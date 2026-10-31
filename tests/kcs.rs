@@ -551,6 +551,50 @@ fn core_integer_conversion_expands_formats_and_uses_engine_prefix_rules() {
 }
 
 #[test]
+fn core_scalar_math_keeps_table_mapping_sse_angle_order_and_pow_nan_signs() {
+    use kcs::Host;
+    let mut vm =
+        kcs::Interpreter::new(kcs::Program::from_code(&[], vec![], 64).unwrap(), vec![]).unwrap();
+    let mut state = katze_system2::expression::State::new(8);
+    let mut host = kcs::CoreHost::new(&mut state);
+    for (index, arguments, expected) in [
+        (50, vec![0], 0),
+        (51, vec![0], 1.0f32.to_bits()),
+        (56, vec![(-1.25f32).to_bits()], (-1.0f32).to_bits()),
+        (57, vec![0xff80_1234], 0x7fc0_1234),
+        (58, vec![(-1.25f32).to_bits()], (-2.0f32).to_bits()),
+        (
+            59,
+            vec![7.0f32.to_bits(), 2.0f32.to_bits()],
+            1.0f32.to_bits(),
+        ),
+        (
+            61,
+            vec![2.0f32.to_bits(), 3.0f32.to_bits()],
+            8.0f32.to_bits(),
+        ),
+        (61, vec![0xff80_1234, (-3.0f32).to_bits()], 0x7fc0_1234),
+        (61, vec![0xffc0_1234, 2.0f32.to_bits()], 0xffc0_1234),
+        (62, vec![f32::MAX.to_bits()], f32::INFINITY.to_bits()),
+        (63, vec![f32::MAX.to_bits()], f32::INFINITY.to_bits()),
+        (64, vec![i32::MIN as u32], i32::MIN as u32),
+    ] {
+        let arguments = arguments
+            .into_iter()
+            .flat_map(u32::to_le_bytes)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            host.call(index, &arguments, &mut vm).unwrap(),
+            kcs::NativeReturn::Value(expected)
+        );
+    }
+    assert_eq!(
+        host.call(65, &[], &mut vm).unwrap(),
+        kcs::NativeReturn::YieldVoid
+    );
+}
+
+#[test]
 fn byte_truncation_and_zero_separated_word_helpers_keep_boundaries() {
     use kcs::Host;
     let mut vm = kcs::Interpreter::new(

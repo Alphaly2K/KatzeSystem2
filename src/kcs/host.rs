@@ -1,5 +1,5 @@
-use super::strings;
 use super::{Host, Interpreter, NativeReturn};
+use super::{numeric, strings};
 use crate::{Error, Result, expression, read, text};
 
 /// 在已有数值状态上提供普通任务表中已核实的数值和字节字符串接口。
@@ -24,9 +24,14 @@ impl Host for CoreHost<'_> {
         if matches!(index, 0 | 2 | 3) {
             return Ok(NativeReturn::Continue);
         }
+        if index == 65 {
+            return Ok(NativeReturn::YieldVoid);
+        }
         let count = match index {
             1 | 6 | 17 | 18 | 25 | 26 | 40 | 47 | 48 | 209 | 210 | 212 | 213 | 278 => 1,
             13..=16 | 19..=24 | 211 | 276 | 277 => 2,
+            50..=58 | 60 | 62..=64 => 1,
+            59 | 61 => 2,
             38 | 44 | 45 => 4,
             41 | 42 | 519 => 3,
             789 => 0,
@@ -45,6 +50,35 @@ impl Host for CoreHost<'_> {
                 NativeReturn::Continue
             }
             6 => NativeReturn::Value(args[0]),
+            50..=61 => {
+                let function = match index {
+                    50..=55 => index - 44,
+                    56..=61 => index - 43,
+                    _ => unreachable!(),
+                };
+                let mut value = numeric::native_math(function, &args);
+                // 普通表调用 SSE2 precise pow，奇整数指数会清除 NaN 底数符号。
+                let exponent = args.get(1).copied().map(f32::from_bits).unwrap_or(0.0);
+                if index == 61
+                    && f32::from_bits(args[0]).is_nan()
+                    && exponent.abs() < 16_777_216.0
+                    && exponent.fract() == 0.0
+                    && exponent as i32 & 1 != 0
+                {
+                    value &= 0x7fff_ffff;
+                }
+                NativeReturn::Value(value)
+            }
+            62 | 63 => {
+                let (multiplier, divisor) = if index == 62 {
+                    (std::f32::consts::PI.to_bits(), 180.0f32.to_bits())
+                } else {
+                    (180.0f32.to_bits(), std::f32::consts::PI.to_bits())
+                };
+                let product = numeric::float_ieee(3, args[0], multiplier);
+                NativeReturn::Value(numeric::float_ieee(4, product, divisor))
+            }
+            64 => NativeReturn::Value((args[0] as i32).wrapping_abs() as u32),
             13 => {
                 let source = vm.read_string(args[1])?.to_vec();
                 if args[0] > args[1] && args[0] - args[1] <= source.len() as u32 {
