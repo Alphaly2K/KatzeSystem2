@@ -30,7 +30,8 @@ impl Resources {
         }
         let length = arguments.len();
         let valid = match index {
-            111 => length == 4,
+            111 | 114 => length == 4,
+            112 => length == 8,
             115 => {
                 length == 40
                     || ((24..40).contains(&length)
@@ -46,6 +47,15 @@ impl Resources {
         let mut args = [0; 10];
         for (arg, bytes) in args.iter_mut().zip(arguments.chunks_exact(4)) {
             *arg = u32::from_le_bytes(bytes.try_into().unwrap());
+        }
+        if index == 112 {
+            return Ok(NativeReturn::Value(
+                self.images.create(owner, [args[0], args[1]])?,
+            ));
+        }
+        if index == 114 {
+            self.images.release(args[0])?;
+            return Ok(NativeReturn::Continue);
         }
         if index == 111 {
             let names = format_string(vm, args[0], 0)?;

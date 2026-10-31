@@ -55,6 +55,22 @@ pub struct Image {
 }
 
 impl Image {
+    /// 创建普通 112 使用的零初始化图像，画布、偏移、基点及帧 ID 均为零。
+    pub fn new(size: [u32; 2]) -> Result<Self> {
+        Ok(Self {
+            id: 0,
+            info: StandardInfo {
+                size,
+                bit_depth: 32,
+                offset: [0; 2],
+                canvas_size: [0; 2],
+                reserved: 0,
+                base: [0; 2],
+            },
+            surface: Surface::new(size)?,
+        })
+    }
+
     pub fn from_frame(frame: DecodedFrame) -> Result<Self> {
         if frame.info.bit_depth as i16 != 32 {
             return Err(Error::new(0, "图像对象需要 32 位像素"));
@@ -160,7 +176,7 @@ impl Image {
     }
 }
 
-/// 普通任务持有的图像句柄；所属任务释放时一起失效。
+/// 普通任务持有的图像句柄；显式释放或所属任务回收时失效。
 #[derive(Default)]
 pub struct Images {
     entries: BTreeMap<u32, (u32, Image)>,
@@ -168,6 +184,10 @@ pub struct Images {
 }
 
 impl Images {
+    pub fn create(&mut self, owner: u32, size: [u32; 2]) -> Result<u32> {
+        self.insert(owner, Image::new(size)?)
+    }
+
     /// 接收已格式展开的名称列表，仅 ASCII 空格分隔，不解释引号。
     pub fn load<S: ResourceServices + ?Sized>(
         &mut self,
@@ -199,6 +219,10 @@ impl Images {
         let Some(image) = image else {
             return Ok(0);
         };
+        self.insert(owner, image)
+    }
+
+    fn insert(&mut self, owner: u32, image: Image) -> Result<u32> {
         if self.entries.len() == read::MAX_ITEMS {
             return Err(Error::new(0, "图像对象数量超过上限"));
         }
@@ -208,6 +232,14 @@ impl Images {
             .ok_or_else(|| Error::new(0, "图像句柄耗尽"))?;
         self.entries.insert(handle, (owner, image));
         Ok(handle)
+    }
+
+    /// 普通 114 显式释放；零句柄跳过，非零失效句柄返回诊断。
+    pub fn release(&mut self, handle: u32) -> Result<()> {
+        if handle != 0 && self.entries.remove(&handle).is_none() {
+            return Err(Error::new(0, "图像对象句柄无效"));
+        }
+        Ok(())
     }
 
     pub fn get(&self, handle: u32) -> Result<&Image> {

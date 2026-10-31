@@ -238,6 +238,10 @@ fn list_loading_skips_missing_entries_composes_and_releases_only_the_owner() {
     images.release_owner(1);
     assert!(images.get(first).is_err());
     assert!(images.get(second).is_ok());
+    images.release(0).unwrap();
+    assert!(images.release(u32::MAX).is_err());
+    images.release(second).unwrap();
+    assert!(images.get(second).is_err());
     let third = images.load(1, b"first:7.hg3", &mut files).unwrap();
     assert_ne!(first, third);
     assert_eq!(images.get(third).unwrap().surface().pixel(0, 0), Some(0));
@@ -251,6 +255,89 @@ fn list_loading_skips_missing_entries_composes_and_releases_only_the_owner() {
             b"graphics/second.hg3".to_vec(),
         ]
     );
+}
+
+struct ScratchPrograms;
+impl ProgramLoader for ScratchPrograms {
+    fn load(&mut self, name: &[u8]) -> Result<Option<Program>> {
+        let mut code = Vec::new();
+        let width = if name == b"empty" { 0 } else { 3 };
+        for output in [0, 4] {
+            ins(&mut code, 0x25, &[width]);
+            ins(&mut code, 0x25, &[2]);
+            ins(&mut code, 0x2b, &[112, 8]);
+            ins(&mut code, 0x26, &[output]);
+        }
+        code.extend([0x25, 0x13, 0, 0, 0, 0]);
+        for n in [0, 0, 3, 1, 0xff12_3456] {
+            ins(&mut code, 0x25, &[n]);
+        }
+        ins(&mut code, 0x2b, &[117, 24]);
+        code.extend([0x25, 0x13, 4, 0, 0, 0]);
+        for n in [0, 0, 3, 2] {
+            ins(&mut code, 0x25, &[n]);
+        }
+        code.extend([0x25, 0x13, 0, 0, 0, 0]);
+        for n in [0, 0, 3, 2] {
+            ins(&mut code, 0x25, &[n]);
+        }
+        ins(&mut code, 0x2b, &[115, 40]);
+        ins(&mut code, 0x25, &[0xabcd_ef01]);
+        code.extend([0x25, 0x13, 0, 0, 0, 0]);
+        ins(&mut code, 0x2b, &[114, 4]);
+        ins(&mut code, 0x25, &[0]);
+        ins(&mut code, 0x2b, &[114, 4]);
+        ins(&mut code, 0x26, &[8]);
+        ins(&mut code, 0x3b, &[]);
+        Ok(Some(Program::from_code(&code, vec![0; 64], 256)?))
+    }
+}
+
+#[test]
+fn blank_images_need_no_resources_and_explicit_release_preserves_other_images_and_stack() {
+    for budget in [1, 4096] {
+        for name in [b"empty".as_slice(), b"painted"] {
+            let mut runtime = Runtime::new(
+                0,
+                kind::ROOT,
+                Box::new(BaseObject::new()),
+                katze_system2::expression::State::new(0),
+                KcsFactory::new(ScratchPrograms),
+            );
+            runtime.set_budget(budget, 1 << 20);
+            let id = runtime.create(0, kind::ORDINARY, name, b"").unwrap();
+            runtime.update(0, 0).unwrap();
+            let vm = runtime.object(id).unwrap().interpreter().unwrap();
+            let first = u32::from_le_bytes(vm.read(0, 4).unwrap().try_into().unwrap());
+            let second = u32::from_le_bytes(vm.read(4, 4).unwrap().try_into().unwrap());
+            assert_ne!(first, 0);
+            assert_ne!(first, second);
+            assert!(runtime.images().get(first).is_err());
+            assert_eq!(vm.read(8, 4).unwrap(), 0xabcd_ef01u32.to_le_bytes());
+            assert!(vm.stack_bytes().is_empty());
+            let image = runtime.images().get(second).unwrap();
+            assert_eq!(image.id(), 0);
+            assert_eq!(image.info().bit_depth, 32);
+            assert_eq!(image.info().offset, [0; 2]);
+            assert_eq!(image.info().canvas_size, [0; 2]);
+            assert_eq!(image.info().base, [0; 2]);
+            if name == b"empty" {
+                assert_eq!(image.info().size, [0, 2]);
+                assert!(image.surface().pixels().is_empty());
+            } else {
+                assert_eq!(image.info().size, [3, 2]);
+                assert_eq!(
+                    image.surface().pixels(),
+                    [0u32, 0, 0, 0xff12_3456, 0xff12_3456, 0xff12_3456]
+                        .into_iter()
+                        .flat_map(u32::to_le_bytes)
+                        .collect::<Vec<_>>()
+                );
+            }
+            runtime.destroy(id).unwrap();
+            assert!(runtime.images().get(second).is_err());
+        }
+    }
 }
 
 fn ins(code: &mut Vec<u8>, op: u8, args: &[u32]) {
