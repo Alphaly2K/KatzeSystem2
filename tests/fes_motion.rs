@@ -9,57 +9,84 @@ fn ins(code: &mut Vec<u8>, opcode: u8, args: &[(u8, u32)]) {
 }
 
 #[test]
-fn image_subcommand_arguments_reach_motion_parameters_and_write_back_position() {
-    let mut image = fes::ImageState::default();
-    image.base.position = [10.5, -3.25];
-    image.base.base_point = [1.25, 2.5];
-    image.base.priority = 42;
-    image.base.parent_priority = 22;
-    image.base.color = 0x1234_5678;
+fn array_subcommands_convert_each_bank_then_run_and_apply_queued_motion() {
+    let mut images = [fes::ImageState::default(), fes::ImageState::default()];
+    for (image, x) in images.iter_mut().zip([10.5, 20.25]) {
+        image.base.position = [x, -3.25];
+        image.base.base_point = [1.25, 2.5];
+        image.base.priority = 42;
+        image.base.parent_priority = 22;
+        image.base.color = 0x1234_5678;
+    }
     let mut state = State::new(16);
+    state.current = 77;
     let mut fes = fes::Interpreter::new(
-        fes::Program::from_text(b"#SUBCOMMAND\noneshot move motion px[0] : [0]\n#START\nexit 0\n")
-            .unwrap(),
-    )
-    .unwrap();
-    let table = fes.subcommands(&state);
-    assert!(table.diagnostics.is_empty());
-    let arguments = fes
-        .subcommand_arguments(
-            &table.bindings[b"move".as_slice()],
-            &[b"25".to_vec()],
-            &image.base.subcommand_context(),
-            &mut state,
-        )
-        .unwrap();
-    assert_eq!(arguments, [14.5]);
+        fes::Program::from_text(b"#DEFINE\nIMAGE sprite[2]\n#SUBCOMMAND\noneshot move motion px[0] : [0]\n#START\nsprite move (25+$0++)\nexit 0\n").unwrap(),
+    ).unwrap();
+    for _ in 0..2 {
+        assert!(matches!(
+            fes.run(&mut state, 100).unwrap(),
+            Step::Event(fes::Event::CreateObject(_) | fes::Event::Declarations(_))
+        ));
+        fes.resume();
+    }
+    let Step::Event(fes::Event::Subcommand(call)) = fes.run(&mut state, 100).unwrap() else {
+        panic!()
+    };
+    assert_eq!(
+        call.target,
+        fes::ObjectReference {
+            name: "sprite".into(),
+            bank: -1
+        }
+    );
+    assert_eq!(state.shared[0], 0);
+    let category = katze_system2::resource::Category {
+        prefix: b"mot".to_vec(),
+        extension: b"kcs".to_vec(),
+    };
+    assert_eq!(
+        category.resolve(&call.binding.target).unwrap(),
+        b"mot/motion.kcs"
+    );
     let mut code = vec![];
     ins(&mut code, 1, &[(0x14, 0x8000_0018), (0x14, 0x8000_009c)]);
     ins(&mut code, 0x15, &[(4, 0x8000_0018), (0x44, 0)]);
     code.push(0x2d);
     ins(&mut code, 0x2b, &[(3, 38), (3, 0)]);
-    let motion_state = kcs::MotionState::with_parameters(&arguments).unwrap();
-    let mut task = kcs::MotionTask::new(
-        kcs::Program::from_code(&code, vec![], 64).unwrap(),
-        motion_state,
-        0,
-    )
-    .unwrap();
-    task.set_properties(&image.base.motion_properties())
-        .unwrap();
-    assert!(matches!(
-        task.update(0, &mut kcs::MotionHost::default(), 100)
-            .unwrap(),
-        Some(Step::Event(_))
-    ));
-    image
-        .base
-        .apply_motion_properties(&task.state().unwrap().properties);
-    assert_eq!(image.base.position, [25.0, -3.25]);
-    assert_eq!(image.base.priority, 42);
-    assert_eq!(image.base.parent_priority, 22);
-    assert_eq!(image.base.color, 0x1234_5678);
-    assert_eq!(image.base.subcommand_context().base, [1.25, 2.5, 42.0]);
+    let program = kcs::Program::from_code(&code, vec![], 64).unwrap();
+    for (image, expected) in images.iter_mut().zip([26.0, 27.0]) {
+        let arguments = fes
+            .subcommand_arguments(
+                &call.binding,
+                &call.arguments,
+                &image.base.subcommand_context(),
+                &mut state,
+            )
+            .unwrap();
+        let motion_state = kcs::MotionState::with_parameters(&arguments).unwrap();
+        let mut queue = kcs::MotionQueue::default();
+        queue.base_properties = image.base.motion_properties();
+        let id = queue
+            .insert(
+                kcs::MotionTask::new(program.clone(), motion_state, 0).unwrap(),
+                0,
+            )
+            .unwrap();
+        assert_eq!(queue.group(id), Some(0));
+        assert!(
+            queue
+                .update_object(0, &mut kcs::MotionHost::default(), 100)
+                .unwrap()
+        );
+        assert!(queue.is_empty());
+        image.base.apply_motion_properties(queue.properties());
+        assert_eq!(image.base.position, [expected, -3.25]);
+        assert_eq!(image.base.priority, 42);
+        assert_eq!(image.base.parent_priority, 22);
+        assert_eq!(image.base.color, 0x1234_5678);
+    }
+    assert_eq!((state.shared[0], state.current), (2, 77));
 }
 
 #[test]
@@ -86,4 +113,73 @@ fn cimage_motion_keeps_zero_signs_float_priority_rounding_and_alpha_only_color()
     assert_eq!(image.color, 0x1234_5678);
     assert_eq!(image.blend, 127);
     assert_eq!(image.display, -1);
+}
+
+#[test]
+fn subcommand_registration_freezes_targets_preserves_builtin_priority_and_evaluates_selectors_once()
+{
+    let mut state = State::new(16);
+    state.strings.insert(1, b"first".to_vec());
+    let mut vm = fes::Interpreter::new(fes::Program::from_text(b"#DEFINE\nIMAGE sprite[2]\n#SUBCOMMAND\noneshot move $str1 p[0] : [0]\noneshot load first p[0] : [0]\ncontinue MOVE first p[0] : [0]\n#START\nsprite[$0++] move 7\nsprite load 9\nsprite Move 8\nsprite MOVE 6\n#sprite.PUSH_L\n@ move 7\nsprite[@] MOVE 6\n").unwrap()).unwrap();
+    assert!(vm.registered_subcommands().is_none());
+    assert!(matches!(
+        vm.run(&mut state, 100).unwrap(),
+        Step::Event(fes::Event::CreateObject(_))
+    ));
+    vm.resume();
+    assert!(matches!(
+        vm.run(&mut state, 100).unwrap(),
+        Step::Event(fes::Event::Declarations(_))
+    ));
+    assert!(vm.registered_subcommands().unwrap().diagnostics.is_empty());
+    state.strings.insert(1, b"second".to_vec());
+    vm.resume();
+    let event = vm.run(&mut state, 100).unwrap();
+    let Step::Event(fes::Event::Subcommand(call)) = &event else {
+        panic!()
+    };
+    assert_eq!(call.target.bank, 1);
+    assert_eq!(call.binding.target, b"first");
+    assert_eq!(vm.run(&mut state, 0).unwrap(), event);
+    assert_eq!(state.shared[0], 1);
+    vm.resume();
+    assert!(matches!(
+        vm.run(&mut state, 100).unwrap(),
+        Step::Event(fes::Event::Command(_))
+    ));
+    vm.resume();
+    assert!(matches!(
+        vm.run(&mut state, 100).unwrap(),
+        Step::Event(fes::Event::Command(_))
+    ));
+    vm.resume();
+    let Step::Event(fes::Event::Subcommand(call)) = vm.run(&mut state, 100).unwrap() else {
+        panic!()
+    };
+    assert_eq!(call.binding.mode, fes::SubcommandMode::Continue);
+    assert_eq!(call.arguments, [b"6".to_vec()]);
+    vm.resume();
+    assert_eq!(
+        vm.run(&mut state, 100).unwrap(),
+        Step::Event(fes::Event::Frame)
+    );
+    assert!(vm.dispatch_event("sprite", 1, "PUSH_L", None).unwrap());
+    for _ in 0..2 {
+        let Step::Event(fes::Event::Subcommand(call)) = vm.run(&mut state, 100).unwrap() else {
+            panic!()
+        };
+        assert_eq!(
+            call.target,
+            fes::ObjectReference {
+                name: "sprite".into(),
+                bank: 1
+            }
+        );
+        vm.resume();
+    }
+    assert_eq!(vm.run(&mut state, 100).unwrap(), Step::Yield);
+    assert_eq!(
+        vm.run(&mut state, 100).unwrap(),
+        Step::Event(fes::Event::Frame)
+    );
 }

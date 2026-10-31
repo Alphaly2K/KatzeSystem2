@@ -22,8 +22,8 @@ pub use params::parse as parameters;
 pub use resources::ImageReference;
 use std::collections::{BTreeMap, VecDeque};
 pub use subcommands::{
-    MappedArgument, Subcommand, SubcommandContext, SubcommandMode, SubcommandParameter,
-    SubcommandTable,
+    MappedArgument, Subcommand, SubcommandCall, SubcommandContext, SubcommandMode,
+    SubcommandParameter, SubcommandTable,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -197,6 +197,7 @@ pub enum Event {
     InitializeObject(Box<ObjectInitialization>),
     Declarations(Vec<Declaration>),
     Command(Line),
+    Subcommand(Box<SubcommandCall>),
     Wait(i32),
     Frame,
     Exit(i32),
@@ -219,6 +220,7 @@ pub struct Interpreter {
     initializers: VecDeque<attributes::InitializationBlock>,
     declarations: Option<Vec<Declaration>>,
     object_banks: BTreeMap<String, u32>,
+    registered_subcommands: Option<SubcommandTable>,
 }
 
 impl Interpreter {
@@ -287,6 +289,7 @@ impl Interpreter {
             initializers,
             declarations,
             object_banks: BTreeMap::new(),
+            registered_subcommands: None,
         })
     }
     pub fn resume(&mut self) {
@@ -358,6 +361,7 @@ impl Interpreter {
                 continue;
             }
             if let Some(declarations) = self.declarations.take() {
+                self.registered_subcommands = Some(self.subcommands(state));
                 let event = Event::Declarations(declarations);
                 self.pending = Some(event.clone());
                 return Ok(Step::Event(event));
@@ -481,10 +485,16 @@ impl Interpreter {
                 {
                     Event::Wait(self.eval(&args[1], state)?)
                 }
-                _ => Event::Command(Line {
-                    offset: line.offset,
-                    bytes: bytes.to_vec(),
-                }),
+                _ => match self
+                    .subcommand_call(line.offset, &args, state)
+                    .map_err(|error| Error::new(line.offset + error.offset, error.message))?
+                {
+                    Some(call) => Event::Subcommand(Box::new(call)),
+                    None => Event::Command(Line {
+                        offset: line.offset,
+                        bytes: bytes.to_vec(),
+                    }),
+                },
             };
             self.pending = Some(event.clone());
             return Ok(Step::Event(event));

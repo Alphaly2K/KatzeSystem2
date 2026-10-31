@@ -1,4 +1,4 @@
-use super::{Interpreter, resources::integer_prefix};
+use super::{Interpreter, ObjectReference, resources::integer_prefix};
 use crate::{Error, Result, expression::State};
 use std::collections::BTreeMap;
 
@@ -42,6 +42,28 @@ pub struct SubcommandTable {
     pub diagnostics: Vec<Error>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SubcommandCall {
+    pub offset: usize,
+    pub target: ObjectReference,
+    pub binding: Subcommand,
+    pub arguments: Vec<Vec<u8>>,
+}
+
+const OBJECT_COMMANDS: &str = concat!(
+    "setid getid enable disp draw wipe getpos stop blend load play copy delete size color ",
+    "noact sndtbl next rev repeat shuffle settbl loadlist loadlist2 dispid ptype setnum ",
+    "setsave pos pl getpos2 setact page getsize ref clip lock exist max keypos attach ",
+    "getflag arc mcarc userfont channel stype tone tonetbl gettonetbl coordmode pend ",
+    "mcpend setanm anm keyblock layout str strsj reset locator pos2 baseopt init param ",
+    "start apend apendmark clear isdraw isdrawmark skip refex setlog blockinfo linecolor ",
+    "blockcolor lineinfo endpos attr refparentpl mag time userfontobj delay ismot insert ",
+    "name getdiv redraw refcap filter pri linecnt getbase getoffset drag bmode mode ",
+    "getfile m2eff m2att m2fspeed m2prmscale m2body m2iner m2enable_blink m2enable_lip ",
+    "m2splay m2draw m2enable_eff sndtag strid get pathinfo getsavestr loop blur make ",
+    "remake getsavedate pause crossfade drawarea userimage",
+);
+
 /// 由宿主按本次目标银行提供的对象状态，旋转使用弧度。
 #[derive(Clone, Debug, PartialEq)]
 pub struct SubcommandContext {
@@ -67,6 +89,54 @@ impl Default for SubcommandContext {
 }
 
 impl Interpreter {
+    /// 声明事件发出后可读取注册表；默认文本仍在每次调用时解释。
+    pub fn registered_subcommands(&self) -> Option<&SubcommandTable> {
+        self.registered_subcommands.as_ref()
+    }
+
+    pub(super) fn subcommand_call(
+        &mut self,
+        offset: usize,
+        arguments: &[Vec<u8>],
+        state: &mut State,
+    ) -> Result<Option<SubcommandCall>> {
+        let Some(name) = arguments.get(1) else {
+            return Ok(None);
+        };
+        if OBJECT_COMMANDS
+            .as_bytes()
+            .split(|&b| b == b' ')
+            .any(|builtin| builtin == name)
+        {
+            return Ok(None);
+        }
+        let Some(binding) = self
+            .registered_subcommands
+            .as_ref()
+            .and_then(|table| table.bindings.get(name))
+            .cloned()
+        else {
+            return Ok(None);
+        };
+        let target = if arguments[0] == b"@" {
+            let context = self
+                .event_context()
+                .ok_or_else(|| Error::new(0, "FES 当前没有事件对象"))?;
+            ObjectReference {
+                name: context.object.clone(),
+                bank: context.bank,
+            }
+        } else {
+            self.object_reference(&arguments[0], state)?
+        };
+        Ok(Some(SubcommandCall {
+            offset,
+            target,
+            binding,
+            arguments: arguments[2..].to_vec(),
+        }))
+    }
+
     /// arguments 为去除对象名和命令名、已展开字符串的参数词项。
     /// 每次 Parameter 映射顺序消耗一个输入，编号选择描述符和缺省值。
     pub fn subcommand_arguments(

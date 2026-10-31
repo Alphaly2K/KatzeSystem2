@@ -61,7 +61,7 @@ FES 内部执行宏声明，初始化按以下顺序交给宿主：
 1. `Declarations` 报告 INCLUDE、PRELOAD 和 KEYBLOCK。
 2. 逐条 `CreateObject(ObjectDefinition)` 请求创建 DEFINE 对象。
 3. 逐条 `InitializeObject(Box<ObjectInitialization>)` 请求应用 OBJECT 属性，每段使用自己的列定义。
-4. `Declarations` 报告 SUBCOMMAND。
+4. 注册子命令表，`Declarations` 报告 SUBCOMMAND。
 5. 开始 START 主流程。
 
 `ObjectDefinition.kind` 为基线类型表中的大写名称，`name` 为对象名，`banks` 为有效银行数。`ObjectInitialization` 包含目标引用和已求值的属性；`Option` 区分未指定字段与明确写零，POS 的三个分量分别保留。POS2／SIZE2 保存在 `position_resource`／`size_resource` 中，由宿主读取所指定图像帧的裁剪偏移／裁剪尺寸。资源、图形／音频句柄、父子关系和各类型的属性应用均由宿主负责；当前库提供初始化解码。没有实际属性的行不发出请求。
@@ -92,11 +92,15 @@ FES 内部执行宏声明，初始化按以下顺序交给宿主：
 
 `Interpreter::subcommands(state)` 返回 `SubcommandTable`，包含按命令名字节索引的绑定和逐行诊断。同名命令保留第一次定义，多个 SUBCOMMAND 段按顺序处理。每个绑定保存类别、原运动资源名、参数描述符及默认文本，以及 `MappedArgument` 映射。`Interpreter::subcommand_arguments(binding, arguments, context, state)` 将去除对象名／命令名的已展开参数换算为运动参数数组。`SubcommandContext` 由宿主按目标银行提供基点、位置、速度、弧度旋转、缩放和 ARGB 颜色；求值使用当前 FES 的局部与命名数值，`@` 为当前属性的整数值。参数编号越界返回诊断。目标资源的配置解析和运动 KCS 启动仍由宿主负责。
 
+`run` 自动将已注册子命令发为 `Event::Subcommand(Box<SubcommandCall>)`。调用包含源码字节位置、对象与银行、绑定及已展开输入；银行 −1 表示整个数组，事件内的 `@` 对象引用解析为触发对象与银行。宿主逐个查找目标银行，提供各自的 `SubcommandContext`，调用 `subcommand_arguments` 后创建并插入运动任务，再用 `resume` 继续 FES。名称先由配置类别的 `Category::resolve` 补全，实际程序加载由宿主负责。基线两类绑定均以分组 0 入队。
+
+`registered_subcommands()` 在声明事件发出后返回已注册表；绑定名称与目标保留注册时的字符串展开结果。125 个原生命令优先于同名绑定，名称区分大小写；其他命令继续通过 `Command` 交给宿主。待处理调用重复返回时，不重新执行银行表达式。
+
 `SubcommandParameter.descriptor` 是基线表中区分大小写的名称；省略默认值时保存 `-1`，读取阶段不求值。`MappedArgument::Parameter` 保存映射编号，`Integer` 保存整数前缀，`Context` 保存 cxr／cxg／cxb／cxa／CA 上下文标记。描述参数和映射参数各最多 16 项，默认文本最多 15 字节；越界映射编号需要在实际调用时根据参数表检查。非法行返回带源位置的诊断，其余绑定继续读取。
 
 对象宿主调用 FES `dispatch_event(object, bank, event, default_handler)`，提供对象名称、银行号、事件名称及可选默认事件组。当前支持 `FOCUS`、`UNFOCUS`、`PUSH_L`、`PUSH_R`、`RELEASE_L`、`RELEASE_R`、`SCRL_P` 和 `TOUCH`，返回是否存在处理器。初始化完成后，允许在 `Wait`、`Frame` 或尚无待确认操作时分派；创建、宿主命令、声明尚未完成或另一个事件正在执行时返回错误。
 
-分派后继续调用 `run`，命令通过通常的 `Command` 事件交给宿主，`event_context()` 提供对象与银行号，供宿主解析 `@` 对象命令；数值表达式中的 `@` 已使用银行号。事件完成时 `run` 返回 `Yield`，上下文变为 `None`；下一次 `run` 恢复主流程原等待，或执行事件交出的目标位置。两类事件中的 `next`／`call` 差异详见 [FES](fes.md)。事件中的 `wait`／`exit` 和嵌套分派当前返回错误。
+分派后继续调用 `run`，命令通过 `Command` 或已注册绑定的 `Subcommand` 事件交给宿主，`event_context()` 提供对象与银行号，供宿主解析 `@` 对象命令；数值表达式中的 `@` 已使用银行号。事件完成时 `run` 返回 `Yield`，上下文变为 `None`；下一次 `run` 恢复主流程原等待，或执行事件交出的目标位置。两类事件中的 `next`／`call` 差异详见 [FES](fes.md)。事件中的 `wait`／`exit` 和嵌套分派当前返回错误。
 
 ANM 的 Image／Wait 事件携带持续时间。宿主完成该时长后再调用 `run`；库当前不绑定刷新率或墙上时钟。零耗时跳转循环受指令预算限制。随机区间通过 `run_with_random` 从宿主读取 u32 随机数，固定区间不消耗随机数。`display` 保留当前显示属性，`max_image_id` 由图像宿主设置。
 
