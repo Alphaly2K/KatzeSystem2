@@ -2,7 +2,7 @@ use super::{Host, Interpreter, NativeReturn, TaskClock};
 use super::{numeric, strings};
 use crate::{Error, Result, expression, read, text};
 
-/// 在已有数值状态上提供普通任务表中已核实的数值和字节字符串接口。
+/// 在已有数值状态上提供普通任务表中已核实的接口。
 pub struct CoreHost<'a> {
     pub state: &'a mut expression::State,
     pub configured_shared_slots: u32,
@@ -37,7 +37,7 @@ impl Host for CoreHost<'_> {
             return Ok(NativeReturn::YieldVoid);
         }
         let count = match index {
-            1 | 6 | 17 | 18 | 25 | 26 | 40 | 47 | 48 | 209 | 210 | 212 | 213 | 278 | 319 => 1,
+            1 | 6 | 17 | 18 | 25 | 26 | 40 | 47 | 48 | 71 | 209 | 210 | 212 | 213 | 278 | 319 => 1,
             13..=16 | 19..=24 | 211 | 276 | 277 => 2,
             50..=58 | 60 | 62..=64 => 1,
             59 | 61 => 2,
@@ -60,6 +60,10 @@ impl Host for CoreHost<'_> {
             }
             6 => NativeReturn::Value(args[0]),
             5 => NativeReturn::Value(self.task_time.wrapping_sub(self.task_origin)),
+            71 => {
+                vm.wait_for_message(args[0])?;
+                NativeReturn::YieldVoid
+            }
             319 => {
                 let shifted = numeric::float_ieee(1, args[0], 0.5f32.to_bits());
                 let rounded = numeric::native_math(15, &[shifted]);

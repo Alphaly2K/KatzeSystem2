@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 mod clock;
 mod host;
 mod matrix;
+mod messages;
 mod motion;
 mod numeric;
 mod particle;
@@ -232,6 +233,7 @@ pub struct Interpreter {
     switch: u32,
     debug: DebugState,
     debug_variable_floors: Vec<usize>,
+    messages: messages::MessageState,
 }
 
 impl Interpreter {
@@ -262,6 +264,7 @@ impl Interpreter {
             switch: 0,
             debug: DebugState::default(),
             debug_variable_floors: Vec::new(),
+            messages: messages::MessageState::default(),
         })
     }
     pub fn debug(&self) -> &DebugState {
