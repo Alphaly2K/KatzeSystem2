@@ -212,6 +212,8 @@ pub trait Host {
     fn set_task_clock(&mut self, _clock: &TaskClock) {}
 
     fn set_task_id(&mut self, _id: u32) {}
+
+    fn set_task_context(&mut self, _context: &[u8]) {}
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

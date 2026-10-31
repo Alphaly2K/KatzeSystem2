@@ -64,6 +64,12 @@ impl<H: Host, S: TaskServices> Host for TaskHost<'_, H, S> {
         self.inner.set_task_id(id);
     }
 
+    fn set_task_context(&mut self, context: &[u8]) {
+        self.creation_context.clear();
+        self.creation_context.extend_from_slice(context);
+        self.inner.set_task_context(context);
+    }
+
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn> {
         if matches!(index, 75 | 76) {
             if let Some(tree) = self.services.task_tree() {

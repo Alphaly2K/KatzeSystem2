@@ -288,3 +288,28 @@ fn creation_formats_names_and_passes_raw_context_before_requesting_deletion() {
     );
     assert_eq!(services.deleted, [(7, 0)]);
 }
+
+#[test]
+fn task_switching_replaces_creation_context_on_a_shared_host() {
+    let mut code = Vec::new();
+    for arg in [12, 42, 32] {
+        ins(&mut code, 0x25, &[arg]);
+    }
+    ins(&mut code, 0x2b, &[66, 12]);
+    code.push(0x3b);
+    let program = Program::from_code(&code, vec![0; 64], 64).unwrap();
+    let mut services = services(&[0x3b]);
+    let mut state = State::new(8);
+    let mut core = CoreHost::new(&mut state);
+    let mut host = TaskHost::new(&mut core, &mut services);
+    for (id, context) in [(7, b"raw%d[G0]\0ignored".as_slice()), (8, b"")] {
+        let mut task = OrdinaryTask::new(program.clone(), vec![]).unwrap();
+        task.task_id = id;
+        task.creation_context = context.to_vec();
+        assert!(task.update(100, 1, &mut host, 100).unwrap());
+    }
+    assert_eq!(services.created[0].sender, 7);
+    assert_eq!(services.created[0].context, b"raw%d[G0]");
+    assert_eq!(services.created[1].sender, 8);
+    assert!(services.created[1].context.is_empty());
+}
