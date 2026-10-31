@@ -769,3 +769,46 @@ fn grouped_integer_format_keeps_sign_rules_minimum_integer_and_double_zero() {
         );
     }
 }
+
+#[test]
+fn memory_copy_keeps_forward_cpu_blocks_and_crt_overlap_results() {
+    use kcs::{Host, MemoryCopyMode};
+    let mut state = katze_system2::expression::State::new(8);
+    let mut host = kcs::CoreHost::new(&mut state);
+    let mut vm = kcs::Interpreter::new(
+        kcs::Program::from_code(&[], vec![0; 64], 64).unwrap(),
+        vec![],
+    )
+    .unwrap();
+    for (mode, expected) in [
+        (
+            MemoryCopyMode::Mmx,
+            [0, 1, 2, 3, 4, 5, 6, 7, 7, 9, 10, 11, 12, 13, 14, 15].as_slice(),
+        ),
+        (
+            MemoryCopyMode::Dword,
+            &[0, 1, 2, 3, 3, 5, 6, 7, 7, 9, 10, 11, 11, 13, 14, 15],
+        ),
+        (
+            MemoryCopyMode::Crt,
+            &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+        ),
+        (MemoryCopyMode::Mmx, &[0, 1, 2, 3, 3, 5, 6, 7, 7, 9, 10, 11]),
+        (
+            MemoryCopyMode::Mmx,
+            &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+        ),
+    ] {
+        vm.write(0, &(0u8..64).collect::<Vec<_>>()).unwrap();
+        host.memory_copy_mode = mode;
+        let arguments: Vec<_> = [1, 0, expected.len() as u32]
+            .into_iter()
+            .flat_map(u32::to_le_bytes)
+            .collect();
+        assert_eq!(
+            host.call(35, &arguments, &mut vm).unwrap(),
+            kcs::NativeReturn::Continue
+        );
+        assert_eq!(vm.read(1, expected.len()).unwrap(), expected);
+    }
+}

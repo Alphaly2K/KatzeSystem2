@@ -1,5 +1,5 @@
-use super::{Host, Interpreter, NativeReturn, ScriptRandom, TaskClock};
-use super::{numeric, strings};
+use super::{Host, Interpreter, MemoryCopyMode, NativeReturn, ScriptRandom, TaskClock};
+use super::{memory, numeric, strings};
 use crate::{Error, Result, expression, read, text};
 use std::collections::BTreeMap;
 
@@ -12,6 +12,7 @@ pub struct CoreHost<'a> {
     pub task_origin: u32,
     pub task_id: u32,
     pub system_time_ms: u32,
+    pub memory_copy_mode: MemoryCopyMode,
     pub random: ScriptRandom,
     integer_maps: BTreeMap<u32, BTreeMap<Vec<u8>, u32>>,
     next_map_handle: u32,
@@ -26,6 +27,7 @@ impl<'a> CoreHost<'a> {
             task_origin: 0,
             task_id: 0,
             system_time_ms: 0,
+            memory_copy_mode: MemoryCopyMode::default(),
             random: ScriptRandom::default(),
             integer_maps: BTreeMap::new(),
             next_map_handle: 1,
@@ -85,7 +87,7 @@ impl Host for CoreHost<'_> {
             50..=58 | 60 | 62..=64 => 1,
             59 | 61 => 2,
             38 | 44 | 45 => 4,
-            36 | 37 | 41 | 42 | 517 | 519 => 3,
+            35..=37 | 41 | 42 | 517 | 519 => 3,
             5 | 789 => 0,
             _ => return Err(Error::new(vm.pc, format!("未支持的 KCS native {index}"))),
         };
@@ -106,6 +108,16 @@ impl Host for CoreHost<'_> {
             71 => {
                 vm.wait_for_message(args[0])?;
                 NativeReturn::YieldVoid
+            }
+            35 => {
+                memory::copy(
+                    vm,
+                    args[0],
+                    args[1],
+                    read::sized(args[2], vm.pc)?,
+                    self.memory_copy_mode,
+                )?;
+                NativeReturn::Continue
             }
             36 => {
                 let count = read::sized(args[2], vm.pc)?;
