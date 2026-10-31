@@ -97,6 +97,18 @@
 
 2,692 组完整 native 调用包括当前目标 817 组、独立图像和同图重叠各 937 组及空源跳过一组。全部目标／源像素、保护区、状态、返回槽和面块更新标记一致；保护页另确认空源只需六项。四项新增合成回归固定两种坐标与裁剪、同图反馈、BGRA 覆盖及运行时分派／预算续跑，不依赖外部数据。
 
+## 绘图变换
+
+`graphics::Transform` 保存基点、平移、缩放、弧度旋转及可选显式矩阵。默认基点为 `[0, 0, 5000]`，平移和旋转为零，缩放为一，矩阵为单位矩阵，dirty 为 false。属性由同名查询方法读取，`set_base_point`、`set_position`、`set_scale`、`set_rotation` 和 `set_matrix` 更新状态；`clear_dirty` 消费变更标记。
+
+向量属性按浮点相等比较整组：全组相等时保留原值的位模式，任一分量不同才整组替换，因此正负零不会单独触发更新，NaN 会触发更新。显式矩阵按 16 个 DWORD 位模式比较，重复设置同一 NaN payload 不触发更新。`set_rotation` 即使角度相等，也退出显式矩阵模式；`set_scale` 保留该模式。
+
+`matrix()` 为 `Identity × Scale × RotateX × RotateY × RotateZ`，显式矩阵模式则为 `Identity × Scale × matrix_override`。起始单位矩阵相乘保留非有限值的传播和求和顺序。旋转沿用原 x87 三角约化：有限大角度使用 66 位 π，NaN 保留符号和 payload 并置 quiet 位，无穷与超出 FSINCOS 范围的输入保留原异常结果。
+
+`transform_point([x, y, z])` 只减去基点 X／Y，保留输入 Z，以 W=1 乘本对象矩阵，再加四维平移 `[px, py, pz, 1]`。普通仿射路径的结果 W 因而为 2。`transform_point_with_parent(point, parent)` 随后乘父级／绘图上下文矩阵，保留该 W，不执行 W 除法；父矩阵的平移同样受它影响。基点 Z 独立保存，不参与这一顶点变换。
+
+12,981 组状态及 38,943 个完整变换后顶点已与原入口核对，有效属性、矩阵、dirty 和顶点结果一致。三项纯合成回归固定几何顺序、父级 W、正负零与矩阵模式、常规三轴旋转和非有限／大角度行为。该接口提供几何核心，二维任务对象、排序和帧绘制整合继续实现。
+
 ## 当前绘图目标
 
 `RenderTarget::new(size)` 创建一块零初始化的 CPU 渲染面。`from_tiles(tile_size, grid, tiles)` 接收按行排列的等尺寸面块，`None` 表示缺失槽位。总尺寸为面块尺寸乘列／行数，`size()`、`tile_size()`、`grid()` 和 `tiles()` 提供只读查询。布局必须精确匹配，总像素容量最多 64 MiB，槽位最多一百万个；允许空尺寸。

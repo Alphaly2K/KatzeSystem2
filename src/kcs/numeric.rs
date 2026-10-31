@@ -74,7 +74,7 @@ fn compare<T: PartialOrd>(op: u8, a: T, b: T) -> bool {
     }
 }
 
-pub(super) fn float(op: u8, left: u32, right: u32) -> u32 {
+pub(crate) fn float(op: u8, left: u32, right: u32) -> u32 {
     if op == 4 && f32::from_bits(right) == 0.0 {
         return 0;
     }

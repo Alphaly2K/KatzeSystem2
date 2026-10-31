@@ -22,7 +22,7 @@ fn shuffle(a: V, b: V, order: u8) -> V {
     ]
 }
 
-pub(super) fn multiply(left: [f32; 16], right: [f32; 16]) -> [f32; 16] {
+pub(crate) fn multiply(left: [f32; 16], right: [f32; 16]) -> [f32; 16] {
     std::array::from_fn(|i| {
         let row = i / 4;
         let col = i % 4;
@@ -38,7 +38,7 @@ pub(super) fn multiply(left: [f32; 16], right: [f32; 16]) -> [f32; 16] {
     })
 }
 
-pub(super) fn transform(v: V, matrix: [f32; 16]) -> V {
+pub(crate) fn transform(v: V, matrix: [f32; 16]) -> V {
     std::array::from_fn(|i| {
         let p = mul(v, std::array::from_fn(|j| matrix[j * 4 + i]));
         scalar(1, scalar(1, p[0], p[1]), scalar(1, p[2], p[3]))
