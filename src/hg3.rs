@@ -1,5 +1,8 @@
 use crate::{Error, Result, read};
 
+mod pixels;
+pub use pixels::{DecodedFrame, decode_frame};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StandardInfo {
     pub size: [u32; 2],
