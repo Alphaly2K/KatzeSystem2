@@ -1,4 +1,4 @@
-use super::{Rect, Surface, pixel_length};
+use super::{Image, Rect, Surface, pixel_length};
 use crate::{Error, Result, read};
 
 /// 按行排列的 CPU 渲染面块和对应的更新标记。
@@ -17,7 +17,7 @@ impl RenderTarget {
         Self::from_tiles(size, [1, 1], vec![Some(Surface::new(size)?)])
     }
 
-    /// 每块尺寸必须一致；None 对应尚未提供表面的槽位，清除操作跳过该槽。
+    /// 每块尺寸必须一致；None 对应尚未提供表面的槽位，像素操作跳过该槽。
     pub fn from_tiles(
         tile_size: [u32; 2],
         grid: [u32; 2],
@@ -127,9 +127,75 @@ impl RenderTarget {
         }
         touched
     }
+
+    /// 普通 115 的当前目标分支；源矩形为全局图像坐标，复制原始 BGRA，不混合或缩放。
+    pub fn copy_image(&mut self, source: &Image, rect: Rect, at: [i32; 2]) -> bool {
+        let info = source.info();
+        let Some(rect) = rect.intersect(Rect::from_xywh(
+            info.offset[0],
+            info.offset[1],
+            info.size[0] as i32,
+            info.size[1] as i32,
+        )) else {
+            return false;
+        };
+        let source_origin = [
+            rect.left.wrapping_sub(info.offset[0]),
+            rect.top.wrapping_sub(info.offset[1]),
+        ];
+        let at = [
+            at[0].wrapping_add(info.offset[0]),
+            at[1].wrapping_add(info.offset[1]),
+        ];
+        let target_rect =
+            Rect::from_xywh(at[0], at[1], rect.right - rect.left, rect.bottom - rect.top);
+        let Some(target_rect) = target_rect.intersect(Rect::from_xywh(
+            0,
+            0,
+            self.size[0] as i32,
+            self.size[1] as i32,
+        )) else {
+            return false;
+        };
+        let input = source.surface();
+        let mut touched = false;
+        for row in 0..self.grid[1] {
+            for column in 0..self.grid[0] {
+                let index = row as usize * self.grid[0] as usize + column as usize;
+                let Some(surface) = &mut self.tiles[index] else {
+                    continue;
+                };
+                let x = (column * self.tile_size[0]) as i32;
+                let y = (row * self.tile_size[1]) as i32;
+                let Some(clipped) = target_rect.intersect(Rect::from_xywh(
+                    x,
+                    y,
+                    self.tile_size[0] as i32,
+                    self.tile_size[1] as i32,
+                )) else {
+                    continue;
+                };
+                self.dirty[index] = true;
+                let width = (clipped.right - clipped.left) as usize * 4;
+                let source_x = source_origin[0] + clipped.left - at[0];
+                let source_y = source_origin[1] + clipped.top - at[1];
+                for line in 0..clipped.bottom - clipped.top {
+                    let from = (info.size[1] as i32 - source_y - line - 1) as usize
+                        * input.stride()
+                        + source_x as usize * 4;
+                    let dest = (clipped.top - y + line) as usize * surface.stride()
+                        + (clipped.left - x) as usize * 4;
+                    surface.pixels[dest..dest + width]
+                        .copy_from_slice(&input.pixels[from..from + width]);
+                }
+                touched = true;
+            }
+        }
+        touched
+    }
 }
 
-/// 当前绘图上下文；117 的零图像分支仅在模式为零、两个开关均开启时清除目标。
+/// 当前绘图上下文；仅在模式为零、两个开关均开启时操作目标。
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct DrawingContext {
     pub mode: u32,
@@ -140,11 +206,19 @@ pub struct DrawingContext {
 
 impl DrawingContext {
     pub fn clear_rect(&mut self, rect: Rect) -> bool {
-        if self.mode != 0 || !self.enabled || !self.active {
-            return false;
-        }
-        self.target
-            .as_mut()
+        self.active_target()
             .is_some_and(|target| target.clear_rect(rect))
+    }
+
+    pub fn copy_image(&mut self, source: &Image, rect: Rect, at: [i32; 2]) -> bool {
+        self.active_target()
+            .is_some_and(|target| target.copy_image(source, rect, at))
+    }
+
+    fn active_target(&mut self) -> Option<&mut RenderTarget> {
+        if self.mode != 0 || !self.enabled || !self.active {
+            return None;
+        }
+        self.target.as_mut()
     }
 }

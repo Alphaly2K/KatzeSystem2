@@ -1,4 +1,4 @@
-use super::{Rect, Surface};
+use super::{ImageRegion, Rect, Surface};
 use crate::hg3::{DecodedFrame, StandardInfo};
 use crate::kcs::ResourceServices;
 use crate::resource::ResourceMode;
@@ -84,6 +84,35 @@ impl Image {
 
     pub fn fill_rect_from_bottom(&mut self, rect: Rect, argb: u32) -> bool {
         self.surface.fill_rect_from_bottom(rect, argb)
+    }
+
+    /// 普通 115 的图像目标分支：目标位置叠加源偏移，两端矩形独立裁剪，不缩放。
+    pub fn blend_from(&mut self, source: &Self, source_rect: Rect, at: [i32; 2]) -> bool {
+        let Some(region) = self.blend_region(source, source_rect, at) else {
+            return false;
+        };
+        self.surface.blend_region(&source.surface, region, 255);
+        true
+    }
+
+    /// 对自身执行相同混合，保留底端起始、从左向右的重叠反馈。
+    pub fn blend_within(&mut self, source_rect: Rect, at: [i32; 2]) -> bool {
+        let Some(region) = self.blend_region(self, source_rect, at) else {
+            return false;
+        };
+        self.surface.blend_region_within(region, 255);
+        true
+    }
+
+    fn blend_region(&self, source: &Self, source_rect: Rect, at: [i32; 2]) -> Option<ImageRegion> {
+        let at = [
+            at[0].wrapping_add(source.info.offset[0]),
+            at[1].wrapping_add(source.info.offset[1]),
+        ];
+        let mut region = self.surface.clip_blend(&source.surface, source_rect, at)?;
+        region.y = self.info.size[1] as usize - region.y - region.height;
+        region.source_y = source.info.size[1] as usize - region.source_y - region.height;
+        Some(region)
     }
 
     /// 普通 111 的后续图像合成，保留首图几何、零透明度和独立裁剪规则。
@@ -193,6 +222,30 @@ impl Images {
             .get_mut(&handle)
             .map(|(_, image)| image)
             .ok_or_else(|| Error::new(0, "图像对象句柄无效"))
+    }
+
+    pub fn blend(
+        &mut self,
+        target: u32,
+        at: [i32; 2],
+        source: u32,
+        source_rect: Rect,
+    ) -> Result<bool> {
+        if source == 0 {
+            return Ok(false);
+        }
+        if source == target {
+            return Ok(self.get_mut(target)?.blend_within(source_rect, at));
+        }
+        let source_image = self
+            .entries
+            .remove(&source)
+            .ok_or_else(|| Error::new(0, "图像对象句柄无效"))?;
+        let result = self
+            .get_mut(target)
+            .map(|target| target.blend_from(&source_image.1, source_rect, at));
+        self.entries.insert(source, source_image);
+        result
     }
 
     pub fn release_owner(&mut self, owner: u32) {

@@ -17,17 +17,22 @@ impl Resources {
         arguments: &[u8],
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
-        let count = if index == 111 {
-            1
-        } else if arguments.len() == 20 && arguments.starts_with(&[0; 4]) {
-            5
-        } else {
-            6
+        let length = arguments.len();
+        let valid = match index {
+            111 => length == 4,
+            115 => {
+                length == 40
+                    || ((24..40).contains(&length)
+                        && length.is_multiple_of(4)
+                        && arguments[20..24] == [0; 4])
+            }
+            117 => length == 24 || (length == 20 && arguments.starts_with(&[0; 4])),
+            _ => unreachable!(),
         };
-        if arguments.len() != count * 4 {
+        if !valid {
             return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
         }
-        let mut args = [0; 6];
+        let mut args = [0; 10];
         for (arg, bytes) in args.iter_mut().zip(arguments.chunks_exact(4)) {
             *arg = u32::from_le_bytes(bytes.try_into().unwrap());
         }
@@ -43,6 +48,25 @@ impl Resources {
                 .ok_or_else(|| Error::new(vm.pc, "运行时未配置资源服务"))?;
             let handle = self.images.load(owner, names, services.as_mut())?;
             return Ok(NativeReturn::Value(handle));
+        }
+        if index == 115 {
+            if args[5] == 0 {
+                return Ok(NativeReturn::Continue);
+            }
+            let source_rect = Rect::from_xywh(
+                args[6] as i32,
+                args[7] as i32,
+                args[8] as i32,
+                args[9] as i32,
+            );
+            let at = [args[1] as i32, args[2] as i32];
+            if args[0] == 0 {
+                self.drawing
+                    .copy_image(self.images.get(args[5])?, source_rect, at);
+            } else {
+                self.images.blend(args[0], at, args[5], source_rect)?;
+            }
+            return Ok(NativeReturn::Continue);
         }
         if args[0] == 0 {
             self.drawing.clear_rect(Rect::from_xywh(

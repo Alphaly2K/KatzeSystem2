@@ -1,6 +1,7 @@
 use katze_system2::{
     Result,
-    graphics::{DrawingContext, Rect, RenderTarget, Surface},
+    graphics::{DrawingContext, Image, Rect, RenderTarget, Surface},
+    hg3::{DecodedFrame, StandardInfo},
     kcs::Program,
     runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, kind},
 };
@@ -178,4 +179,69 @@ fn runtime_clear_uses_the_shared_target_and_preserves_stack_and_configured_size(
             }
         }
     }
+}
+
+#[test]
+fn target_image_copy_uses_global_source_coordinates_reverses_rows_and_overwrites_alpha() {
+    let source = Image::from_frame(DecodedFrame {
+        id: 7,
+        info: StandardInfo {
+            size: [3, 2],
+            bit_depth: 32,
+            offset: [-1, 1],
+            canvas_size: [100, 90],
+            reserved: 0,
+            base: [70, 80],
+        },
+        pixels: [
+            0x0011_2233u32,
+            0x8044_5566,
+            0xff77_8899,
+            0x0102_0304,
+            0x7f05_0607,
+            0xfe08_090a,
+        ]
+        .into_iter()
+        .flat_map(u32::to_le_bytes)
+        .collect(),
+    })
+    .unwrap();
+    let mut surface = Surface::new([2, 2]).unwrap();
+    surface.clear(0xaabb_ccdd);
+    let mut target = RenderTarget::from_tiles(
+        [2, 2],
+        [2, 2],
+        vec![
+            Some(surface.clone()),
+            None,
+            Some(surface.clone()),
+            Some(surface),
+        ],
+    )
+    .unwrap();
+    assert!(target.copy_image(&source, Rect::from_xywh(-1, 1, 3, 2), [2, 0]));
+    assert_eq!(target.dirty_tiles(), [true, false, true, true]);
+    let expected = [
+        [Some(0xaabb_ccdd), Some(0xaabb_ccdd), None, None],
+        [Some(0xaabb_ccdd), Some(0x0102_0304), None, None],
+        [
+            Some(0xaabb_ccdd),
+            Some(0x0011_2233),
+            Some(0x8044_5566),
+            Some(0xff77_8899),
+        ],
+        [Some(0xaabb_ccdd); 4],
+    ];
+    for (y, row) in expected.into_iter().enumerate() {
+        for (x, value) in row.into_iter().enumerate() {
+            assert_eq!(target.pixel(x as u32, y as u32), value);
+        }
+    }
+    target.clear_dirty();
+    assert!(!target.copy_image(&source, Rect::from_xywh(10, 10, 1, 1), [0, 0]));
+    assert_eq!(target.dirty_tiles(), [false; 4]);
+    assert!(target.copy_image(&source, Rect::from_xywh(0, 0, 3, 3), [2, 0]));
+    assert_eq!(target.pixel(1, 1), Some(0x7f05_0607));
+    assert_eq!(target.pixel(1, 2), Some(0x8044_5566));
+    assert_eq!(target.dirty_tiles(), [true, false, true, true]);
 }

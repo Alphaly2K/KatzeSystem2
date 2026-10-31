@@ -1,6 +1,6 @@
 use katze_system2::{
     Result,
-    graphics::{Image, ImageReference, Images},
+    graphics::{DrawingContext, Image, ImageReference, Images, Rect, RenderTarget, Surface},
     hg3::{DecodedFrame, StandardInfo},
     kcs::{Program, ResourceServices},
     resource::{Category, ResourceMode},
@@ -223,6 +223,18 @@ fn list_loading_skips_missing_entries_composes_and_releases_only_the_owner() {
     assert_eq!(images.load(1, b"first\tsecond", &mut files).unwrap(), 0);
     assert_eq!(images.load(1, b"\"first second\"", &mut files).unwrap(), 0);
     assert!(images.load(1, b"bad", &mut files).is_err());
+    assert!(
+        images
+            .blend(u32::MAX, [0, 0], second, Rect::from_xywh(0, 0, 1, 1))
+            .is_err()
+    );
+    assert!(images.get(second).is_ok());
+    assert!(
+        images
+            .blend(second, [0, 0], second, Rect::from_xywh(0, 0, 1, 1))
+            .unwrap()
+    );
+    assert!(!images.blend(u32::MAX, [0, 0], 0, Rect::default()).unwrap());
     images.release_owner(1);
     assert!(images.get(first).is_err());
     assert!(images.get(second).is_ok());
@@ -241,16 +253,17 @@ fn list_loading_skips_missing_entries_composes_and_releases_only_the_owner() {
     );
 }
 
+fn ins(code: &mut Vec<u8>, op: u8, args: &[u32]) {
+    code.push(op);
+    for n in args {
+        code.push(3);
+        code.extend(n.to_le_bytes());
+    }
+}
+
 struct Programs;
 impl ProgramLoader for Programs {
     fn load(&mut self, name: &[u8]) -> Result<Option<Program>> {
-        fn ins(code: &mut Vec<u8>, op: u8, args: &[u32]) {
-            code.push(op);
-            for n in args {
-                code.push(3);
-                code.extend(n.to_le_bytes());
-            }
-        }
         let mut code = Vec::new();
         ins(&mut code, 0x25, &[64]);
         ins(&mut code, 0x2b, &[111, 4]);
@@ -318,5 +331,173 @@ fn runtime_load_and_fill_preserve_stack_and_release_images_with_the_task() {
         assert_eq!(requests.borrow().len(), 3);
         runtime.destroy(0).unwrap();
         assert!(runtime.images().get(h2).is_err());
+    }
+}
+
+#[test]
+fn image_blending_adds_source_offset_and_clips_both_rectangles_independently() {
+    let source = Image::from_frame(frame(
+        7,
+        [2, 2],
+        [-1, 1],
+        &[0xff00_0011, 0x8000_0022, 0x0000_0033, 0x0100_0044],
+    ))
+    .unwrap();
+    let mut target = Image::from_frame(frame(9, [5, 4], [9, -8], &[0; 20])).unwrap();
+    assert!(target.blend_from(&source, Rect::from_xywh(-1, -1, 3, 3), [2, -1]));
+    let expected = [
+        [0; 5],
+        [0; 5],
+        [0x11, 0xff00_0011, 0x8000_0022, 0x22, 0],
+        [0x33, 0x33, 0x0100_0044, 0x44, 0],
+    ];
+    assert_eq!(
+        target.surface().pixels(),
+        expected
+            .into_iter()
+            .flatten()
+            .flat_map(u32::to_le_bytes)
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(target.info().offset, [9, -8]);
+    assert_eq!(target.id(), 9);
+}
+
+#[test]
+fn self_blending_reads_previous_writes_in_bottom_origin_row_and_column_order() {
+    let mut horizontal = Image::from_frame(frame(
+        7,
+        [5, 1],
+        [0, 0],
+        &[
+            0xff00_0011,
+            0xff00_0022,
+            0xff00_0033,
+            0xff00_0044,
+            0xff00_0055,
+        ],
+    ))
+    .unwrap();
+    assert!(horizontal.blend_within(Rect::from_xywh(0, 0, 4, 1), [1, 0]));
+    assert_eq!(
+        horizontal.surface().pixels(),
+        0xff00_0011u32.to_le_bytes().repeat(5)
+    );
+    let mut vertical = Image::from_frame(frame(
+        7,
+        [2, 3],
+        [0, 0],
+        &[
+            0xff00_0001,
+            0xff00_0002,
+            0xff00_0003,
+            0xff00_0004,
+            0xff00_0005,
+            0xff00_0006,
+        ],
+    ))
+    .unwrap();
+    assert!(vertical.blend_within(Rect::from_xywh(0, 0, 2, 2), [0, 1]));
+    assert_eq!(
+        vertical.surface().pixels(),
+        [0xff00_0005u32, 0xff00_0006]
+            .into_iter()
+            .flat_map(u32::to_le_bytes)
+            .collect::<Vec<_>>()
+            .repeat(3)
+    );
+}
+
+struct BlitPrograms;
+impl ProgramLoader for BlitPrograms {
+    fn load(&mut self, _name: &[u8]) -> Result<Option<Program>> {
+        let mut code = Vec::new();
+        for (address, output) in [(64, 0), (80, 4)] {
+            ins(&mut code, 0x25, &[address]);
+            ins(&mut code, 0x2b, &[111, 4]);
+            ins(&mut code, 0x26, &[output]);
+        }
+        ins(&mut code, 0x25, &[0xabcd_ef01]);
+        code.extend([0x25, 0x13, 0, 0, 0, 0]);
+        for n in [0, 0, i32::MAX as u32, 0] {
+            ins(&mut code, 0x25, &[n]);
+        }
+        code.extend([0x25, 0x13, 4, 0, 0, 0]);
+        for n in [0, 0, 1, 1] {
+            ins(&mut code, 0x25, &[n]);
+        }
+        ins(&mut code, 0x2b, &[115, 40]);
+        ins(&mut code, 0x26, &[8]);
+        ins(&mut code, 0x25, &[0x1234_5678]);
+        for n in [0, 1, 0, 0, 0] {
+            ins(&mut code, 0x25, &[n]);
+        }
+        code.extend([0x25, 0x13, 0, 0, 0, 0]);
+        for n in [0, 0, 1, 1] {
+            ins(&mut code, 0x25, &[n]);
+        }
+        ins(&mut code, 0x2b, &[115, 40]);
+        for n in [0x1234, u32::MAX, u32::MAX, u32::MAX, u32::MAX, 0] {
+            ins(&mut code, 0x25, &[n]);
+        }
+        ins(&mut code, 0x2b, &[115, 24]);
+        ins(&mut code, 0x26, &[12]);
+        ins(&mut code, 0x3b, &[]);
+        let mut data = vec![0; 128];
+        data[64..75].copy_from_slice(b"first:7.hg3");
+        data[80..86].copy_from_slice(b"second");
+        Ok(Some(Program::from_code(&code, data, 256)?))
+    }
+}
+
+#[test]
+fn runtime_blits_between_images_and_to_the_current_target_without_scaling_or_stack_values() {
+    for budget in [1, 4096] {
+        let requests = Requests::default();
+        let mut runtime = Runtime::new(
+            0,
+            kind::ROOT,
+            Box::new(BaseObject::new()),
+            katze_system2::expression::State::new(0),
+            KcsFactory::new(BlitPrograms),
+        );
+        runtime.set_resources(Files {
+            requests: requests.clone(),
+        });
+        runtime.set_budget(budget, 1 << 20);
+        let mut surface = Surface::new([3, 2]).unwrap();
+        surface.clear(0xaabb_ccdd);
+        *runtime.drawing_mut() = DrawingContext {
+            mode: 0,
+            enabled: true,
+            active: true,
+            target: Some(RenderTarget::from_tiles([3, 2], [1, 1], vec![Some(surface)]).unwrap()),
+        };
+        let id = runtime.create(0, kind::ORDINARY, b"copy", b"").unwrap();
+        runtime.update(0, 0).unwrap();
+        let vm = runtime.object(id).unwrap().interpreter().unwrap();
+        let handle = u32::from_le_bytes(vm.read(0, 4).unwrap().try_into().unwrap());
+        assert_eq!(
+            vm.read(8, 8).unwrap(),
+            [0xabcd_ef01u32, 0x1234_5678]
+                .into_iter()
+                .flat_map(u32::to_le_bytes)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            runtime.images().get(handle).unwrap().surface().pixel(0, 0),
+            Some(0xff12_3456)
+        );
+        let target = runtime.drawing().target.as_ref().unwrap();
+        assert_eq!(target.pixel(1, 0), Some(0xff12_3456));
+        assert_eq!(target.pixel(1, 1), Some(0xaabb_ccdd));
+        assert_eq!(target.dirty_tiles(), [true]);
+        assert_eq!(requests.borrow().len(), 2);
+        runtime.destroy(id).unwrap();
+        assert!(runtime.images().get(handle).is_err());
+        assert_eq!(
+            runtime.drawing().target.as_ref().unwrap().pixel(1, 0),
+            Some(0xff12_3456)
+        );
     }
 }

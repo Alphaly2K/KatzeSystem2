@@ -722,7 +722,7 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         if matches!(index, 66 | 67 | 69 | 70 | 72 | 73 | 75 | 76 | 109 | 110) {
             return self.task_native(index, arguments, vm);
         }
-        if matches!(index, 111 | 117) {
+        if matches!(index, 111 | 115 | 117) {
             return self.resources.call(self.host.task_id, index, arguments, vm);
         }
         call_native(

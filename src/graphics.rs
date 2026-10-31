@@ -186,6 +186,32 @@ impl Surface {
         }
     }
 
+    fn blend_region_within(&mut self, region: ImageRegion, opacity: u8) {
+        let count = region.width * 4;
+        let stride = self.stride();
+        // 原图像按底端起始的地址向前逐行、逐像素读写，重叠区域会读取先前写入的结果。
+        for row in (0..region.height).rev() {
+            let start = (region.y + row) * stride + region.x * 4;
+            let from = (region.source_y + row) * stride + region.source_x * 4;
+            if region.x > 0 {
+                let pixel: [u8; 4] = self.pixels[from..from + 4].try_into().unwrap();
+                extend_color(&mut self.pixels[start - 4..start], &pixel);
+            }
+            for column in 0..region.width {
+                let source = from + column * 4;
+                let target = start + column * 4;
+                let pixel: [u8; 4] = self.pixels[source..source + 4].try_into().unwrap();
+                blend_pixel(&mut self.pixels[target..target + 4], &pixel, opacity);
+            }
+            if region.x + region.width < self.size[0] as usize {
+                let pixel: [u8; 4] = self.pixels[from + count - 4..from + count]
+                    .try_into()
+                    .unwrap();
+                extend_color(&mut self.pixels[start + count..start + count + 4], &pixel);
+            }
+        }
+    }
+
     fn clip_blend(&self, source: &Self, rect: Rect, at: [i32; 2]) -> Option<ImageRegion> {
         let target = Rect::from_xywh(
             at[0],
