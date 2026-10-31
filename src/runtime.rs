@@ -217,7 +217,6 @@ impl<F: ObjectFactory> Runtime<F> {
             context: Vec::new(),
             budget: self.budget,
             limit: self.limit,
-            current,
         };
         host.host.task_id = current;
         host
@@ -306,7 +305,6 @@ fn run_nested<F: ObjectFactory>(
             context: Vec::new(),
             budget,
             limit,
-            current: target,
         };
         nested.host.task_id = target;
         match execution {
@@ -362,7 +360,6 @@ struct ObjectHost<'a, F: ObjectFactory> {
     context: Vec<u8>,
     budget: usize,
     limit: usize,
-    current: u32,
 }
 
 impl<F: ObjectFactory> ObjectHost<'_, F> {
@@ -495,7 +492,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     return Ok(NativeReturn::Value(1));
                 }
                 // 正在执行 native 的自身 VM 不处于消息等待状态。
-                let value = if args[0] == self.current {
+                let value = if args[0] == self.host.task_id {
                     0
                 } else {
                     self.message_target(args[0], &mut message)?
@@ -511,7 +508,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             }
             72 | 73 => {
                 let count = read::sized(args[2], vm.pc)?;
-                if args[0] == self.current {
+                if args[0] == self.host.task_id {
                     let (destination, source) = if index == 72 {
                         (args[3], args[1])
                     } else {
