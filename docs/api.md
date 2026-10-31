@@ -147,15 +147,17 @@ FES 内部执行宏声明，初始化按以下顺序交给宿主：
 
 ### 任务编号与父子索引
 
-`task::TaskTree::new(root_id, kind)` 登记根任务。`insert(parent, id, kind)` 登记已有对象的编号，`insert_auto(parent, kind)` 选择整棵树中最小可用的非负编号；两者只登记索引，调用者负责实际对象及资源的创建。编号全树唯一，父级必须存在。`node(id)` 读取编号、父级及类型，`children(id)` 按 i32 编号升序枚举直属子任务，`descendants(id)` 以相同顺序枚举全部后代；`find_in_subtree(scope, id)` 只查给定任务自身及其后代。
+`task::TaskTree::new(root_id, kind)` 登记根任务。`insert(parent, id, kind)` 登记已有对象的编号，`insert_auto(parent, kind)` 选择整棵树中最小可用的非负编号；两者只登记索引，调用者负责实际对象及资源的创建。编号全树唯一，父级必须存在。`node(id)` 读取编号、父级及类型，`children(id)` 按 i32 编号升序枚举仍登记的直属子任务，`descendants(id)` 以相同顺序枚举该层可查询的后代；`find_in_subtree(scope, id)` 只查给定任务自身及其后代。
 
-`subtree_ids(id)` 返回父任务优先、同级按有符号编号升序排列的编号。对象销毁时调用 `remove(id)` 清除整个子树，返回相同顺序的编号，供外层释放对应执行状态；根节点不能单独移除。销毁的编号继续保留到 `sweep()`，该方法应在根任务完成索引清理时调用，随后自动编号才能复用空位。`next_id()` 只查询下一编号。直接指定编号的 `insert` 可以重新登记已经销毁的空位。
+`unregister(id)` 只撤销当前编号在祖先索引中的值，保留存活节点、父指针和后代编号；根节点不能撤销注册。`node(id)` 仍可取得对象元数据，祖先的 `find_in_subtree` 随即跳过该编号，但继续查询其后代；任务查询自身仍成功。这一状态供同步删除通知及递归析构使用。
+
+`subtree_ids(id)` 返回父任务优先、同级按有符号编号升序排列的编号。其中包含已撤销注册的存活节点。对象销毁时调用 `remove(id)` 清除整个子树，返回相同顺序的编号，供外层释放对应执行状态；根节点不能单独移除。销毁的编号继续保留到 `sweep()`，该方法应在根任务完成索引清理时调用，随后自动编号才能复用空位。`next_id()` 只查询下一编号。直接指定编号的 `insert` 可以重新登记已经销毁的空位。
 
 普通宿主通过 `CoreHost.task_tree = Some(&tree)` 提供查询上下文。75 接受从零开始的后代索引序号，越界返回 `u32::MAX`；76 无参数，返回当前任务父级编号。没有任务树、当前编号未登记，以及对根任务调用 76 均返回诊断。树的更新、销毁时点和对象命令仍由外层负责。
 
 ### 任务命令路由
 
-`task::Command` 保存 `target`、`sender`、`code` 和三个原始 DWORD `data`。`TaskTree::dispatch(origin, command, &mut output, handler)` 从已登记的 origin 发送命令；`sender` 可以不同于 origin。目标存在返回 true，缺失返回 false 并保留 output。处理器签名为 `FnMut(&mut TaskTree, &Command, &mut u32) -> Result<bool>`，接收实际目标编号；它负责对象自身的阻止分派状态、通用／专属命令及输出写入。返回 false 终止当前分支，返回 true 且 `data[2]` 非零时继续向直属子任务传播，其他兄弟分支仍执行。
+`task::Command` 保存 `target`、`sender`、`code` 和三个原始 DWORD `data`。`TaskTree::dispatch(origin, command, &mut output, handler)` 从存活的 origin 发送命令；`sender` 可以不同于 origin。路由先查 origin 自身的子树索引，再沿父指针查找；可达目标返回 true，缺失返回 false 并保留 output。已撤销注册的祖先仍可通过父指针收到来自后代的命令。处理器签名为 `FnMut(&mut TaskTree, &Command, &mut u32) -> Result<bool>`，接收实际目标编号；它负责对象自身的阻止分派状态、通用／专属命令及输出写入。返回 false 终止当前分支，返回 true 且 `data[2]` 非零时继续向直属子任务传播，其他兄弟分支仍执行。
 
 `broadcast(origin, group, command, &mut output, handler)` 对应外层任务命令 11／12，传入的 `command.code` 为内层命令号。`group=None` 选择全部类型，`Some(kind)` 按节点类型筛选。路由先在 origin 及向上经过的非根任务索引中查找目标，命中时从目标路径上的首个直属子任务开始；未命中则转给根层并从整棵树开始。origin 就是根任务时，先查询根的子树索引。每个接收者的目标编号被替换，`data[2]` 固定为零；处理器返回 false 不阻止广播遍历其后代。
 

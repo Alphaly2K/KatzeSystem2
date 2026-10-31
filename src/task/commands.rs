@@ -26,8 +26,15 @@ impl TaskTree {
         mut handler: impl FnMut(&mut Self, &Command, &mut u32) -> Result<bool>,
     ) -> Result<bool> {
         self.check_command(origin, command.code)?;
-        if self.node(command.target).is_none() {
-            return Ok(false);
+        let mut scope = origin;
+        loop {
+            if self.find_in_subtree(scope, command.target).is_some() {
+                break;
+            }
+            match self.node(scope).unwrap().parent {
+                Some(parent) => scope = parent,
+                None => return Ok(false),
+            }
         }
         self.traverse(command.target, command, output, Mode::Direct, &mut handler)?;
         Ok(true)
@@ -67,7 +74,7 @@ impl TaskTree {
     }
 
     fn first_child_toward(&self, scope: u32, target: u32) -> Option<u32> {
-        let mut node = self.node(target)?;
+        let mut node = self.find_in_subtree(scope, target)?;
         if node.id == scope {
             return None;
         }
@@ -114,8 +121,14 @@ impl TaskTree {
             next = None;
             while let Some((parent, previous)) = parents.last_mut() {
                 let child = self.node(*parent).and_then(|node| match previous {
-                    Some(previous) => node.children.range((Excluded(*previous), Unbounded)).next(),
-                    None => node.children.first(),
+                    Some(previous) => node
+                        .children
+                        .range((Excluded(*previous), Unbounded))
+                        .find(|id| !self.unregistered.contains(id)),
+                    None => node
+                        .children
+                        .iter()
+                        .find(|id| !self.unregistered.contains(id)),
                 });
                 if let Some(&child) = child {
                     *previous = Some(child);

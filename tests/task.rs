@@ -80,3 +80,63 @@ fn ordinary_host_enumerates_all_descendant_ids_and_reads_parent_ids() {
     host.task_id = 999;
     assert!(host.call(75, &0u32.to_le_bytes(), &mut vm).is_err());
 }
+
+#[test]
+fn unregister_keeps_descendant_aliases_and_internal_routes_until_destruction() {
+    use katze_system2::task::Command;
+    let mut tree = TaskTree::new(9, 1);
+    for (parent, id) in [(9, 0), (0, 1), (1, 2), (9, 3)] {
+        tree.insert(parent, id, 12).unwrap();
+    }
+    tree.unregister(0).unwrap();
+    assert!(tree.node(0).is_some());
+    assert!(tree.find_in_subtree(9, 0).is_none());
+    assert!(tree.find_in_subtree(0, 0).is_some());
+    assert!(tree.find_in_subtree(9, 2).is_some());
+    assert_eq!(tree.children(9).unwrap().collect::<Vec<_>>(), [3]);
+    assert_eq!(tree.descendants(9).unwrap().collect::<Vec<_>>(), [1, 2, 3]);
+    let mut output = 77;
+    let mut calls = Vec::new();
+    let mut command = Command {
+        target: 0,
+        sender: 99,
+        code: 0x7000,
+        data: [0; 3],
+    };
+    assert!(
+        !tree
+            .dispatch(9, command, &mut output, |_, _, _| unreachable!())
+            .unwrap()
+    );
+    assert_eq!(output, 77);
+    assert!(
+        tree.dispatch(2, command, &mut output, |_, c, _| {
+            calls.push(c.target);
+            Ok(false)
+        })
+        .unwrap()
+    );
+    assert_eq!(calls, [0]);
+    calls.clear();
+    command.target = 2;
+    tree.broadcast(9, None, command, &mut output, |_, c, _| {
+        calls.push(c.target);
+        Ok(false)
+    })
+    .unwrap();
+    assert_eq!(calls, [0, 1, 2]);
+    calls.clear();
+    command.target = 999;
+    tree.broadcast(9, None, command, &mut output, |_, c, _| {
+        calls.push(c.target);
+        Ok(false)
+    })
+    .unwrap();
+    assert_eq!(calls, [9, 3]);
+    tree.unregister(1).unwrap();
+    assert_eq!(tree.subtree_ids(0).unwrap(), [0, 1, 2]);
+    assert_eq!(tree.remove(0).unwrap(), [0, 1, 2]);
+    assert_eq!(tree.next_id(), 4);
+    tree.sweep();
+    assert_eq!(tree.next_id(), 0);
+}

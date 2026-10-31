@@ -23,6 +23,7 @@ pub struct TaskTree {
     root_id: u32,
     nodes: BTreeMap<i32, TaskNode>,
     reserved: BTreeSet<i32>,
+    unregistered: BTreeSet<i32>,
 }
 
 impl TaskTree {
@@ -30,6 +31,7 @@ impl TaskTree {
         Self {
             root_id,
             reserved: BTreeSet::from([root_id as i32]),
+            unregistered: BTreeSet::new(),
             nodes: BTreeMap::from([(
                 root_id as i32,
                 TaskNode {
@@ -51,7 +53,12 @@ impl TaskTree {
     }
 
     pub fn children(&self, id: u32) -> Option<impl DoubleEndedIterator<Item = u32> + '_> {
-        Some(self.node(id)?.children.iter().map(|&id| id as u32))
+        Some(
+            self.node(id)?
+                .children
+                .iter()
+                .filter_map(|&id| (!self.unregistered.contains(&id)).then_some(id as u32)),
+        )
     }
 
     pub fn descendants(&self, id: u32) -> Option<impl Iterator<Item = u32> + '_> {
@@ -64,6 +71,9 @@ impl TaskTree {
     pub fn find_in_subtree(&self, scope: u32, id: u32) -> Option<&TaskNode> {
         self.node(scope)?;
         let target = self.node(id)?;
+        if scope != id && self.unregistered.contains(&(id as i32)) {
+            return None;
+        }
         let mut node = target;
         loop {
             if node.id == scope {
@@ -127,9 +137,28 @@ impl TaskTree {
         let mut ids = Vec::new();
         while let Some(id) = pending.pop() {
             ids.push(id);
-            pending.extend(self.children(id).unwrap().rev());
+            pending.extend(
+                self.node(id)
+                    .unwrap()
+                    .children
+                    .iter()
+                    .rev()
+                    .map(|&id| id as u32),
+            );
         }
         Ok(ids)
+    }
+
+    /// 撤销当前编号在祖先索引中的值，保留对象、父级和后代编号。
+    pub fn unregister(&mut self, id: u32) -> Result<()> {
+        if id == self.root_id {
+            return Err(Error::new(0, "不能撤销任务树根节点的注册"));
+        }
+        if self.node(id).is_none() {
+            return Err(Error::new(0, "任务不存在"));
+        }
+        self.unregistered.insert(id as i32);
+        Ok(())
     }
 
     /// 在对象销毁时清除整棵子树，返回被移除的编号。
@@ -146,6 +175,7 @@ impl TaskTree {
             .remove(&(id as i32));
         for id in &ids {
             self.nodes.remove(&(*id as i32));
+            self.unregistered.remove(&(*id as i32));
         }
         Ok(ids)
     }
