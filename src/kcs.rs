@@ -6,12 +6,14 @@ mod matrix;
 mod motion;
 mod numeric;
 mod particle;
+mod queue;
 mod random;
 mod sse;
 mod strings;
 pub use host::CoreHost;
 pub use motion::{MotionHost, MotionState, MotionTask};
 pub use particle::{ParticleHost, ParticleVertex};
+pub use queue::MotionQueue;
 pub use random::ScriptRandom;
 
 #[derive(Clone, Copy, Debug)]
