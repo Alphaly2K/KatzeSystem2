@@ -1,10 +1,11 @@
-//! CatSystem2 2.6.1.90 的脚本读取与执行核心。
+//! CatSystem2 2.6.1.90 的脚本与图形核心。
 
 pub mod anm;
 pub mod cst;
 pub mod cstl;
 pub mod expression;
 pub mod fes;
+pub mod graphics;
 pub mod hg3;
 pub mod kcs;
 mod read;
