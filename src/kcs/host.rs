@@ -1,6 +1,7 @@
 use super::{Host, Interpreter, NativeReturn, ScriptRandom, TaskClock};
 use super::{numeric, strings};
 use crate::{Error, Result, expression, read, text};
+use std::collections::BTreeMap;
 
 /// 在已有数值状态上提供普通任务表中已核实的接口。
 pub struct CoreHost<'a> {
@@ -10,6 +11,8 @@ pub struct CoreHost<'a> {
     pub task_time: u32,
     pub task_origin: u32,
     pub random: ScriptRandom,
+    integer_maps: BTreeMap<u32, BTreeMap<Vec<u8>, u32>>,
+    next_map_handle: u32,
 }
 
 impl<'a> CoreHost<'a> {
@@ -20,6 +23,8 @@ impl<'a> CoreHost<'a> {
             task_time: 0,
             task_origin: 0,
             random: ScriptRandom::default(),
+            integer_maps: BTreeMap::new(),
+            next_map_handle: 1,
             state,
         }
     }
@@ -48,13 +53,25 @@ impl Host for CoreHost<'_> {
         if index == 34 {
             return Ok(NativeReturn::Value(self.random.next_float().to_bits()));
         }
+        if index == 515 {
+            if self.integer_maps.len() >= read::MAX_ITEMS {
+                return Err(Error::new(vm.pc, "KCS 整数字典数量超过上限"));
+            }
+            let handle = self.next_map_handle;
+            self.next_map_handle = handle
+                .checked_add(1)
+                .ok_or_else(|| Error::new(vm.pc, "KCS 整数字典句柄耗尽"))?;
+            self.integer_maps.insert(handle, BTreeMap::new());
+            return Ok(NativeReturn::Value(handle));
+        }
         let count = match index {
-            1 | 6 | 17 | 18 | 25 | 26 | 40 | 47 | 48 | 71 | 209 | 210 | 212 | 213 | 278 | 319 => 1,
-            13..=16 | 19..=24 | 211 | 276 | 277 => 2,
+            1 | 6 | 17 | 18 | 25 | 26 | 40 | 47 | 48 | 71 | 209 | 210 | 212 | 213 | 278 | 319
+            | 516 => 1,
+            13..=16 | 19..=24 | 211 | 276 | 277 | 518 => 2,
             50..=58 | 60 | 62..=64 => 1,
             59 | 61 => 2,
             38 | 44 | 45 => 4,
-            36 | 37 | 41 | 42 | 519 => 3,
+            36 | 37 | 41 | 42 | 517 | 519 => 3,
             5 | 789 => 0,
             _ => return Err(Error::new(vm.pc, format!("未支持的 KCS native {index}"))),
         };
@@ -347,6 +364,35 @@ impl Host for CoreHost<'_> {
                     write_string(vm, args[0], word, 2)?;
                 }
                 NativeReturn::Value(word.is_some() as u32)
+            }
+            516 => {
+                if args[0] != 0 && self.integer_maps.remove(&args[0]).is_none() {
+                    return Err(Error::new(vm.pc, "无效的 KCS 整数字典句柄"));
+                }
+                NativeReturn::Continue
+            }
+            517 | 518 => {
+                if args[0] == 0 {
+                    return Ok(if index == 517 {
+                        NativeReturn::Continue
+                    } else {
+                        NativeReturn::Value(u32::MAX)
+                    });
+                }
+                let entries = self
+                    .integer_maps
+                    .get_mut(&args[0])
+                    .ok_or_else(|| Error::new(vm.pc, "无效的 KCS 整数字典句柄"))?;
+                let key = vm.read_string(args[1])?;
+                if index == 518 {
+                    NativeReturn::Value(entries.get(key).copied().unwrap_or(u32::MAX))
+                } else {
+                    if entries.len() >= read::MAX_ITEMS && !entries.contains_key(key) {
+                        return Err(Error::new(vm.pc, "KCS 整数字典条目超过上限"));
+                    }
+                    entries.entry(key.to_vec()).or_insert(args[2]);
+                    NativeReturn::Continue
+                }
             }
             789 => NativeReturn::Value(self.configured_shared_slots),
             _ => unreachable!(),
