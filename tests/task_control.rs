@@ -105,7 +105,6 @@ fn routed_pause_updates_the_ordinary_task_clock_and_consumes_the_branch() {
     let mut tree = TaskTree::new(9, 1);
     tree.insert(9, 42, 12).unwrap();
     tree.insert(42, 43, 12).unwrap();
-    let mut control = Control::default();
     let mut output = 77;
     let mut calls = Vec::new();
     assert!(
@@ -115,13 +114,14 @@ fn routed_pause_updates_the_ordinary_task_clock_and_consumes_the_branch() {
             &mut output,
             |tree, command, output| {
                 calls.push(command.target);
-                control.dispatch(
+                assert!(task.dispatch_control(
                     tree.node(command.target).unwrap().kind,
-                    &mut task.clock,
                     command,
                     output,
-                    |_, _, _, _| Ok(true),
-                )
+                    &mut host,
+                    100,
+                )?);
+                Ok(false)
             }
         )
         .unwrap()
@@ -134,18 +134,13 @@ fn routed_pause_updates_the_ordinary_task_clock_and_consumes_the_branch() {
     assert_eq!(task.running, 1);
 
     for (code, value) in [(24, 12345), (23, 0), (3, 0), (24, 7)] {
-        control
-            .dispatch(
-                12,
-                &mut task.clock,
-                &command(code, value),
-                &mut output,
-                |_, _, _, _| Ok(true),
-            )
-            .unwrap();
+        assert!(
+            task.dispatch_control(12, &command(code, value), &mut output, &mut host, 100,)
+                .unwrap()
+        );
     }
     assert_eq!(output, 12345);
-    assert_eq!(control.property, 12345);
-    assert_eq!(control.deletion_requested, 1);
+    assert_eq!(task.control.property, 12345);
+    assert_eq!(task.control.deletion_requested, 1);
     assert!(tree.node(42).is_some());
 }

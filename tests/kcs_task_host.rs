@@ -305,7 +305,7 @@ fn task_switching_replaces_creation_context_on_a_shared_host() {
     for (id, context) in [(7, b"raw%d[G0]\0ignored".as_slice()), (8, b"")] {
         let mut task = OrdinaryTask::new(program.clone(), vec![]).unwrap();
         task.task_id = id;
-        task.creation_context = context.to_vec();
+        task.set_creation_context(Some(context)).unwrap();
         assert!(task.update(100, 1, &mut host, 100).unwrap());
     }
     assert_eq!(services.created[0].sender, 7);

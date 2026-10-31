@@ -1,5 +1,5 @@
 use super::{Host, Interpreter, Program, TaskClock};
-use crate::task::Control;
+use crate::task::{Command, Control};
 use crate::{Error, Result, Step, read};
 
 enum UpdatePhase {
@@ -98,6 +98,83 @@ impl OrdinaryTask {
             self.interpreter.set_execution_mode(0);
         }
         Ok(())
+    }
+
+    /// 对应命令 26；None 对应空指针，正文最多 31 字节。
+    pub fn set_creation_context(&mut self, context: Option<&[u8]>) -> Result<()> {
+        self.require_idle()?;
+        if self.control.deletion_requested != 0 {
+            return Ok(());
+        }
+        if let Some(context) = context {
+            let end = context
+                .iter()
+                .position(|&byte| byte == 0)
+                .unwrap_or(context.len());
+            if end >= 32 {
+                return Err(Error::new(
+                    self.interpreter.pc,
+                    "普通任务创建上下文超过容量",
+                ));
+            }
+            self.creation_context.clear();
+            self.creation_context.extend_from_slice(&context[..end]);
+        }
+        Ok(())
+    }
+
+    /// 对应命令 25；复制原始正文和一个结尾零，None 跳过写入。
+    pub fn copy_creation_context(&self, destination: Option<&mut [u8]>) -> Result<()> {
+        self.require_idle()?;
+        if self.control.deletion_requested != 0 {
+            return Ok(());
+        }
+        if let Some(destination) = destination {
+            let end = self
+                .creation_context
+                .iter()
+                .position(|&byte| byte == 0)
+                .unwrap_or(self.creation_context.len());
+            if destination.len() <= end {
+                return Err(Error::new(
+                    self.interpreter.pc,
+                    "普通任务创建上下文输出容量不足",
+                ));
+            }
+            destination[..end].copy_from_slice(&self.creation_context[..end]);
+            destination[end] = 0;
+        }
+        Ok(())
+    }
+
+    /// 分派基类控制及 162／163；完成后由路由处理器消费当前分支。
+    pub fn dispatch_control(
+        &mut self,
+        kind: u32,
+        command: &Command,
+        output: &mut u32,
+        host: &mut impl Host,
+        budget: usize,
+    ) -> Result<bool> {
+        if command.code == 3 {
+            return self.request_delete(host, budget);
+        }
+        self.require_idle()?;
+        if self.control.deletion_requested != 0 {
+            return Ok(true);
+        }
+        match command.code {
+            162 => self.start_execution(command.data[0], command.data[1])?,
+            163 => self.stop_execution()?,
+            13 | 17 | 23 | 24 | 29 => {
+                self.control
+                    .dispatch(kind, &mut self.clock, command, output, |_, _, _, _| {
+                        Ok(true)
+                    })?;
+            }
+            _ => return Err(Error::new(self.interpreter.pc, "未支持的普通任务控制命令")),
+        }
+        Ok(true)
     }
 
     /// 同步消息分派；false 表示继续传入同一消息和 output 续跑。

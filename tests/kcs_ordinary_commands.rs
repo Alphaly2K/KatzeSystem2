@@ -2,6 +2,7 @@ use katze_system2::{
     Step,
     expression::State,
     kcs::{CoreHost, OrdinaryTask, Program},
+    task::Command,
 };
 
 fn ins(code: &mut Vec<u8>, opcode: u8, args: &[u32]) {
@@ -73,7 +74,17 @@ fn deletion_notifies_before_marking_and_skips_subsequent_execution() {
     task.task_id = 42;
     assert!(task.update(100, 3, &mut host, 100).unwrap());
     let clock = task.clock.clone();
-    assert!(!task.request_delete(&mut host, 1).unwrap());
+    let command = Command {
+        target: 42,
+        sender: 7,
+        code: 3,
+        data: [0; 3],
+    };
+    assert!(
+        !task
+            .dispatch_control(12, &command, &mut 0, &mut host, 1)
+            .unwrap()
+    );
     assert_eq!(task.control.deletion_requested, 0);
     let mut message = [7, 8, 9, 10];
     let mut output = 99;
@@ -82,7 +93,10 @@ fn deletion_notifies_before_marking_and_skips_subsequent_execution() {
             .is_err()
     );
     for _ in 0..20 {
-        if task.request_delete(&mut host, 1).unwrap() {
+        if task
+            .dispatch_control(12, &command, &mut 0, &mut host, 1)
+            .unwrap()
+        {
             break;
         }
     }
@@ -114,7 +128,16 @@ fn paused_vm_preserves_waiting_but_still_receives_queued_messages() {
     let mut task = receiver(&[0x3b]);
     task.task_id = 42;
     assert!(task.update(10, 1, &mut host, 100).unwrap());
-    task.start_execution(42, 0).unwrap();
+    let mut command = Command {
+        target: 42,
+        sender: 7,
+        code: 162,
+        data: [42, 0, 1],
+    };
+    assert!(
+        task.dispatch_control(12, &command, &mut 0, &mut host, 0)
+            .unwrap()
+    );
     let pc = task.interpreter.pc;
     assert_eq!(task.interpreter.resume(&mut host, 0).unwrap(), Step::Paused);
     assert!(task.update(20, 2, &mut host, 0).unwrap());
@@ -134,11 +157,21 @@ fn paused_vm_preserves_waiting_but_still_receives_queued_messages() {
     assert_eq!(task.interpreter.read(0, 4).unwrap(), 1u32.to_le_bytes());
     assert_eq!(task.interpreter.read(36, 4).unwrap(), 9u32.to_le_bytes());
     assert_eq!((task.running, task.accumulated_increment), (1, 6));
-    task.stop_execution().unwrap();
+    command.code = 163;
+    assert!(
+        task.dispatch_control(12, &command, &mut 0, &mut host, 0)
+            .unwrap()
+    );
     task.enqueue_message([3, 4, 5, 6]).unwrap();
     assert!(task.update(40, 4, &mut host, 100).unwrap());
     assert_eq!(task.queued_messages(), [[3, 4, 5, 6]]);
-    task.start_execution(7, 0).unwrap();
+    command.code = 162;
+    command.sender = 42;
+    command.data[0] = 7;
+    assert!(
+        task.dispatch_control(12, &command, &mut 0, &mut host, 0)
+            .unwrap()
+    );
     assert_eq!(task.interpreter.execution_mode(), 1);
     assert!(task.update(50, 5, &mut host, 100).unwrap());
     assert_eq!(task.running, 0);
@@ -182,4 +215,28 @@ fn step_over_records_the_call_return_and_low_level_run_bypasses_pause() {
         task.interpreter.resume(&mut host, 100).unwrap(),
         Step::Halted
     );
+}
+
+#[test]
+fn context_copy_reserves_the_terminator_and_preserves_state_on_capacity_errors() {
+    let mut task = receiver(&[0x3b]);
+    task.set_creation_context(Some(&[b'x'; 31])).unwrap();
+    assert!(task.set_creation_context(Some(&[b'y'; 32])).is_err());
+    assert_eq!(task.creation_context, [b'x'; 31]);
+    let mut short = [0xa5; 31];
+    assert!(task.copy_creation_context(Some(&mut short)).is_err());
+    assert_eq!(short, [0xa5; 31]);
+    let mut destination = [0xa5; 34];
+    task.copy_creation_context(Some(&mut destination)).unwrap();
+    assert_eq!(&destination[..31], &[b'x'; 31]);
+    assert_eq!(&destination[31..], &[0, 0xa5, 0xa5]);
+    task.set_creation_context(None).unwrap();
+    task.copy_creation_context(None).unwrap();
+    task.set_creation_context(Some(b"raw%d[G0]\0ignored"))
+        .unwrap();
+    assert_eq!(task.creation_context, b"raw%d[G0]");
+    task.control.deletion_requested = -1;
+    task.set_creation_context(Some(&[b'y'; 32])).unwrap();
+    task.copy_creation_context(Some(&mut [])).unwrap();
+    assert_eq!(task.creation_context, b"raw%d[G0]");
 }

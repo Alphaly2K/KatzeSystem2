@@ -137,6 +137,10 @@ FES 内部执行宏声明，初始化按以下顺序交给宿主：
 
 `OrdinaryTask::start_execution(source, mode)` 对应普通命令 162：将 running 设为 1；source 等于当前 task_id 时使用传入 mode，否则使用 1。source 对应命令第一数据项。`stop_execution()` 对应 163，将 running 和 VM 执行模式均设为零。两方法在已有删除标记时跳过，预算续跑期间返回诊断。VM 暂停仍允许时钟、累计增量和排队消息处理，末尾普通恢复完成后保留 running 为 1。
 
+`OrdinaryTask::dispatch_control(kind, command, output, host, budget)` 接收 3／13／17／23／24／29／162／163。kind 来自任务树节点；返回 true 表示本次控制命令完成，false 表示删除通知仍需预算续跑。路由 handler 在完成后返回 false 消费分支。其他编号返回诊断，已有删除标记时跳过。
+
+`set_creation_context(Some(bytes))` 对应命令 26，保存首个零之前的原始字节，正文最多 31 字节；`copy_creation_context(Some(buffer))` 对应 25，写入正文及一个结尾零，保留输出其余字节。两方法的 None 均跳过，删除后的任务也跳过；预算续跑期间返回诊断。输入或输出容量不足时保留原状态，直接使用公开上下文字段时由调用者保持正文容量约束。
+
 `OrdinaryTask::dispatch_message(message, output, host, budget)` 同步投递消息，完成后把活动结果写入 output；未等待时写零，已有删除标记时保留 output。投递不受 running 限制，也不修改时钟、running 或累计增量。`request_delete(host, budget)` 先向等待中的 VM 同步投递内部删除通知，再把 `control.deletion_requested` 设为 1。两方法均以 false 表示预算续跑，只能继续同一入口；消息分派需继续传入同一消息和 output。删除后的更新只更新时间，外层负责移除任务及回收子树。
 
 普通任务在更新、同步消息及删除通知前通过 `Host::set_task_clock`、`set_task_id` 和 `set_task_context` 同步当前时钟、编号及原始创建上下文；包装宿主应委托这三个方法。`CoreHost` 已接入前两项，`TaskHost` 保存上下文供创建使用。4 返回外层平台计时器提供的 `CoreHost.system_time_ms`，初值零，单位毫秒，按 u32 回绕；该字段独立于任务时钟更新。任务树、创建／删除和对象命令由外层负责。
