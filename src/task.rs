@@ -1,8 +1,12 @@
 use crate::{Error, Result, read};
 use std::collections::{BTreeMap, BTreeSet};
 
+mod clock;
 mod commands;
+mod control;
+pub use clock::TaskClock;
 pub use commands::Command;
+pub use control::Control;
 
 /// 任务树中的编号、父级与类型；任务执行状态由对应解释器保存。
 #[derive(Clone, Debug)]

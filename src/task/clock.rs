@@ -1,4 +1,4 @@
-/// 普通任务的整数时钟；原始时刻由外层调度器提供。
+/// 任务基类的整数时钟；原始时刻由外层调度器提供。
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TaskClock {
     pub origin: u32,

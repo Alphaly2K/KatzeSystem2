@@ -1,7 +1,6 @@
 use crate::{Error, Result, Step, read};
 use std::collections::BTreeMap;
 
-mod clock;
 mod host;
 mod matrix;
 mod memory;
@@ -15,7 +14,7 @@ mod random;
 mod sse;
 mod strings;
 mod task_host;
-pub use clock::TaskClock;
+pub use crate::task::TaskClock;
 pub use host::CoreHost;
 pub use memory::MemoryCopyMode;
 pub use motion::{MotionHost, MotionState, MotionTask};
