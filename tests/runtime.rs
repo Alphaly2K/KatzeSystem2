@@ -300,6 +300,42 @@ fn budget_continuation_still_completes_a_synchronous_dispatch() {
 }
 
 #[test]
+fn messages_route_between_sibling_branches() {
+    let mut asm = Asm::default();
+    asm.ins(0x25, &[1])
+        .ins(0x25, &[9])
+        .ins(0x25, &[11])
+        .ins(0x25, &[0])
+        .ins(0x2b, &[69, 16])
+        .ins(0x26, &[0])
+        .ins(0x3b, &[]);
+    let mut source = Source::new();
+    source.add(b"sender", asm.build(), data());
+    source.add(b"target", waiting_child(), data());
+    let mut runtime = runtime(source);
+
+    let target = runtime.create(0, kind::ORDINARY, b"target", b"").unwrap();
+    assert!(runtime.update(10, 0).unwrap());
+    assert!(
+        runtime
+            .object(target)
+            .unwrap()
+            .interpreter()
+            .unwrap()
+            .is_waiting_for_message()
+    );
+    // 兄弟分支之间沿共同祖先路由，不要求目标位于发送者子树内。
+    let sender = runtime.create(0, kind::ORDINARY, b"sender", b"").unwrap();
+    assert_eq!(sender, 2);
+    assert!(runtime.update(20, 0).unwrap());
+    let sender_vm = runtime.object(sender).unwrap().interpreter().unwrap();
+    assert_eq!(words(sender_vm, 0, 1), [1]);
+    let target_vm = runtime.object(target).unwrap().interpreter().unwrap();
+    assert_eq!(words(target_vm, 52, 1), [9]);
+    assert_eq!(words(target_vm, 56, 1), [11]);
+}
+
+#[test]
 fn task_natives_read_and_write_another_tasks_vm() {
     let mut asm = Asm::default();
     asm.ins(0x25, &[1])
