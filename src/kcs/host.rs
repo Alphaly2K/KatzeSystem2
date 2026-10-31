@@ -1,5 +1,6 @@
 use super::{Host, Interpreter, MemoryCopyMode, NativeReturn, ScriptRandom, TaskClock};
 use super::{memory, numeric, strings};
+use crate::task::TaskTree;
 use crate::{Error, Result, expression, read, text};
 use std::collections::BTreeMap;
 
@@ -11,6 +12,7 @@ pub struct CoreHost<'a> {
     pub task_time: u32,
     pub task_origin: u32,
     pub task_id: u32,
+    pub task_tree: Option<&'a TaskTree>,
     pub system_time_ms: u32,
     pub surface_size: [u32; 2],
     pub memory_copy_mode: MemoryCopyMode,
@@ -27,6 +29,7 @@ impl<'a> CoreHost<'a> {
             task_time: 0,
             task_origin: 0,
             task_id: 0,
+            task_tree: None,
             system_time_ms: 0,
             surface_size: [0; 2],
             memory_copy_mode: MemoryCopyMode::default(),
@@ -84,13 +87,13 @@ impl Host for CoreHost<'_> {
         }
         let count = match index {
             1 | 6 | 17 | 18 | 25 | 26 | 40 | 47 | 48 | 71 | 209 | 210 | 212 | 213 | 278 | 319
-            | 516 => 1,
+            | 75 | 516 => 1,
             8 | 13..=16 | 19..=24 | 211 | 276 | 277 | 518 => 2,
             50..=58 | 60 | 62..=64 => 1,
             59 | 61 => 2,
             38 | 44 | 45 => 4,
             35..=37 | 41 | 42 | 517 | 519 => 3,
-            5 | 789 => 0,
+            5 | 76 | 789 => 0,
             _ => return Err(Error::new(vm.pc, format!("未支持的 KCS native {index}"))),
         };
         if arguments.len() != count * 4 {
@@ -116,6 +119,24 @@ impl Host for CoreHost<'_> {
             71 => {
                 vm.wait_for_message(args[0])?;
                 NativeReturn::YieldVoid
+            }
+            75 | 76 => {
+                let tree = self
+                    .task_tree
+                    .ok_or_else(|| Error::new(vm.pc, "KCS 宿主未提供任务树"))?;
+                let node = tree
+                    .node(self.task_id)
+                    .ok_or_else(|| Error::new(vm.pc, "KCS 当前任务未登记"))?;
+                let id = if index == 75 {
+                    tree.descendants(node.id)
+                        .unwrap()
+                        .nth(args[0] as usize)
+                        .unwrap_or(u32::MAX)
+                } else {
+                    node.parent
+                        .ok_or_else(|| Error::new(vm.pc, "KCS 当前任务没有父任务"))?
+                };
+                NativeReturn::Value(id)
             }
             35 => {
                 memory::copy(
