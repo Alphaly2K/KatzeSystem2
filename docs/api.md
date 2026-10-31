@@ -147,6 +147,8 @@ FES 内部执行宏声明，初始化按以下顺序交给宿主：
 
 普通任务在更新、同步消息及删除通知前通过 `Host::set_task_clock`、`set_task_id` 和 `set_task_context` 同步当前时钟、编号及原始创建上下文；包装宿主应委托这三个方法。`CoreHost` 已接入前两项，`TaskHost` 保存上下文供创建使用。4 返回外层平台计时器提供的 `CoreHost.system_time_ms`，初值零，单位毫秒，按 u32 回绕；该字段独立于任务时钟更新。任务树、创建／删除和对象命令由外层负责。
 
+`CoreHost.pointer_position: [i32; 2]` 提供普通表 149 的当前逻辑指针坐标，初值 `[0, 0]`。输入宿主负责平台取样及窗口到逻辑画布的变换，并在脚本查询前更新该值；负数及画布外坐标保留。149 依次写 X 和 Y，不压入返回值。任务编号和时钟同步不改变坐标。
+
 ### 同步系统服务
 
 `kcs::ResourceHost::new(&mut inner, &mut services)` 提供普通表 590～593 的 XML 装载、释放、整数及文本查询。服务实现 `ResourceServices::read(name, mode) -> Result<Option<Vec<u8>>>`；输入为格式展开的字节名称，当前 XML 接口采用 `ResourceMode::LooseFirst`。可由 `ResourceRouter::read` 转交已注册的归档和文件读取，再取返回资源的 bytes。None 或解析失败使 590 返回零，服务错误停止当前推进；创建的句柄存活至显式释放或宿主销毁。零句柄查询跳过地址解析，非零失效句柄返回诊断。593 的目标需为有效零结尾串，缺失字段保留原值，成功时仅覆盖 UTF-8 字段及结尾零。

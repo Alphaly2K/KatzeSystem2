@@ -48,6 +48,8 @@ pub struct CoreHost<'a> {
     pub system_time_ms: u32,
     pub debug_mode: u32,
     pub surface_size: [u32; 2],
+    /// 外层输入宿主提供的当前逻辑画布坐标；保留画布外的值。
+    pub pointer_position: [i32; 2],
     pub memory_copy_mode: MemoryCopyMode,
     pub random: ScriptRandom,
     integer_maps: BTreeMap<u32, BTreeMap<Vec<u8>, u32>>,
@@ -67,6 +69,7 @@ impl<'a> CoreHost<'a> {
             system_time_ms: 0,
             debug_mode: 0,
             surface_size: [0; 2],
+            pointer_position: [0; 2],
             memory_copy_mode: MemoryCopyMode::default(),
             random: ScriptRandom::default(),
             integer_maps: BTreeMap::new(),
@@ -126,7 +129,7 @@ impl Host for CoreHost<'_> {
         let count = match index {
             1 | 6 | 17 | 18 | 25 | 26 | 40 | 47 | 48 | 71 | 209 | 210 | 212 | 213 | 278 | 319
             | 75 | 393 | 516 => 1,
-            8 | 13..=16 | 19..=24 | 211 | 276 | 277 | 518 => 2,
+            8 | 13..=16 | 19..=24 | 149 | 211 | 276 | 277 | 518 => 2,
             50..=58 | 60 | 62..=64 => 1,
             59 | 61 => 2,
             38 | 44 | 45 => 4,
@@ -158,8 +161,13 @@ impl Host for CoreHost<'_> {
                 });
                 NativeReturn::Continue
             }
-            8 => {
-                for (address, value) in args.iter().zip(self.surface_size) {
+            8 | 149 => {
+                let values = if index == 8 {
+                    self.surface_size
+                } else {
+                    self.pointer_position.map(|coordinate| coordinate as u32)
+                };
+                for (address, value) in args.iter().zip(values) {
                     vm.write(*address, &value.to_le_bytes())?;
                 }
                 NativeReturn::Continue
