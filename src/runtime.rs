@@ -15,6 +15,9 @@ use crate::{Error, Result, expression, read};
 use std::collections::BTreeMap;
 
 mod object;
+mod resources;
+
+use resources::Resources;
 
 pub use object::{BaseObject, OrdinaryObject, TaskObject};
 
@@ -87,6 +90,7 @@ pub struct Runtime<F: ObjectFactory> {
     running: BTreeMap<u32, RunningTask>,
     numbers: expression::State,
     host: HostState,
+    resources: Resources,
     factory: F,
     budget: usize,
     limit: usize,
@@ -109,6 +113,7 @@ impl<F: ObjectFactory> Runtime<F> {
             running: BTreeMap::new(),
             numbers,
             host,
+            resources: Resources::default(),
             factory,
             budget: DEFAULT_BUDGET,
             limit: DEFAULT_LIMIT,
@@ -127,6 +132,15 @@ impl<F: ObjectFactory> Runtime<F> {
     pub fn object_mut(&mut self, id: u32) -> Option<&mut dyn TaskObject> {
         let object = self.objects.get_mut(&id)?;
         Some(object.as_mut())
+    }
+
+    /// 配置同步资源读取与类别名称补全；已有图像继续保留。
+    pub fn set_resources(&mut self, services: impl crate::kcs::ResourceServices + 'static) {
+        self.resources.services = Some(Box::new(services));
+    }
+
+    pub fn images(&self) -> &crate::graphics::Images {
+        &self.resources.images
     }
 
     pub fn host(&self) -> &HostState {
@@ -160,6 +174,7 @@ impl<F: ObjectFactory> Runtime<F> {
         let mut lifecycle = TaskLifecycle {
             numbers: &mut self.numbers,
             host: &mut self.host,
+            resources: &mut self.resources,
             objects: &mut self.objects,
             running: &mut self.running,
             factory: &mut self.factory,
@@ -174,6 +189,7 @@ impl<F: ObjectFactory> Runtime<F> {
         let mut lifecycle = TaskLifecycle {
             numbers: &mut self.numbers,
             host: &mut self.host,
+            resources: &mut self.resources,
             objects: &mut self.objects,
             running: &mut self.running,
             factory: &mut self.factory,
@@ -210,6 +226,7 @@ impl<F: ObjectFactory> Runtime<F> {
         Store {
             numbers: &mut self.numbers,
             host: &mut self.host,
+            resources: &mut self.resources,
             tree: &mut self.tree,
             objects: &mut self.objects,
             running: &mut self.running,
@@ -231,6 +248,7 @@ impl<F: ObjectFactory> Runtime<F> {
         let host = ObjectHost {
             numbers: &mut self.numbers,
             host: &mut self.host,
+            resources: &mut self.resources,
             tree: &mut self.tree,
             objects: &mut self.objects,
             running: &mut self.running,
@@ -298,6 +316,7 @@ struct RunningTask {
 struct Store<'a, F: ObjectFactory> {
     numbers: &'a mut expression::State,
     host: &'a mut HostState,
+    resources: &'a mut Resources,
     tree: &'a mut TaskTree,
     objects: &'a mut BTreeMap<u32, Box<dyn TaskObject>>,
     running: &'a mut BTreeMap<u32, RunningTask>,
@@ -315,6 +334,7 @@ fn run_nested<F: ObjectFactory>(
     let Store {
         numbers,
         host,
+        resources,
         tree,
         objects,
         running,
@@ -340,6 +360,7 @@ fn run_nested<F: ObjectFactory>(
         let mut nested = ObjectHost {
             numbers: &mut *numbers,
             host: &mut *host,
+            resources: &mut *resources,
             tree: &mut *tree,
             objects: &mut *objects,
             running: &mut *running,
@@ -402,6 +423,7 @@ fn route<F: ObjectFactory>(store: Store<'_, F>, origin: u32, command: Command) -
     let Store {
         numbers,
         host,
+        resources,
         tree,
         objects,
         running,
@@ -417,6 +439,7 @@ fn route<F: ObjectFactory>(store: Store<'_, F>, origin: u32, command: Command) -
             Store {
                 numbers: &mut *numbers,
                 host: &mut *host,
+                resources: &mut *resources,
                 tree,
                 objects: &mut *objects,
                 running: &mut *running,
@@ -441,6 +464,7 @@ fn route<F: ObjectFactory>(store: Store<'_, F>, origin: u32, command: Command) -
 struct ObjectHost<'a, F: ObjectFactory> {
     numbers: &'a mut expression::State,
     host: &'a mut HostState,
+    resources: &'a mut Resources,
     tree: &'a mut TaskTree,
     objects: &'a mut BTreeMap<u32, Box<dyn TaskObject>>,
     running: &'a mut BTreeMap<u32, RunningTask>,
@@ -455,6 +479,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         Store {
             numbers: &mut *self.numbers,
             host: &mut *self.host,
+            resources: &mut *self.resources,
             tree: &mut *self.tree,
             objects: &mut *self.objects,
             running: &mut *self.running,
@@ -689,6 +714,9 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         if matches!(index, 66 | 67 | 69 | 70 | 72 | 73 | 75 | 76 | 109 | 110) {
             return self.task_native(index, arguments, vm);
         }
+        if matches!(index, 111 | 117) {
+            return self.resources.call(self.host.task_id, index, arguments, vm);
+        }
         call_native(
             &mut *self.numbers,
             &mut *self.host,
@@ -704,6 +732,7 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
 struct TaskLifecycle<'a, F: ObjectFactory> {
     numbers: &'a mut expression::State,
     host: &'a mut HostState,
+    resources: &'a mut Resources,
     objects: &'a mut BTreeMap<u32, Box<dyn TaskObject>>,
     running: &'a mut BTreeMap<u32, RunningTask>,
     factory: &'a mut F,
@@ -716,6 +745,7 @@ impl<F: ObjectFactory> TaskLifecycle<'_, F> {
         Store {
             numbers: &mut *self.numbers,
             host: &mut *self.host,
+            resources: &mut *self.resources,
             tree,
             objects: &mut *self.objects,
             running: &mut *self.running,
@@ -753,6 +783,7 @@ impl<F: ObjectFactory> Lifecycle for TaskLifecycle<'_, F> {
             .get_mut(&id)
             .ok_or_else(|| Error::new(0, "任务对象不存在"))?;
         object.release()?;
+        self.resources.images.release_owner(id);
         self.objects.remove(&id);
         Ok(())
     }

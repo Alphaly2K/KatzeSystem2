@@ -1,5 +1,8 @@
 use crate::{Error, Result, read};
 
+mod image;
+pub use image::{Image, ImageReference, Images};
+
 /// 包含左上边、不包含右下边的像素矩形。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Rect {
@@ -151,6 +154,11 @@ impl Surface {
         let Some(region) = self.clip_blend(source, rect, at) else {
             return false;
         };
+        self.blend_region(source, region, opacity);
+        true
+    }
+
+    fn blend_region(&mut self, source: &Self, region: ImageRegion, opacity: u8) {
         let count = region.width * 4;
         let stride = self.stride();
         let source_stride = source.stride();
@@ -174,7 +182,6 @@ impl Surface {
                 );
             }
         }
-        true
     }
 
     fn clip_blend(&self, source: &Self, rect: Rect, at: [i32; 2]) -> Option<ImageRegion> {
