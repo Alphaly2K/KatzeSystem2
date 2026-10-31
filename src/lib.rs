@@ -8,6 +8,7 @@ pub mod fes;
 pub mod hg3;
 pub mod kcs;
 mod read;
+pub mod resource;
 mod text;
 
 use std::fmt;
