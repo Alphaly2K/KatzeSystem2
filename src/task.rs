@@ -4,9 +4,11 @@ use std::collections::{BTreeMap, BTreeSet};
 mod clock;
 mod commands;
 mod control;
+mod lifecycle;
 pub use clock::TaskClock;
 pub use commands::Command;
 pub use control::Control;
+pub use lifecycle::Lifecycle;
 
 /// 任务树中的编号、父级与类型；任务执行状态由对应解释器保存。
 #[derive(Clone, Debug)]
