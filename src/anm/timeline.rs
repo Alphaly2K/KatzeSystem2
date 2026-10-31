@@ -42,6 +42,43 @@ impl Timeline {
         self.changed
     }
 
+    /// 从入口重启并恢复默认显示，保留变量、速度和时间基点。
+    pub fn restart(&mut self) {
+        self.interpreter.pc = 0;
+        self.interpreter.display = DisplayState::default();
+        self.duration = 0;
+        self.invocation = None;
+        self.finished = false;
+        self.changed = false;
+    }
+
+    /// 对象时钟以零基点表示未开始，u32::MAX 使用当前基点。
+    pub fn update_frame(&mut self, now: u32, budget: usize) -> Result<bool> {
+        let now = self.frame_time(now);
+        self.advance(now, budget, None)
+    }
+
+    pub fn update_frame_with_random(
+        &mut self,
+        now: u32,
+        budget: usize,
+        random: &mut impl FnMut() -> u32,
+    ) -> Result<bool> {
+        let now = self.frame_time(now);
+        self.advance(now, budget, Some(random))
+    }
+
+    fn frame_time(&mut self, now: u32) -> u32 {
+        if self.invocation.is_some() {
+            return now;
+        }
+        let now = if now == u32::MAX { self.origin } else { now };
+        if self.origin == 0 {
+            self.origin = now;
+        }
+        now
+    }
+
     /// true 为本轮完成，false 为预算让出；显示状态从 interpreter.display 读取。
     pub fn update(&mut self, now: u32, budget: usize) -> Result<bool> {
         self.advance(now, budget, None)

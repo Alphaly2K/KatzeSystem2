@@ -102,7 +102,7 @@ FES 内部执行宏声明，初始化按以下顺序交给宿主：
 
 分派后继续调用 `run`，命令通过 `Command` 或已注册绑定的 `Subcommand` 事件交给宿主，`event_context()` 提供对象与银行号，供宿主解析 `@` 对象命令；数值表达式中的 `@` 已使用银行号。事件完成时 `run` 返回 `Yield`，上下文变为 `None`；下一次 `run` 恢复主流程原等待，或执行事件交出的目标位置。两类事件中的 `next`／`call` 差异详见 [FES](fes.md)。事件中的 `wait`／`exit` 和嵌套分派当前返回错误。
 
-`anm::Timeline::new(program)` 提供时钟调度。设置 `speed`／`origin` 后调用 `update(now, budget)`，返回 true 表示本轮完成，false 表示预算让出；续跑保留本轮时间。`interpreter.display` 为最终显示状态，`display_changed()` 为本轮是否改变，`is_finished()` 为持续时间和全部指令是否结束。`update_with_random` 接受共享随机回调。原始指令入口仍可分别使用：ANM 的 Image／Wait 事件携带持续时间。宿主完成该时长后再调用 `run`；库当前不绑定刷新率或墙上时钟。零耗时跳转循环受指令预算限制。随机区间通过 `run_with_random` 从宿主读取 u32 随机数，固定区间不消耗随机数。`display` 保留当前显示属性，`max_image_id` 由图像宿主设置。
+`anm::Timeline::new(program)` 提供时钟调度。设置 `speed`／`origin` 后调用 `update(now, budget)`，返回 true 表示本轮完成，false 表示预算让出；续跑保留本轮时间。`interpreter.display` 为最终显示状态，`display_changed()` 为本轮是否改变，`is_finished()` 为持续时间和全部指令是否结束。`update_with_random` 接受共享随机回调。`update_frame`／`update_frame_with_random` 另处理对象的零起点和 `u32::MAX` 时间哨兵。`restart()` 重置执行位置、持续时间和显示，保留变量、最大帧 ID、速度及时间基点。原始指令入口仍可分别使用：ANM 的 Image／Wait 事件携带持续时间。宿主完成该时长后再调用 `run`；库当前不绑定刷新率或墙上时钟。零耗时跳转循环受指令预算限制。随机区间通过 `run_with_random` 从宿主读取 u32 随机数，固定区间不消耗随机数。`display` 保留当前显示属性，`max_image_id` 由图像宿主设置。
 
 ## KCS 宿主
 
