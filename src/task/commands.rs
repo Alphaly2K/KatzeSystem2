@@ -2,7 +2,7 @@ use super::TaskTree;
 use crate::{Error, Result, read};
 use std::ops::Bound::{Excluded, Unbounded};
 
-/// 任务命令的六个 DWORD；data[2] 在直接分派中控制向后代传播。
+/// 任务命令的六个 DWORD；`data[2]` 在直接分派中控制向后代传播。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Command {
     pub target: u32,
@@ -17,7 +17,7 @@ enum Mode {
 }
 
 impl TaskTree {
-    /// handler 返回 false 时结束当前分支，true 时按 data[2] 继续。
+    /// handler 返回 false 时结束当前分支，true 时按 `data[2]` 继续。
     pub fn dispatch(
         &mut self,
         origin: u32,

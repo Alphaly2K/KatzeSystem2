@@ -623,10 +623,12 @@ impl<F: ObjectFactory> Lifecycle for TaskLifecycle<'_, F> {
     }
 
     fn release(&mut self, id: u32) -> Result<()> {
-        let mut object = self
+        let object = self
             .objects
-            .remove(&id)
+            .get_mut(&id)
             .ok_or_else(|| Error::new(0, "任务对象不存在"))?;
-        object.release()
+        object.release()?;
+        self.objects.remove(&id);
+        Ok(())
     }
 }
