@@ -169,3 +169,36 @@ fn shared_host_receives_each_task_id_and_keeps_system_milliseconds_independent()
         assert_eq!(task.running, 0);
     }
 }
+
+#[test]
+fn split_update_preserves_clock_controls_and_messages_changed_by_children() {
+    for budget in [1, 100] {
+        let mut task = OrdinaryTask::new(message_loop(), vec![]).unwrap();
+        task.clock.origin = 10;
+        let mut state = State::new(8);
+        let mut host = CoreHost::new(&mut state);
+        assert!(task.update(100, 1, &mut host, 100).unwrap());
+        task.clock.update(200);
+        task.clock.paused = -1;
+        task.clock.one_tick_pending = true;
+        task.enqueue_message([7, 0, 0, 0]).unwrap();
+        let clock = task.clock.clone();
+        let mut completed = false;
+        for _ in 0..100 {
+            completed = task.update_body(3, &mut host, budget).unwrap();
+            if completed {
+                break;
+            }
+        }
+        assert!(completed);
+        assert_eq!(task.clock, clock);
+        assert_eq!(task.accumulated_increment, 4);
+        assert_eq!(values(&task)[3], 190);
+        assert!(task.interpreter.is_waiting_for_message());
+        assert!(task.queued_messages().is_empty());
+        assert!(task.update(300, 5, &mut host, 100).unwrap());
+        assert_eq!(values(&task)[3], 90);
+        assert_eq!(task.accumulated_increment, 9);
+        assert!(!task.clock.one_tick_pending);
+    }
+}

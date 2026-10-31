@@ -248,6 +248,21 @@ impl OrdinaryTask {
         }
         if self.phase.is_none() {
             self.clock.update(now);
+        }
+        self.update_body(increment, host, budget_per_call)
+    }
+
+    /// 树调度在时钟及子任务更新之后调用；false 表示主体预算续跑。
+    pub fn update_body(
+        &mut self,
+        increment: u32,
+        host: &mut impl Host,
+        budget_per_call: usize,
+    ) -> Result<bool> {
+        if self.command_phase.is_some() {
+            return Err(Error::new(self.interpreter.pc, "普通任务命令尚未完成"));
+        }
+        if self.phase.is_none() {
             if self.control.deletion_requested != 0 || self.running == 0 {
                 return Ok(true);
             }

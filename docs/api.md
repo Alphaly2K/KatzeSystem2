@@ -135,6 +135,8 @@ FES 内部执行宏声明，初始化按以下顺序交给宿主：
 
 `kcs::OrdinaryTask::new(program, external)` 创建已装载且 running 为 1 的任务；`clock`、`control`、`creation_context`、`interpreter`、`task_id` 和 `running` 可由外层管理，任务编号默认零，创建上下文默认空。`enqueue_message([u32; 4])` 复制入队，`queued_messages()` 查询当前队列。`update(now, increment, host, budget_per_call)` 更新时钟、按顺序分派全部消息并进行一次无消息恢复，返回 true 表示本轮完成；false 时继续调用同一方法，本轮时刻和累计增量保持不变。预算分别交给每次 VM 推进，`is_pending()` 查询续跑状态，续跑期间禁止入队、切换执行入口或直接操作 VM／控制字段。running 为零时只更新时钟并保留队列；时钟 paused 非零仍推进活动脚本。`accumulated_increment` 仅在活动的新一轮累加外层提供的 increment，按 u32 回绕。程序在执行中到达隐式代码末尾时保留 running 为 1，下一轮进入才停止；显式停止指令当轮停止。
 
+`OrdinaryTask::update_body(increment, host, budget_per_call)` 执行消息队列及 VM 主体，省略时钟更新。树调度器先更新该任务的 `clock`，再推进子任务，最后调用本方法；子任务期间可以改变父任务控制字段或入队。主体预算续跑期间继续调用本方法，禁止再次更新时钟或重复运行子任务。原有 `update` 继续提供单任务的时钟与主体组合。
+
 `OrdinaryTask::start_execution(source, mode)` 对应普通命令 162：将 running 设为 1；source 等于当前 task_id 时使用传入 mode，否则使用 1。source 对应命令第一数据项。`stop_execution()` 对应 163，将 running 和 VM 执行模式均设为零。两方法在已有删除标记时跳过，预算续跑期间返回诊断。VM 暂停仍允许时钟、累计增量和排队消息处理，末尾普通恢复完成后保留 running 为 1。
 
 `OrdinaryTask::dispatch_control(kind, command, output, host, budget)` 接收 3／13／17／23／24／29／162／163。kind 来自任务树节点；返回 true 表示本次控制命令完成，false 表示删除通知仍需预算续跑。路由 handler 在完成后返回 false 消费分支。其他编号返回诊断，已有删除标记时跳过。
