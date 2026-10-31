@@ -1,6 +1,9 @@
 use crate::{Error, Result, read};
 use std::collections::{BTreeMap, BTreeSet};
 
+mod commands;
+pub use commands::Command;
+
 /// 任务树中的编号、父级与类型；任务执行状态由对应解释器保存。
 #[derive(Clone, Debug)]
 pub struct TaskNode {
@@ -10,7 +13,7 @@ pub struct TaskNode {
     children: BTreeSet<i32>,
 }
 
-/// 维护一棵任务树的编号与父子索引，不创建资源或执行对象命令。
+/// 维护任务编号、父子索引与对象命令路由。
 #[derive(Clone, Debug)]
 pub struct TaskTree {
     root_id: u32,

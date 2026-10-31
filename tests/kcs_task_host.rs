@@ -5,7 +5,7 @@ use katze_system2::{
         CoreHost, Host, Interpreter, MemoryCopyMode, NativeReturn, OrdinaryTask, Program, TaskHost,
         TaskServices,
     },
-    task::TaskTree,
+    task::{Command, TaskTree},
 };
 
 fn ins(code: &mut Vec<u8>, opcode: u8, args: &[u32]) {
@@ -64,20 +64,54 @@ impl TaskServices for Services {
     }
 
     fn dispatch_message(&mut self, target: u32, message: &mut [u32; 4]) -> Result<u32> {
-        if target != 42 {
+        let mut output = 0;
+        let command = Command {
+            target,
+            sender: message[0],
+            code: 173,
+            data: [0, 0, 1],
+        };
+        let found =
+            self.tree
+                .dispatch(message[0], command, &mut output, |_, command, output| {
+                    if command.target != 42 {
+                        return Err(Error::new(0, "任务不提供接收 VM"));
+                    }
+                    self.dispatched += 1;
+                    let mut state = State::new(8);
+                    let step = self.target.dispatch_message(
+                        message,
+                        &mut CoreHost::new(&mut state),
+                        100,
+                    )?;
+                    *output = u32::from(matches!(step, Some(Step::Event(_))));
+                    Ok(false)
+                })?;
+        if !found {
             return Err(Error::new(0, "任务不存在"));
         }
-        self.dispatched += 1;
-        let mut state = State::new(8);
-        let step = self
-            .target
-            .dispatch_message(message, &mut CoreHost::new(&mut state), 100)?;
-        Ok(u32::from(matches!(step, Some(Step::Event(_)))))
+        Ok(output)
     }
 
     fn enqueue_message(&mut self, target: u32, message: [u32; 4]) -> Result<u32> {
-        self.queued.push((target, message));
-        Ok(1)
+        let mut output = 0;
+        let command = Command {
+            target,
+            sender: message[0],
+            code: 174,
+            data: [0, 0, 1],
+        };
+        let found =
+            self.tree
+                .dispatch(message[0], command, &mut output, |_, command, output| {
+                    self.queued.push((command.target, message));
+                    *output = 1;
+                    Ok(false)
+                })?;
+        if !found {
+            return Err(Error::new(0, "任务不存在"));
+        }
+        Ok(output)
     }
 
     fn interpreter(&mut self, target: u32) -> Result<&mut Interpreter> {
