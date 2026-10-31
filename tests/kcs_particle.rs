@@ -258,6 +258,98 @@ fn particle_end_updates_task_state_and_yields_status_four() {
     assert!(!host.active);
 }
 
+fn particle_task(stop: bool) -> kcs::ParticleTask {
+    let mut code = vec![];
+    let ins = |code: &mut Vec<u8>, opcode, args: &[(u8, u32)]| {
+        code.push(opcode);
+        for &(flags, value) in args {
+            code.push(flags);
+            code.extend(value.to_le_bytes());
+        }
+    };
+    ins(&mut code, 0x16, &[(3, 0)]);
+    code.push(0x2d);
+    for (i, native) in [1, 2, 36].into_iter().enumerate() {
+        ins(&mut code, 0x2b, &[(3, native), (3, 0)]);
+        ins(&mut code, 0x26, &[(3, 4 + i as u32 * 4)]);
+    }
+    for address in [4, 8, 12] {
+        ins(&mut code, 0x25, &[(0x13, address)]);
+    }
+    ins(&mut code, 0x2b, &[(3, 27), (3, 12)]);
+    if stop {
+        ins(&mut code, 0x13, &[(0x13, 12), (3, 1)]);
+        let target = (code.len() + 6 + 11) as u32;
+        ins(&mut code, 0x27, &[(3, target)]);
+        ins(&mut code, 0x2b, &[(3, 32), (3, 0)]);
+    }
+    ins(&mut code, 0x16, &[(3, 16)]);
+    code.push(0x2d);
+    code.push(0x3b);
+    kcs::ParticleTask::new(
+        kcs::Program::from_code(&code, vec![0; 32], 64).unwrap(),
+        ParticleHost {
+            quads: vec![[ParticleVertex::default(); 4]; 3],
+            saved_quads: vec![[ParticleVertex::default(); 4]; 3],
+            offsets: vec![[0.0; 4]; 3],
+            quad_flags: vec![1; 3],
+            ..Default::default()
+        },
+    )
+    .unwrap()
+}
+
+#[test]
+fn particle_updates_share_data_restart_each_quad_and_use_wrapping_integer_time() {
+    let mut task = particle_task(false);
+    task.speed = 3;
+    for (now, elapsed, previous, calls) in [
+        (0, 0, u32::MAX, 3u32),
+        (1, 0, u32::MAX, 6),
+        (5, 12, 0, 9),
+        (u32::MAX, u32::MAX - 5, 12, 12),
+        (4, 9, u32::MAX - 5, 15),
+    ] {
+        assert_eq!(task.update(now, 100).unwrap(), Some(Step::Halted));
+        assert_eq!(task.host.current_quad, 3);
+        assert_eq!(task.host.previous_elapsed, elapsed);
+        assert_eq!(task.interpreter.read(0, 4).unwrap(), calls.to_le_bytes());
+        for (quad, offset) in task.host.offsets.iter().enumerate() {
+            assert_eq!(
+                offset.map(f32::to_bits),
+                [elapsed, previous, quad as u32, 0]
+            );
+        }
+    }
+    task.host.offsets.clear();
+    assert!(task.update(5, 100).is_err());
+}
+
+#[test]
+fn particle_budget_resume_freezes_time_and_exit_still_runs_remaining_quads() {
+    let mut task = particle_task(true);
+    assert_eq!(task.update(1, 1).unwrap(), Some(Step::Yield));
+    let mut done = false;
+    for _ in 0..100 {
+        if task.update(999, 1).unwrap() == Some(Step::Halted) {
+            done = true;
+            break;
+        }
+    }
+    assert!(done);
+    assert_eq!(
+        (task.origin, task.previous_time, task.host.elapsed),
+        (1, 1, 0)
+    );
+    assert!(!task.host.active);
+    assert_eq!(task.host.current_quad, 3);
+    assert_eq!(task.interpreter.read(0, 4).unwrap(), 3u32.to_le_bytes());
+    assert_eq!(task.interpreter.read(16, 4).unwrap(), 2u32.to_le_bytes());
+    assert_eq!(task.host.offsets[2].map(f32::to_bits), [0, u32::MAX, 2, 0]);
+    assert_eq!(task.update(1000, 100).unwrap(), None);
+    assert_eq!((task.previous_time, task.host.previous_elapsed), (1, 0));
+}
+
 #[test]
 fn script_random_keeps_independent_streams_across_mt_state_updates() {
     let mut random = kcs::ScriptRandom::seeded(0);

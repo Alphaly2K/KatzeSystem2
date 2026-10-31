@@ -12,7 +12,7 @@ mod sse;
 mod strings;
 pub use host::CoreHost;
 pub use motion::{MotionHost, MotionState, MotionTask};
-pub use particle::{ParticleHost, ParticleSource, ParticleVertex};
+pub use particle::{ParticleHost, ParticleSource, ParticleTask, ParticleVertex};
 pub use queue::MotionQueue;
 pub use random::ScriptRandom;
 

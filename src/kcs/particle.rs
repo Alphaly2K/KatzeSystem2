@@ -1,5 +1,5 @@
-use super::{Host, Interpreter, NativeReturn, ScriptRandom, matrix, numeric, strings};
-use crate::{Error, Result};
+use super::{Host, Interpreter, NativeReturn, Program, ScriptRandom, matrix, numeric, strings};
+use crate::{Error, Result, Step};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ParticleVertex {
@@ -71,6 +71,81 @@ impl Default for ParticleHost {
             random: ScriptRandom::default(),
             debug_messages: Vec::new(),
         }
+    }
+}
+
+/// 每个网格从入口执行一次，共享同一份程序数据和粒子宿主。
+pub struct ParticleTask {
+    pub interpreter: Interpreter,
+    pub host: ParticleHost,
+    pub speed: u32,
+    pub origin: u32,
+    pub previous_time: u32,
+    invocation: Option<usize>,
+}
+
+impl ParticleTask {
+    pub fn new(program: Program, host: ParticleHost) -> Result<Self> {
+        Ok(Self {
+            interpreter: Interpreter::new(program, Vec::new())?,
+            host,
+            speed: 1,
+            origin: 0,
+            previous_time: 0,
+            invocation: None,
+        })
+    }
+
+    /// 预算按单个网格计算；让出后再次调用会继续当前网格和本次更新。
+    pub fn update(&mut self, now: u32, budget_per_quad: usize) -> Result<Option<Step<()>>> {
+        if self.invocation.is_none() {
+            if !self.host.active {
+                return Ok(None);
+            }
+            let count = self.host.quads.len();
+            if count > u32::MAX as usize
+                || self.host.saved_quads.len() != count
+                || self.host.offsets.len() != count
+                || self.host.quad_flags.len() != count
+            {
+                return Err(Error::new(self.interpreter.pc, "粒子网格数组数量不匹配"));
+            }
+            if self.origin == 0 {
+                self.origin = now;
+                self.host.elapsed = 0;
+                self.host.previous_elapsed = u32::MAX;
+            } else {
+                self.host.elapsed = self.host.elapsed.wrapping_add(
+                    now.wrapping_sub(self.previous_time)
+                        .wrapping_mul(self.speed),
+                );
+            }
+            self.previous_time = now;
+            self.host.current_quad = 0;
+            self.invocation = Some(count);
+            if count != 0 {
+                self.interpreter.reset_execution();
+            }
+        }
+        let count = self.invocation.unwrap();
+        while (self.host.current_quad as usize) < count {
+            match self.interpreter.run(&mut self.host, budget_per_quad) {
+                Ok(Step::Yield) => return Ok(Some(Step::Yield)),
+                Err(error) => {
+                    self.invocation = None;
+                    return Err(error);
+                }
+                Ok(_) => {
+                    self.host.current_quad += 1;
+                    if (self.host.current_quad as usize) < count {
+                        self.interpreter.reset_execution();
+                    }
+                }
+            }
+        }
+        self.host.previous_elapsed = self.host.elapsed;
+        self.invocation = None;
+        Ok(Some(Step::Halted))
     }
 }
 
