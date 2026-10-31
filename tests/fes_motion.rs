@@ -41,13 +41,15 @@ fn array_subcommands_convert_each_bank_then_run_and_apply_queued_motion() {
         }
     );
     assert_eq!(state.shared[0], 0);
-    let category = katze_system2::resource::Category {
-        prefix: b"mot".to_vec(),
-        extension: b"kcs".to_vec(),
-    };
+    let resources = katze_system2::resource::ArchiveConfig::from_xml(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><document><INT><int00>
+         <name>mot</name><int>motion.int</int><ext>kcs</ext><dir>loose</dir>
+         </int00></INT></document>",
+    )
+    .unwrap();
     assert_eq!(
-        category.resolve(&call.binding.target).unwrap(),
-        b"mot/motion.kcs"
+        resources.resolve(b"mot", &call.binding.target).unwrap(),
+        b"motion.int/motion.kcs"
     );
     let mut code = vec![];
     ins(&mut code, 1, &[(0x14, 0x8000_0018), (0x14, 0x8000_009c)]);

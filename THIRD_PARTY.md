@@ -11,5 +11,6 @@
 |cfg-if|1.0.5|MIT|[许可](licenses/cfg-if-1.0.5/LICENSE-MIT)|
 |adler2|2.0.1|MIT|[许可](licenses/adler2-2.0.1/LICENSE-MIT)|
 |simd-adler32|0.3.10|MIT|[许可](licenses/simd-adler32-0.3.10/LICENSE.md)|
+|roxmltree|0.20.0|MIT|[许可](licenses/roxmltree-0.20.0/LICENSE-MIT)|
 
 依赖版本与校验值由 `Cargo.lock` 固定。Zlib 解压采用 Rust 后端，不要求系统 Zlib。未引入先行实现的源码或资源。

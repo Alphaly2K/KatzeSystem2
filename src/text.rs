@@ -38,7 +38,7 @@ pub fn expand(input: &[u8], strings: &BTreeMap<u32, Vec<u8>>) -> Result<Vec<u8>>
     Ok(out)
 }
 
-fn integer_prefix(bytes: &[u8]) -> Option<(usize, u32)> {
+pub(crate) fn integer_prefix(bytes: &[u8]) -> Option<(usize, u32)> {
     let mut p = usize::from(matches!(bytes.first(), Some(b'+' | b'-')));
     if !bytes.get(p)?.is_ascii_digit() {
         return None;

@@ -1,6 +1,9 @@
 use crate::{Error, Result, read};
 
-/// 由资源配置提供的虚拟名前缀和缺省扩展名，均保留原始 CP932 字节。
+mod config;
+pub use config::{ArchiveConfig, ArchiveEntry};
+
+/// 由资源配置提供的虚拟名前缀和缺省扩展名；目录扫描使用基线 CP932 范围。
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Category {
     pub prefix: Vec<u8>,
