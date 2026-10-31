@@ -90,6 +90,11 @@ impl MotionTask {
         MotionState::read(&self.interpreter)
     }
 
+    pub fn set_properties(&mut self, properties: &[u32; 36]) -> Result<()> {
+        let bytes: Vec<_> = properties.iter().flat_map(|n| n.to_le_bytes()).collect();
+        self.interpreter.write(EXTERNAL, &bytes)
+    }
+
     /// 未到开始时间返回 None；同一次预算让出期间固定 elapsed。
     pub fn update(
         &mut self,

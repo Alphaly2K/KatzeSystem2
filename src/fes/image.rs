@@ -1,10 +1,13 @@
-use super::{ImageReference, ObjectAttributes, ObjectReference};
+use super::{ImageReference, ObjectAttributes, ObjectReference, SubcommandContext};
 use crate::{Result, hg3::StandardInfo};
 
 /// CIMAGE 的脚本可设置状态；父子对象关系和绘制由宿主维护。
 #[derive(Clone, Debug, PartialEq)]
 pub struct CImageState {
     pub position: [f32; 2],
+    pub base_point: [f32; 2],
+    pub scale: [f32; 2],
+    pub rotation: f32,
     pub size: [i32; 2],
     pub plane: ObjectReference,
     pub color: i32,
@@ -22,6 +25,9 @@ impl Default for CImageState {
     fn default() -> Self {
         Self {
             position: [0.0; 2],
+            base_point: [0.0; 2],
+            scale: [1.0; 2],
+            rotation: 0.0,
             size: [-1; 2],
             plane: ObjectReference {
                 name: String::new(),
@@ -41,6 +47,60 @@ impl Default for CImageState {
 }
 
 impl CImageState {
+    pub fn subcommand_context(&self) -> SubcommandContext {
+        SubcommandContext {
+            base: [self.base_point[0], self.base_point[1], self.priority as f32],
+            position: [self.position[0], self.position[1], 0.0],
+            velocity: [0.0; 3],
+            rotation: [0.0, 0.0, self.rotation],
+            scale: [self.scale[0], self.scale[1], 1.0],
+            color: self.color as u32,
+        }
+    }
+
+    pub fn motion_properties(&self) -> [u32; 36] {
+        let mut properties = [0; 36];
+        for (index, value) in [
+            (3, self.base_point[0]),
+            (4, self.base_point[1]),
+            (5, self.priority.wrapping_sub(20) as f32),
+            (6, self.position[0]),
+            (7, self.position[1]),
+            (25, self.scale[0]),
+            (26, self.scale[1]),
+            (27, 1.0),
+            (31, self.rotation),
+        ] {
+            properties[index] = value.to_bits();
+        }
+        properties[28] = (self.blend as u32) << 24;
+        properties[35] = self.display as u32;
+        properties
+    }
+
+    pub fn apply_motion_properties(&mut self, properties: &[u32; 36]) {
+        let value = |i| f32::from_bits(properties[i]);
+        for (current, indices) in [
+            (&mut self.position, [6, 7]),
+            (&mut self.scale, [25, 26]),
+            (&mut self.base_point, [3, 4]),
+        ] {
+            let next = indices.map(value);
+            if *current != next {
+                *current = next;
+            }
+        }
+        if self.rotation != value(31) {
+            self.rotation = value(31);
+        }
+        self.blend = (properties[28] >> 24) as i32;
+        let priority = integer_position(value(5));
+        if self.priority != priority {
+            self.priority = priority.wrapping_add(20);
+        }
+        self.display = properties[35] as i32;
+    }
+
     /// 仅应用 CIMAGE 对应的列。bank 是本次应用的具体银行号。
     pub fn apply(&mut self, attributes: &ObjectAttributes, bank: u32) {
         self.apply_visual(attributes, bank);
