@@ -25,6 +25,9 @@ impl Interpreter {
         if self.messages.delivering {
             return Err(Error::new(self.pc, "KCS 消息分派尚未完成"));
         }
+        if self.execution_mode == 0 {
+            return Ok(Step::Paused);
+        }
         if self.messages.waiting {
             self.push(0)?;
             self.messages.waiting = false;

@@ -138,7 +138,7 @@ impl Timeline {
                     self.duration = duration;
                 }
                 Step::Halted => self.finished = true,
-                Step::Yield => (),
+                Step::Yield | Step::Paused => (),
             }
             if self.finished || self.invocation.as_ref().unwrap().remaining < self.duration {
                 self.changed = self.invocation.take().unwrap().before != self.interpreter.display;

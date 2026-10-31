@@ -228,6 +228,7 @@ pub struct DebugState {
     pub source: Vec<u8>,
     pub scopes: Vec<u32>,
     pub variables: Vec<u32>,
+    pub step_over_return: Option<u32>,
 }
 
 pub struct Interpreter {
@@ -245,6 +246,7 @@ pub struct Interpreter {
     debug: DebugState,
     debug_variable_floors: Vec<usize>,
     messages: messages::MessageState,
+    execution_mode: u32,
 }
 
 impl Interpreter {
@@ -276,10 +278,18 @@ impl Interpreter {
             debug: DebugState::default(),
             debug_variable_floors: Vec::new(),
             messages: messages::MessageState::default(),
+            execution_mode: 1,
         })
     }
     pub fn debug(&self) -> &DebugState {
         &self.debug
+    }
+    pub fn execution_mode(&self) -> u32 {
+        self.execution_mode
+    }
+    pub fn set_execution_mode(&mut self, mode: u32) {
+        self.execution_mode = mode;
+        self.debug.step_over_return = None;
     }
     pub fn stack_bytes(&self) -> &[u8] {
         &self.memory[self.stack_start..self.sp]
@@ -386,6 +396,10 @@ impl Interpreter {
             let ins = self.program.instructions[i].clone();
             if ins.opcode == 0x3b {
                 return Ok(Step::Halted);
+            }
+            if self.execution_mode == 3 && ins.opcode == 0x2a {
+                self.execution_mode = 1;
+                self.debug.step_over_return = Some(self.pc as u32 + 11);
             }
             self.pc += 1 + 5 * ins.operands.len();
             let a = &ins.operands;

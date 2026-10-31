@@ -1,4 +1,5 @@
 use katze_system2::{
+    Step,
     expression::State,
     kcs::{CoreHost, OrdinaryTask, Program},
 };
@@ -46,6 +47,8 @@ fn synchronous_delivery_keeps_task_state_and_defers_output_until_completion() {
         assert!(task.update(200, 3, &mut host, 100).is_err());
         assert!(task.request_delete(&mut host, 100).is_err());
         assert!(task.enqueue_message([0; 4]).is_err());
+        assert!(task.start_execution(42, 1).is_err());
+        assert!(task.stop_execution().is_err());
         for _ in 0..20 {
             if task
                 .dispatch_message(&mut message, &mut output, &mut host, 1)
@@ -102,4 +105,81 @@ fn deletion_notifies_before_marking_and_skips_subsequent_execution() {
     assert!(task.update(200, 10, &mut host, 100).unwrap());
     assert_eq!(task.interpreter.pc, pc);
     assert_eq!((task.clock.time, task.accumulated_increment), (200, 3));
+}
+
+#[test]
+fn paused_vm_preserves_waiting_but_still_receives_queued_messages() {
+    let mut state = State::new(8);
+    let mut host = CoreHost::new(&mut state);
+    let mut task = receiver(&[0x3b]);
+    task.task_id = 42;
+    assert!(task.update(10, 1, &mut host, 100).unwrap());
+    task.start_execution(42, 0).unwrap();
+    let pc = task.interpreter.pc;
+    assert_eq!(task.interpreter.resume(&mut host, 0).unwrap(), Step::Paused);
+    assert!(task.update(20, 2, &mut host, 0).unwrap());
+    assert!(!task.is_pending());
+    assert!(task.interpreter.is_waiting_for_message());
+    assert_eq!(task.interpreter.pc, pc);
+    assert!(task.interpreter.stack_bytes().is_empty());
+    assert_eq!((task.running, task.accumulated_increment), (1, 3));
+    task.enqueue_message([7, 8, 9, 10]).unwrap();
+    for _ in 0..20 {
+        if task.update(30, 3, &mut host, 1).unwrap() {
+            break;
+        }
+    }
+    assert!(!task.is_pending());
+    assert!(!task.interpreter.is_waiting_for_message());
+    assert_eq!(task.interpreter.read(0, 4).unwrap(), 1u32.to_le_bytes());
+    assert_eq!(task.interpreter.read(36, 4).unwrap(), 9u32.to_le_bytes());
+    assert_eq!((task.running, task.accumulated_increment), (1, 6));
+    task.stop_execution().unwrap();
+    task.enqueue_message([3, 4, 5, 6]).unwrap();
+    assert!(task.update(40, 4, &mut host, 100).unwrap());
+    assert_eq!(task.queued_messages(), [[3, 4, 5, 6]]);
+    task.start_execution(7, 0).unwrap();
+    assert_eq!(task.interpreter.execution_mode(), 1);
+    assert!(task.update(50, 5, &mut host, 100).unwrap());
+    assert_eq!(task.running, 0);
+    assert!(task.queued_messages().is_empty());
+    task.control.deletion_requested = -1;
+    task.start_execution(42, 3).unwrap();
+    assert_eq!((task.running, task.interpreter.execution_mode()), (0, 1));
+}
+
+#[test]
+fn step_over_records_the_call_return_and_low_level_run_bypasses_pause() {
+    let mut code = Vec::new();
+    ins(&mut code, 0x2a, &[23, 0]);
+    ins(&mut code, 0x2b, &[65, 0]);
+    code.push(0x3b);
+    ins(&mut code, 0x25, &[7]);
+    ins(&mut code, 0x2c, &[4, 0]);
+    let mut task =
+        OrdinaryTask::new(Program::from_code(&code, vec![], 64).unwrap(), vec![]).unwrap();
+    let mut state = State::new(8);
+    let mut host = CoreHost::new(&mut state);
+    task.start_execution(0, 3).unwrap();
+    assert_eq!(task.interpreter.run(&mut host, 0).unwrap(), Step::Yield);
+    assert_eq!(task.interpreter.execution_mode(), 3);
+    assert_eq!(task.interpreter.run(&mut host, 1).unwrap(), Step::Yield);
+    assert_eq!(task.interpreter.execution_mode(), 1);
+    assert_eq!(task.interpreter.debug().step_over_return, Some(11));
+    task.interpreter.set_execution_mode(0);
+    assert_eq!(task.interpreter.debug().step_over_return, None);
+    assert!(matches!(
+        task.interpreter.run(&mut host, 100).unwrap(),
+        Step::Event(_)
+    ));
+    assert_eq!(task.interpreter.stack_bytes(), 7u32.to_le_bytes());
+    assert_eq!(
+        task.interpreter.resume(&mut host, 100).unwrap(),
+        Step::Paused
+    );
+    task.interpreter.set_execution_mode(u32::MAX);
+    assert_eq!(
+        task.interpreter.resume(&mut host, 100).unwrap(),
+        Step::Halted
+    );
 }

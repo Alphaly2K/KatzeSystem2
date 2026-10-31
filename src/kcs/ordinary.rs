@@ -79,6 +79,27 @@ impl OrdinaryTask {
                 && entry_pc != self.interpreter.pc)
     }
 
+    /// 对应命令 162；source 为第一数据项，与当前任务编号比较。
+    pub fn start_execution(&mut self, source: u32, mode: u32) -> Result<()> {
+        self.require_idle()?;
+        if self.control.deletion_requested == 0 {
+            self.running = 1;
+            self.interpreter
+                .set_execution_mode(if source == self.task_id { mode } else { 1 });
+        }
+        Ok(())
+    }
+
+    /// 对应命令 163，同时关闭任务运行和 VM 普通恢复。
+    pub fn stop_execution(&mut self) -> Result<()> {
+        self.require_idle()?;
+        if self.control.deletion_requested == 0 {
+            self.running = 0;
+            self.interpreter.set_execution_mode(0);
+        }
+        Ok(())
+    }
+
     /// 同步消息分派；false 表示继续传入同一消息和 output 续跑。
     pub fn dispatch_message(
         &mut self,

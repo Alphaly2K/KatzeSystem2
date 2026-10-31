@@ -45,5 +45,7 @@ impl std::error::Error for Error {}
 pub enum Step<E> {
     Event(E),
     Yield,
+    /// KCS 普通恢复被执行模式暂停，本次调用已完成。
+    Paused,
     Halted,
 }

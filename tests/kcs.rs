@@ -189,6 +189,7 @@ fn reverse_unsigned_switch_range_and_debug_metadata() {
             source: b"unit".to_vec(),
             scopes: vec![0],
             variables: vec![3],
+            step_over_return: None,
         }
     );
 }
