@@ -217,7 +217,7 @@ FES 内部执行宏声明，初始化按以下顺序交给宿主：
 
 ### 任务消息与跨任务存储
 
-`kcs::TaskHost::new(&mut inner, &mut services)` 包装现有 `Host`，接入普通表 66／67／69／70／72／73，其他 native 委托给 inner。包装时当前编号为零，直接使用 VM 时通过 `Host::set_task_id` 设置；`OrdinaryTask` 会自动同步编号、时钟和创建上下文，包装层继续委托给 inner。
+`kcs::TaskHost::new(&mut inner, &mut services)` 包装现有 `Host`，接入普通表 66／67／69／70／72／73／109／110，其他 native 委托给 inner。包装时当前编号为零，直接使用 VM 时通过 `Host::set_task_id` 设置；`OrdinaryTask` 会自动同步编号、时钟和创建上下文，包装层继续委托给 inner。
 
 `TaskServices` 要求宿主提供三个方法：`dispatch_message(target, &mut message)` 完成同步分派并保留消息回写，`enqueue_message(target, message)` 复制入队，`interpreter(target)` 返回目标任务的 VM。前两项返回任务命令处理器输出的 DWORD，而非消息正文；普通任务未等待时同步结果为零，排队结果为 1。同步回调必须在返回前完成本次分派的全部预算续跑，投递本身不修改目标的 running 或时钟。任务查找、沿树路由、对象类型差异及数值绑定切换由服务处理；缺失或不支持的目标应返回诊断。
 
@@ -226,6 +226,8 @@ FES 内部执行宏声明，初始化按以下顺序交给宿主：
 66 接受对象类型、父任务编号和名称地址，先展开名称中的 KCS 格式引用，再调用 `create_task(sender, parent, kind, name, context)`，以状态 1 返回新编号；编号零有效。`TaskHost.creation_context` 提供当前任务的原始创建上下文，默认空，读取到首个零为止，不展开格式引用。创建服务负责实例化对象、登记父子关系，并按对象类型接收继承的上下文；原普通对象通过任务命令 26 保存它。该方法默认返回未实现诊断。
 
 67 调用 `request_delete(sender, target)`，返回状态 2。服务应分派删除命令 3，让目标执行相应删除通知并标记待删除，在任务更新阶段完成实际销毁和索引清理。该方法默认返回未实现诊断。
+
+`dispatch_command(command, &mut output)` 从 `command.sender` 同步路由，返回目标是否可达，目标处理器通过 output 写回结果。可直接组合 `TaskTree::dispatch` 与对象处理器；处理器消费命令时，路由仍返回 true。缺省服务返回未实现诊断。109 接受目标编号，发送命令 96，data 全零；以状态 1 返回可达目标的 output，未找到返回零。110 接受目标编号和值，发送命令 97，data 为 `[0, value, 0]`；忽略路由返回值和 output，以状态 2 继续。服务错误仍向调用者传播，两项均不向子任务传播。
 
 69／70 均接受目标编号、消息类型和两个数据项，消息首项自动填入发送者编号。69 同步调用服务，执行中的自身任务直接返回零；70 调用排队服务，包括向自身排队。两者都把服务输出按状态 1 返回。
 

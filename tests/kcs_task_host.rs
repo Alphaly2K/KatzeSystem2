@@ -23,6 +23,7 @@ struct Services {
     dispatched: usize,
     created: Vec<Creation>,
     deleted: Vec<(u32, u32)>,
+    commands: Vec<Command>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -61,6 +62,15 @@ impl TaskServices for Services {
     fn request_delete(&mut self, sender: u32, target: u32) -> Result<()> {
         self.deleted.push((sender, target));
         Ok(())
+    }
+
+    fn dispatch_command(&mut self, command: Command, output: &mut u32) -> Result<bool> {
+        self.tree
+            .dispatch(command.sender, command, output, |_, command, output| {
+                self.commands.push(*command);
+                *output = 0x8000_0001;
+                Ok(false)
+            })
     }
 
     fn dispatch_message(&mut self, target: u32, message: &mut [u32; 4]) -> Result<u32> {
@@ -136,6 +146,7 @@ fn services(code: &[u8]) -> Services {
         dispatched: 0,
         created: vec![],
         deleted: vec![],
+        commands: vec![],
     }
 }
 
@@ -204,6 +215,68 @@ fn task_host_sends_messages_and_delegates_clock_and_identity_queries() {
 
 fn args(values: [u32; 4]) -> Vec<u8> {
     values.into_iter().flat_map(u32::to_le_bytes).collect()
+}
+
+#[test]
+fn object_commands_preserve_packets_and_distinguish_missing_routes_from_outputs() {
+    let mut services = services(&[0x3b]);
+    let mut state = State::new(8);
+    let mut core = CoreHost::new(&mut state);
+    let mut vm =
+        Interpreter::new(Program::from_code(&[], vec![0; 16], 32).unwrap(), vec![]).unwrap();
+    let mut host = TaskHost::new(&mut core, &mut services);
+    host.set_task_id(7);
+    assert_eq!(
+        host.call(109, &42u32.to_le_bytes(), &mut vm).unwrap(),
+        NativeReturn::Value(0x8000_0001)
+    );
+    assert_eq!(
+        host.call(109, &999u32.to_le_bytes(), &mut vm).unwrap(),
+        NativeReturn::Value(0)
+    );
+    let update: Vec<_> = [7u32, 0xffff_ffff]
+        .into_iter()
+        .flat_map(u32::to_le_bytes)
+        .collect();
+    assert_eq!(
+        host.call(110, &update, &mut vm).unwrap(),
+        NativeReturn::Continue
+    );
+    host.services.tree.unregister(42).unwrap();
+    assert_eq!(
+        host.call(109, &42u32.to_le_bytes(), &mut vm).unwrap(),
+        NativeReturn::Value(0)
+    );
+    host.set_task_id(42);
+    assert_eq!(
+        host.call(109, &7u32.to_le_bytes(), &mut vm).unwrap(),
+        NativeReturn::Value(0x8000_0001)
+    );
+    assert_eq!(
+        host.services.commands,
+        [
+            Command {
+                target: 42,
+                sender: 7,
+                code: 96,
+                data: [0; 3]
+            },
+            Command {
+                target: 7,
+                sender: 7,
+                code: 97,
+                data: [0, u32::MAX, 0]
+            },
+            Command {
+                target: 7,
+                sender: 42,
+                code: 96,
+                data: [0; 3]
+            },
+        ]
+    );
+    assert!(host.call(109, &[], &mut vm).is_err());
+    assert!(host.call(110, &update[..4], &mut vm).is_err());
 }
 
 #[test]

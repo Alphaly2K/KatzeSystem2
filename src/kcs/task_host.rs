@@ -1,5 +1,5 @@
 use super::{Host, Interpreter, MemoryCopyMode, NativeReturn, TaskClock, memory, strings};
-use crate::task::TaskTree;
+use crate::task::{Command, TaskTree};
 use crate::{Error, Result, read};
 
 /// 普通脚本访问其他任务时所需的同步服务。
@@ -26,13 +26,18 @@ pub trait TaskServices {
         Err(Error::new(0, "任务服务未提供删除请求"))
     }
 
+    /// 从 command.sender 同步路由；返回是否可达，output 由目标处理器填写。
+    fn dispatch_command(&mut self, _command: Command, _output: &mut u32) -> Result<bool> {
+        Err(Error::new(0, "任务服务未提供命令分派"))
+    }
+
     /// 完成本次同步分派，保留消息第二项的回写；返回前应完成预算续跑。
     fn dispatch_message(&mut self, target: u32, message: &mut [u32; 4]) -> Result<u32>;
     fn enqueue_message(&mut self, target: u32, message: [u32; 4]) -> Result<u32>;
     fn interpreter(&mut self, target: u32) -> Result<&mut Interpreter>;
 }
 
-/// 为已有宿主接入普通表的任务创建、删除、消息和存储访问。
+/// 为已有宿主接入普通表的任务创建、命令、消息和存储访问。
 pub struct TaskHost<'a, H, S> {
     pub inner: &'a mut H,
     pub services: &'a mut S,
@@ -87,7 +92,8 @@ impl<H: Host, S: TaskServices> Host for TaskHost<'_, H, S> {
         }
         let count = match index {
             66 => 3,
-            67 => 1,
+            67 | 109 => 1,
+            110 => 2,
             69 | 70 | 72 | 73 => 4,
             _ => return self.inner.call(index, arguments, vm),
         };
@@ -119,6 +125,23 @@ impl<H: Host, S: TaskServices> Host for TaskHost<'_, H, S> {
             return Ok(NativeReturn::Continue);
         }
         match index {
+            109 | 110 => {
+                let mut output = 0;
+                let found = self.services.dispatch_command(
+                    Command {
+                        target: args[0],
+                        sender: self.task_id,
+                        code: if index == 109 { 96 } else { 97 },
+                        data: [0, if index == 110 { args[1] } else { 0 }, 0],
+                    },
+                    &mut output,
+                )?;
+                Ok(if index == 109 {
+                    NativeReturn::Value(if found { output } else { 0 })
+                } else {
+                    NativeReturn::Continue
+                })
+            }
             69 | 70 => {
                 let mut message = [self.task_id, args[1], args[2], args[3]];
                 let value = if index == 70 {
