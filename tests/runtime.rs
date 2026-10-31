@@ -293,13 +293,15 @@ fn queued_messages_are_consumed_by_the_next_task_update() {
 
 #[test]
 fn budget_continuation_still_completes_a_synchronous_dispatch() {
-    let mut runtime = loop_runtime(69, Some(1));
-    assert!(runtime.update(10, 0).unwrap());
-    assert!(runtime.update(20, 0).unwrap());
-    let child_vm = runtime.object(2).unwrap().interpreter().unwrap();
-    assert_eq!(words(child_vm, 56, 1), [2]);
-    let parent_vm = runtime.object(1).unwrap().interpreter().unwrap();
-    assert_eq!(words(parent_vm, 8, 1), [1]);
+    for budget in [0, 1] {
+        let mut runtime = loop_runtime(69, Some(budget));
+        assert!(runtime.update(10, 0).unwrap());
+        assert!(runtime.update(20, 0).unwrap());
+        let child_vm = runtime.object(2).unwrap().interpreter().unwrap();
+        assert_eq!(words(child_vm, 56, 1), [2]);
+        let parent_vm = runtime.object(1).unwrap().interpreter().unwrap();
+        assert_eq!(words(parent_vm, 8, 1), [1]);
+    }
 }
 
 #[test]

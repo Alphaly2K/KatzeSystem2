@@ -30,7 +30,7 @@ pub mod kind {
 
 /// 默认的单次推进预算；预算耗尽时同步入口继续推进到完成。
 pub const DEFAULT_BUDGET: usize = 4096;
-/// 单个同步入口允许执行的总指令数上限，防止不结束的脚本阻塞调度。
+/// 连续耗尽推进预算时的同步执行保护阈值。
 pub const DEFAULT_LIMIT: usize = 1 << 20;
 
 /// 按对象类型创建对象；未实现的类型返回诊断。
@@ -145,9 +145,9 @@ impl<F: ObjectFactory> Runtime<F> {
         &mut self.factory
     }
 
-    /// 设置单次推进预算和同步入口的指令上限；零预算按一处理。
+    /// 设置单次推进预算和同步续跑保护阈值；零预算按一处理。
     pub fn set_budget(&mut self, budget: usize, limit: usize) {
-        self.budget = budget;
+        self.budget = budget.max(1);
         self.limit = limit;
     }
 
