@@ -16,6 +16,11 @@ pub trait TaskObject {
     fn interpreter(&self) -> Option<&Interpreter>;
     fn interpreter_mut(&mut self) -> Option<&mut Interpreter>;
 
+    /// 支持执行中任务操作的对象提供队列视图，并在推进 VM 后消费宿主的 TaskEffects。
+    fn queued_messages(&self) -> Option<&[[u32; 4]]> {
+        None
+    }
+
     /// 接收创建命令 26 传递的原始上下文；对象类型不支持时返回诊断。
     fn set_creation_context(&mut self, context: &[u8]) -> Result<()>;
 
@@ -44,7 +49,7 @@ pub trait TaskObject {
         budget: usize,
     ) -> Result<bool>;
 
-    /// 删除命令 3 的专属通知；完成后由调用者设置删除标记。
+    /// 删除命令 3 的专属通知；完成时对象已经设置删除标记。
     fn request_delete(&mut self, host: &mut dyn Host, budget: usize) -> Result<bool>;
 
     /// 直属子任务已收到删除请求；按对象类型处理自身通知及标记。
@@ -166,6 +171,10 @@ impl OrdinaryObject {
 }
 
 impl TaskObject for OrdinaryObject {
+    fn queued_messages(&self) -> Option<&[[u32; 4]]> {
+        Some(self.task.queued_messages())
+    }
+
     fn control(&self) -> &Control {
         &self.task.control
     }

@@ -72,6 +72,18 @@ impl OrdinaryTask {
         host.set_task_context(&self.creation_context);
     }
 
+    fn apply_effects(&mut self, host: &mut impl Host) -> Result<()> {
+        let effects = host.take_task_effects(self.messages.len());
+        if effects.messages.len() > read::MAX_ITEMS.saturating_sub(self.messages.len()) {
+            return Err(Error::new(self.interpreter.pc, "普通任务消息数量超过上限"));
+        }
+        self.messages.extend(effects.messages);
+        if effects.delete {
+            self.control.deletion_requested = 1;
+        }
+        Ok(())
+    }
+
     fn active_result(&self, step: &Step<super::Event>, entry_pc: usize) -> bool {
         // 取指过程中到达代码末尾仍返回活动，下一次从末尾进入才停止。
         !matches!(step, Step::Halted)
@@ -222,7 +234,9 @@ impl OrdinaryTask {
             }
         };
         self.synchronize(host);
+        self.apply_effects(host)?;
         let step = self.interpreter.dispatch_message(message, host, budget)?;
+        self.apply_effects(host)?;
         if matches!(step, Some(Step::Yield)) {
             return Ok(false);
         }
@@ -246,10 +260,12 @@ impl OrdinaryTask {
             }
         };
         self.synchronize(host);
+        self.apply_effects(host)?;
         self.command_phase = Some(CommandPhase::Delete(message));
         let step = self
             .interpreter
             .dispatch_message(&mut message, host, budget)?;
+        self.apply_effects(host)?;
         if matches!(step, Some(Step::Yield)) {
             self.command_phase = Some(CommandPhase::Delete(message));
             return Ok(false);
@@ -294,6 +310,7 @@ impl OrdinaryTask {
             self.phase = Some(UpdatePhase::Messages(0));
         }
         self.synchronize(host);
+        self.apply_effects(host)?;
         while let Some(UpdatePhase::Messages(index)) = self.phase {
             if index == self.messages.len() {
                 self.messages.clear();
@@ -305,12 +322,15 @@ impl OrdinaryTask {
                 host,
                 budget_per_call,
             )?;
+            self.apply_effects(host)?;
             if matches!(step, Some(Step::Yield)) {
                 return Ok(false);
             }
             self.phase = Some(UpdatePhase::Messages(index + 1));
         }
+        self.apply_effects(host)?;
         let step = self.interpreter.resume(host, budget_per_call)?;
+        self.apply_effects(host)?;
         if matches!(step, Step::Yield) {
             return Ok(false);
         }

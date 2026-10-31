@@ -75,6 +75,10 @@ impl<H: Host, S: TaskServices> Host for TaskHost<'_, H, S> {
         self.inner.set_task_context(context);
     }
 
+    fn take_task_effects(&mut self, queued_messages: usize) -> super::TaskEffects {
+        self.inner.take_task_effects(queued_messages)
+    }
+
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn> {
         if matches!(index, 75 | 76) {
             if let Some(tree) = self.services.task_tree() {

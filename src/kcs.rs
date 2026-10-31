@@ -214,6 +214,13 @@ pub enum NativeReturn {
     Retry,
 }
 
+/// VM 执行期间收到的普通任务操作，由任务包装层在推进返回后应用。
+#[derive(Default)]
+pub struct TaskEffects {
+    pub delete: bool,
+    pub messages: Vec<[u32; 4]>,
+}
+
 pub trait Host {
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn>;
 
@@ -222,6 +229,11 @@ pub trait Host {
     fn set_task_id(&mut self, _id: u32) {}
 
     fn set_task_context(&mut self, _context: &[u8]) {}
+
+    /// 取走当前任务的待应用操作，并提供已保存的队列长度供宿主检查入队容量。
+    fn take_task_effects(&mut self, _queued_messages: usize) -> TaskEffects {
+        TaskEffects::default()
+    }
 }
 
 impl<T: Host + ?Sized> Host for &mut T {
@@ -239,6 +251,10 @@ impl<T: Host + ?Sized> Host for &mut T {
 
     fn set_task_context(&mut self, context: &[u8]) {
         (**self).set_task_context(context);
+    }
+
+    fn take_task_effects(&mut self, queued_messages: usize) -> TaskEffects {
+        (**self).take_task_effects(queued_messages)
     }
 }
 

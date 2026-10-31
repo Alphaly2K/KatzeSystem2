@@ -45,6 +45,10 @@ impl<H: Host, S: SystemServices> Host for SystemHost<'_, H, S> {
         self.inner.set_task_context(context);
     }
 
+    fn take_task_effects(&mut self, queued_messages: usize) -> super::TaskEffects {
+        self.inner.take_task_effects(queued_messages)
+    }
+
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn> {
         if index != 629 {
             return self.inner.call(index, arguments, vm);

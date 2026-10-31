@@ -1003,101 +1003,243 @@ fn tree_dispatch_propagates_unknown_commands_and_stops_at_consumers() {
     assert_eq!(targets(&commands), [0, branch, other]);
 }
 
-// 自引用路径的最小复现：执行中的对象在调用期间移出存储，以下目标语义尚未实现。
-// 原入口已核实的基线写在各个测试里；当前运行时在 67 和同步回信处返回
-// 「任务对象不存在或正在执行」，在 70 处返回「任务对象不存在」。去掉 ignore 即可观察。
-
 #[test]
-#[ignore = "执行中的对象暂时移出存储：native 67 无法删除自身"]
 fn delete_native_can_target_the_running_task() {
-    let mut asm = Asm::default();
-    asm.ins(0x2b, &[68, 0])
-        .ins(0x2b, &[67, 4])
-        .ins(0x25, &[7])
-        .ins(0x26, &[4])
-        .ins(0x3b, &[]);
-    let mut source = Source::new();
-    source.add(b"self", asm.build(), data());
-    let mut runtime = runtime(source);
-    let id = runtime.create(0, kind::ORDINARY, b"self", b"").unwrap();
+    for budget in [1, 4096] {
+        let mut asm = Asm::default();
+        asm.ins(0x2b, &[68, 0])
+            .ins(0x2b, &[67, 4])
+            .ins(0x25, &[7])
+            .ins(0x26, &[4])
+            .ins(0x3b, &[]);
+        let mut source = Source::new();
+        source.add(b"self", asm.build(), data());
+        let mut runtime = runtime(source);
+        runtime.set_budget(budget, 1 << 20);
+        let id = runtime.create(0, kind::ORDINARY, b"self", b"").unwrap();
 
-    // 原入口：删除标记为 1，后续指令仍执行。
-    assert!(runtime.update(10, 0).unwrap());
-    assert_eq!(runtime.object(id).unwrap().control().deletion_requested, 1);
-    let vm = runtime.object(id).unwrap().interpreter().unwrap();
-    assert_eq!(words(vm, 4, 1), [7], "删除命令之后的指令仍执行");
+        // 原入口：删除标记为 1，后续指令仍执行。
+        assert!(runtime.update(10, 0).unwrap());
+        assert_eq!(runtime.object(id).unwrap().control().deletion_requested, 1);
+        let vm = runtime.object(id).unwrap().interpreter().unwrap();
+        assert_eq!(words(vm, 4, 1), [7], "删除命令之后的指令仍执行");
+    }
 }
 
 #[test]
-#[ignore = "执行中的对象暂时移出存储：native 70 无法向自身排队"]
 fn queue_native_can_target_the_running_task() {
-    let mut asm = Asm::default();
-    asm.ins(0x2b, &[68, 0])
-        .ins(0x25, &[7])
-        .ins(0x25, &[0])
-        .ins(0x25, &[0])
-        .ins(0x2b, &[70, 16])
-        .ins(0x26, &[0])
-        .ins(0x25, &[32])
-        .ins(0x2b, &[71, 4])
-        .ins(0x26, &[4])
-        .ins(0x3b, &[]);
-    let mut source = Source::new();
-    source.add(b"self", asm.build(), data());
-    let mut runtime = runtime(source);
-    let id = runtime.create(0, kind::ORDINARY, b"self", b"").unwrap();
+    for budget in [1, 4096] {
+        let mut asm = Asm::default();
+        asm.ins(0x2b, &[68, 0])
+            .ins(0x25, &[7])
+            .ins(0x25, &[0])
+            .ins(0x25, &[0])
+            .ins(0x2b, &[70, 16])
+            .ins(0x26, &[0])
+            .ins(0x25, &[32])
+            .ins(0x2b, &[71, 4])
+            .ins(0x26, &[4])
+            .ins(0x3b, &[]);
+        let mut source = Source::new();
+        source.add(b"self", asm.build(), data());
+        let mut runtime = runtime(source);
+        runtime.set_budget(budget, 1 << 20);
+        let id = runtime.create(0, kind::ORDINARY, b"self", b"").unwrap();
 
-    // 原入口：排队入口返回一，队列新增一项并在下一轮投递给自身的等待地址。
-    assert!(runtime.update(10, 0).unwrap());
-    assert_eq!(
-        words(runtime.object(id).unwrap().interpreter().unwrap(), 0, 1),
-        [1],
-        "排队入口返回一"
-    );
-    assert!(runtime.update(20, 0).unwrap());
-    let vm = runtime.object(id).unwrap().interpreter().unwrap();
-    assert_eq!(words(vm, 32, 2), [1, 7], "下一轮收到自身排队的消息");
+        // 原入口：排队入口返回一，队列新增一项并在下一轮投递给自身的等待地址。
+        assert!(runtime.update(10, 0).unwrap());
+        assert_eq!(
+            words(runtime.object(id).unwrap().interpreter().unwrap(), 0, 1),
+            [1],
+            "排队入口返回一"
+        );
+        assert!(runtime.update(20, 0).unwrap());
+        let vm = runtime.object(id).unwrap().interpreter().unwrap();
+        assert_eq!(words(vm, 32, 2), [1, 7], "下一轮收到自身排队的消息");
+    }
 }
 
 #[test]
-#[ignore = "执行中的对象暂时移出存储：接收者无法向仍在执行的发送者回信"]
 fn message_handler_can_reply_to_the_running_sender() {
-    // 等待消息后把首项（发送者）作为目标，再同步发送一条消息。
-    let mut receiver = Asm::default();
-    receiver
-        .label("wait")
-        .ins(0x25, &[32])
-        .ins(0x2b, &[71, 4])
-        .ins(0x26, &[0])
-        .ins(0x2f, &[32])
-        .ins(0x25, &[7])
-        .ins(0x25, &[0])
-        .ins(0x25, &[0])
-        .ins(0x2b, &[69, 16])
-        .ins(0x26, &[4])
-        .jump(0x29, "wait");
-    let mut sender = Asm::default();
-    sender
-        .ins(0x25, &[1])
-        .ins(0x25, &[7])
-        .ins(0x25, &[0])
-        .ins(0x25, &[0])
-        .ins(0x2b, &[69, 16])
-        .ins(0x26, &[0])
-        .ins(0x3b, &[]);
-    let mut source = Source::new();
-    source.add(b"receiver", receiver.build(), data());
-    source.add(b"sender", sender.build(), data());
-    let mut runtime = runtime(source);
-    let receiver = runtime.create(0, kind::ORDINARY, b"receiver", b"").unwrap();
-    let sender = runtime.create(0, kind::ORDINARY, b"sender", b"").unwrap();
-    assert_eq!((receiver, sender), (1, 2));
+    for budget in [1, 4096] {
+        // 等待消息后把首项（发送者）作为目标，再同步发送一条消息。
+        let mut receiver = Asm::default();
+        receiver
+            .label("wait")
+            .ins(0x25, &[32])
+            .ins(0x2b, &[71, 4])
+            .ins(0x26, &[0])
+            .ins(0x2f, &[32])
+            .ins(0x25, &[7])
+            .ins(0x25, &[0])
+            .ins(0x25, &[0])
+            .ins(0x2b, &[69, 16])
+            .ins(0x26, &[4])
+            .jump(0x29, "wait");
+        let mut sender = Asm::default();
+        sender
+            .ins(0x25, &[1])
+            .ins(0x25, &[7])
+            .ins(0x25, &[0])
+            .ins(0x25, &[0])
+            .ins(0x2b, &[69, 16])
+            .ins(0x26, &[0])
+            .ins(0x3b, &[]);
+        let mut source = Source::new();
+        source.add(b"receiver", receiver.build(), data());
+        source.add(b"sender", sender.build(), data());
+        let mut runtime = runtime(source);
+        runtime.set_budget(budget, 1 << 20);
+        let receiver = runtime.create(0, kind::ORDINARY, b"receiver", b"").unwrap();
+        let sender = runtime.create(0, kind::ORDINARY, b"sender", b"").unwrap();
+        assert_eq!((receiver, sender), (1, 2));
 
-    // 原入口：回信返回零，接收者回到等待，外层 native 69 返回一。
-    assert!(runtime.update(10, 0).unwrap());
-    let receiver_vm = runtime.object(receiver).unwrap().interpreter().unwrap();
-    assert_eq!(words(receiver_vm, 4, 1), [0], "回信返回零");
-    assert!(receiver_vm.is_waiting_for_message(), "接收者回到消息等待");
-    let sender_vm = runtime.object(sender).unwrap().interpreter().unwrap();
-    assert_eq!(words(sender_vm, 0, 1), [1], "外层 native 69 返回一");
+        // 原入口：回信返回零，接收者回到等待，外层 native 69 返回一。
+        assert!(runtime.update(10, 0).unwrap());
+        let receiver_vm = runtime.object(receiver).unwrap().interpreter().unwrap();
+        assert_eq!(words(receiver_vm, 4, 1), [0], "回信返回零");
+        assert!(receiver_vm.is_waiting_for_message(), "接收者回到消息等待");
+        let sender_vm = runtime.object(sender).unwrap().interpreter().unwrap();
+        assert_eq!(words(sender_vm, 0, 1), [1], "外层 native 69 返回一");
+    }
+}
+
+#[test]
+fn messages_appended_by_a_queued_handler_are_consumed_in_the_same_update() {
+    for budget in [1, 4096] {
+        let mut asm = Asm::default();
+        asm.label("wait")
+            .ins(0x25, &[32])
+            .ins(0x2b, &[71, 4])
+            .ins(0x26, &[0])
+            .ins(0x1e, &[16, 1])
+            .ins(0x2d, &[])
+            .ins(0x2f, &[12])
+            .jump(0x28, "wait")
+            .ins(0x25, &[1])
+            .ins(0x26, &[12])
+            .ins(0x2b, &[68, 0])
+            .ins(0x25, &[8])
+            .ins(0x25, &[0])
+            .ins(0x25, &[0])
+            .ins(0x2b, &[70, 16])
+            .ins(0x26, &[0])
+            .jump(0x29, "wait");
+        let mut source = Source::new();
+        source.add(b"self", asm.build(), data());
+        let mut runtime = runtime(source);
+        runtime.set_budget(budget, 1 << 20);
+        let id = runtime.create(0, kind::ORDINARY, b"self", b"").unwrap();
+        runtime.update(10, 0).unwrap();
+        runtime
+            .object_mut(id)
+            .unwrap()
+            .enqueue_message([99, 7, 0, 0])
+            .unwrap();
+        runtime.update(20, 0).unwrap();
+        let object = runtime.object(id).unwrap();
+        assert!(object.queued_messages().unwrap().is_empty());
+        let vm = object.interpreter().unwrap();
+        // 两条排队消息之后还进行一次无消息恢复。
+        assert_eq!(words(vm, 16, 1), [3]);
+        assert_eq!(words(vm, 32, 2), [id, 8]);
+        assert!(vm.is_waiting_for_message());
+    }
+}
+
+#[test]
+fn a_nested_receiver_can_queue_for_or_delete_its_running_sender() {
+    for budget in [1, 4096] {
+        for delete in [false, true] {
+            let mut receiver = Asm::default();
+            receiver
+                .label("wait")
+                .ins(0x25, &[32])
+                .ins(0x2b, &[71, 4])
+                .ins(0x26, &[0])
+                .ins(0x2f, &[0])
+                .jump(0x27, "wait")
+                .ins(0x25, &[2]);
+            if delete {
+                receiver.ins(0x2b, &[67, 4]);
+            } else {
+                receiver
+                    .ins(0x25, &[9])
+                    .ins(0x25, &[0])
+                    .ins(0x25, &[0])
+                    .ins(0x2b, &[70, 16])
+                    .ins(0x26, &[12]);
+            }
+            receiver.jump(0x29, "wait");
+            let mut sender = Asm::default();
+            sender
+                .ins(0x25, &[1])
+                .ins(0x25, &[7])
+                .ins(0x25, &[0])
+                .ins(0x25, &[0])
+                .ins(0x2b, &[69, 16])
+                .ins(0x26, &[0])
+                .ins(0x25, &[32])
+                .ins(0x2b, &[71, 4])
+                .ins(0x26, &[4])
+                .ins(0x3b, &[]);
+            let mut source = Source::new();
+            source.add(b"receiver", receiver.build(), data());
+            source.add(b"sender", sender.build(), data());
+            let mut runtime = runtime(source);
+            runtime.set_budget(budget, 1 << 20);
+            runtime.create(0, kind::ORDINARY, b"receiver", b"").unwrap();
+            let id = runtime.create(0, kind::ORDINARY, b"sender", b"").unwrap();
+            runtime.update(10, 0).unwrap();
+            let object = runtime.object(id).unwrap();
+            assert_eq!(object.control().deletion_requested, i32::from(delete));
+            assert_eq!(words(object.interpreter().unwrap(), 0, 1), [1]);
+            assert_eq!(
+                object.queued_messages().unwrap().len(),
+                usize::from(!delete)
+            );
+            runtime.update(20, 0).unwrap();
+            if delete {
+                assert!(runtime.object(id).is_none());
+            } else {
+                let vm = runtime.object(id).unwrap().interpreter().unwrap();
+                assert_eq!(words(vm, 32, 2), [1, 9]);
+            }
+        }
+    }
+}
+
+#[test]
+fn queueing_for_deleted_tasks_reports_the_uninitialized_native_result() {
+    for target in [1, 2] {
+        let mut asm = Asm::default();
+        if target == 1 {
+            asm.ins(0x25, &[1]).ins(0x2b, &[67, 4]);
+        }
+        asm.ins(0x25, &[target])
+            .ins(0x25, &[7])
+            .ins(0x25, &[0])
+            .ins(0x25, &[0])
+            .ins(0x2b, &[70, 16])
+            .ins(0x3b, &[]);
+        let mut source = Source::new();
+        source.add(b"sender", asm.build(), data());
+        source.add(b"target", vec![0x3b], data());
+        let mut runtime = runtime(source);
+        runtime.create(0, kind::ORDINARY, b"sender", b"").unwrap();
+        if target == 2 {
+            runtime.create(0, kind::ORDINARY, b"target", b"").unwrap();
+            runtime.object_mut(2).unwrap().state().0.deletion_requested = 1;
+        }
+        let error = runtime.update(10, 0).unwrap_err();
+        assert!(error.message.contains("排队返回值未初始化"));
+        assert!(
+            runtime
+                .object(target)
+                .unwrap()
+                .queued_messages()
+                .unwrap()
+                .is_empty()
+        );
+    }
 }

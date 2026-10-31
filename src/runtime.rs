@@ -4,10 +4,12 @@
 //! 对象类型由 [`ObjectFactory`] 创建；当前提供普通 KCS 对象与基类对象，图形、音频、输入和文字等类型需要
 //! 对应子系统按 [`TaskObject`] 协议实现，缺失时创建请求返回诊断。
 //!
-//! 同步消息、删除通知和对象命令在返回前完成预算续跑。正在执行的对象在调用期间不参与查找，
-//! 因此同步分派给自身或正在执行的祖先返回诊断，而不是重入同一 VM。
+//! 同步消息、删除通知和对象命令在返回前完成预算续跑。普通对象执行期间仍接收删除标记与排队消息，
+//! 向执行中普通 VM 同步发送消息返回零；其余需要直接借用该对象的操作返回诊断。
 
-use crate::kcs::{Host, HostState, Interpreter, NativeReturn, OrdinaryTask, Program, call_native};
+use crate::kcs::{
+    Host, HostState, Interpreter, NativeReturn, OrdinaryTask, Program, TaskEffects, call_native,
+};
 use crate::task::{Command, Control, Lifecycle, TaskClock, TaskTree};
 use crate::{Error, Result, expression, read};
 use std::collections::BTreeMap;
@@ -82,6 +84,7 @@ impl<L: ProgramLoader> ObjectFactory for KcsFactory<L> {
 pub struct Runtime<F: ObjectFactory> {
     tree: TaskTree,
     objects: BTreeMap<u32, Box<dyn TaskObject>>,
+    running: BTreeMap<u32, RunningTask>,
     numbers: expression::State,
     host: HostState,
     factory: F,
@@ -103,6 +106,7 @@ impl<F: ObjectFactory> Runtime<F> {
         Self {
             tree: TaskTree::new(root_id, root_kind),
             objects: BTreeMap::from([(root_id, root)]),
+            running: BTreeMap::new(),
             numbers,
             host,
             factory,
@@ -157,6 +161,7 @@ impl<F: ObjectFactory> Runtime<F> {
             numbers: &mut self.numbers,
             host: &mut self.host,
             objects: &mut self.objects,
+            running: &mut self.running,
             factory: &mut self.factory,
             budget: self.budget,
             limit: self.limit,
@@ -170,6 +175,7 @@ impl<F: ObjectFactory> Runtime<F> {
             numbers: &mut self.numbers,
             host: &mut self.host,
             objects: &mut self.objects,
+            running: &mut self.running,
             factory: &mut self.factory,
             budget: self.budget,
             limit: self.limit,
@@ -206,6 +212,7 @@ impl<F: ObjectFactory> Runtime<F> {
             host: &mut self.host,
             tree: &mut self.tree,
             objects: &mut self.objects,
+            running: &mut self.running,
             factory: &mut self.factory,
             budget: self.budget,
             limit: self.limit,
@@ -226,6 +233,7 @@ impl<F: ObjectFactory> Runtime<F> {
             host: &mut self.host,
             tree: &mut self.tree,
             objects: &mut self.objects,
+            running: &mut self.running,
             factory: &mut self.factory,
             context: Vec::new(),
             budget: self.budget,
@@ -280,12 +288,19 @@ enum Execution<'a> {
     MarkDestroying,
 }
 
+struct RunningTask {
+    deleted: bool,
+    remaining_messages: Option<usize>,
+    effects: TaskEffects,
+}
+
 /// 一次嵌套执行需要的可变部分。
 struct Store<'a, F: ObjectFactory> {
     numbers: &'a mut expression::State,
     host: &'a mut HostState,
     tree: &'a mut TaskTree,
     objects: &'a mut BTreeMap<u32, Box<dyn TaskObject>>,
+    running: &'a mut BTreeMap<u32, RunningTask>,
     factory: &'a mut F,
     budget: usize,
     limit: usize,
@@ -302,6 +317,7 @@ fn run_nested<F: ObjectFactory>(
         host,
         tree,
         objects,
+        running,
         factory,
         budget,
         limit,
@@ -309,6 +325,16 @@ fn run_nested<F: ObjectFactory>(
     let mut object = objects
         .remove(&target)
         .ok_or_else(|| Error::new(0, "任务对象不存在或正在执行"))?;
+    running.insert(
+        target,
+        RunningTask {
+            deleted: object.control().deletion_requested != 0,
+            remaining_messages: object
+                .queued_messages()
+                .map(|messages| read::MAX_ITEMS.saturating_sub(messages.len())),
+            effects: TaskEffects::default(),
+        },
+    );
     let saved = (host.task_id, host.task_time, host.task_origin);
     let result = {
         let mut nested = ObjectHost {
@@ -316,6 +342,7 @@ fn run_nested<F: ObjectFactory>(
             host: &mut *host,
             tree: &mut *tree,
             objects: &mut *objects,
+            running: &mut *running,
             factory: &mut *factory,
             context: Vec::new(),
             budget,
@@ -348,6 +375,7 @@ fn run_nested<F: ObjectFactory>(
             }),
         }
     };
+    running.remove(&target);
     objects.insert(target, object);
     host.task_id = saved.0;
     host.task_time = saved.1;
@@ -376,6 +404,7 @@ fn route<F: ObjectFactory>(store: Store<'_, F>, origin: u32, command: Command) -
         host,
         tree,
         objects,
+        running,
         factory,
         budget,
         limit,
@@ -390,6 +419,7 @@ fn route<F: ObjectFactory>(store: Store<'_, F>, origin: u32, command: Command) -
                 host: &mut *host,
                 tree,
                 objects: &mut *objects,
+                running: &mut *running,
                 factory: &mut *factory,
                 budget,
                 limit,
@@ -413,6 +443,7 @@ struct ObjectHost<'a, F: ObjectFactory> {
     host: &'a mut HostState,
     tree: &'a mut TaskTree,
     objects: &'a mut BTreeMap<u32, Box<dyn TaskObject>>,
+    running: &'a mut BTreeMap<u32, RunningTask>,
     factory: &'a mut F,
     context: Vec<u8>,
     budget: usize,
@@ -426,6 +457,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             host: &mut *self.host,
             tree: &mut *self.tree,
             objects: &mut *self.objects,
+            running: &mut *self.running,
             factory: &mut *self.factory,
             budget: self.budget,
             limit: self.limit,
@@ -441,6 +473,13 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
     fn message_target(&mut self, target: u32, message: &mut [u32; 4]) -> Result<u32> {
         if !self.require_reachable(target) {
             return Err(Error::new(0, "任务消息目标不存在"));
+        }
+        if self
+            .running
+            .get(&target)
+            .is_some_and(|task| task.remaining_messages.is_some())
+        {
+            return Ok(0);
         }
         let mut output = 0;
         run_nested(
@@ -523,7 +562,17 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                 if !self.require_reachable(args[0]) {
                     return Err(Error::new(vm.pc, "任务删除目标不存在"));
                 }
-                run_nested(self.store(), args[0], Execution::Delete)?;
+                if let Some(task) = self.running.get_mut(&args[0]) {
+                    if task.remaining_messages.is_none() {
+                        return Err(Error::new(vm.pc, "执行中对象不支持删除请求"));
+                    }
+                    if !task.deleted {
+                        task.deleted = true;
+                        task.effects.delete = true;
+                    }
+                } else {
+                    run_nested(self.store(), args[0], Execution::Delete)?;
+                }
                 Ok(NativeReturn::Continue)
             }
             69 | 70 => {
@@ -532,11 +581,29 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     if !self.require_reachable(args[0]) {
                         return Err(Error::new(vm.pc, "任务消息目标不存在"));
                     }
-                    let object = self
-                        .objects
-                        .get_mut(&args[0])
-                        .ok_or_else(|| Error::new(vm.pc, "任务对象不存在"))?;
-                    object.enqueue_message(message)?;
+                    if let Some(task) = self.running.get_mut(&args[0]) {
+                        let remaining = task
+                            .remaining_messages
+                            .as_mut()
+                            .ok_or_else(|| Error::new(vm.pc, "执行中对象不支持排队消息"))?;
+                        if task.deleted {
+                            return Err(Error::new(vm.pc, "已删除任务的排队返回值未初始化"));
+                        }
+                        if *remaining == 0 {
+                            return Err(Error::new(vm.pc, "普通任务消息数量超过上限"));
+                        }
+                        *remaining -= 1;
+                        task.effects.messages.push(message);
+                    } else {
+                        let object = self
+                            .objects
+                            .get_mut(&args[0])
+                            .ok_or_else(|| Error::new(vm.pc, "任务对象不存在"))?;
+                        if object.control().deletion_requested != 0 {
+                            return Err(Error::new(vm.pc, "已删除任务的排队返回值未初始化"));
+                        }
+                        object.enqueue_message(message)?;
+                    }
                     return Ok(NativeReturn::Value(1));
                 }
                 // 正在执行 native 的自身 VM 不处于消息等待状态。
@@ -594,6 +661,17 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
 }
 
 impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
+    fn take_task_effects(&mut self, queued_messages: usize) -> TaskEffects {
+        let Some(task) = self.running.get_mut(&self.host.task_id) else {
+            return TaskEffects::default();
+        };
+        let effects = std::mem::take(&mut task.effects);
+        task.remaining_messages = Some(
+            read::MAX_ITEMS.saturating_sub(queued_messages.saturating_add(effects.messages.len())),
+        );
+        effects
+    }
+
     fn set_task_clock(&mut self, clock: &TaskClock) {
         self.host.set_task_clock(clock);
     }
@@ -627,6 +705,7 @@ struct TaskLifecycle<'a, F: ObjectFactory> {
     numbers: &'a mut expression::State,
     host: &'a mut HostState,
     objects: &'a mut BTreeMap<u32, Box<dyn TaskObject>>,
+    running: &'a mut BTreeMap<u32, RunningTask>,
     factory: &'a mut F,
     budget: usize,
     limit: usize,
@@ -639,6 +718,7 @@ impl<F: ObjectFactory> TaskLifecycle<'_, F> {
             host: &mut *self.host,
             tree,
             objects: &mut *self.objects,
+            running: &mut *self.running,
             factory: &mut *self.factory,
             budget: self.budget,
             limit: self.limit,

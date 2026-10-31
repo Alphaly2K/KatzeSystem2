@@ -66,6 +66,10 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
         self.inner.set_task_context(context);
     }
 
+    fn take_task_effects(&mut self, queued_messages: usize) -> super::TaskEffects {
+        self.inner.take_task_effects(queued_messages)
+    }
+
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn> {
         let count = match index {
             365 | 366 | 590 | 591 => 1,
