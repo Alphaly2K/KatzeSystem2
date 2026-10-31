@@ -7,6 +7,8 @@ pub struct CoreHost<'a> {
     pub state: &'a mut expression::State,
     pub configured_shared_slots: u32,
     pub debug_messages: Vec<Vec<u8>>,
+    pub task_time: u32,
+    pub task_origin: u32,
 }
 
 impl<'a> CoreHost<'a> {
@@ -14,6 +16,8 @@ impl<'a> CoreHost<'a> {
         Self {
             configured_shared_slots: state.shared.len() as u32,
             debug_messages: Vec::new(),
+            task_time: 0,
+            task_origin: 0,
             state,
         }
     }
@@ -28,13 +32,13 @@ impl Host for CoreHost<'_> {
             return Ok(NativeReturn::YieldVoid);
         }
         let count = match index {
-            1 | 6 | 17 | 18 | 25 | 26 | 40 | 47 | 48 | 209 | 210 | 212 | 213 | 278 => 1,
+            1 | 6 | 17 | 18 | 25 | 26 | 40 | 47 | 48 | 209 | 210 | 212 | 213 | 278 | 319 => 1,
             13..=16 | 19..=24 | 211 | 276 | 277 => 2,
             50..=58 | 60 | 62..=64 => 1,
             59 | 61 => 2,
             38 | 44 | 45 => 4,
             41 | 42 | 519 => 3,
-            789 => 0,
+            5 | 789 => 0,
             _ => return Err(Error::new(vm.pc, format!("未支持的 KCS native {index}"))),
         };
         if arguments.len() != count * 4 {
@@ -50,6 +54,12 @@ impl Host for CoreHost<'_> {
                 NativeReturn::Continue
             }
             6 => NativeReturn::Value(args[0]),
+            5 => NativeReturn::Value(self.task_time.wrapping_sub(self.task_origin)),
+            319 => {
+                let shifted = numeric::float_ieee(1, args[0], 0.5f32.to_bits());
+                let rounded = numeric::native_math(15, &[shifted]);
+                NativeReturn::Value(numeric::convert(0x39, rounded))
+            }
             50..=61 => {
                 let function = match index {
                     50..=55 => index - 44,

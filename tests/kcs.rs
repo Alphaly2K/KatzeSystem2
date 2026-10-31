@@ -578,6 +578,9 @@ fn core_scalar_math_keeps_table_mapping_sse_angle_order_and_pow_nan_signs() {
         (62, vec![f32::MAX.to_bits()], f32::INFINITY.to_bits()),
         (63, vec![f32::MAX.to_bits()], f32::INFINITY.to_bits()),
         (64, vec![i32::MIN as u32], i32::MIN as u32),
+        (319, vec![(-1.5f32).to_bits()], u32::MAX),
+        (319, vec![0.5f32.to_bits()], 1),
+        (319, vec![f32::INFINITY.to_bits()], i32::MIN as u32),
     ] {
         let arguments = arguments
             .into_iter()
@@ -592,6 +595,13 @@ fn core_scalar_math_keeps_table_mapping_sse_angle_order_and_pow_nan_signs() {
         host.call(65, &[], &mut vm).unwrap(),
         kcs::NativeReturn::YieldVoid
     );
+    host.task_origin = u32::MAX;
+    host.task_time = 2;
+    assert_eq!(
+        host.call(5, &[], &mut vm).unwrap(),
+        kcs::NativeReturn::Value(3)
+    );
+    assert_eq!((host.task_origin, host.task_time), (u32::MAX, 2));
 }
 
 #[test]
