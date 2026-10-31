@@ -26,15 +26,8 @@ impl TaskTree {
         mut handler: impl FnMut(&mut Self, &Command, &mut u32) -> Result<bool>,
     ) -> Result<bool> {
         self.check_command(origin, command.code)?;
-        let mut scope = origin;
-        loop {
-            if self.find_in_subtree(scope, command.target).is_some() {
-                break;
-            }
-            match self.node(scope).unwrap().parent {
-                Some(parent) => scope = parent,
-                None => return Ok(false),
-            }
+        if self.find_reachable(origin, command.target).is_none() {
+            return Ok(false);
         }
         self.traverse(command.target, command, output, Mode::Direct, &mut handler)?;
         Ok(true)

@@ -9,6 +9,7 @@ pub mod hg3;
 pub mod kcs;
 mod read;
 pub mod resource;
+pub mod runtime;
 pub mod task;
 mod text;
 

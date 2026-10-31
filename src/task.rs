@@ -85,6 +85,17 @@ impl TaskTree {
         }
     }
 
+    /// 从 origin 自身的子树索引开始沿父指针查找，用于命令和 VM 访问的可达性判断。
+    pub fn find_reachable(&self, origin: u32, id: u32) -> Option<&TaskNode> {
+        let mut scope = origin;
+        loop {
+            if let Some(node) = self.find_in_subtree(scope, id) {
+                return Some(node);
+            }
+            scope = self.node(scope).and_then(|node| node.parent)?;
+        }
+    }
+
     pub fn next_id(&self) -> u32 {
         let mut next = 0;
         for &id in self.reserved.range(0..) {

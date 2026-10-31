@@ -115,7 +115,7 @@ pub(super) fn float32(source: &[u8]) -> u32 {
     (value as f32).to_bits() | sign
 }
 
-pub(super) fn format(vm: &Interpreter, address: u32, depth: usize) -> Result<Vec<u8>> {
+pub(crate) fn format(vm: &Interpreter, address: u32, depth: usize) -> Result<Vec<u8>> {
     if depth >= 32 {
         return Err(Error::new(vm.pc, "KCS 格式字符串引用过深"));
     }

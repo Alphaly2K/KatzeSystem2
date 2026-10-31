@@ -166,6 +166,22 @@ impl OrdinaryTask {
         match command.code {
             162 => self.start_execution(command.data[0], command.data[1])?,
             163 => self.stop_execution()?,
+            // 25／26 在目标 VM 中读写原始创建上下文，正文最多 31 字节；零指针跳过。
+            25 => {
+                let address = command.data[1];
+                if address != 0 {
+                    let mut buffer = vec![0; self.creation_context.len() + 1];
+                    self.copy_creation_context(Some(&mut buffer))?;
+                    self.interpreter.write(address, &buffer)?;
+                }
+            }
+            26 => {
+                let address = command.data[1];
+                if address != 0 {
+                    let context = self.interpreter.read_string(address)?.to_vec();
+                    self.set_creation_context(Some(&context))?;
+                }
+            }
             13 | 17 | 23 | 24 | 29 => {
                 self.control
                     .dispatch(kind, &mut self.clock, command, output, |_, _, _, _| {
