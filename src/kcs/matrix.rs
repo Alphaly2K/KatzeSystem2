@@ -1,14 +1,17 @@
 use super::{numeric, sse};
 
 type V = [f32; 4];
+fn scalar(op: u8, a: f32, b: f32) -> f32 {
+    f32::from_bits(numeric::float(op, a.to_bits(), b.to_bits()))
+}
 fn mul(a: V, b: V) -> V {
-    std::array::from_fn(|i| f32::from_bits(numeric::float(3, a[i].to_bits(), b[i].to_bits())))
+    std::array::from_fn(|i| scalar(3, a[i], b[i]))
 }
 fn add(a: V, b: V) -> V {
-    std::array::from_fn(|i| f32::from_bits(numeric::float(1, a[i].to_bits(), b[i].to_bits())))
+    std::array::from_fn(|i| scalar(1, a[i], b[i]))
 }
 fn sub(a: V, b: V) -> V {
-    std::array::from_fn(|i| f32::from_bits(numeric::float(2, a[i].to_bits(), b[i].to_bits())))
+    std::array::from_fn(|i| scalar(2, a[i], b[i]))
 }
 fn shuffle(a: V, b: V, order: u8) -> V {
     [
@@ -17,6 +20,29 @@ fn shuffle(a: V, b: V, order: u8) -> V {
         b[((order >> 4) & 3) as usize],
         b[(order >> 6) as usize],
     ]
+}
+
+pub(super) fn multiply(left: [f32; 16], right: [f32; 16]) -> [f32; 16] {
+    std::array::from_fn(|i| {
+        let row = i / 4;
+        let col = i % 4;
+        let p = mul(
+            std::array::from_fn(|j| left[row * 4 + j]),
+            std::array::from_fn(|j| right[j * 4 + col]),
+        );
+        if row == 0 || row == 3 {
+            scalar(1, scalar(1, p[0], p[1]), scalar(1, p[2], p[3]))
+        } else {
+            scalar(1, scalar(1, scalar(1, p[0], p[1]), p[2]), p[3])
+        }
+    })
+}
+
+pub(super) fn transform(v: V, matrix: [f32; 16]) -> V {
+    std::array::from_fn(|i| {
+        let p = mul(v, std::array::from_fn(|j| matrix[j * 4 + i]));
+        scalar(1, scalar(1, p[0], p[1]), scalar(1, p[2], p[3]))
+    })
 }
 
 pub(super) fn normalize4(v: V) -> V {
@@ -181,7 +207,11 @@ pub(super) fn inverse(m: [f32; 16]) -> Option<[f32; 16]> {
         return None;
     }
     let seed = sse::reciprocal(determinant);
-    let factor = (seed + seed) - determinant * (seed * seed);
+    let factor = scalar(
+        2,
+        scalar(1, seed, seed),
+        scalar(3, determinant, scalar(3, seed, seed)),
+    );
     let rows = [
         mul(e0, [factor; 4]),
         mul(v4, [factor; 4]),

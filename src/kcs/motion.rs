@@ -294,18 +294,6 @@ fn write_vector<const N: usize>(vm: &mut Interpreter, address: u32, v: [f32; N])
 fn identity() -> [f32; 16] {
     std::array::from_fn(|i| if i % 5 == 0 { 1.0 } else { 0.0 })
 }
-fn multiply(left: [f32; 16], right: [f32; 16]) -> [f32; 16] {
-    std::array::from_fn(|i| {
-        let row = i / 4;
-        let col = i % 4;
-        let p: [f32; 4] = std::array::from_fn(|j| left[row * 4 + j] * right[j * 4 + col]);
-        if row == 0 || row == 3 {
-            (p[0] + p[1]) + (p[2] + p[3])
-        } else {
-            ((p[0] + p[1]) + p[2]) + p[3]
-        }
-    })
-}
 fn matrix_operation(index: u32, a: &[u32], vm: &mut Interpreter) -> Result<()> {
     if index == 26 {
         return write_vector(vm, a[0], identity());
@@ -337,22 +325,14 @@ fn matrix_operation(index: u32, a: &[u32], vm: &mut Interpreter) -> Result<()> {
     if index == 37 {
         let v = vector::<4>(vm, a[0])?;
         let matrix = vector::<16>(vm, a[1])?;
-        let out: [f32; 4] = std::array::from_fn(|i| {
-            let p: [f32; 4] = std::array::from_fn(|j| v[j] * matrix[j * 4 + i]);
-            (p[0] + p[1]) + (p[2] + p[3])
-        });
+        let out = matrix::transform(v, matrix);
         return write_vector(vm, a[0], out);
     }
     let mut left = vector::<16>(vm, a[0])?;
     if index == 44 {
         let reference = vector::<16>(vm, a[1])?;
         let angles = vector::<3>(vm, a[2])?;
-        let transform = |v: [f32; 4]| {
-            std::array::from_fn(|i| {
-                let p: [f32; 4] = std::array::from_fn(|j| v[j] * reference[j * 4 + i]);
-                (p[0] + p[1]) + (p[2] + p[3])
-            })
-        };
+        let transform = |v| matrix::transform(v, reference);
         let mut x = transform([-1.0, 0.0, 0.0, 0.0]);
         x[1] = 0.0;
         let x = matrix::normalize4(x);
@@ -361,21 +341,21 @@ fn matrix_operation(index: u32, a: &[u32], vm: &mut Interpreter) -> Result<()> {
             .into_iter()
             .zip(angles)
         {
-            left = multiply(left, matrix::rotation_axis(axis, angle));
+            left = matrix::multiply(left, matrix::rotation_axis(axis, angle));
         }
     } else if index == 43 {
-        left = multiply(
+        left = matrix::multiply(
             left,
             matrix::yaw_pitch_roll([a[1], a[2], a[3]].map(f32::from_bits)),
         );
     } else if index == 29 {
-        left = multiply(left, vector::<16>(vm, a[1])?);
+        left = matrix::multiply(left, vector::<16>(vm, a[1])?);
     } else if index == 24 || index == 25 {
         let mut right = identity();
         for i in 0..3 {
             right[if index == 24 { 12 + i } else { i * 5 }] = f32::from_bits(a[i + 1]);
         }
-        left = multiply(left, right);
+        left = matrix::multiply(left, right);
     } else {
         for axis in 0..3 {
             let s = f32::from_bits(numeric::native_math(6, &a[axis + 1..axis + 2]));
@@ -402,7 +382,7 @@ fn matrix_operation(index: u32, a: &[u32], vm: &mut Interpreter) -> Result<()> {
                 }
                 _ => unreachable!(),
             };
-            left = multiply(left, right);
+            left = matrix::multiply(left, right);
         }
     }
     write_vector(vm, a[0], left)

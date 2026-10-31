@@ -1,4 +1,4 @@
-use super::{Host, Interpreter, NativeReturn, ScriptRandom, numeric, strings};
+use super::{Host, Interpreter, NativeReturn, ScriptRandom, matrix, numeric, strings};
 use crate::{Error, Result};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -40,6 +40,8 @@ pub struct ParticleHost {
     pub quad_flags: Vec<u32>,
     pub parameters: [u32; 32],
     pub surface_size: [u32; 2],
+    pub depth_offset: f32,
+    pub camera_depth: f32,
     pub object_id: i32,
     pub source: Option<ParticleSource>,
     pub render_mode: u32,
@@ -61,6 +63,8 @@ impl Default for ParticleHost {
             quad_flags: vec![1],
             parameters: [0; 32],
             surface_size: [0; 2],
+            depth_offset: 0.0,
+            camera_depth: 0.0,
             object_id: -1,
             source: None,
             render_mode: 0,
@@ -79,7 +83,7 @@ impl Host for ParticleHost {
             27..=29 | 49 => 3,
             25 | 26 => 4,
             37 => 6,
-            41 => 5,
+            38 | 41 => 5,
             _ => {
                 return Err(Error::new(
                     vm.pc,
@@ -234,6 +238,13 @@ impl Host for ParticleHost {
                 }
                 numeric::native_math(17, &[(total[1] + total[0] + total[2]).to_bits()])
             }
+            38 => {
+                let values = self.projection_bounds(f32::from_bits(args[0]));
+                for (address, value) in args[1..].iter().zip(values) {
+                    vm.write(*address, &value.to_le_bytes())?;
+                }
+                return Ok(NativeReturn::Continue);
+            }
             39 => {
                 if let Some(flag) = self.quad_flags.get_mut(args[0] as usize) {
                     *flag = args[1];
@@ -298,6 +309,37 @@ impl Host for ParticleHost {
             _ => unreachable!(),
         };
         Ok(NativeReturn::Value(bits))
+    }
+}
+
+impl ParticleHost {
+    fn projection_bounds(&self, depth: f32) -> [f32; 4] {
+        let f =
+            |op, a: f32, b: f32| f32::from_bits(numeric::float_ieee(op, a.to_bits(), b.to_bits()));
+        let depth = f(2, 65000.0, f(1, self.depth_offset, depth));
+        let distance = if depth == self.camera_depth {
+            1.0
+        } else {
+            f(2, depth, self.camera_depth)
+        };
+        let scale = f(4, 1000.0, distance);
+        let scale = if scale < 0.0 { 0.0 } else { scale };
+        let mut projection = [0.0; 16];
+        projection[0] = scale;
+        projection[5] = scale;
+        projection[10] = f32::from_bits(0x3781_0e36);
+        projection[15] = f(4, 1.0, distance);
+        let identity = std::array::from_fn(|i| if i % 5 == 0 { 1.0 } else { 0.0 });
+        let projection = matrix::multiply(identity, projection);
+        let projection = matrix::inverse(projection).unwrap_or(projection);
+        let [x, y] = self.surface_size.map(|n| (n >> 1) as f32);
+        let point = matrix::transform([x, y, depth, 1.0], projection);
+        [
+            f(2, x, point[0]),
+            f(2, y, point[1]),
+            f(1, point[0], x),
+            f(1, point[1], y),
+        ]
     }
 }
 

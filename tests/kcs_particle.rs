@@ -105,6 +105,63 @@ fn source_queries_keep_float_bits_write_order_and_absent_object_defaults() {
 }
 
 #[test]
+fn projection_keeps_integer_half_sizes_singular_matrices_and_sse_nan_results() {
+    let mut host = ParticleHost {
+        surface_size: [1279, 719],
+        ..Default::default()
+    };
+    let mut vm = vm(32);
+    for (offset, camera, depth, expected) in [
+        (
+            0,
+            0,
+            0,
+            [0xc71f_c000, 0xc6b3_8000, 0x4724_be00, 0x46b9_1c00],
+        ),
+        (0xff80_5678, 0, 0, [0xffc0_5678; 4]),
+        (0, 0, 0xff80_1234, [0xffc0_1234; 4]),
+    ] {
+        host.depth_offset = f32::from_bits(offset);
+        host.camera_depth = f32::from_bits(camera);
+        assert_eq!(
+            call(&mut host, &mut vm, 38, &[depth, 0, 4, 8, 12]),
+            NativeReturn::Continue
+        );
+        assert_eq!(
+            vm.read(0, 16).unwrap(),
+            expected
+                .into_iter()
+                .flat_map(u32::to_le_bytes)
+                .collect::<Vec<_>>()
+        );
+    }
+    host.surface_size = [1280, 720];
+    host.depth_offset = 65000.0;
+    host.camera_depth = 1.0;
+    call(&mut host, &mut vm, 38, &[0, 0, 4, 8, 12]);
+    assert_eq!(
+        vm.read(0, 16).unwrap(),
+        [640.0f32, 360.0, 640.0, 360.0]
+            .into_iter()
+            .flat_map(f32::to_le_bytes)
+            .collect::<Vec<_>>()
+    );
+    host.camera_depth = 0.0;
+    call(&mut host, &mut vm, 38, &[0, 16, 16, 16, 16]);
+    assert_eq!(vm.read(16, 4).unwrap(), 0x43b4_2e14u32.to_le_bytes());
+    host.depth_offset = f32::from_bits(0xd5d7_4829);
+    host.camera_depth = f32::from_bits(0xa69c_be40);
+    call(&mut host, &mut vm, 38, &[0x1bc0_7baa, 0, 4, 8, 12]);
+    assert_eq!(
+        vm.read(0, 16).unwrap(),
+        [0xffc0_0000u32; 4]
+            .into_iter()
+            .flat_map(u32::to_le_bytes)
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn particle_quad_storage_and_snapshots_preserve_vertex_fields_and_rotation_direction() {
     let vertex = ParticleVertex {
         position: [1.0, 0.0, 0.0],
