@@ -121,3 +121,102 @@ fn maximum_frame_and_display_properties_preserve_raw_values() {
     );
     assert_eq!(vm.run(20).unwrap(), Step::Halted);
 }
+
+#[test]
+fn timeline_catches_up_with_unscaled_origins_and_retains_signed_durations() {
+    let mut timeline = anm::Timeline::new(anm::Program {
+        instructions: (10..14)
+            .map(|id| ins(0, &[(0, id), (0, 4), (0, 4)]))
+            .collect(),
+    });
+    timeline.speed = 0.5;
+    for (now, id, origin, changed, finished) in [
+        (0, 10, 0, true, false),
+        (20, 12, 8, true, false),
+        (20, 13, 12, true, false),
+        (20, 13, 12, false, true),
+    ] {
+        assert!(timeline.update(now, 100).unwrap());
+        assert_eq!(timeline.interpreter.display.image, id);
+        assert_eq!(timeline.origin, origin);
+        assert_eq!(timeline.display_changed(), changed);
+        assert_eq!(timeline.is_finished(), finished);
+    }
+    let mut timeline = anm::Timeline::new(anm::Program {
+        instructions: vec![
+            ins(0, &[(0, 10), (0, 0), (0, 0)]),
+            ins(15, &[(0, -2), (0, -2)]),
+            ins(12, &[(0, 30)]),
+            ins(0, &[(0, 11), (0, 5), (0, 5)]),
+        ],
+    });
+    assert!(timeline.update(0, 100).unwrap());
+    assert_eq!((timeline.origin, timeline.duration), (u32::MAX - 1, 5));
+    assert_eq!(
+        (
+            timeline.interpreter.display.image,
+            timeline.interpreter.display.blend
+        ),
+        (11, 30)
+    );
+    assert!(!timeline.is_finished());
+    assert!(timeline.update(3, 100).unwrap());
+    assert!(timeline.is_finished());
+    assert!(!timeline.display_changed());
+    let mut timeline = anm::Timeline::new(anm::Program {
+        instructions: vec![
+            ins(0, &[(0, 8), (0, 1), (0, 1)]),
+            ins(0, &[(0, 7), (0, 5), (0, 5)]),
+        ],
+    });
+    timeline.interpreter.display.image = 7;
+    assert!(timeline.update(1, 100).unwrap());
+    assert!(!timeline.display_changed());
+    for (now, speed) in [
+        (1, f32::NAN),
+        (1, f32::INFINITY),
+        (1, -1.0),
+        (0x8000_0000, 1.0),
+    ] {
+        let mut timeline = anm::Timeline::new(anm::Program {
+            instructions: vec![ins(0, &[(0, 7), (0, 5), (0, 5)])],
+        });
+        timeline.speed = speed;
+        assert!(timeline.update(now, 100).unwrap());
+        assert_eq!(timeline.interpreter.pc, 0);
+        assert!(!timeline.display_changed());
+    }
+}
+
+#[test]
+fn timeline_budget_resume_freezes_time_and_consumes_random_values_once() {
+    let mut timeline = anm::Timeline::new(anm::Program {
+        instructions: vec![
+            ins(16, &[(0, 0), (0, 1)]),
+            ins(0, &[(0, 7), (0, 2), (0, 5)]),
+            ins(3, &[(0, 0)]),
+        ],
+    });
+    let mut draws = 0;
+    let mut random = || {
+        draws += 1;
+        0
+    };
+    assert!(!timeline.update_with_random(20, 1, &mut random).unwrap());
+    assert!(timeline.is_pending());
+    let mut complete = false;
+    for _ in 0..100 {
+        if timeline.update_with_random(999, 1, &mut random).unwrap() {
+            complete = true;
+            break;
+        }
+    }
+    assert!(complete);
+    assert!(!timeline.is_pending());
+    assert_eq!((timeline.origin, timeline.duration), (20, 2));
+    assert_eq!(timeline.interpreter.variables[0], 11);
+    assert!(timeline.display_changed());
+    assert!(timeline.update_with_random(20, 100, &mut random).unwrap());
+    assert_eq!(draws, 11);
+    assert!(!timeline.display_changed());
+}

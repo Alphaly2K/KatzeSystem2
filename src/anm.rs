@@ -1,5 +1,8 @@
 use crate::{Error, Result, Step, read};
 
+mod timeline;
+pub use timeline::Timeline;
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Operand {
     pub kind: u32,
@@ -157,9 +160,6 @@ impl Interpreter {
                     } else {
                         self.interval(args[0], args[1], &mut random)?
                     };
-                    if duration < 0 {
-                        return Err(Error::new(self.pc, "ANM 持续时间为负"));
-                    }
                     self.pc += 1;
                     return Ok(Step::Event(if op == 0 {
                         self.display.image = a;
