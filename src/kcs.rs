@@ -27,6 +27,7 @@ pub use ordinary::OrdinaryTask;
 pub use particle::{ParticleHost, ParticleSource, ParticleTask, ParticleVertex};
 pub use queue::MotionQueue;
 pub use random::ScriptRandom;
+pub(crate) use resource_host::ResourceState;
 pub use resource_host::{ResourceHost, ResourceServices};
 pub(crate) use strings::format as format_string;
 pub use system_host::{SystemHost, SystemServices};

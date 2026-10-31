@@ -17,9 +17,23 @@ pub trait ResourceServices {
 pub struct ResourceHost<'a, H, S> {
     pub inner: &'a mut H,
     pub services: &'a mut S,
+    state: ResourceState,
+}
+
+pub(crate) struct ResourceState {
     xml: BTreeMap<u32, XmlDocument>,
     images: BTreeMap<u32, Vec<u8>>,
     next_handle: u32,
+}
+
+impl Default for ResourceState {
+    fn default() -> Self {
+        Self {
+            xml: BTreeMap::new(),
+            images: BTreeMap::new(),
+            next_handle: 1,
+        }
+    }
 }
 
 impl<'a, H: Host, S: ResourceServices> ResourceHost<'a, H, S> {
@@ -27,13 +41,17 @@ impl<'a, H: Host, S: ResourceServices> ResourceHost<'a, H, S> {
         Self {
             inner,
             services,
-            xml: BTreeMap::new(),
-            images: BTreeMap::new(),
-            next_handle: 1,
+            state: ResourceState::default(),
         }
     }
 
     /// 借用成功装载的图像资源原始字节，存活至 366 释放或宿主销毁。
+    pub fn image_data(&self, handle: u32) -> Result<&[u8]> {
+        self.state.image_data(handle)
+    }
+}
+
+impl ResourceState {
     pub fn image_data(&self, handle: u32) -> Result<&[u8]> {
         self.images
             .get(&handle)
@@ -71,10 +89,25 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
     }
 
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn> {
+        if !matches!(index, 365 | 366 | 368 | 590..=593) {
+            return self.inner.call(index, arguments, vm);
+        }
+        self.state.call(index, arguments, vm, Some(self.services))
+    }
+}
+
+impl ResourceState {
+    pub fn call(
+        &mut self,
+        index: u32,
+        arguments: &[u8],
+        vm: &mut Interpreter,
+        services: Option<&mut dyn ResourceServices>,
+    ) -> Result<NativeReturn> {
         let count = match index {
             365 | 366 | 590 | 591 => 1,
             368 | 592 | 593 => 3,
-            _ => return self.inner.call(index, arguments, vm),
+            _ => unreachable!(),
         };
         if arguments.len() != count * 4 {
             return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
@@ -85,8 +118,9 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
             .collect();
         if index == 365 {
             let name = strings::format(vm, args[0], 0)?;
-            let name = self.services.resolve(b"image", &name)?;
-            let Some(bytes) = self.services.read(&name, ResourceMode::LooseFirst)? else {
+            let services = services.ok_or_else(|| Error::new(vm.pc, "运行时未配置资源服务"))?;
+            let name = services.resolve(b"image", &name)?;
+            let Some(bytes) = services.read(&name, ResourceMode::LooseFirst)? else {
                 return Ok(NativeReturn::Value(0));
             };
             if bytes.is_empty() {
@@ -138,7 +172,8 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
         }
         if index == 590 {
             let name = strings::format(vm, args[0], 0)?;
-            let Some(bytes) = self.services.read(&name, ResourceMode::LooseFirst)? else {
+            let services = services.ok_or_else(|| Error::new(vm.pc, "运行时未配置资源服务"))?;
+            let Some(bytes) = services.read(&name, ResourceMode::LooseFirst)? else {
                 return Ok(NativeReturn::Value(0));
             };
             let Ok(xml) = XmlDocument::parse(&bytes) else {

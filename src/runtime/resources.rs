@@ -1,5 +1,5 @@
 use crate::graphics::{DrawingContext, Images, Rect};
-use crate::kcs::{Interpreter, NativeReturn, ResourceServices, format_string};
+use crate::kcs::{Interpreter, NativeReturn, ResourceServices, ResourceState, format_string};
 use crate::{Error, Result};
 
 #[derive(Default)]
@@ -7,6 +7,7 @@ pub(super) struct Resources {
     pub services: Option<Box<dyn ResourceServices>>,
     pub images: Images,
     pub drawing: DrawingContext,
+    pub raw: ResourceState,
 }
 
 impl Resources {
@@ -17,6 +18,16 @@ impl Resources {
         arguments: &[u8],
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
+        if matches!(index, 365 | 366 | 368 | 590..=593) {
+            return self.raw.call(
+                index,
+                arguments,
+                vm,
+                self.services
+                    .as_mut()
+                    .map(|services| services.as_mut() as _),
+            );
+        }
         let length = arguments.len();
         let valid = match index {
             111 => length == 4,

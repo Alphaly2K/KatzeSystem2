@@ -134,13 +134,18 @@ impl<F: ObjectFactory> Runtime<F> {
         Some(object.as_mut())
     }
 
-    /// 配置同步资源读取与类别名称补全；已有图像继续保留。
+    /// 配置同步资源读取与类别名称补全；已有资源对象继续保留。
     pub fn set_resources(&mut self, services: impl crate::kcs::ResourceServices + 'static) {
         self.resources.services = Some(Box::new(services));
     }
 
     pub fn images(&self) -> &crate::graphics::Images {
         &self.resources.images
+    }
+
+    /// 365 装载的原始图像字节，存活至 366 显式释放或运行时销毁。
+    pub fn image_data(&self, handle: u32) -> Result<&[u8]> {
+        self.resources.raw.image_data(handle)
     }
 
     pub fn drawing(&self) -> &crate::graphics::DrawingContext {
@@ -722,7 +727,7 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         if matches!(index, 66 | 67 | 69 | 70 | 72 | 73 | 75 | 76 | 109 | 110) {
             return self.task_native(index, arguments, vm);
         }
-        if matches!(index, 111 | 115 | 117) {
+        if matches!(index, 111 | 115 | 117 | 365 | 366 | 368 | 590..=593) {
             return self.resources.call(self.host.task_id, index, arguments, vm);
         }
         call_native(
