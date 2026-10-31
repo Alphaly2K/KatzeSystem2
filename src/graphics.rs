@@ -115,6 +115,21 @@ impl Surface {
         true
     }
 
+    /// 从底部起算 Y 坐标，适配原图像对象的矩形填充坐标。
+    pub fn fill_rect_from_bottom(&mut self, rect: Rect, argb: u32) -> bool {
+        let Some(rect) = rect.intersect(self.bounds()) else {
+            return false;
+        };
+        self.fill_rect(
+            Rect {
+                top: self.size[1] as i32 - rect.bottom,
+                bottom: self.size[1] as i32 - rect.top,
+                ..rect
+            },
+            argb,
+        )
+    }
+
     /// 复制源区域至指定左上位置，裁剪两端并保留源区域到目标的相对位置。
     pub fn copy_from(&mut self, source: &Self, rect: Rect, at: [i32; 2]) -> bool {
         let Some(region) = self.clip_image(source, rect, at) else {

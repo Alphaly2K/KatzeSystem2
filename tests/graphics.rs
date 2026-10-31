@@ -47,6 +47,29 @@ fn surfaces_allow_empty_dimensions_and_reject_invalid_storage() {
 }
 
 #[test]
+fn image_rectangle_fills_clip_before_converting_bottom_origin_coordinates() {
+    let mut surface = Surface::new([3, 4]).unwrap();
+    assert!(surface.fill_rect_from_bottom(Rect::from_xywh(1, 0, 1, 1), 0x0011_2233));
+    assert_eq!(surface.pixel(1, 3), Some(0x0011_2233));
+    assert_eq!(surface.pixel(1, 0), Some(0));
+    assert!(surface.fill_rect_from_bottom(Rect::from_xywh(-1, 2, 3, 4), 0x8044_5566));
+    for y in 0..4 {
+        for x in 0..3 {
+            let expected = if x < 2 && y < 2 {
+                0x8044_5566
+            } else if x == 1 && y == 3 {
+                0x0011_2233
+            } else {
+                0
+            };
+            assert_eq!(surface.pixel(x, y), Some(expected));
+        }
+    }
+    assert!(!surface.fill_rect_from_bottom(Rect::from_xywh(0, 4, 1, 1), u32::MAX));
+    assert!(!surface.fill_rect_from_bottom(Rect::from_xywh(0, 3, 1, -1), u32::MAX));
+}
+
+#[test]
 fn image_copy_clips_both_ends_without_shifting_the_requested_mapping() {
     let bytes: Vec<_> = [0x0011_2233u32, 0x7f44_5566, 0xff77_8899, 1, 2, 3]
         .into_iter()
