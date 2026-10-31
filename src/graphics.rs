@@ -114,6 +114,33 @@ impl Surface {
         }
         true
     }
+
+    /// 复制源区域至指定左上位置，裁剪两端并保留源区域到目标的相对位置。
+    pub fn copy_from(&mut self, source: &Self, rect: Rect, at: [i32; 2]) -> bool {
+        let Some(clipped) = rect.intersect(source.bounds()) else {
+            return false;
+        };
+        let x = i64::from(at[0]) + i64::from(clipped.left) - i64::from(rect.left);
+        let y = i64::from(at[1]) + i64::from(clipped.top) - i64::from(rect.top);
+        let left = x.max(0);
+        let top = y.max(0);
+        let right = (x + i64::from(clipped.right - clipped.left)).min(i64::from(self.size[0]));
+        let bottom = (y + i64::from(clipped.bottom - clipped.top)).min(i64::from(self.size[1]));
+        if left >= right || top >= bottom {
+            return false;
+        }
+        let source_x = (i64::from(clipped.left) + left - x) as usize;
+        let source_y = (i64::from(clipped.top) + top - y) as usize;
+        let count = (right - left) as usize * 4;
+        let stride = self.stride();
+        let source_stride = source.stride();
+        for row in 0..(bottom - top) as usize {
+            let start = (top as usize + row) * stride + left as usize * 4;
+            let from = (source_y + row) * source_stride + source_x * 4;
+            self.pixels[start..start + count].copy_from_slice(&source.pixels[from..from + count]);
+        }
+        true
+    }
 }
 
 fn pixel_length(size: [u32; 2]) -> Result<usize> {

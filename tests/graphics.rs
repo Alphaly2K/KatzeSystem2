@@ -45,3 +45,53 @@ fn surfaces_allow_empty_dimensions_and_reject_invalid_storage() {
     assert!(Surface::new([4097, 4096]).is_err());
     assert!(Surface::new([u32::MAX, 0]).is_err());
 }
+
+#[test]
+fn image_copy_clips_both_ends_without_shifting_the_requested_mapping() {
+    let bytes: Vec<_> = [0x0011_2233u32, 0x7f44_5566, 0xff77_8899, 1, 2, 3]
+        .into_iter()
+        .flat_map(u32::to_le_bytes)
+        .collect();
+    let source = Surface::from_bgra([3, 2], bytes).unwrap();
+    for rect in [
+        source.bounds(),
+        Rect::from_xywh(-2, -1, 5, 4),
+        Rect::from_xywh(1, 0, 4, 3),
+        Rect::from_xywh(1, 1, -1, 2),
+        Rect::from_xywh(i32::MIN, i32::MIN, i32::MAX, i32::MAX),
+    ] {
+        for x in [i32::MIN, -4, -1, 0, 2, i32::MAX] {
+            for y in [i32::MIN, -4, -1, 0, 2, i32::MAX] {
+                let mut destination = Surface::new([4, 3]).unwrap();
+                destination.clear(0xaabb_ccdd);
+                let copied = destination.copy_from(&source, rect, [x, y]);
+                let mut expected_copy = false;
+                for dy in 0..3 {
+                    for dx in 0..4 {
+                        let sx = i64::from(rect.left) + i64::from(dx) - i64::from(x);
+                        let sy = i64::from(rect.top) + i64::from(dy) - i64::from(y);
+                        let expected = if sx >= i64::from(rect.left)
+                            && sx < i64::from(rect.right)
+                            && sy >= i64::from(rect.top)
+                            && sy < i64::from(rect.bottom)
+                            && (0..3).contains(&sx)
+                            && (0..2).contains(&sy)
+                        {
+                            expected_copy = true;
+                            source.pixel(sx as u32, sy as u32).unwrap()
+                        } else {
+                            0xaabb_ccdd
+                        };
+                        assert_eq!(destination.pixel(dx, dy), Some(expected));
+                    }
+                }
+                assert_eq!(copied, expected_copy);
+            }
+        }
+    }
+    assert!(
+        !Surface::new([0, 1])
+            .unwrap()
+            .copy_from(&source, source.bounds(), [0, 0])
+    );
+}
