@@ -11,6 +11,7 @@ mod ordinary;
 mod particle;
 mod queue;
 mod random;
+mod resource_host;
 mod sse;
 mod strings;
 mod system_host;
@@ -23,6 +24,7 @@ pub use ordinary::OrdinaryTask;
 pub use particle::{ParticleHost, ParticleSource, ParticleTask, ParticleVertex};
 pub use queue::MotionQueue;
 pub use random::ScriptRandom;
+pub use resource_host::{ResourceHost, ResourceServices};
 pub use system_host::{SystemHost, SystemServices};
 pub use task_host::{TaskHost, TaskServices};
 

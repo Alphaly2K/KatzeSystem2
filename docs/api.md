@@ -149,6 +149,8 @@ FES 内部执行宏声明，初始化按以下顺序交给宿主：
 
 ### 同步系统服务
 
+`kcs::ResourceHost::new(&mut inner, &mut services)` 提供普通表 590～593 的 XML 装载、释放、整数及文本查询。服务实现 `ResourceServices::read(name, mode) -> Result<Option<Vec<u8>>>`；输入为格式展开的字节名称，当前 XML 接口采用 `ResourceMode::LooseFirst`。可由 `ResourceRouter::read` 转交已注册的归档和文件读取，再取返回资源的 bytes。None 或解析失败使 590 返回零，服务错误停止当前推进；创建的句柄存活至显式释放或宿主销毁。零句柄查询跳过地址解析，非零失效句柄返回诊断。593 的目标需为有效零结尾串，缺失字段保留原值，成功时仅覆盖 UTF-8 字段及结尾零。
+
 `kcs::SystemHost::new(&mut inner, &mut services)` 为已有 Host 接入普通表 629。服务实现 `SystemServices::open(task_id, target, parameters, directory) -> Result<()>`，接收依次格式展开后的三个字节串。服务返回后 native 才以状态 2 继续，不压值；服务错误返回解释器诊断，当前推进立即结束。平台打开 API 的成功／失败返回值均不作为 VM 返回值。
 
 包装层把时钟、编号、创建上下文及其他 native 委托给 inner，可与 TaskHost 组合。初始编号为零，直接使用 VM 时通过 `Host::set_task_id` 设置；OrdinaryTask 自动同步。平台服务按编号查找相应窗口或环境，并负责处理字节路径、参数和目录，具体 Windows 调用契约见 [KCS](kcs.md)。
