@@ -1,4 +1,4 @@
-use super::Transform;
+use super::{ProjectedVertex, Projection, Transform};
 use crate::kcs::float_operation;
 use crate::{Error, Result, read};
 use std::cmp::Ordering;
@@ -111,6 +111,23 @@ impl Drawable {
                 },
             }
         }))
+    }
+
+    /// 在对象／父级变换和颜色覆盖之后，生成供绘图设备使用的投影顶点。
+    pub fn projected_triangle(
+        &self,
+        index: usize,
+        parent: [f32; 16],
+        projection: &Projection,
+        origin: [f32; 2],
+        perspective: bool,
+    ) -> Option<[ProjectedVertex; 3]> {
+        Some(projection.project_triangle(
+            self.transformed_triangle(index, parent)?,
+            self.transform.base_point()[2],
+            origin,
+            perspective,
+        ))
     }
 }
 

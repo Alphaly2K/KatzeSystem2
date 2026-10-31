@@ -10,6 +10,8 @@ mod drawable;
 pub use drawable::{Drawable, Drawables, Vertex};
 mod plane;
 pub use plane::{GraphicsFactory, PlaneObject};
+mod projection;
+pub use projection::{ProjectedVertex, Projection};
 
 /// 包含左上边、不包含右下边的像素矩形。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

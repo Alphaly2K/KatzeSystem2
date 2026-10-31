@@ -109,6 +109,18 @@
 
 12,981 组状态及 38,943 个完整变换后顶点已与原入口核对，有效属性、矩阵、dirty 和顶点结果一致。三项纯合成回归固定几何顺序、父级 W、正负零与矩阵模式、常规三轴旋转和非有限／大角度行为。该接口已用于二维对象属性和三角形查询；像素栅格化与帧提交继续实现。
 
+## 绘图投影
+
+`Projection` 接收绘图中心 `center`、摄像深度 `camera_depth`、最终平移 `translation` 和矩阵 `matrix`，以及已选择坐标组的 `coordinate_offset`／`coordinate_scale`／`coordinate_matrix`。默认中心、深度、偏移和平移为零，比例为一，矩阵为单位矩阵；实际配置由调用者提供，当前尚未从根对象自动装载。
+
+`project_triangle(vertices, base_depth, origin, perspective)` 接收对象／父级变换后的三个顶点、对象基点 Z、已选择的投影原点及开关，返回 `ProjectedVertex { position, rhw, color }`。颜色原样保留，不自动裁剪，不隐式执行 W 除法。
+
+关闭透视或顶点 Z 为正／负零时，先围绕中心应用坐标组缩放与矩阵，再加中心减坐标组偏移；此时 Z 独立改写为 `(65000 − (z + base_depth)) × f32(1/65000)`，坐标组矩阵不改变该 Z。最后乘最终矩阵，再加最终二维平移。矩阵乘法保留完整四维输入。
+
+透视且顶点 Z 非零时，距离先按单精度计算为 `(65000 − base_depth) − camera_depth`。分母为 `z − distance`，两者浮点相等时改用一；二维比例为 `camera_depth / denominator`，负值钳为零。围绕 origin 处理后的四维顶点乘投影矩阵，其 Z 系数为 f32(1/65000)、W 系数为 `1 / denominator`。然后加 origin、减中心、应用坐标组缩放／矩阵，加中心减偏移，再乘最终矩阵及平移。RHW 参与后续矩阵的平移项，不能固定为一。
+
+`Drawable::projected_triangle(index, parent, projection, origin, perspective)` 组合对象变换、父矩阵、颜色覆盖与上述投影；越界返回 None。它使用本对象的基点 Z，不用变换后顶点 Z 代替排序深度。1,266 组三角形的 75,960 字节完整投影顶点已与原入口一致，覆盖两条分支、两级矩阵、负比例、相等分母、正负零及非有限值。两项常规合成回归固定 RHW 平移、分支深度及图元组合；像素栅格化与帧提交继续接入。
+
 ## 绘图登记与三角形
 
 `Drawable::rectangle(at, size, argb)` 创建两个原始三角形，保留负尺寸和退化边；端点按单精度求和。`bounds()` 返回独立原始边界，矩形为 `[x,y,0]` 至 `[x+width,y+height,0]`；通用列表和空图元的边界为零。
