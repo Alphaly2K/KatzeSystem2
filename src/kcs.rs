@@ -14,6 +14,7 @@ mod queue;
 mod random;
 mod sse;
 mod strings;
+mod task_host;
 pub use clock::TaskClock;
 pub use host::CoreHost;
 pub use memory::MemoryCopyMode;
@@ -22,6 +23,7 @@ pub use ordinary::OrdinaryTask;
 pub use particle::{ParticleHost, ParticleSource, ParticleTask, ParticleVertex};
 pub use queue::MotionQueue;
 pub use random::ScriptRandom;
+pub use task_host::{TaskHost, TaskServices};
 
 #[derive(Clone, Copy, Debug)]
 pub struct Operand {
