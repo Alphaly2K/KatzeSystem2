@@ -1,5 +1,5 @@
 use super::{Host, Interpreter, NativeReturn, Program, ScriptRandom, matrix, numeric, strings};
-use crate::{Error, Result, Step};
+use crate::{Error, Result, Step, read};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ParticleVertex {
@@ -388,6 +388,26 @@ impl Host for ParticleHost {
 }
 
 impl ParticleHost {
+    /// 重建矩形网格、快照、零偏移和启用标记，保留任务时间及参数。
+    pub fn reset_quads(&mut self, count: usize, image_size: [f32; 2]) -> Result<()> {
+        if count > read::MAX_BYTES / 244 {
+            return Err(Error::new(0, "粒子网格存储超过上限"));
+        }
+        let [width, height] = image_size;
+        let positions = [[0.0, 0.0], [width, 0.0], [0.0, height], [width, height]];
+        let uv = [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]];
+        let quad = std::array::from_fn(|i| ParticleVertex {
+            position: [positions[i][0], positions[i][1], 0.0],
+            uv: uv[i],
+            ..Default::default()
+        });
+        self.quads = vec![quad; count];
+        self.saved_quads.clone_from(&self.quads);
+        self.offsets = vec![[0.0; 4]; count];
+        self.quad_flags = vec![1; count];
+        Ok(())
+    }
+
     fn projection_bounds(&self, depth: f32) -> [f32; 4] {
         let f =
             |op, a: f32, b: f32| f32::from_bits(numeric::float_ieee(op, a.to_bits(), b.to_bits()));

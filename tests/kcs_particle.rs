@@ -200,6 +200,61 @@ fn particle_quad_storage_and_snapshots_preserve_vertex_fields_and_rotation_direc
 }
 
 #[test]
+fn mesh_reset_builds_image_corners_and_snapshots_without_changing_task_controls() {
+    let mut host = ParticleHost {
+        elapsed: 23,
+        active: false,
+        parameters: [7; 32],
+        ..Default::default()
+    };
+    host.reset_quads(2, [12.5, -3.25]).unwrap();
+    assert_eq!(host.quads.len(), 2);
+    assert_eq!(host.saved_quads, host.quads);
+    assert_eq!(
+        host.quads[0].map(|v| v.position),
+        [
+            [0.0, 0.0, 0.0],
+            [12.5, 0.0, 0.0],
+            [0.0, -3.25, 0.0],
+            [12.5, -3.25, 0.0]
+        ]
+    );
+    assert_eq!(
+        host.quads[1][3],
+        ParticleVertex {
+            position: [12.5, -3.25, 0.0],
+            uv: [1.0, 1.0],
+            ..Default::default()
+        }
+    );
+    assert_eq!(host.offsets, [[0.0; 4]; 2]);
+    assert_eq!(host.quad_flags, [1; 2]);
+    host.quads[0][0].color = 0;
+    host.offsets[0] = [5.0; 4];
+    host.quad_flags[0] = 0;
+    host.reset_quads(1, [-0.0, f32::from_bits(0xff80_5678)])
+        .unwrap();
+    for mesh in [&host.quads, &host.saved_quads] {
+        assert_eq!(mesh.len(), 1);
+        assert_eq!(mesh[0][1].position[0].to_bits(), 0x8000_0000);
+        assert_eq!(mesh[0][2].position[1].to_bits(), 0xff80_5678);
+        assert_eq!(mesh[0][0].color, u32::MAX);
+    }
+    assert_eq!(
+        (host.elapsed, host.active, host.parameters),
+        (23, false, [7; 32])
+    );
+    assert!(host.reset_quads(usize::MAX, [0.0; 2]).is_err());
+    host.reset_quads(0, [0.0; 2]).unwrap();
+    assert!(
+        host.quads.is_empty()
+            && host.saved_quads.is_empty()
+            && host.offsets.is_empty()
+            && host.quad_flags.is_empty()
+    );
+}
+
+#[test]
 fn particle_offsets_uv_flags_and_parameters_follow_distinct_native_contracts() {
     let mut host = ParticleHost {
         surface_size: [10, 20],
