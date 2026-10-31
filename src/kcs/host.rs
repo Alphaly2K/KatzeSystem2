@@ -46,6 +46,7 @@ pub struct CoreHost<'a> {
     pub task_id: u32,
     pub task_tree: Option<&'a TaskTree>,
     pub system_time_ms: u32,
+    pub debug_mode: u32,
     pub surface_size: [u32; 2],
     pub memory_copy_mode: MemoryCopyMode,
     pub random: ScriptRandom,
@@ -64,6 +65,7 @@ impl<'a> CoreHost<'a> {
             task_id: 0,
             task_tree: None,
             system_time_ms: 0,
+            debug_mode: 0,
             surface_size: [0; 2],
             memory_copy_mode: MemoryCopyMode::default(),
             random: ScriptRandom::default(),
@@ -97,6 +99,9 @@ impl Host for CoreHost<'_> {
         }
         if index == 68 {
             return Ok(NativeReturn::Value(self.task_id));
+        }
+        if index == 465 {
+            return Ok(NativeReturn::Value(self.debug_mode));
         }
         if index == 65 {
             return Ok(NativeReturn::YieldVoid);

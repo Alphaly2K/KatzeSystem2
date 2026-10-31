@@ -148,7 +148,7 @@ fn implicit_code_end_stops_on_the_following_update_across_budget_resumption() {
 #[test]
 fn shared_host_receives_each_task_id_and_keeps_system_milliseconds_independent() {
     let mut code = Vec::new();
-    for (native, target) in [(68, 0), (5, 4), (4, 8)] {
+    for (native, target) in [(68, 0), (5, 4), (4, 8), (465, 12)] {
         ins(&mut code, 0x2b, &[(3, native), (3, 0)]);
         ins(&mut code, 0x26, &[(3, target)]);
     }
@@ -164,8 +164,13 @@ fn shared_host_receives_each_task_id_and_keeps_system_milliseconds_independent()
         task.task_id = task_id;
         task.clock.origin = origin;
         host.system_time_ms = system_time_ms;
+        let debug_mode = system_time_ms ^ 0x1234_5678;
+        host.debug_mode = debug_mode;
         assert!(task.update(now, 1, &mut host, 100).unwrap());
-        assert_eq!(values(&task), [task_id, elapsed, system_time_ms, 0]);
+        assert_eq!(
+            values(&task),
+            [task_id, elapsed, system_time_ms, debug_mode]
+        );
         assert_eq!(task.running, 0);
     }
 }
