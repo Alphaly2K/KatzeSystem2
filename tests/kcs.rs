@@ -812,3 +812,42 @@ fn memory_copy_keeps_forward_cpu_blocks_and_crt_overlap_results() {
         assert_eq!(vm.read(1, expected.len()).unwrap(), expected);
     }
 }
+
+#[test]
+fn surface_size_writes_in_argument_order_and_preserves_raw_dimensions() {
+    use kcs::Host;
+    let mut state = katze_system2::expression::State::new(8);
+    let mut host = kcs::CoreHost::new(&mut state);
+    let mut vm = kcs::Interpreter::new(
+        kcs::Program::from_code(&[], vec![0; 32], 64).unwrap(),
+        vec![0; 32],
+    )
+    .unwrap();
+    host.surface_size = [0x1122_3344, 0xaabb_ccdd];
+    for (addresses, target, expected) in [
+        ([1, 2], 1, [0x44, 0xdd, 0xcc, 0xbb, 0xaa].as_slice()),
+        (
+            [0x8000_0000, 0x8000_0000],
+            0x8000_0000,
+            &[0xdd, 0xcc, 0xbb, 0xaa],
+        ),
+    ] {
+        let arguments: Vec<_> = addresses.into_iter().flat_map(u32::to_le_bytes).collect();
+        assert_eq!(
+            host.call(8, &arguments, &mut vm).unwrap(),
+            kcs::NativeReturn::Continue
+        );
+        assert_eq!(vm.read(target, expected.len()).unwrap(), expected);
+    }
+    host.surface_size = [u32::MAX, 0x8000_0000];
+    let arguments: Vec<_> = [0, 0x8000_0004]
+        .into_iter()
+        .flat_map(u32::to_le_bytes)
+        .collect();
+    host.call(8, &arguments, &mut vm).unwrap();
+    assert_eq!(vm.read(0, 4).unwrap(), u32::MAX.to_le_bytes());
+    assert_eq!(
+        vm.read(0x8000_0004, 4).unwrap(),
+        0x8000_0000u32.to_le_bytes()
+    );
+}

@@ -12,6 +12,7 @@ pub struct CoreHost<'a> {
     pub task_origin: u32,
     pub task_id: u32,
     pub system_time_ms: u32,
+    pub surface_size: [u32; 2],
     pub memory_copy_mode: MemoryCopyMode,
     pub random: ScriptRandom,
     integer_maps: BTreeMap<u32, BTreeMap<Vec<u8>, u32>>,
@@ -27,6 +28,7 @@ impl<'a> CoreHost<'a> {
             task_origin: 0,
             task_id: 0,
             system_time_ms: 0,
+            surface_size: [0; 2],
             memory_copy_mode: MemoryCopyMode::default(),
             random: ScriptRandom::default(),
             integer_maps: BTreeMap::new(),
@@ -83,7 +85,7 @@ impl Host for CoreHost<'_> {
         let count = match index {
             1 | 6 | 17 | 18 | 25 | 26 | 40 | 47 | 48 | 71 | 209 | 210 | 212 | 213 | 278 | 319
             | 516 => 1,
-            13..=16 | 19..=24 | 211 | 276 | 277 | 518 => 2,
+            8 | 13..=16 | 19..=24 | 211 | 276 | 277 | 518 => 2,
             50..=58 | 60 | 62..=64 => 1,
             59 | 61 => 2,
             38 | 44 | 45 => 4,
@@ -104,6 +106,12 @@ impl Host for CoreHost<'_> {
                 NativeReturn::Continue
             }
             6 => NativeReturn::Value(args[0]),
+            8 => {
+                for (address, value) in args.iter().zip(self.surface_size) {
+                    vm.write(*address, &value.to_le_bytes())?;
+                }
+                NativeReturn::Continue
+            }
             5 => NativeReturn::Value(self.task_time.wrapping_sub(self.task_origin)),
             71 => {
                 vm.wait_for_message(args[0])?;
