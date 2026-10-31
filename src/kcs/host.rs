@@ -4,7 +4,7 @@ use crate::task::TaskTree;
 use crate::{Error, Result, expression, read, text};
 use std::collections::BTreeMap;
 
-pub(super) fn hierarchy_query(
+pub(crate) fn hierarchy_query(
     tree: &TaskTree,
     task_id: u32,
     index: u32,
@@ -35,16 +35,15 @@ pub struct MenuItemRequest {
     pub value: u32,
 }
 
-/// 在已有数值状态上提供普通任务表中已核实的接口。
-pub struct CoreHost<'a> {
-    pub state: &'a mut expression::State,
+/// 普通任务表的持久宿主状态；数值区由 `CoreHost::state` 单独提供，
+/// 以便同一份状态在多次 native 调用之间保留集合句柄、随机序列和请求队列。
+pub struct HostState {
     pub configured_shared_slots: u32,
     pub debug_messages: Vec<Vec<u8>>,
     pub menu_item_requests: Vec<MenuItemRequest>,
     pub task_time: u32,
     pub task_origin: u32,
     pub task_id: u32,
-    pub task_tree: Option<&'a TaskTree>,
     pub system_time_ms: u32,
     pub debug_mode: u32,
     pub sequence_name_mode: u32,
@@ -58,16 +57,15 @@ pub struct CoreHost<'a> {
     next_collection_handle: u32,
 }
 
-impl<'a> CoreHost<'a> {
-    pub fn new(state: &'a mut expression::State) -> Self {
+impl Default for HostState {
+    fn default() -> Self {
         Self {
-            configured_shared_slots: state.shared.len() as u32,
+            configured_shared_slots: 0,
             debug_messages: Vec::new(),
             menu_item_requests: Vec::new(),
             task_time: 0,
             task_origin: 0,
             task_id: 0,
-            task_tree: None,
             system_time_ms: 0,
             debug_mode: 0,
             sequence_name_mode: 0,
@@ -78,19 +76,60 @@ impl<'a> CoreHost<'a> {
             integer_maps: BTreeMap::new(),
             sequence_maps: BTreeMap::new(),
             next_collection_handle: 1,
-            state,
         }
     }
+}
 
+impl HostState {
+    /// 保存任务时钟供 native 5 查询；不修改平台或其他状态。
     pub fn set_task_clock(&mut self, clock: &TaskClock) {
         self.task_origin = clock.origin;
         self.task_time = clock.time;
     }
 }
 
+/// 在已有数值状态上提供普通任务表中已核实的接口。
+pub struct CoreHost<'a> {
+    pub state: &'a mut expression::State,
+    pub host: HostState,
+    pub task_tree: Option<&'a TaskTree>,
+}
+
+impl<'a> CoreHost<'a> {
+    pub fn new(state: &'a mut expression::State) -> Self {
+        let configured_shared_slots = state.shared.len() as u32;
+        Self {
+            state,
+            host: HostState {
+                configured_shared_slots,
+                ..HostState::default()
+            },
+            task_tree: None,
+        }
+    }
+
+    pub fn set_task_clock(&mut self, clock: &TaskClock) {
+        self.host.set_task_clock(clock);
+    }
+}
+
+impl std::ops::Deref for CoreHost<'_> {
+    type Target = HostState;
+
+    fn deref(&self) -> &HostState {
+        &self.host
+    }
+}
+
+impl std::ops::DerefMut for CoreHost<'_> {
+    fn deref_mut(&mut self) -> &mut HostState {
+        &mut self.host
+    }
+}
+
 impl Host for CoreHost<'_> {
     fn set_task_id(&mut self, id: u32) {
-        self.task_id = id;
+        self.host.task_id = id;
     }
 
     fn set_task_clock(&mut self, clock: &TaskClock) {
@@ -98,451 +137,459 @@ impl Host for CoreHost<'_> {
     }
 
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn> {
-        if matches!(index, 0 | 2 | 3) {
-            return Ok(NativeReturn::Continue);
-        }
-        if index == 4 {
-            return Ok(NativeReturn::Value(self.system_time_ms));
-        }
-        if index == 68 {
-            return Ok(NativeReturn::Value(self.task_id));
-        }
-        if index == 465 {
-            return Ok(NativeReturn::Value(self.debug_mode));
-        }
-        if index == 65 {
-            return Ok(NativeReturn::YieldVoid);
-        }
-        if index == 33 {
-            return Ok(NativeReturn::Value(self.random.next_integer()));
-        }
-        if index == 34 {
-            return Ok(NativeReturn::Value(self.random.next_float().to_bits()));
-        }
-        if matches!(index, 419 | 515) {
-            if self.integer_maps.len() + self.sequence_maps.len() >= read::MAX_ITEMS {
-                return Err(Error::new(vm.pc, "KCS 集合对象数量超过上限"));
-            }
-            let handle = self.next_collection_handle;
-            self.next_collection_handle = handle
-                .checked_add(1)
-                .ok_or_else(|| Error::new(vm.pc, "KCS 集合对象句柄耗尽"))?;
-            if index == 419 {
-                self.sequence_maps.insert(handle, Default::default());
-            } else {
-                self.integer_maps.insert(handle, BTreeMap::new());
-            }
-            return Ok(NativeReturn::Value(handle));
-        }
-        let count = match index {
-            1 | 6 | 17 | 18 | 25 | 26 | 40 | 47 | 48 | 71 | 209 | 210 | 212 | 213 | 278 | 319
-            | 75 | 393 | 420 | 421 | 516 => 1,
-            8 | 13..=16 | 19..=24 | 149 | 211 | 276 | 277 | 422 | 423 | 518 => 2,
-            50..=58 | 60 | 62..=64 => 1,
-            59 | 61 => 2,
-            38 | 44 | 45 => 4,
-            35..=37 | 41 | 42 | 517 | 519 => 3,
-            5 | 76 | 789 => 0,
-            _ => return Err(Error::new(vm.pc, format!("未支持的 KCS native {index}"))),
-        };
-        if arguments.len() != count * 4 {
-            return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
-        }
-        let args: Vec<_> = arguments
-            .chunks_exact(4)
-            .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
-            .collect();
-        Ok(match index {
-            1 => {
-                self.debug_messages.push(strings::format(vm, args[0], 0)?);
-                NativeReturn::Continue
-            }
-            6 => NativeReturn::Value(args[0]),
-            393 => {
-                if self.menu_item_requests.len() >= read::MAX_ITEMS {
-                    return Err(Error::new(vm.pc, "KCS 菜单请求数量超过上限"));
-                }
-                self.menu_item_requests.push(MenuItemRequest {
-                    task_id: self.task_id,
-                    command_id: 0x77,
-                    value: args[0],
-                });
-                NativeReturn::Continue
-            }
-            420 => {
-                if args[0] != 0 && self.sequence_maps.remove(&args[0]).is_none() {
-                    return Err(Error::new(vm.pc, "KCS 序列对象句柄无效"));
-                }
-                NativeReturn::Continue
-            }
-            421..=423 => {
-                if args[0] == 0 {
-                    return Ok(if index == 423 {
-                        NativeReturn::Value(0)
-                    } else {
-                        NativeReturn::Continue
-                    });
-                }
-                let map = self
-                    .sequence_maps
-                    .get_mut(&args[0])
-                    .ok_or_else(|| Error::new(vm.pc, "KCS 序列对象句柄无效"))?;
-                if index == 421 {
-                    *map = Default::default();
-                    NativeReturn::Continue
-                } else {
-                    let source = strings::format(vm, args[1], 0)?;
-                    if index == 422 {
-                        map.register(&source, self.sequence_name_mode)?;
-                        NativeReturn::Continue
-                    } else {
-                        NativeReturn::Value(u32::from(map.contains(&source)?))
-                    }
-                }
-            }
-            8 | 149 => {
-                let values = if index == 8 {
-                    self.surface_size
-                } else {
-                    self.pointer_position.map(|coordinate| coordinate as u32)
-                };
-                for (address, value) in args.iter().zip(values) {
-                    vm.write(*address, &value.to_le_bytes())?;
-                }
-                NativeReturn::Continue
-            }
-            5 => NativeReturn::Value(self.task_time.wrapping_sub(self.task_origin)),
-            71 => {
-                vm.wait_for_message(args[0])?;
-                NativeReturn::YieldVoid
-            }
-            75 | 76 => {
-                let tree = self
-                    .task_tree
-                    .ok_or_else(|| Error::new(vm.pc, "KCS 宿主未提供任务树"))?;
-                hierarchy_query(
-                    tree,
-                    self.task_id,
-                    index,
-                    args.first().copied().unwrap_or(0),
-                    vm.pc,
-                )?
-            }
-            35 => {
-                memory::copy(
-                    vm,
-                    args[0],
-                    args[1],
-                    read::sized(args[2], vm.pc)?,
-                    self.memory_copy_mode,
-                )?;
-                NativeReturn::Continue
-            }
-            36 => {
-                let count = read::sized(args[2], vm.pc)?;
-                vm.read(args[0], count)?;
-                vm.write(args[0], &vec![args[1] as u8; count])?;
-                NativeReturn::Continue
-            }
-            37 => {
-                let value = args[1] as i32;
-                let mut digits = Vec::new();
-                // MIN 的绝对值仍为负数，负余数直接参与数字字节计算。
-                let mut n = value.wrapping_abs();
-                if n == 0 {
-                    digits.push(b'0');
-                } else {
-                    let mut group = 0;
-                    while n != 0 {
-                        if group == 3 {
-                            digits.push(b',');
-                            group = 0;
-                        }
-                        digits.push(((n % 10) as u8).wrapping_add(b'0'));
-                        n /= 10;
-                        group += 1;
-                    }
-                    if value < 0 {
-                        digits.push(b'-');
-                    } else if args[2] != 0 {
-                        digits.push(b'+');
-                    }
-                }
-                digits.reverse();
-                write_string(vm, args[0], &digits, 2)?;
-                NativeReturn::Continue
-            }
-            319 => {
-                let shifted = numeric::float_ieee(1, args[0], 0.5f32.to_bits());
-                let rounded = numeric::native_math(15, &[shifted]);
-                NativeReturn::Value(numeric::convert(0x39, rounded))
-            }
-            50..=61 => {
-                let function = match index {
-                    50..=55 => index - 44,
-                    56..=61 => index - 43,
-                    _ => unreachable!(),
-                };
-                let mut value = numeric::native_math(function, &args);
-                // 普通表调用 SSE2 precise pow，奇整数指数会清除 NaN 底数符号。
-                let exponent = args.get(1).copied().map(f32::from_bits).unwrap_or(0.0);
-                if index == 61
-                    && f32::from_bits(args[0]).is_nan()
-                    && exponent.abs() < 16_777_216.0
-                    && exponent.fract() == 0.0
-                    && exponent as i32 & 1 != 0
-                {
-                    value &= 0x7fff_ffff;
-                }
-                NativeReturn::Value(value)
-            }
-            62 | 63 => {
-                let (multiplier, divisor) = if index == 62 {
-                    (std::f32::consts::PI.to_bits(), 180.0f32.to_bits())
-                } else {
-                    (180.0f32.to_bits(), std::f32::consts::PI.to_bits())
-                };
-                let product = numeric::float_ieee(3, args[0], multiplier);
-                NativeReturn::Value(numeric::float_ieee(4, product, divisor))
-            }
-            64 => NativeReturn::Value((args[0] as i32).wrapping_abs() as u32),
-            13 => {
-                let source = vm.read_string(args[1])?.to_vec();
-                if args[0] > args[1] && args[0] - args[1] <= source.len() as u32 {
-                    return Err(Error::new(vm.pc, "KCS 字符串复制会覆盖尚未读取的源"));
-                }
-                write_string(vm, args[0], &source, 2)?;
-                NativeReturn::Value(args[0])
-            }
-            14 => {
-                let text = strings::format(vm, args[1], 0)?;
-                write_string(vm, args[0], &text, 2)?;
-                NativeReturn::Value(args[0])
-            }
-            15 => {
-                strings::append_raw(vm, args[0], args[1])?;
-                NativeReturn::Value(args[0])
-            }
-            16 => {
-                let source = strings::format(vm, args[1], 0)?;
-                let length = vm.read_string(args[0])?.len();
-                write_string(vm, args[0].wrapping_add(length as u32), &source, 2)?;
-                NativeReturn::Value(args[0])
-            }
-            17 => NativeReturn::Value(vm.read_string(args[0])?.len() as u32),
-            18 => NativeReturn::Value(strings::format(vm, args[0], 0)?.len() as u32),
-            19..=22 => {
-                let (left, right) = if index.is_multiple_of(2) {
-                    (
-                        strings::format(vm, args[0], 0)?,
-                        strings::format(vm, args[1], 0)?,
-                    )
-                } else {
-                    (
-                        vm.read_string(args[1])?.to_vec(),
-                        vm.read_string(args[0])?.to_vec(),
-                    )
-                };
-                NativeReturn::Value(strings::compare(&left, &right, index >= 21) as u32)
-            }
-            26 => NativeReturn::Value(strings::float32(&strings::format(vm, args[0], 0)?)),
-            25 => NativeReturn::Value(
-                text::integer_prefix(&strings::format(vm, args[0], 0)?)
-                    .map_or(0, |(_, value)| value),
-            ),
-            23 => {
-                let source = vm.read_string(args[0])?;
-                let mut length = 0;
-                while length < source.len() {
-                    let width = strings::character_width(&source[length..]);
-                    if length + width >= args[1] as usize || length + width > source.len() {
-                        break;
-                    }
-                    length += width;
-                }
-                vm.write(args[0].wrapping_add(length as u32), &[0, 0])?;
-                NativeReturn::Value(length as u32)
-            }
-            24 => {
-                let source = vm.read_string(args[0])?;
-                let mut length = 0;
-                for _ in 0..args[1] {
-                    if length == source.len() {
-                        break;
-                    }
-                    length += strings::character_width(&source[length..]);
-                }
-                vm.write(args[0].wrapping_add(length as u32), &[0, 0])?;
-                NativeReturn::Value(length as u32)
-            }
-            40 => NativeReturn::Value(
-                (strings::character_width(vm.read_string(args[0])?) == 2) as u32,
-            ),
-            47 | 48 => {
-                let source = if index == 48 {
-                    strings::format(vm, args[0], 0)?
-                } else {
-                    vm.read_string(args[0])?.to_vec()
-                };
-                let mut length = 0;
-                let mut count = 0;
-                while length < source.len() {
-                    length += strings::character_width(&source[length..]);
-                    count += 1;
-                }
-                NativeReturn::Value(count)
-            }
-            38 => {
-                let separators = vm.read_string(args[2])?;
-                let mut decoded = Vec::new();
-                let mut p = 0;
-                while p < separators.len() {
-                    if separators[p..].starts_with(b"\\t") {
-                        decoded.push(b'\t');
-                        p += 2;
-                    } else {
-                        decoded.push(separators[p]);
-                        p += 1;
-                    }
-                }
-                let source = vm.read_string(args[1])?;
-                let length = source
-                    .iter()
-                    .position(|b| decoded.contains(b))
-                    .unwrap_or(source.len())
-                    .min(args[3].wrapping_sub(2) as usize);
-                let value = source[..length].to_vec();
-                write_string(vm, args[0], &value, 2)?;
-                NativeReturn::Value(length as u32)
-            }
-            41 => {
-                let value = strings::split(vm.read_string(args[1])?, vm.read_string(args[2])?);
-                vm.write(args[0], &value)?;
-                NativeReturn::Continue
-            }
-            42 => {
-                let value = strings::multi(vm, args[1], args[2] as i32)?.to_vec();
-                write_string(vm, args[0], &value, 2)?;
-                NativeReturn::Value((!value.is_empty()) as u32)
-            }
-            44 => {
-                vm.write(args[0], &[0])?;
-                let first = (args[2] as i32).max(0);
-                let last = if args[3] == u32::MAX {
-                    i32::MAX
-                } else {
-                    args[3] as i32
-                };
-                let value = strings::join(vm, args[1], first, last)?;
-                write_string(vm, args[0], &value, 1)?;
-                NativeReturn::Continue
-            }
-            // 状态已经由调用者初始化，原入口在已有数值区时同样保留它。
-            209 => NativeReturn::Continue,
-            210 => NativeReturn::Value(
-                self.state
-                    .shared
-                    .get(args[0] as usize)
-                    .copied()
-                    .unwrap_or(0) as u32,
-            ),
-            211 => {
-                if let Some(slot) = self.state.shared.get_mut(args[0] as usize) {
-                    *slot = args[1] as i32;
-                }
-                NativeReturn::Continue
-            }
-            212 => {
-                self.state.current = args[0] as i32;
-                NativeReturn::Continue
-            }
-            213 => {
-                let source = text::ascii(vm.read_string(args[0])?)?;
-                NativeReturn::Value(expression::eval_parameter(source, self.state)? as u32)
-            }
-            276 => {
-                self.state
-                    .strings
-                    .insert(args[0], vm.read_string(args[1])?.to_vec());
-                NativeReturn::Continue
-            }
-            277 => {
-                let string = self.state.strings.get(&args[0]);
-                write_string(vm, args[1], string.map_or(&[], Vec::as_slice), 1)?;
-                NativeReturn::Value(string.is_some() as u32)
-            }
-            278 => {
-                let string = text::expand(vm.read_string(args[0])?, &self.state.strings)?;
-                write_string(vm, args[0], &string, 2)?;
-                NativeReturn::Continue
-            }
-            45 => {
-                let old = vm.read_string(args[2])?.to_vec();
-                let replacement = vm.read_string(args[3])?.to_vec();
-                if old.is_empty() {
-                    return Err(Error::new(vm.pc, "KCS 字符串替换的查找串为空"));
-                }
-                vm.write(args[0], &[0])?;
-                let source = vm.read_string(args[1])?;
-                let mut output = Vec::new();
-                let mut p = 0;
-                while p < source.len() {
-                    if source[p..].starts_with(&old) {
-                        output.extend(&replacement);
-                        p += old.len();
-                    } else {
-                        output.push(source[p]);
-                        p += 1;
-                    }
-                    if output.len() > read::MAX_BYTES {
-                        return Err(Error::new(vm.pc, "KCS 字符串替换超过上限"));
-                    }
-                }
-                write_string(vm, args[0], &output, 1)?;
-                NativeReturn::Continue
-            }
-            519 => {
-                vm.write(args[0], &[0])?;
-                let words = text::arguments(vm.read_string(args[1])?)?;
-                let word = words.get(args[2] as usize);
-                if let Some(word) = word {
-                    write_string(vm, args[0], word, 2)?;
-                }
-                NativeReturn::Value(word.is_some() as u32)
-            }
-            516 => {
-                if args[0] != 0 && self.integer_maps.remove(&args[0]).is_none() {
-                    return Err(Error::new(vm.pc, "无效的 KCS 整数字典句柄"));
-                }
-                NativeReturn::Continue
-            }
-            517 | 518 => {
-                if args[0] == 0 {
-                    return Ok(if index == 517 {
-                        NativeReturn::Continue
-                    } else {
-                        NativeReturn::Value(u32::MAX)
-                    });
-                }
-                let entries = self
-                    .integer_maps
-                    .get_mut(&args[0])
-                    .ok_or_else(|| Error::new(vm.pc, "无效的 KCS 整数字典句柄"))?;
-                let key = vm.read_string(args[1])?;
-                if index == 518 {
-                    NativeReturn::Value(entries.get(key).copied().unwrap_or(u32::MAX))
-                } else {
-                    if entries.len() >= read::MAX_ITEMS && !entries.contains_key(key) {
-                        return Err(Error::new(vm.pc, "KCS 整数字典条目超过上限"));
-                    }
-                    entries.entry(key.to_vec()).or_insert(args[2]);
-                    NativeReturn::Continue
-                }
-            }
-            789 => NativeReturn::Value(self.configured_shared_slots),
-            _ => unreachable!(),
-        })
+        call_native(
+            self.state,
+            &mut self.host,
+            self.task_tree,
+            index,
+            arguments,
+            vm,
+        )
     }
+}
+
+/// 普通任务表的 native 分派；宿主状态由调用者长期持有。
+pub(crate) fn call_native(
+    state: &mut expression::State,
+    host: &mut HostState,
+    task_tree: Option<&TaskTree>,
+    index: u32,
+    arguments: &[u8],
+    vm: &mut Interpreter,
+) -> Result<NativeReturn> {
+    if matches!(index, 0 | 2 | 3) {
+        return Ok(NativeReturn::Continue);
+    }
+    if index == 4 {
+        return Ok(NativeReturn::Value(host.system_time_ms));
+    }
+    if index == 68 {
+        return Ok(NativeReturn::Value(host.task_id));
+    }
+    if index == 465 {
+        return Ok(NativeReturn::Value(host.debug_mode));
+    }
+    if index == 65 {
+        return Ok(NativeReturn::YieldVoid);
+    }
+    if index == 33 {
+        return Ok(NativeReturn::Value(host.random.next_integer()));
+    }
+    if index == 34 {
+        return Ok(NativeReturn::Value(host.random.next_float().to_bits()));
+    }
+    if matches!(index, 419 | 515) {
+        if host.integer_maps.len() + host.sequence_maps.len() >= read::MAX_ITEMS {
+            return Err(Error::new(vm.pc, "KCS 集合对象数量超过上限"));
+        }
+        let handle = host.next_collection_handle;
+        host.next_collection_handle = handle
+            .checked_add(1)
+            .ok_or_else(|| Error::new(vm.pc, "KCS 集合对象句柄耗尽"))?;
+        if index == 419 {
+            host.sequence_maps.insert(handle, Default::default());
+        } else {
+            host.integer_maps.insert(handle, BTreeMap::new());
+        }
+        return Ok(NativeReturn::Value(handle));
+    }
+    let count = match index {
+        1 | 6 | 17 | 18 | 25 | 26 | 40 | 47 | 48 | 71 | 209 | 210 | 212 | 213 | 278 | 319 | 75
+        | 393 | 420 | 421 | 516 => 1,
+        8 | 13..=16 | 19..=24 | 149 | 211 | 276 | 277 | 422 | 423 | 518 => 2,
+        50..=58 | 60 | 62..=64 => 1,
+        59 | 61 => 2,
+        38 | 44 | 45 => 4,
+        35..=37 | 41 | 42 | 517 | 519 => 3,
+        5 | 76 | 789 => 0,
+        _ => return Err(Error::new(vm.pc, format!("未支持的 KCS native {index}"))),
+    };
+    if arguments.len() != count * 4 {
+        return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+    }
+    let args: Vec<_> = arguments
+        .chunks_exact(4)
+        .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
+        .collect();
+    Ok(match index {
+        1 => {
+            host.debug_messages.push(strings::format(vm, args[0], 0)?);
+            NativeReturn::Continue
+        }
+        6 => NativeReturn::Value(args[0]),
+        393 => {
+            if host.menu_item_requests.len() >= read::MAX_ITEMS {
+                return Err(Error::new(vm.pc, "KCS 菜单请求数量超过上限"));
+            }
+            host.menu_item_requests.push(MenuItemRequest {
+                task_id: host.task_id,
+                command_id: 0x77,
+                value: args[0],
+            });
+            NativeReturn::Continue
+        }
+        420 => {
+            if args[0] != 0 && host.sequence_maps.remove(&args[0]).is_none() {
+                return Err(Error::new(vm.pc, "KCS 序列对象句柄无效"));
+            }
+            NativeReturn::Continue
+        }
+        421..=423 => {
+            if args[0] == 0 {
+                return Ok(if index == 423 {
+                    NativeReturn::Value(0)
+                } else {
+                    NativeReturn::Continue
+                });
+            }
+            let map = host
+                .sequence_maps
+                .get_mut(&args[0])
+                .ok_or_else(|| Error::new(vm.pc, "KCS 序列对象句柄无效"))?;
+            if index == 421 {
+                *map = Default::default();
+                NativeReturn::Continue
+            } else {
+                let source = strings::format(vm, args[1], 0)?;
+                if index == 422 {
+                    map.register(&source, host.sequence_name_mode)?;
+                    NativeReturn::Continue
+                } else {
+                    NativeReturn::Value(u32::from(map.contains(&source)?))
+                }
+            }
+        }
+        8 | 149 => {
+            let values = if index == 8 {
+                host.surface_size
+            } else {
+                host.pointer_position.map(|coordinate| coordinate as u32)
+            };
+            for (address, value) in args.iter().zip(values) {
+                vm.write(*address, &value.to_le_bytes())?;
+            }
+            NativeReturn::Continue
+        }
+        5 => NativeReturn::Value(host.task_time.wrapping_sub(host.task_origin)),
+        71 => {
+            vm.wait_for_message(args[0])?;
+            NativeReturn::YieldVoid
+        }
+        75 | 76 => {
+            let tree = task_tree.ok_or_else(|| Error::new(vm.pc, "KCS 宿主未提供任务树"))?;
+            hierarchy_query(
+                tree,
+                host.task_id,
+                index,
+                args.first().copied().unwrap_or(0),
+                vm.pc,
+            )?
+        }
+        35 => {
+            memory::copy(
+                vm,
+                args[0],
+                args[1],
+                read::sized(args[2], vm.pc)?,
+                host.memory_copy_mode,
+            )?;
+            NativeReturn::Continue
+        }
+        36 => {
+            let count = read::sized(args[2], vm.pc)?;
+            vm.read(args[0], count)?;
+            vm.write(args[0], &vec![args[1] as u8; count])?;
+            NativeReturn::Continue
+        }
+        37 => {
+            let value = args[1] as i32;
+            let mut digits = Vec::new();
+            // MIN 的绝对值仍为负数，负余数直接参与数字字节计算。
+            let mut n = value.wrapping_abs();
+            if n == 0 {
+                digits.push(b'0');
+            } else {
+                let mut group = 0;
+                while n != 0 {
+                    if group == 3 {
+                        digits.push(b',');
+                        group = 0;
+                    }
+                    digits.push(((n % 10) as u8).wrapping_add(b'0'));
+                    n /= 10;
+                    group += 1;
+                }
+                if value < 0 {
+                    digits.push(b'-');
+                } else if args[2] != 0 {
+                    digits.push(b'+');
+                }
+            }
+            digits.reverse();
+            write_string(vm, args[0], &digits, 2)?;
+            NativeReturn::Continue
+        }
+        319 => {
+            let shifted = numeric::float_ieee(1, args[0], 0.5f32.to_bits());
+            let rounded = numeric::native_math(15, &[shifted]);
+            NativeReturn::Value(numeric::convert(0x39, rounded))
+        }
+        50..=61 => {
+            let function = match index {
+                50..=55 => index - 44,
+                56..=61 => index - 43,
+                _ => unreachable!(),
+            };
+            let mut value = numeric::native_math(function, &args);
+            // 普通表调用 SSE2 precise pow，奇整数指数会清除 NaN 底数符号。
+            let exponent = args.get(1).copied().map(f32::from_bits).unwrap_or(0.0);
+            if index == 61
+                && f32::from_bits(args[0]).is_nan()
+                && exponent.abs() < 16_777_216.0
+                && exponent.fract() == 0.0
+                && exponent as i32 & 1 != 0
+            {
+                value &= 0x7fff_ffff;
+            }
+            NativeReturn::Value(value)
+        }
+        62 | 63 => {
+            let (multiplier, divisor) = if index == 62 {
+                (std::f32::consts::PI.to_bits(), 180.0f32.to_bits())
+            } else {
+                (180.0f32.to_bits(), std::f32::consts::PI.to_bits())
+            };
+            let product = numeric::float_ieee(3, args[0], multiplier);
+            NativeReturn::Value(numeric::float_ieee(4, product, divisor))
+        }
+        64 => NativeReturn::Value((args[0] as i32).wrapping_abs() as u32),
+        13 => {
+            let source = vm.read_string(args[1])?.to_vec();
+            if args[0] > args[1] && args[0] - args[1] <= source.len() as u32 {
+                return Err(Error::new(vm.pc, "KCS 字符串复制会覆盖尚未读取的源"));
+            }
+            write_string(vm, args[0], &source, 2)?;
+            NativeReturn::Value(args[0])
+        }
+        14 => {
+            let text = strings::format(vm, args[1], 0)?;
+            write_string(vm, args[0], &text, 2)?;
+            NativeReturn::Value(args[0])
+        }
+        15 => {
+            strings::append_raw(vm, args[0], args[1])?;
+            NativeReturn::Value(args[0])
+        }
+        16 => {
+            let source = strings::format(vm, args[1], 0)?;
+            let length = vm.read_string(args[0])?.len();
+            write_string(vm, args[0].wrapping_add(length as u32), &source, 2)?;
+            NativeReturn::Value(args[0])
+        }
+        17 => NativeReturn::Value(vm.read_string(args[0])?.len() as u32),
+        18 => NativeReturn::Value(strings::format(vm, args[0], 0)?.len() as u32),
+        19..=22 => {
+            let (left, right) = if index.is_multiple_of(2) {
+                (
+                    strings::format(vm, args[0], 0)?,
+                    strings::format(vm, args[1], 0)?,
+                )
+            } else {
+                (
+                    vm.read_string(args[1])?.to_vec(),
+                    vm.read_string(args[0])?.to_vec(),
+                )
+            };
+            NativeReturn::Value(strings::compare(&left, &right, index >= 21) as u32)
+        }
+        26 => NativeReturn::Value(strings::float32(&strings::format(vm, args[0], 0)?)),
+        25 => NativeReturn::Value(
+            text::integer_prefix(&strings::format(vm, args[0], 0)?).map_or(0, |(_, value)| value),
+        ),
+        23 => {
+            let source = vm.read_string(args[0])?;
+            let mut length = 0;
+            while length < source.len() {
+                let width = strings::character_width(&source[length..]);
+                if length + width >= args[1] as usize || length + width > source.len() {
+                    break;
+                }
+                length += width;
+            }
+            vm.write(args[0].wrapping_add(length as u32), &[0, 0])?;
+            NativeReturn::Value(length as u32)
+        }
+        24 => {
+            let source = vm.read_string(args[0])?;
+            let mut length = 0;
+            for _ in 0..args[1] {
+                if length == source.len() {
+                    break;
+                }
+                length += strings::character_width(&source[length..]);
+            }
+            vm.write(args[0].wrapping_add(length as u32), &[0, 0])?;
+            NativeReturn::Value(length as u32)
+        }
+        40 => NativeReturn::Value((strings::character_width(vm.read_string(args[0])?) == 2) as u32),
+        47 | 48 => {
+            let source = if index == 48 {
+                strings::format(vm, args[0], 0)?
+            } else {
+                vm.read_string(args[0])?.to_vec()
+            };
+            let mut length = 0;
+            let mut count = 0;
+            while length < source.len() {
+                length += strings::character_width(&source[length..]);
+                count += 1;
+            }
+            NativeReturn::Value(count)
+        }
+        38 => {
+            let separators = vm.read_string(args[2])?;
+            let mut decoded = Vec::new();
+            let mut p = 0;
+            while p < separators.len() {
+                if separators[p..].starts_with(b"\\t") {
+                    decoded.push(b'\t');
+                    p += 2;
+                } else {
+                    decoded.push(separators[p]);
+                    p += 1;
+                }
+            }
+            let source = vm.read_string(args[1])?;
+            let length = source
+                .iter()
+                .position(|b| decoded.contains(b))
+                .unwrap_or(source.len())
+                .min(args[3].wrapping_sub(2) as usize);
+            let value = source[..length].to_vec();
+            write_string(vm, args[0], &value, 2)?;
+            NativeReturn::Value(length as u32)
+        }
+        41 => {
+            let value = strings::split(vm.read_string(args[1])?, vm.read_string(args[2])?);
+            vm.write(args[0], &value)?;
+            NativeReturn::Continue
+        }
+        42 => {
+            let value = strings::multi(vm, args[1], args[2] as i32)?.to_vec();
+            write_string(vm, args[0], &value, 2)?;
+            NativeReturn::Value((!value.is_empty()) as u32)
+        }
+        44 => {
+            vm.write(args[0], &[0])?;
+            let first = (args[2] as i32).max(0);
+            let last = if args[3] == u32::MAX {
+                i32::MAX
+            } else {
+                args[3] as i32
+            };
+            let value = strings::join(vm, args[1], first, last)?;
+            write_string(vm, args[0], &value, 1)?;
+            NativeReturn::Continue
+        }
+        // 状态已经由调用者初始化，原入口在已有数值区时同样保留它。
+        209 => NativeReturn::Continue,
+        210 => NativeReturn::Value(state.shared.get(args[0] as usize).copied().unwrap_or(0) as u32),
+        211 => {
+            if let Some(slot) = state.shared.get_mut(args[0] as usize) {
+                *slot = args[1] as i32;
+            }
+            NativeReturn::Continue
+        }
+        212 => {
+            state.current = args[0] as i32;
+            NativeReturn::Continue
+        }
+        213 => {
+            let source = text::ascii(vm.read_string(args[0])?)?;
+            NativeReturn::Value(expression::eval_parameter(source, state)? as u32)
+        }
+        276 => {
+            state
+                .strings
+                .insert(args[0], vm.read_string(args[1])?.to_vec());
+            NativeReturn::Continue
+        }
+        277 => {
+            let string = state.strings.get(&args[0]);
+            write_string(vm, args[1], string.map_or(&[], Vec::as_slice), 1)?;
+            NativeReturn::Value(string.is_some() as u32)
+        }
+        278 => {
+            let string = text::expand(vm.read_string(args[0])?, &state.strings)?;
+            write_string(vm, args[0], &string, 2)?;
+            NativeReturn::Continue
+        }
+        45 => {
+            let old = vm.read_string(args[2])?.to_vec();
+            let replacement = vm.read_string(args[3])?.to_vec();
+            if old.is_empty() {
+                return Err(Error::new(vm.pc, "KCS 字符串替换的查找串为空"));
+            }
+            vm.write(args[0], &[0])?;
+            let source = vm.read_string(args[1])?;
+            let mut output = Vec::new();
+            let mut p = 0;
+            while p < source.len() {
+                if source[p..].starts_with(&old) {
+                    output.extend(&replacement);
+                    p += old.len();
+                } else {
+                    output.push(source[p]);
+                    p += 1;
+                }
+                if output.len() > read::MAX_BYTES {
+                    return Err(Error::new(vm.pc, "KCS 字符串替换超过上限"));
+                }
+            }
+            write_string(vm, args[0], &output, 1)?;
+            NativeReturn::Continue
+        }
+        519 => {
+            vm.write(args[0], &[0])?;
+            let words = text::arguments(vm.read_string(args[1])?)?;
+            let word = words.get(args[2] as usize);
+            if let Some(word) = word {
+                write_string(vm, args[0], word, 2)?;
+            }
+            NativeReturn::Value(word.is_some() as u32)
+        }
+        516 => {
+            if args[0] != 0 && host.integer_maps.remove(&args[0]).is_none() {
+                return Err(Error::new(vm.pc, "无效的 KCS 整数字典句柄"));
+            }
+            NativeReturn::Continue
+        }
+        517 | 518 => {
+            if args[0] == 0 {
+                return Ok(if index == 517 {
+                    NativeReturn::Continue
+                } else {
+                    NativeReturn::Value(u32::MAX)
+                });
+            }
+            let entries = host
+                .integer_maps
+                .get_mut(&args[0])
+                .ok_or_else(|| Error::new(vm.pc, "无效的 KCS 整数字典句柄"))?;
+            let key = vm.read_string(args[1])?;
+            if index == 518 {
+                NativeReturn::Value(entries.get(key).copied().unwrap_or(u32::MAX))
+            } else {
+                if entries.len() >= read::MAX_ITEMS && !entries.contains_key(key) {
+                    return Err(Error::new(vm.pc, "KCS 整数字典条目超过上限"));
+                }
+                entries.entry(key.to_vec()).or_insert(args[2]);
+                NativeReturn::Continue
+            }
+        }
+        789 => NativeReturn::Value(host.configured_shared_slots),
+        _ => unreachable!(),
+    })
 }
 
 fn write_string(

@@ -19,6 +19,9 @@ impl Default for Control {
 
 impl Control {
     /// 对象处理器返回 true 后执行基类命令；false 表示当前分支被消费。
+    ///
+    /// 返回值表示是否允许按 `data[2]` 继续向子树传播：未识别的编号返回 true，已处理的
+    /// 基类命令和已有删除标记的对象返回 false。
     pub fn dispatch(
         &mut self,
         kind: u32,

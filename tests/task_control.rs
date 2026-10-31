@@ -114,13 +114,16 @@ fn routed_pause_updates_the_ordinary_task_clock_and_consumes_the_branch() {
             &mut output,
             |tree, command, output| {
                 calls.push(command.target);
-                assert!(task.dispatch_control(
-                    tree.node(command.target).unwrap().kind,
-                    command,
-                    output,
-                    &mut host,
-                    100,
-                )?);
+                assert!(
+                    task.dispatch_control(
+                        tree.node(command.target).unwrap().kind,
+                        command,
+                        output,
+                        &mut host,
+                        100,
+                    )?
+                    .done
+                );
                 Ok(false)
             }
         )
@@ -137,6 +140,7 @@ fn routed_pause_updates_the_ordinary_task_clock_and_consumes_the_branch() {
         assert!(
             task.dispatch_control(12, &command(code, value), &mut output, &mut host, 100,)
                 .unwrap()
+                .done
         );
     }
     assert_eq!(output, 12345);

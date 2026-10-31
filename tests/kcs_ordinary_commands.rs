@@ -84,6 +84,7 @@ fn deletion_notifies_before_marking_and_skips_subsequent_execution() {
         !task
             .dispatch_control(12, &command, &mut 0, &mut host, 1)
             .unwrap()
+            .done
     );
     assert_eq!(task.control.deletion_requested, 0);
     let mut message = [7, 8, 9, 10];
@@ -96,6 +97,7 @@ fn deletion_notifies_before_marking_and_skips_subsequent_execution() {
         if task
             .dispatch_control(12, &command, &mut 0, &mut host, 1)
             .unwrap()
+            .done
         {
             break;
         }
@@ -137,6 +139,7 @@ fn paused_vm_preserves_waiting_but_still_receives_queued_messages() {
     assert!(
         task.dispatch_control(12, &command, &mut 0, &mut host, 0)
             .unwrap()
+            .done
     );
     let pc = task.interpreter.pc;
     assert_eq!(task.interpreter.resume(&mut host, 0).unwrap(), Step::Paused);
@@ -161,6 +164,7 @@ fn paused_vm_preserves_waiting_but_still_receives_queued_messages() {
     assert!(
         task.dispatch_control(12, &command, &mut 0, &mut host, 0)
             .unwrap()
+            .done
     );
     task.enqueue_message([3, 4, 5, 6]).unwrap();
     assert!(task.update(40, 4, &mut host, 100).unwrap());
@@ -171,6 +175,7 @@ fn paused_vm_preserves_waiting_but_still_receives_queued_messages() {
     assert!(
         task.dispatch_control(12, &command, &mut 0, &mut host, 0)
             .unwrap()
+            .done
     );
     assert_eq!(task.interpreter.execution_mode(), 1);
     assert!(task.update(50, 5, &mut host, 100).unwrap());

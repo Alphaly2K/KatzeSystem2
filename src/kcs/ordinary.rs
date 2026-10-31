@@ -1,5 +1,5 @@
 use super::{Host, Interpreter, Program, TaskClock};
-use crate::task::{Command, Control};
+use crate::task::{Command, CommandOutcome, Control};
 use crate::{Error, Result, Step, read};
 
 enum UpdatePhase {
@@ -147,7 +147,7 @@ impl OrdinaryTask {
         Ok(())
     }
 
-    /// 分派基类控制及 162／163；完成后由路由处理器消费当前分支。
+    /// 分派基类控制及 162／163；完成后消费当前分支，未知编号返回诊断。
     pub fn dispatch_control(
         &mut self,
         kind: u32,
@@ -155,26 +155,50 @@ impl OrdinaryTask {
         output: &mut u32,
         host: &mut impl Host,
         budget: usize,
-    ) -> Result<bool> {
+    ) -> Result<CommandOutcome> {
         if command.code == 3 {
-            return self.request_delete(host, budget);
+            return Ok(if self.request_delete(host, budget)? {
+                CommandOutcome::finished(false)
+            } else {
+                CommandOutcome::RESUME
+            });
         }
         self.require_idle()?;
         if self.control.deletion_requested != 0 {
-            return Ok(true);
+            return Ok(CommandOutcome::finished(false));
         }
         match command.code {
             162 => self.start_execution(command.data[0], command.data[1])?,
             163 => self.stop_execution()?,
+            // 25／26 在目标 VM 中读写原始创建上下文，正文最多 31 字节；零指针跳过。
+            25 => {
+                let address = command.data[1];
+                if address != 0 {
+                    let mut buffer = vec![0; self.creation_context.len() + 1];
+                    self.copy_creation_context(Some(&mut buffer))?;
+                    self.interpreter.write(address, &buffer)?;
+                }
+            }
+            26 => {
+                let address = command.data[1];
+                if address != 0 {
+                    let context = self.interpreter.read_string(address)?.to_vec();
+                    self.set_creation_context(Some(&context))?;
+                }
+            }
             13 | 17 | 23 | 24 | 29 => {
-                self.control
-                    .dispatch(kind, &mut self.clock, command, output, |_, _, _, _| {
-                        Ok(true)
-                    })?;
+                let propagate = self.control.dispatch(
+                    kind,
+                    &mut self.clock,
+                    command,
+                    output,
+                    |_, _, _, _| Ok(true),
+                )?;
+                return Ok(CommandOutcome::finished(propagate));
             }
             _ => return Err(Error::new(self.interpreter.pc, "未支持的普通任务控制命令")),
         }
-        Ok(true)
+        Ok(CommandOutcome::finished(false))
     }
 
     /// 同步消息分派；false 表示继续传入同一消息和 output 续跑。

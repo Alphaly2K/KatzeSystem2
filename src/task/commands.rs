@@ -2,7 +2,7 @@ use super::TaskTree;
 use crate::{Error, Result, read};
 use std::ops::Bound::{Excluded, Unbounded};
 
-/// 任务命令的六个 DWORD；data[2] 在直接分派中控制向后代传播。
+/// 任务命令的六个 DWORD；`data[2]` 在直接分派中控制向后代传播。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Command {
     pub target: u32,
@@ -11,13 +11,41 @@ pub struct Command {
     pub data: [u32; 3],
 }
 
+/// 一次对象命令分派的结果。
+///
+/// 完成状态与传播状态分开表达：处理器可以在预算耗尽后由调用者续跑，也可以在完成时消费
+/// 当前分支，两者不是同一个布尔值。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CommandOutcome {
+    /// 本次调用已完成；`false` 表示预算耗尽，需要以同一命令续跑。
+    pub done: bool,
+    /// 是否允许按 `data[2]` 继续向子树传播。
+    pub propagate: bool,
+}
+
+impl CommandOutcome {
+    /// 已完成的命令；`propagate` 按基类消费规则给出。
+    pub const fn finished(propagate: bool) -> Self {
+        Self {
+            done: true,
+            propagate,
+        }
+    }
+
+    /// 预算耗尽，等待同一命令续跑。
+    pub const RESUME: Self = Self {
+        done: false,
+        propagate: false,
+    };
+}
+
 enum Mode {
     Direct,
     Broadcast(Option<u32>),
 }
 
 impl TaskTree {
-    /// handler 返回 false 时结束当前分支，true 时按 data[2] 继续。
+    /// handler 返回 false 时结束当前分支，true 时按 `data[2]` 继续。
     pub fn dispatch(
         &mut self,
         origin: u32,
@@ -26,15 +54,8 @@ impl TaskTree {
         mut handler: impl FnMut(&mut Self, &Command, &mut u32) -> Result<bool>,
     ) -> Result<bool> {
         self.check_command(origin, command.code)?;
-        let mut scope = origin;
-        loop {
-            if self.find_in_subtree(scope, command.target).is_some() {
-                break;
-            }
-            match self.node(scope).unwrap().parent {
-                Some(parent) => scope = parent,
-                None => return Ok(false),
-            }
+        if self.find_reachable(origin, command.target).is_none() {
+            return Ok(false);
         }
         self.traverse(command.target, command, output, Mode::Direct, &mut handler)?;
         Ok(true)

@@ -18,14 +18,17 @@ mod strings;
 mod system_host;
 mod task_host;
 pub use crate::task::TaskClock;
-pub use host::{CoreHost, MenuItemRequest};
+pub use host::{CoreHost, HostState, MenuItemRequest};
+pub(crate) use host::{call_native, hierarchy_query};
 pub use memory::MemoryCopyMode;
+pub(crate) use memory::copy as copy_memory;
 pub use motion::{MotionHost, MotionState, MotionTask};
 pub use ordinary::OrdinaryTask;
 pub use particle::{ParticleHost, ParticleSource, ParticleTask, ParticleVertex};
 pub use queue::MotionQueue;
 pub use random::ScriptRandom;
 pub use resource_host::{ResourceHost, ResourceServices};
+pub(crate) use strings::format as format_string;
 pub use system_host::{SystemHost, SystemServices};
 pub use task_host::{TaskHost, TaskServices};
 
@@ -219,6 +222,24 @@ pub trait Host {
     fn set_task_id(&mut self, _id: u32) {}
 
     fn set_task_context(&mut self, _context: &[u8]) {}
+}
+
+impl<T: Host + ?Sized> Host for &mut T {
+    fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn> {
+        (**self).call(index, arguments, vm)
+    }
+
+    fn set_task_clock(&mut self, clock: &TaskClock) {
+        (**self).set_task_clock(clock);
+    }
+
+    fn set_task_id(&mut self, id: u32) {
+        (**self).set_task_id(id);
+    }
+
+    fn set_task_context(&mut self, context: &[u8]) {
+        (**self).set_task_context(context);
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

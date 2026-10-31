@@ -6,7 +6,7 @@ mod commands;
 mod control;
 mod lifecycle;
 pub use clock::TaskClock;
-pub use commands::Command;
+pub use commands::{Command, CommandOutcome};
 pub use control::Control;
 pub use lifecycle::Lifecycle;
 
@@ -82,6 +82,17 @@ impl TaskTree {
                 return Some(target);
             }
             node = self.node(node.parent?)?;
+        }
+    }
+
+    /// 从 origin 自身的子树索引开始沿父指针查找，用于命令和 VM 访问的可达性判断。
+    pub fn find_reachable(&self, origin: u32, id: u32) -> Option<&TaskNode> {
+        let mut scope = origin;
+        loop {
+            if let Some(node) = self.find_in_subtree(scope, id) {
+                return Some(node);
+            }
+            scope = self.node(scope).and_then(|node| node.parent)?;
         }
     }
 

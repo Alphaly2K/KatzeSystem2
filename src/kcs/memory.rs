@@ -10,7 +10,7 @@ pub enum MemoryCopyMode {
     Mmx,
 }
 
-pub(super) fn copy(
+pub(crate) fn copy(
     vm: &mut Interpreter,
     destination: u32,
     source: u32,
