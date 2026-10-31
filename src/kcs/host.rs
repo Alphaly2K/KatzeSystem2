@@ -10,6 +10,8 @@ pub struct CoreHost<'a> {
     pub debug_messages: Vec<Vec<u8>>,
     pub task_time: u32,
     pub task_origin: u32,
+    pub task_id: u32,
+    pub system_time_ms: u32,
     pub random: ScriptRandom,
     integer_maps: BTreeMap<u32, BTreeMap<Vec<u8>, u32>>,
     next_map_handle: u32,
@@ -22,6 +24,8 @@ impl<'a> CoreHost<'a> {
             debug_messages: Vec::new(),
             task_time: 0,
             task_origin: 0,
+            task_id: 0,
+            system_time_ms: 0,
             random: ScriptRandom::default(),
             integer_maps: BTreeMap::new(),
             next_map_handle: 1,
@@ -36,6 +40,10 @@ impl<'a> CoreHost<'a> {
 }
 
 impl Host for CoreHost<'_> {
+    fn set_task_id(&mut self, id: u32) {
+        self.task_id = id;
+    }
+
     fn set_task_clock(&mut self, clock: &TaskClock) {
         CoreHost::set_task_clock(self, clock);
     }
@@ -43,6 +51,12 @@ impl Host for CoreHost<'_> {
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn> {
         if matches!(index, 0 | 2 | 3) {
             return Ok(NativeReturn::Continue);
+        }
+        if index == 4 {
+            return Ok(NativeReturn::Value(self.system_time_ms));
+        }
+        if index == 68 {
+            return Ok(NativeReturn::Value(self.task_id));
         }
         if index == 65 {
             return Ok(NativeReturn::YieldVoid);

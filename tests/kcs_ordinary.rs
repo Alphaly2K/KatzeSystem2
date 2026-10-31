@@ -144,3 +144,28 @@ fn implicit_code_end_stops_on_the_following_update_across_budget_resumption() {
         assert_eq!(task.accumulated_increment, 3);
     }
 }
+
+#[test]
+fn shared_host_receives_each_task_id_and_keeps_system_milliseconds_independent() {
+    let mut code = Vec::new();
+    for (native, target) in [(68, 0), (5, 4), (4, 8)] {
+        ins(&mut code, 0x2b, &[(3, native), (3, 0)]);
+        ins(&mut code, 0x26, &[(3, target)]);
+    }
+    code.push(0x3b);
+    let program = Program::from_code(&code, vec![0; 16], 64).unwrap();
+    let mut state = State::new(8);
+    let mut host = CoreHost::new(&mut state);
+    for (task_id, origin, now, system_time_ms, elapsed) in [
+        (0xdead_beef, 10, 100, u32::MAX, 90),
+        (0x8000_0000, u32::MAX, 5, 0, 6),
+    ] {
+        let mut task = OrdinaryTask::new(program.clone(), vec![]).unwrap();
+        task.task_id = task_id;
+        task.clock.origin = origin;
+        host.system_time_ms = system_time_ms;
+        assert!(task.update(now, 1, &mut host, 100).unwrap());
+        assert_eq!(values(&task), [task_id, elapsed, system_time_ms, 0]);
+        assert_eq!(task.running, 0);
+    }
+}

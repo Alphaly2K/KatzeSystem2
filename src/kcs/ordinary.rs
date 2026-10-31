@@ -11,6 +11,7 @@ pub struct OrdinaryTask {
     pub interpreter: Interpreter,
     pub clock: TaskClock,
     pub running: i32,
+    pub task_id: u32,
     pub accumulated_increment: u32,
     messages: Vec<[u32; 4]>,
     phase: Option<UpdatePhase>,
@@ -22,6 +23,7 @@ impl OrdinaryTask {
             interpreter: Interpreter::new(program, external)?,
             clock: TaskClock::default(),
             running: 1,
+            task_id: 0,
             accumulated_increment: 0,
             messages: Vec::new(),
             phase: None,
@@ -64,6 +66,7 @@ impl OrdinaryTask {
             self.phase = Some(UpdatePhase::Messages(0));
         }
         host.set_task_clock(&self.clock);
+        host.set_task_id(self.task_id);
         while let Some(UpdatePhase::Messages(index)) = self.phase {
             if index == self.messages.len() {
                 self.messages.clear();

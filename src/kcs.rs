@@ -207,6 +207,8 @@ pub trait Host {
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn>;
 
     fn set_task_clock(&mut self, _clock: &TaskClock) {}
+
+    fn set_task_id(&mut self, _id: u32) {}
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
