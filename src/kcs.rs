@@ -1,6 +1,7 @@
 use crate::{Error, Result, Step, read};
 use std::collections::BTreeMap;
 
+mod clock;
 mod host;
 mod matrix;
 mod motion;
@@ -10,6 +11,7 @@ mod queue;
 mod random;
 mod sse;
 mod strings;
+pub use clock::TaskClock;
 pub use host::CoreHost;
 pub use motion::{MotionHost, MotionState, MotionTask};
 pub use particle::{ParticleHost, ParticleSource, ParticleTask, ParticleVertex};

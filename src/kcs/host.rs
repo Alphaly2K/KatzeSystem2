@@ -1,4 +1,4 @@
-use super::{Host, Interpreter, NativeReturn};
+use super::{Host, Interpreter, NativeReturn, TaskClock};
 use super::{numeric, strings};
 use crate::{Error, Result, expression, read, text};
 
@@ -20,6 +20,11 @@ impl<'a> CoreHost<'a> {
             task_origin: 0,
             state,
         }
+    }
+
+    pub fn set_task_clock(&mut self, clock: &TaskClock) {
+        self.task_origin = clock.origin;
+        self.task_time = clock.time;
     }
 }
 
