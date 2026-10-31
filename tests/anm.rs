@@ -11,6 +11,21 @@ fn ins(opcode: u32, args: &[(u32, i32)]) -> anm::Instruction {
     anm::Instruction { opcode, operands }
 }
 
+fn container(instructions: &[anm::Instruction]) -> Vec<u8> {
+    let mut bytes = b"ANM\0".to_vec();
+    bytes.extend(0u32.to_le_bytes());
+    bytes.extend((instructions.len() as u32).to_le_bytes());
+    bytes.resize(32, 0);
+    for instruction in instructions {
+        bytes.extend(instruction.opcode.to_le_bytes());
+        for operand in instruction.operands {
+            bytes.extend(operand.kind.to_le_bytes());
+            bytes.extend(operand.value.to_le_bytes());
+        }
+    }
+    bytes
+}
+
 #[test]
 fn random_ranges_exclude_upper_bound_and_keep_wrapping_order() {
     for (low, high, random, expected, draws) in [
@@ -295,4 +310,86 @@ fn object_clock_initializes_zero_origins_and_restart_preserves_variables_and_tim
         (timeline.origin, timeline.interpreter.display.image),
         (104, 10)
     );
+}
+
+#[test]
+fn image_animation_reload_replaces_runtime_but_keeps_object_controls_and_failed_load_cache() {
+    let mut bytes = container(&[ins(11, &[(0, 2)]), ins(0, &[(1, 2), (0, 5), (0, 5)])]);
+    bytes.extend(b"tail");
+    let mut image = anm::ImageAnimation::default();
+    image.playing = 2;
+    image.reset_time_on_update = true;
+    image.time = 123;
+    image.load(&bytes, 42).unwrap();
+    image.timeline.as_mut().unwrap().speed = 0.5;
+    image.timeline.as_mut().unwrap().interpreter.variables[5] = 77;
+    assert!(image.update(100, 100, false).unwrap());
+    assert_eq!(image.frame_change(), Some(42));
+    assert_eq!(image.time, 100);
+    image.reset_time_on_update = true;
+    image.load(&bytes, 7).unwrap();
+    let timeline = image.timeline.as_ref().unwrap();
+    assert_eq!((timeline.origin, timeline.speed), (0, 1.0));
+    assert_eq!(timeline.interpreter.variables, [0; 64]);
+    assert_eq!(
+        (image.time, image.playing, image.reset_time_on_update),
+        (100, 2, true)
+    );
+    assert_eq!(image.display(), anm::DisplayState::default());
+    assert!(image.update(112, 100, false).unwrap());
+    assert_eq!(image.display().image, 7);
+    let cached = image.display();
+    assert!(image.load(&bytes[..bytes.len() - 5], 99).is_err());
+    assert!(image.timeline.is_none());
+    assert_eq!(image.display(), cached);
+    assert!(image.update(999, 0, false).unwrap());
+    assert_eq!(image.frame_change(), None);
+    assert_eq!((image.time, image.playing), (112, 2));
+}
+
+#[test]
+fn image_animation_budget_resume_preserves_sentinel_selection_and_delays_cached_display() {
+    let bytes = container(&[
+        ins(16, &[(0, 0), (0, 1)]),
+        ins(12, &[(0, 70)]),
+        ins(0, &[(0, 7), (0, 2), (0, 5)]),
+    ]);
+    let mut image = anm::ImageAnimation::default();
+    image.load(&bytes, 77).unwrap();
+    image.reset_time_on_update = true;
+    assert!(image.update(100, 100, true).unwrap());
+    assert!(image.reset_time_on_update);
+    image.playing = 1;
+    let mut draws = 0;
+    let mut random = || {
+        draws += 1;
+        1
+    };
+    assert!(
+        !image
+            .update_with_random(u32::MAX, 1, true, &mut random)
+            .unwrap()
+    );
+    assert_eq!(image.display(), anm::DisplayState::default());
+    image.playing = 0;
+    assert!(
+        !image
+            .update_with_random(999, 1, false, &mut random)
+            .unwrap()
+    );
+    assert!(
+        image
+            .update_with_random(999, 1, false, &mut random)
+            .unwrap()
+    );
+    assert_eq!(draws, 1);
+    assert_eq!(image.frame_change(), Some(10000));
+    assert_eq!(image.display().blend, 70);
+    assert_eq!(image.time, u32::MAX);
+    let timeline = image.timeline.as_ref().unwrap();
+    assert_eq!(timeline.interpreter.display.image, 7);
+    assert_eq!(timeline.interpreter.variables[0], 1);
+    assert_eq!((timeline.origin, timeline.duration), (u32::MAX, 3));
+    assert!(image.update(999, 0, true).unwrap());
+    assert_eq!(image.frame_change(), None);
 }

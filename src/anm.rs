@@ -1,6 +1,8 @@
 use crate::{Error, Result, Step, read};
 
+mod image;
 mod timeline;
+pub use image::ImageAnimation;
 pub use timeline::Timeline;
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -26,11 +28,7 @@ impl Program {
             return Err(Error::new(0, "无效 ANM 容器"));
         }
         let n = read::u32_at(data, 8)? as usize;
-        if data.len() < 32
-            || n == 0
-            || n != (data.len() - 32) / 68
-            || !(data.len() - 32).is_multiple_of(68)
-        {
+        if data.len() < 32 || n == 0 || n > (data.len() - 32) / 68 {
             return Err(Error::new(8, "ANM 指令数量与长度不匹配"));
         }
         let mut instructions = Vec::new();
