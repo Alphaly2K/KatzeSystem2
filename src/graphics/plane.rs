@@ -1,10 +1,10 @@
-use super::Drawables;
+use super::{Drawable, Drawables, drawable::arithmetic};
 use crate::kcs::{Host, Interpreter};
 use crate::runtime::{ObjectFactory, TaskObject, kind};
-use crate::task::{Command, CommandOutcome, Control, TaskClock};
+use crate::task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock};
 use crate::{Error, Result};
 
-/// 二维平面任务的基础生命周期和不携带指针的绘图属性命令。
+/// 二维平面任务的基础生命周期、图元及绘图属性命令。
 pub struct PlaneObject {
     id: u32,
     control: Control,
@@ -13,6 +13,9 @@ pub struct PlaneObject {
     update_property: u32,
     blend_mode: u32,
     creation_flags: u32,
+    offset: [f32; 2],
+    size: [f32; 2],
+    shape_kind: u32,
 }
 
 impl PlaneObject {
@@ -25,6 +28,9 @@ impl PlaneObject {
             update_property: 1,
             blend_mode: 0,
             creation_flags: 1,
+            offset: [0.0; 2],
+            size: [0.0; 2],
+            shape_kind: 0,
         }
     }
 
@@ -42,6 +48,48 @@ impl PlaneObject {
 
     pub fn creation_flags(&self) -> u32 {
         self.creation_flags
+    }
+
+    pub fn offset(&self) -> [f32; 2] {
+        self.offset
+    }
+
+    pub fn size(&self) -> [f32; 2] {
+        self.size
+    }
+
+    pub fn shape_kind(&self) -> u32 {
+        self.shape_kind
+    }
+
+    fn forward(
+        &self,
+        code: u32,
+        command: &Command,
+        buffers: &mut CommandBuffers<'_>,
+        output: &mut u32,
+        host: &mut dyn Host,
+    ) -> Result<()> {
+        let mut previous = None;
+        let mut visits = 0;
+        while let Some(target) = host.next_task_child(previous)? {
+            visits += 1;
+            if visits > crate::read::MAX_ITEMS {
+                return Err(Error::new(0, "二维子任务传播超过上限"));
+            }
+            previous = Some(target);
+            host.dispatch_task_command(
+                Command {
+                    target,
+                    sender: self.id,
+                    code,
+                    data: command.data,
+                },
+                buffers,
+                output,
+            )?;
+        }
+        Ok(())
     }
 }
 
@@ -90,6 +138,25 @@ impl TaskObject for PlaneObject {
         command: &Command,
         output: &mut u32,
         host: &mut dyn Host,
+        budget: usize,
+    ) -> Result<CommandOutcome> {
+        self.dispatch_command_with_buffers(
+            kind,
+            command,
+            &mut CommandBuffers::default(),
+            output,
+            host,
+            budget,
+        )
+    }
+
+    fn dispatch_command_with_buffers(
+        &mut self,
+        kind: u32,
+        command: &Command,
+        buffers: &mut CommandBuffers<'_>,
+        output: &mut u32,
+        host: &mut dyn Host,
         _budget: usize,
     ) -> Result<CommandOutcome> {
         if self.control.deletion_requested != 0 {
@@ -99,8 +166,72 @@ impl TaskObject for PlaneObject {
         match command.code {
             3 | 68 => {
                 drawings(host)?.remove(id);
+                if command.code == 68 {
+                    self.size = [0.0; 2];
+                }
                 if command.code == 3 {
                     self.control.deletion_requested = 1;
+                }
+            }
+            42 | 45 => {
+                drawings(host)?.remove(id);
+                let drawable = if command.code == 42 {
+                    let words = words::<8>(buffers.data1.as_deref())?;
+                    Drawable::rectangle(
+                        [
+                            f32::from_bits(words[0]),
+                            f32::from_bits(words[1]),
+                            f32::from_bits(words[2]),
+                        ],
+                        [f32::from_bits(words[3]), f32::from_bits(words[4])],
+                        words[7],
+                    )
+                } else {
+                    Drawable::default()
+                };
+                if self.creation_flags == 1 {
+                    let bounds = drawable.bounds();
+                    self.offset = [0.0; 2];
+                    self.size =
+                        std::array::from_fn(|i| arithmetic(2, bounds[1][i], bounds[0][i]).abs());
+                    self.shape_kind = if command.code == 42 { 2 } else { 5 };
+                    drawings(host)?.insert(id, drawable)?;
+                }
+            }
+            49 | 51 | 55 | 66 => {
+                let value = words::<3>(buffers.data1.as_deref())?.map(f32::from_bits);
+                let drawings = drawings(host)?;
+                let next = match command.code {
+                    49 => {
+                        drawings.set_base_point(id, value);
+                        50
+                    }
+                    51 => {
+                        drawings.set_position(id, value);
+                        52
+                    }
+                    55 => {
+                        drawings.set_rotation(id, value);
+                        56
+                    }
+                    _ => {
+                        drawings.set_scale(id, value);
+                        67
+                    }
+                };
+                self.forward(next, command, buffers, output, host)?;
+            }
+            50 | 52 | 56 | 58 | 67 => {
+                self.forward(command.code, command, buffers, output, host)?;
+            }
+            61 | 62 => {
+                if let Some(drawable) = drawings(host)?.get(id) {
+                    let value = if command.code == 61 {
+                        drawable.transform().base_point()
+                    } else {
+                        drawable.transform().position()
+                    };
+                    write_words(buffers.data1.as_deref_mut(), &value.map(f32::to_bits))?;
                 }
             }
             59 => {
@@ -110,6 +241,24 @@ impl TaskObject for PlaneObject {
                 drawings(host)?.set_alpha(id, command.data[1]);
             }
             74 => *output = self.input_state,
+            75 => {
+                write_words(buffers.data0.as_deref_mut(), &[self.size[0].to_bits()])?;
+                write_words(buffers.data1.as_deref_mut(), &[self.size[1].to_bits()])?;
+            }
+            76 => {
+                write_words(
+                    buffers.data0.as_deref_mut(),
+                    &[self.offset[0].to_bits(), self.offset[1].to_bits(), 0],
+                )?;
+                write_words(
+                    buffers.data1.as_deref_mut(),
+                    &[
+                        arithmetic(1, self.size[0], self.offset[0]).to_bits(),
+                        arithmetic(1, self.size[1], self.offset[1]).to_bits(),
+                        0,
+                    ],
+                )?;
+            }
             78 => self.update_property = command.data[1],
             81 => {
                 let value = command.data[1];
@@ -117,6 +266,11 @@ impl TaskObject for PlaneObject {
                 drawings(host)?.set_blend_mode(id, value);
             }
             84 => self.creation_flags = command.data[1],
+            57 => {
+                let value = words::<16>(buffers.data1.as_deref())?.map(f32::from_bits);
+                drawings(host)?.set_matrix(id, value);
+                self.forward(58, command, buffers, output, host)?;
+            }
             60 | 71 | 85 | 86 => {}
             4 | 7 | 8 | 41..=99 | 591 | 592 => {
                 return Err(Error::new(
@@ -157,6 +311,25 @@ impl TaskObject for PlaneObject {
         self.control.deletion_requested = 1;
         Ok(true)
     }
+}
+
+fn words<const N: usize>(buffer: Option<&[u8]>) -> Result<[u32; N]> {
+    let bytes = buffer
+        .filter(|b| b.len() >= N * 4)
+        .ok_or_else(|| Error::new(0, "对象命令输入缓冲区缺失或过短"))?;
+    Ok(std::array::from_fn(|i| {
+        u32::from_le_bytes(bytes[i * 4..i * 4 + 4].try_into().unwrap())
+    }))
+}
+
+fn write_words(buffer: Option<&mut [u8]>, words: &[u32]) -> Result<()> {
+    let bytes = buffer
+        .filter(|b| b.len() >= words.len() * 4)
+        .ok_or_else(|| Error::new(0, "对象命令输出缓冲区缺失或过短"))?;
+    for (value, bytes) in words.iter().zip(bytes.chunks_exact_mut(4)) {
+        bytes.copy_from_slice(&value.to_le_bytes());
+    }
+    Ok(())
 }
 
 fn drawings(host: &mut dyn Host) -> Result<&mut Drawables> {

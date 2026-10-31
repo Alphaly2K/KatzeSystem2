@@ -141,7 +141,7 @@ impl TaskTree {
         Ok(())
     }
 
-    fn next_child(&self, id: u32, previous: Option<i32>) -> Option<u32> {
+    pub(crate) fn next_child(&self, id: u32, previous: Option<i32>) -> Option<u32> {
         let children = &self.node(id)?.children;
         let child = match previous {
             Some(previous) => children

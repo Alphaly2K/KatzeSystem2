@@ -6,7 +6,7 @@ mod commands;
 mod control;
 mod lifecycle;
 pub use clock::TaskClock;
-pub use commands::{Command, CommandOutcome};
+pub use commands::{Command, CommandBuffers, CommandOutcome};
 pub use control::Control;
 pub use lifecycle::Lifecycle;
 

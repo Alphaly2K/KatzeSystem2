@@ -1,5 +1,5 @@
 use crate::kcs::{Host, Interpreter, OrdinaryTask};
-use crate::task::{Command, CommandOutcome, Control, TaskClock};
+use crate::task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock};
 use crate::{Error, Result};
 
 /// 任务树中的对象协议。图形、音频、输入等类型由对应子系统提供实现。
@@ -36,6 +36,19 @@ pub trait TaskObject {
         host: &mut dyn Host,
         budget: usize,
     ) -> Result<CommandOutcome>;
+
+    /// 携带显式数据缓冲区的同一命令协议；纯标量处理器继续使用普通入口。
+    fn dispatch_command_with_buffers(
+        &mut self,
+        kind: u32,
+        command: &Command,
+        _buffers: &mut CommandBuffers<'_>,
+        output: &mut u32,
+        host: &mut dyn Host,
+        budget: usize,
+    ) -> Result<CommandOutcome> {
+        self.dispatch_command(kind, command, output, host, budget)
+    }
 
     /// 复制入队一条任务消息；不推进 VM。
     fn enqueue_message(&mut self, message: [u32; 4]) -> Result<()>;

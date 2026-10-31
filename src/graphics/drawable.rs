@@ -1,4 +1,5 @@
 use super::Transform;
+use crate::kcs::float_operation;
 use crate::{Error, Result, read};
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
@@ -15,6 +16,7 @@ pub struct Vertex {
 pub struct Drawable {
     transform: Transform,
     triangles: Vec<[Vertex; 3]>,
+    bounds: [[f32; 3]; 2],
     color: u32,
     color_enabled: u32,
     display: u32,
@@ -26,6 +28,7 @@ impl Default for Drawable {
         Self {
             transform: Transform::default(),
             triangles: Vec::new(),
+            bounds: [[0.0; 3]; 2],
             color: u32::MAX,
             color_enabled: 0,
             display: 0,
@@ -35,6 +38,28 @@ impl Default for Drawable {
 }
 
 impl Drawable {
+    /// 创建两个三角形组成的原始矩形，保留反向尺寸与退化边。
+    pub fn rectangle(at: [f32; 3], size: [f32; 2], color: u32) -> Self {
+        let right = arithmetic(1, at[0], size[0]);
+        let bottom = arithmetic(1, at[1], size[1]);
+        let vertex = |x, y| Vertex {
+            position: [x, y, at[2]],
+            color,
+        };
+        let top_left = vertex(at[0], at[1]);
+        let top_right = vertex(right, at[1]);
+        let bottom_left = vertex(at[0], bottom);
+        let bottom_right = vertex(right, bottom);
+        Self {
+            triangles: vec![
+                [top_left, top_right, bottom_right],
+                [top_left, bottom_left, bottom_right],
+            ],
+            bounds: [[at[0], at[1], 0.0], [right, bottom, 0.0]],
+            ..Self::default()
+        }
+    }
+
     pub fn new(triangles: Vec<[Vertex; 3]>) -> Result<Self> {
         if triangles.len() > read::MAX_BYTES / 48 {
             return Err(Error::new(0, "三角形顶点存储超过上限"));
@@ -51,6 +76,11 @@ impl Drawable {
 
     pub fn triangles(&self) -> &[[Vertex; 3]] {
         &self.triangles
+    }
+
+    /// 独立于顶点的原始边界；通用三角形列表初值为零，矩形保留其请求端点。
+    pub fn bounds(&self) -> [[f32; 3]; 2] {
+        self.bounds
     }
 
     /// 返回覆盖颜色及原始启用值；零值使用每个顶点自己的颜色。
@@ -82,6 +112,10 @@ impl Drawable {
             }
         }))
     }
+}
+
+pub(super) fn arithmetic(op: u8, left: f32, right: f32) -> f32 {
+    f32::from_bits(float_operation(op, left.to_bits(), right.to_bits()))
 }
 
 /// 按对象编号索引、按登记及优先级维护绘制顺序；任务编号不决定同级顺序。

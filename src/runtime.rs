@@ -10,10 +10,11 @@
 use crate::kcs::{
     Host, HostState, Interpreter, NativeReturn, OrdinaryTask, Program, TaskEffects, call_native,
 };
-use crate::task::{Command, Control, Lifecycle, TaskClock, TaskTree};
+use crate::task::{Command, CommandBuffers, Control, Lifecycle, TaskClock, TaskTree};
 use crate::{Error, Result, expression, read};
 use std::collections::BTreeMap;
 
+mod graphics;
 mod object;
 mod resources;
 
@@ -243,6 +244,16 @@ impl<F: ObjectFactory> Runtime<F> {
         route(self.store(), origin, command)
     }
 
+    /// 按同一路由分派带显式输入／输出缓冲区的对象命令。
+    pub fn dispatch_command_with_buffers(
+        &mut self,
+        origin: u32,
+        command: Command,
+        buffers: &mut CommandBuffers<'_>,
+    ) -> Result<u32> {
+        route_with_buffers(self.store(), origin, command, buffers)
+    }
+
     fn store(&mut self) -> Store<'_, F> {
         Store {
             numbers: &mut self.numbers,
@@ -308,7 +319,7 @@ fn create_object<F: ObjectFactory>(
 }
 
 /// 对象主体或命令的一次执行；由 [`run_nested`] 在对象已从存储中取出后派发。
-enum Execution<'a> {
+enum Execution<'a, 'b> {
     Body {
         increment: u32,
     },
@@ -319,6 +330,7 @@ enum Execution<'a> {
     Command {
         kind: u32,
         command: &'a Command,
+        buffers: &'a mut CommandBuffers<'b>,
         output: &'a mut u32,
         /// 预算续跑结束后的树传播结果。
         propagate: &'a mut bool,
@@ -350,7 +362,7 @@ struct Store<'a, F: ObjectFactory> {
 fn run_nested<F: ObjectFactory>(
     store: Store<'_, F>,
     target: u32,
-    execution: Execution<'_>,
+    execution: Execution<'_, '_>,
 ) -> Result<()> {
     let Store {
         numbers,
@@ -401,11 +413,18 @@ fn run_nested<F: ObjectFactory>(
             Execution::Command {
                 kind,
                 command,
+                buffers,
                 output,
                 propagate,
             } => drain(budget, limit, || {
-                let outcome =
-                    object.dispatch_command(kind, command, output, &mut nested, budget)?;
+                let outcome = object.dispatch_command_with_buffers(
+                    kind,
+                    command,
+                    buffers,
+                    output,
+                    &mut nested,
+                    budget,
+                )?;
                 *propagate = outcome.propagate;
                 Ok(outcome.done)
             }),
@@ -441,6 +460,27 @@ fn drain(budget: usize, limit: usize, mut step: impl FnMut() -> Result<bool>) ->
 
 /// 按树契约分派一条命令：可达性、目标改写与 `data[2]` 传播由 [`TaskTree::dispatch`] 负责。
 fn route<F: ObjectFactory>(store: Store<'_, F>, origin: u32, command: Command) -> Result<u32> {
+    route_with_buffers(store, origin, command, &mut CommandBuffers::default())
+}
+
+fn route_with_buffers<F: ObjectFactory>(
+    store: Store<'_, F>,
+    origin: u32,
+    command: Command,
+    buffers: &mut CommandBuffers<'_>,
+) -> Result<u32> {
+    let mut output = 0;
+    let found = route_command(store, origin, command, buffers, &mut output)?;
+    Ok(if found { output } else { 0 })
+}
+
+fn route_command<F: ObjectFactory>(
+    store: Store<'_, F>,
+    origin: u32,
+    command: Command,
+    buffers: &mut CommandBuffers<'_>,
+    output: &mut u32,
+) -> Result<bool> {
     let Store {
         numbers,
         host,
@@ -452,8 +492,7 @@ fn route<F: ObjectFactory>(store: Store<'_, F>, origin: u32, command: Command) -
         budget,
         limit,
     } = store;
-    let mut output = 0;
-    let found = tree.dispatch(origin, command, &mut output, |tree, command, output| {
+    tree.dispatch(origin, command, output, |tree, command, output| {
         let kind = tree.node(command.target).map_or(0, |node| node.kind);
         let mut propagate = false;
         run_nested(
@@ -472,13 +511,13 @@ fn route<F: ObjectFactory>(store: Store<'_, F>, origin: u32, command: Command) -
             Execution::Command {
                 kind,
                 command,
+                buffers,
                 output,
                 propagate: &mut propagate,
             },
         )?;
         Ok(propagate)
-    })?;
-    Ok(if found { output } else { 0 })
+    })
 }
 
 /// 执行中对象的宿主：普通表 native 委托 [`call_native`]，任务 native 使用对象存储。
@@ -540,8 +579,18 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
     }
 
     fn command_target(&mut self, target: u32, code: u32, data: [u32; 3]) -> Result<u32> {
+        self.command_target_with_buffers(target, code, data, &mut CommandBuffers::default())
+    }
+
+    fn command_target_with_buffers(
+        &mut self,
+        target: u32,
+        code: u32,
+        data: [u32; 3],
+        buffers: &mut CommandBuffers<'_>,
+    ) -> Result<u32> {
         let sender = self.host.task_id;
-        route(
+        route_with_buffers(
             self.store(),
             sender,
             Command {
@@ -550,6 +599,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                 code,
                 data,
             },
+            buffers,
         )
     }
 
@@ -711,6 +761,22 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         Some(&mut self.resources.drawables)
     }
 
+    fn next_task_child(&self, previous: Option<u32>) -> Result<Option<u32>> {
+        Ok(self
+            .tree
+            .next_child(self.host.task_id, previous.map(|id| id as i32)))
+    }
+
+    fn dispatch_task_command(
+        &mut self,
+        command: Command,
+        buffers: &mut CommandBuffers<'_>,
+        output: &mut u32,
+    ) -> Result<bool> {
+        let origin = self.host.task_id;
+        route_command(self.store(), origin, command, buffers, output)
+    }
+
     fn take_task_effects(&mut self, queued_messages: usize) -> TaskEffects {
         let Some(task) = self.running.get_mut(&self.host.task_id) else {
             return TaskEffects::default();
@@ -736,6 +802,9 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
     }
 
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn> {
+        if matches!(index, 79 | 80 | 83 | 84 | 100 | 101) {
+            return self.graphics_native(index, arguments, vm);
+        }
         if matches!(index, 66 | 67 | 69 | 70 | 72 | 73 | 75 | 76 | 109 | 110) {
             return self.task_native(index, arguments, vm);
         }

@@ -11,6 +11,15 @@ pub struct Command {
     pub data: [u32; 3],
 }
 
+/// 命令 `data[0]`／`data[1]` 所引用的可移植缓冲区；原 DWORD 不作为宿主指针解引用。
+///
+/// 缓冲区由调用者持有，并在同一次树分派的各个接收者之间保留修改。
+#[derive(Default)]
+pub struct CommandBuffers<'a> {
+    pub data0: Option<&'a mut [u8]>,
+    pub data1: Option<&'a mut [u8]>,
+}
+
 /// 一次对象命令分派的结果。
 ///
 /// 完成状态与传播状态分开表达：处理器可以在预算耗尽后由调用者续跑，也可以在完成时消费

@@ -238,6 +238,20 @@ pub trait Host {
         None
     }
 
+    /// 查询当前对象在有符号编号游标之后的直属子任务；None 从首项开始。
+    fn next_task_child(&self, _previous: Option<u32>) -> Result<Option<u32>> {
+        Err(Error::new(0, "宿主未提供任务子级查询"))
+    }
+
+    fn dispatch_task_command(
+        &mut self,
+        _command: crate::task::Command,
+        _buffers: &mut crate::task::CommandBuffers<'_>,
+        _output: &mut u32,
+    ) -> Result<bool> {
+        Err(Error::new(0, "宿主未提供任务命令分派"))
+    }
+
     /// 取走当前任务的待应用操作，并提供已保存的队列长度供宿主检查入队容量。
     fn take_task_effects(&mut self, _queued_messages: usize) -> TaskEffects {
         TaskEffects::default()
@@ -263,6 +277,19 @@ impl<T: Host + ?Sized> Host for &mut T {
 
     fn drawables(&mut self) -> Option<&mut crate::graphics::Drawables> {
         (**self).drawables()
+    }
+
+    fn next_task_child(&self, previous: Option<u32>) -> Result<Option<u32>> {
+        (**self).next_task_child(previous)
+    }
+
+    fn dispatch_task_command(
+        &mut self,
+        command: crate::task::Command,
+        buffers: &mut crate::task::CommandBuffers<'_>,
+        output: &mut u32,
+    ) -> Result<bool> {
+        (**self).dispatch_task_command(command, buffers, output)
     }
 
     fn take_task_effects(&mut self, queued_messages: usize) -> TaskEffects {
