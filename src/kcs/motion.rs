@@ -1,5 +1,7 @@
-use super::{Host, Interpreter, NativeReturn, ScriptRandom, matrix, numeric, strings};
-use crate::{Error, Result, read};
+use super::{
+    Event, Host, Interpreter, NativeReturn, Program, ScriptRandom, matrix, numeric, strings,
+};
+use crate::{Error, Result, Step, read};
 
 const EXTERNAL: u32 = 0x8000_0000;
 const EXTERNAL_SIZE: usize = 0x4a8;
@@ -60,6 +62,85 @@ impl MotionState {
             finishing: read::u32_at(bytes, 152)? as i32,
             parameters: std::array::from_fn(|i| read::u32_at(bytes, 156 + i * 4).unwrap()),
         })
+    }
+}
+
+enum Invocation {
+    Update,
+    Finish([u8; 12]),
+}
+
+/// 运动入口的时间控制；预算让出会保留本次调用，下一次相同方法继续执行。
+pub struct MotionTask {
+    pub interpreter: Interpreter,
+    pub base_time: u32,
+    invocation: Option<Invocation>,
+}
+
+impl MotionTask {
+    pub fn new(program: Program, state: MotionState, base_time: u32) -> Result<Self> {
+        Ok(Self {
+            interpreter: Interpreter::new(program, state.external_data())?,
+            base_time,
+            invocation: None,
+        })
+    }
+
+    pub fn state(&self) -> Result<MotionState> {
+        MotionState::read(&self.interpreter)
+    }
+
+    /// 未到开始时间返回 None；同一次预算让出期间固定 elapsed。
+    pub fn update(
+        &mut self,
+        now: u32,
+        host: &mut impl Host,
+        budget: usize,
+    ) -> Result<Option<Step<Event>>> {
+        if matches!(self.invocation, Some(Invocation::Finish(_))) {
+            return Err(Error::new(self.interpreter.pc, "运动结束调用尚未完成"));
+        }
+        if self.invocation.is_none() {
+            if word(&self.interpreter, EXTERNAL + 152)? == 0 && self.base_time > now {
+                return Ok(None);
+            }
+            self.interpreter.write(
+                EXTERNAL + 144,
+                &now.wrapping_sub(self.base_time).to_le_bytes(),
+            )?;
+            self.interpreter.reset_execution();
+            self.invocation = Some(Invocation::Update);
+        }
+        self.run(host, budget).map(Some)
+    }
+
+    /// 用结束上下文重新执行入口，完成后恢复时间和两个控制标志。
+    pub fn finish(&mut self, host: &mut impl Host, budget: usize) -> Result<Step<Event>> {
+        if !matches!(self.invocation, Some(Invocation::Finish(_))) {
+            let saved = self
+                .interpreter
+                .read(EXTERNAL + 144, 12)?
+                .try_into()
+                .unwrap();
+            self.interpreter
+                .write(EXTERNAL + 144, &u32::MAX.to_le_bytes())?;
+            self.interpreter
+                .write(EXTERNAL + 152, &1u32.to_le_bytes())?;
+            self.interpreter.reset_execution();
+            self.invocation = Some(Invocation::Finish(saved));
+        }
+        self.run(host, budget)
+    }
+
+    fn run(&mut self, host: &mut impl Host, budget: usize) -> Result<Step<Event>> {
+        let result = self.interpreter.run(host, budget);
+        if !matches!(result, Ok(Step::Yield)) {
+            if let Some(Invocation::Finish(saved)) = self.invocation.take() {
+                self.interpreter.write(EXTERNAL + 144, &saved)?;
+            }
+            self.invocation = None;
+        }
+        result
     }
 }
 

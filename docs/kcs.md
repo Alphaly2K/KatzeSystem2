@@ -254,7 +254,7 @@ u32 dataAddress    // 相对于运行数据区起点
 
 矩阵求逆和向量归一化保留基线 SSE 估计与修正顺序。单位向量归一化的首分量为 `0x3f7fffff`；单位矩阵求逆的对角线也为该值。四维零向量归一化得到四个 `0xffc00000`。43 的四元数使用 SSE 多项式三角近似，其余轴角矩阵使用 x87 路径，两者的舍入不同。
 
-`MotionState` 保存外部属性的 36 个原始 DWORD、elapsed、running、finishing 及 256 个参数位模式。外部地址以 `0x80000000` 为起点：属性占 144 字节，时间和两个状态依次位于 144、148、152，参数从 156 开始。`with_parameters` 清零未提供的参数，`external_data` 生成 VM 缓冲区，`read` 读取运行后状态。属性的对象语义和完整生命周期仍在衔接。
+`MotionState` 保存外部属性的 36 个原始 DWORD、elapsed、running、finishing 及 256 个参数位模式。外部地址以 `0x80000000` 为起点：属性占 144 字节，时间和两个状态依次位于 144、148、152，参数从 156 开始。`with_parameters` 清零未提供的参数，`external_data` 生成 VM 缓冲区，`read` 读取运行后状态。`MotionTask` 接入更新和提前结束：每次更新按基准时间设置 elapsed、重置 PC 和调用栈，保留程序数据；finishing 非零时跳过开始时间检查。提前结束临时使用最大无符号时间及结束标志，执行后恢复 elapsed、running、finishing，保留其他修改。属性的对象语义和 FES 调度仍在衔接。
 
 ### 粒子脚本宿主
 

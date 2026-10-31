@@ -10,7 +10,7 @@ mod random;
 mod sse;
 mod strings;
 pub use host::CoreHost;
-pub use motion::{MotionHost, MotionState};
+pub use motion::{MotionHost, MotionState, MotionTask};
 pub use particle::{ParticleHost, ParticleVertex};
 pub use random::ScriptRandom;
 
@@ -265,6 +265,16 @@ impl Interpreter {
     }
     pub fn stack_bytes(&self) -> &[u8] {
         &self.memory[self.stack_start..self.sp]
+    }
+    /// 从入口重新执行，保留程序数据、外部区及调试元数据。
+    pub fn reset_execution(&mut self) {
+        self.pc = 0;
+        self.sp = self.stack_start;
+        self.frame_base = self.stack_start;
+        self.frame_top = self.stack_start;
+        self.frame_floors.clear();
+        self.frame_floors.push(self.stack_start);
+        self.debug_variable_floors.clear();
     }
     pub fn read(&self, address: u32, length: usize) -> Result<&[u8]> {
         let storage = if address & 0x8000_0000 != 0 {
