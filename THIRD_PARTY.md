@@ -12,5 +12,13 @@
 |adler2|2.0.1|MIT|[许可](licenses/adler2-2.0.1/LICENSE-MIT)|
 |simd-adler32|0.3.10|MIT|[许可](licenses/simd-adler32-0.3.10/LICENSE.md)|
 |roxmltree|0.20.0|MIT|[许可](licenses/roxmltree-0.20.0/LICENSE-MIT)|
+|blowfish|0.9.1|MIT|[许可](licenses/blowfish-0.9.1/LICENSE-MIT)|
+|cipher|0.4.4|MIT|[许可](licenses/cipher-0.4.4/LICENSE-MIT)|
+|inout|0.1.4|MIT|[许可](licenses/inout-0.1.4/LICENSE-MIT)|
+|byteorder|1.5.0|MIT|[许可](licenses/byteorder-1.5.0/LICENSE-MIT)|
+|crypto-common|0.1.7|MIT|[许可](licenses/crypto-common-0.1.7/LICENSE-MIT)|
+|generic-array|0.14.7|MIT|[许可](licenses/generic-array-0.14.7/LICENSE)|
+|typenum|1.20.1|MIT|[许可](licenses/typenum-1.20.1/LICENSE-MIT)|
+|version_check|0.9.5|MIT|[许可](licenses/version_check-0.9.5/LICENSE-MIT)|
 
 依赖版本与校验值由 `Cargo.lock` 固定。Zlib 解压采用 Rust 后端，不要求系统 Zlib。未引入先行实现的源码或资源。

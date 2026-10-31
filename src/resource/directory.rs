@@ -43,39 +43,11 @@ impl ArchiveDirectory {
 
     /// 读取完整的未加密 KIF；加密目录需先解密并通过 new 提供条目。
     pub fn from_plain_kif(bytes: &[u8]) -> Result<Self> {
-        if bytes.get(..4) != Some(b"KIF\0") {
-            return Err(Error::new(0, "KIF 签名无效"));
+        let entries = raw_entries(bytes)?;
+        if encrypted(&entries) {
+            return Err(Error::new(8, "KIF 目录需要解密"));
         }
-        let count = read::u32_at(bytes, 4)? as usize;
-        let end = count
-            .checked_mul(72)
-            .and_then(|n| n.checked_add(8))
-            .filter(|&n| n <= bytes.len() && n <= read::MAX_BYTES)
-            .ok_or_else(|| Error::new(4, "KIF 目录长度无效"))?;
-        let mut entries = Vec::with_capacity(count);
-        for p in (8..end).step_by(72) {
-            let raw_name = &bytes[p..p + 64];
-            let name = terminated(raw_name);
-            if name.len() == 64 {
-                return Err(Error::new(p, "KIF 条目名称缺少终止符"));
-            }
-            if p == 8 && name.eq_ignore_ascii_case(b"__key__.dat") {
-                return Err(Error::new(p, "KIF 目录需要解密"));
-            }
-            let offset = read::u32_at(bytes, p + 64)?;
-            let length = read::u32_at(bytes, p + 68)?;
-            if (offset as usize)
-                .checked_add(length as usize)
-                .is_none_or(|end| end > bytes.len())
-            {
-                return Err(Error::new(p + 64, "KIF 条目数据越界"));
-            }
-            entries.push(DirectoryEntry {
-                name: name.to_vec(),
-                offset,
-                length,
-            });
-        }
+        validate_ranges(&entries, bytes.len())?;
         Self::new(entries)
     }
 
@@ -103,4 +75,47 @@ impl ArchiveDirectory {
         }
         self.index.get(&key).map(|&i| &self.entries[i])
     }
+}
+
+pub(super) fn encrypted(entries: &[DirectoryEntry]) -> bool {
+    entries
+        .first()
+        .is_some_and(|e| e.name.eq_ignore_ascii_case(b"__key__.dat"))
+}
+
+pub(super) fn raw_entries(bytes: &[u8]) -> Result<Vec<DirectoryEntry>> {
+    if bytes.get(..4) != Some(b"KIF\0") {
+        return Err(Error::new(0, "KIF 签名无效"));
+    }
+    let count = read::u32_at(bytes, 4)? as usize;
+    let end = count
+        .checked_mul(72)
+        .and_then(|n| n.checked_add(8))
+        .filter(|&n| n <= bytes.len() && n <= read::MAX_BYTES)
+        .ok_or_else(|| Error::new(4, "KIF 目录长度无效"))?;
+    let mut entries = Vec::with_capacity(count);
+    for p in (8..end).step_by(72) {
+        let name = terminated(&bytes[p..p + 64]);
+        if name.len() == 64 {
+            return Err(Error::new(p, "KIF 条目名称缺少终止符"));
+        }
+        entries.push(DirectoryEntry {
+            name: name.to_vec(),
+            offset: read::u32_at(bytes, p + 64)?,
+            length: read::u32_at(bytes, p + 68)?,
+        });
+    }
+    Ok(entries)
+}
+
+pub(super) fn validate_ranges(entries: &[DirectoryEntry], size: usize) -> Result<()> {
+    for entry in entries {
+        if (entry.offset as usize)
+            .checked_add(entry.length as usize)
+            .is_none_or(|end| end > size)
+        {
+            return Err(Error::new(entry.offset as usize, "KIF 条目数据越界"));
+        }
+    }
+    Ok(())
 }
