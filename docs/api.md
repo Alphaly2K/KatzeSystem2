@@ -147,6 +147,12 @@ FES 内部执行宏声明，初始化按以下顺序交给宿主：
 
 普通任务在更新、同步消息及删除通知前通过 `Host::set_task_clock`、`set_task_id` 和 `set_task_context` 同步当前时钟、编号及原始创建上下文；包装宿主应委托这三个方法。`CoreHost` 已接入前两项，`TaskHost` 保存上下文供创建使用。4 返回外层平台计时器提供的 `CoreHost.system_time_ms`，初值零，单位毫秒，按 u32 回绕；该字段独立于任务时钟更新。任务树、创建／删除和对象命令由外层负责。
 
+### 同步系统服务
+
+`kcs::SystemHost::new(&mut inner, &mut services)` 为已有 Host 接入普通表 629。服务实现 `SystemServices::open(task_id, target, parameters, directory) -> Result<()>`，接收依次格式展开后的三个字节串。服务返回后 native 才以状态 2 继续，不压值；服务错误返回解释器诊断，当前推进立即结束。平台打开 API 的成功／失败返回值均不作为 VM 返回值。
+
+包装层把时钟、编号、创建上下文及其他 native 委托给 inner，可与 TaskHost 组合。初始编号为零，直接使用 VM 时通过 `Host::set_task_id` 设置；OrdinaryTask 自动同步。平台服务按编号查找相应窗口或环境，并负责处理字节路径、参数和目录，具体 Windows 调用契约见 [KCS](kcs.md)。
+
 ### 任务编号与父子索引
 
 `task::TaskTree::new(root_id, kind)` 登记根任务。`insert(parent, id, kind)` 登记已有对象的编号，`insert_auto(parent, kind)` 选择整棵树中最小可用的非负编号；两者只登记索引，调用者负责实际对象及资源的创建。编号全树唯一，父级必须存在。`node(id)` 读取编号、父级及类型，`children(id)` 按 i32 编号升序枚举仍登记的直属子任务，`descendants(id)` 以相同顺序枚举该层可查询的后代；`find_in_subtree(scope, id)` 只查给定任务自身及其后代。

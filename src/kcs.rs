@@ -13,6 +13,7 @@ mod queue;
 mod random;
 mod sse;
 mod strings;
+mod system_host;
 mod task_host;
 pub use crate::task::TaskClock;
 pub use host::{CoreHost, MenuItemRequest};
@@ -22,6 +23,7 @@ pub use ordinary::OrdinaryTask;
 pub use particle::{ParticleHost, ParticleSource, ParticleTask, ParticleVertex};
 pub use queue::MotionQueue;
 pub use random::ScriptRandom;
+pub use system_host::{SystemHost, SystemServices};
 pub use task_host::{TaskHost, TaskServices};
 
 #[derive(Clone, Copy, Debug)]
