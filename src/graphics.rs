@@ -117,9 +117,72 @@ impl Surface {
 
     /// 复制源区域至指定左上位置，裁剪两端并保留源区域到目标的相对位置。
     pub fn copy_from(&mut self, source: &Self, rect: Rect, at: [i32; 2]) -> bool {
-        let Some(clipped) = rect.intersect(source.bounds()) else {
+        let Some(region) = self.clip_image(source, rect, at) else {
             return false;
         };
+        let count = region.width * 4;
+        let stride = self.stride();
+        let source_stride = source.stride();
+        for row in 0..region.height {
+            let start = (region.y + row) * stride + region.x * 4;
+            let from = (region.source_y + row) * source_stride + region.source_x * 4;
+            self.pixels[start..start + count].copy_from_slice(&source.pixels[from..from + count]);
+        }
+        true
+    }
+
+    /// 使用基线普通 32 位 Alpha 规则绘制，并向全零的左右邻接像素延展边缘 RGB。
+    pub fn blend_from(&mut self, source: &Self, rect: Rect, at: [i32; 2], opacity: u8) -> bool {
+        let Some(region) = self.clip_blend(source, rect, at) else {
+            return false;
+        };
+        let count = region.width * 4;
+        let stride = self.stride();
+        let source_stride = source.stride();
+        for row in 0..region.height {
+            let start = (region.y + row) * stride + region.x * 4;
+            let from = (region.source_y + row) * source_stride + region.source_x * 4;
+            let input = &source.pixels[from..from + count];
+            if region.x > 0 {
+                extend_color(&mut self.pixels[start - 4..start], &input[..4]);
+            }
+            for (target, pixel) in self.pixels[start..start + count]
+                .chunks_exact_mut(4)
+                .zip(input.chunks_exact(4))
+            {
+                blend_pixel(target, pixel, opacity);
+            }
+            if region.x + region.width < self.size[0] as usize {
+                extend_color(
+                    &mut self.pixels[start + count..start + count + 4],
+                    &input[count - 4..],
+                );
+            }
+        }
+        true
+    }
+
+    fn clip_blend(&self, source: &Self, rect: Rect, at: [i32; 2]) -> Option<ImageRegion> {
+        let target = Rect::from_xywh(
+            at[0],
+            at[1],
+            rect.right.wrapping_sub(rect.left),
+            rect.bottom.wrapping_sub(rect.top),
+        )
+        .intersect(self.bounds())?;
+        let source = rect.intersect(source.bounds())?;
+        Some(ImageRegion {
+            x: target.left as usize,
+            y: target.top as usize,
+            source_x: source.left as usize,
+            source_y: source.top as usize,
+            width: (source.right - source.left).min(target.right - target.left) as usize,
+            height: (source.bottom - source.top).min(target.bottom - target.top) as usize,
+        })
+    }
+
+    fn clip_image(&self, source: &Self, rect: Rect, at: [i32; 2]) -> Option<ImageRegion> {
+        let clipped = rect.intersect(source.bounds())?;
         let x = i64::from(at[0]) + i64::from(clipped.left) - i64::from(rect.left);
         let y = i64::from(at[1]) + i64::from(clipped.top) - i64::from(rect.top);
         let left = x.max(0);
@@ -127,19 +190,58 @@ impl Surface {
         let right = (x + i64::from(clipped.right - clipped.left)).min(i64::from(self.size[0]));
         let bottom = (y + i64::from(clipped.bottom - clipped.top)).min(i64::from(self.size[1]));
         if left >= right || top >= bottom {
-            return false;
+            return None;
         }
-        let source_x = (i64::from(clipped.left) + left - x) as usize;
-        let source_y = (i64::from(clipped.top) + top - y) as usize;
-        let count = (right - left) as usize * 4;
-        let stride = self.stride();
-        let source_stride = source.stride();
-        for row in 0..(bottom - top) as usize {
-            let start = (top as usize + row) * stride + left as usize * 4;
-            let from = (source_y + row) * source_stride + source_x * 4;
-            self.pixels[start..start + count].copy_from_slice(&source.pixels[from..from + count]);
+        Some(ImageRegion {
+            x: left as usize,
+            y: top as usize,
+            source_x: (i64::from(clipped.left) + left - x) as usize,
+            source_y: (i64::from(clipped.top) + top - y) as usize,
+            width: (right - left) as usize,
+            height: (bottom - top) as usize,
+        })
+    }
+}
+
+struct ImageRegion {
+    x: usize,
+    y: usize,
+    source_x: usize,
+    source_y: usize,
+    width: usize,
+    height: usize,
+}
+
+fn extend_color(target: &mut [u8], source: &[u8]) {
+    if target == [0; 4] {
+        target[..3].copy_from_slice(&source[..3]);
+    }
+}
+
+fn blend_pixel(target: &mut [u8], source: &[u8], opacity: u8) {
+    let alpha = (u32::from(opacity) * (u32::from(source[3]) + 1)) >> 8;
+    if alpha == 0 {
+        extend_color(target, source);
+    } else if alpha == 255 || target[3] == 0 {
+        target[..3].copy_from_slice(&source[..3]);
+        target[3] = alpha as u8;
+    } else if target[3] == 255 {
+        for (target, source) in target[..3].iter_mut().zip(source) {
+            let difference = i32::from(*source) - i32::from(*target);
+            *target = (i32::from(*target) + ((difference * alpha as i32) >> 8)) as u8;
         }
-        true
+    } else {
+        let destination_alpha = u32::from(target[3]);
+        let overlap = (alpha * destination_alpha) >> 8;
+        let destination_weight = ((256 - alpha) * destination_alpha) >> 8;
+        let source_weight = (((256 - destination_alpha) * alpha) >> 8) + overlap;
+        let output_alpha = (source_weight + destination_weight) | 1;
+        let reciprocal = 65536 / output_alpha;
+        for (target, source) in target[..3].iter_mut().zip(source) {
+            let sum = u32::from(*source) * source_weight + u32::from(*target) * destination_weight;
+            *target = ((sum * reciprocal) >> 16) as u8;
+        }
+        target[3] = output_alpha as u8;
     }
 }
 
