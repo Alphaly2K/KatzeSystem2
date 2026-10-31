@@ -25,8 +25,8 @@ impl Host for CoreHost<'_> {
             return Ok(NativeReturn::Continue);
         }
         let count = match index {
-            1 | 6 | 17 | 18 | 26 | 209 | 210 | 212 | 213 | 278 => 1,
-            13..=16 | 19..=23 | 211 | 276 | 277 => 2,
+            1 | 6 | 17 | 18 | 25 | 26 | 40 | 47 | 48 | 209 | 210 | 212 | 213 | 278 => 1,
+            13..=16 | 19..=24 | 211 | 276 | 277 => 2,
             38 | 44 | 45 => 4,
             41 | 42 | 519 => 3,
             789 => 0,
@@ -85,15 +85,15 @@ impl Host for CoreHost<'_> {
                 NativeReturn::Value(strings::compare(&left, &right, index >= 21) as u32)
             }
             26 => NativeReturn::Value(strings::float32(&strings::format(vm, args[0], 0)?)),
+            25 => NativeReturn::Value(
+                text::integer_prefix(&strings::format(vm, args[0], 0)?)
+                    .map_or(0, |(_, value)| value),
+            ),
             23 => {
                 let source = vm.read_string(args[0])?;
                 let mut length = 0;
                 while length < source.len() {
-                    let width = if matches!(source[length], 0x81..=0x9f | 0xe0..=0xfc) {
-                        2
-                    } else {
-                        1
-                    };
+                    let width = strings::character_width(&source[length..]);
                     if length + width >= args[1] as usize || length + width > source.len() {
                         break;
                     }
@@ -101,6 +101,35 @@ impl Host for CoreHost<'_> {
                 }
                 vm.write(args[0].wrapping_add(length as u32), &[0, 0])?;
                 NativeReturn::Value(length as u32)
+            }
+            24 => {
+                let source = vm.read_string(args[0])?;
+                let mut length = 0;
+                for _ in 0..args[1] {
+                    if length == source.len() {
+                        break;
+                    }
+                    length += strings::character_width(&source[length..]);
+                }
+                vm.write(args[0].wrapping_add(length as u32), &[0, 0])?;
+                NativeReturn::Value(length as u32)
+            }
+            40 => NativeReturn::Value(
+                (strings::character_width(vm.read_string(args[0])?) == 2) as u32,
+            ),
+            47 | 48 => {
+                let source = if index == 48 {
+                    strings::format(vm, args[0], 0)?
+                } else {
+                    vm.read_string(args[0])?.to_vec()
+                };
+                let mut length = 0;
+                let mut count = 0;
+                while length < source.len() {
+                    length += strings::character_width(&source[length..]);
+                    count += 1;
+                }
+                NativeReturn::Value(count)
             }
             38 => {
                 let separators = vm.read_string(args[2])?;

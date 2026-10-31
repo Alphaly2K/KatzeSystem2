@@ -1,6 +1,13 @@
 use super::Interpreter;
 use crate::{Error, Result, read, text};
 
+pub(super) fn character_width(source: &[u8]) -> usize {
+    match source {
+        [0x81..=0x9f | 0xe0..=0xef, 0x40..=0x7e | 0x80..=0xfc, ..] => 2,
+        _ => 1,
+    }
+}
+
 pub(super) fn float32(source: &[u8]) -> u32 {
     let start = source
         .iter()
