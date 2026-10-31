@@ -141,7 +141,7 @@ FES 内部执行宏声明，初始化按以下顺序交给宿主：
 
 `OrdinaryTask::start_execution(source, mode)` 对应普通命令 162：将 running 设为 1；source 等于当前 task_id 时使用传入 mode，否则使用 1。source 对应命令第一数据项。`stop_execution()` 对应 163，将 running 和 VM 执行模式均设为零。两方法在已有删除标记时跳过，预算续跑期间返回诊断。VM 暂停仍允许时钟、累计增量和排队消息处理，末尾普通恢复完成后保留 running 为 1。
 
-`OrdinaryTask::dispatch_control(kind, command, output, host, budget)` 接收 3／13／17／23／24／25／26／29／162／163。25 把创建上下文正文和一个结尾零写到第二数据项指向的地址，26 从该地址读取零结尾正文；零指针跳过。kind 来自任务树节点；返回 true 表示本次控制命令完成，false 表示删除通知仍需预算续跑。路由 handler 在完成后返回 false 消费分支。其他编号返回诊断，已有删除标记时跳过。
+`OrdinaryTask::dispatch_control(kind, command, output, host, budget)` 接收 3／13／17／23／24／25／26／29／162／163。25 把创建上下文正文和一个结尾零写到第二数据项指向的地址，26 从该地址读取零结尾正文；零指针跳过。kind 来自任务树节点；返回 `task::CommandOutcome`：`done` 为 false 表示删除通知仍需预算续跑，`propagate` 表示是否允许按 `data[2]` 继续传播。已处理的普通命令和已有删除标记的对象返回 `propagate = false`，其他编号返回诊断。
 
 `set_creation_context(Some(bytes))` 对应命令 26，保存首个零之前的原始字节，正文最多 31 字节；`copy_creation_context(Some(buffer))` 对应 25，写入正文及一个结尾零，保留输出其余字节。两方法的 None 均跳过，删除后的任务也跳过；预算续跑期间返回诊断。输入或输出容量不足时保留原状态，直接使用公开上下文字段时由调用者保持正文容量约束。
 
@@ -261,13 +261,13 @@ FES 内部执行宏声明，初始化按以下顺序交给宿主：
 
 `runtime::Runtime` 组合任务树、对象存储、普通宿主状态和对象工厂，不再要求调用者自行实现 `TaskServices` 与 `Lifecycle`。`Runtime::new(root_id, root_kind, root, numbers, factory)` 接受已经创建的根对象；`update`／`destroy` 按树契约更新时钟、子任务和主体，`create`／`dispatch_command`／`send_message` 对应外层创建、命令和消息入口。`tree`、`object`、`host`、`numbers` 提供查询，`set_budget` 替换推进预算。
 
-对象实现 `runtime::TaskObject`：基类控制与时钟、可选 VM、创建上下文、主体、对象命令、排队与同步消息、删除通知和释放。返回 `false` 的方法表示本次预算耗尽，续跑由运行时完成。库提供 `BaseObject`（只有控制与时钟）与 `OrdinaryObject`（包裹 `OrdinaryTask`）。`ObjectFactory::create` 按类型编号创建对象；`KcsFactory` 经 `ProgramLoader` 按名称装载普通 KCS，`external_bytes` 指定 VM 外部区容量。图形、音频、输入和文字类型需要子系统工厂，缺省返回诊断；`kind` 模块保存基线工厂的类型编号。
+对象实现 `runtime::TaskObject`：基类控制与时钟、可选 VM、创建上下文、主体、对象命令、排队与同步消息、删除通知和释放。除对象命令外，返回 `false` 的方法表示本次预算耗尽，续跑由运行时完成；对象命令返回 `task::CommandOutcome`，完成状态与传播状态分开表达。库提供 `BaseObject`（只有控制与时钟）与 `OrdinaryObject`（包裹 `OrdinaryTask`）。`ObjectFactory::create` 按类型编号创建对象；`KcsFactory` 经 `ProgramLoader` 按名称装载普通 KCS，`external_bytes` 指定 VM 外部区容量。图形、音频、输入和文字类型需要子系统工厂，缺省返回诊断；`kind` 模块保存基线工厂的类型编号。
 
-执行中的对象在调用期间从存储取出，完成后放回，因此不参与同一时刻的目标查找；同步分派给自身或正在执行的祖先返回诊断，不重入同一 VM。嵌套执行前保存宿主的任务编号、时刻和起点，返回后恢复，外层脚本继续读取自己的任务状态。对象处理器消费当前命令分支，命令 173／174 的子树传播留到其他对象类型接入时处理。
+执行中的对象在调用期间从存储取出，完成后放回，因此不参与同一时刻的目标查找；同步分派给自身或正在执行的祖先返回诊断，不重入同一 VM。嵌套执行前保存宿主的任务编号、时刻和起点，返回后恢复，外层脚本继续读取自己的任务状态。对象命令经 `TaskTree::dispatch` 路由，目标改写、可达性判断和 `data[2]` 传播沿用树契约；`dispatch_command(origin, command)` 的 `origin` 只用于路由，`command.sender` 保持调用者给出的值，natives 109／110 以当前任务为发送者。未识别的基类编号不修改状态并允许传播，基类命令和已有删除标记的对象消费当前分支；普通任务对未支持编号继续返回诊断。删除自身（67）、向自身排队（70）和向仍在执行的发送者回信仍受对象取出执行限制，基线行为记录在忽略回归中。
 
 主体、命令和消息在返回前完成预算续跑。`DEFAULT_BUDGET` 为单次推进预算，`DEFAULT_LIMIT` 为单个同步入口允许执行的总指令数，超限返回诊断；与库的其他执行错误一样，出现该错误后应丢弃解释器状态。范围不结束的循环因此不会永久占用调度。
 
-当前运行时接入普通表任务 native 66／67／69／70／72／73／75／76／109／110 和已核实的普通表接口；365～368、590～593、629 仍由 `ResourceHost`／`SystemHost` 单独包装，尚未并入。普通 KCS 对象在工厂返回前装载程序，基线中改为首次更新装载的情形尚未核实。
+当前运行时接入普通表任务 native 66／67／69／70／72／73／75／76／109／110 和已核实的普通表接口；110 接受目标编号和值两个 DWORD。`KcsFactory.external_bytes` 超过库的 64 MiB 上限时在分配前返回诊断。365～368、590～593、629 仍由 `ResourceHost`／`SystemHost` 单独包装，尚未并入。普通 KCS 对象在工厂返回前装载程序，基线中改为首次更新装载的情形尚未核实。
 
 ## 约束与验证
 
