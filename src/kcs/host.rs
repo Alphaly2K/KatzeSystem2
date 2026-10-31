@@ -1,4 +1,4 @@
-use super::{Host, Interpreter, NativeReturn, TaskClock};
+use super::{Host, Interpreter, NativeReturn, ScriptRandom, TaskClock};
 use super::{numeric, strings};
 use crate::{Error, Result, expression, read, text};
 
@@ -9,6 +9,7 @@ pub struct CoreHost<'a> {
     pub debug_messages: Vec<Vec<u8>>,
     pub task_time: u32,
     pub task_origin: u32,
+    pub random: ScriptRandom,
 }
 
 impl<'a> CoreHost<'a> {
@@ -18,6 +19,7 @@ impl<'a> CoreHost<'a> {
             debug_messages: Vec::new(),
             task_time: 0,
             task_origin: 0,
+            random: ScriptRandom::default(),
             state,
         }
     }
@@ -40,13 +42,19 @@ impl Host for CoreHost<'_> {
         if index == 65 {
             return Ok(NativeReturn::YieldVoid);
         }
+        if index == 33 {
+            return Ok(NativeReturn::Value(self.random.next_integer()));
+        }
+        if index == 34 {
+            return Ok(NativeReturn::Value(self.random.next_float().to_bits()));
+        }
         let count = match index {
             1 | 6 | 17 | 18 | 25 | 26 | 40 | 47 | 48 | 71 | 209 | 210 | 212 | 213 | 278 | 319 => 1,
             13..=16 | 19..=24 | 211 | 276 | 277 => 2,
             50..=58 | 60 | 62..=64 => 1,
             59 | 61 => 2,
             38 | 44 | 45 => 4,
-            41 | 42 | 519 => 3,
+            36 | 37 | 41 | 42 | 519 => 3,
             5 | 789 => 0,
             _ => return Err(Error::new(vm.pc, format!("未支持的 KCS native {index}"))),
         };
@@ -67,6 +75,40 @@ impl Host for CoreHost<'_> {
             71 => {
                 vm.wait_for_message(args[0])?;
                 NativeReturn::YieldVoid
+            }
+            36 => {
+                let count = read::sized(args[2], vm.pc)?;
+                vm.read(args[0], count)?;
+                vm.write(args[0], &vec![args[1] as u8; count])?;
+                NativeReturn::Continue
+            }
+            37 => {
+                let value = args[1] as i32;
+                let mut digits = Vec::new();
+                // MIN 的绝对值仍为负数，负余数直接参与数字字节计算。
+                let mut n = value.wrapping_abs();
+                if n == 0 {
+                    digits.push(b'0');
+                } else {
+                    let mut group = 0;
+                    while n != 0 {
+                        if group == 3 {
+                            digits.push(b',');
+                            group = 0;
+                        }
+                        digits.push(((n % 10) as u8).wrapping_add(b'0'));
+                        n /= 10;
+                        group += 1;
+                    }
+                    if value < 0 {
+                        digits.push(b'-');
+                    } else if args[2] != 0 {
+                        digits.push(b'+');
+                    }
+                }
+                digits.reverse();
+                write_string(vm, args[0], &digits, 2)?;
+                NativeReturn::Continue
             }
             319 => {
                 let shifted = numeric::float_ieee(1, args[0], 0.5f32.to_bits());

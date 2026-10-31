@@ -713,3 +713,59 @@ fn text_float_conversion_consumes_a_prefix_and_rounds_through_double() {
     );
     assert_eq!(host.debug_messages, [b"value=1.250000%".to_vec()]);
 }
+
+#[test]
+fn ordinary_random_natives_advance_separate_integer_and_float_streams() {
+    use kcs::Host;
+    let mut state = katze_system2::expression::State::new(8);
+    let mut host = kcs::CoreHost::new(&mut state);
+    host.random = kcs::ScriptRandom::seeded(0);
+    let mut vm =
+        kcs::Interpreter::new(kcs::Program::from_code(&[], vec![], 64).unwrap(), vec![]).unwrap();
+    for (index, expected) in [
+        (34, 0x3de3_ae3e),
+        (33, 0x1c75_c7c9),
+        (33, 0xda96_49c5),
+        (34, 0x3f5a_964a),
+        (33, 0x84e2_43e5),
+        (33, 0xa75c_2a2f),
+    ] {
+        assert_eq!(
+            host.call(index, &[0xff], &mut vm).unwrap(),
+            kcs::NativeReturn::Value(expected)
+        );
+    }
+}
+
+#[test]
+fn grouped_integer_format_keeps_sign_rules_minimum_integer_and_double_zero() {
+    use kcs::Host;
+    let mut state = katze_system2::expression::State::new(8);
+    let mut host = kcs::CoreHost::new(&mut state);
+    let mut vm = kcs::Interpreter::new(
+        kcs::Program::from_code(&[], vec![0; 64], 64).unwrap(),
+        vec![0; 64],
+    )
+    .unwrap();
+    for (value, sign, expected) in [
+        (0, 1, "0"),
+        (123, 0, "123"),
+        (1234567, u32::MAX, "+1,234,567"),
+        ((-1234567i32) as u32, 1, "-1,234,567"),
+        (i32::MIN as u32, 0, "-.,/,),,(-,*,("),
+    ] {
+        let args = [0x8000_0004u32, value, sign]
+            .into_iter()
+            .flat_map(u32::to_le_bytes)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            host.call(37, &args, &mut vm).unwrap(),
+            kcs::NativeReturn::Continue
+        );
+        assert_eq!(vm.read_string(0x8000_0004).unwrap(), expected.as_bytes());
+        assert_eq!(
+            vm.read(0x8000_0004 + expected.len() as u32, 2).unwrap(),
+            [0, 0]
+        );
+    }
+}
