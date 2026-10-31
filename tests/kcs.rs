@@ -1,0 +1,484 @@
+use katze_system2::{Result, Step, kcs};
+
+struct NoHost;
+impl kcs::Host for NoHost {
+    fn call(&mut self, _: u32, _: &[u8], _: &mut kcs::Interpreter) -> Result<kcs::NativeReturn> {
+        panic!("unexpected native call")
+    }
+}
+
+fn ins(code: &mut Vec<u8>, op: u8, args: &[(u8, u32)]) {
+    code.push(op);
+    for &(flags, n) in args {
+        code.push(flags);
+        code.extend(n.to_le_bytes());
+    }
+}
+
+fn execute(op: u8, args: &[(u8, u32)], data: u32) -> Result<(u32, u32)> {
+    let mut code = Vec::new();
+    ins(&mut code, op, args);
+    let mut vm = kcs::Interpreter::new(
+        kcs::Program::from_code(&code, data.to_le_bytes().to_vec(), 64)?,
+        vec![],
+    )?;
+    assert_eq!(vm.run(&mut NoHost, 10)?, Step::Halted);
+    Ok((
+        u32::from_le_bytes(vm.stack_bytes().try_into().unwrap()),
+        u32::from_le_bytes(vm.read(0, 4)?.try_into().unwrap()),
+    ))
+}
+
+#[test]
+fn integer_signedness_shift_and_division_rules() {
+    for (op, lf, a, rf, b, expected) in [
+        (4, 3, u32::MAX, 3, 2, 0x7fff_ffff),
+        (4, 3, u32::MAX, 0x23, 2, 0),
+        (5, 0x23, (-7i32) as u32, 3, 3, u32::MAX),
+        (6, 3, 0xa5, 3, 0x0f, 5),
+        (7, 3, 0xa0, 3, 5, 0xa5),
+        (9, 3, 0xa5, 3, 0x0f, 0xaa),
+        (10, 3, 1, 3, 33, 2),
+        (11, 0x23, 0x8000_0000, 0x23, 1, 0x4000_0000),
+        (0x0f, 3, u32::MAX, 3, 1, 1),
+        (0x0f, 3, u32::MAX, 0x23, 1, 0),
+        (0x0d, 4, 0x8000_0000, 3, 1, 1),
+        (4, 3, 7, 3, 0, 0),
+        (5, 3, 7, 3, 0, 0),
+    ] {
+        assert_eq!(execute(op, &[(lf, a), (rf, b)], 0).unwrap().0, expected);
+    }
+    for op in [4, 5] {
+        assert!(execute(op, &[(0x23, 0x8000_0000), (3, u32::MAX)], 0).is_err());
+    }
+}
+
+#[test]
+fn float_bit_patterns_and_conversions_match_x86() {
+    for (op, left, right, expected) in [
+        (1, 1.5f32.to_bits(), 2f32.to_bits(), 3.5f32.to_bits()),
+        (1, 0x7f80_1234, 0x7fc0_5678, 0x7fc0_1234),
+        (3, 0x7f80_0000, 0, 0xffc0_0000),
+        (4, 1f32.to_bits(), 0x8000_0000, 0),
+        (0x13, 0x7fc0_1234, 0x7fc0_1234, 0),
+        (0x14, 0x7fc0_1234, 0x7fc0_1234, 1),
+        (0x10, 0x7fc0_1234, 0, 0),
+    ] {
+        assert_eq!(
+            execute(op, &[(4, left), (4, right)], 0).unwrap().0,
+            expected
+        );
+    }
+    // 算术读取两侧的浮点位，比较只读取左侧，均不自动转换数值。
+    assert_eq!(
+        execute(1, &[(3, 0x3f80_0000), (4, 0x3f80_0000)], 0)
+            .unwrap()
+            .0,
+        0x4000_0000
+    );
+    assert_eq!(
+        execute(0x13, &[(3, 0x7fc0_1234), (4, 0x7fc0_1234)], 0)
+            .unwrap()
+            .0,
+        1
+    );
+    for (op, input, expected) in [
+        (0x36, u32::MAX, 4294967296f32.to_bits()),
+        (0x37, u32::MAX, (-1f32).to_bits()),
+        (0x38, (-1.5f32).to_bits(), u32::MAX),
+        (0x38, 4294967296f32.to_bits(), 0),
+        (0x38, (-4294967040f32).to_bits(), 256),
+        (0x38, f32::NAN.to_bits(), 0),
+        (0x39, 2147483648f32.to_bits(), 0x8000_0000),
+        (0x39, f32::INFINITY.to_bits(), 0x8000_0000),
+    ] {
+        assert_eq!(execute(op, &[(4, input)], 0).unwrap().0, expected);
+    }
+}
+
+#[test]
+fn narrow_writes_increment_results_and_compound_division() {
+    for (op, flags, initial, rhs_flags, rhs, result, memory) in [
+        (0x15, 0x11, 0x1122_33ff, 3, 256, 0, 0x1122_3300),
+        (0x1e, 0x11, 0x1122_33ff, 3, 1, 0x1122_3400, 0x1122_3300),
+        (0x20, 0x13, 13, 3, 3, 1, 1),
+        (0x20, 0x33, 13, 3, 3, 4, 4),
+        (
+            0x20,
+            0x14,
+            1f32.to_bits(),
+            4,
+            0x8000_0000,
+            0x8000_0000,
+            0x8000_0000,
+        ),
+        (
+            0x1e,
+            0x14,
+            0x7fc0_1234,
+            4,
+            0x7fc0_5678,
+            0x7fc0_5678,
+            0x7fc0_5678,
+        ),
+        (0x22, 0x33, 0x8000_0000, 3, 1, 0xc000_0000, 0xc000_0000),
+        (0x1b, 0x13, 13, 3, 0, 0, 0),
+    ] {
+        assert_eq!(
+            execute(op, &[(flags, 0), (rhs_flags, rhs)], initial).unwrap(),
+            (result, memory)
+        );
+    }
+    for (op, result, memory) in [
+        (0x16, 0x1122_3300, 0x1122_3300),
+        (0x17, 0x1122_33fe, 0x1122_33fe),
+        (0x18, 0x1122_33ff, 0x1122_3300),
+        (0x19, 0x1122_33ff, 0x1122_33fe),
+    ] {
+        assert_eq!(
+            execute(op, &[(0x91, 0)], 0x1122_33ff).unwrap(),
+            (result, memory)
+        );
+    }
+}
+
+#[test]
+fn stack_address_writes_and_block_copy_preserve_values() {
+    let mut code = Vec::new();
+    ins(&mut code, 0x25, &[(3, 0xaabb_ccdd)]);
+    ins(&mut code, 0x25, &[(3, 0)]);
+    ins(&mut code, 0x26, &[(0xd1, 0)]);
+    ins(&mut code, 0x25, &[(3, 0x1234_5678)]);
+    ins(&mut code, 0x25, &[(0x43, 999)]);
+    ins(&mut code, 0x30, &[(0x83, 4), (3, 4)]);
+    let mut vm = kcs::Interpreter::new(
+        kcs::Program::from_code(&code, vec![0; 8], 64).unwrap(),
+        vec![],
+    )
+    .unwrap();
+    assert_eq!(vm.run(&mut NoHost, 20).unwrap(), Step::Halted);
+    assert_eq!(
+        vm.read(0, 8).unwrap(),
+        [0xdd, 0, 0, 0, 0x78, 0x56, 0x34, 0x12]
+    );
+    assert_eq!(vm.stack_bytes(), 0x1234_5678u32.to_le_bytes());
+}
+
+#[test]
+fn reverse_unsigned_switch_range_and_debug_metadata() {
+    let mut code = Vec::new();
+    ins(&mut code, 0x25, &[(3, 3)]);
+    ins(&mut code, 0x33, &[]);
+    ins(&mut code, 0x35, &[(3, 10), (3, 2), (3, 29)]);
+    ins(&mut code, 0x25, &[(3, 999)]);
+    ins(&mut code, 0x41, &[(3, 12), (0x83, 0)]);
+    ins(&mut code, 0x42, &[(0x83, 0)]);
+    ins(&mut code, 0x43, &[(3, 3), (3, 2)]);
+    ins(&mut code, 0x44, &[(3, 1)]);
+    let mut vm = kcs::Interpreter::new(
+        kcs::Program::from_code(&code, b"unit\0".to_vec(), 64).unwrap(),
+        vec![],
+    )
+    .unwrap();
+    assert_eq!(vm.run(&mut NoHost, 30).unwrap(), Step::Halted);
+    assert!(vm.stack_bytes().is_empty());
+    assert_eq!(
+        vm.debug(),
+        &kcs::DebugState {
+            line: 12,
+            source: b"unit".to_vec(),
+            scopes: vec![0],
+            variables: vec![3],
+        }
+    );
+}
+
+#[test]
+fn core_host_shares_numeric_state_and_checks_native_contracts() {
+    let mut code = Vec::new();
+    for (native, args) in [
+        (209, vec![2]),
+        (211, vec![3, 17]),
+        (212, vec![5]),
+        (213, vec![0]),
+        (210, vec![3]),
+        (210, vec![99]),
+    ] {
+        for &arg in &args {
+            ins(&mut code, 0x25, &[(3, arg)]);
+        }
+        ins(&mut code, 0x2b, &[(3, native), (3, args.len() as u32 * 4)]);
+    }
+    let mut vm = kcs::Interpreter::new(
+        kcs::Program::from_code(&code, b"#3+=@%\0".to_vec(), 128).unwrap(),
+        vec![],
+    )
+    .unwrap();
+    let mut state = katze_system2::expression::State::new(8);
+    let mut host = kcs::CoreHost::new(&mut state);
+    assert_eq!(vm.run(&mut host, 100).unwrap(), Step::Halted);
+    assert_eq!(
+        vm.stack_bytes(),
+        [22u32.to_le_bytes(), 22u32.to_le_bytes(), 0u32.to_le_bytes()].concat()
+    );
+    assert_eq!(host.state.shared.len(), 8);
+    assert_eq!(host.state.shared[3], 22);
+    assert!(kcs::Host::call(&mut host, 211, &[0; 4], &mut vm).is_err());
+    assert!(kcs::Host::call(&mut host, 1000, &[], &mut vm).is_err());
+}
+
+#[test]
+fn return_to_code_end_finishes_without_a_stop_marker() {
+    let mut code = Vec::new();
+    ins(&mut code, 0x2c, &[(3, 0), (3, 0)]);
+    ins(&mut code, 0x2a, &[(3, 0), (3, 0)]);
+    let mut vm =
+        kcs::Interpreter::new(kcs::Program::from_code(&code, vec![], 64).unwrap(), vec![]).unwrap();
+    vm.pc = 11;
+    assert_eq!(vm.run(&mut NoHost, 10).unwrap(), Step::Halted);
+    assert_eq!(vm.pc, code.len());
+    assert!(vm.stack_bytes().is_empty());
+}
+
+#[test]
+fn string_expansion_and_argument_boundaries_match_native_words() {
+    use kcs::Host;
+    let mut vm = kcs::Interpreter::new(
+        kcs::Program::from_code(&[], vec![0; 1024], 64).unwrap(),
+        vec![0; 64],
+    )
+    .unwrap();
+    let mut state = katze_system2::expression::State::new(8);
+    for (id, value) in [(0, b"Z"), (7, b"A"), (16, b"H"), (u32::MAX, b"N")] {
+        state.strings.insert(id, value.to_vec());
+    }
+    let mut host = kcs::CoreHost::new(&mut state);
+    for (input, expected) in [
+        ("$str+7;X", "AX"),
+        ("$str-1;X", "NX"),
+        ("$str0x10;X", "HX"),
+        ("$str4294967303;X", "AX"),
+        ("$str0x;X", "ZX"),
+        ("$str7.2X", "$str7.2X"),
+        ("$str100;X", "X"),
+        ("$str7$str7", "AA"),
+    ] {
+        vm.write(0, &[input.as_bytes(), &[0]].concat()).unwrap();
+        assert_eq!(
+            host.call(278, &0u32.to_le_bytes(), &mut vm).unwrap(),
+            kcs::NativeReturn::Continue
+        );
+        assert_eq!(vm.read_string(0).unwrap(), expected.as_bytes());
+    }
+    for (input, words) in [
+        ("cmd a(b)c(d) tail", vec!["cmd", "a", "(b)c", "(d)", "tail"]),
+        ("cmd x1(2) tail", vec!["cmd", "x1(2)", "tail"]),
+        ("cmd (:a b)tail end", vec!["cmd", "a btail", "end"]),
+        ("cmd (:) tail", vec!["cmd"]),
+        ("cmd \"a b\" a\tb", vec!["cmd", "\"a", "b\"", "a\tb"]),
+    ] {
+        vm.write(0, &[input.as_bytes(), &[0]].concat()).unwrap();
+        for i in 0..=words.len() {
+            let args = [512u32, 0, i as u32]
+                .into_iter()
+                .flat_map(u32::to_le_bytes)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                host.call(519, &args, &mut vm).unwrap(),
+                kcs::NativeReturn::Value((i < words.len()) as u32)
+            );
+            assert_eq!(
+                vm.read_string(512).unwrap(),
+                words.get(i).unwrap_or(&"").as_bytes()
+            );
+        }
+    }
+    vm.write(0, b"$str7\0").unwrap();
+    vm.write(64, b"$\0").unwrap();
+    vm.write(80, b"0x\0").unwrap();
+    let args = [128u32, 0, 64, 80]
+        .into_iter()
+        .flat_map(u32::to_le_bytes)
+        .collect::<Vec<_>>();
+    host.call(45, &args, &mut vm).unwrap();
+    assert_eq!(vm.read_string(128).unwrap(), b"0xstr7");
+    host.call(
+        277,
+        &[99u32.to_le_bytes(), 0x8000_0000u32.to_le_bytes()].concat(),
+        &mut vm,
+    )
+    .unwrap();
+    assert_eq!(vm.read_string(0x8000_0000).unwrap(), b"");
+}
+
+#[test]
+fn formatted_strings_use_byte_addresses_and_recurse_through_string_fields() {
+    use kcs::Host;
+    let mut vm = kcs::Interpreter::new(
+        kcs::Program::from_code(&[], vec![0; 512], 256).unwrap(),
+        vec![0; 512],
+    )
+    .unwrap();
+    vm.write(0, &(-7i32).to_le_bytes()).unwrap();
+    vm.write(4, &0x12abu32.to_le_bytes()).unwrap();
+    vm.write(8, &1.25f32.to_bits().to_le_bytes()).unwrap();
+    vm.write(16, b"N%d[G0]\0").unwrap();
+    vm.write(512, &42u32.to_le_bytes()).unwrap();
+    vm.write(0x8000_0000, &13u32.to_le_bytes()).unwrap();
+    let mut state = katze_system2::expression::State::new(8);
+    let mut host = kcs::CoreHost::new(&mut state);
+    for (input, expected) in [
+        (
+            "%d[G0]|%08x[G4]|%f[G8]|%s[G16]|%02d[L0]|%d[H0]|%%",
+            "-7|000012ab|1.250000|N-7|42|13|%",
+        ),
+        ("%04d[G0]", "-007"),
+        ("%8.2f[G8]", "    1.25"),
+        ("%3s[G16]", "N-7"),
+        ("%bad[Z0]|%d[Gbad]|plain%", "%bad[Z0]|%d[Gbad]|plain%"),
+    ] {
+        vm.write(100, &[input.as_bytes(), &[0]].concat()).unwrap();
+        let args = [0x8000_0020u32.to_le_bytes(), 100u32.to_le_bytes()].concat();
+        assert_eq!(
+            host.call(14, &args, &mut vm).unwrap(),
+            kcs::NativeReturn::Value(0x8000_0020)
+        );
+        assert_eq!(vm.read_string(0x8000_0020).unwrap(), expected.as_bytes());
+    }
+    for (bits, expected) in [
+        (0x7fc0_1234u32, "nan"),
+        (0xffc0_1234, "-nan(ind)"),
+        (0x7f80_0000, "inf"),
+        (0xff80_0000, "-inf"),
+        (0x8000_0000, "-0.000000"),
+    ] {
+        vm.write(8, &bits.to_le_bytes()).unwrap();
+        vm.write(100, b"%f[G8]\0").unwrap();
+        host.call(
+            14,
+            &[300u32.to_le_bytes(), 100u32.to_le_bytes()].concat(),
+            &mut vm,
+        )
+        .unwrap();
+        assert_eq!(vm.read_string(300).unwrap(), expected.as_bytes());
+    }
+    vm.write(100, b"%s[G100]\0").unwrap();
+    assert!(
+        host.call(
+            14,
+            &[300u32.to_le_bytes(), 100u32.to_le_bytes()].concat(),
+            &mut vm
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn byte_truncation_and_zero_separated_word_helpers_keep_boundaries() {
+    use kcs::Host;
+    let mut vm = kcs::Interpreter::new(
+        kcs::Program::from_code(&[], vec![0; 1024], 64).unwrap(),
+        vec![],
+    )
+    .unwrap();
+    let mut state = katze_system2::expression::State::new(8);
+    let mut host = kcs::CoreHost::new(&mut state);
+    for (limit, length) in [(0, 0), (1, 0), (2, 1), (3, 1), (4, 3), (5, 4), (6, 5)] {
+        vm.write(100, b"A\x82\xa0BC\0").unwrap();
+        let args = [100u32.to_le_bytes(), u32::to_le_bytes(limit)].concat();
+        assert_eq!(
+            host.call(23, &args, &mut vm).unwrap(),
+            kcs::NativeReturn::Value(length)
+        );
+        assert_eq!(vm.read_string(100).unwrap().len(), length as usize);
+    }
+    vm.write(100, b" ,a,, b c,\0").unwrap();
+    vm.write(200, b", \0").unwrap();
+    let args = [300u32, 100, 200]
+        .into_iter()
+        .flat_map(u32::to_le_bytes)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        host.call(41, &args, &mut vm).unwrap(),
+        kcs::NativeReturn::Continue
+    );
+    assert_eq!(vm.read(300, 8).unwrap(), b"a\0b\0c\0\0\0");
+    for (index, word) in [(-1i32, "a"), (0, "a"), (1, "b"), (2, "c"), (3, "")] {
+        let args = [400u32, 300, index as u32]
+            .into_iter()
+            .flat_map(u32::to_le_bytes)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            host.call(42, &args, &mut vm).unwrap(),
+            kcs::NativeReturn::Value((!word.is_empty()) as u32)
+        );
+        assert_eq!(vm.read_string(400).unwrap(), word.as_bytes());
+    }
+    for (first, last, expected) in [(0u32, u32::MAX, "a b c "), (1, 1, "b ")] {
+        let args = [400u32, 300, first, last]
+            .into_iter()
+            .flat_map(u32::to_le_bytes)
+            .collect::<Vec<_>>();
+        host.call(44, &args, &mut vm).unwrap();
+        assert_eq!(vm.read_string(400).unwrap(), expected.as_bytes());
+    }
+    vm.write(100, b"alpha,beta\tlast\0").unwrap();
+    vm.write(200, b",\\t\0").unwrap();
+    let args = [400u32, 100, 200, 20]
+        .into_iter()
+        .flat_map(u32::to_le_bytes)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        host.call(38, &args, &mut vm).unwrap(),
+        kcs::NativeReturn::Value(5)
+    );
+    assert_eq!(vm.read_string(400).unwrap(), b"alpha");
+}
+
+#[test]
+fn text_float_conversion_consumes_a_prefix_and_rounds_through_double() {
+    use kcs::Host;
+    let mut vm = kcs::Interpreter::new(
+        kcs::Program::from_code(&[], vec![0; 256], 64).unwrap(),
+        vec![],
+    )
+    .unwrap();
+    let mut state = katze_system2::expression::State::new(8);
+    let mut host = kcs::CoreHost::new(&mut state);
+    for (input, expected) in [
+        ("", 0),
+        ("abc", 0),
+        ("12.5tail", 12.5f32.to_bits()),
+        ("  -2.75e2x", (-275.0f32).to_bits()),
+        ("\u{b}\u{c}\r\n\t 3.5", 3.5f32.to_bits()),
+        ("+.5", 0.5f32.to_bits()),
+        ("1e+", 1.0f32.to_bits()),
+        ("1.e-2", 0.01f32.to_bits()),
+        ("0x10", 16.0f32.to_bits()),
+        ("0x1p2", 4.0f32.to_bits()),
+        ("0x.8p-148", 1),
+        ("inf", 0x7f80_0000),
+        ("-INF", 0xff80_0000),
+        ("nan", 0x7fff_ffff),
+        ("-nan(ind)", 0xffff_ffff),
+        ("1e999", 0x7f80_0000),
+        ("-1e-999", 0x8000_0000),
+        ("1.0000000596046448", 1.0f32.to_bits()),
+        ("1,5", 1.0f32.to_bits()),
+        ("%f[G128]", 1.25f32.to_bits()),
+    ] {
+        vm.write(128, &1.25f32.to_bits().to_le_bytes()).unwrap();
+        vm.write(0, &[input.as_bytes(), &[0]].concat()).unwrap();
+        assert_eq!(
+            host.call(26, &0u32.to_le_bytes(), &mut vm).unwrap(),
+            kcs::NativeReturn::Value(expected),
+            "{input}"
+        );
+    }
+    vm.write(0, b"value=%f[G128]%%\0").unwrap();
+    assert_eq!(
+        host.call(1, &0u32.to_le_bytes(), &mut vm).unwrap(),
+        kcs::NativeReturn::Continue
+    );
+    assert_eq!(host.debug_messages, [b"value=1.250000%".to_vec()]);
+}

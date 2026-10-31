@@ -1,0 +1,11 @@
+[package]
+name = "katze-system2"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.87"
+license = "LGPL-2.1-only"
+description = "CatSystem2 2.6.1.90 script readers and interpreters"
+
+[dependencies]
+encoding_rs = "0.8.35"
+flate2 = { version = "1.1.9", default-features = false, features = ["rust_backend"] }
