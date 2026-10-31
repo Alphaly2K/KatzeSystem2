@@ -47,13 +47,15 @@ pub struct CoreHost<'a> {
     pub task_tree: Option<&'a TaskTree>,
     pub system_time_ms: u32,
     pub debug_mode: u32,
+    pub sequence_name_mode: u32,
     pub surface_size: [u32; 2],
     /// 外层输入宿主提供的当前逻辑画布坐标；保留画布外的值。
     pub pointer_position: [i32; 2],
     pub memory_copy_mode: MemoryCopyMode,
     pub random: ScriptRandom,
     integer_maps: BTreeMap<u32, BTreeMap<Vec<u8>, u32>>,
-    next_map_handle: u32,
+    sequence_maps: BTreeMap<u32, super::sequences::SequenceMap>,
+    next_collection_handle: u32,
 }
 
 impl<'a> CoreHost<'a> {
@@ -68,12 +70,14 @@ impl<'a> CoreHost<'a> {
             task_tree: None,
             system_time_ms: 0,
             debug_mode: 0,
+            sequence_name_mode: 0,
             surface_size: [0; 2],
             pointer_position: [0; 2],
             memory_copy_mode: MemoryCopyMode::default(),
             random: ScriptRandom::default(),
             integer_maps: BTreeMap::new(),
-            next_map_handle: 1,
+            sequence_maps: BTreeMap::new(),
+            next_collection_handle: 1,
             state,
         }
     }
@@ -115,21 +119,25 @@ impl Host for CoreHost<'_> {
         if index == 34 {
             return Ok(NativeReturn::Value(self.random.next_float().to_bits()));
         }
-        if index == 515 {
-            if self.integer_maps.len() >= read::MAX_ITEMS {
-                return Err(Error::new(vm.pc, "KCS 整数字典数量超过上限"));
+        if matches!(index, 419 | 515) {
+            if self.integer_maps.len() + self.sequence_maps.len() >= read::MAX_ITEMS {
+                return Err(Error::new(vm.pc, "KCS 集合对象数量超过上限"));
             }
-            let handle = self.next_map_handle;
-            self.next_map_handle = handle
+            let handle = self.next_collection_handle;
+            self.next_collection_handle = handle
                 .checked_add(1)
-                .ok_or_else(|| Error::new(vm.pc, "KCS 整数字典句柄耗尽"))?;
-            self.integer_maps.insert(handle, BTreeMap::new());
+                .ok_or_else(|| Error::new(vm.pc, "KCS 集合对象句柄耗尽"))?;
+            if index == 419 {
+                self.sequence_maps.insert(handle, Default::default());
+            } else {
+                self.integer_maps.insert(handle, BTreeMap::new());
+            }
             return Ok(NativeReturn::Value(handle));
         }
         let count = match index {
             1 | 6 | 17 | 18 | 25 | 26 | 40 | 47 | 48 | 71 | 209 | 210 | 212 | 213 | 278 | 319
-            | 75 | 393 | 516 => 1,
-            8 | 13..=16 | 19..=24 | 149 | 211 | 276 | 277 | 518 => 2,
+            | 75 | 393 | 420 | 421 | 516 => 1,
+            8 | 13..=16 | 19..=24 | 149 | 211 | 276 | 277 | 422 | 423 | 518 => 2,
             50..=58 | 60 | 62..=64 => 1,
             59 | 61 => 2,
             38 | 44 | 45 => 4,
@@ -160,6 +168,37 @@ impl Host for CoreHost<'_> {
                     value: args[0],
                 });
                 NativeReturn::Continue
+            }
+            420 => {
+                if args[0] != 0 && self.sequence_maps.remove(&args[0]).is_none() {
+                    return Err(Error::new(vm.pc, "KCS 序列对象句柄无效"));
+                }
+                NativeReturn::Continue
+            }
+            421..=423 => {
+                if args[0] == 0 {
+                    return Ok(if index == 423 {
+                        NativeReturn::Value(0)
+                    } else {
+                        NativeReturn::Continue
+                    });
+                }
+                let map = self
+                    .sequence_maps
+                    .get_mut(&args[0])
+                    .ok_or_else(|| Error::new(vm.pc, "KCS 序列对象句柄无效"))?;
+                if index == 421 {
+                    *map = Default::default();
+                    NativeReturn::Continue
+                } else {
+                    let source = strings::format(vm, args[1], 0)?;
+                    if index == 422 {
+                        map.register(&source, self.sequence_name_mode)?;
+                        NativeReturn::Continue
+                    } else {
+                        NativeReturn::Value(u32::from(map.contains(&source)?))
+                    }
+                }
             }
             8 | 149 => {
                 let values = if index == 8 {
