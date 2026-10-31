@@ -5,7 +5,7 @@ use katze_system2::{
         CoreHost, Host, Interpreter, NativeReturn, OrdinaryTask, Program, ResourceHost,
         ResourceServices,
     },
-    resource::ResourceMode,
+    resource::{ArchiveConfig, ResourceMode},
 };
 
 #[derive(Default)]
@@ -168,4 +168,73 @@ fn resource_service_error_stops_budgeted_ordinary_execution_after_prior_results(
     );
     assert_eq!(services.requests, [b"missing".to_vec(), b"error".to_vec()]);
     assert!(task.interpreter.stack_bytes().is_empty());
+}
+
+#[test]
+fn image_data_uses_category_resolution_and_keeps_each_load_alive_until_release() {
+    struct Images {
+        config: ArchiveConfig,
+        requests: Vec<Vec<u8>>,
+    }
+    impl ResourceServices for Images {
+        fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+            assert_eq!(category, b"image");
+            self.config.resolve(category, name)
+        }
+
+        fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
+            assert_eq!(mode, ResourceMode::LooseFirst);
+            self.requests.push(name.to_vec());
+            Ok(match name {
+                b"images.int/empty.hg3" => Some(vec![]),
+                b"images.int/missing.hg3" => None,
+                _ => Some(b"raw image bytes".to_vec()),
+            })
+        }
+    }
+    let mut config = ArchiveConfig::default();
+    config.entries[0].name = b"image".to_vec();
+    config.entries[0].category.prefix = b"images.int".to_vec();
+    config.entries[0].category.extension = b"hg3".to_vec();
+    let mut services = Images {
+        config,
+        requests: vec![],
+    };
+    let mut vm =
+        Interpreter::new(Program::from_code(&[], vec![0; 128], 64).unwrap(), vec![]).unwrap();
+    vm.write(0, b"art%04d[G32]\0").unwrap();
+    vm.write(32, &7u32.to_le_bytes()).unwrap();
+    let mut state = State::new(8);
+    let mut core = CoreHost::new(&mut state);
+    let mut host = ResourceHost::new(&mut core, &mut services);
+    let NativeReturn::Value(first) = call(&mut host, &mut vm, 365, &[0]) else {
+        panic!()
+    };
+    vm.write(0, b"folder/item.hg3\0").unwrap();
+    let NativeReturn::Value(second) = call(&mut host, &mut vm, 365, &[0]) else {
+        panic!()
+    };
+    assert_ne!(first, 0);
+    assert_ne!(first, second);
+    assert_eq!(host.image_data(first).unwrap(), b"raw image bytes");
+    assert_eq!(call(&mut host, &mut vm, 366, &[0]), NativeReturn::Continue);
+    assert_eq!(
+        call(&mut host, &mut vm, 366, &[first]),
+        NativeReturn::Continue
+    );
+    assert!(host.image_data(first).is_err());
+    assert_eq!(host.image_data(second).unwrap(), b"raw image bytes");
+    for name in [b"empty\0".as_slice(), b"missing\0"] {
+        vm.write(0, name).unwrap();
+        assert_eq!(call(&mut host, &mut vm, 365, &[0]), NativeReturn::Value(0));
+    }
+    assert_eq!(
+        services.requests,
+        [
+            b"images.int/art0007.hg3".to_vec(),
+            b"folder/item.hg3".to_vec(),
+            b"images.int/empty.hg3".to_vec(),
+            b"images.int/missing.hg3".to_vec(),
+        ]
+    );
 }

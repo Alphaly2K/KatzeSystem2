@@ -5,15 +5,21 @@ use std::collections::BTreeMap;
 
 /// 普通脚本的同步资源读取服务；None 表示未找到或无法打开。
 pub trait ResourceServices {
+    /// 依类别补全名称；可直接委托 ArchiveConfig::resolve。
+    fn resolve(&mut self, _category: &[u8], _name: &[u8]) -> Result<Vec<u8>> {
+        Err(Error::new(0, "资源服务未提供类别名称补全"))
+    }
+
     fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>>;
 }
 
-/// 为已有宿主提供普通表的 XML 资源和独立句柄生命周期。
+/// 为已有宿主提供普通表的图像原始数据、XML 资源及句柄生命周期。
 pub struct ResourceHost<'a, H, S> {
     pub inner: &'a mut H,
     pub services: &'a mut S,
     xml: BTreeMap<u32, XmlDocument>,
-    next_xml_handle: u32,
+    images: BTreeMap<u32, Vec<u8>>,
+    next_handle: u32,
 }
 
 impl<'a, H: Host, S: ResourceServices> ResourceHost<'a, H, S> {
@@ -22,8 +28,28 @@ impl<'a, H: Host, S: ResourceServices> ResourceHost<'a, H, S> {
             inner,
             services,
             xml: BTreeMap::new(),
-            next_xml_handle: 1,
+            images: BTreeMap::new(),
+            next_handle: 1,
         }
+    }
+
+    /// 借用成功装载的图像资源原始字节，存活至 366 释放或宿主销毁。
+    pub fn image_data(&self, handle: u32) -> Result<&[u8]> {
+        self.images
+            .get(&handle)
+            .map(Vec::as_slice)
+            .ok_or_else(|| Error::new(0, "KCS 图像数据句柄无效"))
+    }
+
+    fn allocate_handle(&mut self, offset: usize) -> Result<u32> {
+        if self.xml.len() + self.images.len() >= read::MAX_ITEMS {
+            return Err(Error::new(offset, "KCS 资源对象数量超过上限"));
+        }
+        let handle = self.next_handle;
+        self.next_handle = handle
+            .checked_add(1)
+            .ok_or_else(|| Error::new(offset, "KCS 资源句柄耗尽"))?;
+        Ok(handle)
     }
 }
 
@@ -42,7 +68,7 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
 
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn> {
         let count = match index {
-            590 | 591 => 1,
+            365 | 366 | 590 | 591 => 1,
             592 | 593 => 3,
             _ => return self.inner.call(index, arguments, vm),
         };
@@ -53,6 +79,28 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
             .chunks_exact(4)
             .map(|bytes| u32::from_le_bytes(bytes.try_into().unwrap()))
             .collect();
+        if index == 365 {
+            let name = strings::format(vm, args[0], 0)?;
+            let name = self.services.resolve(b"image", &name)?;
+            let Some(bytes) = self.services.read(&name, ResourceMode::LooseFirst)? else {
+                return Ok(NativeReturn::Value(0));
+            };
+            if bytes.is_empty() {
+                return Ok(NativeReturn::Value(0));
+            }
+            if bytes.len() > read::MAX_BYTES {
+                return Err(Error::new(vm.pc, "KCS 图像资源超过读取上限"));
+            }
+            let handle = self.allocate_handle(vm.pc)?;
+            self.images.insert(handle, bytes);
+            return Ok(NativeReturn::Value(handle));
+        }
+        if index == 366 {
+            if args[0] != 0 && self.images.remove(&args[0]).is_none() {
+                return Err(Error::new(vm.pc, "KCS 图像数据句柄无效"));
+            }
+            return Ok(NativeReturn::Continue);
+        }
         if index == 590 {
             let name = strings::format(vm, args[0], 0)?;
             let Some(bytes) = self.services.read(&name, ResourceMode::LooseFirst)? else {
@@ -61,13 +109,7 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
             let Ok(xml) = XmlDocument::parse(&bytes) else {
                 return Ok(NativeReturn::Value(0));
             };
-            if self.xml.len() >= read::MAX_ITEMS {
-                return Err(Error::new(vm.pc, "KCS XML 对象数量超过上限"));
-            }
-            let handle = self.next_xml_handle;
-            self.next_xml_handle = handle
-                .checked_add(1)
-                .ok_or_else(|| Error::new(vm.pc, "KCS XML 句柄耗尽"))?;
+            let handle = self.allocate_handle(vm.pc)?;
             self.xml.insert(handle, xml);
             return Ok(NativeReturn::Value(handle));
         }
