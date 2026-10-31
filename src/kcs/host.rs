@@ -26,11 +26,21 @@ pub(super) fn hierarchy_query(
     Ok(NativeReturn::Value(id))
 }
 
+/// 交给窗口宿主的异步菜单项状态请求。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MenuItemRequest {
+    pub task_id: u32,
+    pub command_id: u32,
+    /// 非零启用，零禁用；保留原始 DWORD。
+    pub value: u32,
+}
+
 /// 在已有数值状态上提供普通任务表中已核实的接口。
 pub struct CoreHost<'a> {
     pub state: &'a mut expression::State,
     pub configured_shared_slots: u32,
     pub debug_messages: Vec<Vec<u8>>,
+    pub menu_item_requests: Vec<MenuItemRequest>,
     pub task_time: u32,
     pub task_origin: u32,
     pub task_id: u32,
@@ -48,6 +58,7 @@ impl<'a> CoreHost<'a> {
         Self {
             configured_shared_slots: state.shared.len() as u32,
             debug_messages: Vec::new(),
+            menu_item_requests: Vec::new(),
             task_time: 0,
             task_origin: 0,
             task_id: 0,
@@ -109,7 +120,7 @@ impl Host for CoreHost<'_> {
         }
         let count = match index {
             1 | 6 | 17 | 18 | 25 | 26 | 40 | 47 | 48 | 71 | 209 | 210 | 212 | 213 | 278 | 319
-            | 75 | 516 => 1,
+            | 75 | 393 | 516 => 1,
             8 | 13..=16 | 19..=24 | 211 | 276 | 277 | 518 => 2,
             50..=58 | 60 | 62..=64 => 1,
             59 | 61 => 2,
@@ -131,6 +142,17 @@ impl Host for CoreHost<'_> {
                 NativeReturn::Continue
             }
             6 => NativeReturn::Value(args[0]),
+            393 => {
+                if self.menu_item_requests.len() >= read::MAX_ITEMS {
+                    return Err(Error::new(vm.pc, "KCS 菜单请求数量超过上限"));
+                }
+                self.menu_item_requests.push(MenuItemRequest {
+                    task_id: self.task_id,
+                    command_id: 0x77,
+                    value: args[0],
+                });
+                NativeReturn::Continue
+            }
             8 => {
                 for (address, value) in args.iter().zip(self.surface_size) {
                     vm.write(*address, &value.to_le_bytes())?;

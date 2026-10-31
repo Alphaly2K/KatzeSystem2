@@ -202,3 +202,44 @@ fn split_update_preserves_clock_controls_and_messages_changed_by_children() {
         assert!(!task.clock.one_tick_pending);
     }
 }
+
+#[test]
+fn menu_requests_keep_task_identity_and_are_emitted_once_across_budget_resumption() {
+    use katze_system2::kcs::MenuItemRequest;
+    let mut code = Vec::new();
+    for value in [0, u32::MAX] {
+        ins(&mut code, 0x25, &[(3, value)]);
+        ins(&mut code, 0x2b, &[(3, 393), (3, 4)]);
+    }
+    ins(&mut code, 0x2b, &[(3, 68), (3, 0)]);
+    ins(&mut code, 0x26, &[(3, 0)]);
+    code.push(0x3b);
+    let program = Program::from_code(&code, vec![0; 16], 64).unwrap();
+    let mut state = State::new(8);
+    let mut host = CoreHost::new(&mut state);
+    for id in [7, 9] {
+        let mut task = OrdinaryTask::new(program.clone(), vec![]).unwrap();
+        task.task_id = id;
+        let mut completed = false;
+        for _ in 0..20 {
+            completed = task.update(100, 1, &mut host, 1).unwrap();
+            if completed {
+                break;
+            }
+        }
+        assert!(completed);
+        assert!(task.interpreter.stack_bytes().is_empty());
+        assert_eq!(values(&task)[0], id);
+    }
+    let expected: Vec<_> = [7, 9]
+        .into_iter()
+        .flat_map(|task_id| {
+            [0, u32::MAX].into_iter().map(move |value| MenuItemRequest {
+                task_id,
+                command_id: 0x77,
+                value,
+            })
+        })
+        .collect();
+    assert_eq!(host.menu_item_requests, expected);
+}

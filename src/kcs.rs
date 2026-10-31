@@ -15,7 +15,7 @@ mod sse;
 mod strings;
 mod task_host;
 pub use crate::task::TaskClock;
-pub use host::CoreHost;
+pub use host::{CoreHost, MenuItemRequest};
 pub use memory::MemoryCopyMode;
 pub use motion::{MotionHost, MotionState, MotionTask};
 pub use ordinary::OrdinaryTask;
