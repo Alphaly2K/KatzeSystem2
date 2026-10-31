@@ -3,7 +3,7 @@ use crate::{Error, Result, Step, read};
 
 enum UpdatePhase {
     Messages(usize),
-    Resume,
+    Resume(usize),
 }
 
 /// 已装载的普通 KCS 任务；子任务树与对象命令由外层宿主管理。
@@ -67,7 +67,7 @@ impl OrdinaryTask {
         while let Some(UpdatePhase::Messages(index)) = self.phase {
             if index == self.messages.len() {
                 self.messages.clear();
-                self.phase = Some(UpdatePhase::Resume);
+                self.phase = Some(UpdatePhase::Resume(self.interpreter.pc));
                 break;
             }
             let step = self.interpreter.dispatch_message(
@@ -84,7 +84,13 @@ impl OrdinaryTask {
         if matches!(step, Step::Yield) {
             return Ok(false);
         }
-        self.running = (!matches!(step, Step::Halted)) as i32;
+        let Some(UpdatePhase::Resume(entry_pc)) = self.phase else {
+            unreachable!()
+        };
+        // 取指过程中到达代码末尾仍返回活动，下一轮从末尾进入才停止。
+        let reached_end = self.interpreter.pc == self.interpreter.program.code_len
+            && entry_pc != self.interpreter.pc;
+        self.running = (!matches!(step, Step::Halted) || reached_end) as i32;
         self.phase = None;
         Ok(true)
     }

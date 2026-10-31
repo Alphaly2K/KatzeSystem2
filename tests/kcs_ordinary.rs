@@ -118,3 +118,29 @@ fn stopped_task_keeps_updating_its_clock_and_retains_queued_messages() {
     assert_eq!(task.queued_messages(), [[1, 2, 3, 4]]);
     assert_eq!(values(&task), [1, 0, 0, 0]);
 }
+
+#[test]
+fn implicit_code_end_stops_on_the_following_update_across_budget_resumption() {
+    let mut code = Vec::new();
+    ins(&mut code, 0x25, &[(3, 42)]);
+    for budget in [1, 100] {
+        let mut task =
+            OrdinaryTask::new(Program::from_code(&code, vec![0; 16], 64).unwrap(), vec![]).unwrap();
+        let mut state = State::new(8);
+        let mut host = CoreHost::new(&mut state);
+        for _ in 0..10 {
+            if task.update(10, 1, &mut host, budget).unwrap() {
+                break;
+            }
+        }
+        assert!(!task.is_pending());
+        assert_eq!(task.running, 1);
+        assert_eq!(task.accumulated_increment, 1);
+        assert_eq!(task.interpreter.stack_bytes(), 42u32.to_le_bytes());
+        assert!(task.update(20, 2, &mut host, budget).unwrap());
+        assert_eq!(task.running, 0);
+        assert_eq!(task.accumulated_increment, 3);
+        assert!(task.update(30, 3, &mut host, budget).unwrap());
+        assert_eq!(task.accumulated_increment, 3);
+    }
+}

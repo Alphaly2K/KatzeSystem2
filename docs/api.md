@@ -130,7 +130,7 @@ FES 内部执行宏声明，初始化按以下顺序交给宿主：
 
 普通任务使用 `Interpreter::resume(host, budget)` 进行无消息更新；native 71 登记接收地址并让出，下一次普通更新补入 0。`dispatch_message(&mut [u32; 4], host, budget)` 在等待时复制消息、补入 1 并执行，完成后回写消息第二项；未等待时返回 `None`。`Some(Step::Yield)` 表示预算续跑，继续传入同一消息，其间调用 `resume` 返回诊断。`is_waiting_for_message()` 查询等待状态；自定义宿主可调用 `wait_for_message(address)` 注册接收地址。运动／粒子的低层 `run` 不消费消息等待。接收地址切换及回写规则见 [KCS 宿主契约](kcs.md)。
 
-`kcs::OrdinaryTask::new(program, external)` 创建已装载且 running 为 1 的任务；`clock`、`interpreter` 和 `running` 可由外层管理。`enqueue_message([u32; 4])` 复制入队，`queued_messages()` 查询当前队列。`update(now, increment, host, budget_per_call)` 更新时钟、按顺序分派全部消息并进行一次无消息恢复，返回 true 表示本轮完成；false 时继续调用同一方法，本轮时刻和累计增量保持不变。预算分别交给每次 VM 推进，`is_pending()` 查询续跑状态，续跑期间禁止入队或直接操作 VM／控制字段。running 为零时只更新时钟并保留队列；时钟 paused 非零仍推进活动脚本。`accumulated_increment` 仅在活动的新一轮累加外层提供的 increment，按 u32 回绕。
+`kcs::OrdinaryTask::new(program, external)` 创建已装载且 running 为 1 的任务；`clock`、`interpreter` 和 `running` 可由外层管理。`enqueue_message([u32; 4])` 复制入队，`queued_messages()` 查询当前队列。`update(now, increment, host, budget_per_call)` 更新时钟、按顺序分派全部消息并进行一次无消息恢复，返回 true 表示本轮完成；false 时继续调用同一方法，本轮时刻和累计增量保持不变。预算分别交给每次 VM 推进，`is_pending()` 查询续跑状态，续跑期间禁止入队或直接操作 VM／控制字段。running 为零时只更新时钟并保留队列；时钟 paused 非零仍推进活动脚本。`accumulated_increment` 仅在活动的新一轮累加外层提供的 increment，按 u32 回绕。程序在执行中到达隐式代码末尾时保留 running 为 1，下一轮进入才停止；显式停止指令当轮停止。
 
 普通任务通过 `Host::set_task_clock` 同步 native 5 的时间上下文；`CoreHost` 已实现，包装宿主应委托此方法。任务树、创建／删除和对象命令由外层负责。
 
