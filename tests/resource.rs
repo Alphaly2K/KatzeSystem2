@@ -1,4 +1,7 @@
-use katze_system2::resource::{ArchiveConfig, ArchiveDirectory, Category};
+use katze_system2::resource::{
+    ArchiveConfig, ArchiveDirectory, ArchiveMount, Category, KifArchive, ResourceGroup,
+    ResourceMember, ResourceMode, ResourceRouter, ResourceSlot, ResourceSource,
+};
 
 fn config_xml(body: &str) -> String {
     format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?><document>{body}</document>")
@@ -165,4 +168,194 @@ fn plain_archive_directory_rejects_encrypted_tables_and_truncated_ranges() {
     invalid[8..72].fill(b'a');
     assert!(ArchiveDirectory::from_plain_kif(&invalid).is_err());
     assert!(ArchiveDirectory::from_plain_kif(&plain_kif(&[b"__KEY__.DAT"])).is_err());
+}
+
+fn wide(s: &str) -> Vec<u16> {
+    s.encode_utf16().collect()
+}
+
+#[test]
+fn resource_routes_keep_slot_and_mounted_paths_distinct_and_preserve_empty_prefix_rules() {
+    let bytes = plain_kif(&[b"common.kcs", b"nested/sample.kcs"]);
+    let archive = KifArchive::parse(&bytes, 0).unwrap();
+    let mut router = ResourceRouter::default();
+    router.slots[0] = ResourceSlot {
+        prefix: wide("first.int"),
+        directory: wide("資料"),
+        loose_enabled: true,
+        archive: Some(ArchiveMount {
+            path: wide("a.int"),
+            archive: &archive,
+        }),
+    };
+    router.slots[1] = ResourceSlot {
+        prefix: wide("a.int"),
+        loose_enabled: true,
+        ..Default::default()
+    };
+    let read = |name: &[u8], mode| router.read(name, mode, |_| Ok(None)).unwrap();
+    for name in [
+        b"A.INT/common.kcs\0ignored".as_slice(),
+        b"a.int/nested/sample.kcs",
+    ] {
+        assert_eq!(
+            read(name, ResourceMode::Archive).unwrap().source,
+            ResourceSource::Archive(0)
+        );
+    }
+    assert!(read(b"first.int/common.kcs", ResourceMode::Archive).is_none());
+    assert!(read(b"a.int/common.kcs", ResourceMode::ArchiveFirst).is_none());
+    assert!(read(b"common.kcs", ResourceMode::Archive).is_none());
+    assert!(read(b"common.kcs", ResourceMode::ArchiveFirst).is_none());
+    assert_eq!(
+        read(b"/common.kcs", ResourceMode::LooseFirst)
+            .unwrap()
+            .source,
+        ResourceSource::Archive(0)
+    );
+    let mut paths = Vec::new();
+    router
+        .read(b"missing.kcs", ResourceMode::LooseFirst, |path| {
+            paths.push(path.to_vec());
+            Ok(None)
+        })
+        .unwrap();
+    assert_eq!(paths.len(), 256);
+    assert_eq!(paths[0], wide("資料\\missing.kcs"));
+    assert_eq!(paths[1], wide("missing.kcs"));
+    for (mode, path) in [
+        (ResourceMode::LooseFirst, "common.kcs"),
+        (ResourceMode::ArchiveFirst, "\\common.kcs"),
+    ] {
+        let result = router
+            .read(b"a.int/common.kcs", mode, |p| {
+                Ok(Some(p.iter().map(|&v| v as u8).collect()))
+            })
+            .unwrap()
+            .unwrap();
+        assert_eq!(result.source, ResourceSource::File(wide(path)));
+    }
+    let mut direct = Vec::new();
+    router
+        .read(b"a.int\\common.kcs", ResourceMode::File, |path| {
+            direct.push(path.to_vec());
+            Ok(Some(Vec::new()))
+        })
+        .unwrap();
+    assert_eq!(direct, [wide("a.int\\common.kcs")]);
+}
+
+#[test]
+fn resource_lists_apply_priority_per_member_and_patches_override_every_mode() {
+    let first_bytes = plain_kif(&[b"only_first.kcs", b"common.kcs"]);
+    let second_bytes = plain_kif(&[b"common.kcs"]);
+    let first = KifArchive::parse(&first_bytes, 0).unwrap();
+    let second = KifArchive::parse(&second_bytes, 0).unwrap();
+    let mut router = ResourceRouter::default();
+    for (i, archive) in [&first, &second].into_iter().enumerate() {
+        router.slots[i].archive = Some(ArchiveMount {
+            path: wide("unused.int"),
+            archive,
+        });
+    }
+    router.groups.push(ResourceGroup {
+        prefix: wide("pack.lst"),
+        members: vec![
+            ResourceMember {
+                slot: Some(1),
+                loose_enabled: true,
+                ..Default::default()
+            },
+            ResourceMember {
+                slot: Some(0),
+                directory: wide("next"),
+                loose_enabled: true,
+            },
+        ],
+    });
+    let mut paths = Vec::new();
+    let result = router
+        .read(
+            b"PACK.LST/only_first.kcs",
+            ResourceMode::ArchiveFirst,
+            |path| {
+                paths.push(path.to_vec());
+                Ok(None)
+            },
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(result.source, ResourceSource::Archive(0));
+    assert_eq!(paths, [wide("\\only_first.kcs")]);
+    let result = router
+        .read(b"pack.lst/common.kcs", ResourceMode::LooseFirst, |path| {
+            assert_eq!(path, wide("\\common.kcs"));
+            Ok(Some(b"loose".to_vec()))
+        })
+        .unwrap()
+        .unwrap();
+    assert_eq!(result.bytes, b"loose");
+    assert_eq!(
+        router
+            .read(b"pack.lst/common.kcs", ResourceMode::Archive, |_| panic!())
+            .unwrap()
+            .unwrap()
+            .source,
+        ResourceSource::Archive(1)
+    );
+    router.patches = vec![&second, &first];
+    for mode in [
+        ResourceMode::File,
+        ResourceMode::Archive,
+        ResourceMode::LooseFirst,
+        ResourceMode::ArchiveFirst,
+    ] {
+        assert_eq!(
+            router
+                .read(b"unknown.int/only_first.kcs", mode, |_| panic!())
+                .unwrap()
+                .unwrap()
+                .source,
+            ResourceSource::Patch(1)
+        );
+        assert_eq!(
+            router
+                .read(b"common.kcs", mode, |_| panic!())
+                .unwrap()
+                .unwrap()
+                .source,
+            ResourceSource::Patch(0)
+        );
+    }
+    assert!(
+        router
+            .read(
+                b"unknown.int/nested/common.kcs",
+                ResourceMode::Archive,
+                |_| panic!()
+            )
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        router
+            .read(b"missing", ResourceMode::File, |_| Err(
+                katze_system2::Error::new(0, "read failure")
+            ))
+            .is_err()
+    );
+    assert!(
+        router
+            .read_utf16(&vec![b'a' as u16; 260], ResourceMode::File, |_| panic!())
+            .is_err()
+    );
+    assert!(
+        router
+            .read_utf16(
+                &wide("資料.int/missing"),
+                ResourceMode::Archive,
+                |_| panic!()
+            )
+            .is_err()
+    );
 }

@@ -1,4 +1,37 @@
 use katze_system2::{Step, expression::State, fes, kcs};
+use std::io::Write;
+
+fn archived_motion(code: &[u8]) -> Vec<u8> {
+    let mut container = b"KCS\0".to_vec();
+    for value in [
+        2,
+        0x20000,
+        52,
+        code.len() as u32,
+        52 + code.len() as u32,
+        0,
+        0,
+        0,
+        64,
+        52 + code.len() as u32,
+        0,
+        code.len() as u32,
+    ] {
+        container.extend(value.to_le_bytes());
+    }
+    let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder.write_all(code).unwrap();
+    container.extend(encoder.finish().unwrap());
+    let mut archive = b"KIF\0".to_vec();
+    archive.extend(1u32.to_le_bytes());
+    let mut name = [0; 64];
+    name[..10].copy_from_slice(b"motion.kcs");
+    archive.extend(name);
+    archive.extend(80u32.to_le_bytes());
+    archive.extend((container.len() as u32).to_le_bytes());
+    archive.extend(container);
+    archive
+}
 
 fn ins(code: &mut Vec<u8>, opcode: u8, args: &[(u8, u32)]) {
     code.push(opcode);
@@ -47,16 +80,29 @@ fn array_subcommands_convert_each_bank_then_run_and_apply_queued_motion() {
          </int00></INT></document>",
     )
     .unwrap();
-    assert_eq!(
-        resources.resolve(b"mot", &call.binding.target).unwrap(),
-        b"motion.int/motion.kcs"
-    );
+    let target = resources.resolve(b"mot", &call.binding.target).unwrap();
+    assert_eq!(target, b"motion.int/motion.kcs");
     let mut code = vec![];
     ins(&mut code, 1, &[(0x14, 0x8000_0018), (0x14, 0x8000_009c)]);
     ins(&mut code, 0x15, &[(4, 0x8000_0018), (0x44, 0)]);
     code.push(0x2d);
     ins(&mut code, 0x2b, &[(3, 38), (3, 0)]);
-    let program = kcs::Program::from_code(&code, vec![], 64).unwrap();
+    let bytes = archived_motion(&code);
+    let archive = katze_system2::resource::KifArchive::parse(&bytes, 0).unwrap();
+    let mut router = katze_system2::resource::ResourceRouter::default();
+    router.slots[0].archive = Some(katze_system2::resource::ArchiveMount {
+        path: "motion.int".encode_utf16().collect(),
+        archive: &archive,
+    });
+    let loaded = router
+        .read(
+            &target,
+            katze_system2::resource::ResourceMode::Archive,
+            |_| panic!(),
+        )
+        .unwrap()
+        .unwrap();
+    let program = kcs::Program::parse(&loaded.bytes).unwrap();
     for (image, expected) in images.iter_mut().zip([26.0, 27.0]) {
         let arguments = fes
             .subcommand_arguments(
