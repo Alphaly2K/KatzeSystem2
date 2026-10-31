@@ -153,6 +153,8 @@ FES 内部执行宏声明，初始化按以下顺序交给宿主：
 
 同一 `ResourceHost` 提供 365／366 的图像原始数据装载及释放。服务需实现 `resolve(category, name)`，以 `ArchiveConfig::resolve` 等价规则补全 image 类别，随后 `read` 按散装优先读取完整字节。空资源或 None 返回零，其他成功数据创建独立句柄；`image_data(handle)` 可借用其内容，366 或宿主销毁结束生命周期。解析 XML 与加载图像使用不同类型的句柄，错误类型和失效句柄返回诊断。图像解码及绘制对象尚未通过这组接口创建。
 
+368 可从已装载的 HG-3 0x300 数据读取帧元数据，向目标写九个 DWORD；字段顺序见 [KCS 文档](kcs.md)。它返回找到状态，零句柄不写目标，正常查询先清零目标字段。目标需能容纳 36 字节；HG-2／JPEG 查询及未支持的 HG-3 版本返回诊断。
+
 `kcs::SystemHost::new(&mut inner, &mut services)` 为已有 Host 接入普通表 629。服务实现 `SystemServices::open(task_id, target, parameters, directory) -> Result<()>`，接收依次格式展开后的三个字节串。服务返回后 native 才以状态 2 继续，不压值；服务错误返回解释器诊断，当前推进立即结束。平台打开 API 的成功／失败返回值均不作为 VM 返回值。
 
 包装层把时钟、编号、创建上下文及其他 native 委托给 inner，可与 TaskHost 组合。初始编号为零，直接使用 VM 时通过 `Host::set_task_id` 设置；OrdinaryTask 自动同步。平台服务按编号查找相应窗口或环境，并负责处理字节路径、参数和目录，具体 Windows 调用契约见 [KCS](kcs.md)。

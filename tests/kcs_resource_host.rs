@@ -224,6 +224,15 @@ fn image_data_uses_category_resolution_and_keeps_each_load_alive_until_release()
     );
     assert!(host.image_data(first).is_err());
     assert_eq!(host.image_data(second).unwrap(), b"raw image bytes");
+    vm.write(64, &[0x5a; 40]).unwrap();
+    assert_eq!(
+        call(&mut host, &mut vm, 368, &[second, 0, 64]),
+        NativeReturn::Value(0)
+    );
+    assert_eq!(
+        vm.read(64, 40).unwrap(),
+        [[0; 36].as_slice(), &[0x5a; 4]].concat()
+    );
     for name in [b"empty\0".as_slice(), b"missing\0"] {
         vm.write(0, name).unwrap();
         assert_eq!(call(&mut host, &mut vm, 365, &[0]), NativeReturn::Value(0));
@@ -237,4 +246,82 @@ fn image_data_uses_category_resolution_and_keeps_each_load_alive_until_release()
             b"images.int/missing.hg3".to_vec(),
         ]
     );
+}
+
+#[test]
+fn image_metadata_queries_select_first_frame_and_write_only_the_nine_fields() {
+    struct Bytes(Vec<u8>);
+    impl ResourceServices for Bytes {
+        fn resolve(&mut self, _: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+            Ok(name.to_vec())
+        }
+        fn read(&mut self, _: &[u8], _: ResourceMode) -> Result<Option<Vec<u8>>> {
+            Ok(Some(self.0.clone()))
+        }
+    }
+    let mut image = b"HG-3".to_vec();
+    image.extend([12u32, 0x300].into_iter().flat_map(u32::to_le_bytes));
+    for (i, id) in [7u32, 7, u32::MAX].into_iter().enumerate() {
+        image.extend((if i == 2 { 0u32 } else { 64 }).to_le_bytes());
+        image.extend(id.to_le_bytes());
+        image.extend(b"stdinfo\0");
+        image.extend([0u32, 40].into_iter().flat_map(u32::to_le_bytes));
+        let i = i as u32;
+        image.extend(
+            [
+                31 + i,
+                47 + i,
+                if i == 2 { 0x8000 } else { 32 },
+                (-3i32).wrapping_sub(i as i32) as u32,
+                11 + i,
+                640 + i,
+                480 + i,
+                0,
+                100 + i,
+                (-21i32).wrapping_sub(i as i32) as u32,
+            ]
+            .into_iter()
+            .flat_map(u32::to_le_bytes),
+        );
+    }
+    let mut services = Bytes(image);
+    let mut vm = Interpreter::new(
+        Program::from_code(&[], vec![0; 64], 64).unwrap(),
+        vec![0x5a; 64],
+    )
+    .unwrap();
+    let mut state = State::new(8);
+    let mut core = CoreHost::new(&mut state);
+    let mut host = ResourceHost::new(&mut core, &mut services);
+    let NativeReturn::Value(handle) = call(&mut host, &mut vm, 365, &[0]) else {
+        panic!()
+    };
+    for (frame, expected) in [
+        (7, [-3i32, 11, 31, 47, 640, 480, 4, 100, -21]),
+        (u32::MAX, [-5, 13, 33, 49, 642, 482, -4096, 102, -23]),
+    ] {
+        assert_eq!(
+            call(&mut host, &mut vm, 368, &[handle, frame, 0x80000008]),
+            NativeReturn::Value(1)
+        );
+        let expected: Vec<_> = expected.into_iter().flat_map(i32::to_le_bytes).collect();
+        assert_eq!(vm.read(0x80000008, 36).unwrap(), expected);
+    }
+    let before = vm.read(0x80000000, 64).unwrap().to_vec();
+    assert_eq!(
+        call(&mut host, &mut vm, 368, &[0, 7, 0x80000008]),
+        NativeReturn::Value(0)
+    );
+    assert_eq!(vm.read(0x80000000, 64).unwrap(), before);
+    assert_eq!(
+        call(&mut host, &mut vm, 368, &[handle, 7, u32::MAX]),
+        NativeReturn::Value(0)
+    );
+    assert_eq!(
+        call(&mut host, &mut vm, 368, &[handle, 0, 0x80000008]),
+        NativeReturn::Value(0)
+    );
+    assert_eq!(vm.read(0x80000008, 36).unwrap(), [0; 36]);
+    assert_eq!(vm.read(0x80000000, 8).unwrap(), [0x5a; 8]);
+    assert_eq!(vm.read(0x8000002c, 20).unwrap(), [0x5a; 20]);
 }

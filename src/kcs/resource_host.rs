@@ -69,7 +69,7 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn> {
         let count = match index {
             365 | 366 | 590 | 591 => 1,
-            592 | 593 => 3,
+            368 | 592 | 593 => 3,
             _ => return self.inner.call(index, arguments, vm),
         };
         if arguments.len() != count * 4 {
@@ -100,6 +100,37 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
                 return Err(Error::new(vm.pc, "KCS 图像数据句柄无效"));
             }
             return Ok(NativeReturn::Continue);
+        }
+        if index == 368 {
+            if args[0] == 0 || vm.read(args[2], 1).is_err() {
+                return Ok(NativeReturn::Value(0));
+            }
+            vm.write(args[2], &[0; 36])?;
+            let bytes = self.image_data(args[0])?;
+            if bytes.starts_with(b"HG-2") || bytes.starts_with(&[0xff, 0xd8]) {
+                return Err(Error::new(vm.pc, "未支持的 HG-2／JPEG 元数据查询"));
+            }
+            if !bytes.starts_with(b"HG-3") {
+                return Ok(NativeReturn::Value(0));
+            }
+            let metadata = crate::hg3::Metadata::parse(bytes)?;
+            let Some(info) = metadata.frame(args[1] as i32).and_then(|frame| frame.info) else {
+                return Ok(NativeReturn::Value(0));
+            };
+            let fields = [
+                info.offset[0] as u32,
+                info.offset[1] as u32,
+                info.size[0],
+                info.size[1],
+                info.canvas_size[0],
+                info.canvas_size[1],
+                ((info.bit_depth as i16 as i32) / 8) as u32,
+                info.base[0] as u32,
+                info.base[1] as u32,
+            ];
+            let fields: Vec<_> = fields.into_iter().flat_map(u32::to_le_bytes).collect();
+            vm.write(args[2], &fields)?;
+            return Ok(NativeReturn::Value(1));
         }
         if index == 590 {
             let name = strings::format(vm, args[0], 0)?;
