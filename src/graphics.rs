@@ -2,6 +2,8 @@ use crate::{Error, Result, read};
 
 mod image;
 pub use image::{Image, ImageReference, Images};
+mod target;
+pub use target::{DrawingContext, RenderTarget};
 
 /// 包含左上边、不包含右下边的像素矩形。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

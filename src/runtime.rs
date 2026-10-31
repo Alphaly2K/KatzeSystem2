@@ -143,6 +143,14 @@ impl<F: ObjectFactory> Runtime<F> {
         &self.resources.images
     }
 
+    pub fn drawing(&self) -> &crate::graphics::DrawingContext {
+        &self.resources.drawing
+    }
+
+    pub fn drawing_mut(&mut self) -> &mut crate::graphics::DrawingContext {
+        &mut self.resources.drawing
+    }
+
     pub fn host(&self) -> &HostState {
         &self.host
     }
