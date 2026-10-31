@@ -21,12 +21,12 @@ impl<'a> CoreHost<'a> {
 
 impl Host for CoreHost<'_> {
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn> {
-        if index == 0 {
+        if matches!(index, 0 | 2 | 3) {
             return Ok(NativeReturn::Continue);
         }
         let count = match index {
-            1 | 17 | 26 | 209 | 210 | 212 | 213 | 278 => 1,
-            14 | 23 | 211 | 276 | 277 => 2,
+            1 | 6 | 17 | 18 | 26 | 209 | 210 | 212 | 213 | 278 => 1,
+            13..=16 | 19..=23 | 211 | 276 | 277 => 2,
             38 | 44 | 45 => 4,
             41 | 42 | 519 => 3,
             789 => 0,
@@ -44,12 +44,46 @@ impl Host for CoreHost<'_> {
                 self.debug_messages.push(strings::format(vm, args[0], 0)?);
                 NativeReturn::Continue
             }
+            6 => NativeReturn::Value(args[0]),
+            13 => {
+                let source = vm.read_string(args[1])?.to_vec();
+                if args[0] > args[1] && args[0] - args[1] <= source.len() as u32 {
+                    return Err(Error::new(vm.pc, "KCS 字符串复制会覆盖尚未读取的源"));
+                }
+                write_string(vm, args[0], &source, 2)?;
+                NativeReturn::Value(args[0])
+            }
             14 => {
                 let text = strings::format(vm, args[1], 0)?;
                 write_string(vm, args[0], &text, 2)?;
                 NativeReturn::Value(args[0])
             }
+            15 => {
+                strings::append_raw(vm, args[0], args[1])?;
+                NativeReturn::Value(args[0])
+            }
+            16 => {
+                let source = strings::format(vm, args[1], 0)?;
+                let length = vm.read_string(args[0])?.len();
+                write_string(vm, args[0].wrapping_add(length as u32), &source, 2)?;
+                NativeReturn::Value(args[0])
+            }
             17 => NativeReturn::Value(vm.read_string(args[0])?.len() as u32),
+            18 => NativeReturn::Value(strings::format(vm, args[0], 0)?.len() as u32),
+            19..=22 => {
+                let (left, right) = if index.is_multiple_of(2) {
+                    (
+                        strings::format(vm, args[0], 0)?,
+                        strings::format(vm, args[1], 0)?,
+                    )
+                } else {
+                    (
+                        vm.read_string(args[1])?.to_vec(),
+                        vm.read_string(args[0])?.to_vec(),
+                    )
+                };
+                NativeReturn::Value(strings::compare(&left, &right, index >= 21) as u32)
+            }
             26 => NativeReturn::Value(strings::float32(&strings::format(vm, args[0], 0)?)),
             23 => {
                 let source = vm.read_string(args[0])?;

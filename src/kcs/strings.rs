@@ -209,7 +209,44 @@ pub(super) fn format(vm: &Interpreter, address: u32, depth: usize) -> Result<Vec
             return Err(Error::new(vm.pc, "KCS 格式输出超过上限"));
         }
     }
+    if let Some(end) = output.iter().position(|&b| b == 0) {
+        output.truncate(end);
+    }
     Ok(output)
+}
+
+pub(super) fn compare(left: &[u8], right: &[u8], insensitive: bool) -> i32 {
+    for i in 0..=left.len().min(right.len()) {
+        let a = left.get(i).copied().unwrap_or(0);
+        let b = right.get(i).copied().unwrap_or(0);
+        if a != b {
+            let difference = if insensitive {
+                a.to_ascii_lowercase() as i32 - b.to_ascii_lowercase() as i32
+            } else {
+                a as i8 as i32 - b as i8 as i32
+            };
+            if difference != 0 {
+                return difference;
+            }
+        }
+    }
+    0
+}
+
+pub(super) fn append_raw(vm: &mut Interpreter, target: u32, source: u32) -> Result<()> {
+    let length = vm.read_string(source)?.len() + 1;
+    let end = target.wrapping_add(vm.read_string(target)?.len() as u32);
+    // 原入口先按 DWORD、再按单字节向前复制，重叠区不能先整体快照。
+    let mut offset = 0;
+    while offset < length {
+        let width = if length - offset >= 4 { 4 } else { 1 };
+        let mut bytes = [0; 4];
+        bytes[..width].copy_from_slice(vm.read(source.wrapping_add(offset as u32), width)?);
+        vm.write(end.wrapping_add(offset as u32), &bytes[..width])?;
+        offset += width;
+    }
+    let end = target.wrapping_add(vm.read_string(target)?.len() as u32);
+    vm.write(end, &[0, 0])
 }
 
 fn field(s: &str) -> Result<usize> {
