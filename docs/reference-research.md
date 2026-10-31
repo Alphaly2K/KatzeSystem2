@@ -1,0 +1,98 @@
+# 公开资料与先行实现调研
+
+本页保存公开资料、先行项目 issues 与基线输入的调研依据。源码／issue 状态按下述查阅日期记录；当前接口见 [API](api.md)，阶段状态及交接事项见 [GOAL.md](../GOAL.md)。
+
+## 既有调研依据
+
+资料来源：[TriggersTools.CatSystem2 Wiki](https://github.com/trigger-segfault/TriggersTools.CatSystem2/wiki)。本次查阅版本为 `35a34b9`，最新提交日期为 2023-06-14。首页及侧栏导航不完整，应结合完整页面列表查阅。Wiki 同时涉及 CatSystem1、CatSystem2 和平台差异，以下认识聚焦 Windows CatSystem2。
+
+先行实现：[FelineSystem2](https://github.com/kokseen1/FelineSystem2)，查阅主分支版本为 `ce7aeafd7cc6e65763832f7414e4d69d2c9ba48d`，最后提交日期为 2023-06-01。截至 2026-10-31，仓库未归档，共有 47 条 issues，其中 17 条开放、30 条关闭，另有 3 条 PR；本次已阅读全部 issue 正文及 26 条评论。
+
+## 已梳理的引擎结构
+
+- 启动与资源配置：`config/startup.xml` 注册资源类别、归档、扩展名和散装资源目录，并指定启动脚本。`.lst` 可将同类资源组织为多个归档；`update<编号>.int` 承载补丁资源，资源查找必须考虑覆盖关系。
+- 资源归档：`.int` 使用 KIF 容器，可为明文或加密。`V_CODE2` 参与文件名解混淆的种子生成；归档内 `__key__.dat` 的字段参与内容密钥生成。加密路径涉及 Beaufort、Blowfish、修改过的 CRC-32 和 MT19937 的 1999 版初始化算法。较旧引擎还存在较短文件名字段。
+- 剧情：`.cst` 以 `CatScene` 为签名，主体包含输入区间、字符串偏移表和带类型的行。行类型区分发言人、正文、命令、输入等待、翻页及调试信息。命令行仍包含文本，需进一步解析和执行；主体支持 Zlib 压缩或不压缩。
+- 界面：`.fes` 为 Front End Script，Zlib 解压后主要是脚本文本。其职责涉及标题、消息窗口、存读档等界面及流程控制；文档将 `flow.fes` 称为主要流程脚本。
+- 动画：`.anm` 是时间线指令及参数表，包含帧选择、等待、变量、跳转、条件和显示属性命令，参数可引用变量。本基线的全部指令、时间线和对象播放行为已核实，见 [ANM](anm.md)。
+- 图像：HG-2/HG-3 支持帧 ID、裁剪尺寸、完整尺寸、偏移和绘制基点。HG-3 通过标签组织帧数据，存在原生编码、JPEG 加独立 Alpha、WebP 等路径。原生编码还涉及零游程、位编码重排和差分恢复。
+- 底层脚本：`.kcs` 涉及引擎函数、底层图形、运动或粒子逻辑。Wiki 展示了启动入口和编译工具线索，缺少完整格式与执行语义，属于重实现需要继续研究的部分。
+- 文本与版本：传统路径使用 Windows CP932；较新版本增加 UTF-8 及 `.cstl` 多语言文本。新版 FES 区分 `STRING` 与 `STRING8` 等对象，可混合不同编码的字符串，不能为所有文件统一假定编码。
+- 扩展：部分游戏使用 E-mote 及相应资源和驱动；文档记载了跨版本驱动不兼容及传统立绘命令异常的实例。
+
+## FelineSystem2 的实现范围
+
+- 使用 C++、SDL2、SDL_mixer、SDL_ttf 和 Zlib，分别构建 Windows 与 Emscripten/WASM 版本。
+- Python 工具先从游戏程序提取密钥、扫描归档，生成自定义的 `kif.fs2` 索引；运行时按索引读取或通过 HTTP Range 获取资源，再解密内容。因此运行前仍有资源准备步骤。
+- 启动入口固定为 `start.cst`，消息窗口、选项资源及布局由代码固定实现；当前源码没有 FES、KCS、ANM 或 CSTL 的执行或加载路径。其剧情播放器路线为验证 CST 执行提供了参考，完整启动与界面兼容仍需另行研究。
+- 剧情命令由正则表达式分派，数值表达式由递归下降解析器求值。已实现部分背景、立绘组合、音频、条件、选项、等待及移动和淡入淡出行为；部分命令分支为空，变量解析错误被忽略。
+- 图像目前处理 HG-3 的 `stdinfo` 和 `img0000` 路径。普通图像请求固定使用第 0 帧，未建立按 HG 帧 ID 选择的通用路径；纹理缓存也仅以名称为键。
+- 存档采用自定义 JSON，保存场景位置、变量、文本、部分图像和音频及选项；网页端写入 localStorage。当前源码已保存并恢复循环 SE，但没有完整序列化图像 Alpha、运动、转场和 FG 层状态。
+
+## Issues 与当前源码的对照结论
+
+关闭原因需逐条读取：[#11](https://github.com/kokseen1/FelineSystem2/issues/11) 合并到 #5，#19 合并到 #7，#23、#40 合并到 #13，#28 经 #40 归入 #13，#29 合并到 #35。这些关联问题仍然开放。
+
+|问题领域|主要 issues|源码核对与后续关注点|
+|:--|:--|:--|
+|命令与表达式|[#7](https://github.com/kokseen1/FelineSystem2/issues/7)、#9、[#33](https://github.com/kokseen1/FelineSystem2/issues/33)、[#44](https://github.com/kokseen1/FelineSystem2/issues/44)|字符串变量缺少实现；`@` 已用于部分位置表达式，独立解析器也支持一元负号，不能按旧标题认定两者完全不支持。仍需逐个核实命令参数及上下文语义。|
+|等待与动画|[#5](https://github.com/kokseen1/FelineSystem2/issues/5)、[#13](https://github.com/kokseen1/FelineSystem2/issues/13)、#28、#37、#40|已有事件循环等待与部分移动、淡入淡出；`mcarc`、`mcshake`、`mcscalecos` 等分支为空，`mcmove` 被前面的空分支截获。脚本单次推进没有工作量限制，动画时钟直接随渲染次数增长。|
+|图像格式、帧与坐标|[#17](https://github.com/kokseen1/FelineSystem2/issues/17)、#34、[#46](https://github.com/kokseen1/FelineSystem2/issues/46)、[#49](https://github.com/kokseen1/FelineSystem2/issues/49)|HG-3 编码覆盖和帧选择不完整；坐标转换已有 Offset/Base 计算，但 `attr 1` 仍硬编码纵向减 350，FG 的坐标及文本显隐问题仍开放。|
+|编码、排版与追加文本|[#25](https://github.com/kokseen1/FelineSystem2/issues/25)、#38、[#42](https://github.com/kokseen1/FelineSystem2/issues/42)|当前 Message 行直接覆盖正文，换行转义被替换为空格；需明确续写、换行、字形及选项编码规则。|
+|资源命名与补丁|#29、[#35](https://github.com/kokseen1/FelineSystem2/issues/35)|索引使用全局小写名称映射，重名项直接覆盖；生成工具仅扫描根目录的 `.int`，未明确处理 `.lst` 和补丁优先级。|
+|异步读取与音频|[#31](https://github.com/kokseen1/FelineSystem2/issues/31)、[#43](https://github.com/kokseen1/FelineSystem2/issues/43)、#30|已按当前资源名称过滤部分过期音频回调，并缓存 BGM；Range 成功回调仅排除空响应，未核对请求区间、返回长度及 Content-Range。|
+|存档恢复|#22、[#41](https://github.com/kokseen1/FelineSystem2/issues/41)|循环 SE 缺失这一旧评论已落后于当前代码；完整画面状态及时间相关状态恢复仍有缺口。|
+|交互、缩放与精灵效果|[#21](https://github.com/kokseen1/FelineSystem2/issues/21)、#36、[#39](https://github.com/kokseen1/FelineSystem2/issues/39)|已有鼠标推进和数字键选项；触控、选项命中、任意资源尺寸适配及精灵附加效果仍需分别核实，逻辑画布固定为 1024×576。|
+
+## 独立验证与复用结论
+
+- 独立编译原始解析器，以稳定的合成表达式验证赋值行为：初始 `#300=1`、`#301=7`，执行 `#300=#301` 后 `#300` 仍为 1；执行 `#300+=#301` 则错误地将 `#301` 改为 14，`#300` 仍为 1。原因是求右值时覆盖了共享的左值变量名。对应源码：[赋值求值](https://github.com/kokseen1/FelineSystem2/blob/ce7aeafd7cc6e65763832f7414e4d69d2c9ba48d/src/parser.cpp#L453)。
+- 解析器将不支持的字符视作输入结束：`5%2` 返回 5，`0x10` 返回 0，均未报错；作为对照，`-5`、`1+2*3` 及带给定前值的 `@+512` 得到相应正确结果。后续需要分别验证词法覆盖、完整消费输入、左值保持和错误定位。
+- 这些验证只涉及独立解析器；图像、音频、调度和存档结论来自 issues 与当前源码对照，尚未进行完整游戏运行验证。临时验证程序不作为本项目常规测试保留。
+- 可参考的做法包括保留 HG 图像元数据、按语义区分无参及带参 `wait`、非阻塞推进脚本、过滤过期资源回调，以及将资源准备与运行时读取分开。时间单位、坐标常量及命令近似实现仍需与目标引擎核对。
+- 所查阅的 FelineSystem2 版本未找到项目整体许可证；第三方文件存在各自声明，包括 GPL-3.0-or-later 的 Python Blowfish 文件。后续若复用源码或内嵌资源，需先确认相应许可与本项目的兼容性。
+
+## 游戏样本已核实的事项
+
+依据为可执行文件的版本资源、启动配置、归档目录、解压后的格式结构及原生存档。以下结论的适用范围为本次样本及其声明的引擎版本；不据发行时间推定引擎版本。
+
+- **引擎版本：** 两份具备可读版本资源的引擎程序均声明为 `2.6.1.90`。样本包含多个程序变体，实际启动入口及程序修改的影响尚未动态核实。
+- **启动与画布：** 配置指定 KCS 启动入口，逻辑画布为 1280×720、目标帧率为 60 FPS；剧情归档中没有 `start.cst`。FelineSystem2 固定入口和 1024×576 布局需要调整才能适配该样本。
+- **归档：** 已解密并检查 24 个 KIF 的全部 35,264 个普通条目及 24 个加密标记，目录字段与资源范围检查通过。配置注册 50 个归档槽位，其中 24 个列为必需且全部存在；其余 26 个未列为必需的槽位没有对应归档。还存在未注册且扩展名为 `.int` 的非 KIF 附加文件，导入时需按注册关系和签名识别资源。
+- **命名与覆盖：** 各 KIF 内部没有大小写折叠后的重名项；归档之间有 526 组内容相同的 CSTL 重名项。样本没有 `.lst` 或更新归档。原目录索引保留首个大小写碰撞条目；已核实补丁列表优先于所有模式，以及普通槽位／列表成员的散装和归档优先级，补丁发现及自动注册顺序继续核实。
+- **剧情：** 完整解析了 604 份压缩 CST，共 401,255 条类型化记录。基础剧情正文和姓名符合 CP932，命令、姓名、正文、输入等待的行类型与 Wiki 描述相符。存在大量文本续写、换行转义、字符串变量引用及超出 FelineSystem2 覆盖范围的命令，也有十六进制和逻辑非表达式。
+- **多语言：** 1,052 份 CSTL 按名称去重后为 526 份，均可按 UTF-8 和 FF 长度编码完整解析，并各自配有同名 CST；包含三个语言表项。共 40,828 个对白输入块和 40,861 个本地化条目，13 组差额中的 33 条全部对应选项文字，其中每种条件状态读取 29 条、四条末尾数据未读取。条件选项连续索引、正文片段绑定、分隔和越界行为已验证。
+- **编码配置：** 25 份归档 XML 均为 UTF-8，场景编码设置的位置已核实为 `/document/etc/scene/encoding`。该设置与 CP932 基础 CST、UTF-8 CSTL 同时存在。50 份 FES 中有 15 份纯 ASCII、32 份其他文件可整体按 CP932 解码；另 3 份含 26 行 ASCII 语法前缀与 UTF-8 文本参数。字符串转换顺序仍需继续核实。
+- **图像：** 已检查全部 7,004 份 HG-3 的帧和标签，共 14,225 帧，均为 `0x300`、32 位原生 `img0000` 编码；本样本未出现 JPEG、WebP 或多切片路径。146 份文件含多帧，142 份的帧 ID 不等于连续数组下标；53 份文件内部存在重复 ID，原元数据入口按文件顺序选择第一个匹配帧。
+- **图像元数据：** 裁剪尺寸、偏移、绘制基点及属性标签被大量使用，且资源原始尺寸并不统一为画布尺寸。已加入 HG-3 0x300 元数据读取，原入口合成对照确认重复 ID 选择文件中第一个匹配帧。FES 的 POS2／SIZE2 读取资源帧的裁剪偏移／裁剪尺寸；其他属性坐标语义继续核实。
+- **动画：** 3 份 ANM 的文件长度、时间线和参数表符合 Wiki 所述结构；当前样本中的指令只覆盖帧选择及跳转，其余指令已使用合成输入核实，全部 18 种指令及时间线已实现。
+- **KCS 与插件：** 103 份 KCS 均具有 `KCS` 签名、版本字段 2、52 字节头及 Zlib 主体；代码区、2,113 条字符串初始化记录、数据区／栈分配及解压容量已经原装载函数批量验证，整个运行存储与独立预期逐字节相同。指令长度、调用帧及宿主返回状态已确定；完整类型与系统接口仍待研究。159 份粒子插件为 x86 PE DLL，属于另一类资源。
+- **原生存档：** 6 份 CSS 容器均有可解压的 Zlib 主体，压缩及解压长度与头字段一致。内部状态序列化、其他头字段和恢复规则仍待研究；FelineSystem2 的 JSON 存档属于其自定义格式。
+
+## 版本差异与实现差异的划分
+
+- 已确认的适配缺口包括固定剧情入口、固定画布、CSTL 缺失、帧选择不完整、部分语法和命令缺失，以及原生存档格式未覆盖。这些是 FelineSystem2 的实现范围与本次样本之间的差异，尚无两版原引擎的行为对照来确定功能引入时间。
+- 分辨率、语言表及界面布局属于配置或资源特征，不单独作为引擎版本分界。本地化条目数的差额来自选项文本；多个程序变体的影响仍需单独核实。
+- 当前基线的规则和不确定项均记录为 `2.6.1.90` 的适配依据；其他版本的实际差异在相应版本适配分支中处理。
+- 本次工具和验证数据均为临时研究产物，不引入本项目依赖，也不将游戏数据纳入常规测试或版本控制。后续若需要样本验证，应保持在默认测试发现范围之外，并说明输入类别与运行条件。
+
+## 证据缺口与待核实事项
+
+- Wiki 的 KIF 解密示例在搜索密钥条目前检查初始值并直接返回，存在明确控制流错误；实现时需逐项核对算法和样本。
+- 引擎版本列表与移植案例中的部分版本号不一致；本次样本的版本资源已确认是 `2.6.1.90`，其他版本仍需各自核实。
+- 本基线的 KCS 容器、有效指令和已实现宿主已核实，其余普通宿主及完整启动过程仍不完整；原生粒子插件的跨平台替代方式需要另行研究。
+- 补丁归档的发现方式、自动注册顺序、缓存和别名规则需要验证；显式补丁列表及归档／散装查找优先级已核实。
+- CST 其余命令、FES 其他对象行为、输入主循环及原生存档恢复仍待核实；已确认的事件、运动和 ANM 契约见对应脚本页。
+- HG-3 的部分标签及动画属性仍有未知语义；非 Windows 平台资源格式需要单独处理。
+- CST 的 `$` 命令预处理与原生变量入口已衔接，共享区配置容量和分组已追踪；非法输入恢复及各组的保存、恢复和重置时机仍需核实。
+- CSTL 语言切换与正文／姓名回退、FES 字符串转换顺序、逻辑帧与刷新／快进关系，以及原生存档内部状态仍需验证。重复 HG-3 帧 ID 已确认选择首个匹配帧。
+- 原 FES 结构整理函数已对照四个合成块及含孤立 `endif` 的实际块，确认在终止符位置返回；该符号的执行分派及未分类裸标记的处理仍待核实。
+
+
+## 参考入口
+
+- [文件格式总览](https://github.com/trigger-segfault/TriggersTools.CatSystem2/wiki/File-Formats)、[资源归档](https://github.com/trigger-segfault/TriggersTools.CatSystem2/wiki/KIF-Archive)、[归档列表](https://github.com/trigger-segfault/TriggersTools.CatSystem2/wiki/Archive-List-Files)
+- [剧情脚本](https://github.com/trigger-segfault/TriggersTools.CatSystem2/wiki/CST-Scene)、[多语言文本](https://github.com/trigger-segfault/TriggersTools.CatSystem2/wiki/CSTL-Scene-Languages)、[界面脚本](https://github.com/trigger-segfault/TriggersTools.CatSystem2/wiki/FES-Screen)、[动画](https://github.com/trigger-segfault/TriggersTools.CatSystem2/wiki/ANM-Animation)
+- [HG-3 图像](https://github.com/trigger-segfault/TriggersTools.CatSystem2/wiki/HG%E2%80%903-Image)、[HG 图像编码](https://github.com/trigger-segfault/TriggersTools.CatSystem2/wiki/HG%E2%80%90X-ProcessImage)
+- [工具链](https://github.com/trigger-segfault/TriggersTools.CatSystem2/wiki/Category:-Tools)、[KCS 编译线索](https://github.com/trigger-segfault/TriggersTools.CatSystem2/wiki/Tool:-wsd.exe)、[调试功能](https://github.com/trigger-segfault/TriggersTools.CatSystem2/wiki/Debug-Mode)
+- [版本差异](https://github.com/trigger-segfault/TriggersTools.CatSystem2/wiki/Engine-Versions)、[UTF-8 移植案例](https://github.com/trigger-segfault/TriggersTools.CatSystem2/wiki/Case-3:-Grisaia-no-Kajitsu-UTF8-transplant)
