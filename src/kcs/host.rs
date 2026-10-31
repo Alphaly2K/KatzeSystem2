@@ -29,6 +29,10 @@ impl<'a> CoreHost<'a> {
 }
 
 impl Host for CoreHost<'_> {
+    fn set_task_clock(&mut self, clock: &TaskClock) {
+        CoreHost::set_task_clock(self, clock);
+    }
+
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn> {
         if matches!(index, 0 | 2 | 3) {
             return Ok(NativeReturn::Continue);

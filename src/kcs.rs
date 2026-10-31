@@ -7,6 +7,7 @@ mod matrix;
 mod messages;
 mod motion;
 mod numeric;
+mod ordinary;
 mod particle;
 mod queue;
 mod random;
@@ -15,6 +16,7 @@ mod strings;
 pub use clock::TaskClock;
 pub use host::CoreHost;
 pub use motion::{MotionHost, MotionState, MotionTask};
+pub use ordinary::OrdinaryTask;
 pub use particle::{ParticleHost, ParticleSource, ParticleTask, ParticleVertex};
 pub use queue::MotionQueue;
 pub use random::ScriptRandom;
@@ -203,6 +205,8 @@ pub enum NativeReturn {
 
 pub trait Host {
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn>;
+
+    fn set_task_clock(&mut self, _clock: &TaskClock) {}
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

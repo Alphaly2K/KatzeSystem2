@@ -130,6 +130,10 @@ FES 内部执行宏声明，初始化按以下顺序交给宿主：
 
 普通任务使用 `Interpreter::resume(host, budget)` 进行无消息更新；native 71 登记接收地址并让出，下一次普通更新补入 0。`dispatch_message(&mut [u32; 4], host, budget)` 在等待时复制消息、补入 1 并执行，完成后回写消息第二项；未等待时返回 `None`。`Some(Step::Yield)` 表示预算续跑，继续传入同一消息，其间调用 `resume` 返回诊断。`is_waiting_for_message()` 查询等待状态；自定义宿主可调用 `wait_for_message(address)` 注册接收地址。运动／粒子的低层 `run` 不消费消息等待。接收地址切换及回写规则见 [KCS 宿主契约](kcs.md)。
 
+`kcs::OrdinaryTask::new(program, external)` 创建已装载且 running 为 1 的任务；`clock`、`interpreter` 和 `running` 可由外层管理。`enqueue_message([u32; 4])` 复制入队，`queued_messages()` 查询当前队列。`update(now, increment, host, budget_per_call)` 更新时钟、按顺序分派全部消息并进行一次无消息恢复，返回 true 表示本轮完成；false 时继续调用同一方法，本轮时刻和累计增量保持不变。预算分别交给每次 VM 推进，`is_pending()` 查询续跑状态，续跑期间禁止入队或直接操作 VM／控制字段。running 为零时只更新时钟并保留队列；时钟 paused 非零仍推进活动脚本。`accumulated_increment` 仅在活动的新一轮累加外层提供的 increment，按 u32 回绕。
+
+普通任务通过 `Host::set_task_clock` 同步 native 5 的时间上下文；`CoreHost` 已实现，包装宿主应委托此方法。任务树、创建／删除和对象命令由外层负责。
+
 1 的调试文字保存在 `debug_messages`，调用者可读取并用 `std::mem::take` 取走；库保留字节编码。26 读取展开后的数值前缀，返回 f32 原始位模式；它与要求完整表达式的 213 使用不同契约。
 
 `Interpreter::read_string` 有界读取零结尾字节串，`read`／`write` 用于任意字节。文本 native 保留原始编码，数值表达式需要 ASCII。字符串写入检查可用空间，参数字节数必须与接口契约一致。13／14 复制原始／格式展开文本，15／16 追加，18 读取展开后长度；这些写入保留双零结尾。24 以字符数量截断并返回字节数，40 检查基线双字节，47／48 读取原始／展开后字符数；25 的格式整数读取使用引擎前缀规则。19～22 的原始／展开比较具有不同参数顺序和字节符号规则，见 [KCS 宿主契约](kcs.md)。native 278 原地展开字符串；519 将给定参数写入目标，序号包括命令名且从零开始。
