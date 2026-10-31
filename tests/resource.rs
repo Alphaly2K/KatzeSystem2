@@ -1,4 +1,4 @@
-use katze_system2::resource::{ArchiveConfig, Category};
+use katze_system2::resource::{ArchiveConfig, ArchiveDirectory, Category};
 
 fn config_xml(body: &str) -> String {
     format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?><document>{body}</document>")
@@ -104,4 +104,65 @@ fn archive_config_checks_baseline_xml_forms_and_fixed_field_capacities() {
     ))
     .unwrap();
     assert_eq!(config, ArchiveConfig::default());
+}
+
+fn plain_kif(names: &[&[u8]]) -> Vec<u8> {
+    let mut bytes = b"KIF\0".to_vec();
+    bytes.extend((names.len() as u32).to_le_bytes());
+    for (i, name) in names.iter().enumerate() {
+        let mut field = [0; 64];
+        field[..name.len()].copy_from_slice(name);
+        bytes.extend(field);
+        bytes.extend((8 + names.len() as u32 * 72 + i as u32).to_le_bytes());
+        bytes.extend(1u32.to_le_bytes());
+    }
+    bytes.extend(0..names.len() as u8);
+    bytes
+}
+
+#[test]
+fn archive_directory_keeps_first_case_collision_and_wide_query_character_steps() {
+    let bytes = plain_kif(&[
+        b"Alpha.kcs",
+        b"alpha.KCS",
+        b"folder/sample.kcs",
+        b"folder\\sample.kcs",
+        b"\x82\xa0a.kcs",
+        b"\x82\xa0\x82\xa0a.kcs",
+    ]);
+    let directory = ArchiveDirectory::from_plain_kif(&bytes).unwrap();
+    assert_eq!(directory.entries().len(), 6);
+    assert_eq!(
+        directory.find(b"ALPHA.KCS").unwrap().unwrap().name,
+        b"Alpha.kcs"
+    );
+    for name in [b"folder/sample.kcs".as_slice(), b"folder\\sample.kcs"] {
+        assert_eq!(directory.find(name).unwrap().unwrap().name, name);
+    }
+    assert!(directory.find(b"./Alpha.kcs").unwrap().is_none());
+    assert!(directory.find(b"folder//sample.kcs").unwrap().is_none());
+    assert!(directory.find(b"\x82\xa0a.kcs").unwrap().is_none());
+    assert_eq!(
+        directory.find(b"\x82\xa0A.kcs").unwrap().unwrap().name,
+        b"\x82\xa0a.kcs"
+    );
+    assert!(
+        directory
+            .find_utf16(&"ああa.kcs\0ignored".encode_utf16().collect::<Vec<_>>())
+            .is_some()
+    );
+}
+
+#[test]
+fn plain_archive_directory_rejects_encrypted_tables_and_truncated_ranges() {
+    let bytes = plain_kif(&[b"sample"]);
+    for length in [0, 4, 7, 8, 79, 80] {
+        assert!(ArchiveDirectory::from_plain_kif(&bytes[..length]).is_err());
+    }
+    let mut invalid = bytes.clone();
+    invalid[72..76].copy_from_slice(&u32::MAX.to_le_bytes());
+    assert!(ArchiveDirectory::from_plain_kif(&invalid).is_err());
+    invalid[8..72].fill(b'a');
+    assert!(ArchiveDirectory::from_plain_kif(&invalid).is_err());
+    assert!(ArchiveDirectory::from_plain_kif(&plain_kif(&[b"__KEY__.DAT"])).is_err());
 }
