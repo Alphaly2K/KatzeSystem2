@@ -18,6 +18,9 @@
 |[基线对照](baseline-validation.md)|实际脚本覆盖、资料冲突、结构异常及待验证事项|
 |[原引擎核实记录](runtime-probes.md)|合成求值、CST 预处理、CSTL 索引、FES 结构边界与 KCS 对照|
 |[公开资料与先行实现](reference-research.md)|Wiki、FelineSystem2 源码／issues、基线差异及复用限制|
+|[运行时与媒体子系统](subsystems.md)|图形、文字、音频、输入、平台和解释器的职责边界|
+
+解释器接手事项见 [GOAL.md](../GOAL.md)，可复制的任务说明见 [交接 Prompt](interpreter-handoff-prompt.md)。
 
 ## 脚本分类
 
