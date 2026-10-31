@@ -19,9 +19,44 @@ struct Services {
     target: Interpreter,
     queued: Vec<(u32, [u32; 4])>,
     dispatched: usize,
+    created: Vec<Creation>,
+    deleted: Vec<(u32, u32)>,
+}
+
+#[derive(Debug, PartialEq)]
+struct Creation {
+    sender: u32,
+    parent: u32,
+    kind: u32,
+    name: Vec<u8>,
+    context: Vec<u8>,
 }
 
 impl TaskServices for Services {
+    fn create_task(
+        &mut self,
+        sender: u32,
+        parent: u32,
+        kind: u32,
+        name: &[u8],
+        context: &[u8],
+    ) -> Result<u32> {
+        let id = self.created.len() as u32;
+        self.created.push(Creation {
+            sender,
+            parent,
+            kind,
+            name: name.to_vec(),
+            context: context.to_vec(),
+        });
+        Ok(id)
+    }
+
+    fn request_delete(&mut self, sender: u32, target: u32) -> Result<()> {
+        self.deleted.push((sender, target));
+        Ok(())
+    }
+
     fn dispatch_message(&mut self, target: u32, message: &mut [u32; 4]) -> Result<u32> {
         if target != 42 {
             return Err(Error::new(0, "任务不存在"));
@@ -56,6 +91,8 @@ fn services(code: &[u8]) -> Services {
         .unwrap(),
         queued: vec![],
         dispatched: 0,
+        created: vec![],
+        deleted: vec![],
     }
 }
 
@@ -161,4 +198,41 @@ fn task_memory_reads_and_writes_other_vms_and_preserves_self_overlap() {
             .is_err()
     );
     assert!(host.call(70, &[], &mut vm).is_err());
+}
+
+#[test]
+fn creation_formats_names_and_passes_raw_context_before_requesting_deletion() {
+    let mut services = services(&[0x3b]);
+    let mut state = State::new(8);
+    let mut core = CoreHost::new(&mut state);
+    let mut vm =
+        Interpreter::new(Program::from_code(&[], vec![0; 128], 32).unwrap(), vec![]).unwrap();
+    vm.write(0, &17u32.to_le_bytes()).unwrap();
+    vm.write(64, b"unit%d[G0]\0").unwrap();
+    let mut host = TaskHost::new(&mut core, &mut services);
+    host.set_task_id(7);
+    host.creation_context = b"raw%d[G0]\0ignored".to_vec();
+    let arguments: Vec<_> = [12u32, 42, 64]
+        .into_iter()
+        .flat_map(u32::to_le_bytes)
+        .collect();
+    assert_eq!(
+        host.call(66, &arguments, &mut vm).unwrap(),
+        NativeReturn::Value(0)
+    );
+    assert_eq!(
+        host.call(67, &0u32.to_le_bytes(), &mut vm).unwrap(),
+        NativeReturn::Continue
+    );
+    assert_eq!(
+        services.created,
+        [Creation {
+            sender: 7,
+            parent: 42,
+            kind: 12,
+            name: b"unit17".to_vec(),
+            context: b"raw%d[G0]".to_vec()
+        }]
+    );
+    assert_eq!(services.deleted, [(7, 0)]);
 }
