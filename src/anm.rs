@@ -77,6 +77,31 @@ impl Default for DisplayState {
     }
 }
 
+impl DisplayState {
+    /// 将动画显示值与图像自身属性组合；保留帧 ID 和原始显隐值。
+    pub fn compose(self, position: [f32; 2], blend: i32, visible: i32) -> Self {
+        let position = position.map(|value| {
+            if (-2147483648.0..2147483648.0).contains(&value) {
+                value as i32
+            } else {
+                i32::MIN
+            }
+        });
+        let product = (self.blend as u32).wrapping_mul(blend as u32);
+        Self {
+            image: self.image,
+            blend: if product < 0xff00 {
+                (product / 255) as i32
+            } else {
+                255
+            },
+            visible: if visible == 0 { 0 } else { self.visible },
+            x: position[0].wrapping_add(self.x),
+            y: position[1].wrapping_add(self.y),
+        }
+    }
+}
+
 /// 宿主在完成事件给出的持续时间后再次调用 run。
 pub struct Interpreter {
     pub pc: usize,

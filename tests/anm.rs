@@ -123,6 +123,37 @@ fn maximum_frame_and_display_properties_preserve_raw_values() {
 }
 
 #[test]
+fn image_composition_uses_integer_offsets_and_unsigned_wrapping_blend() {
+    let display = anm::DisplayState {
+        image: 17,
+        blend: 128,
+        visible: -7,
+        x: i32::MAX,
+        y: -2,
+    };
+    assert_eq!(
+        display.compose([1.75, -3.75], 128, 2),
+        anm::DisplayState {
+            image: 17,
+            blend: 64,
+            visible: -7,
+            x: i32::MIN,
+            y: -5,
+        }
+    );
+    for (animation, image, expected) in [(-1, -1, 0), (-1, 255, 255), (65536, 65536, 0)] {
+        let composed = anm::DisplayState {
+            blend: animation,
+            ..display
+        }
+        .compose([f32::NAN, f32::INFINITY], image, 0);
+        assert_eq!(composed.blend, expected);
+        assert_eq!(composed.visible, 0);
+        assert_eq!((composed.x, composed.y), (-1, i32::MAX - 1));
+    }
+}
+
+#[test]
 fn timeline_catches_up_with_unscaled_origins_and_retains_signed_durations() {
     let mut timeline = anm::Timeline::new(anm::Program {
         instructions: (10..14)
