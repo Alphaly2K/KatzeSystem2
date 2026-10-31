@@ -65,6 +65,9 @@ impl<L: ProgramLoader> ObjectFactory for KcsFactory<L> {
         if kind != kind::ORDINARY {
             return Err(Error::new(0, format!("对象类型 {kind} 需要对应子系统工厂")));
         }
+        if self.external_bytes > read::MAX_BYTES {
+            return Err(Error::new(0, "普通任务外部存储超过上限"));
+        }
         let program = self
             .programs
             .load(name)?
@@ -190,13 +193,23 @@ impl<F: ObjectFactory> Runtime<F> {
         )
     }
 
-    /// 由外层调度器同步发送任务命令；目标不可达时返回零。
-    pub fn dispatch_command(&mut self, sender: u32, command: Command) -> Result<u32> {
-        if matches!(command.code, 1 | 2 | 11 | 12) {
-            return Err(Error::new(0, "任务创建、登记或嵌套广播需要专用入口"));
+    /// 由外层调度器按 `origin` 路由任务命令；目标不可达时返回零。
+    ///
+    /// `command.sender` 保持调用者给出的值，不因路由起点而改写。
+    pub fn dispatch_command(&mut self, origin: u32, command: Command) -> Result<u32> {
+        route(self.store(), origin, command)
+    }
+
+    fn store(&mut self) -> Store<'_, F> {
+        Store {
+            numbers: &mut self.numbers,
+            host: &mut self.host,
+            tree: &mut self.tree,
+            objects: &mut self.objects,
+            factory: &mut self.factory,
+            budget: self.budget,
+            limit: self.limit,
         }
-        self.host_context(sender)
-            .command_target(command.target, command.code, command.data)
     }
 
     /// 由外层调度器同步投递任务消息；返回目标 VM 的活动结果。
@@ -260,6 +273,8 @@ enum Execution<'a> {
         kind: u32,
         command: &'a Command,
         output: &'a mut u32,
+        /// 预算续跑结束后的树传播结果。
+        propagate: &'a mut bool,
     },
     Delete,
     MarkDestroying,
@@ -318,8 +333,12 @@ fn run_nested<F: ObjectFactory>(
                 kind,
                 command,
                 output,
+                propagate,
             } => drain(budget, limit, || {
-                object.dispatch_command(kind, command, output, &mut nested, budget)
+                let outcome =
+                    object.dispatch_command(kind, command, output, &mut nested, budget)?;
+                *propagate = outcome.propagate;
+                Ok(outcome.done)
             }),
             Execution::Delete => {
                 drain(budget, limit, || object.request_delete(&mut nested, budget))
@@ -348,6 +367,44 @@ fn drain(budget: usize, limit: usize, mut step: impl FnMut() -> Result<bool>) ->
             return Err(Error::new(0, "同步执行未在指令预算内完成"));
         }
     }
+}
+
+/// 按树契约分派一条命令：可达性、目标改写与 `data[2]` 传播由 [`TaskTree::dispatch`] 负责。
+fn route<F: ObjectFactory>(store: Store<'_, F>, origin: u32, command: Command) -> Result<u32> {
+    let Store {
+        numbers,
+        host,
+        tree,
+        objects,
+        factory,
+        budget,
+        limit,
+    } = store;
+    let mut output = 0;
+    let found = tree.dispatch(origin, command, &mut output, |tree, command, output| {
+        let kind = tree.node(command.target).map_or(0, |node| node.kind);
+        let mut propagate = false;
+        run_nested(
+            Store {
+                numbers: &mut *numbers,
+                host: &mut *host,
+                tree,
+                objects: &mut *objects,
+                factory: &mut *factory,
+                budget,
+                limit,
+            },
+            command.target,
+            Execution::Command {
+                kind,
+                command,
+                output,
+                propagate: &mut propagate,
+            },
+        )?;
+        Ok(propagate)
+    })?;
+    Ok(if found { output } else { 0 })
 }
 
 /// 执行中对象的宿主：普通表 native 委托 [`call_native`]，任务 native 使用对象存储。
@@ -398,27 +455,17 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
     }
 
     fn command_target(&mut self, target: u32, code: u32, data: [u32; 3]) -> Result<u32> {
-        if !self.require_reachable(target) {
-            return Ok(0);
-        }
-        let kind = self.tree.node(target).map_or(0, |node| node.kind);
-        let command = Command {
-            target,
-            sender: self.host.task_id,
-            code,
-            data,
-        };
-        let mut output = 0;
-        run_nested(
+        let sender = self.host.task_id;
+        route(
             self.store(),
-            target,
-            Execution::Command {
-                kind,
-                command: &command,
-                output: &mut output,
+            sender,
+            Command {
+                target,
+                sender,
+                code,
+                data,
             },
-        )?;
-        Ok(output)
+        )
     }
 
     fn task_native(
@@ -430,7 +477,8 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         let count = match index {
             66 => 12,
             67 | 75 | 109 => 4,
-            110 | 69 | 70 | 72 | 73 => 16,
+            110 => 8,
+            69 | 70 | 72 | 73 => 16,
             76 => 0,
             _ => unreachable!(),
         };

@@ -105,7 +105,10 @@ impl Lifecycle for World {
         let kind = tree.node(command.target).unwrap().kind;
         let mut state = State::new(8);
         let mut host = CoreHost::new(&mut state);
-        complete(|| task.dispatch_control(kind, &command, &mut 0, &mut host, 1))
+        complete(|| {
+            task.dispatch_control(kind, &command, &mut 0, &mut host, 1)
+                .map(|outcome| outcome.done)
+        })
     }
 
     fn mark_destroying(&mut self, _tree: &mut TaskTree, id: u32) -> Result<()> {

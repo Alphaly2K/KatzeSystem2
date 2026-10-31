@@ -1,5 +1,5 @@
 use super::{Host, Interpreter, Program, TaskClock};
-use crate::task::{Command, Control};
+use crate::task::{Command, CommandOutcome, Control};
 use crate::{Error, Result, Step, read};
 
 enum UpdatePhase {
@@ -147,7 +147,7 @@ impl OrdinaryTask {
         Ok(())
     }
 
-    /// 分派基类控制及 162／163；完成后由路由处理器消费当前分支。
+    /// 分派基类控制及 162／163；完成后消费当前分支，未知编号返回诊断。
     pub fn dispatch_control(
         &mut self,
         kind: u32,
@@ -155,13 +155,17 @@ impl OrdinaryTask {
         output: &mut u32,
         host: &mut impl Host,
         budget: usize,
-    ) -> Result<bool> {
+    ) -> Result<CommandOutcome> {
         if command.code == 3 {
-            return self.request_delete(host, budget);
+            return Ok(if self.request_delete(host, budget)? {
+                CommandOutcome::finished(false)
+            } else {
+                CommandOutcome::RESUME
+            });
         }
         self.require_idle()?;
         if self.control.deletion_requested != 0 {
-            return Ok(true);
+            return Ok(CommandOutcome::finished(false));
         }
         match command.code {
             162 => self.start_execution(command.data[0], command.data[1])?,
@@ -183,14 +187,18 @@ impl OrdinaryTask {
                 }
             }
             13 | 17 | 23 | 24 | 29 => {
-                self.control
-                    .dispatch(kind, &mut self.clock, command, output, |_, _, _, _| {
-                        Ok(true)
-                    })?;
+                let propagate = self.control.dispatch(
+                    kind,
+                    &mut self.clock,
+                    command,
+                    output,
+                    |_, _, _, _| Ok(true),
+                )?;
+                return Ok(CommandOutcome::finished(propagate));
             }
             _ => return Err(Error::new(self.interpreter.pc, "未支持的普通任务控制命令")),
         }
-        Ok(true)
+        Ok(CommandOutcome::finished(false))
     }
 
     /// 同步消息分派；false 表示继续传入同一消息和 output 续跑。

@@ -1,10 +1,10 @@
 use crate::kcs::{Host, Interpreter, OrdinaryTask};
-use crate::task::{Command, Control, TaskClock};
+use crate::task::{Command, CommandOutcome, Control, TaskClock};
 use crate::{Error, Result};
 
 /// 任务树中的对象协议。图形、音频、输入等类型由对应子系统提供实现。
 ///
-/// 返回 `false` 的方法表示本次调用预算耗尽，调用者应继续传入相同输入完成续跑。
+/// 除对象命令外，返回 `false` 的方法表示本次调用预算耗尽，调用者应继续传入相同输入完成续跑。
 pub trait TaskObject {
     fn control(&self) -> &Control;
     fn clock(&self) -> &TaskClock;
@@ -22,7 +22,7 @@ pub trait TaskObject {
     /// 执行对象主体；在返回前完成所有预算续跑由调用者负责。
     fn update_body(&mut self, host: &mut dyn Host, increment: u32, budget: usize) -> Result<bool>;
 
-    /// 处理对象命令；`kind` 为树中登记的对象类型。
+    /// 处理对象命令；`kind` 为树中登记的对象类型。完成与传播状态分别返回。
     fn dispatch_command(
         &mut self,
         kind: u32,
@@ -30,7 +30,7 @@ pub trait TaskObject {
         output: &mut u32,
         host: &mut dyn Host,
         budget: usize,
-    ) -> Result<bool>;
+    ) -> Result<CommandOutcome>;
 
     /// 复制入队一条任务消息；不推进 VM。
     fn enqueue_message(&mut self, message: [u32; 4]) -> Result<()>;
@@ -124,13 +124,14 @@ impl TaskObject for BaseObject {
         output: &mut u32,
         _host: &mut dyn Host,
         _budget: usize,
-    ) -> Result<bool> {
-        // 基类命令消费当前分支；未识别编号不修改状态，是否继续传播由调用方决定。
-        self.control
-            .dispatch(kind, &mut self.clock, command, output, |_, _, _, _| {
-                Ok(true)
-            })?;
-        Ok(true)
+    ) -> Result<CommandOutcome> {
+        // 基类命令消费当前分支；未识别编号不修改状态，允许继续传播。
+        let propagate =
+            self.control
+                .dispatch(kind, &mut self.clock, command, output, |_, _, _, _| {
+                    Ok(true)
+                })?;
+        Ok(CommandOutcome::finished(propagate))
     }
 
     fn enqueue_message(&mut self, _message: [u32; 4]) -> Result<()> {
@@ -201,7 +202,7 @@ impl TaskObject for OrdinaryObject {
         output: &mut u32,
         host: &mut dyn Host,
         budget: usize,
-    ) -> Result<bool> {
+    ) -> Result<CommandOutcome> {
         let mut host = host;
         self.task
             .dispatch_control(kind, command, output, &mut host, budget)

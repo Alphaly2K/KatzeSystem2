@@ -3,10 +3,13 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use katze_system2::{
-    Result,
-    kcs::{Host, Interpreter, Program, TaskClock},
-    runtime::{BaseObject, KcsFactory, ObjectFactory, ProgramLoader, Runtime, TaskObject, kind},
-    task::{Command, Control},
+    Error, Result,
+    kcs::{Host, Interpreter, OrdinaryTask, Program, TaskClock},
+    runtime::{
+        BaseObject, KcsFactory, ObjectFactory, OrdinaryObject, ProgramLoader, Runtime, TaskObject,
+        kind,
+    },
+    task::{Command, CommandOutcome, Control},
 };
 
 const DATA: usize = 512;
@@ -436,12 +439,12 @@ impl TaskObject for Recorded {
         _output: &mut u32,
         _host: &mut dyn Host,
         _budget: usize,
-    ) -> Result<bool> {
+    ) -> Result<CommandOutcome> {
         if command.code == 3 && self.base.control.deletion_requested == 0 {
             self.log.push(self.id, "delete");
             self.base.control.deletion_requested = 1;
         }
-        Ok(true)
+        Ok(CommandOutcome::finished(true))
     }
 
     fn enqueue_message(&mut self, _message: [u32; 4]) -> Result<()> {
@@ -590,6 +593,17 @@ fn unsupported_creation_targets_and_missing_message_targets_report_diagnostics()
 }
 
 #[test]
+fn oversized_external_memory_is_rejected_before_allocation() {
+    let mut factory = KcsFactory::new(Source::new());
+    factory.external_bytes = usize::MAX;
+    let error = factory
+        .create(1, kind::ORDINARY, b"missing")
+        .err()
+        .expect("超大外部存储应被拒绝");
+    assert!(error.message.contains("外部存储"));
+}
+
+#[test]
 fn commands_route_by_tree_and_preserve_outputs() {
     let mut source = Source::new();
     source.add(b"child", waiting_child(), data());
@@ -722,4 +736,366 @@ fn delete_native_marks_a_new_child_for_destruction_on_the_next_update() {
     assert!(runtime.object(child).is_none());
     assert!(runtime.object(parent).is_some());
     assert_eq!(runtime.tree().next_id(), child);
+}
+
+/// 命令录制：目标处理器收到的原始命令，顺序即树遍历顺序。
+#[derive(Clone, Default)]
+struct Commands(Rc<RefCell<Vec<Command>>>);
+
+impl Commands {
+    fn all(&self) -> Vec<Command> {
+        self.0.borrow().clone()
+    }
+
+    fn clear(&self) {
+        self.0.borrow_mut().clear();
+    }
+}
+
+/// 只有基类控制和命令记录的对象，用于核对路由与传播。
+struct CommandRecorder {
+    base: BaseObject,
+    commands: Commands,
+}
+
+impl TaskObject for CommandRecorder {
+    fn control(&self) -> &Control {
+        &self.base.control
+    }
+
+    fn clock(&self) -> &TaskClock {
+        &self.base.clock
+    }
+
+    fn state(&mut self) -> (&mut Control, &mut TaskClock) {
+        (&mut self.base.control, &mut self.base.clock)
+    }
+
+    fn interpreter(&self) -> Option<&Interpreter> {
+        None
+    }
+
+    fn interpreter_mut(&mut self) -> Option<&mut Interpreter> {
+        None
+    }
+
+    fn set_creation_context(&mut self, _context: &[u8]) -> Result<()> {
+        Ok(())
+    }
+
+    fn update_body(
+        &mut self,
+        _host: &mut dyn Host,
+        _increment: u32,
+        _budget: usize,
+    ) -> Result<bool> {
+        Ok(true)
+    }
+
+    fn dispatch_command(
+        &mut self,
+        kind: u32,
+        command: &Command,
+        output: &mut u32,
+        host: &mut dyn Host,
+        budget: usize,
+    ) -> Result<CommandOutcome> {
+        self.commands.0.borrow_mut().push(*command);
+        <BaseObject as TaskObject>::dispatch_command(
+            &mut self.base,
+            kind,
+            command,
+            output,
+            host,
+            budget,
+        )
+    }
+
+    fn enqueue_message(&mut self, _message: [u32; 4]) -> Result<()> {
+        Ok(())
+    }
+
+    fn dispatch_message(
+        &mut self,
+        _message: &mut [u32; 4],
+        _output: &mut u32,
+        _host: &mut dyn Host,
+        _budget: usize,
+    ) -> Result<bool> {
+        Ok(true)
+    }
+
+    fn request_delete(&mut self, _host: &mut dyn Host, _budget: usize) -> Result<bool> {
+        self.base.control.deletion_requested = 1;
+        Ok(true)
+    }
+
+    fn release(&mut self) -> Result<()> {
+        Ok(())
+    }
+}
+
+/// 按类型提供录制对象，其余类型按名称装载普通 KCS。
+struct MixedFactory {
+    programs: Source,
+    commands: Commands,
+}
+
+impl ObjectFactory for MixedFactory {
+    fn create(&mut self, id: u32, kind: u32, name: &[u8]) -> Result<Box<dyn TaskObject>> {
+        if kind == kind::PLANE {
+            return Ok(Box::new(CommandRecorder {
+                base: BaseObject::new(),
+                commands: self.commands.clone(),
+            }));
+        }
+        let program = self
+            .programs
+            .load(name)?
+            .ok_or_else(|| Error::new(0, "KCS 程序不存在"))?;
+        let mut task = OrdinaryTask::new(program, Vec::new())?;
+        task.task_id = id;
+        Ok(Box::new(OrdinaryObject::new(task)))
+    }
+}
+
+fn recording_runtime(programs: Source) -> (Runtime<MixedFactory>, Commands) {
+    let commands = Commands::default();
+    let runtime = Runtime::new(
+        0,
+        kind::ROOT,
+        Box::new(CommandRecorder {
+            base: BaseObject::new(),
+            commands: commands.clone(),
+        }),
+        katze_system2::expression::State::new(8),
+        MixedFactory {
+            programs,
+            commands: commands.clone(),
+        },
+    );
+    (runtime, commands)
+}
+
+fn targets(commands: &Commands) -> Vec<u32> {
+    commands
+        .all()
+        .into_iter()
+        .map(|command| command.target)
+        .collect()
+}
+
+#[test]
+fn native_110_sends_two_words_as_command_97() {
+    let mut asm = Asm::default();
+    asm.ins(0x25, &[1])
+        .ins(0x25, &[0x1122_3344])
+        .ins(0x2b, &[110, 8])
+        .ins(0x3b, &[]);
+    let mut source = Source::new();
+    source.add(b"sender", asm.build(), data());
+    let (mut runtime, commands) = recording_runtime(source);
+    let target = runtime.create(0, kind::PLANE, b"target", b"").unwrap();
+    let sender = runtime.create(0, kind::ORDINARY, b"sender", b"").unwrap();
+    assert_eq!((target, sender), (1, 2));
+
+    assert!(runtime.update(10, 0).unwrap());
+    assert_eq!(
+        commands.all(),
+        [Command {
+            target,
+            sender,
+            code: 97,
+            data: [0, 0x1122_3344, 0],
+        }]
+    );
+}
+
+#[test]
+fn dispatch_command_keeps_the_sender_given_by_the_caller() {
+    let (mut runtime, commands) = recording_runtime(Source::new());
+    let target = runtime.create(0, kind::PLANE, b"target", b"").unwrap();
+    let sender = runtime.create(0, kind::PLANE, b"sender", b"").unwrap();
+    assert_eq!((target, sender), (1, 2));
+
+    // 路由起点是根任务，发送者仍是命令自带的编号。
+    let output = runtime
+        .dispatch_command(
+            0,
+            Command {
+                target,
+                sender,
+                code: 99,
+                data: [0; 3],
+            },
+        )
+        .unwrap();
+    assert_eq!(output, 0);
+    assert_eq!(
+        commands.all(),
+        [Command {
+            target,
+            sender,
+            code: 99,
+            data: [0; 3],
+        }]
+    );
+}
+
+#[test]
+fn tree_dispatch_propagates_unknown_commands_and_stops_at_consumers() {
+    let (mut runtime, commands) = recording_runtime(Source::new());
+    let branch = runtime.create(0, kind::PLANE, b"branch", b"").unwrap();
+    let leaf = runtime.create(branch, kind::PLANE, b"leaf", b"").unwrap();
+    let other = runtime.create(0, kind::PLANE, b"other", b"").unwrap();
+    assert_eq!((branch, leaf, other), (1, 2, 3));
+
+    // 未识别的编号不修改状态，允许按 data[2] 传播到整棵子树。
+    runtime
+        .dispatch_command(
+            0,
+            Command {
+                target: 0,
+                sender: 0,
+                code: 99,
+                data: [0, 0, 1],
+            },
+        )
+        .unwrap();
+    assert_eq!(targets(&commands), [0, branch, leaf, other]);
+    commands.clear();
+
+    // 基类命令 13 由目标消费，即使 data[2] 非零也不进入子树。
+    runtime
+        .dispatch_command(
+            0,
+            Command {
+                target: 0,
+                sender: 0,
+                code: 13,
+                data: [0, 0, 1],
+            },
+        )
+        .unwrap();
+    assert_eq!(targets(&commands), [0]);
+    commands.clear();
+
+    // 已有删除标记的对象消费命令，当前分支到此结束；同层其他分支仍会收到。
+    runtime
+        .object_mut(branch)
+        .unwrap()
+        .state()
+        .0
+        .deletion_requested = 1;
+    runtime
+        .dispatch_command(
+            0,
+            Command {
+                target: 0,
+                sender: 0,
+                code: 99,
+                data: [0, 0, 1],
+            },
+        )
+        .unwrap();
+    assert_eq!(targets(&commands), [0, branch, other]);
+}
+
+// 自引用路径的最小复现：执行中的对象在调用期间移出存储，以下目标语义尚未实现。
+// 原入口已核实的基线写在各个测试里；当前运行时在 67 和同步回信处返回
+// 「任务对象不存在或正在执行」，在 70 处返回「任务对象不存在」。去掉 ignore 即可观察。
+
+#[test]
+#[ignore = "执行中的对象暂时移出存储：native 67 无法删除自身"]
+fn delete_native_can_target_the_running_task() {
+    let mut asm = Asm::default();
+    asm.ins(0x2b, &[68, 0])
+        .ins(0x2b, &[67, 4])
+        .ins(0x25, &[7])
+        .ins(0x26, &[4])
+        .ins(0x3b, &[]);
+    let mut source = Source::new();
+    source.add(b"self", asm.build(), data());
+    let mut runtime = runtime(source);
+    let id = runtime.create(0, kind::ORDINARY, b"self", b"").unwrap();
+
+    // 原入口：删除标记为 1，后续指令仍执行。
+    assert!(runtime.update(10, 0).unwrap());
+    assert_eq!(runtime.object(id).unwrap().control().deletion_requested, 1);
+    let vm = runtime.object(id).unwrap().interpreter().unwrap();
+    assert_eq!(words(vm, 4, 1), [7], "删除命令之后的指令仍执行");
+}
+
+#[test]
+#[ignore = "执行中的对象暂时移出存储：native 70 无法向自身排队"]
+fn queue_native_can_target_the_running_task() {
+    let mut asm = Asm::default();
+    asm.ins(0x2b, &[68, 0])
+        .ins(0x25, &[7])
+        .ins(0x25, &[0])
+        .ins(0x25, &[0])
+        .ins(0x2b, &[70, 16])
+        .ins(0x26, &[0])
+        .ins(0x25, &[32])
+        .ins(0x2b, &[71, 4])
+        .ins(0x26, &[4])
+        .ins(0x3b, &[]);
+    let mut source = Source::new();
+    source.add(b"self", asm.build(), data());
+    let mut runtime = runtime(source);
+    let id = runtime.create(0, kind::ORDINARY, b"self", b"").unwrap();
+
+    // 原入口：排队入口返回一，队列新增一项并在下一轮投递给自身的等待地址。
+    assert!(runtime.update(10, 0).unwrap());
+    assert_eq!(
+        words(runtime.object(id).unwrap().interpreter().unwrap(), 0, 1),
+        [1],
+        "排队入口返回一"
+    );
+    assert!(runtime.update(20, 0).unwrap());
+    let vm = runtime.object(id).unwrap().interpreter().unwrap();
+    assert_eq!(words(vm, 32, 2), [1, 7], "下一轮收到自身排队的消息");
+}
+
+#[test]
+#[ignore = "执行中的对象暂时移出存储：接收者无法向仍在执行的发送者回信"]
+fn message_handler_can_reply_to_the_running_sender() {
+    // 等待消息后把首项（发送者）作为目标，再同步发送一条消息。
+    let mut receiver = Asm::default();
+    receiver
+        .label("wait")
+        .ins(0x25, &[32])
+        .ins(0x2b, &[71, 4])
+        .ins(0x26, &[0])
+        .ins(0x2f, &[32])
+        .ins(0x25, &[7])
+        .ins(0x25, &[0])
+        .ins(0x25, &[0])
+        .ins(0x2b, &[69, 16])
+        .ins(0x26, &[4])
+        .jump(0x29, "wait");
+    let mut sender = Asm::default();
+    sender
+        .ins(0x25, &[1])
+        .ins(0x25, &[7])
+        .ins(0x25, &[0])
+        .ins(0x25, &[0])
+        .ins(0x2b, &[69, 16])
+        .ins(0x26, &[0])
+        .ins(0x3b, &[]);
+    let mut source = Source::new();
+    source.add(b"receiver", receiver.build(), data());
+    source.add(b"sender", sender.build(), data());
+    let mut runtime = runtime(source);
+    let receiver = runtime.create(0, kind::ORDINARY, b"receiver", b"").unwrap();
+    let sender = runtime.create(0, kind::ORDINARY, b"sender", b"").unwrap();
+    assert_eq!((receiver, sender), (1, 2));
+
+    // 原入口：回信返回零，接收者回到等待，外层 native 69 返回一。
+    assert!(runtime.update(10, 0).unwrap());
+    let receiver_vm = runtime.object(receiver).unwrap().interpreter().unwrap();
+    assert_eq!(words(receiver_vm, 4, 1), [0], "回信返回零");
+    assert!(receiver_vm.is_waiting_for_message(), "接收者回到消息等待");
+    let sender_vm = runtime.object(sender).unwrap().interpreter().unwrap();
+    assert_eq!(words(sender_vm, 0, 1), [1], "外层 native 69 返回一");
 }
