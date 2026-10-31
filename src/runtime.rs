@@ -1,8 +1,8 @@
 //! 任务树、对象存储与普通脚本宿主的整合。
 //!
 //! 本模块把任务索引、基类控制、生命周期回调和真实对象存储连接起来，替代此前只能逐项手工搭建的适配层。
-//! 对象类型由 [`ObjectFactory`] 创建；当前提供普通 KCS 对象与基类对象，图形、音频、输入和文字等类型需要
-//! 对应子系统按 [`TaskObject`] 协议实现，缺失时创建请求返回诊断。
+//! 对象类型由 [`ObjectFactory`] 创建；提供普通 KCS、基类及 [`crate::graphics::GraphicsFactory`] 的基础二维对象。
+//! 其他类型需要对应子系统按 [`TaskObject`] 协议实现，缺失时创建请求返回诊断。
 //!
 //! 同步消息、删除通知和对象命令在返回前完成预算续跑。普通对象执行期间仍接收删除标记与排队消息，
 //! 向执行中普通 VM 同步发送消息返回零；其余需要直接借用该对象的操作返回诊断。
@@ -154,6 +154,14 @@ impl<F: ObjectFactory> Runtime<F> {
 
     pub fn drawing_mut(&mut self) -> &mut crate::graphics::DrawingContext {
         &mut self.resources.drawing
+    }
+
+    pub fn drawables(&self) -> &crate::graphics::Drawables {
+        &self.resources.drawables
+    }
+
+    pub fn drawables_mut(&mut self) -> &mut crate::graphics::Drawables {
+        &mut self.resources.drawables
     }
 
     pub fn host(&self) -> &HostState {
@@ -699,6 +707,10 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
 }
 
 impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
+    fn drawables(&mut self) -> Option<&mut crate::graphics::Drawables> {
+        Some(&mut self.resources.drawables)
+    }
+
     fn take_task_effects(&mut self, queued_messages: usize) -> TaskEffects {
         let Some(task) = self.running.get_mut(&self.host.task_id) else {
             return TaskEffects::default();
@@ -800,6 +812,7 @@ impl<F: ObjectFactory> Lifecycle for TaskLifecycle<'_, F> {
             .ok_or_else(|| Error::new(0, "任务对象不存在"))?;
         object.release()?;
         self.resources.images.release_owner(id);
+        self.resources.drawables.remove(id);
         self.objects.remove(&id);
         Ok(())
     }

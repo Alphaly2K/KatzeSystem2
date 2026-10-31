@@ -1,4 +1,4 @@
-use crate::graphics::{DrawingContext, Images, Rect};
+use crate::graphics::{Drawables, DrawingContext, Images, Rect};
 use crate::kcs::{Interpreter, NativeReturn, ResourceServices, ResourceState, format_string};
 use crate::{Error, Result};
 
@@ -7,6 +7,7 @@ pub(super) struct Resources {
     pub services: Option<Box<dyn ResourceServices>>,
     pub images: Images,
     pub drawing: DrawingContext,
+    pub drawables: Drawables,
     pub raw: ResourceState,
 }
 

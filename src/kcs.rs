@@ -233,6 +233,11 @@ pub trait Host {
 
     fn set_task_context(&mut self, _context: &[u8]) {}
 
+    /// 具体绘图对象使用的登记与属性服务；独立解释宿主可以不提供。
+    fn drawables(&mut self) -> Option<&mut crate::graphics::Drawables> {
+        None
+    }
+
     /// 取走当前任务的待应用操作，并提供已保存的队列长度供宿主检查入队容量。
     fn take_task_effects(&mut self, _queued_messages: usize) -> TaskEffects {
         TaskEffects::default()
@@ -254,6 +259,10 @@ impl<T: Host + ?Sized> Host for &mut T {
 
     fn set_task_context(&mut self, context: &[u8]) {
         (**self).set_task_context(context);
+    }
+
+    fn drawables(&mut self) -> Option<&mut crate::graphics::Drawables> {
+        (**self).drawables()
     }
 
     fn take_task_effects(&mut self, queued_messages: usize) -> TaskEffects {

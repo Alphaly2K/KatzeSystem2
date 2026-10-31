@@ -6,6 +6,10 @@ mod target;
 pub use target::{DrawingContext, RenderTarget};
 mod transform;
 pub use transform::Transform;
+mod drawable;
+pub use drawable::{Drawable, Drawables, Vertex};
+mod plane;
+pub use plane::{GraphicsFactory, PlaneObject};
 
 /// 包含左上边、不包含右下边的像素矩形。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
