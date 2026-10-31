@@ -1,8 +1,14 @@
 use super::{Host, Interpreter, MemoryCopyMode, NativeReturn, TaskClock, memory, strings};
+use crate::task::TaskTree;
 use crate::{Error, Result, read};
 
 /// 普通脚本访问其他任务时所需的同步服务。
 pub trait TaskServices {
+    /// 提供服务当前持有的任务树；缺省沿用内层宿主的查询。
+    fn task_tree(&self) -> Option<&TaskTree> {
+        None
+    }
+
     /// 创建对象、登记父子关系并传递当前任务的创建上下文。
     fn create_task(
         &mut self,
@@ -59,6 +65,20 @@ impl<H: Host, S: TaskServices> Host for TaskHost<'_, H, S> {
     }
 
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn> {
+        if matches!(index, 75 | 76) {
+            if let Some(tree) = self.services.task_tree() {
+                let count = if index == 75 { 4 } else { 0 };
+                if arguments.len() != count {
+                    return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+                }
+                let argument = if index == 75 {
+                    u32::from_le_bytes(arguments.try_into().unwrap())
+                } else {
+                    0
+                };
+                return super::host::hierarchy_query(tree, self.task_id, index, argument, vm.pc);
+            }
+        }
         let count = match index {
             66 => 3,
             67 => 1,

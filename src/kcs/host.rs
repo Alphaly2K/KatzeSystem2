@@ -4,6 +4,28 @@ use crate::task::TaskTree;
 use crate::{Error, Result, expression, read, text};
 use std::collections::BTreeMap;
 
+pub(super) fn hierarchy_query(
+    tree: &TaskTree,
+    task_id: u32,
+    index: u32,
+    argument: u32,
+    pc: usize,
+) -> Result<NativeReturn> {
+    let node = tree
+        .node(task_id)
+        .ok_or_else(|| Error::new(pc, "KCS 当前任务未登记"))?;
+    let id = if index == 75 {
+        tree.descendants(node.id)
+            .unwrap()
+            .nth(argument as usize)
+            .unwrap_or(u32::MAX)
+    } else {
+        node.parent
+            .ok_or_else(|| Error::new(pc, "KCS 当前任务没有父任务"))?
+    };
+    Ok(NativeReturn::Value(id))
+}
+
 /// 在已有数值状态上提供普通任务表中已核实的接口。
 pub struct CoreHost<'a> {
     pub state: &'a mut expression::State,
@@ -124,19 +146,13 @@ impl Host for CoreHost<'_> {
                 let tree = self
                     .task_tree
                     .ok_or_else(|| Error::new(vm.pc, "KCS 宿主未提供任务树"))?;
-                let node = tree
-                    .node(self.task_id)
-                    .ok_or_else(|| Error::new(vm.pc, "KCS 当前任务未登记"))?;
-                let id = if index == 75 {
-                    tree.descendants(node.id)
-                        .unwrap()
-                        .nth(args[0] as usize)
-                        .unwrap_or(u32::MAX)
-                } else {
-                    node.parent
-                        .ok_or_else(|| Error::new(vm.pc, "KCS 当前任务没有父任务"))?
-                };
-                NativeReturn::Value(id)
+                hierarchy_query(
+                    tree,
+                    self.task_id,
+                    index,
+                    args.first().copied().unwrap_or(0),
+                    vm.pc,
+                )?
             }
             35 => {
                 memory::copy(

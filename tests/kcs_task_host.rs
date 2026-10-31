@@ -5,6 +5,7 @@ use katze_system2::{
         CoreHost, Host, Interpreter, MemoryCopyMode, NativeReturn, OrdinaryTask, Program, TaskHost,
         TaskServices,
     },
+    task::TaskTree,
 };
 
 fn ins(code: &mut Vec<u8>, opcode: u8, args: &[u32]) {
@@ -16,6 +17,7 @@ fn ins(code: &mut Vec<u8>, opcode: u8, args: &[u32]) {
 }
 
 struct Services {
+    tree: TaskTree,
     target: Interpreter,
     queued: Vec<(u32, [u32; 4])>,
     dispatched: usize,
@@ -33,6 +35,10 @@ struct Creation {
 }
 
 impl TaskServices for Services {
+    fn task_tree(&self) -> Option<&TaskTree> {
+        Some(&self.tree)
+    }
+
     fn create_task(
         &mut self,
         sender: u32,
@@ -41,7 +47,7 @@ impl TaskServices for Services {
         name: &[u8],
         context: &[u8],
     ) -> Result<u32> {
-        let id = self.created.len() as u32;
+        let id = self.tree.insert_auto(parent, kind)?;
         self.created.push(Creation {
             sender,
             parent,
@@ -83,7 +89,10 @@ impl TaskServices for Services {
 }
 
 fn services(code: &[u8]) -> Services {
+    let mut tree = TaskTree::new(7, 12);
+    tree.insert(7, 42, 12).unwrap();
     Services {
+        tree,
         target: Interpreter::new(
             Program::from_code(code, vec![0; 64], 64).unwrap(),
             vec![0; 32],
@@ -223,6 +232,15 @@ fn creation_formats_names_and_passes_raw_context_before_requesting_deletion() {
     assert_eq!(
         host.call(67, &0u32.to_le_bytes(), &mut vm).unwrap(),
         NativeReturn::Continue
+    );
+    assert_eq!(
+        host.call(75, &0u32.to_le_bytes(), &mut vm).unwrap(),
+        NativeReturn::Value(0)
+    );
+    host.set_task_id(0);
+    assert_eq!(
+        host.call(76, &[], &mut vm).unwrap(),
+        NativeReturn::Value(42)
     );
     assert_eq!(
         services.created,
