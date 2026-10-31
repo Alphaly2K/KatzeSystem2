@@ -224,9 +224,10 @@ impl<F: ObjectFactory> Runtime<F> {
     }
 }
 
-/// 选取最小可用编号、创建对象、登记父子关系并传递上下文。
+/// 选取最小可用编号、创建对象、传递上下文并登记父子关系。
 ///
-/// 创建失败时不保留任务索引；上下文传递失败时撤销本次登记。
+/// 命令 66 在返回前完成创建、登记和上下文传递；这里先完成上下文，任何失败都不会留下
+/// 已占用但无对象的编号。
 fn create_object<F: ObjectFactory>(
     tree: &mut TaskTree,
     objects: &mut BTreeMap<u32, Box<dyn TaskObject>>,
@@ -241,11 +242,8 @@ fn create_object<F: ObjectFactory>(
     }
     let id = tree.next_id();
     let mut object = factory.create(id, kind, name)?;
+    object.set_creation_context(context)?;
     tree.insert(parent, id, kind)?;
-    if let Err(error) = object.set_creation_context(context) {
-        tree.remove(id)?;
-        return Err(error);
-    }
     objects.insert(id, object);
     Ok(id)
 }
@@ -455,6 +453,10 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                 vm.pc,
             ),
             66 => {
+                // 命令先路由到父任务；不可达的父级不能接受创建请求。
+                if !self.require_reachable(args[1]) {
+                    return Err(Error::new(vm.pc, "任务创建父级不可达"));
+                }
                 let name = crate::kcs::format_string(vm, args[2], 0)?;
                 let end = self
                     .context

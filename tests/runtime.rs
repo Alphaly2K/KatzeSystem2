@@ -615,6 +615,46 @@ fn commands_route_by_tree_and_preserve_outputs() {
 }
 
 #[test]
+fn creation_context_overflow_leaves_no_task_registered() {
+    let mut source = Source::new();
+    source.add(b"child", waiting_child(), data());
+    let mut runtime = runtime(source);
+    let context = [b'x'; 32];
+    let error = runtime
+        .create(0, kind::ORDINARY, b"child", &context)
+        .unwrap_err();
+    assert!(error.message.contains("创建上下文"));
+    assert!(runtime.tree().node(1).is_none());
+    assert_eq!(runtime.tree().next_id(), 1);
+    assert!(runtime.object(1).is_none());
+}
+
+#[test]
+fn root_shutdown_closes_the_tree() {
+    let mut source = Source::new();
+    source.add(b"child", waiting_child(), data());
+    let mut runtime = runtime(source);
+    runtime.create(0, kind::ORDINARY, b"child", b"").unwrap();
+    runtime.destroy(0).unwrap();
+    assert!(runtime.tree().node(0).is_none());
+    assert!(runtime.object(0).is_none());
+    assert!(runtime.update(10, 0).is_err());
+}
+
+#[test]
+fn runaway_program_stops_at_the_synchronous_instruction_limit() {
+    let mut asm = Asm::default();
+    asm.label("loop").jump(0x29, "loop");
+    let mut source = Source::new();
+    source.add(b"child", asm.build(), data());
+    let mut runtime = runtime(source);
+    runtime.create(0, kind::ORDINARY, b"child", b"").unwrap();
+    runtime.set_budget(1024, 4096);
+    let error = runtime.update(10, 0).unwrap_err();
+    assert!(error.message.contains("同步执行"));
+}
+
+#[test]
 fn delete_native_marks_a_new_child_for_destruction_on_the_next_update() {
     let mut parent_data = data();
     parent_data[100..106].copy_from_slice(b"child\0");
