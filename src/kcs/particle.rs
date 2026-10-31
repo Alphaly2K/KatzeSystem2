@@ -9,6 +9,13 @@ pub struct ParticleVertex {
     pub uv: [f32; 2],
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ParticleSource {
+    pub color: u32,
+    pub position_2d: [f32; 2],
+    pub position_3d: [f32; 3],
+}
+
 impl Default for ParticleVertex {
     fn default() -> Self {
         Self {
@@ -34,6 +41,7 @@ pub struct ParticleHost {
     pub parameters: [u32; 32],
     pub surface_size: [u32; 2],
     pub object_id: i32,
+    pub source: Option<ParticleSource>,
     pub render_mode: u32,
     pub random: ScriptRandom,
     pub debug_messages: Vec<Vec<u8>>,
@@ -54,6 +62,7 @@ impl Default for ParticleHost {
             parameters: [0; 32],
             surface_size: [0; 2],
             object_id: -1,
+            source: None,
             render_mode: 0,
             random: ScriptRandom::default(),
             debug_messages: Vec::new(),
@@ -64,10 +73,10 @@ impl Default for ParticleHost {
 impl Host for ParticleHost {
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn> {
         let count = match index {
-            1 | 2 | 4 | 32..=34 | 36 | 40 | 44..=46 => 0,
+            1 | 2 | 4 | 32..=34 | 36 | 40 | 44..=47 => 0,
             0 | 3 | 6..=11 | 13..=15 | 17 | 19..=21 | 30 | 31 | 35 | 42 | 50 => 1,
-            5 | 12 | 16 | 18 | 22..=24 | 39 | 43 => 2,
-            27..=29 => 3,
+            5 | 12 | 16 | 18 | 22..=24 | 39 | 43 | 48 => 2,
+            27..=29 | 49 => 3,
             25 | 26 => 4,
             37 => 6,
             41 => 5,
@@ -261,6 +270,27 @@ impl Host for ParticleHost {
                 return Ok(NativeReturn::Continue);
             }
             46 => self.object_id as u32,
+            47..=49 => {
+                let source = if self.object_id == -1 {
+                    None
+                } else {
+                    self.source
+                };
+                let source = source.unwrap_or_default();
+                if index == 47 {
+                    source.color
+                } else {
+                    let position: &[f32] = if index == 48 {
+                        &source.position_2d
+                    } else {
+                        &source.position_3d
+                    };
+                    for (address, value) in args.iter().zip(position) {
+                        vm.write(*address, &value.to_le_bytes())?;
+                    }
+                    return Ok(NativeReturn::Continue);
+                }
+            }
             50 => {
                 self.render_mode = if args[0] <= 5 { args[0] } else { 0 };
                 return Ok(NativeReturn::Continue);

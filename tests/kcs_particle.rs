@@ -66,6 +66,45 @@ fn particle_math_keeps_x86_nan_bits_rounding_and_time_units() {
 }
 
 #[test]
+fn source_queries_keep_float_bits_write_order_and_absent_object_defaults() {
+    let mut host = ParticleHost {
+        object_id: 17,
+        source: Some(kcs::ParticleSource {
+            color: 0x1234_5678,
+            position_2d: [1.25, -2.5],
+            position_3d: [0xff80_1234, 0x8000_0000, 0x4070_0000].map(f32::from_bits),
+        }),
+        ..Default::default()
+    };
+    let mut vm = vm(32);
+    assert_eq!(
+        call(&mut host, &mut vm, 47, &[]),
+        NativeReturn::Value(0x1234_5678)
+    );
+    call(&mut host, &mut vm, 49, &[0, 4, 8]);
+    assert_eq!(
+        vm.read(0, 12).unwrap(),
+        [0xff80_1234u32, 0x8000_0000, 0x4070_0000]
+            .into_iter()
+            .flat_map(u32::to_le_bytes)
+            .collect::<Vec<_>>()
+    );
+    call(&mut host, &mut vm, 48, &[16, 16]);
+    assert_eq!(vm.read(16, 4).unwrap(), (-2.5f32).to_le_bytes());
+    call(&mut host, &mut vm, 49, &[20, 20, 20]);
+    assert_eq!(vm.read(20, 4).unwrap(), 3.75f32.to_le_bytes());
+    for (object_id, source) in [(-1, host.source), (17, None)] {
+        host.object_id = object_id;
+        host.source = source;
+        assert_eq!(call(&mut host, &mut vm, 47, &[]), NativeReturn::Value(0));
+        call(&mut host, &mut vm, 49, &[0, 4, 8]);
+        assert_eq!(vm.read(0, 12).unwrap(), [0; 12]);
+    }
+    assert!(host.call(49, &[0; 8], &mut vm).is_err());
+    assert!(host.call(48, &[0; 12], &mut vm).is_err());
+}
+
+#[test]
 fn particle_quad_storage_and_snapshots_preserve_vertex_fields_and_rotation_direction() {
     let vertex = ParticleVertex {
         position: [1.0, 0.0, 0.0],
