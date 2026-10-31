@@ -392,4 +392,27 @@ fn image_animation_budget_resume_preserves_sentinel_selection_and_delays_cached_
     assert_eq!((timeline.origin, timeline.duration), (u32::MAX, 3));
     assert!(image.update(999, 0, true).unwrap());
     assert_eq!(image.frame_change(), None);
+    let mut restart_draws = 0;
+    assert!(
+        !image
+            .restart_with_random(1, true, &mut || {
+                restart_draws += 1;
+                1
+            })
+            .unwrap()
+    );
+    assert_eq!(image.playing, 0);
+    assert_eq!(image.frame_change(), None);
+    assert_eq!(image.timeline.as_ref().unwrap().interpreter.variables[0], 2);
+    assert!(
+        image
+            .update_with_random(999, 100, false, &mut || {
+                restart_draws += 1;
+                1
+            })
+            .unwrap()
+    );
+    assert_eq!(restart_draws, 1);
+    assert_eq!(image.frame_change(), Some(10000));
+    assert_eq!(image.playing, 0);
 }

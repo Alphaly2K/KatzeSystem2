@@ -107,6 +107,8 @@ FES 内部执行宏声明，初始化按以下顺序交给宿主：
 
 `anm::ImageAnimation` 保存图像持有的可选时间线和显示缓存。`load(bytes, max_image_id)` 先移除旧时间线，成功后初始化全新运行状态，失败则保持无动画；对象的播放开关和首次更新时间标记保持。`update(now, budget, has_reset_frame)`／`update_with_random` 完成一轮后，通过 `frame_change()` 提供可选选帧请求，`display()` 提供缓存；未绑定动画时使用图像自身属性。资源读取可由 `ResourceRouter` 提供，图像宿主负责最大帧 ID、保留帧 10000 是否存在及实际选帧。完整装载与续跑契约见 [ANM 文档](anm.md)。
 
+`ImageAnimation::restart(budget, has_reset_frame)`／`restart_with_random` 重启现有时间线，并强制按哨兵时刻更新一次，保留原播放开关。返回 false 时通过普通更新接口续跑，保留该次强制更新的时间和选帧条件；`Timeline::restart()` 本身不触发推进。
+
 ## KCS 宿主
 
 `kcs::Host::call` 接收函数编号、参数字节区和可检查的 VM 存储接口。字符串地址、对象句柄及参数布局依各 native 接口契约解释；库不调用原程序函数指针。

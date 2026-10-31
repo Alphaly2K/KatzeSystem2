@@ -51,6 +51,37 @@ impl ImageAnimation {
         self.advance(now, budget, has_reset_frame, Some(random))
     }
 
+    /// 重启后强制以哨兵时刻推进一次，保留播放开关；预算续跑调用 update。
+    pub fn restart(&mut self, budget: usize, has_reset_frame: bool) -> Result<bool> {
+        self.restart_inner(budget, has_reset_frame, None)
+    }
+
+    pub fn restart_with_random(
+        &mut self,
+        budget: usize,
+        has_reset_frame: bool,
+        random: &mut impl FnMut() -> u32,
+    ) -> Result<bool> {
+        self.restart_inner(budget, has_reset_frame, Some(random))
+    }
+
+    fn restart_inner(
+        &mut self,
+        budget: usize,
+        has_reset_frame: bool,
+        random: Option<&mut dyn FnMut() -> u32>,
+    ) -> Result<bool> {
+        if let Some(timeline) = self.timeline.as_mut() {
+            timeline.restart();
+        }
+        self.invocation = None;
+        let playing = self.playing;
+        self.playing = 1;
+        let result = self.advance(u32::MAX, budget, has_reset_frame, random);
+        self.playing = playing;
+        result
+    }
+
     fn advance(
         &mut self,
         now: u32,
