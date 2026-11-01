@@ -604,6 +604,8 @@ fn loaded_images_use_the_stdinfo_alpha_flag_independently_of_pixel_alpha() {
         for color in [0x8011_2233u32, 0xff11_2233] {
             let mut data = blob(7, color);
             data[64..68].copy_from_slice(&flag.to_le_bytes());
+            data[68..72].copy_from_slice(&(-1i32).to_le_bytes());
+            data[72..76].copy_from_slice(&0i32.to_le_bytes());
             let mut images = Images::default();
             let source = images.load(1, b"x:7.hg3", &mut AlphaImage(data)).unwrap();
             let mut list = katze_system2::graphics::ImageList::new(2, [3, 1], &mut images).unwrap();
@@ -617,7 +619,11 @@ fn loaded_images_use_the_stdinfo_alpha_flag_independently_of_pixel_alpha() {
                 &mut images,
             )
             .unwrap();
-            list.redraw(&mut images).unwrap();
+            assert_eq!(
+                list.dirty_rectangles().collect::<Vec<_>>(),
+                [Rect::from_xywh(1, 0, 2, 1)]
+            );
+            list.update(&mut images).unwrap();
             let edge = if flag == 0 { 0 } else { color & 0xffffff };
             assert_eq!(images.get(source).unwrap().info().reserved, flag);
             assert_eq!(

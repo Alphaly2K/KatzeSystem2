@@ -191,11 +191,14 @@ fn runtime_lists_keep_kcs_images_alive_and_feed_fes_canvas_planes() {
                 .try_into()
                 .unwrap(),
         );
-        let mut list = ImageList::new(owner, [2, 2], runtime.images_mut()).unwrap();
+        let mut list = ImageList::new(owner, [5, 3], runtime.images_mut()).unwrap();
         list.set(
             ImageList::key(painter, 0),
             source,
-            ImageListProperties::default(),
+            ImageListProperties {
+                position: [2., 1.],
+                ..Default::default()
+            },
             runtime.images_mut(),
         )
         .unwrap();
@@ -209,8 +212,13 @@ fn runtime_lists_keep_kcs_images_alive_and_feed_fes_canvas_planes() {
         canvas.target = Some(
             RenderTarget::from_tiles([2, 3], [2, 1], vec![Some(tile.clone()), Some(tile)]).unwrap(),
         );
-        list.set_offset([1, 1]);
-        assert!(runtime.redraw_image_list(&mut list).unwrap());
+        list.set_offset([-1, 0]);
+        assert_eq!(
+            list.dirty_rectangles().collect::<Vec<_>>(),
+            [katze_system2::graphics::Rect::from_xywh(2, 1, 2, 2)]
+        );
+        assert!(runtime.update_image_list(&mut list).unwrap());
+        assert!(!runtime.update_image_list(&mut list).unwrap());
         assert!(
             runtime
                 .drawing()
@@ -270,7 +278,7 @@ fn runtime_lists_keep_kcs_images_alive_and_feed_fes_canvas_planes() {
         }
         list.clear(runtime.images_mut()).unwrap();
         runtime.drawing_mut().enabled = false;
-        assert!(!runtime.redraw_image_list(&mut list).unwrap());
+        assert!(!runtime.update_image_list(&mut list).unwrap());
         assert!(
             runtime
                 .images()
@@ -286,6 +294,7 @@ fn runtime_lists_keep_kcs_images_alive_and_feed_fes_canvas_planes() {
             Some(0xff12_4578)
         );
         runtime.drawing_mut().enabled = true;
+        assert!(!runtime.update_image_list(&mut list).unwrap());
         assert!(runtime.redraw_image_list(&mut list).unwrap());
         assert_eq!(
             runtime.drawing().target.as_ref().unwrap().pixel(1, 1),
@@ -345,7 +354,131 @@ fn list_alpha_classification_stays_with_shared_pixels_and_waits_for_visible_geom
             images.get(list.image()).unwrap().surface().pixels(),
             [edge, replacement, edge].map(u32::to_le_bytes).concat()
         );
+        let output = images.share(list.image()).unwrap();
         list.release(&mut images).unwrap();
+        assert_eq!(
+            images.get(output).unwrap().surface().pixels(),
+            [edge, replacement, edge].map(u32::to_le_bytes).concat()
+        );
+        images.release(output).unwrap();
         images.release(alias).unwrap();
     }
+}
+
+#[test]
+fn incremental_lists_keep_history_and_repeat_blending_in_overlapping_blocks() {
+    use katze_system2::graphics::Rect;
+    let mut images = Images::default();
+    assert!(ImageList::new_tiled(2, [1, 1], [1, 0], &mut images).is_err());
+    assert!(ImageList::new_tiled(2, [65536, 65536], [1, 1], &mut images).is_err());
+    let mut empty = ImageList::new_tiled(2, [0, i32::MAX as u32], [1, 1], &mut images).unwrap();
+    assert!(empty.update(&mut images).unwrap().is_empty());
+    empty.release(&mut images).unwrap();
+    let source = images.create(1, [3, 2]).unwrap();
+    for (pixel, color) in images
+        .get_mut(source)
+        .unwrap()
+        .pixels_mut()
+        .chunks_exact_mut(4)
+        .zip([
+            0x8012_3459u32,
+            0x8012_345a,
+            0x8012_345b,
+            0x8012_3456,
+            0x8012_3457,
+            0x8012_3458,
+        ])
+    {
+        pixel.copy_from_slice(&color.to_le_bytes());
+    }
+    let mut list = ImageList::new_tiled(2, [8, 6], [3, 2], &mut images).unwrap();
+    let properties = ImageListProperties {
+        position: [2., 1.],
+        opacity: 128,
+        ..Default::default()
+    };
+    list.set(7, source, properties, &mut images).unwrap();
+    let first = [
+        Rect::from_xywh(2, 1, 1, 2),
+        Rect::from_xywh(3, 1, 2, 2),
+        Rect::from_xywh(2, 2, 1, 1),
+        Rect::from_xywh(3, 2, 2, 1),
+    ];
+    assert_eq!(list.dirty_rectangles().collect::<Vec<_>>(), first);
+    assert_eq!(list.update(&mut images).unwrap(), first);
+    assert_eq!(
+        images.get(list.image()).unwrap().surface().pixel(2, 4),
+        Some(0x4012_3456)
+    );
+    assert_eq!(
+        images.get(list.image()).unwrap().surface().pixel(2, 3),
+        Some(0x7111_3358)
+    );
+    images
+        .get_mut(source)
+        .unwrap()
+        .fill_rect_from_bottom(Rect::from_xywh(0, 0, 3, 2), 0xff77_8899);
+    assert!(list.update(&mut images).unwrap().is_empty());
+    assert_eq!(
+        images.get(list.image()).unwrap().surface().pixel(2, 4),
+        Some(0x4012_3456)
+    );
+    list.set(7, source, properties, &mut images).unwrap();
+    list.update(&mut images).unwrap();
+    assert_eq!(
+        images.get(list.image()).unwrap().surface().pixel(2, 4),
+        Some(0x8077_8899)
+    );
+    assert_eq!(
+        images.get(list.image()).unwrap().surface().pixel(2, 3),
+        Some(0xc176_8797)
+    );
+    let moved = ImageListProperties {
+        position: [3., 2.],
+        ..properties
+    };
+    list.set(7, source, moved, &mut images).unwrap();
+    let history = [
+        Rect::from_xywh(2, 1, 1, 2),
+        Rect::from_xywh(3, 1, 3, 2),
+        Rect::from_xywh(2, 2, 1, 2),
+        Rect::from_xywh(3, 2, 3, 2),
+    ];
+    assert_eq!(list.update(&mut images).unwrap(), history);
+    list.set(
+        7,
+        source,
+        ImageListProperties {
+            visible: false,
+            ..moved
+        },
+        &mut images,
+    )
+    .unwrap();
+    assert_eq!(list.update(&mut images).unwrap(), history);
+    assert_eq!(
+        images.get(list.image()).unwrap().surface().pixel(1, 4),
+        Some(0x0012_3456)
+    );
+    assert_eq!(
+        images.get(list.image()).unwrap().surface().pixel(6, 3),
+        Some(0x0077_8899)
+    );
+    assert!(list.remove(7, &mut images).unwrap());
+    assert!(list.update(&mut images).unwrap().is_empty());
+    list.clear(&mut images).unwrap();
+    assert!(
+        images
+            .get(list.image())
+            .unwrap()
+            .surface()
+            .pixels()
+            .iter()
+            .all(|&b| b == 0)
+    );
+    assert_eq!(list.dirty_rectangles().count(), 9);
+    assert_eq!(list.update(&mut images).unwrap().len(), 9);
+    assert!(list.update(&mut images).unwrap().is_empty());
+    list.release(&mut images).unwrap();
+    images.release(source).unwrap();
 }

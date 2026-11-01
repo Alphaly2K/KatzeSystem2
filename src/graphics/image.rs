@@ -131,31 +131,38 @@ impl Image {
         Some(region)
     }
 
+    fn list_bounds(&self, position: [f32; 2], base: [f32; 2]) -> Rect {
+        let at = std::array::from_fn::<_, 2, _>(|i| {
+            list_coordinate(position[i])
+                .wrapping_sub(list_coordinate(base[i]))
+                .wrapping_add(self.info.offset[i])
+        });
+        Rect::from_xywh(
+            at[0],
+            at[1],
+            self.info.size[0] as i32,
+            self.info.size[1] as i32,
+        )
+    }
+
     fn list_region(
         &self,
         source: &Self,
         position: [f32; 2],
         base: [f32; 2],
+        clip: Rect,
     ) -> Option<ImageRegion> {
-        let at = std::array::from_fn::<_, 2, _>(|i| {
-            list_coordinate(position[i])
-                .wrapping_sub(list_coordinate(base[i]))
-                .wrapping_add(source.info.offset[i])
-        });
-        let rect = Rect::from_xywh(
-            at[0],
-            at[1],
-            source.info.size[0] as i32,
-            source.info.size[1] as i32,
-        )
-        .intersect(self.surface.bounds())?;
+        let bounds = source.list_bounds(position, base);
+        let rect = bounds.intersect(self.surface.bounds())?.intersect(clip)?;
         let width = (rect.right - rect.left) as usize;
         let height = (rect.bottom - rect.top) as usize;
         Some(ImageRegion {
             x: rect.left as usize,
             y: self.info.size[1] as usize - rect.bottom as usize,
-            source_x: rect.left.wrapping_sub(at[0]) as usize,
-            source_y: source.info.size[1] as usize - rect.top.wrapping_sub(at[1]) as usize - height,
+            source_x: rect.left.wrapping_sub(bounds.left) as usize,
+            source_y: source.info.size[1] as usize
+                - rect.top.wrapping_sub(bounds.top) as usize
+                - height,
             width,
             height,
         })
@@ -167,9 +174,10 @@ impl Image {
         position: [f32; 2],
         base: [f32; 2],
         opacity: u8,
+        clip: Rect,
         has_alpha: &mut Option<bool>,
     ) {
-        let Some(region) = self.list_region(source, position, base) else {
+        let Some(region) = self.list_region(source, position, base, clip) else {
             return;
         };
         let has_alpha = *has_alpha.get_or_insert_with(|| {
@@ -494,6 +502,7 @@ impl Images {
         position: [f32; 2],
         base: [f32; 2],
         opacity: u8,
+        clip: Rect,
     ) -> Result<()> {
         let source_data = self.entry_mut(source)?.data;
         let target_data = self.entry_mut(target)?.data;
@@ -510,10 +519,20 @@ impl Images {
                 position,
                 base,
                 opacity,
+                clip,
                 &mut source_image.has_alpha,
             );
         self.data.insert(source_data, source_image);
         Ok(())
+    }
+
+    pub(crate) fn list_bounds(
+        &self,
+        source: u32,
+        position: [f32; 2],
+        base: [f32; 2],
+    ) -> Result<Rect> {
+        Ok(self.get(source)?.list_bounds(position, base))
     }
 }
 

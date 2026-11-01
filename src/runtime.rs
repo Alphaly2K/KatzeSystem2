@@ -183,6 +183,25 @@ impl<F: ObjectFactory> Runtime<F> {
         ))
     }
 
+    /// 更新并提交列表脏区；关闭上下文时仍更新自有图像并消费脏区。
+    pub fn update_image_list(&mut self, list: &mut crate::graphics::ImageList) -> Result<bool> {
+        let regions = list.update(&mut self.resources.images)?;
+        let image = self.resources.images.get(list.image())?;
+        let offset = list.offset();
+        let mut copied = false;
+        for region in regions {
+            copied |= self.resources.drawing.copy_image(
+                image,
+                region,
+                [
+                    offset[0].wrapping_add(region.left),
+                    offset[1].wrapping_add(region.top),
+                ],
+            );
+        }
+        Ok(copied)
+    }
+
     /// 365 装载的原始图像字节，存活至 366 显式释放或运行时销毁。
     pub fn image_data(&self, handle: u32) -> Result<&[u8]> {
         self.resources.raw.image_data(handle)
