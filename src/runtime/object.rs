@@ -16,6 +16,14 @@ pub trait TaskObject {
     fn interpreter(&self) -> Option<&Interpreter>;
     fn interpreter_mut(&mut self) -> Option<&mut Interpreter>;
 
+    /// 显式输入入口使用的状态；其他对象返回 None。
+    fn input_state(&self) -> Option<&crate::input::InputState> {
+        None
+    }
+    fn input_state_mut(&mut self) -> Option<&mut crate::input::InputState> {
+        None
+    }
+
     /// 支持执行中任务操作的对象提供队列视图，并在推进 VM 后消费宿主的 TaskEffects。
     fn queued_messages(&self) -> Option<&[[u32; 4]]> {
         None

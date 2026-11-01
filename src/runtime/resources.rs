@@ -9,6 +9,7 @@ pub(super) struct Resources {
     pub drawing: DrawingContext,
     pub drawables: Drawables,
     pub raw: ResourceState,
+    pub input_callbacks: std::collections::BTreeMap<u32, crate::input::CommandState>,
 }
 
 impl Resources {

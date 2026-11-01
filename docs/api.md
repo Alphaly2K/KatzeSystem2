@@ -15,7 +15,7 @@
 |`resource`|启动归档类别配置、名称补全、目录索引、KIF 解密及虚拟名路由|自动挂载、列表读取、补丁发现、缓存及别名|
 |`hg3`|0x300 帧目录、标准元数据、按 ID 选帧及原生 32 位完整帧像素解码|其他位深、切片及其他图像编码|
 |`graphics`|BGRA8 渲染面、裁剪填充／复制／普通混合，图像装载与持有、绘图变换／投影／三角形及排序、KX2 几何装载、显式画布图元、画布矩形／源变换／延迟切割及独立帧提交、基础二维任务及图元脚本接口、纯色／渐变三角形和纹理 CPU 核心、分块渲染目标及绘图状态|完整帧自动驱动、缩放／特殊混合、输入绑定、缓存和设备呈现|
-|`input`|区域命令 127～136／154、键命令 151／152、四组设备扫描与重复触发、按键分派与捕获、命中位图、指针选择及进入／离开／移动通知|完整输入任务、平台设备、坐标转换、图像生成掩码和焦点导航|
+|`input`|区域命令 127～136／154、137 查询、键命令 151／152、四组扫描与重复、按键捕获、位图及指针通知；输入对象与运行时显式入口|自动输入更新、平台设备、坐标转换、图像生成掩码和焦点导航|
 |`task`|任务编号、父子索引、子树移除、编号回收、直接命令与类型广播路由、基类控制、整数时钟及同步树更新／销毁调度|类型专属对象与序列化|
 |`runtime`|任务树、对象存储、普通宿主状态与对象工厂的整合；普通对象、基类对象、任务 native、78／79／80／82／83／84／100／101、111／112／114／115／117、365／366／368、590～593|其他对象类型、系统 native 组合、程序装载时点|
 
@@ -287,11 +287,13 @@ FES 内部执行宏声明，初始化按以下顺序交给宿主：
 
 `CanvasLayout::new(tile_size, grid, step)` 与 `triangulate(source)` 将已变换的源几何切成逐块画布三角形，保留原顺序、颜色及局部 UV。步长、整数裁剪门控和资源上限见[画布几何切割](graphics.md#画布几何切割)。`Drawable::from_canvas_source` 与平面命令 41 保留源和包装两套变换；源变化后通过 `prepare_canvas` 更新，帧提交自动准备可见对象。直接查询与属性选择契约见[画布纹理包装](graphics.md#画布纹理包装)。
 
-对象实现 `runtime::TaskObject`：基类控制与时钟、可选 VM、创建上下文、主体、对象命令、排队与同步消息、删除通知和释放。除对象命令外，返回 `false` 的方法表示本次预算耗尽，续跑由运行时完成；对象命令返回 `task::CommandOutcome`，完成状态与传播状态分开表达。库提供 `BaseObject`（只有控制与时钟）与 `OrdinaryObject`（包裹 `OrdinaryTask`）。`ObjectFactory::create` 按类型编号创建对象；`KcsFactory` 经 `ProgramLoader` 按名称装载普通 KCS，`external_bytes` 指定 VM 外部区容量。`graphics::GraphicsFactory { fallback }` 创建类型 2 的 `PlaneObject`，其他类型委托 fallback；基础平面提供基类控制、矩形／空图元、向量／矩阵属性和查询、内部子任务传播及绘图登记清理，运动及输入等缺失入口返回诊断，详见[二维任务对象](graphics.md#基础二维任务对象)。音频、输入和文字类型继续由对应子系统工厂提供；`kind` 模块保存基线工厂的类型编号。
+对象实现 `runtime::TaskObject`：基类控制与时钟、可选 VM、创建上下文、主体、对象命令、排队与同步消息、删除通知和释放。除对象命令外，返回 `false` 的方法表示本次预算耗尽，续跑由运行时完成；对象命令返回 `task::CommandOutcome`，完成状态与传播状态分开表达。库提供 `BaseObject`（只有控制与时钟）与 `OrdinaryObject`（包裹 `OrdinaryTask`）。`ObjectFactory::create` 按类型编号创建对象；`KcsFactory` 经 `ProgramLoader` 按名称装载普通 KCS，`external_bytes` 指定 VM 外部区容量。`graphics::GraphicsFactory { fallback }` 创建类型 2 的 `PlaneObject`，其他类型委托 fallback；基础平面提供基类控制、矩形／空图元、向量／矩阵属性和查询、内部子任务传播及绘图登记清理，运动及输入等缺失入口返回诊断，详见[二维任务对象](graphics.md#基础二维任务对象)。`input::InputFactory { fallback }` 创建类型 11 的 InputObject，接入区域、键、137 查询及基类命令；音频和文字类型继续由对应工厂提供，`kind` 保存基线类型编号。
+
+`Runtime::input_state(id)`／`input_state_mut(id)` 查询输入状态。`dispatch_input_key`、`scan_input_keys`、`update_input_selection`、`dispatch_input_motion` 将逻辑坐标和设备查询连接到真实任务命令路由。接收者回调可以修改正在执行的输入任务的区域、键开关及基类状态，后续遍历立即生效，错误返回也保留已发生的修改。完整协议见[输入对象](input.md#输入对象与运行时)。输入对象的自动设备更新尚未接入，树更新到其主体时返回诊断；显式入口不代替完整输入主体。
 
 普通对象执行期间仍接受 67 删除请求及 70 排队消息；69 同步发送给执行中的普通 VM 时返回零。删除请求保留后续指令，实际析构继续发生在树更新；消息处理阶段追加的消息在同一轮继续消费，无消息恢复阶段追加的消息留到下一轮。`TaskObject::queued_messages()` 提供可选队列视图，支持执行中任务操作的自定义对象应提供该视图并消费 `Host::take_task_effects`；`OrdinaryObject` 已完成这些操作。给已有删除标记的对象排队时，原 native 的返回槽未初始化，运行时返回诊断且不入队。
 
-执行中的对象暂时从对象存储取出，需要直接借用该对象的其他命令或 VM 访问继续返回诊断。嵌套执行前保存宿主的任务编号、时刻和起点，返回后恢复，外层脚本继续读取自己的任务状态。对象命令经 `TaskTree::dispatch` 路由，目标改写、可达性判断和 `data[2]` 传播沿用树契约；`dispatch_command(origin, command)` 的 `origin` 只用于路由，`command.sender` 保持调用者给出的值，natives 109／110 以当前任务为发送者。未识别的基类编号不修改状态并允许传播，基类命令和已有删除标记的对象消费当前分支；普通任务对未支持编号继续返回诊断。
+执行中的对象暂时从对象存储取出；输入同步回调通过 `Host::dispatch_input_command` 开放同一 CommandState 处理嵌套命令，其他需要直接借用执行中对象的命令或 VM 访问继续返回诊断。嵌套执行前保存宿主的任务编号、时刻和起点，返回后恢复，外层脚本继续读取自己的任务状态。对象命令经 `TaskTree::dispatch` 路由，目标改写、可达性判断和 `data[2]` 传播沿用树契约；`dispatch_command(origin, command)` 的 `origin` 只用于路由，`command.sender` 保持调用者给出的值，natives 109／110 以当前任务为发送者。未识别的基类编号不修改状态并允许传播，基类命令和已有删除标记的对象消费当前分支；普通任务对未支持编号继续返回诊断。
 
 `Runtime::dispatch_command_with_buffers(origin, command, &mut buffers)` 按相同树规则分派显式字节缓冲区。`task::CommandBuffers` 的 data0／data1 是可选可变借用，对应原 data[0]／data[1] 所引用的数据；不解释 DWORD 为进程指针或 VM 地址。各接收者共享缓冲区中的修改。对象通过 `TaskObject::dispatch_command_with_buffers` 接收，缺省委托标量入口，所需长度由具体命令检查。`Host::next_task_child(previous)` 查询当前对象在有符号编号游标之后的直属子级，None 从首项开始，`dispatch_task_command(command, buffers, output)` 保留传入返回槽并返回是否找到目标，用于对象内部传播；宿主未提供服务时返回诊断。
 

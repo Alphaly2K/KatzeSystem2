@@ -262,6 +262,17 @@ pub trait Host {
         Err(Error::new(0, "宿主未提供任务命令分派"))
     }
 
+    /// 输入同步路由期间开放同一份命令状态，返回前须保留嵌套命令的修改。
+    fn dispatch_input_command(
+        &mut self,
+        _state: &mut crate::input::CommandState,
+        _command: crate::task::Command,
+        _buffers: &mut crate::task::CommandBuffers<'_>,
+        _output: &mut u32,
+    ) -> Result<bool> {
+        Err(Error::new(0, "宿主未提供输入回调命令分派"))
+    }
+
     /// 取走当前任务的待应用操作，并提供已保存的队列长度供宿主检查入队容量。
     fn take_task_effects(&mut self, _queued_messages: usize) -> TaskEffects {
         TaskEffects::default()
@@ -312,6 +323,16 @@ impl<T: Host + ?Sized> Host for &mut T {
 
     fn take_task_effects(&mut self, queued_messages: usize) -> TaskEffects {
         (**self).take_task_effects(queued_messages)
+    }
+
+    fn dispatch_input_command(
+        &mut self,
+        state: &mut crate::input::CommandState,
+        command: crate::task::Command,
+        buffers: &mut crate::task::CommandBuffers<'_>,
+        output: &mut u32,
+    ) -> Result<bool> {
+        (**self).dispatch_input_command(state, command, buffers, output)
     }
 }
 

@@ -5,7 +5,8 @@
 //! 其他类型需要对应子系统按 [`TaskObject`] 协议实现，缺失时创建请求返回诊断。
 //!
 //! 同步消息、删除通知和对象命令在返回前完成预算续跑。普通对象执行期间仍接收删除标记与排队消息，
-//! 向执行中普通 VM 同步发送消息返回零；其余需要直接借用该对象的操作返回诊断。
+//! 向执行中普通 VM 同步发送消息返回零。输入同步回调开放同一份区域、键和基类命令状态；
+//! 其他需要直接借用执行中对象的操作返回诊断。
 
 use crate::kcs::{
     Host, HostState, Interpreter, NativeReturn, OrdinaryTask, Program, TaskEffects, call_native,
@@ -284,6 +285,65 @@ impl<F: ObjectFactory> Runtime<F> {
         route_with_buffers(self.store(), origin, command, buffers)
     }
 
+    pub fn input_state(&self, id: u32) -> Option<&crate::input::InputState> {
+        self.objects
+            .get(&id)
+            .and_then(|object| object.input_state())
+    }
+
+    pub fn input_state_mut(&mut self, id: u32) -> Option<&mut crate::input::InputState> {
+        self.objects
+            .get_mut(&id)
+            .and_then(|object| object.input_state_mut())
+    }
+
+    /// 以已经转换的逻辑坐标同步分派一条输入事件。
+    pub fn dispatch_input_key(&mut self, id: u32, event: crate::input::KeyEvent) -> Result<bool> {
+        let mut consumed = false;
+        self.with_input(id, &mut |state, host| {
+            consumed = state.dispatch_key(id, event, host)?;
+            Ok(())
+        })?;
+        Ok(consumed)
+    }
+
+    /// 重算指针选择，并在返回前完成进入／离开通知。
+    pub fn update_input_selection(&mut self, id: u32, point: Option<[i32; 2]>) -> Result<()> {
+        self.with_input(id, &mut |state, host| {
+            state.update_pointer_selection(id, point, host)
+        })
+    }
+
+    /// 同步分派共享前后点缓冲区的移动通知。
+    pub fn dispatch_input_motion(
+        &mut self,
+        id: u32,
+        motion: crate::input::PointerMotion,
+    ) -> Result<()> {
+        self.with_input(id, &mut |state, host| {
+            state.dispatch_pointer_motion(id, motion, host)
+        })
+    }
+
+    /// 按实际查询顺序读取设备；同步回调可以修改本次后续键开关和区域。
+    pub fn scan_input_keys(
+        &mut self,
+        id: u32,
+        point: [i32; 2],
+        mut sample: impl FnMut(u32, u32) -> Result<crate::input::KeySample>,
+    ) -> Result<bool> {
+        let mut consumed = false;
+        self.with_input(id, &mut |state, host| {
+            consumed = state.scan_keys(id, point, &mut sample, host)?;
+            Ok(())
+        })?;
+        Ok(consumed)
+    }
+
+    fn with_input(&mut self, id: u32, action: &mut InputAction<'_>) -> Result<()> {
+        run_nested(self.store(), id, Execution::Input { action })
+    }
+
     fn store(&mut self) -> Store<'_, F> {
         Store {
             numbers: &mut self.numbers,
@@ -367,7 +427,12 @@ enum Execution<'a, 'b> {
     },
     Delete,
     MarkDestroying,
+    Input {
+        action: &'a mut InputAction<'b>,
+    },
 }
+
+type InputAction<'a> = dyn FnMut(&mut crate::input::InputState, &mut dyn Host) -> Result<()> + 'a;
 
 struct RunningTask {
     deleted: bool,
@@ -405,6 +470,13 @@ fn run_nested<F: ObjectFactory>(
         budget,
         limit,
     } = store;
+    if let Some(state) = resources.input_callbacks.get_mut(&target) {
+        if matches!(&execution, Execution::Delete | Execution::MarkDestroying) {
+            state.control.deletion_requested = 1;
+            return Ok(());
+        }
+        return Err(Error::new(0, "输入回调期间不支持重新执行该任务"));
+    }
     let mut object = objects
         .remove(&target)
         .ok_or_else(|| Error::new(0, "任务对象不存在或正在执行"))?;
@@ -464,6 +536,13 @@ fn run_nested<F: ObjectFactory>(
             Execution::MarkDestroying => drain(budget, limit, || {
                 object.mark_destroying(&mut nested, budget)
             }),
+            Execution::Input { action } => {
+                nested.set_task_clock(object.clock());
+                match object.input_state_mut() {
+                    Some(state) => action(state, &mut nested),
+                    None => Err(Error::new(0, "目标不是输入对象")),
+                }
+            }
         }
     };
     running.remove(&target);
@@ -524,6 +603,9 @@ fn route_command<F: ObjectFactory>(
     } = store;
     tree.dispatch(origin, command, output, |tree, command, output| {
         let kind = tree.node(command.target).map_or(0, |node| node.kind);
+        if let Some(state) = resources.input_callbacks.get_mut(&command.target) {
+            return state.dispatch_command(kind, command, buffers, output);
+        }
         let mut propagate = false;
         run_nested(
             Store {
@@ -688,6 +770,10 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                 if !self.require_reachable(args[0]) {
                     return Err(Error::new(vm.pc, "任务删除目标不存在"));
                 }
+                if self.resources.input_callbacks.contains_key(&args[0]) {
+                    run_nested(self.store(), args[0], Execution::Delete)?;
+                    return Ok(NativeReturn::Continue);
+                }
                 if let Some(task) = self.running.get_mut(&args[0]) {
                     if task.remaining_messages.is_none() {
                         return Err(Error::new(vm.pc, "执行中对象不支持删除请求"));
@@ -821,6 +907,27 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
     ) -> Result<bool> {
         let origin = self.host.task_id;
         route_command(self.store(), origin, command, buffers, output)
+    }
+
+    fn dispatch_input_command(
+        &mut self,
+        state: &mut crate::input::CommandState,
+        command: Command,
+        buffers: &mut CommandBuffers<'_>,
+        output: &mut u32,
+    ) -> Result<bool> {
+        let origin = self.host.task_id;
+        if !self.running.contains_key(&origin)
+            || self.resources.input_callbacks.contains_key(&origin)
+        {
+            return Err(Error::new(0, "输入回调上下文不可用"));
+        }
+        self.resources
+            .input_callbacks
+            .insert(origin, std::mem::take(state));
+        let result = route_command(self.store(), origin, command, buffers, output);
+        *state = self.resources.input_callbacks.remove(&origin).unwrap();
+        result
     }
 
     fn take_task_effects(&mut self, queued_messages: usize) -> TaskEffects {

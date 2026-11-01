@@ -26,6 +26,19 @@ pub struct KeyTransition {
     pub mask: u32,
 }
 
+impl KeyTransition {
+    pub(crate) fn event(self, point: [i32; 2]) -> KeyEvent {
+        KeyEvent {
+            kind: self.kind,
+            code: 4,
+            key: self.key,
+            pressed: self.pressed,
+            mask: self.mask,
+            point,
+        }
+    }
+}
+
 /// 扫描期间即时查询设备并同步分派；消费结果决定是否继续扫描。
 pub trait KeyServices {
     fn sample(&mut self, key: u32, group: u32) -> Result<KeySample>;
@@ -145,19 +158,7 @@ impl Events {
         if transition.kind == KeyEventKind::Change {
             self.set_suppressed(0);
         }
-        self.dispatch_key(
-            sender,
-            regions,
-            KeyEvent {
-                kind: transition.kind,
-                code: 4,
-                key: transition.key,
-                pressed: transition.pressed,
-                mask: transition.mask,
-                point,
-            },
-            route,
-        )
+        self.dispatch_key(sender, regions, transition.event(point), route)
     }
 }
 
