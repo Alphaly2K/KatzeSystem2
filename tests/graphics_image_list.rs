@@ -515,3 +515,59 @@ fn incremental_lists_keep_history_and_repeat_blending_in_overlapping_blocks() {
     list.release(&mut images).unwrap();
     images.release(source).unwrap();
 }
+
+#[test]
+fn clipping_keeps_history_shrinks_and_null_reset_waits_for_new_invalidation() {
+    use katze_system2::graphics::Rect;
+    let mut images = Images::default();
+    let source = images.create(1, [3, 2]).unwrap();
+    images
+        .get_mut(source)
+        .unwrap()
+        .fill_rect_from_bottom(Rect::from_xywh(0, 0, 3, 2), 0xff12_3456);
+    let mut list = ImageList::new(2, [6, 4], &mut images).unwrap();
+    let p = ImageListProperties {
+        position: [1., 1.],
+        ..Default::default()
+    };
+    list.set(7, source, p, &mut images).unwrap();
+    list.update(&mut images).unwrap();
+    let clip = Rect::from_xywh(2, 1, 2, 2);
+    assert!(list.set_clip(7, Some(clip), &images).unwrap());
+    assert_eq!(
+        list.update(&mut images).unwrap(),
+        [Rect::from_xywh(1, 1, 3, 2)]
+    );
+    assert_eq!(
+        images.get(list.image()).unwrap().surface().pixel(1, 1),
+        Some(0)
+    );
+    assert_eq!(
+        images.get(list.image()).unwrap().surface().pixel(2, 1),
+        Some(0xff12_3456)
+    );
+    list.set_clip(7, Some(clip), &images).unwrap();
+    assert!(list.dirty_rectangles().next().is_none());
+    list.set_clip(7, None, &images).unwrap();
+    assert!(list.update(&mut images).unwrap().is_empty());
+    assert_eq!(
+        images.get(list.image()).unwrap().surface().pixel(1, 1),
+        Some(0)
+    );
+    list.set(7, source, p, &mut images).unwrap();
+    list.update(&mut images).unwrap();
+    assert_eq!(
+        images.get(list.image()).unwrap().surface().pixel(1, 1),
+        Some(0xff12_3456)
+    );
+    list.set_clip(7, Some(clip), &images).unwrap();
+    list.update(&mut images).unwrap();
+    list.set_clip(7, Some(Rect::from_xywh(0, 0, 0, 0)), &images)
+        .unwrap();
+    assert_eq!(list.update(&mut images).unwrap(), [clip]);
+    assert_eq!(
+        images.get(list.image()).unwrap().surface().pixel(1, 1),
+        Some(0)
+    );
+    assert!(!list.set_clip(99, Some(clip), &images).unwrap());
+}

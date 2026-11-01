@@ -154,6 +154,49 @@ fn image_list_tasks_create_one_plane_update_shared_pixels_and_release_their_wrap
         runtime.drawing().target.as_ref().unwrap().pixel(1, 1),
         Some(0xff12_3456)
     );
+    let mut clip = [2i32, 1, 3, 3].map(i32::to_le_bytes).concat();
+    runtime
+        .dispatch_command_with_buffers(
+            0,
+            command(id, 295, 7, 0),
+            &mut CommandBuffers {
+                data0: None,
+                data1: Some(&mut clip),
+            },
+        )
+        .unwrap();
+    send(&mut runtime, id, 296, 0, 0);
+    assert_eq!(
+        runtime.drawing().target.as_ref().unwrap().pixel(1, 1),
+        Some(0)
+    );
+    assert_eq!(
+        runtime.drawing().target.as_ref().unwrap().pixel(2, 1),
+        Some(0xff12_3456)
+    );
+    send(&mut runtime, id, 295, 7, 0);
+    runtime
+        .dispatch_command_with_buffers(
+            0,
+            command(id, 286, 7, 0),
+            &mut CommandBuffers {
+                data0: None,
+                data1: Some(&mut properties),
+            },
+        )
+        .unwrap();
+    send(&mut runtime, id, 296, 0, 0);
+    let mut short = [0; 1];
+    runtime
+        .dispatch_command_with_buffers(
+            0,
+            command(id, 295, 99, 1),
+            &mut CommandBuffers {
+                data0: None,
+                data1: Some(&mut short),
+            },
+        )
+        .unwrap();
     send(&mut runtime, id, 310, 0, 0);
     send(&mut runtime, id, 293, 7, 0);
     runtime.update(1, 1).unwrap();

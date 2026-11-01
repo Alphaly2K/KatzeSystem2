@@ -1,4 +1,4 @@
-use super::{ImageList, ImageListProperties, Images};
+use super::{ImageList, ImageListProperties, Images, Rect};
 use crate::kcs::{Host, Interpreter};
 use crate::runtime::{BaseObject, TaskObject, kind};
 use crate::task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock};
@@ -241,6 +241,32 @@ impl TaskObject for ImageListObject {
                     .as_ref()
                     .ok_or_else(|| Error::new(0, "图像列表尚未创建"))?
                     .len() as u32;
+            }
+            295 => {
+                let list = self
+                    .list
+                    .as_mut()
+                    .ok_or_else(|| Error::new(0, "图像列表尚未创建"))?;
+                if !list.contains_key(key) {
+                    return Ok(CommandOutcome::finished(false));
+                }
+                if b != 0 && buffers.data1.is_none() {
+                    return Err(Error::new(0, "图像列表裁剪缓冲区缺失"));
+                }
+                let clip = buffers
+                    .data1
+                    .as_deref()
+                    .map(|buffer| {
+                        let [left, top, right, bottom] = words::<4>(Some(buffer))?;
+                        Ok::<_, Error>(Rect {
+                            left: left as i32,
+                            top: top as i32,
+                            right: right as i32,
+                            bottom: bottom as i32,
+                        })
+                    })
+                    .transpose()?;
+                list.set_clip(key, clip, images(host)?)?;
             }
             296 | 316 => {
                 self.enabled = 1;

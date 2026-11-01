@@ -26,6 +26,7 @@ struct Entry {
     image: u32,
     properties: ImageListProperties,
     history: Option<Rect>,
+    clip: Rect,
 }
 
 struct Block {
@@ -104,6 +105,9 @@ impl ImageList {
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
+    pub(crate) fn contains_key(&self, key: u32) -> bool {
+        self.entries.contains_key(&key)
+    }
     pub fn offset(&self) -> [i32; 2] {
         self.offset
     }
@@ -135,9 +139,11 @@ impl ImageList {
         let viewport = self.bounds(images)?;
         let source_base = images.pixel_image(pixels)?.info().base.map(|v| v as f32);
         let mut history = None;
+        let mut clip = viewport;
         let image = if let Some(entry) = self.entries.get(&key) {
             let image = entry.image;
             history = entry.history;
+            clip = entry.clip;
             if entry.properties.visible {
                 history = accumulate(
                     history,
@@ -146,7 +152,7 @@ impl ImageList {
                         entry.properties.position,
                         entry.properties.base_point,
                     )?,
-                    viewport,
+                    clip,
                 );
                 self.mark(history);
             }
@@ -162,13 +168,13 @@ impl ImageList {
         history = accumulate(
             history,
             images.list_bounds(image, properties.position, source_base)?,
-            viewport,
+            clip,
         );
         if properties.visible {
             history = accumulate(
                 history,
                 images.list_bounds(image, properties.position, properties.base_point)?,
-                viewport,
+                clip,
             );
             self.mark(history);
         }
@@ -178,6 +184,7 @@ impl ImageList {
                 image,
                 properties,
                 history,
+                clip,
             },
         );
         Ok(())
@@ -196,7 +203,7 @@ impl ImageList {
                     entry.properties.position,
                     entry.properties.base_point,
                 )?,
-                self.bounds(images)?,
+                entry.clip,
             );
             self.mark(history);
         }
@@ -207,7 +214,7 @@ impl ImageList {
 
     /// 仅在显示状态变化时更新几何和脏区，保留来源与请求基点。
     pub fn set_visible(&mut self, key: u32, visible: bool, images: &Images) -> Result<bool> {
-        let viewport = self.bounds(images)?;
+        self.bounds(images)?;
         let Some(entry) = self.entries.get_mut(&key) else {
             return Ok(false);
         };
@@ -220,10 +227,40 @@ impl ImageList {
                     entry.properties.position,
                     entry.properties.base_point,
                 )?,
-                viewport,
+                entry.clip,
             );
             let history = entry.history;
             self.mark(history);
+        }
+        Ok(true)
+    }
+
+    /// 修改条目裁剪；None 恢复完整视口且不标脏，空矩形恢复视口并按变化标脏。
+    pub fn set_clip(&mut self, key: u32, clip: Option<Rect>, images: &Images) -> Result<bool> {
+        let viewport = self.bounds(images)?;
+        let Some(entry) = self.entries.get_mut(&key) else {
+            return Ok(false);
+        };
+        let Some(clip) = clip else {
+            entry.clip = viewport;
+            entry.history = entry
+                .history
+                .and_then(|history| history.intersect(viewport));
+            return Ok(true);
+        };
+        if clip != entry.clip {
+            let previous = entry.history;
+            entry.clip = if clip.left >= clip.right || clip.top >= clip.bottom {
+                viewport
+            } else {
+                clip
+            };
+            entry.history = entry
+                .history
+                .and_then(|history| history.intersect(entry.clip));
+            let next = entry.properties.visible.then_some(entry.history).flatten();
+            self.mark(previous);
+            self.mark(next);
         }
         Ok(true)
     }
@@ -283,6 +320,9 @@ impl ImageList {
             let p = entry.properties;
             if p.visible && p.opacity != 0 {
                 for &clip in &regions {
+                    let Some(clip) = clip.intersect(entry.clip) else {
+                        continue;
+                    };
                     images.draw_list_entry(
                         self.image,
                         entry.image,
