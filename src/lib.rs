@@ -7,6 +7,7 @@ pub mod expression;
 pub mod fes;
 pub mod graphics;
 pub mod hg3;
+pub mod input;
 pub mod kcs;
 mod read;
 pub mod resource;
