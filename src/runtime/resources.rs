@@ -25,6 +25,37 @@ impl Resources {
         }
     }
 
+    pub fn update_image_list(
+        &mut self,
+        list: &mut crate::graphics::ImageList,
+        submit: bool,
+        force: bool,
+    ) -> Result<bool> {
+        let regions = list.update(&mut self.images)?;
+        if !submit {
+            return Ok(false);
+        }
+        let regions = if force {
+            vec![list.bounds(&self.images)?]
+        } else {
+            regions
+        };
+        let image = self.images.get(list.image())?;
+        let offset = list.offset();
+        let mut copied = false;
+        for region in regions {
+            copied |= self.drawing.copy_image(
+                image,
+                region,
+                [
+                    offset[0].wrapping_add(region.left),
+                    offset[1].wrapping_add(region.top),
+                ],
+            );
+        }
+        Ok(copied)
+    }
+
     pub fn call(
         &mut self,
         owner: u32,

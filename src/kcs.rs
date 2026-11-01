@@ -248,6 +248,21 @@ pub trait Host {
         Err(Error::new(0, "宿主未提供解码图像查询"))
     }
 
+    /// 图像对象的可变存储；使用者持有期间必须沿用同一存储。
+    fn images_mut(&mut self) -> Option<&mut crate::graphics::Images> {
+        None
+    }
+
+    /// 更新列表并按开关提交脏区或整幅图像；返回是否复制了画布像素。
+    fn update_image_list(
+        &mut self,
+        _list: &mut crate::graphics::ImageList,
+        _submit: bool,
+        _force: bool,
+    ) -> Result<bool> {
+        Err(Error::new(0, "宿主未提供图像列表更新服务"))
+    }
+
     /// 具体对象创建纹理包装时读取的布局，独立于当前像素访问开关。
     fn canvas_layout(&self) -> Result<Option<crate::graphics::CanvasLayout>> {
         Ok(None)
@@ -276,6 +291,11 @@ pub trait Host {
     /// 查询当前对象的直接父任务编号；未提供服务或没有父任务时返回诊断。
     fn parent_task_id(&self) -> Result<u32> {
         Err(Error::new(0, "宿主未提供当前任务父级查询"))
+    }
+
+    /// 同步创建直属子任务；名称及上下文为未展开的原始字节。
+    fn create_task_child(&mut self, _kind: u32, _name: &[u8], _context: &[u8]) -> Result<u32> {
+        Err(Error::new(0, "宿主未提供子任务创建"))
     }
 
     /// 查询当前对象在有符号编号游标之后的直属子任务；None 从首项开始。
@@ -348,6 +368,23 @@ impl<T: Host + ?Sized> Host for &mut T {
 
     fn image(&self, handle: u32) -> Result<&crate::graphics::Image> {
         (**self).image(handle)
+    }
+
+    fn images_mut(&mut self) -> Option<&mut crate::graphics::Images> {
+        (**self).images_mut()
+    }
+
+    fn update_image_list(
+        &mut self,
+        list: &mut crate::graphics::ImageList,
+        submit: bool,
+        force: bool,
+    ) -> Result<bool> {
+        (**self).update_image_list(list, submit, force)
+    }
+
+    fn create_task_child(&mut self, kind: u32, name: &[u8], context: &[u8]) -> Result<u32> {
+        (**self).create_task_child(kind, name, context)
     }
 
     fn canvas_layout(&self) -> Result<Option<crate::graphics::CanvasLayout>> {

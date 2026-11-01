@@ -205,6 +205,33 @@ impl ImageList {
         Ok(true)
     }
 
+    /// 仅在显示状态变化时更新几何和脏区，保留来源与请求基点。
+    pub fn set_visible(&mut self, key: u32, visible: bool, images: &Images) -> Result<bool> {
+        let viewport = self.bounds(images)?;
+        let Some(entry) = self.entries.get_mut(&key) else {
+            return Ok(false);
+        };
+        if entry.properties.visible != visible {
+            entry.properties.visible = visible;
+            entry.history = accumulate(
+                entry.history,
+                images.list_bounds(
+                    entry.image,
+                    entry.properties.position,
+                    entry.properties.base_point,
+                )?,
+                viewport,
+            );
+            let history = entry.history;
+            self.mark(history);
+        }
+        Ok(true)
+    }
+
+    pub(crate) fn has_blocks(&self) -> bool {
+        !self.blocks.is_empty()
+    }
+
     /// 释放全部来源，立即清空自有图像并将全部面块标脏。
     pub fn clear(&mut self, images: &mut Images) -> Result<()> {
         self.release_entries(images)?;

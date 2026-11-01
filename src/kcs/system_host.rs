@@ -52,6 +52,23 @@ impl<H: Host, S: SystemServices> Host for SystemHost<'_, H, S> {
         self.inner.image(handle)
     }
 
+    fn images_mut(&mut self) -> Option<&mut crate::graphics::Images> {
+        self.inner.images_mut()
+    }
+
+    fn update_image_list(
+        &mut self,
+        list: &mut crate::graphics::ImageList,
+        submit: bool,
+        force: bool,
+    ) -> Result<bool> {
+        self.inner.update_image_list(list, submit, force)
+    }
+
+    fn create_task_child(&mut self, kind: u32, name: &[u8], context: &[u8]) -> Result<u32> {
+        self.inner.create_task_child(kind, name, context)
+    }
+
     fn canvas_layout(&self) -> Result<Option<crate::graphics::CanvasLayout>> {
         self.inner.canvas_layout()
     }

@@ -1,7 +1,7 @@
 //! 任务树、对象存储与普通脚本宿主的整合。
 //!
 //! 本模块把任务索引、基类控制、生命周期回调和真实对象存储连接起来，替代此前只能逐项手工搭建的适配层。
-//! 对象类型由 [`ObjectFactory`] 创建；提供普通 KCS、基类及 [`crate::graphics::GraphicsFactory`] 的基础二维对象。
+//! 对象类型由 [`ObjectFactory`] 创建；提供普通 KCS、基类及 [`crate::graphics::GraphicsFactory`] 的二维与图像列表对象。
 //! 其他类型需要对应子系统按 [`TaskObject`] 协议实现，缺失时创建请求返回诊断。
 //!
 //! 同步消息、删除通知和对象命令在返回前完成预算续跑。普通对象执行期间仍接收删除标记与排队消息，
@@ -35,6 +35,7 @@ pub mod kind {
     pub const INPUT: u32 = 11;
     pub const ORDINARY: u32 = 12;
     pub const SOUND: u32 = 13;
+    pub const IMAGE_LIST: u32 = 15;
     pub const FES: u32 = 34;
 }
 
@@ -174,32 +175,13 @@ impl<F: ObjectFactory> Runtime<F> {
 
     /// 整幅重绘图像列表并复制到当前画布；提交受 DrawingContext 的模式与开关门控。
     pub fn redraw_image_list(&mut self, list: &mut crate::graphics::ImageList) -> Result<bool> {
-        list.redraw(&mut self.resources.images)?;
-        let bounds = list.bounds(&self.resources.images)?;
-        Ok(self.resources.drawing.copy_image(
-            self.resources.images.get(list.image())?,
-            bounds,
-            list.offset(),
-        ))
+        list.invalidate_all();
+        self.resources.update_image_list(list, true, true)
     }
 
     /// 更新并提交列表脏区；关闭上下文时仍更新自有图像并消费脏区。
     pub fn update_image_list(&mut self, list: &mut crate::graphics::ImageList) -> Result<bool> {
-        let regions = list.update(&mut self.resources.images)?;
-        let image = self.resources.images.get(list.image())?;
-        let offset = list.offset();
-        let mut copied = false;
-        for region in regions {
-            copied |= self.resources.drawing.copy_image(
-                image,
-                region,
-                [
-                    offset[0].wrapping_add(region.left),
-                    offset[1].wrapping_add(region.top),
-                ],
-            );
-        }
-        Ok(copied)
+        self.resources.update_image_list(list, true, false)
     }
 
     /// 365 装载的原始图像字节，存活至 366 显式释放或运行时销毁。
@@ -1043,6 +1025,24 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
 
     fn image(&self, handle: u32) -> Result<&crate::graphics::Image> {
         self.resources.images.get(handle)
+    }
+
+    fn images_mut(&mut self) -> Option<&mut crate::graphics::Images> {
+        Some(&mut self.resources.images)
+    }
+
+    fn update_image_list(
+        &mut self,
+        list: &mut crate::graphics::ImageList,
+        submit: bool,
+        force: bool,
+    ) -> Result<bool> {
+        self.resources.update_image_list(list, submit, force)
+    }
+
+    fn create_task_child(&mut self, kind: u32, name: &[u8], context: &[u8]) -> Result<u32> {
+        let parent = self.host.task_id;
+        create_object(self.store(), parent, kind, name, context)
     }
     fn input_device(&mut self) -> Option<&mut dyn crate::input::InputDevice> {
         self.resources
