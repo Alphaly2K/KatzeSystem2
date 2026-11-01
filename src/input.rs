@@ -4,7 +4,9 @@ use crate::{Error, Result, read};
 
 mod events;
 pub use events::{Events, HitMask, KeyEvent, KeyEventKind};
+mod motion;
 mod selection;
+pub use motion::PointerMotion;
 
 /// 输入区域的十五 DWORD 记录；可移植位掩码以存在标记代替指针槽。
 #[derive(Clone, Debug)]
@@ -55,6 +57,10 @@ impl Region {
 
     pub fn selection_enabled(&self) -> u32 {
         self.words[9]
+    }
+
+    pub fn motion_enabled(&self) -> u32 {
+        self.words[14]
     }
 
     pub fn hit_mask(&self) -> Option<&HitMask> {
@@ -108,7 +114,7 @@ impl Regions {
         self.geometry_dirty = false;
     }
 
-    /// 处理输入对象命令 127～136；true 表示已消费，未知编号返回 false。
+    /// 处理输入对象命令 127～136 及 154；true 表示已消费，未知编号返回 false。
     /// 调用者负责对象删除门控、基类分派及设备更新。
     pub fn dispatch_command(
         &mut self,
@@ -197,11 +203,18 @@ impl Regions {
                     *output = region.selected();
                 }
             }
-            135 | 136 => {
+            135 | 136 | 154 => {
                 if let Some(index) = self.index(a) {
-                    self.records[index].words[if command.code == 135 { 8 } else { 9 }] = b;
+                    let word = match command.code {
+                        135 => 8,
+                        136 => 9,
+                        _ => 14,
+                    };
+                    self.records[index].words[word] = b;
                 }
-                self.geometry_dirty = true;
+                if command.code != 154 {
+                    self.geometry_dirty = true;
+                }
             }
             _ => return Ok(false),
         }

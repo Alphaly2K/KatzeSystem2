@@ -1,6 +1,6 @@
 use katze_system2::{
     Result,
-    input::{Events, HitMask, KeyEvent, KeyEventKind, Regions},
+    input::{Events, HitMask, KeyEvent, KeyEventKind, PointerMotion, Regions},
     task::{Command, CommandBuffers},
 };
 
@@ -409,5 +409,72 @@ fn pointer_selection_keeps_duplicate_and_sentinel_rules_and_live_callback_change
     assert_eq!(log, [(7, 8)]);
     assert_eq!(regions.get(7).unwrap().selected(), 0);
     assert_eq!(regions.get(9).unwrap().selected(), 7);
+    Ok(())
+}
+
+#[test]
+fn pointer_motion_shares_mutable_points_and_filters_without_hit_masks() -> Result<()> {
+    let mut regions = Regions::default();
+    register(&mut regions, 7, 10, 2, [0; 4]);
+    register(&mut regions, 9, 9, 2, [5, 5, 8, 8]);
+    register(&mut regions, 11, 8, 2, [0; 4]);
+    register(&mut regions, 13, 7, 1, [0; 4]);
+    register(&mut regions, 15, 6, 2, [1, 1, 2, 2]);
+    register(&mut regions, 17, 5, 2, [8, 9, -1, -2]);
+    regions.set_hit_mask(7, Some(HitMask::new([1, 1], vec![0])?));
+    command(&mut regions, 136, 7, 0);
+    command(&mut regions, 154, 11, 0);
+    regions.clear_geometry_dirty();
+    let motion = PointerMotion {
+        code: 6,
+        previous: [1, 1],
+        current: [99, 99],
+    };
+    let mut log = Vec::new();
+    regions.dispatch_pointer_motion(10, motion, |_, packet, buffers| {
+        assert_eq!(packet.sender, 10);
+        assert_eq!(packet.code, 6);
+        assert_eq!(packet.data, [0; 3]);
+        log.push(packet.target);
+        let previous = buffers.data0.as_deref_mut().unwrap();
+        let current = buffers.data1.as_deref_mut().unwrap();
+        if packet.target == 7 {
+            assert_eq!(&previous[..4], &1i32.to_le_bytes());
+            assert_eq!(&current[..4], &99i32.to_le_bytes());
+            previous[..4].copy_from_slice(&5i32.to_le_bytes());
+            previous[4..].copy_from_slice(&5i32.to_le_bytes());
+            current[..4].copy_from_slice(&(-7i32).to_le_bytes());
+            current[4..].copy_from_slice(&17i32.to_le_bytes());
+        } else {
+            assert_eq!(&previous[..4], &5i32.to_le_bytes());
+            assert_eq!(&previous[4..], &5i32.to_le_bytes());
+            assert_eq!(&current[..4], &(-7i32).to_le_bytes());
+            assert_eq!(&current[4..], &17i32.to_le_bytes());
+        }
+        Ok(())
+    })?;
+    assert_eq!(log, [7, 9, 17]);
+    assert!(!regions.geometry_dirty());
+    register(&mut regions, 7, -1, 2, [0; 4]);
+    command(&mut regions, 154, 7, 0);
+    command(&mut regions, 154, 999, 1);
+    assert_eq!(regions.get(7).unwrap().motion_enabled(), 0);
+    assert_eq!(regions.records().last().unwrap().motion_enabled(), 1);
+    assert!(!regions.geometry_dirty());
+    log.clear();
+    regions.dispatch_pointer_motion(
+        10,
+        PointerMotion {
+            previous: [100; 2],
+            ..motion
+        },
+        |_, packet, _| {
+            log.push(packet.target);
+            Ok(())
+        },
+    )?;
+    assert_eq!(log, [17, 7]);
+    assert_eq!(motion.previous, [1, 1]);
+    assert_eq!(motion.current, [99, 99]);
     Ok(())
 }
