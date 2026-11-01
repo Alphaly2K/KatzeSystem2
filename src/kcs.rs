@@ -248,6 +248,11 @@ pub trait Host {
         Err(Error::new(0, "宿主未提供解码图像查询"))
     }
 
+    /// 原始图像数据的同步借用；来源使用者自行持有解码后的帧。
+    fn image_data(&self, _handle: u32) -> Result<&[u8]> {
+        Err(Error::new(0, "宿主未提供原始图像数据查询"))
+    }
+
     /// 图像对象的可变存储；使用者持有期间必须沿用同一存储。
     fn images_mut(&mut self) -> Option<&mut crate::graphics::Images> {
         None
@@ -368,6 +373,10 @@ impl<T: Host + ?Sized> Host for &mut T {
 
     fn image(&self, handle: u32) -> Result<&crate::graphics::Image> {
         (**self).image(handle)
+    }
+
+    fn image_data(&self, handle: u32) -> Result<&[u8]> {
+        (**self).image_data(handle)
     }
 
     fn images_mut(&mut self) -> Option<&mut crate::graphics::Images> {

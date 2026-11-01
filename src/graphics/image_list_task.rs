@@ -4,7 +4,7 @@ use crate::runtime::{BaseObject, TaskObject, kind};
 use crate::task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock};
 use crate::{Error, Result};
 
-/// 类型 15 的图像列表任务；当前接收无变换的像素来源。
+/// 类型 15 的图像列表任务；当前接收无变换的像素与 HG-3 原始数据来源。
 pub struct ImageListObject {
     id: u32,
     base: BaseObject,
@@ -177,23 +177,24 @@ impl TaskObject for ImageListObject {
                     if data[14] != 0 {
                         return Err(Error::new(0, "图像列表附加对象尚未接入"));
                     }
-                    if data[0] != 0 {
+                    if data[0] != 0 || data[1] != 0 {
                         if data[13] != 0 {
                             return Err(Error::new(0, "图像列表变换来源尚未接入"));
                         }
                         let opacity = u8::try_from(data[11])
                             .map_err(|_| Error::new(0, "图像列表超范围透明度尚未核实"))?;
-                        list.set_pixels(
-                            key,
-                            data[0],
-                            ImageListProperties {
-                                position: [data[4], data[5]].map(f32::from_bits),
-                                base_point: [data[6], data[7]].map(f32::from_bits),
-                                opacity,
-                                visible: data[12] != 0,
-                            },
-                            images(host)?,
-                        )?;
+                        let properties = ImageListProperties {
+                            position: [data[4], data[5]].map(f32::from_bits),
+                            base_point: [data[6], data[7]].map(f32::from_bits),
+                            opacity,
+                            visible: data[12] != 0,
+                        };
+                        if data[0] != 0 {
+                            list.set_pixels(key, data[0], properties, images(host)?)?;
+                        } else {
+                            let frames = ImageList::decode_hg3(host.image_data(data[1])?)?;
+                            list.set_frames(key, frames, properties, images(host)?)?;
+                        }
                     } else if data[1..4].iter().any(|&value| value != 0) {
                         return Err(Error::new(0, "图像列表其他来源类型尚未接入"));
                     }

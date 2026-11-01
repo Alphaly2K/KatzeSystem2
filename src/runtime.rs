@@ -1027,6 +1027,10 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         self.resources.images.get(handle)
     }
 
+    fn image_data(&self, handle: u32) -> Result<&[u8]> {
+        self.resources.raw.image_data(handle)
+    }
+
     fn images_mut(&mut self) -> Option<&mut crate::graphics::Images> {
         Some(&mut self.resources.images)
     }

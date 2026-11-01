@@ -52,6 +52,10 @@ impl<H: Host, S: SystemServices> Host for SystemHost<'_, H, S> {
         self.inner.image(handle)
     }
 
+    fn image_data(&self, handle: u32) -> Result<&[u8]> {
+        self.inner.image_data(handle)
+    }
+
     fn images_mut(&mut self) -> Option<&mut crate::graphics::Images> {
         self.inner.images_mut()
     }

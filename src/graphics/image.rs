@@ -423,7 +423,12 @@ impl Images {
         Ok(self.pixel_handle(handle)? != 0)
     }
 
-    fn insert(&mut self, owner: u32, image: Image, has_alpha: Option<bool>) -> Result<u32> {
+    pub(crate) fn insert(
+        &mut self,
+        owner: u32,
+        image: Image,
+        has_alpha: Option<bool>,
+    ) -> Result<u32> {
         if self.entries.len() == read::MAX_ITEMS {
             return Err(Error::new(0, "图像对象数量超过上限"));
         }

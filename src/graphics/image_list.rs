@@ -1,4 +1,4 @@
-use super::{Images, Rect};
+use super::{Image, Images, Rect};
 use crate::{Error, Result, read};
 use std::collections::BTreeMap;
 
@@ -23,11 +23,25 @@ impl Default for ImageListProperties {
 }
 
 struct Entry {
+    // 有帧缓存时只借用其中的包装；生命周期由整个条目及所属任务管理。
     image: u32,
+    frames: BTreeMap<u32, u32>,
     priority: i32,
     properties: ImageListProperties,
     history: Option<Rect>,
     clip: Rect,
+}
+
+impl Entry {
+    fn release(self, images: &mut Images) -> Result<()> {
+        if self.frames.is_empty() {
+            images.release(self.image)?;
+        }
+        for &image in self.frames.values() {
+            images.release(image)?;
+        }
+        Ok(())
+    }
 }
 
 struct Block {
@@ -137,13 +151,131 @@ impl ImageList {
         properties: ImageListProperties,
         images: &mut Images,
     ) -> Result<()> {
-        let viewport = self.bounds(images)?;
         let source_base = images.pixel_image(pixels)?.info().base.map(|v| v as f32);
+        let (history, clip, priority) = self.source_history(key, images)?;
+        let image = if let Some(entry) = self.entries.get(&key) {
+            let image = entry.image;
+            images.bind_pixels(image, pixels)?;
+            image
+        } else {
+            images.share_pixels_for(Some(self.owner), pixels)?
+        };
+        let frames = self
+            .entries
+            .get_mut(&key)
+            .map(|entry| std::mem::take(&mut entry.frames))
+            .unwrap_or_default();
+        self.finish_source(
+            key,
+            Entry {
+                image,
+                frames,
+                priority,
+                properties,
+                history,
+                clip,
+            },
+            source_base,
+            images,
+        )
+    }
+
+    /// 登记完整 HG-3 原始数据，独立持有全部帧；初始显示最小无符号 ID。
+    pub fn set_hg3(
+        &mut self,
+        key: u32,
+        data: &[u8],
+        properties: ImageListProperties,
+        images: &mut Images,
+    ) -> Result<()> {
+        self.set_frames(key, Self::decode_hg3(data)?, properties, images)
+    }
+
+    pub(crate) fn decode_hg3(data: &[u8]) -> Result<BTreeMap<u32, Image>> {
+        let metadata = crate::hg3::Metadata::parse(data)?;
+        let mut frames = BTreeMap::new();
+        let mut length = 0usize;
+        for frame in metadata.frames {
+            if frames.contains_key(&frame.id) {
+                continue;
+            }
+            let image = crate::hg3::decode_frame(data, frame.id as i32)?
+                .ok_or_else(|| Error::new(frame.offset, "HG-3 帧目录与解码结果不匹配"))?;
+            length = length
+                .checked_add(image.pixels.len())
+                .filter(|&length| length <= read::MAX_BYTES)
+                .ok_or_else(|| Error::new(frame.offset, "图像列表帧集合超过像素存储上限"))?;
+            frames.insert(frame.id, Image::from_frame(image)?);
+        }
+        Ok(frames)
+    }
+
+    pub(crate) fn set_frames(
+        &mut self,
+        key: u32,
+        decoded: BTreeMap<u32, Image>,
+        properties: ImageListProperties,
+        images: &mut Images,
+    ) -> Result<()> {
+        let (history, clip, priority) = self.source_history(key, images)?;
+        let mut frames = BTreeMap::new();
+        for (id, image) in decoded {
+            let alpha = Some(image.info().reserved != 0);
+            match images.insert(self.owner, image, alpha) {
+                Ok(image) => {
+                    frames.insert(id, image);
+                }
+                Err(error) => {
+                    for &image in frames.values() {
+                        images.release(image)?;
+                    }
+                    return Err(error);
+                }
+            }
+        }
+        let image = *frames
+            .first_key_value()
+            .ok_or_else(|| Error::new(0, "图像列表原始来源没有可用帧"))?
+            .1;
+        let source_base = images.get(image)?.info().base.map(|v| v as f32);
+        if let Some(previous) = self.entries.remove(&key) {
+            previous.release(images)?;
+        }
+        self.finish_source(
+            key,
+            Entry {
+                image,
+                frames,
+                priority,
+                properties,
+                history,
+                clip,
+            },
+            source_base,
+            images,
+        )
+    }
+
+    /// 选择缓存帧并恢复该帧基点；缺失 key 或 ID 保持当前来源并返回 false。
+    /// 选帧本身不产生脏区；重新登记或显式失效后才重绘。
+    pub fn select_frame(&mut self, key: u32, id: u32, images: &mut Images) -> Result<bool> {
+        let Some(entry) = self.entries.get_mut(&key) else {
+            return Ok(false);
+        };
+        let Some(&image) = entry.frames.get(&id) else {
+            return Ok(false);
+        };
+        entry.image = image;
+        entry.properties.base_point = images.get(image)?.info().base.map(|v| v as f32);
+        Ok(true)
+    }
+
+    fn source_history(&mut self, key: u32, images: &Images) -> Result<(Option<Rect>, Rect, i32)> {
+        let viewport = self.bounds(images)?;
         let mut history = None;
         let mut clip = viewport;
         let mut priority = (key >> 16) as i32;
-        let image = if let Some(entry) = self.entries.get(&key) {
-            let image = entry.image;
+        if let Some(entry) = self.entries.get(&key) {
             history = entry.history;
             clip = entry.clip;
             priority = entry.priority;
@@ -151,7 +283,7 @@ impl ImageList {
                 history = accumulate(
                     history,
                     images.list_bounds(
-                        image,
+                        entry.image,
                         entry.properties.position,
                         entry.properties.base_point,
                     )?,
@@ -159,38 +291,35 @@ impl ImageList {
                 );
                 self.mark(history);
             }
-            images.bind_pixels(image, pixels)?;
-            image
-        } else {
-            if self.entries.len() == read::MAX_ITEMS {
-                return Err(Error::new(0, "图像列表条目数量超过上限"));
-            }
-            images.share_pixels_for(Some(self.owner), pixels)?
-        };
+        } else if self.entries.len() == read::MAX_ITEMS {
+            return Err(Error::new(0, "图像列表条目数量超过上限"));
+        }
+        Ok((history, clip, priority))
+    }
+
+    fn finish_source(
+        &mut self,
+        key: u32,
+        mut entry: Entry,
+        source_base: [f32; 2],
+        images: &Images,
+    ) -> Result<()> {
+        let properties = entry.properties;
         // 设置显示状态时先使用来源基点更新几何，再写入请求基点。
-        history = accumulate(
-            history,
-            images.list_bounds(image, properties.position, source_base)?,
-            clip,
+        entry.history = accumulate(
+            entry.history,
+            images.list_bounds(entry.image, properties.position, source_base)?,
+            entry.clip,
         );
         if properties.visible {
-            history = accumulate(
-                history,
-                images.list_bounds(image, properties.position, properties.base_point)?,
-                clip,
+            entry.history = accumulate(
+                entry.history,
+                images.list_bounds(entry.image, properties.position, properties.base_point)?,
+                entry.clip,
             );
-            self.mark(history);
+            self.mark(entry.history);
         }
-        self.entries.insert(
-            key,
-            Entry {
-                image,
-                priority,
-                properties,
-                history,
-                clip,
-            },
-        );
+        self.entries.insert(key, entry);
         Ok(())
     }
 
@@ -211,8 +340,7 @@ impl ImageList {
             );
             self.mark(history);
         }
-        images.release(image)?;
-        self.entries.remove(&key);
+        self.entries.remove(&key).unwrap().release(images)?;
         Ok(true)
     }
 
@@ -302,8 +430,7 @@ impl ImageList {
 
     fn release_entries(&mut self, images: &mut Images) -> Result<()> {
         while let Some(&key) = self.entries.keys().next() {
-            images.release(self.entries[&key].image)?;
-            self.entries.remove(&key);
+            self.entries.remove(&key).unwrap().release(images)?;
         }
         Ok(())
     }
