@@ -634,6 +634,59 @@ fn cimage_applies_its_columns_with_float_rounding_and_baseline_priority_updates(
 }
 
 #[test]
+fn cimage_keeps_source_property_and_priority_updates_independent() {
+    let mut image = fes::CImageState::default();
+    assert!(!image.updates.is_dirty());
+    assert!(!image.updates.needs_rebuild());
+    assert!(!image.updates.priority_changed());
+    image.apply(
+        &fes::ObjectAttributes {
+            size_resource: Some(b"dimensions:7".to_vec()),
+            priority: Some(4),
+            sequential_priority: true,
+            ..Default::default()
+        },
+        2,
+    );
+    assert!(!image.updates.is_dirty());
+    assert!(!image.updates.needs_rebuild());
+    assert!(image.updates.priority_changed());
+    assert_eq!((image.priority, image.parent_priority), (26, 6));
+    image.updates = Default::default();
+    image.apply(
+        &fes::ObjectAttributes {
+            size: Some([-1; 2]),
+            display: Some(0),
+            ..Default::default()
+        },
+        0,
+    );
+    assert!(!image.updates.is_dirty());
+    assert!(!image.updates.needs_rebuild());
+    for _ in 0..2 {
+        image.updates = Default::default();
+        image.apply(
+            &fes::ObjectAttributes {
+                color: Some(-1),
+                ..Default::default()
+            },
+            0,
+        );
+        assert!(image.updates.needs_rebuild());
+        assert!(!image.updates.is_dirty());
+    }
+    image.updates = Default::default();
+    let mut properties = image.motion_properties();
+    properties[6] = 1.25f32.to_bits();
+    properties[5] = 10f32.to_bits();
+    assert!(image.apply_motion_properties(&properties));
+    assert!(image.updates.is_dirty());
+    assert!(!image.updates.needs_rebuild());
+    assert!(image.updates.priority_changed());
+    assert_eq!((image.priority, image.parent_priority), (30, 6));
+}
+
+#[test]
 fn cimage_resolves_size_before_consuming_position_resource() {
     let mut image = fes::CImageState::default();
     image.apply(

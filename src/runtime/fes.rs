@@ -288,13 +288,9 @@ impl Objects {
             }
             let dirty = match &mut self.objects.get_mut(&handle).unwrap().state {
                 ObjectState::Base => false,
-                ObjectState::CImage(state) => {
-                    state.apply(&initialization.attributes, bank as u32);
-                    false
-                }
+                ObjectState::CImage(state) => state.apply(&initialization.attributes, bank as u32),
                 ObjectState::Image(state) => {
-                    state.apply(&initialization.attributes, bank as u32, &mut transform_name)?;
-                    false
+                    state.apply(&initialization.attributes, bank as u32, &mut transform_name)?
                 }
                 ObjectState::CPlane(state) => state.apply(&initialization.attributes, bank as u32),
                 ObjectState::Plane(state) => state.apply(&initialization.attributes, bank as u32),
@@ -312,6 +308,11 @@ impl Objects {
             let object = self.objects.get_mut(&handle).unwrap();
             if let Some(state) = object.state.plane_mut() {
                 state.dirty = true;
+            }
+            match &mut object.state {
+                ObjectState::CImage(state) => state.updates.invalidate(),
+                ObjectState::Image(state) => state.base.updates.invalidate(),
+                _ => (),
             }
             pending.extend(object.children.iter().copied());
         }

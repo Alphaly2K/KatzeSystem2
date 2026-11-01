@@ -16,7 +16,7 @@ mod resources;
 mod subcommands;
 pub use attributes::{ObjectAttributes, ObjectInitialization, ObjectReference};
 pub use events::EventContext;
-pub use image::{CImageState, ImageState};
+pub use image::{CImageState, ImageState, ImageUpdates};
 pub use keyblocks::KeyBlock;
 pub use objects::ObjectDefinition;
 pub use params::parse as parameters;

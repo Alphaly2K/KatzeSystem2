@@ -144,6 +144,41 @@ fn interpreter_events_initialize_actual_bank_types_and_publish_object_identities
 }
 
 #[test]
+fn image_property_changes_invalidate_descendants_without_rebuilding_their_sources() {
+    let mut objects = Objects::new(HandleAllocator::default()).unwrap();
+    let parent = objects.define(&definition("CIMAGE", "group", 1)).unwrap()[0];
+    let child = objects.define(&definition("IMAGE", "child", 1)).unwrap()[0];
+    let plane = objects.define(&definition("CPLANE", "panel", 1)).unwrap()[0];
+    objects.set_parent(child, Some(parent)).unwrap();
+    objects.set_parent(plane, Some(child)).unwrap();
+    objects
+        .initialize(
+            &ObjectInitialization {
+                target: ObjectReference {
+                    name: "group".into(),
+                    bank: 0,
+                },
+                attributes: ObjectAttributes {
+                    position: [Some(3), Some(5), None],
+                    ..Default::default()
+                },
+            },
+            |_| unreachable!(),
+        )
+        .unwrap();
+    let ObjectState::Image(state) = &objects.get(child).unwrap().state else {
+        panic!()
+    };
+    assert!(state.base.updates.is_dirty());
+    assert!(!state.base.updates.needs_rebuild());
+    let ObjectState::CPlane(state) = &objects.get(plane).unwrap().state else {
+        panic!()
+    };
+    assert!(state.is_dirty());
+    assert!(!state.needs_rebuild());
+}
+
+#[test]
 fn reparenting_and_removal_keep_bank_holes_and_failed_initialization_changes() {
     let handles = HandleAllocator::default();
     let mut objects = Objects::new(handles).unwrap();
