@@ -37,7 +37,8 @@ impl<F: ObjectFactory> Runtime<F> {
                 objects.invalidate(handle)?;
             }
         }
-        self.register_fes_image(owner, objects, handle, list, wrapper, prepared)
+        self.register_fes_image(owner, objects, handle, list, wrapper, prepared)?;
+        self.update_fes_image_priority(owner, objects, handle, list)
     }
 
     pub(super) fn update_fes_image(
@@ -124,7 +125,9 @@ impl<F: ObjectFactory> Runtime<F> {
                 }
             }
         }
-        self.register_fes_image(owner, objects, handle, list, wrapper, prepared)
+        self.register_fes_image(owner, objects, handle, list, wrapper, prepared)?;
+        self.update_fes_image_animation(owner, objects, handle, list)?;
+        self.update_fes_image_priority(owner, objects, handle, list)
     }
 
     fn fes_image_wrapper(&mut self, owner: u32, objects: &mut Objects, handle: u32) -> Result<u32> {
@@ -222,6 +225,16 @@ impl<F: ObjectFactory> Runtime<F> {
             updates.rebuild = false;
             updates.dirty = false;
         }
+        Ok(())
+    }
+
+    fn update_fes_image_priority(
+        &mut self,
+        owner: u32,
+        objects: &mut Objects,
+        handle: u32,
+        list: u32,
+    ) -> Result<()> {
         let state = objects.get_mut(handle).unwrap().state.image_mut().unwrap();
         if state.updates.priority_changed {
             state.updates.priority_changed = false;

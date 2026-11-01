@@ -15,6 +15,77 @@ fn definition(kind: &'static str, name: &str, banks: u32) -> ObjectDefinition {
 }
 
 #[test]
+fn animation_commands_expand_banks_skip_other_types_and_preserve_the_play_switch() {
+    let mut objects = Objects::new(HandleAllocator::default()).unwrap();
+    let handles = objects.define(&definition("IMAGE", "item", 3)).unwrap();
+    objects.get_mut(handles[1]).unwrap().state = ObjectState::CImage(Box::default());
+    objects.remove(handles[0]).unwrap();
+    let mut interpreter =
+        fes::Interpreter::new(fes::Program::from_text(b"#START\nexit 0\n").unwrap()).unwrap();
+    objects.publish_bindings(&mut interpreter);
+    let mut numbers = State::new(0);
+    let mut dispatch = |objects: &mut Objects, bytes: &[u8]| {
+        objects.dispatch_image_animation(
+            &mut interpreter,
+            &fes::Line {
+                offset: 100,
+                bytes: bytes.to_vec(),
+            },
+            &mut numbers,
+        )
+    };
+    assert!(dispatch(&mut objects, b"item setanm").unwrap());
+    assert!(
+        objects
+            .get(handles[1])
+            .unwrap()
+            .image_animation_request()
+            .is_none()
+    );
+    let request = objects
+        .get(handles[2])
+        .unwrap()
+        .image_animation_request()
+        .unwrap();
+    assert_eq!(request.name(), b".anm");
+    assert_eq!(request.playing(), 0);
+    assert!(request.is_pending());
+    for (line, playing, name) in [
+        (b"item anm 0".as_slice(), 1, b".anm".as_slice()),
+        (b"item[2] setanm dir.with/file", 1, b"dir.with/file.anm"),
+        (b"item[2] anm sToP", 0, b"dir.with/file.anm"),
+        (b"item[2] setanm explicit.custom", 0, b"explicit.custom"),
+        (b"item[2] setanm tail.", 0, b"tail.anm"),
+    ] {
+        assert!(dispatch(&mut objects, line).unwrap());
+        let request = objects
+            .get(handles[2])
+            .unwrap()
+            .image_animation_request()
+            .unwrap();
+        assert_eq!((request.playing(), request.name()), (playing, name));
+    }
+    assert!(dispatch(&mut objects, b"missing anm").unwrap());
+    assert!(!dispatch(&mut objects, b"item play").unwrap());
+    assert!(
+        dispatch(
+            &mut objects,
+            &[b"item[2] setanm ".as_slice(), &[b'x'; 256]].concat()
+        )
+        .is_err()
+    );
+    assert_eq!(
+        objects
+            .get(handles[2])
+            .unwrap()
+            .image_animation_request()
+            .unwrap()
+            .name(),
+        b"tail.anm"
+    );
+}
+
+#[test]
 fn definitions_keep_first_bindings_and_count_while_owning_duplicate_objects() {
     let handles = HandleAllocator::default();
     let foreign = handles.allocate().unwrap();

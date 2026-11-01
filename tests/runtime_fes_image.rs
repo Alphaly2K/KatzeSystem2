@@ -1081,3 +1081,124 @@ fn list_animation_commands_share_random_and_automatic_updates_use_the_body_time(
         );
     }
 }
+
+#[test]
+fn fes_animation_events_defer_loading_and_consume_requests_before_failed_loads() {
+    for budget in [1, 4096] {
+        let (mut runtime, mut objects, list) = setup();
+        runtime.set_budget(budget, 10000);
+        let mut program = b"ANM\0".to_vec();
+        program.resize(32, 0);
+        program[8..12].copy_from_slice(&2u32.to_le_bytes());
+        for (opcode, values) in [(12u32, [128i32, 0, 0]), (0, [7, 3, 3])] {
+            program.extend(opcode.to_le_bytes());
+            for value in values.into_iter().chain([0; 5]) {
+                program.extend(0u32.to_le_bytes());
+                program.extend(value.to_le_bytes());
+            }
+        }
+        let reads = Rc::new(RefCell::new(Vec::new()));
+        let mut pixels = pixel_file(0xffff_0000);
+        pixels[68..76].fill(0);
+        runtime.set_resources(PixelFiles {
+            files: BTreeMap::from([
+                (b"raw".to_vec(), pixels),
+                (b"walk.anm".to_vec(), program),
+                (b"invalid.anm".to_vec(), b"invalid".to_vec()),
+            ]),
+            reads: reads.clone(),
+        });
+        runtime
+            .numbers_mut()
+            .strings
+            .insert(7, b"walk.custom".to_vec());
+        let source = b"#DEFINE\nIMAGE sprite\n#OBJECT FILE IDN PRI POS DISP\nsprite raw -1 5 2,1 1\n#START\nsprite setanm $str7;\nsprite anm 0\nsprite anm stop\nsprite anm\nsprite setanm invalid\nexit 0\n";
+        let mut interpreter =
+            fes::Interpreter::new(fes::Program::from_text(source).unwrap()).unwrap();
+        let mut commands = 0;
+        loop {
+            match interpreter.run(runtime.numbers_mut(), budget).unwrap() {
+                Step::Yield => (),
+                Step::Event(fes::Event::CreateObject(definition)) => {
+                    objects.define(&definition).unwrap();
+                    objects.publish_bindings(&mut interpreter);
+                    interpreter.resume();
+                }
+                Step::Event(fes::Event::InitializeObject(request)) => {
+                    objects
+                        .initialize(&request, |name| Ok(name.to_vec()))
+                        .unwrap();
+                    let sprite = objects.lookup("sprite", 0).unwrap();
+                    runtime.update_fes_object(0, &mut objects, sprite).unwrap();
+                    runtime.update(10, 10).unwrap();
+                    interpreter.resume();
+                }
+                Step::Event(fes::Event::Command(line)) => {
+                    let before = reads.borrow().len();
+                    assert!(
+                        objects
+                            .dispatch_image_animation(
+                                &mut interpreter,
+                                &line,
+                                runtime.numbers_mut()
+                            )
+                            .unwrap()
+                    );
+                    assert_eq!(reads.borrow().len(), before);
+                    let sprite = objects.lookup("sprite", 0).unwrap();
+                    let request = objects
+                        .get(sprite)
+                        .unwrap()
+                        .image_animation_request()
+                        .unwrap();
+                    assert!(request.is_pending());
+                    assert_eq!(request.playing(), i32::from(matches!(commands, 1 | 3 | 4)));
+                    assert_eq!(
+                        request.name(),
+                        if commands == 4 {
+                            b"invalid.anm".as_slice()
+                        } else {
+                            b"walk.custom"
+                        }
+                    );
+                    let result = runtime.update_fes_object(0, &mut objects, sprite);
+                    assert_eq!(result.is_err(), commands == 4);
+                    assert!(
+                        !objects
+                            .get(sprite)
+                            .unwrap()
+                            .image_animation_request()
+                            .unwrap()
+                            .is_pending()
+                    );
+                    runtime.update_fes_object(0, &mut objects, sprite).unwrap();
+                    send(&mut runtime, list, 298, 0, 0);
+                    assert_eq!(
+                        runtime.drawing().target.as_ref().unwrap().pixel(3, 3),
+                        Some(if commands == 0 || commands == 4 {
+                            0xffff_0000
+                        } else {
+                            0x80ff_0000
+                        })
+                    );
+                    runtime.update(1000 + commands, 100 + commands).unwrap();
+                    commands += 1;
+                    interpreter.resume();
+                }
+                Step::Event(fes::Event::Exit(0)) => interpreter.resume(),
+                Step::Halted => break,
+                other => panic!("{other:?}"),
+            }
+        }
+        assert_eq!(commands, 5);
+        assert_eq!(
+            reads.borrow().as_slice(),
+            [
+                b"raw".to_vec(),
+                b"walk.anm".to_vec(),
+                b"walk.anm".to_vec(),
+                b"invalid.anm".to_vec()
+            ]
+        );
+    }
+}

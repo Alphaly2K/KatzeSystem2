@@ -7,8 +7,10 @@ use crate::fes::{
 use crate::{Error, HandleAllocator, Result, read};
 use std::collections::{BTreeMap, BTreeSet};
 
+mod animation;
 mod image;
 mod plane;
+pub use animation::ImageAnimationRequest;
 
 const TOP: &str = "_TOPOBJ_";
 
@@ -89,6 +91,7 @@ pub struct Object {
     image: Option<u32>,
     raw_image: u32,
     image_offset: [f32; 2],
+    animation: ImageAnimationRequest,
     pub state: ObjectState,
 }
 
@@ -127,6 +130,11 @@ impl Object {
     pub fn raw_image_handle(&self) -> u32 {
         self.raw_image
     }
+
+    /// IMAGE 保存的请求；列表动画的实时播放与显示状态由共享列表维护。
+    pub fn image_animation_request(&self) -> Option<&ImageAnimationRequest> {
+        matches!(self.state, ObjectState::Image(_)).then_some(&self.animation)
+    }
 }
 
 /// 一份 FES 的对象存储。绑定保留首次值，数量表与对象表分别维护。
@@ -160,6 +168,7 @@ impl Objects {
                     image: None,
                     raw_image: 0,
                     image_offset: [0.; 2],
+                    animation: ImageAnimationRequest::default(),
                     state: ObjectState::Base,
                 },
             )]),
@@ -253,6 +262,7 @@ impl Objects {
                     image: None,
                     raw_image: 0,
                     image_offset: [0.; 2],
+                    animation: ImageAnimationRequest::default(),
                     state: initial.clone(),
                 },
             );
