@@ -7,6 +7,8 @@ pub use events::{Events, HitMask, KeyEvent, KeyEventKind};
 mod motion;
 mod selection;
 pub use motion::PointerMotion;
+mod keys;
+pub use keys::{KeySample, KeyServices, KeyState, KeyTransition, Keys};
 
 /// 输入区域的十五 DWORD 记录；可移植位掩码以存在标记代替指针槽。
 #[derive(Clone, Debug)]
