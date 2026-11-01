@@ -13,6 +13,8 @@ mod state;
 pub use state::{CommandState, InputDelivery, InputState};
 mod object;
 pub use object::{InputFactory, InputObject};
+mod button;
+pub use button::ButtonObject;
 mod coordinates;
 pub use coordinates::CoordinateMap;
 mod device;

@@ -39,6 +39,9 @@ pub trait TaskObject {
         false
     }
 
+    /// 时钟和子任务更新前执行的主体前置处理。
+    fn begin_update(&mut self) {}
+
     /// 接收创建命令 26 传递的原始上下文；对象类型不支持时返回诊断。
     fn set_creation_context(&mut self, context: &[u8]) -> Result<()>;
 

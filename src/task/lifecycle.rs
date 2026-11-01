@@ -4,6 +4,10 @@ use std::ops::Bound::{Excluded, Unbounded};
 
 /// 树调度访问的对象状态及同步生命周期操作。
 pub trait Lifecycle {
+    fn begin_update(&mut self, _id: u32) -> Result<()> {
+        Ok(())
+    }
+
     fn state(&mut self, id: u32) -> Result<(&mut Control, &mut TaskClock)>;
 
     /// 时钟及子任务更新已完成；返回前完成本次主体的预算续跑。
@@ -74,6 +78,7 @@ impl TaskTree {
                         continue;
                     }
                     count_visit(&mut visited)?;
+                    lifecycle.begin_update(id)?;
                     lifecycle.state(id)?.1.update(now);
                     frames.push(Frame::Children(id, None));
                 }

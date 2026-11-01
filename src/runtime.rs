@@ -1301,6 +1301,14 @@ impl<F: ObjectFactory> TaskLifecycle<'_, F> {
 }
 
 impl<F: ObjectFactory> Lifecycle for TaskLifecycle<'_, F> {
+    fn begin_update(&mut self, id: u32) -> Result<()> {
+        self.objects
+            .get_mut(&id)
+            .ok_or_else(|| Error::new(0, "任务对象不存在"))?
+            .begin_update();
+        Ok(())
+    }
+
     fn state(&mut self, id: u32) -> Result<(&mut Control, &mut TaskClock)> {
         let object = self
             .objects
