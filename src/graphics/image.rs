@@ -131,6 +131,60 @@ impl Image {
         Some(region)
     }
 
+    fn list_region(
+        &self,
+        source: &Self,
+        position: [f32; 2],
+        base: [f32; 2],
+    ) -> Option<ImageRegion> {
+        let at = std::array::from_fn::<_, 2, _>(|i| {
+            list_coordinate(position[i])
+                .wrapping_sub(list_coordinate(base[i]))
+                .wrapping_add(source.info.offset[i])
+        });
+        let rect = Rect::from_xywh(
+            at[0],
+            at[1],
+            source.info.size[0] as i32,
+            source.info.size[1] as i32,
+        )
+        .intersect(self.surface.bounds())?;
+        let width = (rect.right - rect.left) as usize;
+        let height = (rect.bottom - rect.top) as usize;
+        Some(ImageRegion {
+            x: rect.left as usize,
+            y: self.info.size[1] as usize - rect.bottom as usize,
+            source_x: rect.left.wrapping_sub(at[0]) as usize,
+            source_y: source.info.size[1] as usize - rect.top.wrapping_sub(at[1]) as usize - height,
+            width,
+            height,
+        })
+    }
+
+    fn list_is_opaque(&self, opacity: u8) -> bool {
+        opacity == 255 && self.surface.pixels().chunks_exact(4).all(|p| p[3] == 255)
+    }
+
+    fn draw_list_from(&mut self, source: &Self, position: [f32; 2], base: [f32; 2], opacity: u8) {
+        let Some(region) = self.list_region(source, position, base) else {
+            return;
+        };
+        if source.list_is_opaque(opacity) {
+            self.surface.copy_from(
+                &source.surface,
+                Rect::from_xywh(
+                    region.source_x as i32,
+                    region.source_y as i32,
+                    region.width as i32,
+                    region.height as i32,
+                ),
+                [region.x as i32, region.y as i32],
+            );
+        } else {
+            self.surface.blend_region(&source.surface, region, opacity);
+        }
+    }
+
     /// 普通 111 的后续图像合成，保留首图几何、零透明度和独立裁剪规则。
     pub fn composite(&mut self, source: &Self) -> bool {
         let bounds = Rect::from_xywh(
@@ -269,6 +323,10 @@ impl Images {
     /// 为同一像素对象创建独立包装；没有任务登记，使用者须显式释放。
     /// 源包装释放后新句柄继续有效，两个包装的像素修改互相可见。
     pub fn share(&mut self, handle: u32) -> Result<u32> {
+        self.share_for(None, handle)
+    }
+
+    pub(crate) fn share_for(&mut self, owner: Option<u32>, handle: u32) -> Result<u32> {
         let data = self
             .entries
             .get(&handle)
@@ -286,12 +344,27 @@ impl Images {
         self.entries.insert(
             shared,
             ImageEntry {
-                owner: None,
+                owner,
                 references: 1,
                 data,
             },
         );
         Ok(shared)
+    }
+
+    pub(crate) fn bind(&mut self, handle: u32, source: u32) -> Result<()> {
+        let previous = self.entry_mut(handle)?.data;
+        let next = self.entry_mut(source)?.data;
+        if previous != next {
+            let data = self.data.get_mut(&next).unwrap();
+            data.references = data
+                .references
+                .checked_add(1)
+                .ok_or_else(|| Error::new(0, "图像引用数量超过上限"))?;
+            self.entries.get_mut(&handle).unwrap().data = next;
+            release_data(&mut self.data, previous);
+        }
+        Ok(())
     }
 
     /// 增加共享持有，使用者通过 `release_reference` 配对释放；像素修改对所有使用者可见。
@@ -398,6 +471,37 @@ impl Images {
                 true
             }
         });
+    }
+
+    pub(crate) fn draw_list_entry(
+        &mut self,
+        target: u32,
+        source: u32,
+        position: [f32; 2],
+        base: [f32; 2],
+        opacity: u8,
+    ) -> Result<()> {
+        let source_data = self.entry_mut(source)?.data;
+        let target_data = self.entry_mut(target)?.data;
+        if source_data == target_data {
+            return Err(Error::new(0, "图像列表自有图像不能同时用作绘制来源"));
+        }
+        let source_image = self.data.remove(&source_data).unwrap();
+        self.data
+            .get_mut(&target_data)
+            .unwrap()
+            .image
+            .draw_list_from(&source_image.image, position, base, opacity);
+        self.data.insert(source_data, source_image);
+        Ok(())
+    }
+}
+
+fn list_coordinate(value: f32) -> i32 {
+    if (-2147483648.0..2147483648.0).contains(&value) {
+        value as i32
+    } else {
+        i32::MIN
     }
 }
 

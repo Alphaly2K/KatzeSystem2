@@ -168,6 +168,21 @@ impl<F: ObjectFactory> Runtime<F> {
         &self.resources.images
     }
 
+    pub fn images_mut(&mut self) -> &mut crate::graphics::Images {
+        &mut self.resources.images
+    }
+
+    /// 整幅重绘图像列表并复制到当前画布；提交受 DrawingContext 的模式与开关门控。
+    pub fn redraw_image_list(&mut self, list: &mut crate::graphics::ImageList) -> Result<bool> {
+        list.redraw(&mut self.resources.images)?;
+        let bounds = list.bounds(&self.resources.images)?;
+        Ok(self.resources.drawing.copy_image(
+            self.resources.images.get(list.image())?,
+            bounds,
+            list.offset(),
+        ))
+    }
+
     /// 365 装载的原始图像字节，存活至 366 显式释放或运行时销毁。
     pub fn image_data(&self, handle: u32) -> Result<&[u8]> {
         self.resources.raw.image_data(handle)

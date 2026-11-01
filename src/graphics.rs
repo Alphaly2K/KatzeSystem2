@@ -2,6 +2,8 @@ use crate::{Error, Result, read};
 
 mod image;
 pub use image::{Image, ImageReference, Images};
+mod image_list;
+pub use image_list::{ImageList, ImageListProperties};
 mod target;
 pub use target::{DrawingContext, RenderTarget};
 mod transform;
