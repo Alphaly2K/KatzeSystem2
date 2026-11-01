@@ -2,11 +2,24 @@ use crate::graphics::Rect;
 use crate::task::{Command, CommandBuffers};
 use crate::{Error, Result, read};
 
-/// 输入区域的原始十五 DWORD 记录；所有字段保持原位模式。
-#[derive(Clone, Debug, PartialEq, Eq)]
+mod events;
+pub use events::{Events, HitMask, KeyEvent, KeyEventKind};
+
+/// 输入区域的十五 DWORD 记录；可移植位掩码以存在标记代替指针槽。
+#[derive(Clone, Debug)]
 pub struct Region {
     words: [u32; 15],
+    instance: u64,
+    mask: Option<HitMask>,
 }
+
+impl PartialEq for Region {
+    fn eq(&self, other: &Self) -> bool {
+        self.words == other.words && self.mask == other.mask
+    }
+}
+
+impl Eq for Region {}
 
 impl Region {
     pub fn id(&self) -> u32 {
@@ -35,6 +48,14 @@ impl Region {
         self.words[8]
     }
 
+    pub fn event_mask(&self) -> u32 {
+        self.words[2]
+    }
+
+    pub fn hit_mask(&self) -> Option<&HitMask> {
+        self.mask.as_ref()
+    }
+
     pub fn words(&self) -> &[u32; 15] {
         &self.words
     }
@@ -45,6 +66,7 @@ impl Region {
 pub struct Regions {
     records: Vec<Region>,
     geometry_dirty: bool,
+    next_instance: u64,
 }
 
 impl Regions {
@@ -55,6 +77,20 @@ impl Regions {
     /// 重复编号时返回当前排序中的首项。
     pub fn get(&self, id: u32) -> Option<&Region> {
         self.records.iter().find(|r| r.id() == id)
+    }
+
+    /// 给首个匹配项设置显式位掩码；原指针槽仅保存存在标记一。
+    pub fn set_hit_mask(&mut self, id: u32, mask: Option<HitMask>) -> bool {
+        let Some(index) = self.index(id) else {
+            return false;
+        };
+        let region = &mut self.records[index];
+        region.words[11..14].copy_from_slice(&mask.as_ref().map_or([0; 3], |mask| {
+            let [width, height] = mask.size();
+            [1, width, height]
+        }));
+        region.mask = mask;
+        true
     }
 
     /// 矩形或启用属性变动要求后续输入更新重新检查命中区域。
@@ -85,7 +121,12 @@ impl Regions {
                 words[1] = a;
                 words[7..10].copy_from_slice(&[0, 1, 1]);
                 words[11..15].copy_from_slice(&[0, 0, 0, 1]);
-                self.records.push(Region { words });
+                let instance = self.allocate_instance()?;
+                self.records.push(Region {
+                    words,
+                    instance,
+                    mask: None,
+                });
                 self.sort();
             }
             128 => {
@@ -96,8 +137,10 @@ impl Regions {
             }
             129 => {
                 if let Some(index) = self.index(a) {
+                    let instance = self.allocate_instance()?;
                     let mut region = self.records.remove(index);
                     region.words[1] = b;
+                    region.instance = instance;
                     self.records.push(region);
                     self.sort();
                 }
@@ -162,6 +205,14 @@ impl Regions {
 
     fn index(&self, id: u32) -> Option<usize> {
         self.records.iter().position(|r| r.id() == id)
+    }
+
+    fn allocate_instance(&mut self) -> Result<u64> {
+        self.next_instance = self
+            .next_instance
+            .checked_add(1)
+            .ok_or_else(|| Error::new(0, "输入区域登记序号耗尽"))?;
+        Ok(self.next_instance)
     }
 
     fn sort(&mut self) {

@@ -20,7 +20,7 @@
 |[公开资料与先行实现](reference-research.md)|Wiki、FelineSystem2 源码／issues、基线差异及复用限制|
 |[运行时与媒体子系统](subsystems.md)|图形、文字、音频、输入、平台和解释器的职责边界|
 |[图像与像素接口](graphics.md)|HG-3 原生帧解码、BGRA 渲染面、图像装载／合成、任务持有及读取约束|
-|[输入区域接口](input.md)|输入区域登记、优先级、选择标记及属性命令|
+|[输入区域与事件接口](input.md)|区域登记、优先级、属性、按下／释放／重复分派及命中位图|
 
 解释器接手事项见 [GOAL.md](../GOAL.md)，可复制的任务说明见 [交接 Prompt](interpreter-handoff-prompt.md)。
 
