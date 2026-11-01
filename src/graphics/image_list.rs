@@ -24,6 +24,7 @@ impl Default for ImageListProperties {
 
 struct Entry {
     image: u32,
+    priority: i32,
     properties: ImageListProperties,
     history: Option<Rect>,
     clip: Rect,
@@ -140,10 +141,12 @@ impl ImageList {
         let source_base = images.pixel_image(pixels)?.info().base.map(|v| v as f32);
         let mut history = None;
         let mut clip = viewport;
+        let mut priority = (key >> 16) as i32;
         let image = if let Some(entry) = self.entries.get(&key) {
             let image = entry.image;
             history = entry.history;
             clip = entry.clip;
+            priority = entry.priority;
             if entry.properties.visible {
                 history = accumulate(
                     history,
@@ -182,6 +185,7 @@ impl ImageList {
             key,
             Entry {
                 image,
+                priority,
                 properties,
                 history,
                 clip,
@@ -209,6 +213,23 @@ impl ImageList {
         }
         images.release(image)?;
         self.entries.remove(&key);
+        Ok(true)
+    }
+
+    /// 初始优先级取 key 的高 16 位；显式优先级按有符号整数排序。
+    pub fn priority(&self, key: u32) -> Option<i32> {
+        self.entries.get(&key).map(|entry| entry.priority)
+    }
+
+    /// 相同优先级也将可见条目的历史范围标脏；来源重登记保留优先级。
+    pub fn set_priority(&mut self, key: u32, priority: i32, images: &Images) -> Result<bool> {
+        self.bounds(images)?;
+        let Some(entry) = self.entries.get_mut(&key) else {
+            return Ok(false);
+        };
+        entry.priority = priority;
+        let history = entry.properties.visible.then_some(entry.history).flatten();
+        self.mark(history);
         Ok(true)
     }
 
@@ -316,7 +337,9 @@ impl ImageList {
         for &region in &regions {
             images.get_mut(self.image)?.fill_rect_from_bottom(region, 0);
         }
-        for entry in self.entries.values() {
+        let mut entries: Vec<_> = self.entries.iter().collect();
+        entries.sort_unstable_by_key(|&(&key, entry)| (entry.priority, key));
+        for (_, entry) in entries {
             let p = entry.properties;
             if p.visible && p.opacity != 0 {
                 for &clip in &regions {

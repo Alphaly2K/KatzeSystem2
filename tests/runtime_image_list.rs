@@ -143,6 +143,26 @@ fn image_list_tasks_create_one_plane_update_shared_pixels_and_release_their_wrap
         )
         .unwrap();
     assert_eq!(send(&mut runtime, id, 294, 0, 0), 1);
+    let mut priority = [0; 4];
+    for expected in [7i32, -1] {
+        assert_eq!(
+            runtime
+                .dispatch_command_with_buffers(
+                    0,
+                    command(id, 304, 7, 0),
+                    &mut CommandBuffers {
+                        data0: None,
+                        data1: Some(&mut priority),
+                    },
+                )
+                .unwrap(),
+            1
+        );
+        assert_eq!(i32::from_le_bytes(priority), expected);
+        assert_eq!(send(&mut runtime, id, 305, 7, u32::MAX), 1);
+    }
+    assert_eq!(send(&mut runtime, id, 305, 99, 0), 0);
+    assert_eq!(send(&mut runtime, id, 304, 99, 0), 0);
     runtime.images_mut().release(source).unwrap();
     let output = output_image(&mut runtime, id);
     runtime.update(0, 0).unwrap();

@@ -288,6 +288,24 @@ impl TaskObject for ImageListObject {
                     self.force = 0;
                 }
             }
+            304 => {
+                let list = self
+                    .list
+                    .as_ref()
+                    .ok_or_else(|| Error::new(0, "图像列表尚未创建"))?;
+                let priority = list.priority(key);
+                if let Some(priority) = priority {
+                    write(buffers.data1.as_deref_mut(), priority as u32)?;
+                }
+                *output = priority.is_some() as u32;
+            }
+            305 => {
+                let list = self
+                    .list
+                    .as_mut()
+                    .ok_or_else(|| Error::new(0, "图像列表尚未创建"))?;
+                *output = list.set_priority(key, b as i32, images(host)?)? as u32;
+            }
             310 => self.enabled = b,
             288..=308 | 310..=319 => {
                 return Err(Error::new(

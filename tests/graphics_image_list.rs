@@ -134,6 +134,54 @@ fn list_redraw_clips_relative_to_the_source_and_keeps_separate_wrapper_lifetimes
 }
 
 #[test]
+fn explicit_priorities_sort_signed_then_by_unsigned_key_and_repeat_marks_dirty() {
+    let mut images = Images::default();
+    let first = images.create(1, [1, 1]).unwrap();
+    let second = images.create(1, [1, 1]).unwrap();
+    let fill = |images: &mut Images, image, color: u32| {
+        images
+            .get_mut(image)
+            .unwrap()
+            .pixels_mut()
+            .copy_from_slice(&color.to_le_bytes());
+    };
+    fill(&mut images, first, 0xff11_2233);
+    fill(&mut images, second, 0xff44_5566);
+    let mut list = ImageList::new(2, [1, 1], &mut images).unwrap();
+    let p = ImageListProperties::default();
+    list.set(0xffff_ffff, first, p, &mut images).unwrap();
+    list.set(0, second, p, &mut images).unwrap();
+    assert_eq!(list.priority(u32::MAX), Some(65535));
+    assert_eq!(list.priority(99), None);
+    assert!(!list.set_priority(99, 0, &images).unwrap());
+    list.update(&mut images).unwrap();
+    let pixel = |images: &Images| images.get(list.image()).unwrap().surface().pixel(0, 0);
+    assert_eq!(pixel(&images), Some(0xff11_2233));
+    list.set_priority(u32::MAX, i32::MIN, &images).unwrap();
+    list.update(&mut images).unwrap();
+    assert_eq!(
+        images.get(list.image()).unwrap().surface().pixel(0, 0),
+        Some(0xff44_5566)
+    );
+    list.set_priority(0, i32::MIN, &images).unwrap();
+    list.set(u32::MAX, first, p, &mut images).unwrap();
+    assert_eq!(list.priority(u32::MAX), Some(i32::MIN));
+    list.update(&mut images).unwrap();
+    fill(&mut images, first, 0xff77_8899);
+    assert!(list.update(&mut images).unwrap().is_empty());
+    list.set_priority(u32::MAX, i32::MIN, &images).unwrap();
+    assert!(!list.update(&mut images).unwrap().is_empty());
+    assert_eq!(
+        images.get(list.image()).unwrap().surface().pixel(0, 0),
+        Some(0xff77_8899)
+    );
+    list.set_visible(u32::MAX, false, &images).unwrap();
+    list.update(&mut images).unwrap();
+    list.set_priority(u32::MAX, 10, &images).unwrap();
+    assert!(list.update(&mut images).unwrap().is_empty());
+}
+
+#[test]
 fn pixel_handles_stay_distinct_and_live_while_list_wrappers_hold_them() {
     let mut images = Images::default();
     let source = images.create(1, [1, 1]).unwrap();
