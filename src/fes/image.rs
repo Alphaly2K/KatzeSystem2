@@ -196,7 +196,7 @@ impl CImageState {
         dirty
     }
 
-    fn set_priority(&mut self, priority: i32) {
+    pub(crate) fn set_priority(&mut self, priority: i32) {
         if self.priority != priority {
             self.priority = priority.wrapping_add(20);
             self.updates.priority_changed = true;

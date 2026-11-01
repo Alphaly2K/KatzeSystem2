@@ -318,7 +318,7 @@ impl Interpreter {
             .map(|s| text::expand(&s, &state.strings))
             .collect()
     }
-    fn eval(&mut self, bytes: &[u8], state: &mut State) -> Result<i32> {
+    pub(crate) fn eval(&mut self, bytes: &[u8], state: &mut State) -> Result<i32> {
         let current = self
             .invocation
             .as_ref()

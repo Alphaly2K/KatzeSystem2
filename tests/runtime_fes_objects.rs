@@ -14,6 +14,233 @@ fn definition(kind: &'static str, name: &str, banks: u32) -> ObjectDefinition {
     }
 }
 
+fn object_command(
+    objects: &mut Objects,
+    interpreter: &mut fes::Interpreter,
+    numbers: &mut State,
+    bytes: &[u8],
+) -> katze_system2::Result<bool> {
+    objects.dispatch_object_command(
+        interpreter,
+        &fes::Line {
+            offset: 100,
+            bytes: bytes.to_vec(),
+        },
+        numbers,
+    )
+}
+
+#[test]
+fn object_commands_evaluate_once_and_keep_distinct_bank_and_type_traversal_rules() {
+    for hole in [false, true] {
+        let mut objects = Objects::new(HandleAllocator::default()).unwrap();
+        let handles = objects.define(&definition("CIMAGE", "item", 5)).unwrap();
+        objects.get_mut(handles[1]).unwrap().state = ObjectState::Image(Box::default());
+        objects.get_mut(handles[2]).unwrap().state = ObjectState::Base;
+        objects.get_mut(handles[3]).unwrap().state = ObjectState::CPlane(Box::default());
+        objects.set_parent(handles[3], Some(handles[0])).unwrap();
+        objects
+            .initialize(
+                &ObjectInitialization {
+                    target: ObjectReference {
+                        name: "item".into(),
+                        bank: -1,
+                    },
+                    attributes: ObjectAttributes {
+                        display: Some(21),
+                        priority: Some(7),
+                        sequential_priority: true,
+                        ..Default::default()
+                    },
+                },
+                |name| Ok(name.to_vec()),
+            )
+            .unwrap();
+        if hole {
+            objects.remove(handles[1]).unwrap();
+        }
+        let mut interpreter =
+            fes::Interpreter::new(fes::Program::from_text(b"#START\nexit 0\n").unwrap()).unwrap();
+        objects.publish_bindings(&mut interpreter);
+        let mut numbers = State::new(4);
+        let mut dispatch = |objects: &mut Objects, bytes: &[u8]| {
+            object_command(objects, &mut interpreter, &mut numbers, bytes).unwrap()
+        };
+        assert!(dispatch(&mut objects, b"item size ($0+=1) ($0+=1)"));
+        assert!(dispatch(&mut objects, b"item disp"));
+        assert!(dispatch(&mut objects, b"item pri 8"));
+        assert!(dispatch(&mut objects, b"item pos2 asset:5 ($0+=1)"));
+        assert!(dispatch(&mut objects, b"item enable ($0+=1)"));
+        assert!(!dispatch(&mut objects, b"item unknown ($0+=1)"));
+        assert_eq!(numbers.shared[0], 4);
+        for index in [0, 4] {
+            let ObjectState::CImage(image) = &objects.get(handles[index]).unwrap().state else {
+                panic!()
+            };
+            assert_eq!(image.size, if index == 0 { [1, 2] } else { [-1; 2] });
+            assert_eq!(image.display, if index == 0 || !hole { 1 } else { 21 });
+            assert_eq!(image.priority, if index == 0 || !hole { 28 } else { 31 });
+            assert_eq!(image.parent_priority, 7 + index as i32);
+            assert_eq!(image.position_resource.as_ref().unwrap().name, b"asset");
+            assert_eq!(image.position_resource.as_ref().unwrap().frame, 5);
+        }
+        let ObjectState::CPlane(plane) = &objects.get(handles[3]).unwrap().state else {
+            panic!()
+        };
+        assert_eq!(plane.size(), [800, 600]);
+        assert_eq!(plane.display(), if hole { 21 } else { 1 });
+        assert_eq!(plane.priority(), if hole { 10 } else { 8 });
+        assert!(plane.position_resource().is_none());
+
+        let ObjectState::CImage(image) = &mut objects.get_mut(handles[0]).unwrap().state else {
+            panic!()
+        };
+        image.updates = Default::default();
+        assert!(
+            object_command(
+                &mut objects,
+                &mut interpreter,
+                &mut numbers,
+                b"item[0] pri 28"
+            )
+            .unwrap()
+        );
+        assert!(
+            object_command(&mut objects, &mut interpreter, &mut numbers, b"item[0] pri").unwrap()
+        );
+        let ObjectState::CImage(image) = &objects.get(handles[0]).unwrap().state else {
+            panic!()
+        };
+        assert!(!image.updates.priority_changed());
+        assert!(
+            object_command(
+                &mut objects,
+                &mut interpreter,
+                &mut numbers,
+                b"item[0] pri 8"
+            )
+            .unwrap()
+        );
+        assert!(
+            object_command(
+                &mut objects,
+                &mut interpreter,
+                &mut numbers,
+                b"item[0] size"
+            )
+            .unwrap()
+        );
+        assert!(
+            object_command(
+                &mut objects,
+                &mut interpreter,
+                &mut numbers,
+                b"item[0] disp 0"
+            )
+            .unwrap()
+        );
+        assert!(
+            object_command(
+                &mut objects,
+                &mut interpreter,
+                &mut numbers,
+                b"item[0] pos2"
+            )
+            .unwrap()
+        );
+        let ObjectState::CImage(image) = &objects.get(handles[0]).unwrap().state else {
+            panic!()
+        };
+        assert_eq!(image.size, [0; 2]);
+        assert_eq!(image.display, 0);
+        assert!(image.updates.priority_changed());
+        assert!(image.updates.needs_rebuild());
+        assert_eq!(image.position_resource.as_ref().unwrap().frame, 5);
+        let before = numbers.shared.clone();
+        assert!(
+            object_command(
+                &mut objects,
+                &mut interpreter,
+                &mut numbers,
+                b"missing size ($0+=1) ($0+=1)"
+            )
+            .is_err()
+        );
+        assert_eq!(numbers.shared, before);
+    }
+}
+
+#[test]
+fn id_commands_query_logical_frames_and_guard_arrays_and_shared_destinations() {
+    let mut objects = Objects::new(HandleAllocator::default()).unwrap();
+    let single = objects.define(&definition("IMAGE", "single", 1)).unwrap()[0];
+    let handles = objects.define(&definition("IMAGE", "item", 2)).unwrap();
+    let base = objects.define(&definition("BASE", "base", 1)).unwrap()[0];
+    let ObjectState::Image(image) = &mut objects.get_mut(single).unwrap().state else {
+        panic!()
+    };
+    image.image_number = 22;
+    let ObjectState::Image(image) = &mut objects.get_mut(handles[0]).unwrap().state else {
+        panic!()
+    };
+    image.frames[2] = 11;
+    image.frame_table_enabled = true;
+    let mut interpreter =
+        fes::Interpreter::new(fes::Program::from_text(b"#START\nexit 0\n").unwrap()).unwrap();
+    objects.publish_bindings(&mut interpreter);
+    let mut numbers = State::new(4);
+    for line in [b"item setid 2".as_slice(), b"item getid ($0+=1)"] {
+        assert!(object_command(&mut objects, &mut interpreter, &mut numbers, line).unwrap());
+    }
+    assert_eq!(numbers.shared, [0; 4]);
+    for (line, expected) in [
+        (b"single getid ($0+=1)".as_slice(), [1, 22, 0, 0]),
+        (b"item[0] getid 2", [1, 22, 2, 0]),
+        (b"single getid -1", [1, 22, 2, 0]),
+        (b"single getid 99", [1, 22, 2, 0]),
+        (b"single getid", [22, 22, 2, 0]),
+        (b"single setid", [22, 22, 2, 0]),
+        (b"single getid", [0, 22, 2, 0]),
+        (b"item[0] setid 32", [0, 22, 2, 0]),
+        (b"item[0] getid 3", [0, 22, 2, 2]),
+    ] {
+        assert!(object_command(&mut objects, &mut interpreter, &mut numbers, line).unwrap());
+        assert_eq!(numbers.shared, expected);
+    }
+    let ObjectState::Image(image) = &objects.get(handles[0]).unwrap().state else {
+        panic!()
+    };
+    assert_eq!(image.selected_frame(), 11);
+    assert!(image.base.updates.needs_rebuild());
+    assert!(
+        object_command(
+            &mut objects,
+            &mut interpreter,
+            &mut numbers,
+            b"base getid 0"
+        )
+        .is_err()
+    );
+    assert_eq!(objects.get(base).unwrap().state, ObjectState::Base);
+    assert_eq!(numbers.shared, [0, 22, 2, 2]);
+
+    let mut interpreter =
+        fes::Interpreter::new(fes::Program::from_text(b"#START\nwait 1\n#single.FOCUS\n").unwrap())
+            .unwrap();
+    objects.publish_bindings(&mut interpreter);
+    numbers.current = 13;
+    assert!(
+        interpreter
+            .dispatch_event("single", -1, "FOCUS", None)
+            .unwrap()
+    );
+    for line in [b"@ setid (@+2)".as_slice(), b"@ getid 3"] {
+        assert!(object_command(&mut objects, &mut interpreter, &mut numbers, line).unwrap());
+    }
+    assert_eq!(numbers.shared[3], 1);
+    assert_eq!(numbers.current, 13);
+}
+
 #[test]
 fn animation_commands_expand_banks_skip_other_types_and_preserve_the_play_switch() {
     let mut objects = Objects::new(HandleAllocator::default()).unwrap();

@@ -8,6 +8,7 @@ use crate::{Error, HandleAllocator, Result, read};
 use std::collections::{BTreeMap, BTreeSet};
 
 mod animation;
+mod commands;
 mod image;
 mod input;
 mod plane;

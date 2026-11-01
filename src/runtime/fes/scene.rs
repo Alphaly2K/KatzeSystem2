@@ -295,6 +295,10 @@ impl<F: ObjectFactory> Store<'_, F> {
                         &mut scene.interpreter,
                         &line,
                         self.numbers,
+                    )? && !scene.objects.dispatch_object_command(
+                        &mut scene.interpreter,
+                        &line,
+                        self.numbers,
                     )? {
                         return Err(Error::new(line.offset, "FES 系统块对象命令尚未接入"));
                     }
@@ -413,6 +417,10 @@ impl<F: ObjectFactory> Store<'_, F> {
                                 continue;
                             }
                             if !scene.objects.dispatch_image_animation(
+                                &mut scene.interpreter,
+                                &line,
+                                self.numbers,
+                            )? && !scene.objects.dispatch_object_command(
                                 &mut scene.interpreter,
                                 &line,
                                 self.numbers,

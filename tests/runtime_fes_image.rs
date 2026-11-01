@@ -1202,6 +1202,83 @@ fn fes_animation_events_defer_loading_and_consume_requests_before_failed_loads()
 }
 
 #[test]
+fn scene_object_commands_select_frames_reload_sizes_and_update_final_pixels() {
+    for budget in [1, 4096] {
+        let (mut runtime, _, list) = setup();
+        runtime.set_budget(budget, 10000);
+        runtime.numbers_mut().shared.resize(4, 0);
+        let mut first = pixel_file(0xffff_0000);
+        let mut second = pixel_file(0xff00_ff00);
+        for pixels in [&mut first, &mut second] {
+            pixels[48..56].fill(0);
+            pixels[68..76].fill(0);
+        }
+        second[16..20].copy_from_slice(&8u32.to_le_bytes());
+        let next = (first.len() - 12) as u32;
+        first[12..16].copy_from_slice(&next.to_le_bytes());
+        first.extend_from_slice(&second[12..]);
+        let mut position = pixel_file(0);
+        position[48..52].copy_from_slice(&3i32.to_le_bytes());
+        position[52..56].copy_from_slice(&2i32.to_le_bytes());
+        let reads = Rc::new(RefCell::new(Vec::new()));
+        runtime.set_resources(PixelFiles {
+            files: BTreeMap::from([
+                (b"texture".to_vec(), first),
+                (b"position".to_vec(), position),
+            ]),
+            reads: reads.clone(),
+        });
+        let program = fes::Program::from_text(b"#DEFINE\nIMAGE sprite\nPLANE panel\n#OBJECT FILE IDN PRI POS DISP\nsprite texture 7 5 1,1 0\n#OBJECT POS SIZE VRAM PRI DISP\npanel 0,0 8,6 0,0 500 1\n#START\n\\0=0\nsprite disp\nsprite pri 7\nwait 1\nsprite setid 8\nsprite getid 0\nsprite size (\\0+=1) (\\0+=1)\n$1=\\0\nwait 1\nsprite size 1 2\nwait 1\nsprite size -1 -1\nsprite pos2 position 7\nwait 1\nsprite disp 0\nwait 99\n").unwrap();
+        let mut scene =
+            katze_system2::runtime::fes::Scene::new(program, runtime.host().handle_allocator())
+                .unwrap();
+        scene
+            .objects_mut()
+            .unwrap()
+            .set_image_list(list, Rect::from_xywh(0, 0, 8, 6));
+        for (now, color, point, read_count, size) in [
+            (100, 0xffff_0000, [1, 1], 1, [1, 1]),
+            (101, 0xff00_ff00, [1, 1], 2, [1, 2]),
+            (102, 0xff00_ff00, [1, 1], 2, [1, 2]),
+            (103, 0xff00_ff00, [3, 2], 4, [1, 1]),
+            (104, 0, [3, 2], 4, [1, 1]),
+        ] {
+            let mut complete = false;
+            for _ in 0..64 {
+                if runtime.update_fes_scene(0, &mut scene, now).unwrap() {
+                    complete = true;
+                    break;
+                }
+            }
+            assert!(complete);
+            let sprite = scene.objects().lookup("sprite", 0).unwrap();
+            let state = image(scene.objects(), sprite);
+            assert_eq!(state.size, size);
+            assert_eq!((state.priority, state.parent_priority), (27, 5));
+            assert_eq!(reads.borrow().len(), read_count);
+            if now > 100 {
+                assert_eq!(&runtime.numbers().shared[..2], &[8, 2]);
+            }
+            send(&mut runtime, list, 298, 0, 0);
+            assert_rectangle(
+                &frame(&mut runtime, budget),
+                Rect::from_xywh(point[0], point[1], 1, 1),
+                color,
+            );
+        }
+        assert_eq!(
+            &*reads.borrow(),
+            &[
+                b"texture".to_vec(),
+                b"texture".to_vec(),
+                b"texture".to_vec(),
+                b"position".to_vec()
+            ]
+        );
+    }
+}
+
+#[test]
 fn fes_scenes_run_image_commands_and_repeat_blocks_after_exit_notifications() {
     for budget in [1, 4096] {
         let (mut runtime, _, list) = setup();

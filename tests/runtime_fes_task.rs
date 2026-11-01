@@ -675,7 +675,7 @@ fn auxiliary_input_reaches_script_values_and_transients_clear_after_the_round() 
 
 #[test]
 fn dedicated_pause_hides_refreshed_media_and_wakes_with_current_fes_display() {
-    let source = b"#DEFINE\nCIMAGE sprite\nCPLANE panel\nPLANE view\n#OBJECT SIZE COLOR PRI POS DISP\nsprite 2,2 0xff123456 5 1,1 21\npanel 1,1 0xff654321 100 5,4 94\n#OBJECT POS SIZE VRAM PRI DISP\nview 0,0 8,6 0,0 500 57\n#START\n$0=$0+1\nwait 77\n$1=$1+1\n#_FES_SLEEP_\n$2=$2+1\n#_FES_WAKE_\n$3=$3+1\n";
+    let source = b"#DEFINE\nCIMAGE sprite\nCPLANE panel\nPLANE view\n#OBJECT SIZE COLOR PRI POS DISP\nsprite 2,2 0xff123456 5 1,1 21\npanel 1,1 0xff654321 100 5,4 94\n#OBJECT POS SIZE VRAM PRI DISP\nview 0,0 8,6 0,0 500 57\n#START\n$0=$0+1\nwait 77\n$1=$1+1\n#_FES_SLEEP_\n$2=$2+1\nsprite size 3 3\nsprite pri ($4+=1)\n#_FES_WAKE_\n$3=$3+1\nsprite size 4 4\npanel pri 99\n";
     for budget in [1, 4096] {
         let Setup { mut runtime, .. } = setup(budget, source);
         let fes = runtime.create(0, kind::FES, b"scene", b"").unwrap();
@@ -700,6 +700,7 @@ fn dedicated_pause_hides_refreshed_media_and_wakes_with_current_fes_display() {
         for (value, count) in [(0, 0), (1, 1), (1, 1), (2, 2)] {
             send(&mut runtime, fes, 348, 0, value);
             assert_eq!(runtime.numbers().shared[2], count);
+            assert_eq!(runtime.numbers().shared[4], count);
         }
         runtime.update(123, 1).unwrap();
         assert_eq!(&runtime.numbers().shared[..4], &[1, 0, 2, 0]);
@@ -719,6 +720,19 @@ fn dedicated_pause_hides_refreshed_media_and_wakes_with_current_fes_display() {
         assert_eq!(
             runtime.drawing().target.as_ref().unwrap().pixel(1, 1),
             Some(0xff123456)
+        );
+        assert_eq!(
+            runtime.drawing().target.as_ref().unwrap().pixel(4, 4),
+            Some(0xff123456)
+        );
+        assert_eq!(
+            runtime
+                .drawables()
+                .get(planes[0])
+                .unwrap()
+                .transform()
+                .base_point()[2],
+            99.
         );
         assert_eq!(runtime.drawables().get(planes[0]).unwrap().display(), 94);
         assert_eq!(runtime.drawables().get(planes[1]).unwrap().display(), 57);
