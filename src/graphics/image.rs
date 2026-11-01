@@ -176,10 +176,16 @@ impl Image {
     }
 }
 
-/// 普通任务持有的图像句柄；显式释放或所属任务回收时失效。
+struct ImageEntry {
+    owner: Option<u32>,
+    references: usize,
+    image: Image,
+}
+
+/// 普通任务与绘制使用者共享的图像；最后一个引用释放后句柄失效。
 #[derive(Default)]
 pub struct Images {
-    entries: BTreeMap<u32, (u32, Image)>,
+    entries: BTreeMap<u32, ImageEntry>,
     handles: HandleAllocator,
 }
 
@@ -235,14 +241,57 @@ impl Images {
             return Err(Error::new(0, "图像对象数量超过上限"));
         }
         let handle = self.handles.allocate()?;
-        self.entries.insert(handle, (owner, image));
+        self.entries.insert(
+            handle,
+            ImageEntry {
+                owner: Some(owner),
+                references: 1,
+                image,
+            },
+        );
         Ok(handle)
     }
 
-    /// 普通 114 显式释放；零句柄跳过，非零失效句柄返回诊断。
+    /// 增加共享持有，使用者通过 `release_reference` 配对释放；像素修改对所有使用者可见。
+    pub fn retain(&mut self, handle: u32) -> Result<()> {
+        let entry = self.entry_mut(handle)?;
+        entry.references = entry
+            .references
+            .checked_add(1)
+            .ok_or_else(|| Error::new(0, "图像引用数量超过上限"))?;
+        Ok(())
+    }
+
+    /// 解除所属任务登记并释放一个引用；零句柄跳过。
     pub fn release(&mut self, handle: u32) -> Result<()> {
-        if handle != 0 && self.entries.remove(&handle).is_none() {
-            return Err(Error::new(0, "图像对象句柄无效"));
+        if handle == 0 {
+            return Ok(());
+        }
+        self.entry_mut(handle)?.owner = None;
+        self.release_reference(handle)
+    }
+
+    /// 普通 114：只解除调用任务的匹配登记，并始终释放一个引用。
+    pub fn release_for(&mut self, owner: u32, handle: u32) -> Result<()> {
+        if handle == 0 {
+            return Ok(());
+        }
+        let entry = self.entry_mut(handle)?;
+        if entry.owner == Some(owner) {
+            entry.owner = None;
+        }
+        self.release_reference(handle)
+    }
+
+    /// 释放共享使用者的一个引用，保留所属任务登记；零句柄跳过。
+    pub fn release_reference(&mut self, handle: u32) -> Result<()> {
+        if handle == 0 {
+            return Ok(());
+        }
+        let entry = self.entry_mut(handle)?;
+        entry.references -= 1;
+        if entry.references == 0 {
+            self.entries.remove(&handle);
         }
         Ok(())
     }
@@ -250,14 +299,17 @@ impl Images {
     pub fn get(&self, handle: u32) -> Result<&Image> {
         self.entries
             .get(&handle)
-            .map(|(_, image)| image)
+            .map(|entry| &entry.image)
             .ok_or_else(|| Error::new(0, "图像对象句柄无效"))
     }
 
     pub fn get_mut(&mut self, handle: u32) -> Result<&mut Image> {
+        Ok(&mut self.entry_mut(handle)?.image)
+    }
+
+    fn entry_mut(&mut self, handle: u32) -> Result<&mut ImageEntry> {
         self.entries
             .get_mut(&handle)
-            .map(|(_, image)| image)
             .ok_or_else(|| Error::new(0, "图像对象句柄无效"))
     }
 
@@ -280,12 +332,18 @@ impl Images {
             .ok_or_else(|| Error::new(0, "图像对象句柄无效"))?;
         let result = self
             .get_mut(target)
-            .map(|target| target.blend_from(&source_image.1, source_rect, at));
+            .map(|target| target.blend_from(&source_image.image, source_rect, at));
         self.entries.insert(source, source_image);
         result
     }
 
     pub fn release_owner(&mut self, owner: u32) {
-        self.entries.retain(|_, (id, _)| *id != owner);
+        self.entries.retain(|_, entry| {
+            if entry.owner == Some(owner) {
+                entry.owner = None;
+                entry.references -= 1;
+            }
+            entry.references != 0
+        });
     }
 }

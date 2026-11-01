@@ -68,7 +68,7 @@ impl Resources {
             ));
         }
         if index == 114 {
-            self.images.release(args[0])?;
+            self.images.release_for(owner, args[0])?;
             return Ok(NativeReturn::Continue);
         }
         if index == 111 {
