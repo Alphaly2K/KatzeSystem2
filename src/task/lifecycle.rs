@@ -35,7 +35,37 @@ impl TaskTree {
         if self.node(self.root_id).is_none() {
             return Err(Error::new(0, "任务树已经关闭"));
         }
-        let mut frames = vec![Frame::Enter(self.root_id)];
+        self.update_scope(self.root_id, now, increment, lifecycle, false)?;
+        Ok(self.node(self.root_id).is_some())
+    }
+
+    /// 显式主体调用前推进子任务；所属对象由调用者持有并更新时钟。
+    pub(crate) fn update_children(
+        &mut self,
+        owner: u32,
+        now: u32,
+        increment: u32,
+        lifecycle: &mut impl Lifecycle,
+    ) -> Result<()> {
+        if self.node(owner).is_none() {
+            return Err(Error::new(0, "任务不存在"));
+        }
+        self.update_scope(owner, now, increment, lifecycle, true)
+    }
+
+    fn update_scope(
+        &mut self,
+        scope: u32,
+        now: u32,
+        increment: u32,
+        lifecycle: &mut impl Lifecycle,
+        children_only: bool,
+    ) -> Result<()> {
+        let mut frames = vec![if children_only {
+            Frame::Children(scope, None)
+        } else {
+            Frame::Enter(scope)
+        }];
         let mut visited = 0;
         while let Some(frame) = frames.pop() {
             match frame {
@@ -56,6 +86,9 @@ impl TaskTree {
                         frames.push(Frame::Enter(child));
                         continue;
                     }
+                    if children_only && id == scope {
+                        continue;
+                    }
                     if id == self.root_id {
                         self.sweep();
                     }
@@ -67,7 +100,7 @@ impl TaskTree {
                 }
             }
         }
-        Ok(self.node(self.root_id).is_some())
+        Ok(())
     }
 
     /// 同步发送子任务删除通知并释放子树；也可用于关闭根任务。

@@ -60,6 +60,10 @@ impl<'a, H: Host, S: TaskServices> TaskHost<'a, H, S> {
 }
 
 impl<H: Host, S: TaskServices> Host for TaskHost<'_, H, S> {
+    fn fes_services(&mut self) -> Option<&mut dyn crate::runtime::fes::Services> {
+        self.inner.fes_services()
+    }
+
     fn surface_size(&self) -> [u32; 2] {
         self.inner.surface_size()
     }

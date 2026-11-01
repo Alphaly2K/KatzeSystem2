@@ -11,8 +11,10 @@ mod animation;
 mod image;
 mod plane;
 mod scene;
+mod task;
 pub use animation::ImageAnimationRequest;
 pub use scene::Scene;
+pub use task::{FesFactory, FesObject, Services};
 
 const TOP: &str = "_TOPOBJ_";
 

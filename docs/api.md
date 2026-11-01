@@ -307,6 +307,8 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 
 对象实现 `runtime::TaskObject`：基类控制与时钟、可选 VM、创建上下文、主体、对象命令、排队与同步消息、删除通知和释放。除对象命令外，返回 `false` 的方法表示本次预算耗尽，续跑由运行时完成；对象命令返回 `task::CommandOutcome`，完成状态与传播状态分开表达。库提供 `BaseObject`（只有控制与时钟）与 `OrdinaryObject`（包裹 `OrdinaryTask`）。`ObjectFactory::create` 按类型编号创建对象；`KcsFactory` 经 `ProgramLoader` 按名称装载普通 KCS，`external_bytes` 指定 VM 外部区容量。`graphics::GraphicsFactory { fallback }` 创建类型 2 的 `PlaneObject`，其他类型委托 fallback；基础平面提供基类控制、几何及查询、显示与输入绑定、事件响应、内部子任务传播及绘图登记清理，运动等缺失入口返回诊断，详见[二维任务对象](graphics.md#基础二维任务对象)。`input::InputFactory { fallback }` 创建类型 11 的 InputObject，接入区域、键、指针查询、光标及基类命令；音频和文字类型继续由对应工厂提供，`kind` 保存基线类型编号。
 
+`runtime::fes::FesFactory { fallback }` 创建未装载的类型 34 任务。运行时依次使用 337 初始化、338 通过文件名缓冲区装载、340 绑定直属共享列表、339 立即启动；338 与 340 可以交换先后。此后由 `Runtime::update` 自动推进。337 的第二数据项用零表示运行时隐式共享状态，338 和 25／26 的字节数据通过 `CommandBuffers.data1` 提供。命令、预算、错误及当前支持范围见[图形文档的 FES 任务对象](graphics.md#fes-任务对象)。TaskObject 的 `creation_context()` 为上下文继承提供只读视图，`accepts_deferred_delete()` 为消费 TaskEffects 的对象开放嵌套删除请求；两者默认不提供。
+
 `RootObject::new(input_task, sound_task)` 保存输入与声音任务编号，命令 34／35 原样返回相应值；任务删除后不会自动选择替代编号。该对象作为 Runtime 的显式根参数使用，子任务由调用者创建，自动启动链仍待接入。根对象遵循专属命令消费规则，其余未实现的专属入口返回诊断。
 
 `runtime::fes::Scene::new(program, handles)` 组合预先装载的 FES 解释器和对象存储；与 Runtime 共用 `runtime.host().handle_allocator()`。调用前通过 `objects_mut()?.set_image_list(list, clip)` 绑定共享列表；`Runtime::update_fes_scene(owner, &mut scene, now)` 消费已支持的脚本事件并按声明顺序更新对象，返回 false 时继续调用以完成预算续跑，期间保留原时刻和游标。true 表示本轮完成，`exit_code()` 在退出且最终对象更新完成后返回退出码。`deadline()` 查询原始等待期限，`is_pending()` 查询续跑状态，`objects()`／`interpreter()` 提供只读查询；推进未完成时 `objects_mut()` 返回诊断。首次推进绑定 owner，后续不能更换。调用方在所属任务主体时点推进，保证该任务时钟已经更新；下层动画命令继续使用任务自身时钟。支持范围和未接入服务见[场景推进](graphics.md#fes-场景推进)。

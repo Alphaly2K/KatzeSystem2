@@ -89,6 +89,21 @@ impl CommandState {
                     self.show_cursor(command.target, 1, true, host)?;
                 }
             }
+            145 => {
+                if command.data[0] >= 80 {
+                    return Err(Error::new(0, "输入键槽位超出 0～79"));
+                }
+                for group in 0..4 {
+                    let mask = super::update::device(host)?
+                        .key(command.data[0], group, false)?
+                        .mask;
+                    if group == 0 {
+                        *output = mask;
+                    } else {
+                        *output |= mask;
+                    }
+                }
+            }
             146 => {
                 for region in &mut self.regions.records {
                     region.words[7] = 0;

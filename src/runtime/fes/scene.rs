@@ -23,9 +23,12 @@ struct Invocation {
 
 impl Scene {
     pub fn new(program: fes::Program, handles: HandleAllocator) -> Result<Self> {
+        let mut interpreter = fes::Interpreter::new(program)?;
+        let objects = Objects::new(handles)?;
+        objects.publish_bindings(&mut interpreter);
         Ok(Self {
-            interpreter: fes::Interpreter::new(program)?,
-            objects: Objects::new(handles)?,
+            interpreter,
+            objects,
             owner: None,
             frame_origin: 0,
             deadline: None,
@@ -57,6 +60,18 @@ impl Scene {
     /// 退出码在最终对象更新完成后可用；退出后仍可逐轮更新媒体对象。
     pub fn exit_code(&self) -> Option<i32> {
         self.exit_code.filter(|_| self.invocation.is_none())
+    }
+
+    pub(super) fn exit_request(&self) -> Option<i32> {
+        self.exit_code
+    }
+
+    pub(super) fn set_system_value(&mut self, name: &str, value: i32) {
+        self.interpreter
+            .named
+            .entry(name.to_owned())
+            .or_default()
+            .insert(0, value);
     }
 
     pub fn is_pending(&self) -> bool {

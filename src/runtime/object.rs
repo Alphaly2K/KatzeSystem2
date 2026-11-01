@@ -16,6 +16,11 @@ pub trait TaskObject {
     fn interpreter(&self) -> Option<&Interpreter>;
     fn interpreter_mut(&mut self) -> Option<&mut Interpreter>;
 
+    /// 支持命令 25 的原始创建上下文；没有上下文存储的对象返回 None。
+    fn creation_context(&self) -> Option<&[u8]> {
+        None
+    }
+
     /// 显式输入入口使用的状态；其他对象返回 None。
     fn input_state(&self) -> Option<&crate::input::InputState> {
         None
@@ -27,6 +32,11 @@ pub trait TaskObject {
     /// 支持执行中任务操作的对象提供队列视图，并在推进 VM 后消费宿主的 TaskEffects。
     fn queued_messages(&self) -> Option<&[[u32; 4]]> {
         None
+    }
+
+    /// 消费 TaskEffects 删除标记的对象可在嵌套调用期间接收删除请求。
+    fn accepts_deferred_delete(&self) -> bool {
+        false
     }
 
     /// 接收创建命令 26 传递的原始上下文；对象类型不支持时返回诊断。
@@ -192,6 +202,10 @@ impl OrdinaryObject {
 }
 
 impl TaskObject for OrdinaryObject {
+    fn creation_context(&self) -> Option<&[u8]> {
+        Some(&self.task.creation_context)
+    }
+
     fn queued_messages(&self) -> Option<&[[u32; 4]]> {
         Some(self.task.queued_messages())
     }

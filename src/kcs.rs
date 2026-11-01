@@ -238,6 +238,11 @@ pub trait Host {
 
     fn set_task_context(&mut self, _context: &[u8]) {}
 
+    /// FES 任务使用同一运行时的共享状态、对象更新和立即启动服务。
+    fn fes_services(&mut self) -> Option<&mut dyn crate::runtime::fes::Services> {
+        None
+    }
+
     /// 具体绘图对象使用的登记与属性服务；独立解释宿主可以不提供。
     fn drawables(&mut self) -> Option<&mut crate::graphics::Drawables> {
         None
@@ -372,6 +377,10 @@ pub trait Host {
 }
 
 impl<T: Host + ?Sized> Host for &mut T {
+    fn fes_services(&mut self) -> Option<&mut dyn crate::runtime::fes::Services> {
+        (**self).fes_services()
+    }
+
     fn handle_allocator(&self) -> Option<crate::HandleAllocator> {
         (**self).handle_allocator()
     }

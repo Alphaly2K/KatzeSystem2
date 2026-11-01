@@ -489,6 +489,9 @@ type InputAction<'a> = dyn FnMut(&mut crate::input::InputState, &mut dyn Host) -
 
 struct RunningTask {
     deleted: bool,
+    deferred_delete: bool,
+    clock: TaskClock,
+    context: Option<Vec<u8>>,
     remaining_messages: Option<usize>,
     effects: TaskEffects,
 }
@@ -558,6 +561,25 @@ fn run_nested<F: ObjectFactory>(
             return Ok(());
         }
     }
+    if let Some(task) = running.get_mut(&target) {
+        let propagate = match &mut execution {
+            Execution::Delete if task.deferred_delete => Some(None),
+            Execution::Command {
+                command, propagate, ..
+            } if command.code == 3 && task.deferred_delete => Some(Some(propagate)),
+            _ => None,
+        };
+        if let Some(propagate) = propagate {
+            if !task.deleted {
+                task.deleted = true;
+                task.effects.delete = true;
+            }
+            if let Some(propagate) = propagate {
+                **propagate = false;
+            }
+            return Ok(());
+        }
+    }
     if let Some(response) = resources.graphics_responses.get_mut(&target) {
         if let Execution::Command {
             command, propagate, ..
@@ -617,6 +639,9 @@ fn run_nested<F: ObjectFactory>(
         target,
         RunningTask {
             deleted: object.control().deletion_requested != 0,
+            deferred_delete: object.accepts_deferred_delete(),
+            clock: object.clock().clone(),
+            context: object.creation_context().map(<[u8]>::to_vec),
             remaining_messages: object
                 .queued_messages()
                 .map(|messages| read::MAX_ITEMS.saturating_sub(messages.len())),
@@ -926,7 +951,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     return Ok(NativeReturn::Continue);
                 }
                 if let Some(task) = self.running.get_mut(&args[0]) {
-                    if task.remaining_messages.is_none() {
+                    if task.remaining_messages.is_none() && !task.deferred_delete {
                         return Err(Error::new(vm.pc, "执行中对象不支持删除请求"));
                     }
                     if !task.deleted {
@@ -1024,6 +1049,10 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
 }
 
 impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
+    fn fes_services(&mut self) -> Option<&mut dyn fes::Services> {
+        Some(self)
+    }
+
     fn surface_size(&self) -> [u32; 2] {
         self.host.surface_size
     }
@@ -1181,14 +1210,18 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
             return TaskEffects::default();
         };
         let effects = std::mem::take(&mut task.effects);
-        task.remaining_messages = Some(
-            read::MAX_ITEMS.saturating_sub(queued_messages.saturating_add(effects.messages.len())),
-        );
+        if let Some(remaining) = &mut task.remaining_messages {
+            *remaining = read::MAX_ITEMS
+                .saturating_sub(queued_messages.saturating_add(effects.messages.len()));
+        }
         effects
     }
 
     fn set_task_clock(&mut self, clock: &TaskClock) {
         self.host.set_task_clock(clock);
+        if let Some(task) = self.running.get_mut(&self.host.task_id) {
+            task.clock = clock.clone();
+        }
     }
 
     fn set_task_id(&mut self, id: u32) {
@@ -1198,6 +1231,9 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
     fn set_task_context(&mut self, context: &[u8]) {
         self.context.clear();
         self.context.extend_from_slice(context);
+        if let Some(task) = self.running.get_mut(&self.host.task_id) {
+            task.context = Some(context.to_vec());
+        }
     }
 
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn> {
