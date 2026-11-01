@@ -1,6 +1,6 @@
 use super::{
-    Events, KeyEvent, KeyEventKind, KeySample, KeyServices, KeyTransition, Keys, PointerMotion,
-    Regions,
+    CoordinateMap, Events, InputDevice, KeyEvent, KeyEventKind, KeySample, KeyServices,
+    KeyTransition, Keys, PointerMotion, PointerState, Regions,
 };
 use crate::kcs::Host;
 use crate::task::{Command, CommandBuffers, Control, TaskClock};
@@ -13,7 +13,14 @@ pub struct CommandState {
     pub clock: TaskClock,
     pub regions: Regions,
     pub keys: Keys,
+    pub pointer: PointerState,
     raw_state: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InputDelivery {
+    Direct,
+    Broadcast,
 }
 
 impl CommandState {
@@ -24,6 +31,8 @@ impl CommandState {
         command: &Command,
         buffers: &mut CommandBuffers<'_>,
         output: &mut u32,
+        coordinates: CoordinateMap,
+        device: Option<&mut dyn InputDevice>,
     ) -> Result<bool> {
         if self.control.deletion_requested != 0 {
             return Ok(false);
@@ -41,25 +50,73 @@ impl CommandState {
             };
             return Ok(false);
         }
-        if (126..=160).contains(&command.code) {
-            return Err(Error::new(
-                0,
-                format!("输入对象命令 {} 尚未接入", command.code),
-            ));
+        match command.code {
+            3 => self.request_delete(device)?,
+            126 => {
+                let device = device.ok_or_else(|| Error::new(0, "宿主未配置输入设备"))?;
+                let point = coordinates.to_logical(device.pointer()?.position).0;
+                write(buffers.data0.as_deref_mut(), &point[0].to_le_bytes())?;
+                write(buffers.data1.as_deref_mut(), &point[1].to_le_bytes())?;
+            }
+            146 => {
+                for region in &mut self.regions.records {
+                    region.words[7] = 0;
+                }
+                self.pointer.position = [-1; 2];
+                self.pointer.forced = 1;
+            }
+            149 => write(
+                buffers.data1.as_deref_mut(),
+                &self.pointer.cursor_shown.to_le_bytes(),
+            )?,
+            150 => {
+                let device = device.ok_or_else(|| Error::new(0, "宿主未配置输入设备"))?;
+                device.show_cursor(command.data[1])?;
+                self.pointer.cursor_requested = device.cursor_visible()?;
+            }
+            153 => *output = u32::from(self.pointer.active == 0),
+            160 => {
+                if buffers.data1.is_some() || command.data[1] != 0 {
+                    write(buffers.data1.as_deref_mut(), &self.pointer.history)?;
+                }
+            }
+            _ => {
+                if (126..=160).contains(&command.code) {
+                    return Err(Error::new(
+                        0,
+                        format!("输入对象命令 {} 尚未接入", command.code),
+                    ));
+                }
+                return self.control.dispatch(
+                    kind,
+                    &mut self.clock,
+                    command,
+                    output,
+                    |_, _, _, _| Ok(true),
+                );
+            }
         }
-        self.control
-            .dispatch(kind, &mut self.clock, command, output, |_, _, _, _| {
-                Ok(true)
-            })
+        Ok(false)
     }
 
-    fn split(&mut self, raw_state: u32) -> (&mut Regions, Callback<'_>) {
+    pub(crate) fn request_delete(&mut self, device: Option<&mut dyn InputDevice>) -> Result<()> {
+        if self.control.deletion_requested == 0 {
+            if let Some(device) = device {
+                device.show_cursor(1)?;
+            }
+            self.control.deletion_requested = 1;
+        }
+        Ok(())
+    }
+
+    pub(super) fn split(&mut self, raw_state: u32) -> (&mut Regions, Callback<'_>) {
         self.raw_state = raw_state;
         let Self {
             control,
             clock,
             regions,
             keys,
+            pointer,
             raw_state,
         } = self;
         (
@@ -68,6 +125,7 @@ impl CommandState {
                 control,
                 clock,
                 keys,
+                pointer,
                 raw_state,
             },
         )
@@ -78,7 +136,7 @@ impl CommandState {
 #[derive(Default)]
 pub struct InputState {
     pub(crate) commands: CommandState,
-    events: Events,
+    pub(super) events: Events,
 }
 
 impl InputState {
@@ -97,6 +155,16 @@ impl InputState {
     pub fn events_mut(&mut self) -> &mut Events {
         &mut self.events
     }
+    pub fn pointer(&self) -> &PointerState {
+        &self.commands.pointer
+    }
+    pub fn pointer_mut(&mut self) -> &mut PointerState {
+        &mut self.commands.pointer
+    }
+    pub(crate) fn initialize_pointer(&mut self, position: [i32; 2]) {
+        self.commands.pointer.position = position;
+        self.commands.pointer.active = 0;
+    }
 
     pub fn dispatch_command(
         &mut self,
@@ -104,10 +172,18 @@ impl InputState {
         command: &Command,
         buffers: &mut CommandBuffers<'_>,
         output: &mut u32,
+        host: &mut dyn Host,
     ) -> Result<bool> {
         self.commands.raw_state = self.events.raw_state();
-        self.commands
-            .dispatch_command(kind, command, buffers, output)
+        let coordinates = host.input_coordinates();
+        self.commands.dispatch_command(
+            kind,
+            command,
+            buffers,
+            output,
+            coordinates,
+            host.input_device(),
+        )
     }
 
     pub fn dispatch_key(&mut self, id: u32, event: KeyEvent, host: &mut dyn Host) -> Result<bool> {
@@ -172,15 +248,16 @@ impl InputState {
     }
 }
 
-struct Callback<'a> {
+pub(super) struct Callback<'a> {
     control: &'a mut Control,
     clock: &'a mut TaskClock,
     keys: &'a mut Keys,
+    pointer: &'a mut PointerState,
     raw_state: &'a mut u32,
 }
 
 impl Callback<'_> {
-    fn route(
+    pub(super) fn route(
         &mut self,
         host: &mut dyn Host,
         regions: &mut Regions,
@@ -192,17 +269,33 @@ impl Callback<'_> {
             clock: std::mem::take(self.clock),
             regions: std::mem::take(regions),
             keys: std::mem::take(self.keys),
+            pointer: std::mem::take(self.pointer),
             raw_state: *self.raw_state,
         };
         let mut output = 1;
-        let result = host.dispatch_input_command(&mut state, command, buffers, &mut output);
+        let result = host.dispatch_input_command(
+            &mut state,
+            InputDelivery::Direct,
+            command,
+            buffers,
+            &mut output,
+        );
         *self.control = state.control;
         *self.clock = state.clock;
         *regions = state.regions;
         *self.keys = state.keys;
+        *self.pointer = state.pointer;
         *self.raw_state = state.raw_state;
         result.map(|found| found.then_some(output))
     }
+}
+
+fn write(buffer: Option<&mut [u8]>, value: &[u8]) -> Result<()> {
+    let buffer = buffer
+        .filter(|bytes| bytes.len() >= value.len())
+        .ok_or_else(|| Error::new(0, "输入输出缓冲区缺失或过短"))?;
+    buffer[..value.len()].copy_from_slice(value);
+    Ok(())
 }
 
 struct Scan<'a> {

@@ -248,6 +248,13 @@ pub trait Host {
         None
     }
 
+    fn input_device(&mut self) -> Option<&mut dyn crate::input::InputDevice> {
+        None
+    }
+    fn input_coordinates(&self) -> crate::input::CoordinateMap {
+        crate::input::CoordinateMap::default()
+    }
+
     /// 查询当前对象在有符号编号游标之后的直属子任务；None 从首项开始。
     fn next_task_child(&self, _previous: Option<u32>) -> Result<Option<u32>> {
         Err(Error::new(0, "宿主未提供任务子级查询"))
@@ -266,6 +273,7 @@ pub trait Host {
     fn dispatch_input_command(
         &mut self,
         _state: &mut crate::input::CommandState,
+        _delivery: crate::input::InputDelivery,
         _command: crate::task::Command,
         _buffers: &mut crate::task::CommandBuffers<'_>,
         _output: &mut u32,
@@ -308,6 +316,13 @@ impl<T: Host + ?Sized> Host for &mut T {
         (**self).resource_services()
     }
 
+    fn input_device(&mut self) -> Option<&mut dyn crate::input::InputDevice> {
+        (**self).input_device()
+    }
+    fn input_coordinates(&self) -> crate::input::CoordinateMap {
+        (**self).input_coordinates()
+    }
+
     fn next_task_child(&self, previous: Option<u32>) -> Result<Option<u32>> {
         (**self).next_task_child(previous)
     }
@@ -328,11 +343,12 @@ impl<T: Host + ?Sized> Host for &mut T {
     fn dispatch_input_command(
         &mut self,
         state: &mut crate::input::CommandState,
+        delivery: crate::input::InputDelivery,
         command: crate::task::Command,
         buffers: &mut crate::task::CommandBuffers<'_>,
         output: &mut u32,
     ) -> Result<bool> {
-        (**self).dispatch_input_command(state, command, buffers, output)
+        (**self).dispatch_input_command(state, delivery, command, buffers, output)
     }
 }
 

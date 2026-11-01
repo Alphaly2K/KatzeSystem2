@@ -15,7 +15,7 @@
 |`resource`|启动归档类别配置、名称补全、目录索引、KIF 解密及虚拟名路由|自动挂载、列表读取、补丁发现、缓存及别名|
 |`hg3`|0x300 帧目录、标准元数据、按 ID 选帧及原生 32 位完整帧像素解码|其他位深、切片及其他图像编码|
 |`graphics`|BGRA8 渲染面、裁剪填充／复制／普通混合，图像装载与持有、绘图变换／投影／三角形及排序、KX2 几何装载、显式画布图元、画布矩形／源变换／延迟切割及独立帧提交、基础二维任务及图元脚本接口、纯色／渐变三角形和纹理 CPU 核心、分块渲染目标及绘图状态|完整帧自动驱动、缩放／特殊混合、输入绑定、缓存和设备呈现|
-|`input`|两级坐标转换、区域命令 127～136／154、137 查询、键命令 151／152、四组扫描与重复、按键捕获、位图及指针通知；对象与运行时显式入口|自动输入更新、平台设备与映射配置、图像生成掩码和焦点导航|
+|`input`|两级坐标转换、区域和键命令、四组扫描与重复、捕获、位图及指针通知、滚轮、移动阈值、自动光标、快照查询；对象、显式入口及同步设备更新|平滑定位、平台设备与映射配置、图像生成掩码和焦点导航|
 |`task`|任务编号、父子索引、子树移除、编号回收、直接命令与类型广播路由、基类控制、整数时钟及同步树更新／销毁调度|类型专属对象与序列化|
 |`runtime`|任务树、对象存储、普通宿主状态与对象工厂的整合；普通对象、基类对象、任务 native、78／79／80／82／83／84／100／101、111／112／114／115／117、365／366／368、590～593|其他对象类型、系统 native 组合、程序装载时点|
 
@@ -153,7 +153,7 @@ FES 内部执行宏声明，初始化按以下顺序交给宿主：
 
 普通任务在更新、同步消息及删除通知前通过 `Host::set_task_clock`、`set_task_id` 和 `set_task_context` 同步当前时钟、编号及原始创建上下文；包装宿主应委托这三个方法。`Host::take_task_effects(queued_messages)` 接收当前队列长度并返回 `TaskEffects { delete, messages }`，默认无操作；普通任务在每次 VM 推进前后应用它，保留处理消息期间继续入队的时点及容量检查。包装宿主同样需要委托此方法。`CoreHost` 已接入时钟及编号，`TaskHost` 保存上下文供创建使用。4 返回外层平台计时器提供的 `CoreHost.system_time_ms`，初值零，单位毫秒，按 u32 回绕；该字段独立于任务时钟更新。任务树、创建／删除和对象命令由外层负责。
 
-`CoreHost.pointer_position: [i32; 2]` 提供普通表 149 的当前逻辑指针坐标，初值 `[0, 0]`。输入宿主负责平台取样及窗口到逻辑画布的变换，并在脚本查询前更新该值；负数及画布外坐标保留。149 依次写 X 和 Y，不压入返回值。任务编号和时钟同步不改变坐标。
+`CoreHost.pointer_position: [i32; 2]` 提供普通表 149 的当前逻辑指针坐标，初值 `[0, 0]`。独立宿主在查询前更新该值；Runtime 绑定 InputDevice 后在每次 149 调用时即时查询并经共享 CoordinateMap 换算，无设备则使用既有缓存。负数及画布外坐标保留。149 依次写 X 和 Y，不压入返回值。任务编号和时钟同步不改变坐标。
 
 ### 同步系统服务
 
@@ -287,9 +287,11 @@ FES 内部执行宏声明，初始化按以下顺序交给宿主：
 
 `CanvasLayout::new(tile_size, grid, step)` 与 `triangulate(source)` 将已变换的源几何切成逐块画布三角形，保留原顺序、颜色及局部 UV。步长、整数裁剪门控和资源上限见[画布几何切割](graphics.md#画布几何切割)。`Drawable::from_canvas_source` 与平面命令 41 保留源和包装两套变换；源变化后通过 `prepare_canvas` 更新，帧提交自动准备可见对象。直接查询与属性选择契约见[画布纹理包装](graphics.md#画布纹理包装)。
 
-对象实现 `runtime::TaskObject`：基类控制与时钟、可选 VM、创建上下文、主体、对象命令、排队与同步消息、删除通知和释放。除对象命令外，返回 `false` 的方法表示本次预算耗尽，续跑由运行时完成；对象命令返回 `task::CommandOutcome`，完成状态与传播状态分开表达。库提供 `BaseObject`（只有控制与时钟）与 `OrdinaryObject`（包裹 `OrdinaryTask`）。`ObjectFactory::create` 按类型编号创建对象；`KcsFactory` 经 `ProgramLoader` 按名称装载普通 KCS，`external_bytes` 指定 VM 外部区容量。`graphics::GraphicsFactory { fallback }` 创建类型 2 的 `PlaneObject`，其他类型委托 fallback；基础平面提供基类控制、矩形／空图元、向量／矩阵属性和查询、内部子任务传播及绘图登记清理，运动及输入等缺失入口返回诊断，详见[二维任务对象](graphics.md#基础二维任务对象)。`input::InputFactory { fallback }` 创建类型 11 的 InputObject，接入区域、键、137 查询及基类命令；音频和文字类型继续由对应工厂提供，`kind` 保存基线类型编号。
+对象实现 `runtime::TaskObject`：基类控制与时钟、可选 VM、创建上下文、主体、对象命令、排队与同步消息、删除通知和释放。除对象命令外，返回 `false` 的方法表示本次预算耗尽，续跑由运行时完成；对象命令返回 `task::CommandOutcome`，完成状态与传播状态分开表达。库提供 `BaseObject`（只有控制与时钟）与 `OrdinaryObject`（包裹 `OrdinaryTask`）。`ObjectFactory::create` 按类型编号创建对象；`KcsFactory` 经 `ProgramLoader` 按名称装载普通 KCS，`external_bytes` 指定 VM 外部区容量。`graphics::GraphicsFactory { fallback }` 创建类型 2 的 `PlaneObject`，其他类型委托 fallback；基础平面提供基类控制、矩形／空图元、向量／矩阵属性和查询、内部子任务传播及绘图登记清理，运动及输入等缺失入口返回诊断，详见[二维任务对象](graphics.md#基础二维任务对象)。`input::InputFactory { fallback }` 创建类型 11 的 InputObject，接入区域、键、指针查询、光标及基类命令；音频和文字类型继续由对应工厂提供，`kind` 保存基线类型编号。
 
-`Runtime::input_state(id)`／`input_state_mut(id)` 查询输入状态。`dispatch_input_key`、`scan_input_keys`、`update_input_selection`、`dispatch_input_motion` 将逻辑坐标和设备查询连接到真实任务命令路由。接收者回调可以修改正在执行的输入任务的区域、键开关及基类状态，后续遍历立即生效，错误返回也保留已发生的修改。完整协议见[输入对象](input.md#输入对象与运行时)。输入对象的自动设备更新尚未接入，树更新到其主体时返回诊断；显式入口不代替完整输入主体。
+`Runtime::input_state(id)`／`input_state_mut(id)` 查询输入状态。`dispatch_input_key`、`scan_input_keys`、`update_input_selection`、`dispatch_input_motion` 将逻辑坐标和设备查询连接到真实任务命令路由。接收者回调可以修改正在执行的输入任务的区域、键开关、指针及基类状态，后续遍历立即生效，错误返回也保留已发生的修改。完整协议见[输入对象](input.md#输入对象与运行时)。
+
+`Runtime::set_input_device(device)` 绑定同步 `input::InputDevice`，为已有输入对象逐个查询初始位置；之后新建输入对象在登记前查询，失败不占用编号。共享映射通过 `input_coordinates()`／`input_coordinates_mut()` 配置。InputObject 主体自动执行轮询、选择、按键、滚轮、拖动、光标及更新收尾；未绑定设备返回诊断，显式事件入口仍可使用。平滑定位及平台采集继续实现，设备协议及查询次序见[同步设备更新](input.md#同步设备更新)。独立输入宿主提供 `Host::input_device`／`input_coordinates` 和 `dispatch_input_command(state, delivery, command, buffers, output)`，delivery 区分直接分派与广播，返回值表示目标可达性。
 
 普通对象执行期间仍接受 67 删除请求及 70 排队消息；69 同步发送给执行中的普通 VM 时返回零。删除请求保留后续指令，实际析构继续发生在树更新；消息处理阶段追加的消息在同一轮继续消费，无消息恢复阶段追加的消息留到下一轮。`TaskObject::queued_messages()` 提供可选队列视图，支持执行中任务操作的自定义对象应提供该视图并消费 `Host::take_task_effects`；`OrdinaryObject` 已完成这些操作。给已有删除标记的对象排队时，原 native 的返回槽未初始化，运行时返回诊断且不入队。
 

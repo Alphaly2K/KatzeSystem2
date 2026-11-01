@@ -4,14 +4,16 @@ use crate::runtime::{ObjectFactory, TaskObject, kind};
 use crate::task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock};
 use crate::{Error, Result};
 
-/// 输入对象的命令及显式事件入口；自动设备更新尚未接入。
+/// 输入对象的命令、显式事件入口和同步设备更新。
 pub struct InputObject {
+    id: u32,
     state: InputState,
 }
 
 impl InputObject {
-    pub fn new() -> Self {
+    pub fn new(id: u32) -> Self {
         Self {
+            id,
             state: InputState::default(),
         }
     }
@@ -19,7 +21,7 @@ impl InputObject {
 
 impl Default for InputObject {
     fn default() -> Self {
-        Self::new()
+        Self::new(0)
     }
 }
 
@@ -59,11 +61,12 @@ impl TaskObject for InputObject {
 
     fn update_body(
         &mut self,
-        _host: &mut dyn Host,
+        host: &mut dyn Host,
         _increment: u32,
         _budget: usize,
     ) -> Result<bool> {
-        Err(Error::new(0, "输入任务的自动设备更新尚未接入"))
+        self.state.update_device(self.id, host)?;
+        Ok(true)
     }
 
     fn dispatch_command(
@@ -90,11 +93,11 @@ impl TaskObject for InputObject {
         command: &Command,
         buffers: &mut CommandBuffers<'_>,
         output: &mut u32,
-        _host: &mut dyn Host,
+        host: &mut dyn Host,
         _budget: usize,
     ) -> Result<CommandOutcome> {
         self.state
-            .dispatch_command(kind, command, buffers, output)
+            .dispatch_command(kind, command, buffers, output, host)
             .map(CommandOutcome::finished)
     }
 
@@ -112,8 +115,8 @@ impl TaskObject for InputObject {
         Err(Error::new(0, "输入对象不接收普通 KCS 同步消息"))
     }
 
-    fn request_delete(&mut self, _host: &mut dyn Host, _budget: usize) -> Result<bool> {
-        self.state.commands.control.deletion_requested = 1;
+    fn request_delete(&mut self, host: &mut dyn Host, _budget: usize) -> Result<bool> {
+        self.state.commands.request_delete(host.input_device())?;
         Ok(true)
     }
 }
@@ -126,7 +129,7 @@ pub struct InputFactory<F> {
 impl<F: ObjectFactory> ObjectFactory for InputFactory<F> {
     fn create(&mut self, id: u32, object_kind: u32, name: &[u8]) -> Result<Box<dyn TaskObject>> {
         if object_kind == kind::INPUT {
-            Ok(Box::new(InputObject::new()))
+            Ok(Box::new(InputObject::new(id)))
         } else {
             self.fallback.create(id, object_kind, name)
         }

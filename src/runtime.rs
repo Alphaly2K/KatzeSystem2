@@ -257,15 +257,7 @@ impl<F: ObjectFactory> Runtime<F> {
     /// 普通 KCS 程序在工厂返回前装载。基线中装载发生在构造还是首次更新尚未核实，
     /// 需要其他时点时由调用者提供相应的工厂实现。
     pub fn create(&mut self, parent: u32, kind: u32, name: &[u8], context: &[u8]) -> Result<u32> {
-        create_object(
-            &mut self.tree,
-            &mut self.objects,
-            &mut self.factory,
-            parent,
-            kind,
-            name,
-            context,
-        )
+        create_object(self.store(), parent, kind, name, context)
     }
 
     /// 由外层调度器按 `origin` 路由任务命令；目标不可达时返回零。
@@ -295,6 +287,34 @@ impl<F: ObjectFactory> Runtime<F> {
         self.objects
             .get_mut(&id)
             .and_then(|object| object.input_state_mut())
+    }
+
+    /// 绑定同步设备，并读取已有输入对象的初始设备位置。
+    pub fn set_input_device(
+        &mut self,
+        device: impl crate::input::InputDevice + 'static,
+    ) -> Result<()> {
+        self.resources.input_device = Some(Box::new(device));
+        for object in self.objects.values_mut() {
+            if let Some(state) = object.input_state_mut() {
+                let position = self
+                    .resources
+                    .input_device
+                    .as_mut()
+                    .unwrap()
+                    .pointer()?
+                    .position;
+                state.initialize_pointer(position);
+            }
+        }
+        Ok(())
+    }
+
+    pub fn input_coordinates(&self) -> &crate::input::CoordinateMap {
+        &self.resources.input_coordinates
+    }
+    pub fn input_coordinates_mut(&mut self) -> &mut crate::input::CoordinateMap {
+        &mut self.resources.input_coordinates
     }
 
     /// 以已经转换的逻辑坐标同步分派一条输入事件。
@@ -389,20 +409,29 @@ impl<F: ObjectFactory> Runtime<F> {
 /// 命令 66 在返回前完成创建、登记和上下文传递；这里先完成上下文，任何失败都不会留下
 /// 已占用但无对象的编号。
 fn create_object<F: ObjectFactory>(
-    tree: &mut TaskTree,
-    objects: &mut BTreeMap<u32, Box<dyn TaskObject>>,
-    factory: &mut F,
+    store: Store<'_, F>,
     parent: u32,
     kind: u32,
     name: &[u8],
     context: &[u8],
 ) -> Result<u32> {
+    let Store {
+        tree,
+        objects,
+        factory,
+        resources,
+        ..
+    } = store;
     if tree.node(parent).is_none() {
         return Err(Error::new(0, "任务父级不存在"));
     }
     let id = tree.next_id();
     let mut object = factory.create(id, kind, name)?;
     object.set_creation_context(context)?;
+    if let (Some(state), Some(device)) = (object.input_state_mut(), resources.input_device.as_mut())
+    {
+        state.initialize_pointer(device.pointer()?.position);
+    }
     tree.insert(parent, id, kind)?;
     objects.insert(id, object);
     Ok(id)
@@ -472,7 +501,7 @@ fn run_nested<F: ObjectFactory>(
     } = store;
     if let Some(state) = resources.input_callbacks.get_mut(&target) {
         if matches!(&execution, Execution::Delete | Execution::MarkDestroying) {
-            state.control.deletion_requested = 1;
+            state.request_delete(resources.input_device.as_mut().map(|d| d.as_mut() as _))?;
             return Ok(());
         }
         return Err(Error::new(0, "输入回调期间不支持重新执行该任务"));
@@ -590,6 +619,24 @@ fn route_command<F: ObjectFactory>(
     buffers: &mut CommandBuffers<'_>,
     output: &mut u32,
 ) -> Result<bool> {
+    route_command_mode(
+        store,
+        origin,
+        command,
+        buffers,
+        output,
+        crate::input::InputDelivery::Direct,
+    )
+}
+
+fn route_command_mode<F: ObjectFactory>(
+    store: Store<'_, F>,
+    origin: u32,
+    command: Command,
+    buffers: &mut CommandBuffers<'_>,
+    output: &mut u32,
+    delivery: crate::input::InputDelivery,
+) -> Result<bool> {
     let Store {
         numbers,
         host,
@@ -601,10 +648,17 @@ fn route_command<F: ObjectFactory>(
         budget,
         limit,
     } = store;
-    tree.dispatch(origin, command, output, |tree, command, output| {
+    let handler = |tree: &mut TaskTree, command: &Command, output: &mut u32| {
         let kind = tree.node(command.target).map_or(0, |node| node.kind);
         if let Some(state) = resources.input_callbacks.get_mut(&command.target) {
-            return state.dispatch_command(kind, command, buffers, output);
+            return state.dispatch_command(
+                kind,
+                command,
+                buffers,
+                output,
+                resources.input_coordinates,
+                resources.input_device.as_mut().map(|d| d.as_mut() as _),
+            );
         }
         let mut propagate = false;
         run_nested(
@@ -629,7 +683,17 @@ fn route_command<F: ObjectFactory>(
             },
         )?;
         Ok(propagate)
-    })
+    };
+    match delivery {
+        crate::input::InputDelivery::Direct => tree.dispatch(origin, command, output, handler),
+        crate::input::InputDelivery::Broadcast => {
+            if tree.find_reachable(origin, command.target).is_none() {
+                return Ok(false);
+            }
+            tree.broadcast(origin, None, command, output, handler)?;
+            Ok(true)
+        }
+    }
 }
 
 /// 执行中对象的宿主：普通表 native 委托 [`call_native`]，任务 native 使用对象存储。
@@ -755,15 +819,8 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     .iter()
                     .position(|&byte| byte == 0)
                     .unwrap_or(self.context.len());
-                let id = create_object(
-                    &mut *self.tree,
-                    &mut *self.objects,
-                    &mut *self.factory,
-                    args[1],
-                    args[0],
-                    &name,
-                    &self.context[..end],
-                )?;
+                let context = self.context[..end].to_vec();
+                let id = create_object(self.store(), args[1], args[0], &name, &context)?;
                 Ok(NativeReturn::Value(id))
             }
             67 => {
@@ -873,6 +930,16 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
 }
 
 impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
+    fn input_device(&mut self) -> Option<&mut dyn crate::input::InputDevice> {
+        self.resources
+            .input_device
+            .as_mut()
+            .map(|device| device.as_mut() as _)
+    }
+
+    fn input_coordinates(&self) -> crate::input::CoordinateMap {
+        self.resources.input_coordinates
+    }
     fn canvas_layout(&self) -> Result<Option<crate::graphics::CanvasLayout>> {
         self.resources
             .drawing
@@ -912,6 +979,7 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
     fn dispatch_input_command(
         &mut self,
         state: &mut crate::input::CommandState,
+        delivery: crate::input::InputDelivery,
         command: Command,
         buffers: &mut CommandBuffers<'_>,
         output: &mut u32,
@@ -925,7 +993,7 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         self.resources
             .input_callbacks
             .insert(origin, std::mem::take(state));
-        let result = route_command(self.store(), origin, command, buffers, output);
+        let result = route_command_mode(self.store(), origin, command, buffers, output, delivery);
         *state = self.resources.input_callbacks.remove(&origin).unwrap();
         result
     }
@@ -955,6 +1023,18 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
     }
 
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn> {
+        if index == 149 {
+            if arguments.len() != 8 {
+                return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+            }
+            if let Some(device) = self.resources.input_device.as_mut() {
+                self.host.pointer_position = self
+                    .resources
+                    .input_coordinates
+                    .to_logical(device.pointer()?.position)
+                    .0;
+            }
+        }
         if matches!(index, 78 | 79 | 80 | 82 | 83 | 84 | 100 | 101) {
             return self.graphics_native(index, arguments, vm);
         }

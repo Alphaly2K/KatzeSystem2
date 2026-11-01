@@ -10,6 +10,8 @@ pub(super) struct Resources {
     pub drawables: Drawables,
     pub raw: ResourceState,
     pub input_callbacks: std::collections::BTreeMap<u32, crate::input::CommandState>,
+    pub input_device: Option<Box<dyn crate::input::InputDevice>>,
+    pub input_coordinates: crate::input::CoordinateMap,
 }
 
 impl Resources {

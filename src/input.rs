@@ -10,11 +10,14 @@ pub use motion::PointerMotion;
 mod keys;
 pub use keys::{KeySample, KeyServices, KeyState, KeyTransition, Keys};
 mod state;
-pub use state::{CommandState, InputState};
+pub use state::{CommandState, InputDelivery, InputState};
 mod object;
 pub use object::{InputFactory, InputObject};
 mod coordinates;
 pub use coordinates::CoordinateMap;
+mod device;
+pub use device::{InputDevice, PointerSample, PointerState};
+mod update;
 
 /// 输入区域的十五 DWORD 记录；可移植位掩码以存在标记代替指针槽。
 #[derive(Clone, Debug)]
