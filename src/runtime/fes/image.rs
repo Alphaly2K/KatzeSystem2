@@ -1,9 +1,9 @@
 use super::{ObjectState, Objects};
 use crate::graphics::Rect;
-use crate::runtime::{ObjectFactory, Runtime, kind};
+use crate::runtime::{ObjectFactory, Store, kind};
 use crate::{Error, Result};
 
-impl<F: ObjectFactory> Runtime<F> {
+impl<F: ObjectFactory> Store<'_, F> {
     pub(super) fn update_fes_cimage(
         &mut self,
         owner: u32,
@@ -19,13 +19,14 @@ impl<F: ObjectFactory> Runtime<F> {
                 state.size = self.fes_image_geometry(resource, true)?;
             }
             if let Err(error) = self
-                .images_mut()
+                .resources
+                .images
                 .recreate(wrapper, state.size.map(|v| v as u32))
             {
                 state.updates.rebuild = false;
                 return Err(error);
             }
-            let image = self.images_mut().get_mut(wrapper)?;
+            let image = self.resources.images.get_mut(wrapper)?;
             image.fill_rect_from_bottom(
                 Rect::from_xywh(0, 0, state.size[0], state.size[1]),
                 state.color as u32,
@@ -97,7 +98,7 @@ impl<F: ObjectFactory> Runtime<F> {
                 )?
             };
             if loaded {
-                let image = self.images_mut().get_mut(wrapper)?;
+                let image = self.resources.images.get_mut(wrapper)?;
                 let info = *image.info();
                 let object = objects.get_mut(handle).unwrap();
                 let state = object.state.image_mut().unwrap();
@@ -134,7 +135,7 @@ impl<F: ObjectFactory> Runtime<F> {
         match objects.get(handle).unwrap().image {
             Some(image) => Ok(image),
             None => {
-                let image = self.images_mut().create_empty(owner)?;
+                let image = self.resources.images.create_empty(owner)?;
                 objects.get_mut(handle).unwrap().image = Some(image);
                 Ok(image)
             }
@@ -173,7 +174,7 @@ impl<F: ObjectFactory> Runtime<F> {
                     objects.invalidate(handle)?;
                 }
             }
-            let pixels = self.images().pixel_handle(wrapper)?;
+            let pixels = self.resources.images.pixel_handle(wrapper)?;
             let raw = objects.get(handle).unwrap().raw_image;
             let state = objects.get(handle).unwrap().state.image().unwrap();
             let slot = state.parent_priority as u32;

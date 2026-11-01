@@ -3,7 +3,7 @@ use crate::{
     Error, Result,
     expression::State,
     fes,
-    runtime::{ObjectFactory, Runtime},
+    runtime::{ObjectFactory, Store},
 };
 
 /// FES IMAGE 保存的动画请求；待对象更新时装载并设置列表播放状态。
@@ -92,7 +92,7 @@ impl Objects {
     }
 }
 
-impl<F: ObjectFactory> Runtime<F> {
+impl<F: ObjectFactory> Store<'_, F> {
     pub(super) fn update_fes_image_animation(
         &mut self,
         owner: u32,

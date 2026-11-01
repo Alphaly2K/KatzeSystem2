@@ -506,6 +506,22 @@ struct Store<'a, F: ObjectFactory> {
     limit: usize,
 }
 
+impl<F: ObjectFactory> Store<'_, F> {
+    fn reborrow(&mut self) -> Store<'_, F> {
+        Store {
+            numbers: self.numbers,
+            host: self.host,
+            resources: self.resources,
+            tree: self.tree,
+            objects: self.objects,
+            running: self.running,
+            factory: self.factory,
+            budget: self.budget,
+            limit: self.limit,
+        }
+    }
+}
+
 /// 取出目标对象执行一次，完成后放回并恢复宿主记录的当前任务状态。
 fn run_nested<F: ObjectFactory>(
     store: Store<'_, F>,

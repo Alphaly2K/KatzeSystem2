@@ -1,13 +1,35 @@
 use super::{ObjectState, Objects};
 use crate::fes::ImageReference;
-use crate::runtime::{ObjectFactory, Runtime, kind};
+use crate::runtime::{ObjectFactory, Runtime, Store, create_object, kind, route_with_buffers};
 use crate::task::{Command, CommandBuffers};
 use crate::{Error, Result};
 
 impl<F: ObjectFactory> Runtime<F> {
+    /// 显式推进一个 FES 对象的下层更新；调用方按 FES 顺序推进对象。
+    pub fn update_fes_object(
+        &mut self,
+        owner: u32,
+        objects: &mut Objects,
+        handle: u32,
+    ) -> Result<()> {
+        self.store().update_fes_object(owner, objects, handle)
+    }
+
+    /// 移出 FES 子树并请求删除下层任务，任务释放仍发生在树更新中。
+    pub fn remove_fes_object(
+        &mut self,
+        owner: u32,
+        objects: &mut Objects,
+        handle: u32,
+    ) -> Result<()> {
+        self.store().remove_fes_object(owner, objects, handle)
+    }
+}
+
+impl<F: ObjectFactory> Store<'_, F> {
     /// 显式推进一个 FES 对象的下层更新；平面创建的任务直属 owner。
     /// 调用方按 FES 更新顺序调用，并将对象存储与 owner 保持同一生命周期。
-    pub fn update_fes_object(
+    pub(in crate::runtime) fn update_fes_object(
         &mut self,
         owner: u32,
         objects: &mut Objects,
@@ -46,7 +68,7 @@ impl<F: ObjectFactory> Runtime<F> {
             if let Some(old) = task {
                 self.fes_command(owner, Some(old), 3, [0; 3], None)?;
             }
-            task = match self.create(owner, kind::PLANE, b"FE Plane", b"") {
+            task = match create_object(self.reborrow(), owner, kind::PLANE, b"FE Plane", b"") {
                 Ok(task) => Some(task),
                 Err(error) => {
                     state.rebuild = false;
@@ -167,7 +189,7 @@ impl<F: ObjectFactory> Runtime<F> {
     }
 
     /// 先标记下层任务删除，再移出 FES 子树；任务实际释放仍发生在树更新中。
-    pub fn remove_fes_object(
+    pub(in crate::runtime) fn remove_fes_object(
         &mut self,
         owner: u32,
         objects: &mut Objects,
@@ -197,7 +219,7 @@ impl<F: ObjectFactory> Runtime<F> {
                     .ok_or_else(|| Error::new(0, "FES 图像来源与对象类型不匹配"))?
                     .parent_priority;
                 self.fes_command(owner, Some(list), 287, [slot as u32, 0, 0], None)?;
-                self.images_mut().release(image)?;
+                self.resources.images.release(image)?;
                 objects.get_mut(id).unwrap().image = None;
             }
             let raw = objects.get(id).unwrap().raw_image;
@@ -229,7 +251,8 @@ impl<F: ObjectFactory> Runtime<F> {
         bytes: Option<&mut [u8]>,
     ) -> Result<()> {
         if let Some(task) = task {
-            self.dispatch_command_with_buffers(
+            route_with_buffers(
+                self.reborrow(),
                 owner,
                 Command {
                     target: task,
