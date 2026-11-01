@@ -241,6 +241,8 @@ pub struct ImageState {
     pub image_number: i32,
     pub frames: [i32; 32],
     pub frame_table_enabled: bool,
+    /// 帧表写入后，下次有效 IDN 即使编号相同也请求重新装载。
+    pub frame_mapping_changed: bool,
     pub path_mode: i32,
 }
 
@@ -253,6 +255,7 @@ impl Default for ImageState {
             image_number: 0,
             frames: std::array::from_fn(|i| i as i32),
             frame_table_enabled: false,
+            frame_mapping_changed: true,
             path_mode: 0,
         }
     }
@@ -269,13 +272,19 @@ impl ImageState {
         if let Some(file) = &attributes.file {
             self.requested_file = file.clone();
             if !file.is_empty() {
-                self.file = transform_name(file)?;
+                let next = transform_name(file)?;
+                self.base.updates.rebuild |= replace(&mut self.file, next);
             }
         }
         let dirty = self.base.apply_visual(attributes, bank);
         match attributes.image_number {
-            Some(number) if !self.frame_table_enabled || (0..32).contains(&number) => {
+            Some(number)
+                if (!self.frame_table_enabled || (0..32).contains(&number))
+                    && (self.image_number != number || self.frame_mapping_changed) =>
+            {
                 self.image_number = number;
+                self.frame_mapping_changed = false;
+                self.base.updates.rebuild = true;
             }
             _ => (),
         }
@@ -283,6 +292,7 @@ impl ImageState {
             if let Some(number) = number {
                 self.frames[id] = *number;
                 self.frame_table_enabled = true;
+                self.frame_mapping_changed = true;
             }
         }
         if let Some(path_mode) = attributes.path_mode {

@@ -572,6 +572,53 @@ fn image_file_and_frame_initialization_preserve_type_and_update_order() {
 }
 
 #[test]
+fn image_frame_mapping_changes_wait_for_idn_and_repeated_file_names_skip_reload() {
+    let mut image = fes::ImageState::default();
+    let id = fes::ObjectAttributes {
+        image_number: Some(0),
+        ..Default::default()
+    };
+    assert!(!image.base.updates.needs_rebuild());
+    image.apply(&id, 0, |_| unreachable!()).unwrap();
+    assert!(image.base.updates.needs_rebuild());
+    assert!(!image.frame_mapping_changed);
+    image.base.updates = Default::default();
+    image.apply(&id, 0, |_| unreachable!()).unwrap();
+    assert!(!image.base.updates.needs_rebuild());
+    let file = fes::ObjectAttributes {
+        file: Some(b"texture".to_vec()),
+        ..Default::default()
+    };
+    image.apply(&file, 0, |v| Ok(v.to_vec())).unwrap();
+    assert!(image.base.updates.needs_rebuild());
+    image.base.updates = Default::default();
+    image.apply(&file, 0, |v| Ok(v.to_vec())).unwrap();
+    assert!(!image.base.updates.needs_rebuild());
+    let mut mapping = fes::ObjectAttributes::default();
+    mapping.frames[0] = Some(17);
+    image.apply(&mapping, 0, |_| unreachable!()).unwrap();
+    assert_eq!(image.selected_frame(), 17);
+    assert!(image.frame_mapping_changed);
+    assert!(!image.base.updates.needs_rebuild());
+    image
+        .apply(
+            &fes::ObjectAttributes {
+                image_number: Some(99),
+                ..Default::default()
+            },
+            0,
+            |_| unreachable!(),
+        )
+        .unwrap();
+    assert!(image.frame_mapping_changed);
+    assert!(!image.base.updates.needs_rebuild());
+    image.apply(&id, 0, |_| unreachable!()).unwrap();
+    assert!(!image.frame_mapping_changed);
+    assert!(image.base.updates.needs_rebuild());
+    assert!(!image.base.updates.is_dirty());
+}
+
+#[test]
 fn cimage_applies_its_columns_with_float_rounding_and_baseline_priority_updates() {
     let mut image = fes::CImageState {
         position: [-7.5, 8.75],
