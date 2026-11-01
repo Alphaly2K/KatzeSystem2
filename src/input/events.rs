@@ -158,13 +158,13 @@ impl Events {
             let command = packet(sender, region.id(), event);
             if route(regions, command)? == Some(0) {
                 self.captures[key] = if event.pressed != 0 {
-                    current(regions, index, instance)?.1.id()
+                    regions.current(index, instance)?.1.id()
                 } else {
                     0
                 };
                 return Ok(true);
             }
-            index = current(regions, index, instance)?.0 + 1;
+            index = regions.current(index, instance)?.0 + 1;
         }
         if event.pressed == 0 {
             self.captures[key] = 0;
@@ -200,20 +200,4 @@ fn packet(sender: u32, target: u32, event: KeyEvent) -> Command {
         code: event.code,
         data: [event.key, event.pressed, 0],
     }
-}
-
-fn current(regions: &Regions, index: usize, instance: u64) -> Result<(usize, &Region)> {
-    if let Some(region) = regions
-        .records
-        .get(index)
-        .filter(|region| region.instance == instance)
-    {
-        return Ok((index, region));
-    }
-    regions
-        .records
-        .iter()
-        .enumerate()
-        .find(|(_, region)| region.instance == instance)
-        .ok_or_else(|| Error::new(0, "输入回调移除或重新登记了当前区域，无法继续原游标"))
 }

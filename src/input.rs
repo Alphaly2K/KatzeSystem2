@@ -4,6 +4,7 @@ use crate::{Error, Result, read};
 
 mod events;
 pub use events::{Events, HitMask, KeyEvent, KeyEventKind};
+mod selection;
 
 /// 输入区域的十五 DWORD 记录；可移植位掩码以存在标记代替指针槽。
 #[derive(Clone, Debug)]
@@ -50,6 +51,10 @@ impl Region {
 
     pub fn event_mask(&self) -> u32 {
         self.words[2]
+    }
+
+    pub fn selection_enabled(&self) -> u32 {
+        self.words[9]
     }
 
     pub fn hit_mask(&self) -> Option<&HitMask> {
@@ -205,6 +210,21 @@ impl Regions {
 
     fn index(&self, id: u32) -> Option<usize> {
         self.records.iter().position(|r| r.id() == id)
+    }
+
+    fn current(&self, index: usize, instance: u64) -> Result<(usize, &Region)> {
+        if let Some(region) = self
+            .records
+            .get(index)
+            .filter(|region| region.instance == instance)
+        {
+            return Ok((index, region));
+        }
+        self.records
+            .iter()
+            .enumerate()
+            .find(|(_, region)| region.instance == instance)
+            .ok_or_else(|| Error::new(0, "输入回调移除或重新登记了当前区域，无法继续原游标"))
     }
 
     fn allocate_instance(&mut self) -> Result<u64> {

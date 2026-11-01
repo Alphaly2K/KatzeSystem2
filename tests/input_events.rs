@@ -310,3 +310,104 @@ fn suppression_preserves_state_and_zero_id_keeps_the_uncaptured_sentinel() -> Re
     assert_eq!(state.state(), 3);
     Ok(())
 }
+
+#[test]
+fn pointer_selection_uses_independent_geometry_and_orders_flag_notifications() -> Result<()> {
+    let mut regions = Regions::default();
+    register(&mut regions, 7, 10, 0, [0; 4]);
+    register(&mut regions, 9, 0, 0, [0, 0, 2, 2]);
+    command(&mut regions, 133, 9, 5);
+    regions.update_pointer_selection(10, Some([1, 1]), |_, _| {
+        panic!("保持已有选择值时不重复通知")
+    })?;
+    assert_eq!(regions.get(9).unwrap().selected(), 5);
+    regions.set_hit_mask(7, Some(HitMask::new([3, 1], vec![4])?));
+    let mut log = Vec::new();
+    regions.update_pointer_selection(10, Some([2, 0]), |regions, packet| {
+        log.push(packet);
+        if packet.code == 8 {
+            assert_eq!(regions.get(9).unwrap().selected(), 5);
+            assert_eq!(regions.get(7).unwrap().selected(), 0);
+            command(regions, 133, 9, 99);
+        } else {
+            assert_eq!(regions.get(9).unwrap().selected(), 0);
+            assert_eq!(regions.get(7).unwrap().selected(), 1);
+        }
+        Ok(())
+    })?;
+    assert_eq!(
+        log.iter().map(|p| (p.target, p.code)).collect::<Vec<_>>(),
+        [(9, 8), (7, 7)]
+    );
+    assert!(log.iter().all(|p| p.sender == 10 && p.data == [2, 0, 0]));
+    command(&mut regions, 136, 7, 0);
+    assert_eq!(regions.get(7).unwrap().selection_enabled(), 0);
+    regions.clear_geometry_dirty();
+    log.clear();
+    regions.update_pointer_selection(10, Some([1, 1]), |_, packet| {
+        log.push(packet);
+        Ok(())
+    })?;
+    assert_eq!(log.len(), 1);
+    assert_eq!((log[0].target, log[0].code), (9, 7));
+    assert_eq!(regions.get(7).unwrap().selected(), 1);
+    assert_eq!(regions.get(9).unwrap().selected(), 1);
+    assert!(!regions.geometry_dirty());
+    command(&mut regions, 136, 7, 1);
+    log.clear();
+    regions.update_pointer_selection(10, None, |_, packet| {
+        log.push(packet);
+        Ok(())
+    })?;
+    assert_eq!(
+        log.iter().map(|p| (p.target, p.code)).collect::<Vec<_>>(),
+        [(7, 8), (9, 8)]
+    );
+    assert!(
+        log.iter()
+            .all(|p| p.data == [i32::MIN as u32, i32::MIN as u32, 0])
+    );
+    assert!(regions.records().iter().all(|r| r.selected() == 0));
+    Ok(())
+}
+
+#[test]
+fn pointer_selection_keeps_duplicate_and_sentinel_rules_and_live_callback_changes() -> Result<()> {
+    let mut regions = Regions::default();
+    register(&mut regions, 3, 10, 0, [0; 4]);
+    command(&mut regions, 135, 3, 0);
+    register(&mut regions, 3, 0, 0, [0, 0, 8, 8]);
+    regions.update_pointer_selection(10, Some([1, 1]), |regions, packet| {
+        assert_eq!(packet.code, 7);
+        assert_eq!(packet.target, 3);
+        assert_eq!(regions.records()[0].enabled(), 0);
+        assert_eq!(regions.records()[0].selected(), 1);
+        assert_eq!(regions.records()[1].selected(), 0);
+        Ok(())
+    })?;
+
+    let mut regions = Regions::default();
+    register(&mut regions, u32::MAX, 0, 0, [0, 0, 8, 8]);
+    regions
+        .update_pointer_selection(10, Some([1, 1]), |_, _| panic!("编号全一与无候选哨兵相同"))?;
+    assert_eq!(regions.get(u32::MAX).unwrap().selected(), 0);
+    command(&mut regions, 133, u32::MAX, 7);
+    regions
+        .update_pointer_selection(10, None, |_, _| panic!("无候选时保留同哨兵编号的已有选择"))?;
+    assert_eq!(regions.get(u32::MAX).unwrap().selected(), 7);
+
+    let mut regions = Regions::default();
+    register(&mut regions, 7, 10, 0, [0; 4]);
+    register(&mut regions, 9, 0, 0, [0, 0, 8, 8]);
+    command(&mut regions, 133, 7, 1);
+    let mut log = Vec::new();
+    regions.update_pointer_selection(10, Some([1, 1]), |regions, packet| {
+        log.push((packet.target, packet.code));
+        command(regions, 133, 9, 7);
+        Ok(())
+    })?;
+    assert_eq!(log, [(7, 8)]);
+    assert_eq!(regions.get(7).unwrap().selected(), 0);
+    assert_eq!(regions.get(9).unwrap().selected(), 7);
+    Ok(())
+}
