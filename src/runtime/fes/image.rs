@@ -202,7 +202,7 @@ impl<F: ObjectFactory> Runtime<F> {
                     state.blend as u32,
                     state.display as u32,
                     0,
-                    0,
+                    if pixels == 0 { wrapper } else { 0 },
                 ]
                 .map(u32::to_le_bytes)
                 .concat();

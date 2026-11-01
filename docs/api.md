@@ -283,7 +283,7 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 
 `graphics::ImageList` 接收普通图像包装并持有独立来源包装，或通过 `set_hg3` 独立持有全部 HG-3 帧。初始选择最小无符号 ID，重复 ID 取首帧；`select_frame` 恢复选中帧基点但不标脏，缺失返回 false。像素重登记保留帧缓存，并改绑当前帧包装；原始来源重登记替换缓存，解码错误保留旧来源，帧集合总像素上限为 64 MiB。列表另提供 `set`／`remove`／`set_visible`／`clear`、脏区 `update` 及显式全部面块 `redraw`；支持无变换图像来源，`priority`／`set_priority` 查询和修改有符号优先级，同级按无符号 key 排序。`Runtime::images_mut()` 访问同一存储，`update_image_list(list)` 更新并提交脏矩形，`redraw_image_list(list)` 重绘后整幅提交，均返回是否复制了画布像素；上下文关闭时仍更新自有图像并消费脏区。`new_tiled` 设置面块步长，重叠区保留重复混合，`clear` 立即清空自有图像。
 
-`GraphicsFactory` 同时创建类型 15 的 `ImageListObject`，接入 285～287、289～298、304／305、310 和零裁剪 316。任务主体自动更新列表；285 自动创建隐藏子平面，291 查询输出包装，292／310 控制提交与自动更新，295 通过可选缓冲设置条目裁剪，对应 `ImageList::set_clip`。286 已接入底层像素及原始数据两种来源，自定义宿主通过 `image_data` 借用原始数据字节，并提供 `images_mut`、`create_task_child`、`canvas_layout` 和 `update_image_list`，后者先更新并消费脏区，再按提交和强制开关复制画布，返回是否复制像素。完整参数、未实现来源及确定性初始偏移见[图像列表任务](graphics.md#图像列表任务)。
+`GraphicsFactory` 同时创建类型 15 的 `ImageListObject`，接入 285～287、289～298、304／305、308、310 和零裁剪 316。任务主体自动更新列表；285 自动创建隐藏子平面，291 查询输出包装，292／310 控制提交与自动更新，295 通过可选缓冲设置条目裁剪，对应 `ImageList::set_clip`。286 已接入底层像素及原始数据两种来源，自定义宿主通过 `image_data` 借用原始数据字节，并提供 `images_mut`、`create_task_child`、`canvas_layout` 和 `update_image_list`，后者先更新并消费脏区，再按提交和强制开关复制画布，返回是否复制像素。`set_source_identity` 保存不增加引用的来源标识，来源重登记保留该标识；`find_source_identity` 按有符号 key 选择首项，308 将其槽号写入输出缓冲，缺失保持缓冲。完整参数、未实现来源及确定性初始偏移见[图像列表任务](graphics.md#图像列表任务)。
 
 112 无需读取服务，按两个尺寸参数创建全零 BGRA8 图像，状态 1 返回句柄；画布、偏移、基点及帧 ID 为零。114 显式释放解码或空白图像，以状态 2 保留操作栈原值，零句柄跳过。释放后的句柄不复用，任务回收仅释放剩余图像。`Image::new`、`Images::create` 提供独立创建；`release_for(caller, handle)` 保留 114 的调用任务语义，`release(handle)` 解除所属任务登记并释放一个引用。跨任务释放只减少引用，原任务登记继续保留；包装到最后一个引用释放才失效。`Images::share(handle)` 为同一像素创建独立、无任务登记的包装，新句柄须显式释放；原包装释放后新包装继续有效，像素修改相互可见。
 
@@ -317,7 +317,7 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 
 `Runtime::update_fes_object(owner, &mut objects, handle)` 显式推进一个对象。BASE 无媒体操作，CPLANE／PLANE 使用实际对象工厂和命令路由创建／更新直属二维任务，`Object::task_id()` 返回可选编号。CIMAGE 与 IMAGE 通过共享类型 15 列表更新来源与登记，`Object::image_handle()` 查询可选来源包装；IMAGE 支持按当前映射帧装载普通 HG-3 文件及多文件合成，缺失文件或帧清空像素绑定。非零 PATHMODE 使用完整直接路径，跳过类别补全；IDN=−1 的原始来源与像素独立保存，具体契约见下文。调用者按 FES 对象更新顺序推进，并将 objects 与 owner 保持同一生命周期，下层任务由此入口维护。CPLANE 在创建下层任务前读取 SIZE2，PLANE 在创建后读取；POS2 在属性更新时消费；读取共用 Runtime 的资源服务，按 image 类别补全名称，支持 HG-3 元数据。已有绑定的 VIEWPORT 更新返回命令 89 的诊断。此入口尚不执行运动和 FES 主体调度。
 
-FES IMAGE 的 `IDN=−1` 接收完整名称的原始来源，不受 PATHMODE 影响；`Object::raw_image_handle` 返回其非持有查询句柄，零表示没有来源。像素和原始数据独立保留，登记优先使用像素；普通装载缺帧后可退回旧原始来源。FES 持有的数据随替换、对象删除或所属任务实际回收释放，列表已经解码的帧继续存活。具体几何、槽号和待接入的来源身份查询见[原始来源更新](graphics.md#fes-image-原始来源更新)。
+FES IMAGE 的 `IDN=−1` 接收完整名称的原始来源，不受 PATHMODE 影响；`Object::raw_image_handle` 返回其非持有查询句柄，零表示没有来源。像素和原始数据独立保留，登记优先使用像素；普通装载缺帧后可退回旧原始来源。FES 持有的数据随替换、对象删除或所属任务实际回收释放，列表已经解码的帧继续存活。原始来源登记以本对象包装保存来源身份，可用 308 反查；具体几何和槽号规则见[原始来源更新](graphics.md#fes-image-原始来源更新)。
 
 `fes::PlaneState` 的 `base` 复用平面属性，`vram()` 返回独立的画布取样位置，`apply(&attributes, bank)` 另应用 VRAM。运行时 PLANE 需要先在 DrawingContext 提供画布目标，再通过 `render_frame` 输出；支持跨面块取样。`Objects::set_canvas_offset([x, y])` 保存共享绘制服务给出的画布偏移，`canvas_offset()` 查询该值；设置本身不使对象失效，在下一次 PLANE 属性更新时叠加到 VRAM。PLANE 的尺寸重建保留有效屏幕位置，其他属性仍等到失效后提交。当前支持 CPLANE／PLANE 父级的位置累加，基点仅沿直接为 PLANE 的父级累加。
 

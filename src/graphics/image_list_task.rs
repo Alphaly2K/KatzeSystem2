@@ -174,9 +174,6 @@ impl TaskObject for ImageListObject {
             286 => {
                 if let Some(list) = &mut self.list {
                     let data = words::<15>(buffers.data1.as_deref())?;
-                    if data[14] != 0 {
-                        return Err(Error::new(0, "图像列表附加对象尚未接入"));
-                    }
                     if data[0] != 0 || data[1] != 0 {
                         if data[13] != 0 {
                             return Err(Error::new(0, "图像列表变换来源尚未接入"));
@@ -197,6 +194,9 @@ impl TaskObject for ImageListObject {
                         }
                     } else if data[1..4].iter().any(|&value| value != 0) {
                         return Err(Error::new(0, "图像列表其他来源类型尚未接入"));
+                    }
+                    if data[14] != 0 {
+                        list.set_source_identity(key, data[14]);
                     }
                 }
             }
@@ -306,6 +306,17 @@ impl TaskObject for ImageListObject {
                     .as_mut()
                     .ok_or_else(|| Error::new(0, "图像列表尚未创建"))?;
                 *output = list.set_priority(key, b as i32, images(host)?)? as u32;
+            }
+            308 => {
+                let list = self
+                    .list
+                    .as_ref()
+                    .ok_or_else(|| Error::new(0, "图像列表尚未创建"))?;
+                let key = list.find_source_identity(a);
+                *output = key.is_some() as u32;
+                if let Some(key) = key {
+                    write(buffers.data1.as_deref_mut(), key >> 16)?;
+                }
             }
             310 => self.enabled = b,
             288..=308 | 310..=319 => {

@@ -10,7 +10,7 @@ use katze_system2::{
         fes::{ObjectState, Objects},
         kind,
     },
-    task::Command,
+    task::{Command, CommandBuffers},
 };
 use std::{cell::RefCell, collections::BTreeMap, io::Write, rc::Rc};
 
@@ -35,6 +35,31 @@ fn send(runtime: &mut TestRuntime, task: u32, code: u32, a: u32, b: u32) -> u32 
             },
         )
         .unwrap()
+}
+
+fn source_slot(runtime: &mut TestRuntime, list: u32, identity: u32) -> Option<u32> {
+    let mut bytes = [0xa5; 4];
+    let found = runtime
+        .dispatch_command_with_buffers(
+            0,
+            Command {
+                target: list,
+                sender: 0,
+                code: 308,
+                data: [identity, 0, 0],
+            },
+            &mut CommandBuffers {
+                data0: None,
+                data1: Some(&mut bytes),
+            },
+        )
+        .unwrap();
+    if found != 0 {
+        Some(u32::from_le_bytes(bytes))
+    } else {
+        assert_eq!(bytes, [0xa5; 4]);
+        None
+    }
 }
 
 fn setup() -> (TestRuntime, Objects, u32) {
@@ -752,6 +777,7 @@ fn image_raw_sources_keep_pixels_and_reappear_after_a_missing_ordinary_frame() {
     let wrapper = objects.get(sprite).unwrap().image_handle().unwrap();
     let raw = objects.get(sprite).unwrap().raw_image_handle();
     assert_eq!(runtime.image_data(raw).unwrap(), first);
+    assert_eq!(source_slot(&mut runtime, list, wrapper), Some(5));
     assert_eq!(runtime.images().pixel_handle(wrapper).unwrap(), 0);
     assert_eq!(image(&objects, sprite).size, [-1; 2]);
     assert_eq!(image(&objects, sprite).base_point, [0.; 2]);
@@ -777,6 +803,7 @@ fn image_raw_sources_keep_pixels_and_reappear_after_a_missing_ordinary_frame() {
     let pixels = runtime.images().pixel_handle(wrapper).unwrap();
     assert_ne!(pixels, 0);
     assert_eq!(objects.get(sprite).unwrap().raw_image_handle(), raw);
+    assert_eq!(source_slot(&mut runtime, list, wrapper), Some(5));
     assert_rectangle(
         &frame(&mut runtime, 1),
         Rect::from_xywh(3, 3, 1, 1),
@@ -856,7 +883,9 @@ fn image_raw_sources_keep_pixels_and_reappear_after_a_missing_ordinary_frame() {
     runtime.update_fes_object(0, &mut objects, sprite).unwrap();
     let raw = objects.get(sprite).unwrap().raw_image_handle();
     assert_eq!(send(&mut runtime, list, 294, 0, 0), 1);
+    assert_eq!(source_slot(&mut runtime, list, wrapper), Some(65535));
     runtime.remove_fes_object(0, &mut objects, sprite).unwrap();
+    assert_eq!(source_slot(&mut runtime, list, wrapper), None);
     assert!(runtime.image_data(raw).is_err());
     assert!(runtime.images().pixel_handle(wrapper).is_err());
     assert_eq!(send(&mut runtime, list, 294, 0, 0), 0);

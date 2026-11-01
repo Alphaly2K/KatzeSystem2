@@ -26,6 +26,7 @@ struct Entry {
     // 有帧缓存时只借用其中的包装；生命周期由整个条目及所属任务管理。
     image: u32,
     frames: BTreeMap<u32, u32>,
+    source_identity: u32,
     priority: i32,
     properties: ImageListProperties,
     history: Option<Rect>,
@@ -153,6 +154,10 @@ impl ImageList {
     ) -> Result<()> {
         let source_base = images.pixel_image(pixels)?.info().base.map(|v| v as f32);
         let (history, clip, priority) = self.source_history(key, images)?;
+        let source_identity = self
+            .entries
+            .get(&key)
+            .map_or(0, |entry| entry.source_identity);
         let image = if let Some(entry) = self.entries.get(&key) {
             let image = entry.image;
             images.bind_pixels(image, pixels)?;
@@ -170,6 +175,7 @@ impl ImageList {
             Entry {
                 image,
                 frames,
+                source_identity,
                 priority,
                 properties,
                 history,
@@ -218,6 +224,10 @@ impl ImageList {
         images: &mut Images,
     ) -> Result<()> {
         let (history, clip, priority) = self.source_history(key, images)?;
+        let source_identity = self
+            .entries
+            .get(&key)
+            .map_or(0, |entry| entry.source_identity);
         let mut frames = BTreeMap::new();
         for (id, image) in decoded {
             let alpha = Some(image.info().reserved != 0);
@@ -246,6 +256,7 @@ impl ImageList {
             Entry {
                 image,
                 frames,
+                source_identity,
                 priority,
                 properties,
                 history,
@@ -268,6 +279,24 @@ impl ImageList {
         entry.image = image;
         entry.properties.base_point = images.get(image)?.info().base.map(|v| v as f32);
         Ok(true)
+    }
+
+    /// 保存不增加引用的来源身份；没有条目时返回 false，不产生脏区。
+    pub fn set_source_identity(&mut self, key: u32, identity: u32) -> bool {
+        let Some(entry) = self.entries.get_mut(&key) else {
+            return false;
+        };
+        entry.source_identity = identity;
+        true
+    }
+
+    /// 返回同一来源身份中有符号 key 最小的条目；零也可作为查询身份。
+    pub fn find_source_identity(&self, identity: u32) -> Option<u32> {
+        self.entries
+            .iter()
+            .filter(|(_, entry)| entry.source_identity == identity)
+            .map(|(&key, _)| key)
+            .min_by_key(|&key| key as i32)
     }
 
     fn source_history(&mut self, key: u32, images: &Images) -> Result<(Option<Rect>, Rect, i32)> {

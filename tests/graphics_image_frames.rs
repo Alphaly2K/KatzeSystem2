@@ -92,6 +92,8 @@ fn raw_sources_keep_all_frames_and_pixel_rebinding_changes_the_current_cached_wr
         ..Default::default()
     };
     list.set_hg3(7, &data, properties, &mut images).unwrap();
+    assert!(list.set_source_identity(7, 123));
+    assert!(!list.set_source_identity(8, 123));
     data.fill(0);
     list.update(&mut images).unwrap();
     let pixel = |images: &Images, x| images.get(list.image()).unwrap().surface().pixel(x, 1);
@@ -130,6 +132,7 @@ fn raw_sources_keep_all_frames_and_pixel_rebinding_changes_the_current_cached_wr
         .pixels_mut()
         .copy_from_slice(&0xff77_8899u32.to_le_bytes());
     list.set(7, source, properties, &mut images).unwrap();
+    assert_eq!(list.find_source_identity(123), Some(7));
     images.release(source).unwrap();
     assert!(list.select_frame(7, 7, &mut images).unwrap());
     list.redraw(&mut images).unwrap();
@@ -144,6 +147,7 @@ fn raw_sources_keep_all_frames_and_pixel_rebinding_changes_the_current_cached_wr
         Some(0xff77_8899)
     );
     list.remove(7, &mut images).unwrap();
+    assert_eq!(list.find_source_identity(123), None);
     assert!(list.set_pixels(8, pixels, properties, &mut images).is_err());
     list.release(&mut images).unwrap();
 
@@ -153,6 +157,19 @@ fn raw_sources_keep_all_frames_and_pixel_rebinding_changes_the_current_cached_wr
     let source = images.create(2, [1, 1]).unwrap();
     let pixels = images.pixel_handle(source).unwrap();
     list.set(7, source, properties, &mut images).unwrap();
+    list.set_hg3(
+        u32::MAX,
+        &hg3(&[(2, 0, [0; 2], [0; 2])]),
+        properties,
+        &mut images,
+    )
+    .unwrap();
+    assert_eq!(list.find_source_identity(0), Some(u32::MAX));
+    list.set_source_identity(7, 123);
+    list.set_source_identity(u32::MAX, 123);
+    assert_eq!(list.find_source_identity(123), Some(u32::MAX));
+    list.set_source_identity(u32::MAX, 0);
+    assert_eq!(list.find_source_identity(123), Some(7));
     images.release(source).unwrap();
     images.release_owner(1);
     let mut observer = ImageList::new(3, [1, 1], &mut images).unwrap();
@@ -276,7 +293,7 @@ fn runtime_second_source_decodes_raw_handles_and_keeps_pixels_after_native_close
             255,
             1,
             0,
-            0,
+            123,
         ]
         .map(u32::to_le_bytes)
         .concat();
@@ -290,6 +307,25 @@ fn runtime_second_source_decodes_raw_handles_and_keeps_pixels_after_native_close
                 },
             )
             .unwrap();
+        let mut slot = [0xa5; 4];
+        let found = runtime
+            .dispatch_command_with_buffers(
+                0,
+                command(308, [123, 0, 0]),
+                &mut CommandBuffers {
+                    data0: None,
+                    data1: Some(&mut slot),
+                },
+            )
+            .unwrap();
+        assert_eq!(found, 1);
+        assert_eq!(u32::from_le_bytes(slot), 5);
+        assert_eq!(
+            runtime
+                .dispatch_command(0, command(308, [999, 0, 0]))
+                .unwrap(),
+            0
+        );
         let mut output = [0; 4];
         runtime
             .dispatch_command_with_buffers(
