@@ -295,6 +295,9 @@ impl Interpreter {
     pub fn resume(&mut self) {
         self.pending = None;
     }
+    pub(crate) fn set_object_bank_count(&mut self, name: &str, count: u32) {
+        self.object_banks.insert(name.to_owned(), count);
+    }
     /// 读取已完成行级展开的命令，并展开参数内部的字符串引用。
     pub fn parameters(&self, input: &[u8], state: &State) -> Result<Vec<Vec<u8>>> {
         parameters(input)?

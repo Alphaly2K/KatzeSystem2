@@ -70,7 +70,7 @@ FES 内部执行宏声明，初始化按以下顺序交给宿主：
 4. 注册子命令表，`Declarations` 报告 SUBCOMMAND。
 5. 开始 START 主流程。
 
-`ObjectDefinition.kind` 为基线类型表中的大写名称，`name` 为对象名，`banks` 为有效银行数。`ObjectInitialization` 包含目标引用和已求值的属性；`Option` 区分未指定字段与明确写零，POS 的三个分量分别保留。POS2／SIZE2 保存在 `position_resource`／`size_resource` 中，由宿主读取所指定图像帧的裁剪偏移／裁剪尺寸。资源、图形／音频句柄、父子关系和各类型的属性应用均由宿主负责；当前库提供初始化解码。没有实际属性的行不发出请求。
+`ObjectDefinition.kind` 为基线类型表中的大写名称，`name` 为对象名，`banks` 为有效银行数。`ObjectInitialization` 包含目标引用和已求值的属性；`Option` 区分未指定字段与明确写零，POS 的三个分量分别保留。POS2／SIZE2 保存在 `position_resource`／`size_resource` 中，由宿主读取所指定图像帧的裁剪偏移／裁剪尺寸。`runtime::fes::Objects` 提供 BASE／CIMAGE／IMAGE 的身份、银行绑定、父子关系及属性应用；资源与下层任务更新继续接入。没有实际属性的行不发出请求。
 
 `fes::ImageReference::parse` 将 POS2／SIZE2 的值拆为资源名称字节和帧 ID。省略帧号时取 0，冒号后读取带可选符号的十进制／十六进制整数前缀，非法前缀取零，不运行表达式。
 
@@ -294,6 +294,12 @@ FES 内部执行宏声明，初始化按以下顺序交给宿主：
 对象实现 `runtime::TaskObject`：基类控制与时钟、可选 VM、创建上下文、主体、对象命令、排队与同步消息、删除通知和释放。除对象命令外，返回 `false` 的方法表示本次预算耗尽，续跑由运行时完成；对象命令返回 `task::CommandOutcome`，完成状态与传播状态分开表达。库提供 `BaseObject`（只有控制与时钟）与 `OrdinaryObject`（包裹 `OrdinaryTask`）。`ObjectFactory::create` 按类型编号创建对象；`KcsFactory` 经 `ProgramLoader` 按名称装载普通 KCS，`external_bytes` 指定 VM 外部区容量。`graphics::GraphicsFactory { fallback }` 创建类型 2 的 `PlaneObject`，其他类型委托 fallback；基础平面提供基类控制、几何及查询、显示与输入绑定、事件响应、内部子任务传播及绘图登记清理，运动等缺失入口返回诊断，详见[二维任务对象](graphics.md#基础二维任务对象)。`input::InputFactory { fallback }` 创建类型 11 的 InputObject，接入区域、键、指针查询、光标及基类命令；音频和文字类型继续由对应工厂提供，`kind` 保存基线类型编号。
 
 `RootObject::new(input_task, sound_task)` 保存输入与声音任务编号，命令 34／35 原样返回相应值；任务删除后不会自动选择替代编号。该对象作为 Runtime 的显式根参数使用，子任务由调用者创建，自动启动链仍待接入。根对象遵循专属命令消费规则，其余未实现的专属入口返回诊断。
+
+`runtime::fes::Objects::new(handles)` 为一份 FES 建立独立的对象存储，并登记 `_TOPOBJ_` 银行 0 的根 BASE 对象；与 Runtime 组合时传入 `runtime.host().handle_allocator()`。FES 对象标识来自共享不透明编号源，与任务编号分别使用。`define(&definition)` 接受有效的非零银行数，返回此次新创建的全部标识；目前支持 BASE、CIMAGE 和 IMAGE，其他类型返回诊断。名称限定为 1～31 个非零 ASCII 字节。`get`／`get_mut` 查询实际对象及 `ObjectState`，`len` 包括根及重复声明的未绑定对象。
+
+`lookup(name, bank)` 精确查找名称／银行，缺失返回 None；−1 在这里不展开数组。重复 DEFINE 仍创建对象，但已有银行保留原绑定，新银行取得各自的首次绑定；`count(name)` 始终保留首次登记的数组数量。创建完成后先调用 `publish_bindings(&mut interpreter)`，再确认事件；该入口同步对象命名值和解释器的数组数量，保留其他系统命名值。删除后同样需要同步。显式银行可访问超出首次数量的新绑定，省略银行号的数组展开继续使用首次数量。
+
+`initialize(&initialization, transform_name)` 按银行查找实际类型，先应用 PARENT，再复用 CIMAGE／IMAGE 的类型属性规则；IMAGE 的非空 FILE 通过闭包转换。PARENT 的精确查找无结果时解除父级。`set_parent(handle, parent)` 可显式重挂或解除 FES 父级，循环、无效标识及根重挂返回诊断。该关系独立于任务树。`remove(handle)` 移出对象及后代，按后代先于父对象的顺序返回所有权；数量表保留、绑定移除、未绑定的重复对象不自动补位。根对象随存储释放。调用方负责返回对象所持的媒体资源和下层任务清理；当前对象存储尚未自动装载图像、创建绘图任务或推进 FES 主体。初始化错误保留先前已完成的银行及属性修改。
 
 图形事件的同步响应通过 `Host::dispatch_graphics_event(response, command, buffers, output)` 开放。运行时回调中的命令 95 改写当前平面的响应，返回错误时也保留此前修改；其余需要重入完整平面对象的命令返回诊断。移动通知使用同一份 CommandBuffers，事件接收者返回的普通 output 与平面响应分别保存。
 

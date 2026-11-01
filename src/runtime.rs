@@ -15,6 +15,7 @@ use crate::task::{Command, CommandBuffers, Control, Lifecycle, TaskClock, TaskTr
 use crate::{Error, Result, expression, read};
 use std::collections::BTreeMap;
 
+pub mod fes;
 mod graphics;
 mod object;
 mod resources;
