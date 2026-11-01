@@ -81,13 +81,7 @@ impl PlaneObject {
         &self.geometry_name
     }
 
-    fn input_command(
-        &self,
-        code: u32,
-        data: [u32; 3],
-        buffers: &mut CommandBuffers<'_>,
-        host: &mut dyn Host,
-    ) -> Result<u32> {
+    fn input_task(&self, host: &mut dyn Host) -> Result<u32> {
         let mut input = 0;
         host.dispatch_task_command(
             Command {
@@ -99,6 +93,17 @@ impl PlaneObject {
             &mut CommandBuffers::default(),
             &mut input,
         )?;
+        Ok(input)
+    }
+
+    fn input_command(
+        &self,
+        code: u32,
+        data: [u32; 3],
+        buffers: &mut CommandBuffers<'_>,
+        host: &mut dyn Host,
+    ) -> Result<u32> {
+        let input = self.input_task(host)?;
         let mut output = 0;
         self.send_command(input, code, data, buffers, &mut output, host)?;
         Ok(output)
@@ -154,25 +159,52 @@ impl PlaneObject {
         Ok(())
     }
 
-    fn configure_input(&mut self, command: &Command, host: &mut dyn Host) -> Result<()> {
-        if self.event_target == u32::MAX {
-            let (base, position) = drawings(host)?
-                .get(self.id)
-                .and_then(|d| d.geometry_transform(false))
-                .map(|t| (t.base_point(), t.position()))
-                .ok_or_else(|| Error::new(0, "输入区域登记需要已创建的二维图元"))?;
-            let origin: [f32; 2] = std::array::from_fn(|i| position[i] - base[i]);
-            let mut rect = [
+    fn input_geometry(&self, host: &mut dyn Host) -> Result<([i32; 4], u32)> {
+        let (base, position) = drawings(host)?
+            .get(self.id)
+            .and_then(|d| d.geometry_transform(false))
+            .map(|t| (t.base_point(), t.position()))
+            .ok_or_else(|| Error::new(0, "输入区域需要已创建的二维图元"))?;
+        let origin: [f32; 2] = std::array::from_fn(|i| position[i] - base[i]);
+        Ok((
+            [
                 truncate(origin[0]),
                 truncate(origin[1]),
                 truncate(origin[0] + self.size[0]),
                 truncate(origin[1] + self.size[1]),
-            ];
+            ],
+            truncate(base[2]) as u32,
+        ))
+    }
+
+    fn refresh_input_rect(&self, host: &mut dyn Host) -> Result<()> {
+        let input = self.input_task(host)?;
+        if self.input_configured {
+            let (rect, _) = self.input_geometry(host)?;
+            let mut buffer = [0; 16];
+            write_words(Some(&mut buffer), &rect.map(|value| value as u32))?;
+            self.send_command(
+                input,
+                130,
+                [self.id, 0, 0],
+                &mut CommandBuffers {
+                    data1: Some(&mut buffer),
+                    ..CommandBuffers::default()
+                },
+                &mut 0,
+                host,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn configure_input(&mut self, command: &Command, host: &mut dyn Host) -> Result<()> {
+        if self.event_target == u32::MAX {
+            let (mut rect, priority) = self.input_geometry(host)?;
             let logical = host.input_coordinates().logical_size;
             if rect[0] <= 0 && rect[1] <= 0 && rect[2] >= logical[0] && rect[3] >= logical[1] {
                 rect = [-100_000, -100_000, 100_000, 100_000];
             }
-            let priority = truncate(base[2]) as u32;
             let mut region = [0; 60];
             write_words(
                 Some(&mut region),
@@ -218,17 +250,7 @@ impl PlaneObject {
 
     fn enable_input(&self, enabled: u32, propagation: u32, host: &mut dyn Host) -> Result<()> {
         if self.event_target != u32::MAX {
-            let mut input = 0;
-            host.dispatch_task_command(
-                Command {
-                    target: 0,
-                    sender: self.id,
-                    code: 34,
-                    data: [0; 3],
-                },
-                &mut CommandBuffers::default(),
-                &mut input,
-            )?;
+            let input = self.input_task(host)?;
             let mut output = 0;
             for code in [135].into_iter().chain((enabled == 0).then_some(133)) {
                 self.send_command(
@@ -540,9 +562,13 @@ impl TaskObject for PlaneObject {
                         67
                     }
                 };
+                self.refresh_input_rect(host)?;
                 self.forward(next, command, buffers, output, host)?;
             }
             50 | 52 | 56 | 58 | 67 => {
+                if command.code != 52 || command.data[0] == 0 {
+                    self.refresh_input_rect(host)?;
+                }
                 self.forward(command.code, command, buffers, output, host)?;
             }
             47 | 48 => {
@@ -641,6 +667,7 @@ impl TaskObject for PlaneObject {
             57 => {
                 let value = words::<16>(buffers.data1.as_deref())?.map(f32::from_bits);
                 drawings(host)?.set_geometry_matrix(id, value, command.data[0] != 0);
+                self.refresh_input_rect(host)?;
                 self.forward(58, command, buffers, output, host)?;
             }
             60 | 71 | 85 | 86 => {}

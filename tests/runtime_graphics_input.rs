@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use katze_system2::{
     Error, Result, expression,
-    graphics::GraphicsFactory,
+    graphics::{GraphicsFactory, RenderTarget},
     input::{InputFactory, KeyEvent, KeyEventKind},
     kcs::{Host, Interpreter, NativeReturn},
     runtime::{BaseObject, ObjectFactory, RootObject, Runtime, TaskObject, kind},
@@ -419,6 +419,18 @@ fn plane_binding_reconfiguration_and_deletion_keep_the_verified_boundaries() {
         [bounds.left, bounds.top, bounds.right, bounds.bottom],
         [-100_000, -100_000, 100_000, 100_000]
     );
+    send(&mut runtime, 3, 52, 0);
+    let bounds = runtime
+        .input_state(1)
+        .unwrap()
+        .regions()
+        .get(3)
+        .unwrap()
+        .bounds();
+    assert_eq!(
+        [bounds.left, bounds.top, bounds.right, bounds.bottom],
+        [0, 0, 100, 50]
+    );
     configure(&mut runtime, &mut states());
     assert_eq!(runtime.input_state(1).unwrap().regions().records().len(), 1);
     runtime.destroy(3).unwrap();
@@ -526,4 +538,146 @@ fn graphics_event_response_survives_errors_and_forwards_motion_buffers() {
             .unwrap(),
         0
     );
+}
+
+#[test]
+fn geometry_changes_refresh_bounds_without_reprioritizing_or_scaling_the_region() {
+    let (mut runtime, _, _, _) = setup();
+    let bounds = |runtime: &TestRuntime| {
+        let rect = runtime
+            .input_state(1)
+            .unwrap()
+            .regions()
+            .get(3)
+            .unwrap()
+            .bounds();
+        [rect.left, rect.top, rect.right, rect.bottom]
+    };
+    let vector = |runtime: &mut TestRuntime, code, value: [f32; 3]| {
+        let mut data = bytes(&value.map(f32::to_bits));
+        runtime
+            .dispatch_command_with_buffers(
+                0,
+                packet(3, 2, code, [0; 3]),
+                &mut CommandBuffers {
+                    data1: Some(&mut data),
+                    ..CommandBuffers::default()
+                },
+            )
+            .unwrap();
+    };
+    assert!(!runtime.input_state(1).unwrap().regions().geometry_dirty());
+    configure(&mut runtime, &mut states());
+    vector(&mut runtime, 51, [40.75, -10.25, 11.]);
+    assert_eq!(bounds(&runtime), [30, -30, 130, 19]);
+    vector(&mut runtime, 49, [5.5, 6.25, 1000.]);
+    assert_eq!(bounds(&runtime), [35, -16, 135, 33]);
+    assert_eq!(
+        runtime
+            .input_state(1)
+            .unwrap()
+            .regions()
+            .get(3)
+            .unwrap()
+            .priority(),
+        4000
+    );
+    vector(&mut runtime, 55, [1., 2., 3.]);
+    vector(&mut runtime, 66, [9., 8., 7.]);
+    let mut matrix = bytes(&[1f32.to_bits(); 16]);
+    runtime
+        .dispatch_command_with_buffers(
+            0,
+            packet(3, 2, 57, [0; 3]),
+            &mut CommandBuffers {
+                data1: Some(&mut matrix),
+                ..CommandBuffers::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(bounds(&runtime), [35, -16, 135, 33]);
+    for code in [50, 52, 56, 58, 67] {
+        let mut changed = bytes(&[999; 4]);
+        runtime
+            .dispatch_command_with_buffers(
+                0,
+                packet(1, 2, 130, [3, 0, 0]),
+                &mut CommandBuffers {
+                    data1: Some(&mut changed),
+                    ..CommandBuffers::default()
+                },
+            )
+            .unwrap();
+        runtime
+            .input_state_mut(1)
+            .unwrap()
+            .regions_mut()
+            .clear_geometry_dirty();
+        if code == 52 {
+            runtime
+                .dispatch_command(0, packet(3, 2, 52, [1, 0, 1]))
+                .unwrap();
+            assert_eq!(bounds(&runtime), [999; 4]);
+            assert!(!runtime.input_state(1).unwrap().regions().geometry_dirty());
+        }
+        runtime
+            .dispatch_command(0, packet(3, 2, code, [0, 0, 1]))
+            .unwrap();
+        assert_eq!(bounds(&runtime), [35, -16, 135, 33]);
+        assert!(runtime.input_state(1).unwrap().regions().geometry_dirty());
+    }
+    runtime.drawing_mut().target = Some(RenderTarget::new([128, 64]).unwrap());
+    let mut rectangle = bytes(&[0, 0, 0, 100f32.to_bits(), 50f32.to_bits(), 0, 0, 0]);
+    runtime
+        .dispatch_command_with_buffers(
+            0,
+            packet(3, 2, 41, [0; 3]),
+            &mut CommandBuffers {
+                data1: Some(&mut rectangle),
+                ..CommandBuffers::default()
+            },
+        )
+        .unwrap();
+    vector(&mut runtime, 49, [5.5, 6.25, 1000.]);
+    vector(&mut runtime, 51, [40.75, -10.25, 11.]);
+    let mut source = bytes(&[999f32.to_bits(), 888f32.to_bits(), 777f32.to_bits()]);
+    runtime
+        .dispatch_command_with_buffers(
+            0,
+            packet(3, 2, 51, [1, 0, 0]),
+            &mut CommandBuffers {
+                data1: Some(&mut source),
+                ..CommandBuffers::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(bounds(&runtime), [35, -16, 135, 33]);
+    assert_eq!(
+        runtime
+            .drawables()
+            .get(3)
+            .unwrap()
+            .geometry_transform(true)
+            .unwrap()
+            .position(),
+        [999., 888., 777.]
+    );
+    vector(&mut runtime, 51, [f32::NAN, f32::INFINITY, 11.]);
+    assert_eq!(bounds(&runtime), [i32::MIN; 4]);
+    send(&mut runtime, 3, 91, 0);
+    runtime
+        .input_state_mut(1)
+        .unwrap()
+        .regions_mut()
+        .clear_geometry_dirty();
+    vector(&mut runtime, 51, [0.; 3]);
+    assert!(
+        runtime
+            .input_state(1)
+            .unwrap()
+            .regions()
+            .records()
+            .is_empty()
+    );
+    assert!(runtime.input_state(1).unwrap().regions().geometry_dirty());
 }

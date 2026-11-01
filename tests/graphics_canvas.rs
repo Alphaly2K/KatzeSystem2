@@ -101,6 +101,19 @@ impl Host for DrawingHost {
     fn next_task_child(&self, _: Option<u32>) -> Result<Option<u32>> {
         Ok(None)
     }
+    fn dispatch_task_command(
+        &mut self,
+        command: Command,
+        _: &mut CommandBuffers<'_>,
+        output: &mut u32,
+    ) -> Result<bool> {
+        assert_eq!(
+            (command.target, command.code, command.data),
+            (0, 34, [0; 3])
+        );
+        *output = 8;
+        Ok(true)
+    }
 }
 
 fn dispatch(
