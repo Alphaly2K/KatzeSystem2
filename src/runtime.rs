@@ -499,12 +499,44 @@ fn run_nested<F: ObjectFactory>(
         budget,
         limit,
     } = store;
-    if let Some(state) = resources.input_callbacks.get_mut(&target) {
-        if matches!(&execution, Execution::Delete | Execution::MarkDestroying) {
-            state.request_delete(resources.input_device.as_mut().map(|d| d.as_mut() as _))?;
-            return Ok(());
-        }
-        return Err(Error::new(0, "输入回调期间不支持重新执行该任务"));
+    if let Some(mut state) = resources.input_callbacks.remove(&target) {
+        let saved = (host.task_id, host.task_time, host.task_origin);
+        let result = {
+            let mut nested = ObjectHost {
+                numbers,
+                host,
+                resources,
+                tree,
+                objects,
+                running,
+                factory,
+                context: Vec::new(),
+                budget,
+                limit,
+            };
+            nested.host.task_id = target;
+            nested.set_task_clock(&state.clock);
+            match execution {
+                Execution::Command {
+                    kind,
+                    command,
+                    buffers,
+                    output,
+                    propagate,
+                } => state
+                    .dispatch_command(kind, command, buffers, output, &mut nested)
+                    .map(|value| *propagate = value),
+                Execution::Delete | Execution::MarkDestroying => {
+                    state.request_delete(nested.input_device())
+                }
+                _ => Err(Error::new(0, "输入回调期间不支持重新执行该任务")),
+            }
+        };
+        resources.input_callbacks.insert(target, state);
+        host.task_id = saved.0;
+        host.task_time = saved.1;
+        host.task_origin = saved.2;
+        return result;
     }
     let mut object = objects
         .remove(&target)
@@ -650,16 +682,6 @@ fn route_command_mode<F: ObjectFactory>(
     } = store;
     let handler = |tree: &mut TaskTree, command: &Command, output: &mut u32| {
         let kind = tree.node(command.target).map_or(0, |node| node.kind);
-        if let Some(state) = resources.input_callbacks.get_mut(&command.target) {
-            return state.dispatch_command(
-                kind,
-                command,
-                buffers,
-                output,
-                resources.input_coordinates,
-                resources.input_device.as_mut().map(|d| d.as_mut() as _),
-            );
-        }
         let mut propagate = false;
         run_nested(
             Store {

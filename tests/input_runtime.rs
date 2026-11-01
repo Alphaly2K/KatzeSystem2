@@ -219,6 +219,13 @@ impl TaskObject for Receiver {
                 send(host, self.id, 150, 0, 0)?;
                 *output = 0;
             }
+            (9, 22, 2) => {
+                send(host, self.id, 150, 0, 0)?;
+                send(host, self.id, 159, 0, 0)?;
+            }
+            (11, 22, 2) => {
+                send(host, self.id, 138, 0, 0)?;
+            }
             _ => *output = 0,
         }
         Ok(CommandOutcome::finished(false))
@@ -794,5 +801,59 @@ fn failed_press_position_query_retains_key_state_and_restores_object_access() ->
     assert_eq!(input.regions().records().len(), 1);
     assert!(runtime.object(1).is_some());
     assert_eq!(input_command(&mut runtime, 134, [2, 0, 0])?, 0);
+    Ok(())
+}
+
+#[test]
+fn cursor_commands_keep_nested_changes_and_restore_state_after_callback_errors() -> Result<()> {
+    let (mut runtime, mode, records) = runtime(9);
+    let state = Rc::new(RefCell::new(DeviceState::new([0; 2])));
+    runtime.set_input_device(Device(state.clone()))?;
+    let input = runtime.input_state_mut(1).unwrap();
+    input.set_update_rate(120);
+    input.pointer_mut().idle_count = 9;
+    input_command(&mut runtime, 143, [5, u32::MAX, 0])?;
+    let input = runtime.input_state(1).unwrap();
+    assert_eq!(input.update_rate(), 120);
+    assert_eq!(input.pointer().auto_hide, 5);
+    assert_eq!(input.pointer().idle_limit, 71_582_786);
+    assert_eq!(input.pointer().idle_count, 0);
+    assert_eq!(input.pointer().cursor_shown, 1);
+    assert_eq!(input.pointer().cursor_requested, 0);
+    assert_eq!(state.borrow().shows, [1, 0]);
+    assert_eq!(
+        records
+            .borrow()
+            .iter()
+            .map(|r| (r.packet.code, r.packet.target))
+            .collect::<Vec<_>>(),
+        [(22, 2), (22, 3)]
+    );
+
+    runtime.input_state_mut(1).unwrap().pointer_mut().idle_count = 7;
+    input_command(&mut runtime, 143, [0, 1, 0])?;
+    assert_eq!(runtime.input_state(1).unwrap().pointer().idle_count, 7);
+    input_command(&mut runtime, 159, [0; 3])?;
+    assert_eq!(runtime.input_state(1).unwrap().pointer().idle_count, 0);
+    assert_eq!(state.borrow().shows, [1, 0]);
+
+    mode.set(11);
+    input_command(&mut runtime, 150, [0, 1, 0])?;
+    runtime.input_state_mut(1).unwrap().pointer_mut().idle_count = 11;
+    assert!(
+        input_command(&mut runtime, 143, [7, 1, 0])
+            .unwrap_err()
+            .message
+            .contains("138")
+    );
+    let input = runtime.input_state(1).unwrap();
+    assert_eq!(input.pointer().auto_hide, 7);
+    assert_eq!(input.pointer().idle_limit, 2);
+    assert_eq!(input.pointer().idle_count, 11);
+    assert_eq!(input.pointer().cursor_shown, 1);
+    assert!(runtime.object(1).is_some());
+    mode.set(0);
+    input_command(&mut runtime, 159, [0; 3])?;
+    assert_eq!(runtime.input_state(1).unwrap().pointer().idle_count, 0);
     Ok(())
 }

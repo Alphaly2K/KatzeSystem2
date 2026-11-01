@@ -1,6 +1,6 @@
 use super::{
-    CoordinateMap, Events, InputDevice, KeyEvent, KeyEventKind, KeySample, KeyServices,
-    KeyTransition, Keys, PointerMotion, PointerState, Regions,
+    Events, InputDevice, KeyEvent, KeyEventKind, KeySample, KeyServices, KeyTransition, Keys,
+    PointerMotion, PointerState, Regions,
 };
 use crate::kcs::Host;
 use crate::task::{Command, CommandBuffers, Control, TaskClock};
@@ -14,6 +14,7 @@ pub struct CommandState {
     pub regions: Regions,
     pub keys: Keys,
     pub pointer: PointerState,
+    pub update_rate: u32,
     raw_state: u32,
 }
 
@@ -31,8 +32,7 @@ impl CommandState {
         command: &Command,
         buffers: &mut CommandBuffers<'_>,
         output: &mut u32,
-        coordinates: CoordinateMap,
-        device: Option<&mut dyn InputDevice>,
+        host: &mut dyn Host,
     ) -> Result<bool> {
         if self.control.deletion_requested != 0 {
             return Ok(false);
@@ -51,12 +51,21 @@ impl CommandState {
             return Ok(false);
         }
         match command.code {
-            3 => self.request_delete(device)?,
+            3 => self.request_delete(host.input_device())?,
             126 => {
-                let device = device.ok_or_else(|| Error::new(0, "宿主未配置输入设备"))?;
-                let point = coordinates.to_logical(device.pointer()?.position).0;
+                let coordinates = host.input_coordinates();
+                let point = coordinates
+                    .to_logical(super::update::device(host)?.pointer()?.position)
+                    .0;
                 write(buffers.data0.as_deref_mut(), &point[0].to_le_bytes())?;
                 write(buffers.data1.as_deref_mut(), &point[1].to_le_bytes())?;
+            }
+            143 => {
+                self.pointer.auto_hide = command.data[0];
+                self.pointer.idle_limit = self.update_rate.wrapping_mul(command.data[1]) / 60;
+                if self.pointer.auto_hide != 0 && self.pointer.cursor_requested != 0 {
+                    self.show_cursor(command.target, 1, true, host)?;
+                }
             }
             146 => {
                 for region in &mut self.regions.records {
@@ -70,11 +79,17 @@ impl CommandState {
                 &self.pointer.cursor_shown.to_le_bytes(),
             )?,
             150 => {
-                let device = device.ok_or_else(|| Error::new(0, "宿主未配置输入设备"))?;
+                let device = super::update::device(host)?;
                 device.show_cursor(command.data[1])?;
                 self.pointer.cursor_requested = device.cursor_visible()?;
             }
             153 => *output = u32::from(self.pointer.active == 0),
+            159 => {
+                if self.pointer.auto_hide != 0 && self.pointer.cursor_requested != 0 {
+                    self.show_cursor(command.target, 1, true, host)?;
+                }
+                self.pointer.idle_count = 0;
+            }
             160 => {
                 if buffers.data1.is_some() || command.data[1] != 0 {
                     write(buffers.data1.as_deref_mut(), &self.pointer.history)?;
@@ -117,6 +132,7 @@ impl CommandState {
             regions,
             keys,
             pointer,
+            update_rate,
             raw_state,
         } = self;
         (
@@ -126,6 +142,7 @@ impl CommandState {
                 clock,
                 keys,
                 pointer,
+                update_rate,
                 raw_state,
             },
         )
@@ -161,6 +178,12 @@ impl InputState {
     pub fn pointer_mut(&mut self) -> &mut PointerState {
         &mut self.commands.pointer
     }
+    pub fn update_rate(&self) -> u32 {
+        self.commands.update_rate
+    }
+    pub fn set_update_rate(&mut self, rate: u32) {
+        self.commands.update_rate = rate;
+    }
     pub(crate) fn initialize_pointer(&mut self, position: [i32; 2]) {
         self.commands.pointer.position = position;
         self.commands.pointer.active = 0;
@@ -175,15 +198,8 @@ impl InputState {
         host: &mut dyn Host,
     ) -> Result<bool> {
         self.commands.raw_state = self.events.raw_state();
-        let coordinates = host.input_coordinates();
-        self.commands.dispatch_command(
-            kind,
-            command,
-            buffers,
-            output,
-            coordinates,
-            host.input_device(),
-        )
+        self.commands
+            .dispatch_command(kind, command, buffers, output, host)
     }
 
     pub fn dispatch_key(&mut self, id: u32, event: KeyEvent, host: &mut dyn Host) -> Result<bool> {
@@ -253,6 +269,7 @@ pub(super) struct Callback<'a> {
     clock: &'a mut TaskClock,
     keys: &'a mut Keys,
     pointer: &'a mut PointerState,
+    update_rate: &'a mut u32,
     raw_state: &'a mut u32,
 }
 
@@ -270,6 +287,7 @@ impl Callback<'_> {
             regions: std::mem::take(regions),
             keys: std::mem::take(self.keys),
             pointer: std::mem::take(self.pointer),
+            update_rate: *self.update_rate,
             raw_state: *self.raw_state,
         };
         let mut output = 1;
@@ -285,6 +303,7 @@ impl Callback<'_> {
         *regions = state.regions;
         *self.keys = state.keys;
         *self.pointer = state.pointer;
+        *self.update_rate = state.update_rate;
         *self.raw_state = state.raw_state;
         result.map(|found| found.then_some(output))
     }

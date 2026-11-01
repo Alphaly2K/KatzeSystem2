@@ -1,6 +1,6 @@
 use super::{
-    InputDelivery, InputDevice, InputState, KeyEventKind, KeySample, KeyServices, KeyTransition,
-    Keys, PointerMotion, Regions,
+    CommandState, InputDelivery, InputDevice, InputState, KeyEventKind, KeySample, KeyServices,
+    KeyTransition, Keys, PointerMotion, Regions,
 };
 use crate::kcs::Host;
 use crate::task::{Command, CommandBuffers};
@@ -23,13 +23,13 @@ impl InputState {
                         && p.cursor_shown != 0
                         && p.idle_count >= p.idle_limit
                     {
-                        self.cursor(id, 0, true, host)?;
+                        self.commands.show_cursor(id, 0, true, host)?;
                     }
                 }
             } else if self.commands.pointer.forced == 0 {
                 self.commands.pointer.idle_count = 0;
                 if self.cursor_needs_showing() {
-                    self.cursor(id, 1, false, host)?;
+                    self.commands.show_cursor(id, 1, false, host)?;
                 }
             }
         } else {
@@ -43,7 +43,7 @@ impl InputState {
             if self.commands.pointer.forced == 0 && changed {
                 self.commands.pointer.idle_count = 0;
                 if self.cursor_needs_showing() {
-                    self.cursor(id, 1, true, host)?;
+                    self.commands.show_cursor(id, 1, true, host)?;
                 }
             }
             self.commands.pointer.forced = 0;
@@ -104,12 +104,29 @@ impl InputState {
         p.auto_hide != 0 && p.cursor_requested != 0 && p.cursor_shown == 0
     }
 
-    fn cursor(&mut self, id: u32, visible: u32, notify: bool, host: &mut dyn Host) -> Result<()> {
-        self.commands.pointer.cursor_shown = visible;
+    fn wheel(&mut self, id: u32, point: [i32; 2], host: &mut dyn Host) -> Result<()> {
+        let (regions, mut callback) = self.commands.split(self.events.raw_state());
+        regions.dispatch_wheel(id, point, |regions, command| {
+            callback
+                .route(host, regions, command, &mut CommandBuffers::default())
+                .map(|_| ())
+        })
+    }
+}
+
+impl CommandState {
+    pub(super) fn show_cursor(
+        &mut self,
+        id: u32,
+        visible: u32,
+        notify: bool,
+        host: &mut dyn Host,
+    ) -> Result<()> {
+        self.pointer.cursor_shown = visible;
         device(host)?.show_cursor(visible)?;
         if notify {
             host.dispatch_input_command(
-                &mut self.commands,
+                self,
                 InputDelivery::Broadcast,
                 Command {
                     sender: id,
@@ -122,15 +139,6 @@ impl InputState {
             )?;
         }
         Ok(())
-    }
-
-    fn wheel(&mut self, id: u32, point: [i32; 2], host: &mut dyn Host) -> Result<()> {
-        let (regions, mut callback) = self.commands.split(self.events.raw_state());
-        regions.dispatch_wheel(id, point, |regions, command| {
-            callback
-                .route(host, regions, command, &mut CommandBuffers::default())
-                .map(|_| ())
-        })
     }
 }
 
@@ -214,7 +222,7 @@ impl KeyServices for DeviceScan<'_> {
     }
 }
 
-fn device(host: &mut dyn Host) -> Result<&mut dyn InputDevice> {
+pub(super) fn device(host: &mut dyn Host) -> Result<&mut dyn InputDevice> {
     host.input_device()
         .ok_or_else(|| Error::new(0, "宿主未配置输入设备，自动设备更新不可用"))
 }
