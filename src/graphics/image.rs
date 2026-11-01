@@ -251,6 +251,7 @@ impl Image {
 struct ImageEntry {
     owner: Option<u32>,
     references: usize,
+    // 零表示包装尚未绑定像素，与已绑定的零尺寸图像分别保存。
     data: u32,
 }
 
@@ -283,13 +284,36 @@ impl Images {
         self.insert(owner, Image::new(size)?, None)
     }
 
+    /// 创建尚未绑定像素的包装；pixel_handle 返回零，recreate 首次分配像素。
+    pub fn create_empty(&mut self, owner: u32) -> Result<u32> {
+        self.empty_wrapper(Some(owner))
+    }
+
+    fn empty_wrapper(&mut self, owner: Option<u32>) -> Result<u32> {
+        if self.entries.len() == read::MAX_ITEMS {
+            return Err(Error::new(0, "图像对象数量超过上限"));
+        }
+        let handle = self.handles.allocate()?;
+        self.entries.insert(
+            handle,
+            ImageEntry {
+                owner,
+                references: 1,
+                data: 0,
+            },
+        );
+        Ok(handle)
+    }
+
     /// 重建包装绑定的空白图像；基线在任一轴尺寸相同时复用原像素。
     /// 两轴均不同时替换像素，其他包装继续持有旧像素；失败保留原绑定。
     pub fn recreate(&mut self, handle: u32, size: [u32; 2]) -> Result<()> {
         let previous = self.entry_mut(handle)?.data;
-        let old_size = self.data[&previous].image.info().size;
-        if old_size.into_iter().zip(size).any(|(old, new)| old == new) {
-            return Ok(());
+        if let Some(data) = self.data.get(&previous) {
+            let old_size = data.image.info().size;
+            if old_size.into_iter().zip(size).any(|(old, new)| old == new) {
+                return Ok(());
+            }
         }
         let image = Image::new(size)?;
         let pixels = self.handles.allocate()?;
@@ -369,10 +393,16 @@ impl Images {
     /// 为同一像素对象创建独立包装；没有任务登记，使用者须显式释放。
     /// 源包装释放后新句柄继续有效，两个包装的像素修改互相可见。
     pub fn share(&mut self, handle: u32) -> Result<u32> {
-        self.share_pixels_for(None, self.pixel_handle(handle)?)
+        let pixels = self.pixel_handle(handle)?;
+        if pixels == 0 {
+            self.empty_wrapper(None)
+        } else {
+            self.share_pixels_for(None, pixels)
+        }
     }
 
-    /// 查询包装当前绑定的像素句柄，不增加引用；至少一个包装持有时有效。
+    /// 查询包装当前绑定的像素句柄，不增加引用；空包装返回零。
+    /// 非零像素句柄在至少一个包装持有时有效。
     pub fn pixel_handle(&self, handle: u32) -> Result<u32> {
         Ok(self
             .entries
@@ -477,13 +507,17 @@ impl Images {
     pub fn get(&self, handle: u32) -> Result<&Image> {
         self.entries
             .get(&handle)
-            .map(|entry| &self.data[&entry.data].image)
-            .ok_or_else(|| Error::new(0, "图像对象句柄无效"))
+            .and_then(|entry| self.data.get(&entry.data))
+            .map(|data| &data.image)
+            .ok_or_else(|| Error::new(0, "图像对象句柄无效或尚未绑定像素"))
     }
 
     pub fn get_mut(&mut self, handle: u32) -> Result<&mut Image> {
         let data = self.entry_mut(handle)?.data;
-        Ok(&mut self.data.get_mut(&data).unwrap().image)
+        self.data
+            .get_mut(&data)
+            .map(|data| &mut data.image)
+            .ok_or_else(|| Error::new(0, "图像对象尚未绑定像素"))
     }
 
     fn entry_mut(&mut self, handle: u32) -> Result<&mut ImageEntry> {
@@ -508,6 +542,8 @@ impl Images {
             .ok_or_else(|| Error::new(0, "图像对象句柄无效"))?
             .data;
         let target_data = self.entry_mut(target)?.data;
+        self.pixel_image(source_data)?;
+        self.pixel_image(target_data)?;
         if source_data == target_data {
             return Ok(self.get_mut(target)?.blend_within(source_rect, at));
         }
@@ -546,6 +582,8 @@ impl Images {
     ) -> Result<()> {
         let source_data = self.entry_mut(source)?.data;
         let target_data = self.entry_mut(target)?.data;
+        self.pixel_image(source_data)?;
+        self.pixel_image(target_data)?;
         if source_data == target_data {
             return Err(Error::new(0, "图像列表自有图像不能同时用作绘制来源"));
         }
@@ -585,6 +623,9 @@ fn list_coordinate(value: f32) -> i32 {
 }
 
 fn release_data(data: &mut BTreeMap<u32, ImageData>, handle: u32) {
+    if handle == 0 {
+        return;
+    }
     let image = data.get_mut(&handle).unwrap();
     image.references -= 1;
     if image.references == 0 {

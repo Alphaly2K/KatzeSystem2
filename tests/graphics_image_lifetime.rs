@@ -117,6 +117,39 @@ fn separate_wrappers_share_pixels_and_preserve_alias_blending_after_owner_releas
 }
 
 #[test]
+fn empty_wrappers_allocate_on_first_recreation_and_share_only_the_current_binding() {
+    let mut images = Images::default();
+    let empty = images.create_empty(7).unwrap();
+    let shared = images.share(empty).unwrap();
+    assert_ne!(empty, 0);
+    assert_eq!(images.pixel_handle(empty).unwrap(), 0);
+    assert_eq!(images.pixel_handle(shared).unwrap(), 0);
+    assert!(images.get(empty).is_err());
+    assert!(images.get_mut(empty).is_err());
+    assert!(images.recreate(empty, [u32::MAX; 2]).is_err());
+    assert_eq!(images.pixel_handle(empty).unwrap(), 0);
+    images.recreate(empty, [0, 0]).unwrap();
+    assert_ne!(images.pixel_handle(empty).unwrap(), 0);
+    assert_eq!(images.get(empty).unwrap().info().size, [0, 0]);
+    assert_eq!(images.pixel_handle(shared).unwrap(), 0);
+    images.recreate(shared, [1, 2]).unwrap();
+    assert!(
+        images
+            .blend(empty, [0; 2], shared, Rect::from_xywh(0, 0, 1, 2))
+            .is_ok()
+    );
+    images.release_owner(7);
+    assert!(images.pixel_handle(empty).is_err());
+    assert_eq!(images.get(shared).unwrap().info().size, [1, 2]);
+    images.release(shared).unwrap();
+    let empty = images.create_empty(8).unwrap();
+    images.retain(empty).unwrap();
+    images.release_owner(8);
+    images.release_reference(empty).unwrap();
+    assert!(images.pixel_handle(empty).is_err());
+}
+
+#[test]
 fn recreation_reuses_either_matching_axis_and_keeps_shared_old_pixels_alive() {
     let mut images = Images::default();
     let image = images.create(7, [3, 2]).unwrap();
