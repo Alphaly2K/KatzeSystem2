@@ -9,6 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 mod animation;
 mod image;
+mod input;
 mod plane;
 mod scene;
 mod task;

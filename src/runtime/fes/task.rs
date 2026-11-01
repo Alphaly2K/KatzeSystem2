@@ -125,6 +125,8 @@ pub struct FesObject {
     exit_published: bool,
     first_update: bool,
     input_button: Option<u32>,
+    input_mode: u32,
+    last_input: u32,
 }
 
 impl FesObject {
@@ -146,6 +148,8 @@ impl FesObject {
             exit_published: false,
             first_update: true,
             input_button: None,
+            input_mode: 0,
+            last_input: 0,
         }
     }
 
@@ -167,6 +171,106 @@ impl FesObject {
 
     pub fn input_button(&self) -> Option<u32> {
         self.input_button
+    }
+
+    pub fn last_input(&self) -> u32 {
+        self.last_input
+    }
+
+    fn pointer_position(&self, host: &mut dyn Host, propagation: u32) -> Result<[i32; 2]> {
+        let mut x = [0; 4];
+        let mut y = [0; 4];
+        self.send(
+            host,
+            self.input,
+            126,
+            [0, 0, propagation],
+            &mut CommandBuffers {
+                data0: Some(&mut x),
+                data1: Some(&mut y),
+            },
+        )?;
+        Ok([i32::from_le_bytes(x), i32::from_le_bytes(y)])
+    }
+
+    fn update_pointer_values(&mut self, host: &mut dyn Host) -> Result<()> {
+        if !self.initialized {
+            return Ok(());
+        }
+        let outside = self.send(
+            host,
+            self.input,
+            153,
+            [0, 0, 1],
+            &mut CommandBuffers::default(),
+        )?;
+        let point = if outside == 0 {
+            self.pointer_position(host, 1)?
+        } else {
+            [i32::MIN; 2]
+        };
+        if let Some(scene) = &mut self.scene {
+            scene.set_system_value("_MOUSE_X_", point[0]);
+            scene.set_system_value("_MOUSE_Y_", point[1]);
+        }
+        Ok(())
+    }
+
+    fn input_event(
+        &mut self,
+        command: &Command,
+        output: &mut u32,
+        host: &mut dyn Host,
+    ) -> Result<()> {
+        if self.scene.is_none() && matches!(command.code, 9 | 10) {
+            return Err(Error::new(0, "FES 按下与释放事件需要已装载脚本"));
+        }
+        if command.code == 9 {
+            let raw = self.send(
+                host,
+                command.sender,
+                96,
+                [0, 1, 1],
+                &mut CommandBuffers::default(),
+            )?;
+            self.last_input = raw;
+            self.scene.as_mut().unwrap().set_raw_input(raw);
+        } else if command.code == 10 {
+            self.last_input = 0;
+        }
+        self.update_pointer_values(host)?;
+        *output = 0;
+        let key = command.data[1];
+        // 当前已接入的 FES 类型均不参与按钮编号匹配，事件使用系统命名值。
+        let event = match (command.code, key) {
+            (9, 0) => Some(2),
+            (9, 1) => Some(3),
+            (9, 8) => Some(6),
+            (9, 9) => Some(7),
+            (9, 10) => Some(9),
+            (9, 11) => Some(10),
+            (10, 0) => Some(4),
+            (10, 1) => Some(5),
+            (10, 4..=7) => Some(key + 11),
+            _ => None,
+        };
+        if command.code == 9 && (4..=7).contains(&key) {
+            self.pointer_position(host, 0)?;
+        }
+        if let Some(event) = event {
+            self.scene.as_mut().unwrap().record_input_event(event);
+        }
+        if matches!(command.code, 9 | 10) {
+            // 未匹配对象处理器时，控制器响应槽保持构造初值一。
+            self.send(
+                host,
+                command.sender,
+                95,
+                [0, 1, 1],
+                &mut CommandBuffers::default(),
+            )?;
+        }
+        Ok(())
     }
 
     fn prepare_input_button(&mut self, host: &mut dyn Host) -> Result<()> {
@@ -261,6 +365,7 @@ impl FesObject {
             .as_ref()
             .ok_or_else(|| Error::new(0, "FES 尚未装载"))?;
         if !scene.is_pending() {
+            self.update_pointer_values(host)?;
             let mode = self.send(
                 host,
                 self.input,
@@ -268,8 +373,12 @@ impl FesObject {
                 [12, 0, 1],
                 &mut CommandBuffers::default(),
             )?;
-            if mode != 0 {
-                return Err(Error::new(0, "FES 输入模式切换尚未接入"));
+            if mode != self.input_mode {
+                self.scene
+                    .as_mut()
+                    .unwrap()
+                    .record_input_event(if mode != 0 { 19 } else { 20 });
+                self.input_mode = mode;
             }
         }
         let result = services(host)?.update(
@@ -365,6 +474,7 @@ impl TaskObject for FesObject {
         self.synchronize(host);
         let b = command.data[1];
         match command.code {
+            9 | 10 | 64 | 65 => self.input_event(command, output, host)?,
             3 => {
                 self.request_delete(host, budget)?;
             }
@@ -488,7 +598,7 @@ impl TaskObject for FesObject {
                 self.offset = [i32::from_le_bytes(x), i32::from_le_bytes(y)];
                 self.bind()?;
             }
-            9 | 10 | 19 | 27 | 28 | 64 | 65 | 177 | 178 | 341..=358 => {
+            19 | 27 | 28 | 177 | 178 | 341..=358 => {
                 return Err(Error::new(0, "FES 专属命令尚未接入"));
             }
             _ => {

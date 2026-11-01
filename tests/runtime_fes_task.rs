@@ -2,7 +2,7 @@ use katze_system2::{
     Error, Result,
     expression::State,
     graphics::{GraphicsFactory, Projection, RenderTarget, TextureFilter, Transform},
-    input::{InputDevice, InputFactory, KeySample, PointerSample},
+    input::{InputDevice, InputFactory, KeyEvent, KeyEventKind, KeySample, PointerSample},
     kcs::{Host, Interpreter, ResourceServices},
     resource::ResourceMode,
     runtime::{BaseObject, ObjectFactory, RootObject, Runtime, TaskObject, fes::FesFactory, kind},
@@ -79,13 +79,14 @@ impl ResourceServices for Files {
 struct Device {
     queries: Queries,
     mask: Rc<Cell<bool>>,
+    pointer: Rc<Cell<PointerSample>>,
 }
 impl InputDevice for Device {
     fn poll(&mut self) -> Result<()> {
         Ok(())
     }
     fn pointer(&mut self) -> Result<PointerSample> {
-        Ok(PointerSample::default())
+        Ok(self.pointer.get())
     }
     fn key(&mut self, key: u32, group: u32, repeat: bool) -> Result<KeySample> {
         self.queries.borrow_mut().push((key, group, repeat));
@@ -174,6 +175,7 @@ struct Setup {
     child: Rc<Cell<Option<u32>>>,
     fail_button: Rc<Cell<bool>>,
     button_attempts: Rc<Cell<u32>>,
+    pointer: Rc<Cell<PointerSample>>,
 }
 
 fn setup(budget: usize, source: &[u8]) -> Setup {
@@ -183,6 +185,7 @@ fn setup(budget: usize, source: &[u8]) -> Setup {
     let reads = Rc::new(RefCell::new(Vec::new()));
     let fail_button = Rc::new(Cell::new(false));
     let button_attempts = Rc::new(Cell::new(0));
+    let pointer = Rc::new(Cell::new(PointerSample::default()));
     let mut runtime = Runtime::new(
         0,
         kind::ROOT,
@@ -208,6 +211,7 @@ fn setup(budget: usize, source: &[u8]) -> Setup {
         .set_input_device(Device {
             queries: queries.clone(),
             mask: mask.clone(),
+            pointer: pointer.clone(),
         })
         .unwrap();
     runtime.set_resources(Files {
@@ -232,6 +236,7 @@ fn setup(budget: usize, source: &[u8]) -> Setup {
         child,
         fail_button,
         button_attempts,
+        pointer,
     }
 }
 
@@ -442,14 +447,17 @@ fn fes_start_reads_the_running_parent_elapsed_clock_and_current_context() {
 }
 
 #[test]
-fn failed_loads_preserve_the_task_and_input_queries_gate_script_execution() {
+fn failed_loads_preserve_the_task_and_input_modes_publish_system_values() {
     let Setup {
         mut runtime,
         queries,
         mask,
         reads,
         ..
-    } = setup(1, b"#START\n$0=$0+(_TOPOBJ_!=0)\nexit 3\n");
+    } = setup(
+        1,
+        b"#START\n$0=$0+(_TOPOBJ_!=0)\n$2=_CLICK_L_\nwait 1000\n$3=_CLICK_L_\nwait 1\n$4=_CLICK_L_\nexit 3\n",
+    );
     let fes = runtime.create(0, kind::FES, b"scene", b"").unwrap();
     send(&mut runtime, fes, 337, 0, 0);
     file(&mut runtime, fes, b"missing").unwrap();
@@ -468,15 +476,15 @@ fn failed_loads_preserve_the_task_and_input_queries_gate_script_execution() {
             (12, 3, false)
         ]
     );
-    assert!(
-        runtime
-            .dispatch_command(0, command(fes, 339, 0, 0))
-            .is_err()
-    );
-    assert_eq!(runtime.numbers().shared[0], 0);
-    mask.set(false);
     send(&mut runtime, fes, 339, 0, 0);
     assert_eq!(runtime.numbers().shared[0], 1);
+    assert_eq!(runtime.numbers().shared[2], -1);
+    runtime.update(1, 1).unwrap();
+    assert_eq!(runtime.numbers().shared[0], 1);
+    assert_eq!(runtime.numbers().shared[3], -1);
+    mask.set(false);
+    runtime.update(2, 1).unwrap();
+    assert_eq!(runtime.numbers().shared[4], 0);
     assert_eq!(send(&mut runtime, fes, 23, 0, 0), 3);
     assert_eq!(
         *reads.borrow(),
@@ -602,4 +610,57 @@ fn failed_first_button_creation_is_reported_once_and_does_not_reserve_an_id() {
         runtime.create(0, kind::BASE, b"unused", b"").unwrap(),
         fes + 1
     );
+}
+
+#[test]
+fn auxiliary_input_reaches_script_values_and_transients_clear_after_the_round() {
+    for budget in [1, 4096] {
+        let Setup { mut runtime, pointer, .. } = setup(budget, b"#START\nwait 1000\n$0=_CLICK_L_\n$2=_MOUSE_X_\n$3=_MOUSE_Y_\n$4=_SCRL_U_\nwait 1\n$1=_CLICK_L_\n$5=_SCRL_U_\n$6=_MOUSE_X_\n$7=_MOUSE_Y_\nwait 20\n");
+        pointer.set(PointerSample {
+            position: [2, 3],
+            active: 1,
+        });
+        runtime.input_coordinates_mut().logical_size = [8, 6];
+        let fes = runtime.create(0, kind::FES, b"scene", b"").unwrap();
+        send(&mut runtime, fes, 337, 0, 0);
+        file(&mut runtime, fes, b"complete.fes").unwrap();
+        runtime.update(100, 1).unwrap();
+        send(&mut runtime, fes, 339, 0, 0);
+        let button = runtime
+            .tree()
+            .children(fes)
+            .unwrap()
+            .find(|id| runtime.tree().node(*id).unwrap().kind == kind::BUTTON)
+            .unwrap();
+        runtime.update_input_selection(1, Some([2, 3])).unwrap();
+        assert!(
+            !runtime
+                .dispatch_input_key(
+                    1,
+                    KeyEvent {
+                        kind: KeyEventKind::Change,
+                        code: 4,
+                        key: 0,
+                        pressed: 1,
+                        mask: 2,
+                        point: [2, 3],
+                    }
+                )
+                .unwrap()
+        );
+        assert_eq!(send(&mut runtime, button, 4, 8, 1), 1);
+        runtime.update(101, 1).unwrap();
+        assert_eq!(runtime.numbers().shared[0], -1);
+        assert_eq!(&runtime.numbers().shared[2..5], &[2, 3, -1]);
+        pointer.set(PointerSample::default());
+        runtime.update(102, 1).unwrap();
+        assert_eq!(
+            (runtime.numbers().shared[1], runtime.numbers().shared[5]),
+            (0, 0)
+        );
+        assert_eq!(&runtime.numbers().shared[6..8], &[i32::MIN; 2]);
+        assert_eq!(send(&mut runtime, button, 4, 0, 0), 1);
+        assert_eq!(send(&mut runtime, fes, 64, button, 1), 0);
+        assert_eq!(send(&mut runtime, fes, 65, button, 1), 0);
+    }
 }

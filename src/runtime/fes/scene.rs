@@ -13,6 +13,7 @@ pub struct Scene {
     deadline: Option<u32>,
     exit_code: Option<i32>,
     invocation: Option<Invocation>,
+    input: super::input::SystemInput,
 }
 
 struct Invocation {
@@ -26,6 +27,22 @@ impl Scene {
         let mut interpreter = fes::Interpreter::new(program)?;
         let objects = Objects::new(handles)?;
         objects.publish_bindings(&mut interpreter);
+        for name in [
+            "_CLICK_L_",
+            "_CLICK_R_",
+            "_SCRL_U_",
+            "_SCRL_D_",
+            "_PUSH_UP_",
+            "_PUSH_DOWN_",
+            "_PUSH_RIGHT_",
+            "_PUSH_LEFT_",
+        ] {
+            interpreter
+                .named
+                .entry(name.to_owned())
+                .or_default()
+                .insert(0, 0);
+        }
         Ok(Self {
             interpreter,
             objects,
@@ -34,6 +51,7 @@ impl Scene {
             deadline: None,
             exit_code: None,
             invocation: None,
+            input: super::input::SystemInput::default(),
         })
     }
 
@@ -55,6 +73,20 @@ impl Scene {
 
     pub fn deadline(&self) -> Option<u32> {
         self.deadline
+    }
+
+    pub fn raw_input(&self) -> u32 {
+        self.input.raw
+    }
+
+    pub(super) fn set_raw_input(&mut self, value: u32) {
+        self.input.raw = value;
+    }
+
+    pub(super) fn record_input_event(&mut self, event: u32) {
+        if let Some((name, value)) = self.input.record(event) {
+            self.set_system_value(name, value);
+        }
     }
 
     /// 退出码在最终对象更新完成后可用；退出后仍可逐轮更新媒体对象。
@@ -129,6 +161,14 @@ impl Scene {
         Ok(true)
     }
 
+    fn finish_input(&mut self) {
+        if self.input.finish() {
+            for name in super::input::TRANSIENT_NAMES {
+                self.set_system_value(name, 0);
+            }
+        }
+    }
+
     fn begin_updates(&mut self, resume_script: bool) {
         let invocation = self.invocation.as_mut().unwrap();
         invocation.updates = Some((self.objects.update_order().collect(), 0));
@@ -178,7 +218,12 @@ impl<F: ObjectFactory> Store<'_, F> {
                 updates: None,
                 resume_script: false,
             });
-            if scene.exit_code.is_some() || scene.deadline.is_some_and(|deadline| now < deadline) {
+            if scene.exit_code.is_some()
+                || scene
+                    .deadline
+                    .is_some_and(|deadline| now < deadline && !scene.input.left)
+            {
+                scene.finish_input();
                 scene.begin_updates(false);
             } else {
                 scene.deadline = None;
@@ -205,6 +250,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                 Step::Paused => return Err(Error::new(0, "FES 解释器出现未支持的暂停状态")),
                 Step::Halted => {
                     scene.exit_code = Some(scene.interpreter.return_value);
+                    scene.finish_input();
                     scene.begin_updates(false);
                 }
                 Step::Event(event) => {
@@ -236,10 +282,12 @@ impl<F: ObjectFactory> Store<'_, F> {
                                 return Err(Error::new(0, "FES 特殊等待尚未接入"));
                             }
                             scene.deadline = Some(now.wrapping_add(duration.max(1) as u32));
+                            scene.finish_input();
                             scene.begin_updates(false);
                         }
                         fes::Event::Frame => {
                             scene.deadline = Some(now.wrapping_add(1));
+                            scene.finish_input();
                             scene.begin_updates(false);
                         }
                         fes::Event::Exit(code) => {
@@ -255,5 +303,59 @@ impl<F: ObjectFactory> Store<'_, F> {
             }
         }
         Ok(false)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::runtime::{BaseObject, TaskObject, kind};
+
+    struct NoObjects;
+    impl ObjectFactory for NoObjects {
+        fn create(&mut self, _: u32, _: u32, _: &[u8]) -> Result<Box<dyn TaskObject>> {
+            Err(Error::new(0, "合成场景不创建任务"))
+        }
+    }
+
+    #[test]
+    fn exit_keeps_input_until_the_next_round_without_clearing_release_or_touch_values() {
+        for budget in [1, 4096] {
+            let mut runtime = Runtime::new(
+                0,
+                kind::ROOT,
+                Box::new(BaseObject::new()),
+                crate::expression::State::new(0),
+                NoObjects,
+            );
+            runtime.set_budget(budget, 10000);
+            let mut scene = Scene::new(
+                fes::Program::from_text(b"#START\nexit 5\n").unwrap(),
+                runtime.host().handle_allocator(),
+            )
+            .unwrap();
+            scene.set_raw_input(16);
+            for event in [2, 15, 21] {
+                scene.record_input_event(event);
+            }
+            for now in [100, 101] {
+                let mut complete = false;
+                for _ in 0..16 {
+                    if runtime.update_fes_scene(0, &mut scene, now).unwrap() {
+                        complete = true;
+                        break;
+                    }
+                }
+                assert!(complete);
+                assert_eq!(
+                    scene.interpreter().named["_CLICK_L_"][&0],
+                    if now == 100 { -1 } else { 0 }
+                );
+                assert_eq!(scene.interpreter().named["_RELEASE_UP_"][&0], -1);
+                assert_eq!(scene.interpreter().named["_TOUCH_"][&0], -1);
+                assert_eq!(scene.raw_input(), 16);
+                assert_eq!(scene.exit_code(), Some(5));
+            }
+        }
     }
 }

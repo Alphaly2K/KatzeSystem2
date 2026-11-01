@@ -311,7 +311,7 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 
 `RootObject::new(input_task, sound_task)` 保存输入与声音任务编号，命令 34／35 原样返回相应值；任务删除后不会自动选择替代编号。该对象作为 Runtime 的显式根参数使用，子任务由调用者创建，自动启动链仍待接入。根对象遵循专属命令消费规则，其余未实现的专属入口返回诊断。
 
-`runtime::fes::Scene::new(program, handles)` 组合预先装载的 FES 解释器和对象存储；与 Runtime 共用 `runtime.host().handle_allocator()`。调用前通过 `objects_mut()?.set_image_list(list, clip)` 绑定共享列表；`Runtime::update_fes_scene(owner, &mut scene, now)` 消费已支持的脚本事件并按声明顺序更新对象，返回 false 时继续调用以完成预算续跑，期间保留原时刻和游标。true 表示本轮完成，`exit_code()` 在退出且最终对象更新完成后返回退出码。`deadline()` 查询原始等待期限，`is_pending()` 查询续跑状态，`objects()`／`interpreter()` 提供只读查询；推进未完成时 `objects_mut()` 返回诊断。首次推进绑定 owner，后续不能更换。调用方在所属任务主体时点推进，保证该任务时钟已经更新；下层动画命令继续使用任务自身时钟。支持范围和未接入服务见[场景推进](graphics.md#fes-场景推进)。
+`runtime::fes::Scene::new(program, handles)` 组合预先装载的 FES 解释器和对象存储；与 Runtime 共用 `runtime.host().handle_allocator()`。调用前通过 `objects_mut()?.set_image_list(list, clip)` 绑定共享列表；`Runtime::update_fes_scene(owner, &mut scene, now)` 消费已支持的脚本事件并按声明顺序更新对象，返回 false 时继续调用以完成预算续跑，期间保留原时刻和游标。true 表示本轮完成，`exit_code()` 在退出且最终对象更新完成后返回退出码。`deadline()` 查询原始等待期限，`raw_input()` 查询控制器保存的原始输入掩码，`is_pending()` 查询续跑状态，`objects()`／`interpreter()` 提供只读查询；推进未完成时 `objects_mut()` 返回诊断。首次推进绑定 owner，后续不能更换。调用方在所属任务主体时点推进，保证该任务时钟已经更新；下层动画命令继续使用任务自身时钟。支持范围和未接入服务见[场景推进](graphics.md#fes-场景推进)。
 
 `Scene::prepare(&mut state, budget)` 只消费装载期声明和对象属性，返回 false 后继续调用；完成时尚未进入 START，也未创建下层媒体任务。可以重复调用。使用与 Runtime 相同的 `numbers_mut()`，初始化表达式的副作用会立即保留。普通 update 也可直接完成初始化。退出后的 update 继续更新 `_FRAME_` 和媒体对象，脚本保持停止；退出码由任务层写入属性槽，场景本身不删除所属任务。
 
