@@ -283,6 +283,29 @@ impl Images {
         self.insert(owner, Image::new(size)?, None)
     }
 
+    /// 重建包装绑定的空白图像；基线在任一轴尺寸相同时复用原像素。
+    /// 两轴均不同时替换像素，其他包装继续持有旧像素；失败保留原绑定。
+    pub fn recreate(&mut self, handle: u32, size: [u32; 2]) -> Result<()> {
+        let previous = self.entry_mut(handle)?.data;
+        let old_size = self.data[&previous].image.info().size;
+        if old_size.into_iter().zip(size).any(|(old, new)| old == new) {
+            return Ok(());
+        }
+        let image = Image::new(size)?;
+        let pixels = self.handles.allocate()?;
+        self.data.insert(
+            pixels,
+            ImageData {
+                references: 1,
+                has_alpha: None,
+                image,
+            },
+        );
+        self.entries.get_mut(&handle).unwrap().data = pixels;
+        release_data(&mut self.data, previous);
+        Ok(())
+    }
+
     /// 接收已格式展开的名称列表，仅 ASCII 空格分隔，不解释引号。
     pub fn load<S: ResourceServices + ?Sized>(
         &mut self,

@@ -275,6 +275,8 @@ FES 内部执行宏声明，初始化按以下顺序交给宿主：
 
 图像包装与底层像素也分别分配句柄。`Images::pixel_handle(wrapper)` 只查询绑定关系，不增加引用；像素句柄在至少一个包装持有时有效，不能用于普通包装查询或释放。`ImageList::set_pixels` 按像素句柄登记并持有独立包装，`set` 接收普通包装后作同一登记。
 
+`Images::recreate(wrapper, size)` 保留包装及任务登记，仅在宽高均变化时绑定新的全零像素；任一轴相同则保留旧尺寸及像素。其他包装继续持有旧像素，尺寸检查或分配失败保留原绑定。该路径与每次创建独立包装的普通 112 分开提供。
+
 `graphics::ImageList` 接收普通图像包装并持有独立来源包装，提供 `set`／`remove`／`set_visible`／`clear`、脏区 `update` 及显式全部面块 `redraw`；当前支持默认排序优先级下的无变换图像来源。`Runtime::images_mut()` 访问同一存储，`update_image_list(list)` 更新并提交脏矩形，`redraw_image_list(list)` 重绘后整幅提交，均返回是否复制了画布像素；上下文关闭时仍更新自有图像并消费脏区。`new_tiled` 设置面块步长，重叠区保留重复混合，`clear` 立即清空自有图像。
 
 `GraphicsFactory` 同时创建类型 15 的 `ImageListObject`，接入 285～287、289～298、310 和零裁剪 316。任务主体自动更新列表；285 自动创建隐藏子平面，291 查询输出包装，292／310 控制提交与自动更新，295 通过可选缓冲设置条目裁剪，对应 `ImageList::set_clip`。自定义宿主提供 `images_mut`、`create_task_child`、`canvas_layout` 和 `update_image_list`，后者先更新并消费脏区，再按提交和强制开关复制画布，返回是否复制像素。完整参数、未实现来源及确定性初始偏移见[图像列表任务](graphics.md#图像列表任务)。

@@ -115,3 +115,54 @@ fn separate_wrappers_share_pixels_and_preserve_alias_blending_after_owner_releas
     images.release_reference(next).unwrap();
     assert!(images.get(next).is_err());
 }
+
+#[test]
+fn recreation_reuses_either_matching_axis_and_keeps_shared_old_pixels_alive() {
+    let mut images = Images::default();
+    let image = images.create(7, [3, 2]).unwrap();
+    images
+        .get_mut(image)
+        .unwrap()
+        .fill_rect_from_bottom(Rect::from_xywh(0, 0, 3, 2), 0x8012_3456);
+    let alias = images.share(image).unwrap();
+    let pixels = images.pixel_handle(image).unwrap();
+    for size in [[3, 5], [4, 2]] {
+        images.recreate(image, size).unwrap();
+        assert_eq!(images.get(image).unwrap().info().size, [3, 2]);
+        assert_eq!(images.pixel_handle(image).unwrap(), pixels);
+        assert_eq!(
+            images.get(image).unwrap().surface().pixel(0, 0),
+            Some(0x8012_3456)
+        );
+    }
+    images.recreate(image, [4, 5]).unwrap();
+    assert_ne!(images.pixel_handle(image).unwrap(), pixels);
+    assert_eq!(images.get(image).unwrap().info().size, [4, 5]);
+    assert!(
+        images
+            .get(image)
+            .unwrap()
+            .surface()
+            .pixels()
+            .iter()
+            .all(|&value| value == 0)
+    );
+    assert_eq!(images.pixel_handle(alias).unwrap(), pixels);
+    assert_eq!(
+        images.get(alias).unwrap().surface().pixel(0, 0),
+        Some(0x8012_3456)
+    );
+    let next = images.pixel_handle(image).unwrap();
+    assert!(images.recreate(image, [u32::MAX, 2]).is_err());
+    assert_eq!(images.pixel_handle(image).unwrap(), next);
+    images.recreate(image, [0, 5]).unwrap();
+    assert_eq!(images.get(image).unwrap().info().size, [4, 5]);
+    images.recreate(image, [0, 0]).unwrap();
+    assert_eq!(images.get(image).unwrap().info().size, [0, 0]);
+    images.recreate(image, [0, 7]).unwrap();
+    assert_eq!(images.get(image).unwrap().info().size, [0, 0]);
+    images.release_owner(7);
+    assert!(images.get(image).is_err());
+    assert!(images.get(alias).is_ok());
+    images.release(alias).unwrap();
+}
