@@ -1,6 +1,9 @@
 use super::{Image, Images, Rect};
+use crate::anm::{DisplayState, ImageAnimation};
 use crate::{Error, Result, read};
 use std::collections::BTreeMap;
+
+mod animation;
 
 /// 图像列表的无变换来源属性；位置和基点分别截断为整数。
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -27,6 +30,7 @@ struct Entry {
     image: u32,
     frames: BTreeMap<u32, u32>,
     source_identity: u32,
+    animation: ImageAnimation,
     priority: i32,
     properties: ImageListProperties,
     history: Option<Rect>,
@@ -34,6 +38,23 @@ struct Entry {
 }
 
 impl Entry {
+    fn display(&self) -> DisplayState {
+        let state = if self.animation.timeline.is_some() {
+            self.animation.display()
+        } else {
+            DisplayState::default()
+        };
+        state.compose(
+            self.properties.position,
+            i32::from(self.properties.opacity),
+            i32::from(self.properties.visible),
+        )
+    }
+
+    fn visible(&self) -> bool {
+        self.display().visible != 0
+    }
+
     fn release(self, images: &mut Images) -> Result<()> {
         if self.frames.is_empty() {
             images.release(self.image)?;
@@ -58,6 +79,7 @@ pub struct ImageList {
     entries: BTreeMap<u32, Entry>,
     blocks: Vec<Block>,
     offset: [i32; 2],
+    animation_pass: Option<animation::Pass>,
 }
 
 impl ImageList {
@@ -103,6 +125,7 @@ impl ImageList {
             entries: BTreeMap::new(),
             blocks,
             offset: [0; 2],
+            animation_pass: None,
         })
     }
 
@@ -165,16 +188,22 @@ impl ImageList {
         } else {
             images.share_pixels_for(Some(self.owner), pixels)?
         };
-        let frames = self
+        let (frames, animation) = self
             .entries
             .get_mut(&key)
-            .map(|entry| std::mem::take(&mut entry.frames))
+            .map(|entry| {
+                (
+                    std::mem::take(&mut entry.frames),
+                    std::mem::take(&mut entry.animation),
+                )
+            })
             .unwrap_or_default();
         self.finish_source(
             key,
             Entry {
                 image,
                 frames,
+                animation,
                 source_identity,
                 priority,
                 properties,
@@ -248,14 +277,23 @@ impl ImageList {
             .ok_or_else(|| Error::new(0, "图像列表原始来源没有可用帧"))?
             .1;
         let source_base = images.get(image)?.info().base.map(|v| v as f32);
-        if let Some(previous) = self.entries.remove(&key) {
+        let mut animation = if let Some(mut previous) = self.entries.remove(&key) {
+            let animation = std::mem::take(&mut previous.animation);
             previous.release(images)?;
+            animation
+        } else {
+            ImageAnimation::default()
+        };
+        animation.reset_time_on_update = true;
+        if let Some(timeline) = &mut animation.timeline {
+            timeline.interpreter.max_image_id = *frames.last_key_value().unwrap().0 as i32;
         }
         self.finish_source(
             key,
             Entry {
                 image,
                 frames,
+                animation,
                 source_identity,
                 priority,
                 properties,
@@ -270,6 +308,7 @@ impl ImageList {
     /// 选择缓存帧并恢复该帧基点；缺失 key 或 ID 保持当前来源并返回 false。
     /// 选帧本身不产生脏区；重新登记或显式失效后才重绘。
     pub fn select_frame(&mut self, key: u32, id: u32, images: &mut Images) -> Result<bool> {
+        self.check_animation_pass()?;
         let Some(entry) = self.entries.get_mut(&key) else {
             return Ok(false);
         };
@@ -300,6 +339,7 @@ impl ImageList {
     }
 
     fn source_history(&mut self, key: u32, images: &Images) -> Result<(Option<Rect>, Rect, i32)> {
+        self.check_animation_pass()?;
         let viewport = self.bounds(images)?;
         let mut history = None;
         let mut clip = viewport;
@@ -308,7 +348,7 @@ impl ImageList {
             history = entry.history;
             clip = entry.clip;
             priority = entry.priority;
-            if entry.properties.visible {
+            if entry.visible() {
                 history = accumulate(
                     history,
                     images.list_bounds(
@@ -333,17 +373,20 @@ impl ImageList {
         source_base: [f32; 2],
         images: &Images,
     ) -> Result<()> {
-        let properties = entry.properties;
         // 设置显示状态时先使用来源基点更新几何，再写入请求基点。
         entry.history = accumulate(
             entry.history,
-            images.list_bounds(entry.image, properties.position, source_base)?,
+            images.list_bounds(entry.image, entry.properties.position, source_base)?,
             entry.clip,
         );
-        if properties.visible {
+        if entry.visible() {
             entry.history = accumulate(
                 entry.history,
-                images.list_bounds(entry.image, properties.position, properties.base_point)?,
+                images.list_bounds(
+                    entry.image,
+                    entry.properties.position,
+                    entry.properties.base_point,
+                )?,
                 entry.clip,
             );
             self.mark(entry.history);
@@ -353,11 +396,12 @@ impl ImageList {
     }
 
     pub fn remove(&mut self, key: u32, images: &mut Images) -> Result<bool> {
+        self.check_animation_pass()?;
         let Some(entry) = self.entries.get(&key) else {
             return Ok(false);
         };
         let image = entry.image;
-        if entry.properties.visible {
+        if entry.visible() {
             let history = accumulate(
                 entry.history,
                 images.list_bounds(
@@ -380,23 +424,25 @@ impl ImageList {
 
     /// 相同优先级也将可见条目的历史范围标脏；来源重登记保留优先级。
     pub fn set_priority(&mut self, key: u32, priority: i32, images: &Images) -> Result<bool> {
+        self.check_animation_pass()?;
         self.bounds(images)?;
         let Some(entry) = self.entries.get_mut(&key) else {
             return Ok(false);
         };
         entry.priority = priority;
-        let history = entry.properties.visible.then_some(entry.history).flatten();
+        let history = entry.visible().then_some(entry.history).flatten();
         self.mark(history);
         Ok(true)
     }
 
     /// 仅在显示状态变化时更新几何和脏区，保留来源与请求基点。
     pub fn set_visible(&mut self, key: u32, visible: bool, images: &Images) -> Result<bool> {
+        self.check_animation_pass()?;
         self.bounds(images)?;
         let Some(entry) = self.entries.get_mut(&key) else {
             return Ok(false);
         };
-        if entry.properties.visible != visible {
+        if entry.visible() != visible {
             entry.properties.visible = visible;
             entry.history = accumulate(
                 entry.history,
@@ -415,6 +461,7 @@ impl ImageList {
 
     /// 修改条目裁剪；None 恢复完整视口且不标脏，空矩形恢复视口并按变化标脏。
     pub fn set_clip(&mut self, key: u32, clip: Option<Rect>, images: &Images) -> Result<bool> {
+        self.check_animation_pass()?;
         let viewport = self.bounds(images)?;
         let Some(entry) = self.entries.get_mut(&key) else {
             return Ok(false);
@@ -436,7 +483,7 @@ impl ImageList {
             entry.history = entry
                 .history
                 .and_then(|history| history.intersect(entry.clip));
-            let next = entry.properties.visible.then_some(entry.history).flatten();
+            let next = entry.visible().then_some(entry.history).flatten();
             self.mark(previous);
             self.mark(next);
         }
@@ -449,6 +496,7 @@ impl ImageList {
 
     /// 释放全部来源，立即清空自有图像并将全部面块标脏。
     pub fn clear(&mut self, images: &mut Images) -> Result<()> {
+        self.check_animation_pass()?;
         self.release_entries(images)?;
         if self.image != 0 {
             images.get_mut(self.image)?.pixels_mut().fill(0);
@@ -488,6 +536,7 @@ impl ImageList {
     /// 清除全部脏区后按条目、面块顺序绘制；成功后消费脏区并返回提交矩形。
     /// 来源像素修改不单独产生脏区，重登记或 invalidate_all 后才重绘。
     pub fn update(&mut self, images: &mut Images) -> Result<Vec<Rect>> {
+        self.check_animation_pass()?;
         images.get(self.image)?;
         let regions: Vec<_> = self.dirty_rectangles().collect();
         for &region in &regions {
@@ -496,8 +545,9 @@ impl ImageList {
         let mut entries: Vec<_> = self.entries.iter().collect();
         entries.sort_unstable_by_key(|&(&key, entry)| (entry.priority, key));
         for (_, entry) in entries {
+            let display = entry.display();
             let p = entry.properties;
-            if p.visible && p.opacity != 0 {
+            if display.visible != 0 && display.blend != 0 {
                 for &clip in &regions {
                     let Some(clip) = clip.intersect(entry.clip) else {
                         continue;
@@ -505,9 +555,9 @@ impl ImageList {
                     images.draw_list_entry(
                         self.image,
                         entry.image,
-                        p.position,
+                        entry.properties.position,
                         p.base_point,
-                        p.opacity,
+                        display.blend as u8,
                         clip,
                     )?;
                 }
@@ -527,6 +577,7 @@ impl ImageList {
     }
 
     pub fn release(&mut self, images: &mut Images) -> Result<()> {
+        self.animation_pass = None;
         self.release_entries(images)?;
         images.release(self.image)?;
         self.image = 0;

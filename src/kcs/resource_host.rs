@@ -142,6 +142,15 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
         self.inner.update_image_list(list, submit, force)
     }
 
+    fn update_image_list_animations(
+        &mut self,
+        list: &mut crate::graphics::ImageList,
+        now: u32,
+        budget: usize,
+    ) -> Result<bool> {
+        self.inner.update_image_list_animations(list, now, budget)
+    }
+
     fn create_task_child(&mut self, kind: u32, name: &[u8], context: &[u8]) -> Result<u32> {
         self.inner.create_task_child(kind, name, context)
     }

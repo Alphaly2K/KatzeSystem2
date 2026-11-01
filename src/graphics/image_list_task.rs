@@ -124,13 +124,13 @@ impl TaskObject for ImageListObject {
         self.base.set_creation_context(context)
     }
 
-    fn update_body(
-        &mut self,
-        host: &mut dyn Host,
-        _increment: u32,
-        _budget: usize,
-    ) -> Result<bool> {
+    fn update_body(&mut self, host: &mut dyn Host, increment: u32, budget: usize) -> Result<bool> {
         if self.enabled != 0 {
+            if let Some(list) = &mut self.list {
+                if !host.update_image_list_animations(list, increment, budget)? {
+                    return Ok(false);
+                }
+            }
             self.update_list(host)?;
         }
         Ok(true)
@@ -287,6 +287,43 @@ impl TaskObject for ImageListObject {
                     list.invalidate_all();
                     host.update_image_list(list, true, true)?;
                     self.force = 0;
+                }
+            }
+            299 => {
+                let bytes = buffers
+                    .data1
+                    .as_deref()
+                    .ok_or_else(|| Error::new(0, "图像列表动画名称缓冲缺失"))?;
+                let end = bytes
+                    .iter()
+                    .position(|&byte| byte == 0)
+                    .ok_or_else(|| Error::new(0, "图像列表动画名称缺少结尾零"))?;
+                let services = host
+                    .resource_services()
+                    .ok_or_else(|| Error::new(0, "宿主未提供动画资源读取服务"))?;
+                let bytes =
+                    services.read(&bytes[..end], crate::resource::ResourceMode::LooseFirst)?;
+                if let Some(bytes) = bytes.filter(|bytes| !bytes.is_empty()) {
+                    self.list
+                        .as_mut()
+                        .ok_or_else(|| Error::new(0, "图像列表尚未创建"))?
+                        .load_animation(key, &bytes)?;
+                }
+            }
+            301 => {
+                let now = self.base.clock().elapsed();
+                let list = self
+                    .list
+                    .as_mut()
+                    .ok_or_else(|| Error::new(0, "图像列表尚未创建"))?;
+                if !list.animations_pending() {
+                    if !list.set_animation_time(key, now)? {
+                        return Ok(CommandOutcome::finished(false));
+                    }
+                    list.set_animation_playing(key, b as i32)?;
+                }
+                if !host.update_image_list_animations(list, now, budget)? {
+                    return Ok(CommandOutcome::RESUME);
                 }
             }
             304 => {

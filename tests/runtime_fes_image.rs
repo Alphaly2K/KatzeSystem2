@@ -951,3 +951,115 @@ fn fes_raw_data_is_released_with_its_owner_while_the_list_keeps_decoded_frames()
         Some(0xff12_3456)
     );
 }
+
+#[test]
+fn list_animation_commands_share_random_and_automatic_updates_use_the_body_time() {
+    for budget in [1, 4096] {
+        let (mut runtime, mut objects, list) = setup();
+        runtime.set_budget(budget, 10000);
+        runtime.host_mut().random = katze_system2::kcs::ScriptRandom::seeded(17);
+        let mut first = pixel_file(0xffff_0000);
+        let mut second = pixel_file(0xff00_00ff);
+        first[68..76].fill(0);
+        second[68..76].fill(0);
+        second[16..20].copy_from_slice(&2u32.to_le_bytes());
+        let next = (first.len() - 12) as u32;
+        first[12..16].copy_from_slice(&next.to_le_bytes());
+        first.extend_from_slice(&second[12..]);
+        let mut program = b"ANM\0".to_vec();
+        program.resize(32, 0);
+        let ops = [
+            (1u32, [0i32, 0, 100]),
+            (12, [128, 0, 0]),
+            (0, [7, 3, 3]),
+            (0, [2, 4, 4]),
+        ];
+        program[8..12].copy_from_slice(&(ops.len() as u32).to_le_bytes());
+        for (opcode, values) in ops {
+            program.extend(opcode.to_le_bytes());
+            for value in values.into_iter().chain([0; 5]) {
+                program.extend(0u32.to_le_bytes());
+                program.extend(value.to_le_bytes());
+            }
+        }
+        let reads = Rc::new(RefCell::new(Vec::new()));
+        runtime.set_resources(PixelFiles {
+            files: BTreeMap::from([
+                (b"raw".to_vec(), first),
+                (b"movement.anm".to_vec(), program),
+                (b"invalid.anm".to_vec(), b"invalid".to_vec()),
+            ]),
+            reads: reads.clone(),
+        });
+        let sprite = define(&mut objects, "IMAGE", "sprite");
+        initialize(
+            &mut objects,
+            "sprite",
+            ObjectAttributes {
+                file: Some(b"raw".to_vec()),
+                image_number: Some(-1),
+                priority: Some(5),
+                position: [Some(2), Some(1), None],
+                display: Some(1),
+                ..Default::default()
+            },
+        );
+        runtime.update_fes_object(0, &mut objects, sprite).unwrap();
+        runtime.update(10, 10).unwrap();
+        let mut name = b"movement.anm\0".to_vec();
+        let load = |runtime: &mut TestRuntime, name: &mut [u8]| {
+            runtime.dispatch_command_with_buffers(
+                0,
+                Command {
+                    target: list,
+                    sender: 0,
+                    code: 299,
+                    data: [5, 0, 0],
+                },
+                &mut CommandBuffers {
+                    data0: None,
+                    data1: Some(name),
+                },
+            )
+        };
+        load(&mut runtime, &mut name).unwrap();
+        assert_eq!(send(&mut runtime, list, 301, 5, 1), 0);
+        let mut expected = katze_system2::kcs::ScriptRandom::seeded(17);
+        expected.next_integer();
+        assert_eq!(
+            runtime.host().random.clone().next_integer(),
+            expected.next_integer()
+        );
+        send(&mut runtime, list, 298, 0, 0);
+        assert_eq!(
+            runtime.drawing().target.as_ref().unwrap().pixel(3, 3),
+            Some(0x80ff_0000)
+        );
+        runtime.update(1000, 13).unwrap();
+        assert_eq!(
+            runtime.drawing().target.as_ref().unwrap().pixel(3, 3),
+            Some(0x8000_00ff)
+        );
+        load(&mut runtime, &mut b"missing.anm\0".to_vec()).unwrap();
+        runtime.update(1001, 14).unwrap();
+        assert_eq!(
+            runtime.drawing().target.as_ref().unwrap().pixel(3, 3),
+            Some(0x8000_00ff)
+        );
+        assert!(load(&mut runtime, &mut b"invalid.anm\0".to_vec()).is_err());
+        send(&mut runtime, list, 298, 0, 0);
+        assert_eq!(
+            runtime.drawing().target.as_ref().unwrap().pixel(3, 3),
+            Some(0xff00_00ff)
+        );
+        assert_eq!(
+            reads.borrow().as_slice(),
+            [
+                b"raw".to_vec(),
+                b"movement.anm".to_vec(),
+                b"missing.anm".to_vec(),
+                b"invalid.anm".to_vec()
+            ]
+        );
+    }
+}

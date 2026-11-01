@@ -375,3 +375,101 @@ fn runtime_second_source_decodes_raw_handles_and_keeps_pixels_after_native_close
         assert!(runtime.images().get(output).is_err());
     }
 }
+
+fn animation(ops: &[(u32, [i32; 3])]) -> Vec<u8> {
+    let mut bytes = b"ANM\0".to_vec();
+    bytes.resize(32, 0);
+    bytes[8..12].copy_from_slice(&(ops.len() as u32).to_le_bytes());
+    for &(opcode, values) in ops {
+        bytes.extend(opcode.to_le_bytes());
+        for value in values.into_iter().chain([0; 5]) {
+            bytes.extend(0u32.to_le_bytes());
+            bytes.extend(value.to_le_bytes());
+        }
+    }
+    bytes
+}
+
+#[test]
+fn animated_lists_freeze_budgeted_time_and_keep_hidden_pixels_until_visible_invalidation() {
+    let mut images = Images::default();
+    let mut list = ImageList::new_tiled(1, [8, 6], [3, 2], &mut images).unwrap();
+    list.set_hg3(
+        7,
+        &hg3(&[
+            (9, 0xffff_0000, [0, 0], [0; 2]),
+            (2, 0xff00_00ff, [0, 0], [0; 2]),
+            (7, 0xff00_ff00, [1, 1], [0; 2]),
+        ]),
+        ImageListProperties {
+            position: [2., 1.],
+            ..Default::default()
+        },
+        &mut images,
+    )
+    .unwrap();
+    let code = animation(&[
+        (12, [128, 0, 0]),
+        (14, [999, -999, 0]),
+        (0, [7, 3, 3]),
+        (13, [0, 0, 0]),
+        (0, [9, 2, 2]),
+        (13, [1, 0, 0]),
+        (0, [2, 4, 4]),
+        (0, [999, 3, 3]),
+    ]);
+    list.load_animation(7, &code).unwrap();
+    assert!(list.update_animations(100, 1, &mut images).unwrap());
+    list.update(&mut images).unwrap();
+    list.set_animation_playing(7, 1).unwrap();
+    assert!(!list.update_animations(100, 1, &mut images).unwrap());
+    assert!(list.update(&mut images).is_err());
+    assert!(list.set_animation_playing(7, 0).is_err());
+    let mut completed = false;
+    for _ in 0..16 {
+        if list.update_animations(999, 1, &mut images).unwrap() {
+            completed = true;
+            break;
+        }
+    }
+    assert!(completed);
+    let state = list.animation(7).unwrap();
+    assert_eq!(state.time, 100);
+    assert_eq!(state.timeline.as_ref().unwrap().origin, 100);
+    assert_eq!(state.display().image, 7);
+    list.update(&mut images).unwrap();
+    let painted = images
+        .get(list.image())
+        .unwrap()
+        .surface()
+        .pixels()
+        .to_vec();
+    assert_ne!(
+        images.get(list.image()).unwrap().surface().pixel(3, 3),
+        Some(0)
+    );
+    assert!(list.update_animations(103, 32, &mut images).unwrap());
+    assert_eq!(list.animation(7).unwrap().display().visible, 0);
+    assert!(list.dirty_rectangles().next().is_none());
+    list.update(&mut images).unwrap();
+    assert_eq!(
+        images.get(list.image()).unwrap().surface().pixels(),
+        painted
+    );
+    assert!(list.update_animations(104, 32, &mut images).unwrap());
+    assert!(list.update_animations(105, 32, &mut images).unwrap());
+    assert!(list.dirty_rectangles().next().is_some());
+    list.update(&mut images).unwrap();
+    assert_eq!(
+        images.get(list.image()).unwrap().surface().pixel(2, 4),
+        Some(0x8000_00ff)
+    );
+    assert!(list.load_animation(7, b"invalid").is_err());
+    assert!(list.animation(7).unwrap().timeline.is_none());
+    list.redraw(&mut images).unwrap();
+    assert_eq!(
+        images.get(list.image()).unwrap().surface().pixel(2, 4),
+        Some(0xff00_00ff)
+    );
+    list.release(&mut images).unwrap();
+}
