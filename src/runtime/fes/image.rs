@@ -53,16 +53,30 @@ impl<F: ObjectFactory> Runtime<F> {
         };
         let prepared = state.base.updates.rebuild;
         if prepared {
-            if state.image_number == -1 {
-                return Err(Error::new(0, "FES IMAGE 原始数据来源尚未接入"));
-            }
             let name = &state.file[..state
                 .file
                 .iter()
                 .position(|&b| b == 0)
                 .unwrap_or(state.file.len())];
             let direct = state.path_mode != 0;
-            let loaded = if name.is_empty() || (!direct && name.iter().all(|&b| b == b' ')) {
+            let loaded = if state.image_number == -1 {
+                let raw = if name.is_empty() {
+                    0
+                } else {
+                    let services = self
+                        .resources
+                        .services
+                        .as_deref_mut()
+                        .ok_or_else(|| Error::new(0, "运行时未配置 FES 图像资源服务"))?;
+                    self.resources
+                        .raw
+                        .load_image(name, services, Some(owner), 0)?
+                };
+                let object = objects.get_mut(handle).unwrap();
+                self.resources.raw.release_image(object.raw_image)?;
+                object.raw_image = raw;
+                false
+            } else if name.is_empty() || (!direct && name.iter().all(|&b| b == b' ')) {
                 if !direct {
                     self.resources.images.bind_pixels(wrapper, 0)?;
                 }
@@ -157,13 +171,14 @@ impl<F: ObjectFactory> Runtime<F> {
                 }
             }
             let pixels = self.images().pixel_handle(wrapper)?;
+            let raw = objects.get(handle).unwrap().raw_image;
             let state = objects.get(handle).unwrap().state.image().unwrap();
             let slot = state.parent_priority as u32;
-            if pixels == 0 {
+            if pixels == 0 && raw == 0 {
                 if !file || slot != u32::MAX {
                     self.fes_command(owner, Some(list), 287, [slot, 0, 0], None)?;
                 }
-            } else if slot != u32::MAX {
+            } else if file || slot != u32::MAX {
                 let position = objects.image_position(handle);
                 let position: [f32; 2] = std::array::from_fn(|i| {
                     if file {
@@ -174,7 +189,7 @@ impl<F: ObjectFactory> Runtime<F> {
                 });
                 let mut record = [
                     pixels,
-                    0,
+                    if pixels == 0 { raw } else { 0 },
                     0,
                     0,
                     position[0].to_bits(),

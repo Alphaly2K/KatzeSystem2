@@ -200,6 +200,9 @@ impl<F: ObjectFactory> Runtime<F> {
                 self.images_mut().release(image)?;
                 objects.get_mut(id).unwrap().image = None;
             }
+            let raw = objects.get(id).unwrap().raw_image;
+            self.resources.raw.release_image(raw)?;
+            objects.get_mut(id).unwrap().raw_image = 0;
         }
         objects.remove(handle)?;
         Ok(())

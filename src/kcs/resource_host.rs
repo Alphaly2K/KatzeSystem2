@@ -23,8 +23,13 @@ pub struct ResourceHost<'a, H, S> {
 #[derive(Default)]
 pub(crate) struct ResourceState {
     xml: BTreeMap<u32, XmlDocument>,
-    images: BTreeMap<u32, Vec<u8>>,
+    images: BTreeMap<u32, ImageData>,
     handles: HandleAllocator,
+}
+
+struct ImageData {
+    bytes: Vec<u8>,
+    owner: Option<u32>,
 }
 
 impl<'a, H: Host, S: ResourceServices> ResourceHost<'a, H, S> {
@@ -54,8 +59,41 @@ impl ResourceState {
     pub fn image_data(&self, handle: u32) -> Result<&[u8]> {
         self.images
             .get(&handle)
-            .map(Vec::as_slice)
+            .map(|image| image.bytes.as_slice())
             .ok_or_else(|| Error::new(0, "KCS 图像数据句柄无效"))
+    }
+
+    pub fn load_image(
+        &mut self,
+        name: &[u8],
+        services: &mut dyn ResourceServices,
+        owner: Option<u32>,
+        offset: usize,
+    ) -> Result<u32> {
+        let name = services.resolve(b"image", name)?;
+        let Some(bytes) = services.read(&name, ResourceMode::LooseFirst)? else {
+            return Ok(0);
+        };
+        if bytes.is_empty() {
+            return Ok(0);
+        }
+        if bytes.len() > read::MAX_BYTES {
+            return Err(Error::new(offset, "KCS 图像资源超过读取上限"));
+        }
+        let handle = self.allocate_handle(offset)?;
+        self.images.insert(handle, ImageData { bytes, owner });
+        Ok(handle)
+    }
+
+    pub fn release_image(&mut self, handle: u32) -> Result<()> {
+        if handle != 0 && self.images.remove(&handle).is_none() {
+            return Err(Error::new(0, "KCS 图像数据句柄无效"));
+        }
+        Ok(())
+    }
+
+    pub fn release_owner(&mut self, owner: u32) {
+        self.images.retain(|_, image| image.owner != Some(owner));
     }
 
     fn allocate_handle(&mut self, offset: usize) -> Result<u32> {
@@ -163,24 +201,12 @@ impl ResourceState {
         if index == 365 {
             let name = strings::format(vm, args[0], 0)?;
             let services = services.ok_or_else(|| Error::new(vm.pc, "运行时未配置资源服务"))?;
-            let name = services.resolve(b"image", &name)?;
-            let Some(bytes) = services.read(&name, ResourceMode::LooseFirst)? else {
-                return Ok(NativeReturn::Value(0));
-            };
-            if bytes.is_empty() {
-                return Ok(NativeReturn::Value(0));
-            }
-            if bytes.len() > read::MAX_BYTES {
-                return Err(Error::new(vm.pc, "KCS 图像资源超过读取上限"));
-            }
-            let handle = self.allocate_handle(vm.pc)?;
-            self.images.insert(handle, bytes);
+            let handle = self.load_image(&name, services, None, vm.pc)?;
             return Ok(NativeReturn::Value(handle));
         }
         if index == 366 {
-            if args[0] != 0 && self.images.remove(&args[0]).is_none() {
-                return Err(Error::new(vm.pc, "KCS 图像数据句柄无效"));
-            }
+            self.release_image(args[0])
+                .map_err(|error| Error::new(vm.pc, error.message))?;
             return Ok(NativeReturn::Continue);
         }
         if index == 368 {

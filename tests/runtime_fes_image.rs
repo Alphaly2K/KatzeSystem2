@@ -701,3 +701,224 @@ fn image_direct_paths_keep_spaces_bypass_categories_and_replace_requested_dimens
         &[b"raw sprite.hg3".to_vec(), b"missing sprite.hg3".to_vec()]
     );
 }
+
+#[test]
+fn image_raw_sources_keep_pixels_and_reappear_after_a_missing_ordinary_frame() {
+    let (mut runtime, mut objects, list) = setup();
+    let reads = Rc::new(RefCell::new(Vec::new()));
+    let mut first = pixel_file(0xff11_2233);
+    first[16..20].copy_from_slice(&9u32.to_le_bytes());
+    let mut second = pixel_file(0xff44_5566);
+    second[16..20].copy_from_slice(&2u32.to_le_bytes());
+    let next = (first.len() - 12) as u32;
+    first[12..16].copy_from_slice(&next.to_le_bytes());
+    first.extend_from_slice(&second[12..]);
+    runtime.set_resources(PixelFiles {
+        files: BTreeMap::from([
+            (b"raw sprite".to_vec(), first.clone()),
+            (b"ordinary".to_vec(), pixel_file(0xff77_8899)),
+            (b"other raw".to_vec(), pixel_file(0xffaa_bbcc)),
+        ]),
+        reads: reads.clone(),
+    });
+    let sprite = define(&mut objects, "IMAGE", "sprite");
+    let panel = define(&mut objects, "PLANE", "panel");
+    initialize(
+        &mut objects,
+        "sprite",
+        ObjectAttributes {
+            file: Some(b"raw sprite".to_vec()),
+            image_number: Some(-1),
+            path_mode: Some(3),
+            priority: Some(5),
+            display: Some(1),
+            position: [Some(2), Some(1), None],
+            ..Default::default()
+        },
+    );
+    initialize(
+        &mut objects,
+        "panel",
+        ObjectAttributes {
+            position: [Some(0), Some(0), None],
+            size: Some([8, 6]),
+            priority: Some(500),
+            display: Some(1),
+            ..Default::default()
+        },
+    );
+    runtime.update_fes_object(0, &mut objects, panel).unwrap();
+    runtime.update_fes_object(0, &mut objects, sprite).unwrap();
+    let wrapper = objects.get(sprite).unwrap().image_handle().unwrap();
+    let raw = objects.get(sprite).unwrap().raw_image_handle();
+    assert_eq!(runtime.image_data(raw).unwrap(), first);
+    assert_eq!(runtime.images().pixel_handle(wrapper).unwrap(), 0);
+    assert_eq!(image(&objects, sprite).size, [-1; 2]);
+    assert_eq!(image(&objects, sprite).base_point, [0.; 2]);
+    assert_rectangle(
+        &frame(&mut runtime, 1),
+        Rect::from_xywh(3, 3, 1, 1),
+        0xff44_5566,
+    );
+    runtime.update_fes_object(0, &mut objects, sprite).unwrap();
+    assert_eq!(reads.borrow().as_slice(), &[b"raw sprite".to_vec()]);
+
+    initialize(
+        &mut objects,
+        "sprite",
+        ObjectAttributes {
+            file: Some(b"ordinary".to_vec()),
+            image_number: Some(7),
+            path_mode: Some(0),
+            ..Default::default()
+        },
+    );
+    runtime.update_fes_object(0, &mut objects, sprite).unwrap();
+    let pixels = runtime.images().pixel_handle(wrapper).unwrap();
+    assert_ne!(pixels, 0);
+    assert_eq!(objects.get(sprite).unwrap().raw_image_handle(), raw);
+    assert_rectangle(
+        &frame(&mut runtime, 1),
+        Rect::from_xywh(3, 3, 1, 1),
+        0xff77_8899,
+    );
+    let geometry = (
+        image(&objects, sprite).size,
+        image(&objects, sprite).base_point,
+    );
+    initialize(
+        &mut objects,
+        "sprite",
+        ObjectAttributes {
+            file: Some(b"other raw".to_vec()),
+            image_number: Some(-1),
+            ..Default::default()
+        },
+    );
+    runtime.update_fes_object(0, &mut objects, sprite).unwrap();
+    let other = objects.get(sprite).unwrap().raw_image_handle();
+    assert_ne!(other, raw);
+    assert!(runtime.image_data(raw).is_err());
+    assert_eq!(runtime.images().pixel_handle(wrapper).unwrap(), pixels);
+    assert_eq!(
+        (
+            image(&objects, sprite).size,
+            image(&objects, sprite).base_point
+        ),
+        geometry
+    );
+    assert_rectangle(
+        &frame(&mut runtime, 1),
+        Rect::from_xywh(3, 3, 1, 1),
+        0xff77_8899,
+    );
+
+    initialize(
+        &mut objects,
+        "sprite",
+        ObjectAttributes {
+            image_number: Some(999),
+            ..Default::default()
+        },
+    );
+    runtime.update_fes_object(0, &mut objects, sprite).unwrap();
+    assert_eq!(runtime.images().pixel_handle(wrapper).unwrap(), 0);
+    assert_eq!(objects.get(sprite).unwrap().raw_image_handle(), other);
+    assert_rectangle(
+        &frame(&mut runtime, 1),
+        Rect::from_xywh(4, 5, 1, 1),
+        0xffaa_bbcc,
+    );
+    initialize(
+        &mut objects,
+        "sprite",
+        ObjectAttributes {
+            image_number: Some(-1),
+            file: Some(b"missing".to_vec()),
+            ..Default::default()
+        },
+    );
+    runtime.update_fes_object(0, &mut objects, sprite).unwrap();
+    assert_eq!(objects.get(sprite).unwrap().raw_image_handle(), 0);
+    assert!(runtime.image_data(other).is_err());
+    assert_eq!(send(&mut runtime, list, 294, 0, 0), 0);
+    assert_rectangle(&frame(&mut runtime, 1), Rect::default(), 0);
+
+    initialize(
+        &mut objects,
+        "sprite",
+        ObjectAttributes {
+            file: Some(b"raw sprite".to_vec()),
+            priority: Some(-1),
+            ..Default::default()
+        },
+    );
+    runtime.update_fes_object(0, &mut objects, sprite).unwrap();
+    let raw = objects.get(sprite).unwrap().raw_image_handle();
+    assert_eq!(send(&mut runtime, list, 294, 0, 0), 1);
+    runtime.remove_fes_object(0, &mut objects, sprite).unwrap();
+    assert!(runtime.image_data(raw).is_err());
+    assert!(runtime.images().pixel_handle(wrapper).is_err());
+    assert_eq!(send(&mut runtime, list, 294, 0, 0), 0);
+
+    let sprite = define(&mut objects, "IMAGE", "unslotted");
+    initialize(
+        &mut objects,
+        "unslotted",
+        ObjectAttributes {
+            file: Some(b"ordinary".to_vec()),
+            image_number: Some(7),
+            ..Default::default()
+        },
+    );
+    runtime.update_fes_object(0, &mut objects, sprite).unwrap();
+    assert_eq!(image(&objects, sprite).parent_priority, -1);
+    assert_eq!(send(&mut runtime, list, 294, 0, 0), 1);
+    runtime.remove_fes_object(0, &mut objects, sprite).unwrap();
+    assert_eq!(send(&mut runtime, list, 294, 0, 0), 0);
+}
+
+#[test]
+fn fes_raw_data_is_released_with_its_owner_while_the_list_keeps_decoded_frames() {
+    let (mut runtime, mut objects, list) = setup();
+    runtime.set_resources(PixelFiles {
+        files: BTreeMap::from([(b"raw".to_vec(), pixel_file(0xff12_3456))]),
+        reads: Rc::default(),
+    });
+    let owner = runtime.create(0, kind::PLANE, b"owner", b"").unwrap();
+    let child_list = runtime
+        .create(owner, kind::IMAGE_LIST, b"list", b"")
+        .unwrap();
+    send(&mut runtime, child_list, 285, 8, 6);
+    objects.set_image_list(child_list, Rect::from_xywh(0, 0, 8, 6));
+    let sprite = define(&mut objects, "IMAGE", "sprite");
+    initialize(
+        &mut objects,
+        "sprite",
+        ObjectAttributes {
+            file: Some(b"raw".to_vec()),
+            image_number: Some(-1),
+            priority: Some(5),
+            display: Some(1),
+            ..Default::default()
+        },
+    );
+    runtime
+        .update_fes_object(owner, &mut objects, sprite)
+        .unwrap();
+    let raw = objects.get(sprite).unwrap().raw_image_handle();
+    let wrapper = objects.get(sprite).unwrap().image_handle().unwrap();
+    objects.set_image_list(list, Rect::from_xywh(0, 0, 8, 6));
+    objects.invalidate(sprite).unwrap();
+    runtime.update_fes_object(0, &mut objects, sprite).unwrap();
+    assert_eq!(send(&mut runtime, list, 294, 0, 0), 1);
+    runtime.destroy(owner).unwrap();
+    assert!(runtime.image_data(raw).is_err());
+    assert!(runtime.images().pixel_handle(wrapper).is_err());
+    send(&mut runtime, list, 298, 0, 0);
+    assert_eq!(send(&mut runtime, list, 294, 0, 0), 1);
+    assert_eq!(
+        runtime.drawing().target.as_ref().unwrap().pixel(1, 2),
+        Some(0xff12_3456)
+    );
+}

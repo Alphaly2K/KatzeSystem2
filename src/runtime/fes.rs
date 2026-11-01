@@ -87,6 +87,7 @@ pub struct Object {
     children: BTreeSet<u32>,
     task_id: Option<u32>,
     image: Option<u32>,
+    raw_image: u32,
     image_offset: [f32; 2],
     pub state: ObjectState,
 }
@@ -121,6 +122,11 @@ impl Object {
     pub fn image_handle(&self) -> Option<u32> {
         self.image
     }
+
+    /// IMAGE 独立持有的原始图像数据；零表示没有来源，查询不增加持有。
+    pub fn raw_image_handle(&self) -> u32 {
+        self.raw_image
+    }
 }
 
 /// 一份 FES 的对象存储。绑定保留首次值，数量表与对象表分别维护。
@@ -152,6 +158,7 @@ impl Objects {
                     children: BTreeSet::new(),
                     task_id: None,
                     image: None,
+                    raw_image: 0,
                     image_offset: [0.; 2],
                     state: ObjectState::Base,
                 },
@@ -244,6 +251,7 @@ impl Objects {
                     children: BTreeSet::new(),
                     task_id: None,
                     image: None,
+                    raw_image: 0,
                     image_offset: [0.; 2],
                     state: initial.clone(),
                 },

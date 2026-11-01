@@ -273,7 +273,7 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 
 `set_resources(services)` 接收拥有的 `ResourceServices`，提供普通 111 的 image 类别补全及同步读取；`images()` 查询 `graphics::Images` 中存活的解码对象。111 按名称列表选择 HG-3 帧并保留首图几何，以状态 1 返回句柄；117 对非零句柄作底端起始的原始 ARGB 填充，以状态 2 继续。所属任务实际释放时解除其图像引用，额外使用者持有的图像继续存活，后续图像句柄不复用。名称重组、合成及读取限制见 [图像接口](graphics.md)。共享持有通过 `Images::retain`／`release_reference` 配对，缓存继续接入。
 
-同一资源服务也处理 365／366／368 和 590～593，契约与 `ResourceHost` 一致。`image_data(handle)` 查询 365 装载的原始字节。原始数据与 XML 句柄由运行时共享，存活至显式释放或运行时销毁；任务释放和 `set_resources` 替换服务均不回收它们，其他任务可以继续查询和关闭。解码图像与原始数据分别保存，不互换句柄。未配置服务时，装载返回诊断，零句柄查询／释放仍按各自规则执行。
+同一资源服务也处理 365／366／368 和 590～593，契约与 `ResourceHost` 一致。`image_data(handle)` 查询 365 装载的原始字节。365 装载的原始数据与 XML 句柄由运行时共享，存活至显式释放或运行时销毁；任务释放和 `set_resources` 替换服务均不回收它们，其他任务可以继续查询和关闭。解码图像与原始数据分别保存，不互换句柄。未配置服务时，装载返回诊断，零句柄查询／释放仍按各自规则执行。
 
 解码图像、原始数据、XML、419 序列集合与 515 整数字典共用一个运行时编号源；同时存活的不同类型对象不会获得相同编号，释放后也不复用。错误类型的读取／释放返回诊断，不释放该句柄真正指向的对象。任务回收和读取服务替换均保持编号递增；装载缺失、解析失败及尺寸检查失败不创建句柄。
 
@@ -315,7 +315,9 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 
 `fes::CPlaneState` 通过只读查询提供位置、基点、尺寸、优先级、颜色、显示、创建类型、EXPOS、资源／VIEWPORT 引用及更新标记。`apply(&attributes, bank)` 返回本次是否使属性失效；`Objects::initialize` 同时标记 FES 后代。尺寸重建与属性失效独立，具体列规则见 [FES](fes.md)。
 
-`Runtime::update_fes_object(owner, &mut objects, handle)` 显式推进一个对象。BASE 无媒体操作，CPLANE／PLANE 使用实际对象工厂和命令路由创建／更新直属二维任务，`Object::task_id()` 返回可选编号。CIMAGE 与 IMAGE 通过共享类型 15 列表更新来源与登记，`Object::image_handle()` 查询可选来源包装；IMAGE 支持按当前映射帧装载普通 HG-3 文件及多文件合成，缺失文件或帧清空来源。非零 PATHMODE 使用完整直接路径，跳过类别补全；IDN=−1 的原始数据来源仍返回诊断。调用者按 FES 对象更新顺序推进，并将 objects 与 owner 保持同一生命周期，下层任务由此入口维护。CPLANE 在创建下层任务前读取 SIZE2，PLANE 在创建后读取；POS2 在属性更新时消费；读取共用 Runtime 的资源服务，按 image 类别补全名称，支持 HG-3 元数据。已有绑定的 VIEWPORT 更新返回命令 89 的诊断。此入口尚不执行运动和 FES 主体调度。
+`Runtime::update_fes_object(owner, &mut objects, handle)` 显式推进一个对象。BASE 无媒体操作，CPLANE／PLANE 使用实际对象工厂和命令路由创建／更新直属二维任务，`Object::task_id()` 返回可选编号。CIMAGE 与 IMAGE 通过共享类型 15 列表更新来源与登记，`Object::image_handle()` 查询可选来源包装；IMAGE 支持按当前映射帧装载普通 HG-3 文件及多文件合成，缺失文件或帧清空像素绑定。非零 PATHMODE 使用完整直接路径，跳过类别补全；IDN=−1 的原始来源与像素独立保存，具体契约见下文。调用者按 FES 对象更新顺序推进，并将 objects 与 owner 保持同一生命周期，下层任务由此入口维护。CPLANE 在创建下层任务前读取 SIZE2，PLANE 在创建后读取；POS2 在属性更新时消费；读取共用 Runtime 的资源服务，按 image 类别补全名称，支持 HG-3 元数据。已有绑定的 VIEWPORT 更新返回命令 89 的诊断。此入口尚不执行运动和 FES 主体调度。
+
+FES IMAGE 的 `IDN=−1` 接收完整名称的原始来源，不受 PATHMODE 影响；`Object::raw_image_handle` 返回其非持有查询句柄，零表示没有来源。像素和原始数据独立保留，登记优先使用像素；普通装载缺帧后可退回旧原始来源。FES 持有的数据随替换、对象删除或所属任务实际回收释放，列表已经解码的帧继续存活。具体几何、槽号和待接入的来源身份查询见[原始来源更新](graphics.md#fes-image-原始来源更新)。
 
 `fes::PlaneState` 的 `base` 复用平面属性，`vram()` 返回独立的画布取样位置，`apply(&attributes, bank)` 另应用 VRAM。运行时 PLANE 需要先在 DrawingContext 提供画布目标，再通过 `render_frame` 输出；支持跨面块取样。`Objects::set_canvas_offset([x, y])` 保存共享绘制服务给出的画布偏移，`canvas_offset()` 查询该值；设置本身不使对象失效，在下一次 PLANE 属性更新时叠加到 VRAM。PLANE 的尺寸重建保留有效屏幕位置，其他属性仍等到失效后提交。当前支持 CPLANE／PLANE 父级的位置累加，基点仅沿直接为 PLANE 的父级累加。
 

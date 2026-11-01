@@ -1254,6 +1254,7 @@ impl<F: ObjectFactory> Lifecycle for TaskLifecycle<'_, F> {
             .ok_or_else(|| Error::new(0, "任务对象不存在"))?;
         object.release()?;
         self.resources.images.release_owner(id);
+        self.resources.raw.release_owner(id);
         self.resources.drawables.remove(id);
         self.objects.remove(&id);
         Ok(())
