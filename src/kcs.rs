@@ -238,6 +238,11 @@ pub trait Host {
         None
     }
 
+    /// 具体对象同步读取资源所用的服务；类别补全由请求入口决定。
+    fn resource_services(&mut self) -> Option<&mut dyn ResourceServices> {
+        None
+    }
+
     /// 查询当前对象在有符号编号游标之后的直属子任务；None 从首项开始。
     fn next_task_child(&self, _previous: Option<u32>) -> Result<Option<u32>> {
         Err(Error::new(0, "宿主未提供任务子级查询"))
@@ -277,6 +282,10 @@ impl<T: Host + ?Sized> Host for &mut T {
 
     fn drawables(&mut self) -> Option<&mut crate::graphics::Drawables> {
         (**self).drawables()
+    }
+
+    fn resource_services(&mut self) -> Option<&mut dyn ResourceServices> {
+        (**self).resource_services()
     }
 
     fn next_task_child(&self, previous: Option<u32>) -> Result<Option<u32>> {

@@ -16,6 +16,7 @@ pub struct PlaneObject {
     offset: [f32; 2],
     size: [f32; 2],
     shape_kind: u32,
+    geometry_name: Vec<u8>,
 }
 
 impl PlaneObject {
@@ -31,6 +32,7 @@ impl PlaneObject {
             offset: [0.0; 2],
             size: [0.0; 2],
             shape_kind: 0,
+            geometry_name: Vec::new(),
         }
     }
 
@@ -60,6 +62,11 @@ impl PlaneObject {
 
     pub fn shape_kind(&self) -> u32 {
         self.shape_kind
+    }
+
+    /// 上次成功装载的 KX2 名称；清除图元或装载失败不改写此值。
+    pub fn geometry_name(&self) -> &[u8] {
+        &self.geometry_name
     }
 
     fn forward(
@@ -196,6 +203,39 @@ impl TaskObject for PlaneObject {
                         std::array::from_fn(|i| arithmetic(2, bounds[1][i], bounds[0][i]).abs());
                     self.shape_kind = if command.code == 42 { 2 } else { 5 };
                     drawings(host)?.insert(id, drawable)?;
+                }
+            }
+            70 => {
+                let name = crate::read::zstr(
+                    buffers
+                        .data1
+                        .as_deref()
+                        .ok_or_else(|| Error::new(0, "对象命令输入缓冲区缺失"))?,
+                    0,
+                )?;
+                if name.len() >= 260 {
+                    return Err(Error::new(0, "几何资源名超过基线缓冲区范围"));
+                }
+                drawings(host)?.remove(id);
+                if self.creation_flags == 1 {
+                    let services = host
+                        .resource_services()
+                        .ok_or_else(|| Error::new(0, "宿主未提供资源服务"))?;
+                    if let Some(data) =
+                        services.read(name, crate::resource::ResourceMode::LooseFirst)?
+                    {
+                        if data.get(..4) == Some(b"KX2\0") {
+                            let drawable = Drawable::from_kx2(&data)?;
+                            let bounds = drawable.bounds();
+                            self.offset = [bounds[0][0], bounds[0][1]];
+                            self.size = std::array::from_fn(|i| {
+                                arithmetic(2, bounds[1][i], bounds[0][i]).abs()
+                            });
+                            self.shape_kind = 7;
+                            self.geometry_name = name.to_vec();
+                            drawings(host)?.insert(id, drawable)?;
+                        }
+                    }
                 }
             }
             49 | 51 | 55 | 66 => {

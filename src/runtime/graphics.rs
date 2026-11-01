@@ -1,5 +1,5 @@
 use super::{ObjectFactory, ObjectHost};
-use crate::kcs::{Interpreter, NativeReturn};
+use crate::kcs::{Interpreter, NativeReturn, format_string};
 use crate::task::CommandBuffers;
 use crate::{Error, Result};
 
@@ -13,6 +13,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         let count = match index {
             79 => 16,
             80 | 83 => 4,
+            82 => 8,
             84 | 101 => 20,
             100 => 12,
             _ => unreachable!(),
@@ -45,6 +46,30 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             }
             80 | 83 => {
                 self.command_target(target, if index == 80 { 45 } else { 68 }, [0; 3])?;
+            }
+            82 => {
+                let formatted = format_string(vm, word(1), 0)?;
+                let name = &formatted[..formatted
+                    .iter()
+                    .position(|&b| b == 0)
+                    .unwrap_or(formatted.len())];
+                let services = self
+                    .resources
+                    .services
+                    .as_mut()
+                    .ok_or_else(|| Error::new(vm.pc, "运行时未配置资源服务"))?;
+                let mut name = services.resolve(b"kx2", name)?;
+                name.truncate(name.iter().position(|&b| b == 0).unwrap_or(name.len()));
+                name.push(0);
+                self.command_target_with_buffers(
+                    target,
+                    70,
+                    [0; 3],
+                    &mut CommandBuffers {
+                        data0: None,
+                        data1: Some(&mut name),
+                    },
+                )?;
             }
             84 | 101 => {
                 let mut vector = [0; 12];

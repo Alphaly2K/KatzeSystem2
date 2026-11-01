@@ -38,6 +38,51 @@ impl Default for Drawable {
 }
 
 impl Drawable {
+    /// 读取 KX2 的独立二维边界和 XYZ／ARGB 三角形，不从顶点重新计算边界。
+    pub fn from_kx2(data: &[u8]) -> Result<Self> {
+        if data.len() > read::MAX_BYTES || data.get(..4) != Some(b"KX2\0") {
+            return Err(Error::new(0, "无效 KX2 几何资源"));
+        }
+        let count = read::u32_at(data, 20)? as usize;
+        if count > (read::MAX_BYTES - 24) / 48 {
+            return Err(Error::new(20, "KX2 三角形数量超过上限"));
+        }
+        let vertices = read::range(data, 24, count * 48)?;
+        let mut triangles = Vec::with_capacity(count);
+        for bytes in vertices.chunks_exact(48) {
+            triangles.push(std::array::from_fn(|i| {
+                let word = |n| {
+                    u32::from_le_bytes(
+                        bytes[i * 16 + n * 4..i * 16 + n * 4 + 4]
+                            .try_into()
+                            .unwrap(),
+                    )
+                };
+                Vertex {
+                    position: std::array::from_fn(|n| f32::from_bits(word(n))),
+                    color: word(3),
+                }
+            }));
+        }
+        let bounds = [
+            [
+                f32::from_bits(read::u32_at(data, 4)?),
+                f32::from_bits(read::u32_at(data, 8)?),
+                0.,
+            ],
+            [
+                f32::from_bits(read::u32_at(data, 12)?),
+                f32::from_bits(read::u32_at(data, 16)?),
+                0.,
+            ],
+        ];
+        Ok(Self {
+            triangles,
+            bounds,
+            ..Self::default()
+        })
+    }
+
     /// 创建两个三角形组成的原始矩形，保留反向尺寸与退化边。
     pub fn rectangle(at: [f32; 3], size: [f32; 2], color: u32) -> Self {
         let right = arithmetic(1, at[0], size[0]);

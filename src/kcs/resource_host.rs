@@ -72,6 +72,10 @@ impl ResourceState {
 }
 
 impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
+    fn resource_services(&mut self) -> Option<&mut dyn ResourceServices> {
+        Some(self.services)
+    }
+
     fn set_task_clock(&mut self, clock: &TaskClock) {
         self.inner.set_task_clock(clock);
     }

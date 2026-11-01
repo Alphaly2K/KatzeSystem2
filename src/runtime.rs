@@ -772,6 +772,13 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         Some(&mut self.resources.drawables)
     }
 
+    fn resource_services(&mut self) -> Option<&mut dyn crate::kcs::ResourceServices> {
+        match &mut self.resources.services {
+            Some(services) => Some(services.as_mut()),
+            None => None,
+        }
+    }
+
     fn next_task_child(&self, previous: Option<u32>) -> Result<Option<u32>> {
         Ok(self
             .tree
@@ -813,7 +820,7 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
     }
 
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn> {
-        if matches!(index, 79 | 80 | 83 | 84 | 100 | 101) {
+        if matches!(index, 79 | 80 | 82 | 83 | 84 | 100 | 101) {
             return self.graphics_native(index, arguments, vm);
         }
         if matches!(index, 66 | 67 | 69 | 70 | 72 | 73 | 75 | 76 | 109 | 110) {

@@ -60,6 +60,10 @@ impl<'a, H: Host, S: TaskServices> TaskHost<'a, H, S> {
 }
 
 impl<H: Host, S: TaskServices> Host for TaskHost<'_, H, S> {
+    fn resource_services(&mut self) -> Option<&mut dyn super::ResourceServices> {
+        self.inner.resource_services()
+    }
+
     fn set_task_clock(&mut self, clock: &TaskClock) {
         self.inner.set_task_clock(clock);
     }
