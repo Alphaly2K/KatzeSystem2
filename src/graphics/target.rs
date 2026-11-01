@@ -1,4 +1,4 @@
-use super::{Image, Rect, Surface, pixel_length};
+use super::{Image, ProjectedVertex, Rect, Surface, TextureFilter, pixel_length};
 use crate::{Error, Result, read};
 
 /// 按行排列的 CPU 渲染面块和对应的更新标记。
@@ -75,13 +75,35 @@ impl RenderTarget {
 
     /// 以全局整数像素中心绘制纯色三角形，跨面块保留相同的亚像素边界。
     pub fn blend_triangle(&mut self, points: [[f32; 2]; 3], argb: u32) -> bool {
+        self.draw_tiles(|surface, origin| surface.blend_triangle_at(points, argb, origin))
+    }
+
+    /// 以全局顶点插值颜色，跨面块保留同一组插值方程。
+    pub fn blend_projected_triangle(&mut self, vertices: [ProjectedVertex; 3]) -> bool {
+        self.draw_tiles(|surface, origin| surface.blend_projected_triangle_at(vertices, origin))
+    }
+
+    /// 在各面块上使用相同的全局覆盖、透视插值及纹理寻址。
+    pub fn blend_textured_triangle(
+        &mut self,
+        vertices: [ProjectedVertex; 3],
+        uv: [[f32; 2]; 3],
+        texture: &Surface,
+        filter: TextureFilter,
+    ) -> bool {
+        self.draw_tiles(|surface, origin| {
+            surface.blend_textured_triangle_at(vertices, uv, texture, filter, origin)
+        })
+    }
+
+    fn draw_tiles(&mut self, mut draw: impl FnMut(&mut Surface, [u32; 2]) -> bool) -> bool {
         let mut touched = false;
         for row in 0..self.grid[1] {
             for column in 0..self.grid[0] {
                 let index = row as usize * self.grid[0] as usize + column as usize;
                 if let Some(surface) = &mut self.tiles[index] {
                     let origin = [column * self.tile_size[0], row * self.tile_size[1]];
-                    if surface.blend_triangle_at(points, argb, origin) {
+                    if draw(surface, origin) {
                         self.dirty[index] = true;
                         touched = true;
                     }

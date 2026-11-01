@@ -13,6 +13,7 @@ pub use plane::{GraphicsFactory, PlaneObject};
 mod projection;
 pub use projection::{ProjectedVertex, Projection};
 mod raster;
+pub use raster::TextureFilter;
 
 /// 包含左上边、不包含右下边的像素矩形。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

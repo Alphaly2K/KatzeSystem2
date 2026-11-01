@@ -165,7 +165,7 @@ impl<F: ObjectFactory> Runtime<F> {
         &mut self.resources.drawables
     }
 
-    /// 更新完成后显式绘制基础纯色图元；帧清空和平台呈现由调用者驱动。
+    /// 更新完成后显式绘制基础纯色及渐变图元；帧清空和平台呈现由调用者驱动。
     pub fn render_triangles(
         &mut self,
         projection: &crate::graphics::Projection,

@@ -1,0 +1,186 @@
+use katze_system2::graphics::{
+    Drawable, Drawables, ProjectedVertex, Projection, RenderTarget, Surface, TextureFilter, Vertex,
+};
+
+fn texture() -> Surface {
+    let mut pixels = vec![];
+    for y in 0..4 {
+        for x in 0..4 {
+            pixels.extend([
+                13 + x * 47 + y * 3,
+                21 + x * 7 + y * 53,
+                9 + x * 31 + y * 17,
+                7 + x * 39 + y * 43,
+            ]);
+        }
+    }
+    Surface::from_bgra([4, 4], pixels).unwrap()
+}
+
+fn vertices() -> [ProjectedVertex; 3] {
+    [[-4., -4.], [20., -4.], [-4., 20.]].map(|p| ProjectedVertex {
+        position: [p[0], p[1], 0.5],
+        rhw: 1.,
+        color: u32::MAX,
+    })
+}
+
+#[test]
+fn mirror_sampling_filtering_and_modulation_keep_fractional_channels() {
+    for (filter, uv, color, expected) in [
+        (
+            TextureFilter::Point,
+            [-0.125, 0.125],
+            u32::MAX,
+            0x3e7d2010u32,
+        ),
+        (TextureFilter::Point, [0.125, 0.125], u32::MAX, 0x3e7d2010),
+        (TextureFilter::Point, [1.125, 0.125], u32::MAX, 0x5d732553),
+        (TextureFilter::Point, [2.125, 0.5], 0x8080c040, 0x3d6d2c0e),
+        (TextureFilter::Point, [0.375, 0.5], u32::MAX, 0x6364552a),
+        (TextureFilter::Linear, [-0.125, 0.125], u32::MAX, 0x3e7d2010),
+        (TextureFilter::Linear, [0., 0.5], u32::MAX, 0x42663310),
+        (TextureFilter::Linear, [0.125, 0.5], 0x8080c040, 0x3c70260e),
+        (TextureFilter::Linear, [0.375, 0.5], u32::MAX, 0x54654125),
+        (TextureFilter::Linear, [0.5, 1.], 0x8080c040, 0x4d634b13),
+        (TextureFilter::Linear, [0.875, 0.5], u32::MAX, 0x9c806279),
+        (TextureFilter::Linear, [2.125, 0.5], 0x8080c040, 0x3c70260e),
+    ] {
+        let mut target = Surface::new([8, 8]).unwrap();
+        target.clear(0x40802010);
+        let vertices = vertices().map(|v| ProjectedVertex { color, ..v });
+        assert!(target.blend_textured_triangle(vertices, [uv; 3], &texture(), filter));
+        assert!(
+            target
+                .pixels()
+                .chunks_exact(4)
+                .all(|p| p == expected.to_le_bytes())
+        );
+    }
+}
+
+#[test]
+fn rhw_corrects_both_texture_coordinates_and_vertex_colors() {
+    let mut vertices = vertices();
+    for (vertex, (rhw, color)) in
+        vertices
+            .iter_mut()
+            .zip([(1., 0x100000ff), (0.5, 0x8000ff00), (2., 0xffffff00)])
+    {
+        vertex.rhw = rhw;
+        vertex.color = color;
+    }
+    let mut target = Surface::new([8, 8]).unwrap();
+    target.clear(0x40802010);
+    assert!(target.blend_textured_triangle(
+        vertices,
+        [[0.625, 0.625]; 3],
+        &texture(),
+        TextureFilter::Point,
+    ));
+    for (at, expected) in [
+        ([0, 0], 0x4067261e),
+        ([4, 0], 0x44642c1c),
+        ([0, 4], 0x4f63351c),
+        ([4, 4], 0x56623e17),
+        ([7, 7], 0x6d64580b),
+    ] {
+        assert_eq!(target.pixel(at[0], at[1]), Some(expected));
+    }
+    let mut texture = Surface::new([2, 1]).unwrap();
+    texture
+        .pixels_mut()
+        .copy_from_slice(&[0, 0, 255, 255, 255, 0, 0, 255]);
+    let triangle = [[0., 0.], [4., 0.], [0., 4.]].map(|p| ProjectedVertex {
+        position: [p[0], p[1], 0.5],
+        rhw: 1.,
+        color: u32::MAX,
+    });
+    let uv = [[0.25, 0.5], [0.75, 0.5], [0.25, 0.5]];
+    let mut affine = Surface::new([4, 4]).unwrap();
+    affine.blend_textured_triangle(triangle, uv, &texture, TextureFilter::Linear);
+    let mut perspective = triangle;
+    perspective[1].rhw = 3.;
+    let mut corrected = Surface::new([4, 4]).unwrap();
+    corrected.blend_textured_triangle(perspective, uv, &texture, TextureFilter::Linear);
+    assert_eq!(affine.pixel(1, 1), Some(0xffbf0040));
+    assert_eq!(corrected.pixel(1, 1), Some(0xff800080));
+}
+
+#[test]
+fn textured_tiles_share_global_interpolation_and_invalid_inputs_preserve_pixels() {
+    let mut target =
+        RenderTarget::from_tiles([4, 4], [2, 2], vec![Some(Surface::new([4, 4]).unwrap()); 4])
+            .unwrap();
+    let mut whole = Surface::new([8, 8]).unwrap();
+    let triangle = [[1. + 1. / 1024., 1.], [7., 1.], [1., 7.]].map(|p| ProjectedVertex {
+        position: [p[0], p[1], 0.5],
+        rhw: 1.,
+        color: 0x8080c040,
+    });
+    let uv = [[-0.125, 0.125], [2.125, 0.875], [0.375, 1.125]];
+    assert!(target.blend_textured_triangle(triangle, uv, &texture(), TextureFilter::Linear));
+    whole.blend_textured_triangle(triangle, uv, &texture(), TextureFilter::Linear);
+    for y in 0..8 {
+        for x in 0..8 {
+            assert_eq!(target.pixel(x, y), whole.pixel(x, y));
+        }
+    }
+    assert_eq!(target.dirty_tiles(), &[true, true, true, false]);
+    let before = whole.clone();
+    for rhw in [0., -1., f32::INFINITY, f32::NAN] {
+        let mut invalid = triangle;
+        invalid[1].rhw = rhw;
+        assert!(!whole.blend_textured_triangle(invalid, uv, &texture(), TextureFilter::Point));
+    }
+    let mut invalid_uv = uv;
+    invalid_uv[0][1] = f32::NAN;
+    assert!(!whole.blend_textured_triangle(triangle, invalid_uv, &texture(), TextureFilter::Point));
+    assert!(!whole.blend_textured_triangle(
+        triangle,
+        uv,
+        &Surface::new([0, 4]).unwrap(),
+        TextureFilter::Point
+    ));
+    let transparent = triangle.map(|v| ProjectedVertex {
+        color: 0x00123456,
+        ..v
+    });
+    assert!(!whole.blend_textured_triangle(transparent, uv, &texture(), TextureFilter::Linear));
+    assert_eq!(whole, before);
+}
+
+#[test]
+fn drawable_submission_interpolates_colors_without_a_texture() {
+    const IDENTITY: [f32; 16] = [
+        1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.,
+    ];
+    let triangle = [
+        Vertex {
+            position: [0., 0., 0.],
+            color: 0xffff0000,
+        },
+        Vertex {
+            position: [4., 0., 0.],
+            color: 0xff00ff00,
+        },
+        Vertex {
+            position: [0., 4., 0.],
+            color: 0xff0000ff,
+        },
+    ];
+    let mut drawables = Drawables::default();
+    drawables
+        .insert(1, Drawable::new(vec![triangle]).unwrap())
+        .unwrap();
+    drawables.set_display(1, 1);
+    let mut target = RenderTarget::new([4, 4]).unwrap();
+    assert!(
+        drawables
+            .render_triangles(&mut target, &Projection::default(), IDENTITY)
+            .unwrap()
+    );
+    assert_eq!(target.pixel(0, 0), Some(0xffff0000));
+    assert_eq!(target.pixel(1, 1), Some(0xff804040));
+    assert_eq!(target.pixel(2, 2), Some(0));
+}

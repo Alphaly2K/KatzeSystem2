@@ -209,11 +209,23 @@
 
 `RenderTarget::blend_triangle` 使用相同的全局顶点处理各面块，不提前平移并舍入顶点；缺失面块跳过，实际覆盖非零 Alpha 像素的块登记 dirty。返回值表示是否覆盖了存在的面块，原像素与混合结果相等时仍可返回 true。
 
-`Drawables::render_triangles(target, projection, parent)` 按基点 Z 和登记顺序绘制，display 为零或空图元时跳过。每个对象最多提交前 32 个三角形；对象基点 Z 用于投影深度，平移 XY 作为投影原点。当前接入默认坐标组、普通混合及每个三角形内一致的颜色；特殊混合、顶点颜色插值和需要近远深度裁剪的输入返回诊断。父矩阵与 `Projection` 由调用者提供；未实现深度缓冲、纹理、着色器或对象专属坐标组切换。
+`Drawables::render_triangles(target, projection, parent)` 按基点 Z 和登记顺序绘制，display 为零或空图元时跳过。每个对象最多提交前 32 个三角形；对象基点 Z 用于投影深度，平移 XY 作为投影原点。当前接入默认坐标组、普通混合及顶点颜色插值；特殊混合和需要近远深度裁剪的输入返回诊断。颜色不一致时要求有限的正 RHW，随后按透视权重插值。父矩阵与 `Projection` 由调用者提供；未实现深度缓冲、纹理、着色器或对象专属坐标组切换。
 
 `DrawingContext::render_triangles` 保留模式零、enabled／active 和目标存在性门控；未开启时返回 false。`Runtime::render_triangles(projection, parent)` 使用运行时的同一份登记与绘图目标。调用者在更新完成后显式调用，负责清空目标和随后呈现；连续调用会继续混合当前像素。平面构造及创建矩形仍保持默认 display=0，当前显示开关由宿主通过 `Drawables::set_display` 提供，专属显示命令继续接入。
 
 合成 KCS 已能通过普通 79／84 创建及移动矩形，经运行时绘图登记、投影和分块目标得到完整 BGRA 像素。四项常规合成回归覆盖共享对角线、Alpha 舍入、亚像素边界、空／非法输入、全局面块坐标、排序／可见性、提交上限、上下文门控及脚本到像素的串联。设备视口裁剪的边界差异见[验证记录](runtime-probes.md#纯色栅格化与设备像素)。
+
+## 纹理与顶点颜色插值
+
+`Surface::blend_projected_triangle(vertices)` 接收三个 `ProjectedVertex`，按其屏幕 XY 及 RHW 插值 ARGB，再作普通 Alpha 混合。`Surface::blend_textured_triangle(vertices, uv, texture, filter)` 另接收每顶点的归一化 UV、只读 BGRA8 纹理及 `TextureFilter::Point`／`Linear`，取样结果逐通道乘以插值后的顶点颜色。两种接口均返回是否覆盖非零 Alpha 像素；`RenderTarget` 提供同名接口，跨面块保留全局插值并标记实际覆盖的块。
+
+像素覆盖沿用八位亚像素及左／上边包含规则。插值使用对齐前的顶点，以屏幕重心权重乘各顶点 RHW，再除以三个权重之和；UV 和颜色使用同一组透视权重。常量属性直接保留其值，计算使用 f64，取样、颜色相乘和混合之间不作八位整数舍入，最终写入 BGRA8 时取最近整数。
+
+UV 的两个方向均采用镜像寻址，周期为二。点取样按 `floor(uv × size)` 选择 texel；双线性过滤以 texel 中心为半像素位置，按 `uv × size − 0.5` 混合相邻四个 texel。边缘的镜像 texel 重复，负 UV 和超出一个周期的 UV 同样有效。纹理为非预乘 Alpha，四通道都参与过滤、调制及源 Alpha 混合。
+
+调用者显式选择点取样或双线性过滤，当前没有自动区分缩小／放大、mipmap 或各向异性过滤。空纹理、非有限 XY／UV、非有限或非正 RHW、退化及完全越界三角形返回 false 并保留像素；Z 不参与此核心的裁剪或深度测试。`Drawables::render_triangles` 已使用颜色插值核心，纹理图元的登记、图像持有和帧提交入口继续接入。
+
+设备对照的固定 UV 与颜色插值案例共 528 组、33,792 个像素全部一致。其余 312 组变化 UV 中，315 个像素存在单通道一级差异，9 个点取样像素在 texel 选择边界附近选择不同 texel；CPU 核心固定上述 f64 计算规则，尚未复现设备过滤精度和选择边界的全部细节。具体范围见[验证记录](runtime-probes.md#纹理取样与透视插值)。四项合成回归固定镜像／过滤、非整数调制、RHW 对 UV 与颜色的作用、跨块插值、非法输入，以及 Drawable 到渐变像素的串联；默认测试不使用图形设备。
 
 ## 当前绘图目标
 
