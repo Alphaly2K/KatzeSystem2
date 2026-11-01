@@ -121,8 +121,19 @@ impl ImageList {
         properties: ImageListProperties,
         images: &mut Images,
     ) -> Result<()> {
+        self.set_pixels(key, images.pixel_handle(source)?, properties, images)
+    }
+
+    /// 按底层像素句柄登记，持有独立包装；不接受普通图像包装或其他资源句柄。
+    pub fn set_pixels(
+        &mut self,
+        key: u32,
+        pixels: u32,
+        properties: ImageListProperties,
+        images: &mut Images,
+    ) -> Result<()> {
         let viewport = self.bounds(images)?;
-        let source_base = images.get(source)?.info().base.map(|v| v as f32);
+        let source_base = images.pixel_image(pixels)?.info().base.map(|v| v as f32);
         let mut history = None;
         let image = if let Some(entry) = self.entries.get(&key) {
             let image = entry.image;
@@ -139,13 +150,13 @@ impl ImageList {
                 );
                 self.mark(history);
             }
-            images.bind(image, source)?;
+            images.bind_pixels(image, pixels)?;
             image
         } else {
             if self.entries.len() == read::MAX_ITEMS {
                 return Err(Error::new(0, "图像列表条目数量超过上限"));
             }
-            images.share_for(Some(self.owner), source)?
+            images.share_pixels_for(Some(self.owner), pixels)?
         };
         // 设置显示状态时先使用来源基点更新几何，再写入请求基点。
         history = accumulate(

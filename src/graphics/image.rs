@@ -323,8 +323,9 @@ impl Images {
             return Err(Error::new(0, "图像对象数量超过上限"));
         }
         let handle = self.handles.allocate()?;
+        let pixels = self.handles.allocate()?;
         self.data.insert(
-            handle,
+            pixels,
             ImageData {
                 references: 1,
                 has_alpha,
@@ -336,7 +337,7 @@ impl Images {
             ImageEntry {
                 owner: Some(owner),
                 references: 1,
-                data: handle,
+                data: pixels,
             },
         );
         Ok(handle)
@@ -345,45 +346,61 @@ impl Images {
     /// 为同一像素对象创建独立包装；没有任务登记，使用者须显式释放。
     /// 源包装释放后新句柄继续有效，两个包装的像素修改互相可见。
     pub fn share(&mut self, handle: u32) -> Result<u32> {
-        self.share_for(None, handle)
+        self.share_pixels_for(None, self.pixel_handle(handle)?)
     }
 
-    pub(crate) fn share_for(&mut self, owner: Option<u32>, handle: u32) -> Result<u32> {
-        let data = self
+    /// 查询包装当前绑定的像素句柄，不增加引用；至少一个包装持有时有效。
+    pub fn pixel_handle(&self, handle: u32) -> Result<u32> {
+        Ok(self
             .entries
             .get(&handle)
             .ok_or_else(|| Error::new(0, "图像对象句柄无效"))?
-            .data;
+            .data)
+    }
+
+    pub(crate) fn pixel_image(&self, pixels: u32) -> Result<&Image> {
+        self.data
+            .get(&pixels)
+            .map(|data| &data.image)
+            .ok_or_else(|| Error::new(0, "图像像素句柄无效"))
+    }
+
+    pub(crate) fn share_pixels_for(&mut self, owner: Option<u32>, pixels: u32) -> Result<u32> {
         if self.entries.len() == read::MAX_ITEMS {
             return Err(Error::new(0, "图像对象数量超过上限"));
         }
-        let references = self.data[&data]
+        let references = self
+            .data
+            .get(&pixels)
+            .ok_or_else(|| Error::new(0, "图像像素句柄无效"))?
             .references
             .checked_add(1)
             .ok_or_else(|| Error::new(0, "图像引用数量超过上限"))?;
         let shared = self.handles.allocate()?;
-        self.data.get_mut(&data).unwrap().references = references;
+        self.data.get_mut(&pixels).unwrap().references = references;
         self.entries.insert(
             shared,
             ImageEntry {
                 owner,
                 references: 1,
-                data,
+                data: pixels,
             },
         );
         Ok(shared)
     }
 
-    pub(crate) fn bind(&mut self, handle: u32, source: u32) -> Result<()> {
+    pub(crate) fn bind_pixels(&mut self, handle: u32, pixels: u32) -> Result<()> {
         let previous = self.entry_mut(handle)?.data;
-        let next = self.entry_mut(source)?.data;
-        if previous != next {
-            let data = self.data.get_mut(&next).unwrap();
+        let data = self
+            .data
+            .get_mut(&pixels)
+            .ok_or_else(|| Error::new(0, "图像像素句柄无效"))?;
+        if previous != pixels {
             data.references = data
                 .references
                 .checked_add(1)
                 .ok_or_else(|| Error::new(0, "图像引用数量超过上限"))?;
-            self.entries.get_mut(&handle).unwrap().data = next;
+            self.entries.get_mut(&handle).unwrap().data = pixels;
             release_data(&mut self.data, previous);
         }
         Ok(())

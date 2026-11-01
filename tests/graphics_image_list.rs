@@ -133,6 +133,39 @@ fn list_redraw_clips_relative_to_the_source_and_keeps_separate_wrapper_lifetimes
     assert!(images.get(opaque).is_err());
 }
 
+#[test]
+fn pixel_handles_stay_distinct_and_live_while_list_wrappers_hold_them() {
+    let mut images = Images::default();
+    let source = images.create(1, [1, 1]).unwrap();
+    let pixels = images.pixel_handle(source).unwrap();
+    assert_ne!(source, pixels);
+    assert!(images.get(pixels).is_err());
+    assert!(images.pixel_handle(pixels).is_err());
+    assert!(images.release(pixels).is_err());
+    images
+        .get_mut(source)
+        .unwrap()
+        .pixels_mut()
+        .copy_from_slice(&0xff12_3456u32.to_le_bytes());
+    let mut first = ImageList::new(2, [1, 1], &mut images).unwrap();
+    let p = ImageListProperties::default();
+    assert!(first.set_pixels(0, source, p, &mut images).is_err());
+    first.set_pixels(0, pixels, p, &mut images).unwrap();
+    images.release_owner(1);
+    assert!(images.get(source).is_err());
+    let mut second = ImageList::new(3, [1, 1], &mut images).unwrap();
+    second.set_pixels(0, pixels, p, &mut images).unwrap();
+    first.release(&mut images).unwrap();
+    second.update(&mut images).unwrap();
+    assert_eq!(
+        images.get(second.image()).unwrap().surface().pixel(0, 0),
+        Some(0xff12_3456)
+    );
+    second.remove(0, &mut images).unwrap();
+    assert!(second.set_pixels(0, pixels, p, &mut images).is_err());
+    second.release(&mut images).unwrap();
+}
+
 struct Programs;
 impl ProgramLoader for Programs {
     fn load(&mut self, _: &[u8]) -> Result<Option<Program>> {

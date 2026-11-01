@@ -92,11 +92,16 @@ fn resource_wrappers_share_handles_with_collections_and_external_images() {
         handles.push(value(call(&mut host, &mut vm, native, &[0])));
     }
     handles.push(value(call(&mut host, &mut vm, 515, &[])));
-    assert_eq!(handles, [1, 2, 3, 4, 5]);
+    let pixels = images.pixel_handle(handles[1]).unwrap();
+    let mut allocated = handles.clone();
+    allocated.insert(2, pixels);
+    assert!(allocated.iter().all(|&handle| handle != 0));
+    assert!(allocated.windows(2).all(|pair| pair[0] < pair[1]));
     images.release(handles[1]).unwrap();
     call(&mut host, &mut vm, 420, &[handles[0]]);
-    assert_eq!(value(call(&mut host, &mut vm, 419, &[])), 6);
-    assert_eq!(images.create(0, [0, 0]).unwrap(), 7);
+    let next = value(call(&mut host, &mut vm, 419, &[]));
+    assert!(next > *handles.last().unwrap());
+    assert!(images.create(0, [0, 0]).unwrap() > next);
 }
 
 #[test]
