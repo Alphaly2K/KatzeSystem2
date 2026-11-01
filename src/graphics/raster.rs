@@ -301,10 +301,11 @@ impl Drawables {
         self.order();
         let mut touched = false;
         for id in &self.order {
-            let drawable = &self.entries[id];
+            let drawable = self.entries.get_mut(id).unwrap();
             if drawable.display() == 0 {
                 continue;
             }
+            drawable.prepare_canvas()?;
             let count = drawable
                 .canvas_triangles()
                 .map_or(drawable.triangles().len(), |t| t.len());

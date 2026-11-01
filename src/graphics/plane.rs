@@ -180,9 +180,9 @@ impl TaskObject for PlaneObject {
                     self.control.deletion_requested = 1;
                 }
             }
-            42 | 45 => {
+            41 | 42 | 45 => {
                 drawings(host)?.remove(id);
-                let drawable = if command.code == 42 {
+                let drawable = if command.code != 45 {
                     let words = words::<8>(buffers.data1.as_deref())?;
                     Drawable::rectangle(
                         [
@@ -191,17 +191,33 @@ impl TaskObject for PlaneObject {
                             f32::from_bits(words[2]),
                         ],
                         [f32::from_bits(words[3]), f32::from_bits(words[4])],
-                        words[7],
+                        if command.code == 41 {
+                            u32::MAX
+                        } else {
+                            words[7]
+                        },
                     )
                 } else {
                     Drawable::default()
                 };
                 if self.creation_flags == 1 {
+                    let drawable = if command.code == 41 {
+                        let layout = host
+                            .canvas_layout()?
+                            .ok_or_else(|| Error::new(0, "宿主未提供画布纹理布局"))?;
+                        Drawable::from_canvas_source(drawable, layout)?
+                    } else {
+                        drawable
+                    };
                     let bounds = drawable.bounds();
                     self.offset = [0.0; 2];
                     self.size =
                         std::array::from_fn(|i| arithmetic(2, bounds[1][i], bounds[0][i]).abs());
-                    self.shape_kind = if command.code == 42 { 2 } else { 5 };
+                    self.shape_kind = match command.code {
+                        41 => 1,
+                        42 => 2,
+                        _ => 5,
+                    };
                     drawings(host)?.insert(id, drawable)?;
                 }
             }
@@ -249,17 +265,18 @@ impl TaskObject for PlaneObject {
             49 | 51 | 55 | 66 => {
                 let value = words::<3>(buffers.data1.as_deref())?.map(f32::from_bits);
                 let drawings = drawings(host)?;
+                let source = command.data[0] != 0;
                 let next = match command.code {
                     49 => {
-                        drawings.set_base_point(id, value);
+                        drawings.set_geometry_base_point(id, value, source);
                         50
                     }
                     51 => {
-                        drawings.set_position(id, value);
+                        drawings.set_geometry_position(id, value, source);
                         52
                     }
                     55 => {
-                        drawings.set_rotation(id, value);
+                        drawings.set_geometry_rotation(id, value, source);
                         56
                     }
                     _ => {
@@ -273,11 +290,14 @@ impl TaskObject for PlaneObject {
                 self.forward(command.code, command, buffers, output, host)?;
             }
             61 | 62 => {
-                if let Some(drawable) = drawings(host)?.get(id) {
+                if let Some(transform) = drawings(host)?
+                    .get(id)
+                    .and_then(|d| d.geometry_transform(command.data[0] != 0))
+                {
                     let value = if command.code == 61 {
-                        drawable.transform().base_point()
+                        transform.base_point()
                     } else {
-                        drawable.transform().position()
+                        transform.position()
                     };
                     write_words(buffers.data1.as_deref_mut(), &value.map(f32::to_bits))?;
                 }
@@ -316,7 +336,7 @@ impl TaskObject for PlaneObject {
             84 => self.creation_flags = command.data[1],
             57 => {
                 let value = words::<16>(buffers.data1.as_deref())?.map(f32::from_bits);
-                drawings(host)?.set_matrix(id, value);
+                drawings(host)?.set_geometry_matrix(id, value, command.data[0] != 0);
                 self.forward(58, command, buffers, output, host)?;
             }
             60 | 71 | 85 | 86 => {}

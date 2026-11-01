@@ -11,6 +11,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
         let count = match index {
+            78 => 12,
             79 => 16,
             80 | 83 => 4,
             82 => 8,
@@ -30,13 +31,19 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         }
         let word = |i: usize| u32::from_le_bytes(arguments[i * 4..i * 4 + 4].try_into().unwrap());
         match index {
-            79 => {
+            78 | 79 => {
                 let mut rectangle = [0; 32];
                 rectangle[12..20].copy_from_slice(&arguments[4..12]);
-                rectangle[28..32].copy_from_slice(&arguments[12..16]);
+                if index == 78 {
+                    rectangle[20..24].copy_from_slice(&32u32.to_le_bytes());
+                    rectangle[24..28].copy_from_slice(&1u32.to_le_bytes());
+                    rectangle[28..32].copy_from_slice(&u32::MAX.to_le_bytes());
+                } else {
+                    rectangle[28..32].copy_from_slice(&arguments[12..16]);
+                }
                 self.command_target_with_buffers(
                     target,
-                    42,
+                    if index == 78 { 41 } else { 42 },
                     [0; 3],
                     &mut CommandBuffers {
                         data0: None,

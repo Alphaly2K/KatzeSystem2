@@ -238,6 +238,11 @@ pub trait Host {
         None
     }
 
+    /// 具体对象创建纹理包装时读取的布局，独立于当前像素访问开关。
+    fn canvas_layout(&self) -> Result<Option<crate::graphics::CanvasLayout>> {
+        Ok(None)
+    }
+
     /// 具体对象同步读取资源所用的服务；类别补全由请求入口决定。
     fn resource_services(&mut self) -> Option<&mut dyn ResourceServices> {
         None
@@ -282,6 +287,10 @@ impl<T: Host + ?Sized> Host for &mut T {
 
     fn drawables(&mut self) -> Option<&mut crate::graphics::Drawables> {
         (**self).drawables()
+    }
+
+    fn canvas_layout(&self) -> Result<Option<crate::graphics::CanvasLayout>> {
+        (**self).canvas_layout()
     }
 
     fn resource_services(&mut self) -> Option<&mut dyn ResourceServices> {

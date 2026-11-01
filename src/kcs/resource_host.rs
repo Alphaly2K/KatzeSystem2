@@ -72,6 +72,14 @@ impl ResourceState {
 }
 
 impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
+    fn drawables(&mut self) -> Option<&mut crate::graphics::Drawables> {
+        self.inner.drawables()
+    }
+
+    fn canvas_layout(&self) -> Result<Option<crate::graphics::CanvasLayout>> {
+        self.inner.canvas_layout()
+    }
+
     fn resource_services(&mut self) -> Option<&mut dyn ResourceServices> {
         Some(self.services)
     }

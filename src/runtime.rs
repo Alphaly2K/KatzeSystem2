@@ -787,6 +787,15 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
 }
 
 impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
+    fn canvas_layout(&self) -> Result<Option<crate::graphics::CanvasLayout>> {
+        self.resources
+            .drawing
+            .target
+            .as_ref()
+            .map(|t| crate::graphics::CanvasLayout::new(t.tile_size(), t.grid(), t.tile_size()))
+            .transpose()
+    }
+
     fn drawables(&mut self) -> Option<&mut crate::graphics::Drawables> {
         Some(&mut self.resources.drawables)
     }
@@ -839,7 +848,7 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
     }
 
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn> {
-        if matches!(index, 79 | 80 | 82 | 83 | 84 | 100 | 101) {
+        if matches!(index, 78 | 79 | 80 | 82 | 83 | 84 | 100 | 101) {
             return self.graphics_native(index, arguments, vm);
         }
         if matches!(index, 66 | 67 | 69 | 70 | 72 | 73 | 75 | 76 | 109 | 110) {

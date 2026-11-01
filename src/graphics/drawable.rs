@@ -17,6 +17,7 @@ pub struct Drawable {
     pub(super) transform: Transform,
     pub(super) triangles: Vec<[Vertex; 3]>,
     pub(super) canvas_triangles: Option<Vec<CanvasTriangle>>,
+    pub(super) canvas_source: Option<Box<super::canvas::CanvasSource>>,
     pub(super) bounds: [[f32; 3]; 2],
     pub(super) color: u32,
     pub(super) color_enabled: u32,
@@ -30,6 +31,7 @@ impl Default for Drawable {
             transform: Transform::default(),
             triangles: Vec::new(),
             canvas_triangles: None,
+            canvas_source: None,
             bounds: [[0.0; 3]; 2],
             color: u32::MAX,
             color_enabled: 0,
@@ -228,17 +230,29 @@ impl Drawables {
     }
 
     pub fn set_base_point(&mut self, id: u32, value: [f32; 3]) -> bool {
-        let Some(drawable) = self.entries.get_mut(&id) else {
+        self.set_geometry_base_point(id, value, false)
+    }
+
+    pub(crate) fn set_geometry_base_point(
+        &mut self,
+        id: u32,
+        value: [f32; 3],
+        source: bool,
+    ) -> bool {
+        if !self.edit_geometry(id, source, |t| t.set_base_point(value)) {
             return false;
-        };
-        drawable.transform.set_base_point(value);
+        }
         // 原管理器在基点设置后总登记重排，即使浮点比较未改变属性。
         self.order_dirty = true;
         true
     }
 
     pub fn set_position(&mut self, id: u32, value: [f32; 3]) -> bool {
-        self.update(id, |d| d.transform.set_position(value))
+        self.set_geometry_position(id, value, false)
+    }
+
+    pub(crate) fn set_geometry_position(&mut self, id: u32, value: [f32; 3], source: bool) -> bool {
+        self.edit_geometry(id, source, |t| t.set_position(value))
     }
 
     pub fn set_scale(&mut self, id: u32, value: [f32; 3]) -> bool {
@@ -246,11 +260,40 @@ impl Drawables {
     }
 
     pub fn set_rotation(&mut self, id: u32, value: [f32; 3]) -> bool {
-        self.update(id, |d| d.transform.set_rotation(value))
+        self.set_geometry_rotation(id, value, false)
+    }
+
+    pub(crate) fn set_geometry_rotation(&mut self, id: u32, value: [f32; 3], source: bool) -> bool {
+        self.edit_geometry(id, source, |t| t.set_rotation(value))
     }
 
     pub fn set_matrix(&mut self, id: u32, value: [f32; 16]) -> bool {
-        self.update(id, |d| d.transform.set_matrix(value))
+        self.set_geometry_matrix(id, value, false)
+    }
+
+    pub(crate) fn set_geometry_matrix(&mut self, id: u32, value: [f32; 16], source: bool) -> bool {
+        self.edit_geometry(id, source, |t| t.set_matrix(value))
+    }
+
+    fn edit_geometry(
+        &mut self,
+        id: u32,
+        source: bool,
+        change: impl FnOnce(&mut Transform),
+    ) -> bool {
+        let Some(drawable) = self.entries.get_mut(&id) else {
+            return false;
+        };
+        let selected = if source && drawable.canvas_triangles.is_some() {
+            let Some(source) = &mut drawable.canvas_source else {
+                return false;
+            };
+            &mut source.geometry
+        } else {
+            drawable
+        };
+        change(&mut selected.transform);
+        true
     }
 
     pub fn set_color(&mut self, id: u32, color: u32, enabled: u32) -> bool {

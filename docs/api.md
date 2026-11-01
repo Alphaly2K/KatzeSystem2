@@ -16,7 +16,7 @@
 |`hg3`|0x300 帧目录、标准元数据、按 ID 选帧及原生 32 位完整帧像素解码|其他位深、切片及其他图像编码|
 |`graphics`|BGRA8 渲染面、裁剪填充／复制／普通混合，图像装载与持有、绘图变换／投影／三角形及排序、KX2 几何装载、显式画布图元及独立帧提交、基础二维任务及图元脚本接口、纯色／渐变三角形和纹理 CPU 核心、分块渲染目标及绘图状态|矩形纹理包装／完整帧自动驱动、缩放／特殊混合、输入绑定、缓存和设备呈现|
 |`task`|任务编号、父子索引、子树移除、编号回收、直接命令与类型广播路由、基类控制、整数时钟及同步树更新／销毁调度|类型专属对象与序列化|
-|`runtime`|任务树、对象存储、普通宿主状态与对象工厂的整合；普通对象、基类对象、任务 native、79／80／82／83／84／100／101、111／112／114／115／117、365／366／368、590～593|其他对象类型、系统 native 组合、程序装载时点|
+|`runtime`|任务树、对象存储、普通宿主状态与对象工厂的整合；普通对象、基类对象、任务 native、78／79／80／82／83／84／100／101、111／112／114／115／117、365／366／368、590～593|其他对象类型、系统 native 组合、程序装载时点|
 
 尚未实现的 KCS 宿主和无效 ANM 指令在执行时返回错误。CST 和 FES 的宿主命令返回事件，由宿主处理；宿主不能通过空实现确认一个尚未支持的命令。成功读取容器不代表该程序的所有执行路径都已实现。
 
@@ -284,7 +284,7 @@ FES 内部执行宏声明，初始化按以下顺序交给宿主：
 
 `Drawable::from_canvas(data, count)` 读取显式画布三角形，`CanvasTriangle` 保留 tag、面块索引、顶点和 UV；平面命令 83 使用显式缓冲区接入。`Drawables::render_frame` 读取画布并写入独立目标，`Runtime::render_frame` 使用运行时当前画布。提交、缺失纹理和过滤约束见[画布图元与帧](graphics.md#画布图元与独立帧提交)。
 
-`CanvasLayout::new(tile_size, grid, step)` 与 `triangulate(source)` 将已变换的源几何切成逐块画布三角形，保留原顺序、颜色及局部 UV。步长、整数裁剪门控和资源上限见[画布几何切割](graphics.md#画布几何切割)；它尚未自动连接平面命令 41。
+`CanvasLayout::new(tile_size, grid, step)` 与 `triangulate(source)` 将已变换的源几何切成逐块画布三角形，保留原顺序、颜色及局部 UV。步长、整数裁剪门控和资源上限见[画布几何切割](graphics.md#画布几何切割)。`Drawable::from_canvas_source` 与平面命令 41 保留源和包装两套变换；源变化后通过 `prepare_canvas` 更新，帧提交自动准备可见对象。直接查询与属性选择契约见[画布纹理包装](graphics.md#画布纹理包装)。
 
 对象实现 `runtime::TaskObject`：基类控制与时钟、可选 VM、创建上下文、主体、对象命令、排队与同步消息、删除通知和释放。除对象命令外，返回 `false` 的方法表示本次预算耗尽，续跑由运行时完成；对象命令返回 `task::CommandOutcome`，完成状态与传播状态分开表达。库提供 `BaseObject`（只有控制与时钟）与 `OrdinaryObject`（包裹 `OrdinaryTask`）。`ObjectFactory::create` 按类型编号创建对象；`KcsFactory` 经 `ProgramLoader` 按名称装载普通 KCS，`external_bytes` 指定 VM 外部区容量。`graphics::GraphicsFactory { fallback }` 创建类型 2 的 `PlaneObject`，其他类型委托 fallback；基础平面提供基类控制、矩形／空图元、向量／矩阵属性和查询、内部子任务传播及绘图登记清理，运动及输入等缺失入口返回诊断，详见[二维任务对象](graphics.md#基础二维任务对象)。音频、输入和文字类型继续由对应子系统工厂提供；`kind` 模块保存基线工厂的类型编号。
 
@@ -294,7 +294,7 @@ FES 内部执行宏声明，初始化按以下顺序交给宿主：
 
 `Runtime::dispatch_command_with_buffers(origin, command, &mut buffers)` 按相同树规则分派显式字节缓冲区。`task::CommandBuffers` 的 data0／data1 是可选可变借用，对应原 data[0]／data[1] 所引用的数据；不解释 DWORD 为进程指针或 VM 地址。各接收者共享缓冲区中的修改。对象通过 `TaskObject::dispatch_command_with_buffers` 接收，缺省委托标量入口，所需长度由具体命令检查。`Host::next_task_child(previous)` 查询当前对象在有符号编号游标之后的直属子级，None 从首项开始，`dispatch_task_command(command, buffers, output)` 保留传入返回槽并返回是否找到目标，用于对象内部传播；宿主未提供服务时返回诊断。
 
-普通 79／80／82／83／84／100／101 已在运行时连接基础图元及属性命令，均以状态 2 保留栈原值；零目标只需一个 DWORD，非零缺失目标继续执行。完整参数及对象命令见[基础图元](graphics.md#普通脚本的基础图元)及 [KX2 几何](graphics.md#kx2-几何资源)。对象通过 `Host::resource_services()` 访问与 native 共用的同步资源服务；未提供服务时返回诊断。
+普通 78／79／80／82／83／84／100／101 已在运行时连接基础图元及属性命令，均以状态 2 保留栈原值；零目标只需一个 DWORD，非零缺失目标继续执行。完整参数及对象命令见[基础图元](graphics.md#普通脚本的基础图元)及 [KX2 几何](graphics.md#kx2-几何资源)。对象通过 `Host::resource_services()` 访问与 native 共用的同步资源服务，通过 `Host::canvas_layout()` 查询画布布局；未提供所需服务时返回诊断。
 
 主体、命令和消息在返回前完成预算续跑。`DEFAULT_BUDGET` 为单次推进预算，零预算按一处理；连续耗尽预算时，`DEFAULT_LIMIT` 按续跑累计额度触发同步执行诊断。与库的其他执行错误一样，出现该错误后应丢弃解释器状态。不结束的普通指令循环因此会返回诊断。
 

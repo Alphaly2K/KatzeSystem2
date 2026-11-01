@@ -1,4 +1,4 @@
-use super::{Drawable, Vertex, drawable::arithmetic as f};
+use super::{CanvasLayout, Drawable, Drawables, Transform, Vertex, drawable::arithmetic as f};
 use crate::kcs::transform_vector;
 use crate::{Error, Result, read};
 
@@ -11,7 +11,86 @@ pub struct CanvasTriangle {
     pub uv: [[f32; 2]; 3],
 }
 
+impl Drawables {
+    /// 在直接检查记录或变换后顶点前，应用指定对象的源几何变动。
+    pub fn prepare_canvas(&mut self, id: u32) -> Result<bool> {
+        let Some(drawable) = self.entries.get_mut(&id) else {
+            return Ok(false);
+        };
+        drawable.prepare_canvas()?;
+        Ok(true)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct CanvasSource {
+    pub geometry: Drawable,
+    layout: CanvasLayout,
+}
+
 impl Drawable {
+    /// 保留非纹理源几何及独立的包装变换；源变化后在 prepare_canvas 中重新切割。
+    pub fn from_canvas_source(source: Self, layout: CanvasLayout) -> Result<Self> {
+        if source.canvas_triangles.is_some() {
+            return Err(Error::new(0, "画布包装需要非纹理源几何"));
+        }
+        let mut drawable = Self {
+            bounds: source.bounds,
+            canvas_triangles: Some(Vec::new()),
+            canvas_source: Some(Box::new(CanvasSource {
+                geometry: source,
+                layout,
+            })),
+            ..Self::default()
+        };
+        drawable.rebuild_canvas()?;
+        Ok(drawable)
+    }
+
+    /// source 为真时选择包装的非纹理源；显式画布记录没有源对象。
+    pub fn geometry_transform(&self, source: bool) -> Option<&Transform> {
+        if source && self.canvas_triangles.is_some() {
+            self.canvas_source.as_ref().map(|s| &s.geometry.transform)
+        } else {
+            Some(&self.transform)
+        }
+    }
+
+    /// 源属性变动后更新原始纹理记录；帧提交会自动为可见对象执行。
+    pub fn prepare_canvas(&mut self) -> Result<()> {
+        if self
+            .canvas_source
+            .as_ref()
+            .is_some_and(|source| source.geometry.transform.is_dirty())
+        {
+            self.rebuild_canvas()?;
+        }
+        Ok(())
+    }
+
+    fn rebuild_canvas(&mut self) -> Result<()> {
+        const IDENTITY: [f32; 16] = [
+            1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.,
+        ];
+        let source = self.canvas_source.as_mut().unwrap();
+        let transformed: Vec<_> = (0..source.geometry.triangles.len())
+            .map(|i| source.geometry.transformed_triangle(i, IDENTITY).unwrap())
+            .collect();
+        let mut triangles = source.layout.triangulate(&transformed)?;
+        let position = source.geometry.transform.position();
+        // UV 使用画布坐标，几何再移回源平移前的位置。
+        for triangle in &mut triangles {
+            for vertex in &mut triangle.vertices {
+                for (axis, value) in position[..2].iter().enumerate() {
+                    vertex.position[axis] = f(2, vertex.position[axis], *value);
+                }
+            }
+        }
+        self.canvas_triangles = Some(triangles);
+        source.geometry.transform.clear_dirty();
+        Ok(())
+    }
+
     /// 读取 count 条八十字节的画布三角形；初始覆盖颜色为白色，保留原顶点颜色。
     pub fn from_canvas(data: &[u8], count: u32) -> Result<Self> {
         let count = count as usize;
@@ -54,7 +133,7 @@ impl Drawable {
         })
     }
 
-    /// None 为非纹理图元，Some 的空列表为零三角形画布图元。
+    /// None 为非纹理图元；有源的包装在读取前应调用 prepare_canvas。
     pub fn canvas_triangles(&self) -> Option<&[CanvasTriangle]> {
         self.canvas_triangles.as_deref()
     }
