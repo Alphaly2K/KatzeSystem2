@@ -20,6 +20,9 @@ impl<F: ObjectFactory> Runtime<F> {
             .get(handle)
             .ok_or_else(|| Error::new(0, "FES 对象标识无效"))?;
         let canvas = matches!(object.state, ObjectState::Plane(_));
+        if matches!(object.state, ObjectState::CImage(_)) {
+            return self.update_fes_cimage(owner, objects, handle);
+        }
         if object.state.plane().is_none() {
             return match object.state {
                 ObjectState::Base => Ok(()),
@@ -38,7 +41,7 @@ impl<F: ObjectFactory> Runtime<F> {
                 }
             }
             if let Some(old) = task {
-                self.fes_plane_command(owner, Some(old), 3, [0; 3], None)?;
+                self.fes_command(owner, Some(old), 3, [0; 3], None)?;
             }
             task = match self.create(owner, kind::PLANE, b"FE Plane", b"") {
                 Ok(task) => Some(task),
@@ -49,7 +52,7 @@ impl<F: ObjectFactory> Runtime<F> {
                 }
             };
             object.task_id = task;
-            self.fes_plane_command(owner, task, 84, [0, state.creation_type, 0], None)?;
+            self.fes_command(owner, task, 84, [0, state.creation_type, 0], None)?;
             if canvas {
                 if let Some(resource) = &state.size_resource {
                     state.size = self.fes_image_geometry(resource, true)?;
@@ -71,7 +74,7 @@ impl<F: ObjectFactory> Runtime<F> {
             {
                 rectangle[i * 4..i * 4 + 4].copy_from_slice(&value.to_le_bytes());
             }
-            self.fes_plane_command(
+            self.fes_command(
                 owner,
                 task,
                 if canvas { 41 } else { 42 },
@@ -83,7 +86,7 @@ impl<F: ObjectFactory> Runtime<F> {
                     .iter()
                     .flat_map(|v| v.to_le_bytes())
                     .collect::<Vec<_>>();
-                self.fes_plane_command(owner, task, 51, [0, 0, 1], Some(&mut bytes))?;
+                self.fes_command(owner, task, 51, [0, 0, 1], Some(&mut bytes))?;
             }
             state.rebuild = false;
         }
@@ -109,7 +112,7 @@ impl<F: ObjectFactory> Runtime<F> {
             let next = [offset[0] as f32, offset[1] as f32];
             if state.position[..2] != next {
                 state.position[..2].copy_from_slice(&next);
-                objects.invalidate(handle);
+                objects.invalidate(handle)?;
             }
         }
         let position = objects.plane_position(handle);
@@ -136,19 +139,19 @@ impl<F: ObjectFactory> Runtime<F> {
         vectors.push((66, 0, [1.0; 3]));
         for (code, source, value) in vectors {
             let mut bytes = value.map(f32::to_le_bytes).concat();
-            self.fes_plane_command(owner, task, code, [source, 0, 1], Some(&mut bytes))?;
+            self.fes_command(owner, task, code, [source, 0, 1], Some(&mut bytes))?;
         }
         let mut matrix = crate::graphics::Transform::default()
             .matrix()
             .map(f32::to_le_bytes)
             .concat();
-        self.fes_plane_command(owner, task, 57, [0, 0, 1], Some(&mut matrix))?;
+        self.fes_command(owner, task, 57, [0, 0, 1], Some(&mut matrix))?;
         for (code, data) in [
             (59, [1, state.color, 1]),
             (47, [0, state.display as u32, 1]),
             (81, [0, 0, 1]),
         ] {
-            self.fes_plane_command(owner, task, code, data, None)?;
+            self.fes_command(owner, task, code, data, None)?;
         }
         objects
             .get_mut(handle)
@@ -178,11 +181,22 @@ impl<F: ObjectFactory> Runtime<F> {
             let object = objects
                 .get(id)
                 .ok_or_else(|| Error::new(0, "FES 对象标识无效"))?;
+            pending.extend(object.children());
             self.check_fes_plane_binding(owner, object.task_id)?;
             if object.task_id.is_some() {
-                self.fes_plane_command(owner, object.task_id, 3, [0; 3], None)?;
+                self.fes_command(owner, object.task_id, 3, [0; 3], None)?;
             }
-            pending.extend(object.children());
+            if let Some(image) = object.image {
+                let list = self.check_fes_image_list(owner, objects)?;
+                let slot = object
+                    .state
+                    .image()
+                    .ok_or_else(|| Error::new(0, "FES 图像来源与对象类型不匹配"))?
+                    .parent_priority;
+                self.fes_command(owner, Some(list), 287, [slot as u32, 0, 0], None)?;
+                self.images_mut().release(image)?;
+                objects.get_mut(id).unwrap().image = None;
+            }
         }
         objects.remove(handle)?;
         Ok(())
@@ -200,7 +214,7 @@ impl<F: ObjectFactory> Runtime<F> {
         Ok(())
     }
 
-    fn fes_plane_command(
+    pub(super) fn fes_command(
         &mut self,
         owner: u32,
         task: Option<u32>,
@@ -226,7 +240,11 @@ impl<F: ObjectFactory> Runtime<F> {
         Ok(())
     }
 
-    fn fes_image_geometry(&mut self, reference: &ImageReference, size: bool) -> Result<[i32; 2]> {
+    pub(super) fn fes_image_geometry(
+        &mut self,
+        reference: &ImageReference,
+        size: bool,
+    ) -> Result<[i32; 2]> {
         if reference.name.is_empty() {
             return Ok([0; 2]);
         }

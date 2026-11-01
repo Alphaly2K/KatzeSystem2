@@ -7,6 +7,7 @@ use crate::fes::{
 use crate::{Error, HandleAllocator, Result, read};
 use std::collections::{BTreeMap, BTreeSet};
 
+mod image;
 mod plane;
 
 const TOP: &str = "_TOPOBJ_";
@@ -58,6 +59,22 @@ impl ObjectState {
             _ => None,
         }
     }
+
+    fn image(&self) -> Option<&CImageState> {
+        match self {
+            Self::CImage(state) => Some(state),
+            Self::Image(state) => Some(&state.base),
+            _ => None,
+        }
+    }
+
+    fn image_mut(&mut self) -> Option<&mut CImageState> {
+        match self {
+            Self::CImage(state) => Some(state),
+            Self::Image(state) => Some(&mut state.base),
+            _ => None,
+        }
+    }
 }
 
 /// 一个 FES 对象。handle 是不透明标识，不是任务编号；重复声明也有独立身份。
@@ -69,6 +86,8 @@ pub struct Object {
     parent: Option<u32>,
     children: BTreeSet<u32>,
     task_id: Option<u32>,
+    image: Option<u32>,
+    image_offset: [f32; 2],
     pub state: ObjectState,
 }
 
@@ -97,6 +116,11 @@ impl Object {
     pub fn task_id(&self) -> Option<u32> {
         self.task_id
     }
+
+    /// 图像更新创建的来源包装；包装在首次准备来源前没有像素。
+    pub fn image_handle(&self) -> Option<u32> {
+        self.image
+    }
 }
 
 /// 一份 FES 的对象存储。绑定保留首次值，数量表与对象表分别维护。
@@ -107,6 +131,8 @@ pub struct Objects {
     bindings: BTreeMap<String, BTreeMap<i32, u32>>,
     counts: BTreeMap<String, u32>,
     canvas_offset: [i32; 2],
+    image_list: Option<u32>,
+    image_clip: crate::graphics::Rect,
 }
 
 impl Objects {
@@ -125,12 +151,16 @@ impl Objects {
                     parent: None,
                     children: BTreeSet::new(),
                     task_id: None,
+                    image: None,
+                    image_offset: [0.; 2],
                     state: ObjectState::Base,
                 },
             )]),
             bindings: BTreeMap::from([(TOP.to_owned(), BTreeMap::from([(0, top)]))]),
             counts: BTreeMap::from([(TOP.to_owned(), 1)]),
             canvas_offset: [0; 2],
+            image_list: None,
+            image_clip: crate::graphics::Rect::default(),
         })
     }
 
@@ -145,6 +175,17 @@ impl Objects {
     /// 保存共享绘制服务提供的画布偏移；在后续 PLANE 属性更新时应用。
     pub fn set_canvas_offset(&mut self, offset: [i32; 2]) {
         self.canvas_offset = offset;
+    }
+
+    /// 绑定直属所属任务的类型 15 共享列表及全局图像裁剪。
+    /// 不触发对象失效；调用方在图像更新前完成列表创建和绑定。
+    pub fn set_image_list(&mut self, task: u32, clip: crate::graphics::Rect) {
+        self.image_list = Some(task);
+        self.image_clip = clip;
+    }
+
+    pub fn image_list(&self) -> Option<u32> {
+        self.image_list
     }
 
     /// 包含根对象及重复声明产生的未绑定对象。
@@ -202,6 +243,8 @@ impl Objects {
                     parent: Some(self.top),
                     children: BTreeSet::new(),
                     task_id: None,
+                    image: None,
+                    image_offset: [0.; 2],
                     state: initial.clone(),
                 },
             );
@@ -296,13 +339,17 @@ impl Objects {
                 ObjectState::Plane(state) => state.apply(&initialization.attributes, bank as u32),
             };
             if dirty {
-                self.invalidate(handle);
+                self.invalidate(handle)?;
             }
         }
         Ok(())
     }
 
-    fn invalidate(&mut self, handle: u32) {
+    /// 显示属性直接修改或运动回写后，标记对象及后代等待重新登记。
+    pub fn invalidate(&mut self, handle: u32) -> Result<()> {
+        if !self.objects.contains_key(&handle) {
+            return Err(Error::new(0, "FES 对象标识无效"));
+        }
         let mut pending = vec![handle];
         while let Some(handle) = pending.pop() {
             let object = self.objects.get_mut(&handle).unwrap();
@@ -316,6 +363,7 @@ impl Objects {
             }
             pending.extend(object.children.iter().copied());
         }
+        Ok(())
     }
 
     /// 移出对象及后代，后代先返回；调用方负责释放其下层媒体资源和任务。
