@@ -179,6 +179,11 @@ impl Image {
 struct ImageEntry {
     owner: Option<u32>,
     references: usize,
+    data: u32,
+}
+
+struct ImageData {
+    references: usize,
     image: Image,
 }
 
@@ -186,6 +191,7 @@ struct ImageEntry {
 #[derive(Default)]
 pub struct Images {
     entries: BTreeMap<u32, ImageEntry>,
+    data: BTreeMap<u32, ImageData>,
     handles: HandleAllocator,
 }
 
@@ -194,6 +200,7 @@ impl Images {
     pub fn with_handles(handles: HandleAllocator) -> Self {
         Self {
             entries: BTreeMap::new(),
+            data: BTreeMap::new(),
             handles,
         }
     }
@@ -241,15 +248,50 @@ impl Images {
             return Err(Error::new(0, "图像对象数量超过上限"));
         }
         let handle = self.handles.allocate()?;
+        self.data.insert(
+            handle,
+            ImageData {
+                references: 1,
+                image,
+            },
+        );
         self.entries.insert(
             handle,
             ImageEntry {
                 owner: Some(owner),
                 references: 1,
-                image,
+                data: handle,
             },
         );
         Ok(handle)
+    }
+
+    /// 为同一像素对象创建独立包装；没有任务登记，使用者须显式释放。
+    /// 源包装释放后新句柄继续有效，两个包装的像素修改互相可见。
+    pub fn share(&mut self, handle: u32) -> Result<u32> {
+        let data = self
+            .entries
+            .get(&handle)
+            .ok_or_else(|| Error::new(0, "图像对象句柄无效"))?
+            .data;
+        if self.entries.len() == read::MAX_ITEMS {
+            return Err(Error::new(0, "图像对象数量超过上限"));
+        }
+        let references = self.data[&data]
+            .references
+            .checked_add(1)
+            .ok_or_else(|| Error::new(0, "图像引用数量超过上限"))?;
+        let shared = self.handles.allocate()?;
+        self.data.get_mut(&data).unwrap().references = references;
+        self.entries.insert(
+            shared,
+            ImageEntry {
+                owner: None,
+                references: 1,
+                data,
+            },
+        );
+        Ok(shared)
     }
 
     /// 增加共享持有，使用者通过 `release_reference` 配对释放；像素修改对所有使用者可见。
@@ -291,7 +333,8 @@ impl Images {
         let entry = self.entry_mut(handle)?;
         entry.references -= 1;
         if entry.references == 0 {
-            self.entries.remove(&handle);
+            let data = self.entries.remove(&handle).unwrap().data;
+            release_data(&mut self.data, data);
         }
         Ok(())
     }
@@ -299,12 +342,13 @@ impl Images {
     pub fn get(&self, handle: u32) -> Result<&Image> {
         self.entries
             .get(&handle)
-            .map(|entry| &entry.image)
+            .map(|entry| &self.data[&entry.data].image)
             .ok_or_else(|| Error::new(0, "图像对象句柄无效"))
     }
 
     pub fn get_mut(&mut self, handle: u32) -> Result<&mut Image> {
-        Ok(&mut self.entry_mut(handle)?.image)
+        let data = self.entry_mut(handle)?.data;
+        Ok(&mut self.data.get_mut(&data).unwrap().image)
     }
 
     fn entry_mut(&mut self, handle: u32) -> Result<&mut ImageEntry> {
@@ -323,27 +367,44 @@ impl Images {
         if source == 0 {
             return Ok(false);
         }
-        if source == target {
+        let source_data = self
+            .entries
+            .get(&source)
+            .ok_or_else(|| Error::new(0, "图像对象句柄无效"))?
+            .data;
+        let target_data = self.entry_mut(target)?.data;
+        if source_data == target_data {
             return Ok(self.get_mut(target)?.blend_within(source_rect, at));
         }
-        let source_image = self
-            .entries
-            .remove(&source)
-            .ok_or_else(|| Error::new(0, "图像对象句柄无效"))?;
+        let source_image = self.data.remove(&source_data).unwrap();
         let result = self
             .get_mut(target)
             .map(|target| target.blend_from(&source_image.image, source_rect, at));
-        self.entries.insert(source, source_image);
+        self.data.insert(source_data, source_image);
         result
     }
 
     pub fn release_owner(&mut self, owner: u32) {
+        let data = &mut self.data;
         self.entries.retain(|_, entry| {
             if entry.owner == Some(owner) {
                 entry.owner = None;
                 entry.references -= 1;
             }
-            entry.references != 0
+            if entry.references == 0 {
+                release_data(data, entry.data);
+                false
+            } else {
+                true
+            }
         });
+    }
+}
+
+fn release_data(data: &mut BTreeMap<u32, ImageData>, handle: u32) {
+    let image = data.get_mut(&handle).unwrap();
+    image.references -= 1;
+    if image.references == 0 {
+        data.remove(&handle);
     }
 }
