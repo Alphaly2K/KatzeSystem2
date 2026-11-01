@@ -5,6 +5,8 @@ pub struct CoordinateMap {
     pub device_scale: f32,
     pub configuration_offset: [i32; 2],
     pub logical_scale: [f32; 2],
+    /// 反向转换使用独立配置值，不自动取 logical_scale 的倒数。
+    pub device_units_per_logical: [f32; 2],
     pub logical_size: [i32; 2],
 }
 
@@ -15,6 +17,7 @@ impl Default for CoordinateMap {
             device_scale: 1.,
             configuration_offset: [0; 2],
             logical_scale: [1.; 2],
+            device_units_per_logical: [1.; 2],
             logical_size: [0; 2],
         }
     }
@@ -31,6 +34,19 @@ impl CoordinateMap {
             truncate(configured as f32 * self.logical_scale[i])
         });
         let inside = (0..2).all(|i| point[i] >= 0 && point[i] < self.logical_size[i]);
+        (point, inside)
+    }
+
+    /// 逻辑点先作范围判断，再转换为设备位置；画布外点仍完成换算。
+    pub fn to_device(&self, point: [i32; 2]) -> ([i32; 2], bool) {
+        let inside = (0..2).all(|i| point[i] >= 0 && point[i] < self.logical_size[i]);
+        let inverse = 1.0 / self.device_scale;
+        let point = std::array::from_fn(|i| {
+            let scaled = truncate(point[i] as f32 * self.device_units_per_logical[i]);
+            let configured = scaled.wrapping_add(self.configuration_offset[i]);
+            let device = configured as f32 / inverse;
+            truncate(device + self.device_offset[i])
+        });
         (point, inside)
     }
 }

@@ -7,6 +7,7 @@ fn coordinate_mapping_truncates_each_stage_and_preserves_outside_points() {
         device_scale: 2.,
         configuration_offset: [1, -2],
         logical_scale: [3., 0.5],
+        device_units_per_logical: [1.; 2],
         logical_size: [100; 2],
     };
     assert_eq!(map.to_logical([10; 2]), ([9, 3], true));
@@ -70,4 +71,55 @@ fn coordinate_mapping_keeps_f32_rounding_wrapping_and_invalid_integer_results() 
         ..CoordinateMap::default()
     };
     assert_eq!(map.to_logical([0, 1]), ([i32::MIN; 2], false));
+}
+
+#[test]
+fn reverse_mapping_uses_independent_scales_and_checks_original_logical_bounds() {
+    let map = CoordinateMap {
+        device_offset: [0.9, -0.9],
+        device_scale: 1.5,
+        configuration_offset: [1, -2],
+        logical_scale: [99.; 2],
+        device_units_per_logical: [0.5, 1.5],
+        logical_size: [8, 6],
+    };
+    assert_eq!(map.to_device([7, 5]), ([6, 6], true));
+    assert_eq!(map.to_device([8, 6]), ([8, 9], false));
+    assert_eq!(map.to_device([-1, 0]), ([2, -3], false));
+    let map = CoordinateMap {
+        device_offset: [-100.; 2],
+        ..map
+    };
+    assert_eq!(map.to_device([0; 2]), ([-98, -103], true));
+}
+
+#[test]
+fn reverse_mapping_preserves_reciprocal_rounding_and_integer_wraps() {
+    let mut map = CoordinateMap {
+        device_scale: 0.5,
+        configuration_offset: [1, -1],
+        device_units_per_logical: [f32::INFINITY, f32::NAN],
+        ..CoordinateMap::default()
+    };
+    assert_eq!(
+        map.to_device([1; 2]),
+        ([-1_073_741_824, 1_073_741_824], false)
+    );
+    map.device_units_per_logical = [1.; 2];
+    assert_eq!(
+        map.to_device([i32::MAX, i32::MIN]),
+        ([-1_073_741_824, 1_073_741_824], false)
+    );
+    map = CoordinateMap {
+        device_scale: 3.1,
+        ..CoordinateMap::default()
+    };
+    assert_eq!(map.to_device([10, -10]), ([30, -30], false));
+    map = CoordinateMap {
+        device_scale: 0.,
+        ..CoordinateMap::default()
+    };
+    assert_eq!(map.to_device([1, -1]), ([0; 2], false));
+    map.device_scale = f32::INFINITY;
+    assert_eq!(map.to_device([1, -1]), ([i32::MIN; 2], false));
 }
