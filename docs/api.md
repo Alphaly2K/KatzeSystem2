@@ -315,6 +315,8 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 
 `Scene::prepare(&mut state, budget)` 只消费装载期声明和对象属性，返回 false 后继续调用；完成时尚未进入 START，也未创建下层媒体任务。可以重复调用。使用与 Runtime 相同的 `numbers_mut()`，初始化表达式的副作用会立即保留。普通 update 也可直接完成初始化。退出后的 update 继续更新 `_FRAME_` 和媒体对象，脚本保持停止；退出码由任务层写入属性槽，场景本身不删除所属任务。
 
+`Runtime::dispatch_fes_system_block(owner, &mut scene, name)` 同步执行 `_FES_SLEEP_`／`_FES_WAKE_`，返回 false 后以同一名称续跑；普通推进、对象修改及另一个系统块须等到本次完成。缺失块直接完成。该入口不推进系统帧，不切换媒体显示；通常保留主流程位置和等待，`next` 按系统块的调用深度规则处理。局部 `wait` 结束本次分派。未知命令、运动及系统块退出事件队列返回诊断并保留待处理事件。命令 348 在系统块后刷新对象并切换显示，`FesObject::paused()` 查询专属暂停原始值；完整契约见[暂停与唤醒](graphics.md#fes-专属暂停与唤醒)。
+
 `runtime::fes::Objects::new(handles)` 为一份 FES 建立独立的对象存储，并登记 `_TOPOBJ_` 银行 0 的根 BASE 对象；与 Runtime 组合时传入 `runtime.host().handle_allocator()`。FES 对象标识来自共享不透明编号源，与任务编号分别使用。`define(&definition)` 接受有效的非零银行数，返回此次新创建的全部标识；目前支持 BASE、CIMAGE、IMAGE、CPLANE 和 PLANE，其他类型返回诊断。名称限定为 1～31 个非零 ASCII 字节。`get`／`get_mut` 查询实际对象及 `ObjectState`，`len` 包括根及重复声明的未绑定对象。`update_order()` 按声明及银行顺序查询当前绑定，保留重复记录并跳过缺失银行；新声明占据银行空洞后，旧记录也会解析到新绑定。
 
 `lookup(name, bank)` 精确查找名称／银行，缺失返回 None；−1 在这里不展开数组。重复 DEFINE 仍创建对象，但已有银行保留原绑定，新银行取得各自的首次绑定；`count(name)` 始终保留首次登记的数组数量。创建完成后先调用 `publish_bindings(&mut interpreter)`，再确认事件；该入口同步对象命名值和解释器的数组数量，保留其他系统命名值。删除后同样需要同步。显式银行可访问超出首次数量的新绑定，省略银行号的数组展开继续使用首次数量。

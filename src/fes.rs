@@ -217,6 +217,7 @@ pub struct Interpreter {
     /// 当前 FES 的宿主命名值；对象句柄与系统值均由宿主更新。
     pub named: BTreeMap<String, BTreeMap<i32, i32>>,
     invocation: Option<events::Invocation>,
+    dispatch_result: Option<bool>,
     definitions: VecDeque<Line>,
     pre_declarations: Option<Vec<Declaration>>,
     initializers: VecDeque<attributes::InitializationBlock>,
@@ -286,6 +287,7 @@ impl Interpreter {
             return_value: 0,
             named: BTreeMap::new(),
             invocation: None,
+            dispatch_result: None,
             definitions,
             pre_declarations,
             initializers,
@@ -443,7 +445,12 @@ impl Interpreter {
             let Some(command) = args.first().map(Vec::as_slice) else {
                 continue;
             };
-            if self.invocation.is_some() && matches!(command, b"wait" | b"exit") {
+            if self
+                .invocation
+                .as_ref()
+                .is_some_and(|invocation| !invocation.system)
+                && matches!(command, b"wait" | b"exit")
+            {
                 return Err(Error::new(line.offset, "FES 事件内的 wait/exit 尚不支持"));
             }
             let event = match command {

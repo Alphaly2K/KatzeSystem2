@@ -67,11 +67,15 @@ impl ObjectFactory for Factory {
 struct Files {
     files: BTreeMap<Vec<u8>, Vec<u8>>,
     reads: Rc<RefCell<Vec<Vec<u8>>>>,
+    fail_media: Rc<Cell<bool>>,
 }
 impl ResourceServices for Files {
     fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
         assert_eq!(mode, ResourceMode::LooseFirst);
         self.reads.borrow_mut().push(name.to_vec());
+        if self.fail_media.get() && name != b"complete.fes" {
+            return Err(Error::new(0, "合成媒体读取失败"));
+        }
         Ok(self.files.get(name).cloned())
     }
 }
@@ -176,6 +180,7 @@ struct Setup {
     fail_button: Rc<Cell<bool>>,
     button_attempts: Rc<Cell<u32>>,
     pointer: Rc<Cell<PointerSample>>,
+    fail_media: Rc<Cell<bool>>,
 }
 
 fn setup(budget: usize, source: &[u8]) -> Setup {
@@ -186,6 +191,7 @@ fn setup(budget: usize, source: &[u8]) -> Setup {
     let fail_button = Rc::new(Cell::new(false));
     let button_attempts = Rc::new(Cell::new(0));
     let pointer = Rc::new(Cell::new(PointerSample::default()));
+    let fail_media = Rc::new(Cell::new(false));
     let mut runtime = Runtime::new(
         0,
         kind::ROOT,
@@ -217,6 +223,7 @@ fn setup(budget: usize, source: &[u8]) -> Setup {
     runtime.set_resources(Files {
         files: BTreeMap::from([(b"complete.fes".to_vec(), packed(source))]),
         reads: reads.clone(),
+        fail_media: fail_media.clone(),
     });
     runtime.drawing_mut().enabled = true;
     runtime.drawing_mut().active = true;
@@ -237,6 +244,7 @@ fn setup(budget: usize, source: &[u8]) -> Setup {
         fail_button,
         button_attempts,
         pointer,
+        fail_media,
     }
 }
 
@@ -662,5 +670,153 @@ fn auxiliary_input_reaches_script_values_and_transients_clear_after_the_round() 
         assert_eq!(send(&mut runtime, button, 4, 0, 0), 1);
         assert_eq!(send(&mut runtime, fes, 64, button, 1), 0);
         assert_eq!(send(&mut runtime, fes, 65, button, 1), 0);
+    }
+}
+
+#[test]
+fn dedicated_pause_hides_refreshed_media_and_wakes_with_current_fes_display() {
+    let source = b"#DEFINE\nCIMAGE sprite\nCPLANE panel\nPLANE view\n#OBJECT SIZE COLOR PRI POS DISP\nsprite 2,2 0xff123456 5 1,1 21\npanel 1,1 0xff654321 100 5,4 94\n#OBJECT POS SIZE VRAM PRI DISP\nview 0,0 8,6 0,0 500 57\n#START\n$0=$0+1\nwait 77\n$1=$1+1\n#_FES_SLEEP_\n$2=$2+1\n#_FES_WAKE_\n$3=$3+1\n";
+    for budget in [1, 4096] {
+        let Setup { mut runtime, .. } = setup(budget, source);
+        let fes = runtime.create(0, kind::FES, b"scene", b"").unwrap();
+        send(&mut runtime, fes, 337, 0, 0);
+        let list = runtime.create(fes, kind::IMAGE_LIST, b"list", b"").unwrap();
+        send(&mut runtime, list, 285, 8, 6);
+        send(&mut runtime, fes, 340, 0, list);
+        file(&mut runtime, fes, b"complete.fes").unwrap();
+        send(&mut runtime, fes, 339, 0, 0);
+        runtime.update(1, 1).unwrap();
+        assert_eq!(
+            runtime.drawing().target.as_ref().unwrap().pixel(1, 1),
+            Some(0xff123456)
+        );
+        let planes: Vec<_> = runtime
+            .tree()
+            .children(fes)
+            .unwrap()
+            .filter(|id| runtime.tree().node(*id).unwrap().kind == kind::PLANE)
+            .collect();
+        assert_eq!(planes.len(), 2);
+        for (value, count) in [(0, 0), (1, 1), (1, 1), (2, 2)] {
+            send(&mut runtime, fes, 348, 0, value);
+            assert_eq!(runtime.numbers().shared[2], count);
+        }
+        runtime.update(123, 1).unwrap();
+        assert_eq!(&runtime.numbers().shared[..4], &[1, 0, 2, 0]);
+        assert_eq!(runtime.object(fes).unwrap().clock().time, 123);
+        assert_eq!(runtime.object(list).unwrap().clock().time, 123);
+        assert_eq!(
+            runtime.drawing().target.as_ref().unwrap().pixel(1, 1),
+            Some(0)
+        );
+        for &id in &planes {
+            assert_eq!(runtime.drawables().get(id).unwrap().display(), 0);
+            assert_eq!(runtime.object(id).unwrap().clock().time, 123);
+        }
+        send(&mut runtime, list, 310, 0, 0);
+        send(&mut runtime, fes, 348, 0, 0);
+        assert_eq!(runtime.numbers().shared[3], 1);
+        assert_eq!(
+            runtime.drawing().target.as_ref().unwrap().pixel(1, 1),
+            Some(0xff123456)
+        );
+        assert_eq!(runtime.drawables().get(planes[0]).unwrap().display(), 94);
+        assert_eq!(runtime.drawables().get(planes[1]).unwrap().display(), 57);
+        send(&mut runtime, fes, 348, 0, 0);
+        assert_eq!(runtime.numbers().shared[3], 1);
+        runtime.update(124, 1).unwrap();
+        assert_eq!(&runtime.numbers().shared[..4], &[1, 1, 2, 1]);
+    }
+}
+
+#[test]
+fn pause_propagates_to_nested_fes_and_skips_the_first_body_until_wake() {
+    for budget in [1, 4096] {
+        let Setup {
+            mut runtime,
+            button_attempts,
+            ..
+        } = setup(
+            budget,
+            b"#START\n$0=$0+1\nwait 100\n#_FES_SLEEP_\n$2=$2*10+1\n#_FES_WAKE_\n$3=$3*10+2\n",
+        );
+        let parent = runtime.create(0, kind::FES, b"parent", b"").unwrap();
+        let child = runtime.create(parent, kind::FES, b"child", b"").unwrap();
+        for id in [parent, child] {
+            send(&mut runtime, id, 337, 0, 0);
+            file(&mut runtime, id, b"complete.fes").unwrap();
+        }
+        runtime
+            .dispatch_command(
+                0,
+                Command {
+                    data: [0, 2, 1],
+                    ..command(parent, 348, 0, 2)
+                },
+            )
+            .unwrap();
+        assert_eq!(runtime.numbers().shared[2], 11);
+        runtime.update(100, 1).unwrap();
+        assert_eq!(button_attempts.get(), 0);
+        assert_eq!(runtime.object(parent).unwrap().clock().time, 100);
+        assert_eq!(runtime.object(child).unwrap().clock().time, 100);
+        send(&mut runtime, parent, 339, 0, 0);
+        send(&mut runtime, child, 339, 0, 0);
+        assert_eq!(runtime.numbers().shared[0], 0);
+        runtime
+            .dispatch_command(
+                0,
+                Command {
+                    data: [0, 0, 1],
+                    ..command(parent, 348, 0, 0)
+                },
+            )
+            .unwrap();
+        assert_eq!(runtime.numbers().shared[3], 22);
+        runtime.update(101, 1).unwrap();
+        assert_eq!(button_attempts.get(), 2);
+        assert_eq!(runtime.numbers().shared[0], 2);
+    }
+}
+
+#[test]
+fn media_failure_retries_pause_without_repeating_the_system_block() {
+    for budget in [1, 4096] {
+        let Setup { mut runtime, fail_media, reads, .. } = setup(budget,
+            b"#DEFINE\nIMAGE sprite\n#OBJECT FILE PATHMODE SIZE PRI DISP\nsprite absent 1 2,2 5 1\n#START\nwait 77\n#_FES_SLEEP_\n$2=$2+1\n");
+        let fes = runtime.create(0, kind::FES, b"scene", b"").unwrap();
+        send(&mut runtime, fes, 337, 0, 0);
+        let list = runtime.create(fes, kind::IMAGE_LIST, b"list", b"").unwrap();
+        send(&mut runtime, list, 285, 8, 6);
+        send(&mut runtime, fes, 340, 0, list);
+        file(&mut runtime, fes, b"complete.fes").unwrap();
+        fail_media.set(true);
+        for _ in 0..2 {
+            assert!(
+                runtime
+                    .dispatch_command(0, command(fes, 348, 0, 1))
+                    .unwrap_err()
+                    .message
+                    .contains("媒体读取失败")
+            );
+            assert_eq!(runtime.numbers().shared[2], 1);
+        }
+        assert!(
+            runtime
+                .dispatch_command(0, command(fes, 348, 0, 0))
+                .is_err()
+        );
+        fail_media.set(false);
+        send(&mut runtime, fes, 348, 0, 1);
+        assert_eq!(runtime.numbers().shared[2], 1);
+        assert_eq!(
+            reads
+                .borrow()
+                .iter()
+                .filter(|name| name.as_slice() == b"absent")
+                .count(),
+            3
+        );
+        runtime.update(100, 1).unwrap();
     }
 }

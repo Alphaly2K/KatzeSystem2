@@ -15,6 +15,8 @@ pub(super) struct Invocation {
     depth: usize,
     object_block: Option<usize>,
     default: bool,
+    pub(super) system: bool,
+    ended: bool,
 }
 
 impl Interpreter {
@@ -81,10 +83,69 @@ impl Interpreter {
             depth: self.calls.len(),
             object_block,
             default: default_block.is_some(),
+            system: false,
+            ended: false,
         });
+        self.dispatch_result = None;
         self.block = block;
         self.pc = 0;
         Ok(true)
+    }
+
+    pub(crate) fn dispatch_system_block(&mut self, name: &str) -> Result<bool> {
+        if self.invocation.is_some() || self.initialization_pending() {
+            return Err(Error::new(0, "FES 无法在当前状态分派系统块"));
+        }
+        if self
+            .pending
+            .as_ref()
+            .is_some_and(|event| !matches!(event, Event::Wait(_) | Event::Frame))
+        {
+            return Err(Error::new(0, "FES 需要先完成当前宿主操作"));
+        }
+        let Some(block) = self
+            .program
+            .blocks
+            .iter()
+            .position(|block| block.name == name)
+        else {
+            return Ok(false);
+        };
+        self.invocation = Some(Invocation {
+            context: EventContext {
+                object: String::new(),
+                bank: 0,
+                event: name.to_owned(),
+            },
+            main: (self.block, self.pc),
+            pending: self.pending.take(),
+            depth: self.calls.len(),
+            object_block: Some(block),
+            default: false,
+            system: true,
+            ended: self.ended,
+        });
+        self.dispatch_result = None;
+        self.ended = false;
+        self.block = block;
+        self.pc = 0;
+        Ok(true)
+    }
+
+    pub(crate) fn finish_system_block(&mut self) -> Result<()> {
+        if !self
+            .invocation
+            .as_ref()
+            .is_some_and(|invocation| invocation.system)
+        {
+            return Err(Error::new(0, "FES 没有正在执行的系统块"));
+        }
+        self.finish_event(false);
+        Ok(())
+    }
+
+    pub(crate) fn take_dispatch_result(&mut self) -> Option<bool> {
+        self.dispatch_result.take()
     }
 
     pub(super) fn event_block_ended(&mut self) -> bool {
@@ -117,6 +178,8 @@ impl Interpreter {
 
     fn finish_event(&mut self, transfer: bool) {
         let invocation = self.invocation.take().unwrap();
+        self.dispatch_result = Some(transfer);
+        self.ended |= invocation.ended;
         if !transfer {
             (self.block, self.pc) = invocation.main;
             self.pending = invocation.pending;

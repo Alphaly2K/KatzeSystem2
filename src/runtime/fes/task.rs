@@ -16,6 +16,15 @@ pub trait Services {
     fn inherited_context(&self) -> Result<Vec<u8>>;
     /// 辅助按钮优先级；直接父级为根时返回一。
     fn button_priority(&self) -> Result<u32>;
+    /// 分派睡眠／唤醒系统块；false 后用相同名称完成预算续跑。
+    fn dispatch_system_block(
+        &mut self,
+        scene: &mut Scene,
+        name: &str,
+        budget: usize,
+    ) -> Result<bool>;
+    /// 刷新当前媒体属性后隐藏或恢复显示，唤醒时强制提交共享列表。
+    fn set_media_sleep(&mut self, scene: &mut Scene, sleeping: bool) -> Result<()>;
 }
 
 impl<F: ObjectFactory> Services for ObjectHost<'_, F> {
@@ -28,6 +37,23 @@ impl<F: ObjectFactory> Services for ObjectHost<'_, F> {
         let mut store = self.store();
         store.budget = budget.max(1);
         store.update_fes_scene(owner, scene, now)
+    }
+
+    fn dispatch_system_block(
+        &mut self,
+        scene: &mut Scene,
+        name: &str,
+        budget: usize,
+    ) -> Result<bool> {
+        let owner = self.host.task_id;
+        let mut store = self.store();
+        store.budget = budget.max(1);
+        store.dispatch_fes_system_block(owner, scene, name)
+    }
+
+    fn set_media_sleep(&mut self, scene: &mut Scene, sleeping: bool) -> Result<()> {
+        let owner = self.host.task_id;
+        self.store().set_fes_media_sleep(owner, scene, sleeping)
     }
 
     fn start(&mut self, clock: &mut TaskClock) -> Result<()> {
@@ -127,6 +153,8 @@ pub struct FesObject {
     input_button: Option<u32>,
     input_mode: u32,
     last_input: u32,
+    paused: u32,
+    pause_script_done: bool,
 }
 
 impl FesObject {
@@ -150,6 +178,8 @@ impl FesObject {
             input_button: None,
             input_mode: 0,
             last_input: 0,
+            paused: 0,
+            pause_script_done: false,
         }
     }
 
@@ -175,6 +205,10 @@ impl FesObject {
 
     pub fn last_input(&self) -> u32 {
         self.last_input
+    }
+
+    pub fn paused(&self) -> u32 {
+        self.paused
     }
 
     fn pointer_position(&self, host: &mut dyn Host, propagation: u32) -> Result<[i32; 2]> {
@@ -237,6 +271,20 @@ impl FesObject {
             self.scene.as_mut().unwrap().set_raw_input(raw);
         } else if command.code == 10 {
             self.last_input = 0;
+        }
+        if self.paused != 0 {
+            if matches!(command.code, 9 | 10) {
+                self.send(
+                    host,
+                    command.sender,
+                    95,
+                    [0, 1, 1],
+                    &mut CommandBuffers::default(),
+                )?;
+            } else {
+                *output = 0;
+            }
+            return Ok(());
         }
         self.update_pointer_values(host)?;
         *output = 0;
@@ -353,7 +401,7 @@ impl FesObject {
     fn run_body(&mut self, host: &mut dyn Host, budget: usize) -> Result<bool> {
         self.synchronize(host);
         self.effects(host);
-        if self.base.control.deletion_requested != 0 {
+        if self.base.control.deletion_requested != 0 || self.paused != 0 {
             return Ok(true);
         }
         self.prepare_input_button(host)?;
@@ -598,7 +646,31 @@ impl TaskObject for FesObject {
                 self.offset = [i32::from_le_bytes(x), i32::from_le_bytes(y)];
                 self.bind()?;
             }
-            19 | 27 | 28 | 177 | 178 | 341..=358 => {
+            348 => {
+                if self.pending.is_none() {
+                    if self.paused == b {
+                        return Ok(CommandOutcome::finished(true));
+                    }
+                    self.paused = b;
+                    self.pause_script_done = false;
+                    self.pending = Some(*command);
+                }
+                if let Some(scene) = &mut self.scene {
+                    if !self.pause_script_done {
+                        let name = if b != 0 { "_FES_SLEEP_" } else { "_FES_WAKE_" };
+                        if !services(host)?.dispatch_system_block(scene, name, budget)? {
+                            return Ok(CommandOutcome::RESUME);
+                        }
+                        self.pause_script_done = true;
+                    }
+                    services(host)?.set_media_sleep(scene, b != 0)?;
+                }
+                self.pending = None;
+                self.pause_script_done = false;
+                self.effects(host);
+                return Ok(CommandOutcome::finished(true));
+            }
+            19 | 27 | 28 | 177 | 178 | 341..=347 | 349..=358 => {
                 return Err(Error::new(0, "FES 专属命令尚未接入"));
             }
             _ => {
@@ -661,4 +733,82 @@ fn name(bytes: &[u8], capacity: usize) -> Result<&[u8]> {
         return Err(Error::new(0, "FES 名称或上下文超过容量"));
     }
     Ok(&bytes[..end])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct InputHost(Vec<Command>);
+    impl Host for InputHost {
+        fn call(
+            &mut self,
+            _: u32,
+            _: &[u8],
+            _: &mut Interpreter,
+        ) -> Result<crate::kcs::NativeReturn> {
+            Err(Error::new(0, "合成宿主不执行 native"))
+        }
+        fn dispatch_task_command(
+            &mut self,
+            command: Command,
+            _: &mut CommandBuffers<'_>,
+            output: &mut u32,
+        ) -> Result<bool> {
+            assert!(matches!(command.code, 95 | 96));
+            if command.code == 96 {
+                *output = 0x80000002;
+            }
+            self.0.push(command);
+            Ok(true)
+        }
+    }
+
+    #[test]
+    fn paused_events_acknowledge_without_pointer_or_script_input_changes() {
+        let mut task = FesObject::new(9);
+        task.paused = 2;
+        let mut scene = Scene::new(
+            fes::Program::from_text(b"#START\nwait 77\n").unwrap(),
+            crate::HandleAllocator::default(),
+        )
+        .unwrap();
+        scene.set_system_value("_CLICK_L_", 73);
+        task.scene = Some(scene);
+        let mut host = InputHost(Vec::new());
+        for code in [9, 10, 64, 65] {
+            let mut output = 0x13579bdf;
+            assert_eq!(
+                task.dispatch_command(
+                    kind::FES,
+                    &Command {
+                        target: 9,
+                        sender: 5,
+                        code,
+                        data: [5, 0, 0],
+                    },
+                    &mut output,
+                    &mut host,
+                    1
+                )
+                .unwrap(),
+                CommandOutcome::finished(false)
+            );
+            assert_eq!(output, if code < 64 { 0x13579bdf } else { 0 });
+            assert_eq!(task.last_input(), if code == 9 { 0x80000002 } else { 0 });
+            let scene = task.scene().unwrap();
+            assert_eq!(scene.raw_input(), 0x80000002);
+            assert_eq!(scene.interpreter().named["_CLICK_L_"][&0], 73);
+            assert!(!scene.interpreter().named.contains_key("_MOUSE_X_"));
+        }
+        assert_eq!(
+            host.0,
+            [96, 95, 95].map(|code| Command {
+                target: 5,
+                sender: 9,
+                code,
+                data: [0, 1, 1],
+            })
+        );
+    }
 }

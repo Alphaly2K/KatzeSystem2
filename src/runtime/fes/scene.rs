@@ -14,6 +14,7 @@ pub struct Scene {
     exit_code: Option<i32>,
     invocation: Option<Invocation>,
     input: super::input::SystemInput,
+    system_block: Option<String>,
 }
 
 struct Invocation {
@@ -52,6 +53,7 @@ impl Scene {
             exit_code: None,
             invocation: None,
             input: super::input::SystemInput::default(),
+            system_block: None,
         })
     }
 
@@ -65,7 +67,7 @@ impl Scene {
 
     /// 同一次预算续跑期间保持对象绑定和属性稳定。
     pub fn objects_mut(&mut self) -> Result<&mut Objects> {
-        if self.invocation.is_some() {
+        if self.is_pending() {
             return Err(Error::new(0, "FES 本轮推进尚未完成"));
         }
         Ok(&mut self.objects)
@@ -91,7 +93,7 @@ impl Scene {
 
     /// 退出码在最终对象更新完成后可用；退出后仍可逐轮更新媒体对象。
     pub fn exit_code(&self) -> Option<i32> {
-        self.exit_code.filter(|_| self.invocation.is_none())
+        self.exit_code.filter(|_| !self.is_pending())
     }
 
     pub(super) fn exit_request(&self) -> Option<i32> {
@@ -107,7 +109,7 @@ impl Scene {
     }
 
     pub fn is_pending(&self) -> bool {
-        self.invocation.is_some()
+        self.invocation.is_some() || self.system_block.is_some()
     }
 
     /// 只处理装载期声明和属性，不进入 START 或推进下层媒体对象。
@@ -117,7 +119,7 @@ impl Scene {
         numbers: &mut crate::expression::State,
         budget: usize,
     ) -> Result<bool> {
-        if self.invocation.is_some() {
+        if self.is_pending() {
             return Err(Error::new(0, "FES 本轮推进尚未完成"));
         }
         for _ in 0..budget.max(1) {
@@ -177,6 +179,16 @@ impl Scene {
 }
 
 impl<F: ObjectFactory> Runtime<F> {
+    /// 同步推进睡眠／唤醒系统块；false 后用同一名称继续预算续跑。
+    pub fn dispatch_fes_system_block(
+        &mut self,
+        owner: u32,
+        scene: &mut Scene,
+        name: &str,
+    ) -> Result<bool> {
+        self.store().dispatch_fes_system_block(owner, scene, name)
+    }
+
     /// 推进脚本并在本轮边界更新 FES 对象；false 表示预算耗尽，续跑保留原时刻。
     pub fn update_fes_scene(&mut self, owner: u32, scene: &mut Scene, now: u32) -> Result<bool> {
         self.store().update_fes_scene(owner, scene, now)
@@ -184,12 +196,128 @@ impl<F: ObjectFactory> Runtime<F> {
 }
 
 impl<F: ObjectFactory> Store<'_, F> {
+    pub(in crate::runtime) fn set_fes_media_sleep(
+        &mut self,
+        owner: u32,
+        scene: &mut Scene,
+        sleeping: bool,
+    ) -> Result<()> {
+        if scene.is_pending() {
+            return Err(Error::new(0, "FES 推进尚未完成，不能切换媒体睡眠状态"));
+        }
+        let handles = scene.objects.update_order().collect::<Vec<_>>();
+        for &handle in &handles {
+            self.update_fes_object(owner, &mut scene.objects, handle)?;
+        }
+        for handle in handles {
+            let object = scene.objects.get(handle).unwrap();
+            if let Some(image) = object.state.image() {
+                self.fes_command(
+                    owner,
+                    scene.objects.image_list,
+                    293,
+                    [
+                        image.parent_priority as u32,
+                        if sleeping { 0 } else { image.display as u32 },
+                        0,
+                    ],
+                    None,
+                )?;
+            } else if let Some(plane) = object.state.plane() {
+                self.fes_command(
+                    owner,
+                    object.task_id,
+                    47,
+                    [0, if sleeping { 0 } else { plane.display() as u32 }, 0],
+                    None,
+                )?;
+            }
+        }
+        if !sleeping {
+            self.fes_command(owner, scene.objects.image_list, 298, [0; 3], None)?;
+        }
+        Ok(())
+    }
+
+    pub(in crate::runtime) fn dispatch_fes_system_block(
+        &mut self,
+        owner: u32,
+        scene: &mut Scene,
+        name: &str,
+    ) -> Result<bool> {
+        if !matches!(name, "_FES_SLEEP_" | "_FES_WAKE_") {
+            return Err(Error::new(0, "FES 系统块名称尚未接入"));
+        }
+        if self.tree.node(owner).is_none() || scene.owner.is_some_and(|bound| bound != owner) {
+            return Err(Error::new(0, "FES 系统块所属任务无效"));
+        }
+        if scene.invocation.is_some() {
+            return Err(Error::new(0, "FES 本轮推进尚未完成"));
+        }
+        if let Some(pending) = &scene.system_block {
+            if pending != name {
+                return Err(Error::new(0, "FES 上一次系统块尚未完成"));
+            }
+        } else {
+            scene.owner = Some(owner);
+            if !scene.interpreter.dispatch_system_block(name)? {
+                return Ok(true);
+            }
+            scene.system_block = Some(name.to_owned());
+        }
+        for _ in 0..self.budget.max(1) {
+            match scene.interpreter.run(self.numbers, 1)? {
+                Step::Yield => (),
+                Step::Event(fes::Event::Wait(_)) => scene.interpreter.finish_system_block()?,
+                Step::Event(fes::Event::Command(line)) => {
+                    let args = scene.interpreter.parameters(&line.bytes, self.numbers)?;
+                    if args.first().is_some_and(|name| name == b"decode") {
+                        for handle in scene.objects.update_order().collect::<Vec<_>>() {
+                            self.update_fes_object(owner, &mut scene.objects, handle)?;
+                        }
+                    } else if !scene.objects.dispatch_image_animation(
+                        &mut scene.interpreter,
+                        &line,
+                        self.numbers,
+                    )? {
+                        return Err(Error::new(line.offset, "FES 系统块对象命令尚未接入"));
+                    }
+                    scene.interpreter.resume();
+                }
+                Step::Event(fes::Event::InitializeObject(initialization)) => {
+                    scene
+                        .objects
+                        .initialize(&initialization, |name| Ok(name.to_vec()))?;
+                    scene.interpreter.resume();
+                }
+                Step::Event(fes::Event::Exit(_)) => {
+                    return Err(Error::new(0, "FES 系统块退出事件队列尚未接入"));
+                }
+                Step::Event(fes::Event::Subcommand(call)) => {
+                    return Err(Error::new(call.offset, "FES 系统块运动服务尚未接入"));
+                }
+                _ => return Err(Error::new(0, "FES 系统块出现未支持的执行状态")),
+            }
+            if let Some(transferred) = scene.interpreter.take_dispatch_result() {
+                if transferred {
+                    scene.deadline = None;
+                }
+                scene.system_block = None;
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
     pub(in crate::runtime) fn update_fes_scene(
         &mut self,
         owner: u32,
         scene: &mut Scene,
         now: u32,
     ) -> Result<bool> {
+        if scene.system_block.is_some() {
+            return Err(Error::new(0, "FES 系统块尚未完成"));
+        }
         if self.tree.node(owner).is_none() {
             return Err(Error::new(0, "FES 所属任务不存在"));
         }
