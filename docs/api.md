@@ -301,6 +301,8 @@ FES 内部执行宏声明，初始化按以下顺序交给宿主：
 
 `input::HitMask::from_image(&image)` 按画布尺寸、裁剪偏移及非零 Alpha 生成区域持有的独立位图。输入命令 147 与平面命令 98 通过 `Host::image(handle)` 使用普通 111／112 的解码图像；位图在图像释放后继续有效。独立宿主提供解码图像借用，TaskHost／ResourceHost／SystemHost 向内层委托该查询。边界、替换失败和空句柄规则见[位掩码](input.md#位掩码)。
 
+`Host::parent_task_id()` 返回当前对象的直接父级编号，默认返回诊断。Runtime 从任务树查询；CoreHost 使用其 task_tree，TaskHost 优先使用 TaskServices 的树，ResourceHost／SystemHost／`&mut H` 继续向内层委托。平面 53／54 开启／解除相对父级坐标绑定，具体规则见[图形接口](graphics.md)。父级传播期间的 61／62 可查询正在执行的平面，保持删除门控、几何源选择及输出缓冲区契约；完整平面重入仍未开放。
+
 `Runtime::set_input_device(device)` 绑定同步 `input::InputDevice`，为已有输入对象逐个查询初始位置；之后新建输入对象在登记前查询，失败不占用编号。共享映射通过 `input_coordinates()`／`input_coordinates_mut()` 配置。InputObject 主体自动执行轮询、定位、选择、按键、滚轮、拖动、光标及更新收尾；未绑定设备返回诊断，显式事件入口仍可使用。平台采集继续实现，设备协议及查询次序见[同步设备更新](input.md#同步设备更新)。独立输入宿主提供 `Host::input_device`／`input_coordinates` 和 `dispatch_input_command(state, delivery, command, buffers, output)`，delivery 区分直接分派与广播，返回值表示目标可达性。
 
 `Runtime::set_input_pointer_control(enabled)` 设置命令 138 的配置门控，默认 false；139 仍可在前台请求有效目标。独立宿主实现 `Host::input_pointer_control`。两个命令接受打包的无符号十六位逻辑坐标，清理受抑制的键状态后保存定位目标、剩余值和任务 elapsed；设备通过 set_pointer 和 clear_keys 完成对应操作。时刻及坐标约定见[平滑定位](input.md#平滑定位)。

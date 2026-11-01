@@ -32,6 +32,10 @@ impl<'a, H: Host, S: SystemServices> SystemHost<'a, H, S> {
 }
 
 impl<H: Host, S: SystemServices> Host for SystemHost<'_, H, S> {
+    fn parent_task_id(&self) -> Result<u32> {
+        self.inner.parent_task_id()
+    }
+
     fn handle_allocator(&self) -> Option<crate::HandleAllocator> {
         self.inner.handle_allocator()
     }

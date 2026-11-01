@@ -268,6 +268,11 @@ pub trait Host {
         false
     }
 
+    /// 查询当前对象的直接父任务编号；未提供服务或没有父任务时返回诊断。
+    fn parent_task_id(&self) -> Result<u32> {
+        Err(Error::new(0, "宿主未提供当前任务父级查询"))
+    }
+
     /// 查询当前对象在有符号编号游标之后的直属子任务；None 从首项开始。
     fn next_task_child(&self, _previous: Option<u32>) -> Result<Option<u32>> {
         Err(Error::new(0, "宿主未提供任务子级查询"))
@@ -360,6 +365,10 @@ impl<T: Host + ?Sized> Host for &mut T {
 
     fn next_task_child(&self, previous: Option<u32>) -> Result<Option<u32>> {
         (**self).next_task_child(previous)
+    }
+
+    fn parent_task_id(&self) -> Result<u32> {
+        (**self).parent_task_id()
     }
 
     fn dispatch_task_command(

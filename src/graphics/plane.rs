@@ -21,6 +21,7 @@ pub struct PlaneObject {
     creation_flags: u32,
     offset: [f32; 2],
     size: [f32; 2],
+    parent_offset: Option<[f32; 3]>,
     shape_kind: u32,
     geometry_name: Vec<u8>,
 }
@@ -43,6 +44,7 @@ impl PlaneObject {
             creation_flags: 1,
             offset: [0.0; 2],
             size: [0.0; 2],
+            parent_offset: None,
             shape_kind: 0,
             geometry_name: Vec::new(),
         }
@@ -70,6 +72,47 @@ impl PlaneObject {
 
     pub fn size(&self) -> [f32; 2] {
         self.size
+    }
+
+    pub fn parent_offset(&self) -> Option<[f32; 3]> {
+        self.parent_offset
+    }
+
+    fn inherit_coordinates(&self, host: &mut dyn Host) -> Result<()> {
+        let Some(offset) = self.parent_offset else {
+            return Ok(());
+        };
+        let parent = host.parent_task_id()?;
+        let mut position = [0; 12];
+        let mut base = [0; 12];
+        let mut output = 0;
+        for (code, buffer) in [(62, &mut position), (61, &mut base)] {
+            self.send_command(
+                parent,
+                code,
+                [0; 3],
+                &mut CommandBuffers {
+                    data1: Some(buffer),
+                    ..CommandBuffers::default()
+                },
+                &mut output,
+                host,
+            )?;
+        }
+        let base = words::<3>(Some(&base))?.map(f32::from_bits);
+        let base = [
+            arithmetic(2, base[0], offset[0]),
+            arithmetic(2, base[1], offset[1]),
+            arithmetic(1, offset[2], base[2]),
+        ];
+        let drawings = drawings(host)?;
+        drawings.set_geometry_base_point(self.id, base, false);
+        drawings.set_geometry_position(
+            self.id,
+            words::<3>(Some(&position))?.map(f32::from_bits),
+            false,
+        );
+        Ok(())
     }
 
     pub fn shape_kind(&self) -> u32 {
@@ -541,36 +584,67 @@ impl TaskObject for PlaneObject {
                 drawings(host)?.insert(id, drawable)?;
             }
             49 | 51 | 55 | 66 => {
-                let value = words::<3>(buffers.data1.as_deref())?.map(f32::from_bits);
-                let drawings = drawings(host)?;
                 let source = command.data[0] != 0;
-                let next = match command.code {
-                    49 => {
-                        drawings.set_geometry_base_point(id, value, source);
-                        50
-                    }
-                    51 => {
-                        drawings.set_geometry_position(id, value, source);
-                        52
-                    }
-                    55 => {
-                        drawings.set_geometry_rotation(id, value, source);
-                        56
-                    }
-                    _ => {
-                        drawings.set_scale(id, value);
-                        67
-                    }
-                };
+                let next =
+                    if matches!(command.code, 49 | 51) && !source && self.parent_offset.is_some() {
+                        self.inherit_coordinates(host)?;
+                        command.code + 1
+                    } else {
+                        let value = words::<3>(buffers.data1.as_deref())?.map(f32::from_bits);
+                        let drawings = drawings(host)?;
+                        match command.code {
+                            49 => {
+                                drawings.set_geometry_base_point(id, value, source);
+                                50
+                            }
+                            51 => {
+                                drawings.set_geometry_position(id, value, source);
+                                52
+                            }
+                            55 => {
+                                drawings.set_geometry_rotation(id, value, source);
+                                56
+                            }
+                            _ => {
+                                drawings.set_scale(id, value);
+                                67
+                            }
+                        }
+                    };
                 self.refresh_input_rect(host)?;
                 self.forward(next, command, buffers, output, host)?;
             }
             50 | 52 | 56 | 58 | 67 => {
+                if self.parent_offset.is_some() {
+                    match command.code {
+                        50 | 52 if command.data[0] == 0 => self.inherit_coordinates(host)?,
+                        56 | 67 => {
+                            let value = words::<3>(buffers.data1.as_deref())?.map(f32::from_bits);
+                            let drawings = drawings(host)?;
+                            if command.code == 56 {
+                                drawings.set_geometry_rotation(id, value, command.data[0] != 0);
+                            } else {
+                                drawings.set_scale(id, value);
+                            }
+                        }
+                        58 => {
+                            let value = words::<16>(buffers.data1.as_deref())?.map(f32::from_bits);
+                            drawings(host)?.set_geometry_matrix(id, value, command.data[0] != 0);
+                        }
+                        _ => {}
+                    }
+                }
                 if command.code != 52 || command.data[0] == 0 {
                     self.refresh_input_rect(host)?;
                 }
                 self.forward(command.code, command, buffers, output, host)?;
             }
+            53 => {
+                self.parent_offset =
+                    Some(words::<3>(buffers.data1.as_deref())?.map(f32::from_bits));
+                self.inherit_coordinates(host)?;
+            }
+            54 => self.parent_offset = None,
             47 | 48 => {
                 if command.code == 47 {
                     self.display = command.data[1];
@@ -590,17 +664,7 @@ impl TaskObject for PlaneObject {
                 self.forward(48, command, buffers, output, host)?;
             }
             61 | 62 => {
-                if let Some(transform) = drawings(host)?
-                    .get(id)
-                    .and_then(|d| d.geometry_transform(command.data[0] != 0))
-                {
-                    let value = if command.code == 61 {
-                        transform.base_point()
-                    } else {
-                        transform.position()
-                    };
-                    write_words(buffers.data1.as_deref_mut(), &value.map(f32::to_bits))?;
-                }
+                query_geometry(drawings(host)?, id, command, buffers)?;
             }
             59 => {
                 drawings(host)?.set_color(id, command.data[1], command.data[0]);
@@ -736,6 +800,26 @@ fn words<const N: usize>(buffer: Option<&[u8]>) -> Result<[u32; N]> {
     Ok(std::array::from_fn(|i| {
         u32::from_le_bytes(bytes[i * 4..i * 4 + 4].try_into().unwrap())
     }))
+}
+
+pub(crate) fn query_geometry(
+    drawings: &Drawables,
+    id: u32,
+    command: &Command,
+    buffers: &mut CommandBuffers<'_>,
+) -> Result<()> {
+    if let Some(transform) = drawings
+        .get(id)
+        .and_then(|d| d.geometry_transform(command.data[0] != 0))
+    {
+        let value = if command.code == 61 {
+            transform.base_point()
+        } else {
+            transform.position()
+        };
+        write_words(buffers.data1.as_deref_mut(), &value.map(f32::to_bits))?;
+    }
+    Ok(())
 }
 
 fn write_words(buffer: Option<&mut [u8]>, words: &[u32]) -> Result<()> {

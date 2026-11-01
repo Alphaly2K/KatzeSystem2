@@ -1,7 +1,7 @@
 use katze_system2::{
     Error, Result,
     expression::State,
-    graphics::{Drawable, GraphicsFactory},
+    graphics::{CanvasLayout, Drawable, GraphicsFactory},
     kcs::{Host, Interpreter, Program},
     runtime::{BaseObject, KcsFactory, ObjectFactory, ProgramLoader, Runtime, TaskObject, kind},
     task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock},
@@ -137,6 +137,167 @@ fn buffered<F: ObjectFactory>(
             data1: Some(data),
         },
     )
+}
+
+#[test]
+fn bound_planes_query_running_ancestors_and_stop_inheriting_after_unbind() {
+    let mut runtime = Runtime::new(
+        0,
+        kind::ROOT,
+        Box::new(BaseObject::new()),
+        State::new(0),
+        GraphicsFactory {
+            fallback: BaseFactory,
+        },
+    );
+    let parent = runtime.create(0, kind::PLANE, b"parent", b"").unwrap();
+    let child = runtime.create(parent, kind::PLANE, b"child", b"").unwrap();
+    let grandchild = runtime
+        .create(child, kind::PLANE, b"grandchild", b"")
+        .unwrap();
+    for id in [parent, grandchild] {
+        runtime
+            .drawables_mut()
+            .insert(id, Drawable::default())
+            .unwrap();
+    }
+    runtime
+        .drawables_mut()
+        .insert(
+            child,
+            Drawable::from_canvas_source(
+                Drawable::default(),
+                CanvasLayout::new([8, 8], [1, 1], [8, 8]).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let vector = |runtime: &mut Runtime<_>, id, code, value: [f32; 3]| {
+        buffered(runtime, id, code, &mut bytes(&value.map(f32::to_bits))).unwrap();
+    };
+    vector(&mut runtime, parent, 49, [10., 20., 100.]);
+    vector(&mut runtime, parent, 51, [100., 200., 3.]);
+    vector(&mut runtime, child, 53, [2., 3., 4.]);
+    vector(&mut runtime, grandchild, 53, [1., 2., 5.]);
+    assert_eq!(
+        runtime
+            .drawables()
+            .get(child)
+            .unwrap()
+            .transform()
+            .base_point(),
+        [8., 17., 104.]
+    );
+    assert_eq!(
+        runtime
+            .drawables()
+            .get(grandchild)
+            .unwrap()
+            .transform()
+            .base_point(),
+        [7., 15., 109.]
+    );
+    let mut source_position = bytes(&[7f32, 8., 9.].map(f32::to_bits));
+    let mut source_command = command(child, 51);
+    source_command.data[0] = 1;
+    runtime
+        .dispatch_command_with_buffers(
+            0,
+            source_command,
+            &mut CommandBuffers {
+                data1: Some(&mut source_position),
+                ..CommandBuffers::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        runtime
+            .drawables()
+            .get(child)
+            .unwrap()
+            .geometry_transform(true)
+            .unwrap()
+            .position(),
+        [7., 8., 9.]
+    );
+    assert_eq!(
+        runtime
+            .drawables()
+            .get(child)
+            .unwrap()
+            .transform()
+            .position(),
+        [100., 200., 3.]
+    );
+
+    vector(&mut runtime, parent, 51, [30., 40., 50.]);
+    for id in [child, grandchild] {
+        assert_eq!(
+            runtime.drawables().get(id).unwrap().transform().position(),
+            [30., 40., 50.]
+        );
+    }
+    // 绑定的自身位置命令重新查询父级，不需要读取传入向量。
+    runtime.dispatch_command(0, command(child, 51)).unwrap();
+    assert_eq!(
+        runtime
+            .drawables()
+            .get(child)
+            .unwrap()
+            .transform()
+            .position(),
+        [30., 40., 50.]
+    );
+    vector(&mut runtime, parent, 55, [0., 0., 0.75]);
+    vector(&mut runtime, parent, 66, [2., 3., 4.]);
+    for id in [child, grandchild] {
+        let transform = runtime.drawables().get(id).unwrap().transform();
+        assert_eq!(transform.rotation(), [0., 0., 0.75]);
+        assert_eq!(transform.scale(), [2., 3., 4.]);
+    }
+    let matrix = [1f32; 16];
+    buffered(
+        &mut runtime,
+        parent,
+        57,
+        &mut bytes(&matrix.map(f32::to_bits)),
+    )
+    .unwrap();
+    assert_eq!(
+        runtime
+            .drawables()
+            .get(grandchild)
+            .unwrap()
+            .transform()
+            .matrix_override(),
+        Some(&matrix)
+    );
+
+    runtime.dispatch_command(0, command(child, 54)).unwrap();
+    vector(&mut runtime, parent, 51, [70., 80., 90.]);
+    vector(&mut runtime, parent, 55, [0.25, 0., 0.]);
+    let transform = runtime.drawables().get(child).unwrap().transform();
+    assert_eq!(transform.position(), [30., 40., 50.]);
+    assert_eq!(transform.rotation(), [0., 0., 0.75]);
+    // 未绑定的中间节点仍向下传播；孙级绑定的是它的坐标。
+    assert_eq!(
+        runtime
+            .drawables()
+            .get(grandchild)
+            .unwrap()
+            .transform()
+            .position(),
+        [30., 40., 50.]
+    );
+    assert_eq!(
+        runtime
+            .drawables()
+            .get(grandchild)
+            .unwrap()
+            .transform()
+            .rotation(),
+        [0.25, 0., 0.]
+    );
 }
 
 #[test]

@@ -67,6 +67,10 @@ impl ResourceState {
 }
 
 impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
+    fn parent_task_id(&self) -> Result<u32> {
+        self.inner.parent_task_id()
+    }
+
     fn handle_allocator(&self) -> Option<HandleAllocator> {
         Some(self.state.handles.clone())
     }

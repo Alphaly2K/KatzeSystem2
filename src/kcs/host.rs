@@ -119,6 +119,13 @@ impl std::ops::DerefMut for CoreHost<'_> {
 }
 
 impl Host for CoreHost<'_> {
+    fn parent_task_id(&self) -> Result<u32> {
+        self.task_tree
+            .and_then(|tree| tree.node(self.host.task_id))
+            .and_then(|node| node.parent)
+            .ok_or_else(|| Error::new(0, "当前任务没有可查询的父级"))
+    }
+
     fn handle_allocator(&self) -> Option<HandleAllocator> {
         Some(self.host.handle_allocator())
     }

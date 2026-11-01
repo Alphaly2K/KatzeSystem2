@@ -13,6 +13,7 @@ pub use canvas_layout::CanvasLayout;
 mod drawable;
 pub use drawable::{Drawable, Drawables, Vertex};
 mod plane;
+pub(crate) use plane::query_geometry;
 pub use plane::{GraphicsFactory, PlaneObject};
 mod projection;
 pub use projection::{ProjectedVertex, Projection};

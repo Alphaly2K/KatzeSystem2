@@ -706,6 +706,77 @@ fn geometry_changes_refresh_bounds_without_reprioritizing_or_scaling_the_region(
 }
 
 #[test]
+fn inherited_geometry_refreshes_regions_after_parent_changes_but_not_on_binding() {
+    let (mut runtime, _, _, _) = setup();
+    let child = runtime.create(3, kind::PLANE, b"child", b"").unwrap();
+    let mut rectangle = bytes(&[0, 0, 0, 20f32.to_bits(), 10f32.to_bits(), 0, 0, u32::MAX]);
+    runtime
+        .dispatch_command_with_buffers(
+            0,
+            packet(child, 2, 42, [0; 3]),
+            &mut CommandBuffers {
+                data1: Some(&mut rectangle),
+                ..CommandBuffers::default()
+            },
+        )
+        .unwrap();
+    send(&mut runtime, child, 90, 0);
+    let bounds = |runtime: &TestRuntime| {
+        let region = runtime
+            .input_state(1)
+            .unwrap()
+            .regions()
+            .get(child)
+            .unwrap();
+        let r = region.bounds();
+        ([r.left, r.top, r.right, r.bottom], region.priority())
+    };
+    assert_eq!(bounds(&runtime), ([0, 0, 20, 10], 5000));
+    let vector = |runtime: &mut TestRuntime, target, code, source, value: [f32; 3]| {
+        let mut data = bytes(&value.map(f32::to_bits));
+        runtime
+            .dispatch_command_with_buffers(
+                0,
+                packet(target, 2, code, [source, 0, 0]),
+                &mut CommandBuffers {
+                    data1: Some(&mut data),
+                    ..CommandBuffers::default()
+                },
+            )
+            .unwrap();
+    };
+    vector(&mut runtime, child, 53, 0, [2., 3., 4.]);
+    assert_eq!(bounds(&runtime), ([0, 0, 20, 10], 5000));
+    assert_eq!(
+        runtime
+            .drawables()
+            .get(child)
+            .unwrap()
+            .transform()
+            .base_point(),
+        [8., 17., 4004.5]
+    );
+    vector(&mut runtime, 3, 51, 0, [50.75, 70.25, 11.]);
+    assert_eq!(bounds(&runtime), ([42, 53, 62, 63], 5000));
+    vector(&mut runtime, 3, 51, 1, [100., 200., 12.]);
+    assert_eq!(bounds(&runtime), ([42, 53, 62, 63], 5000));
+    assert_eq!(
+        runtime
+            .drawables()
+            .get(child)
+            .unwrap()
+            .transform()
+            .position(),
+        [50.75, 70.25, 11.]
+    );
+    vector(&mut runtime, child, 51, 0, [999.; 3]);
+    assert_eq!(bounds(&runtime), ([92, 183, 112, 193], 5000));
+    send(&mut runtime, child, 54, 0);
+    vector(&mut runtime, child, 51, 0, [5., 6., 7.]);
+    assert_eq!(bounds(&runtime), ([-3, -11, 17, -1], 5000));
+}
+
+#[test]
 fn allocated_image_masks_survive_release_and_gate_plane_selection_and_capture() {
     let (mut runtime, records, _, _) = setup();
     assert_eq!(send(&mut runtime, 3, 98, u32::MAX), 0);

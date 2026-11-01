@@ -60,6 +60,16 @@ impl<'a, H: Host, S: TaskServices> TaskHost<'a, H, S> {
 }
 
 impl<H: Host, S: TaskServices> Host for TaskHost<'_, H, S> {
+    fn parent_task_id(&self) -> Result<u32> {
+        if let Some(tree) = self.services.task_tree() {
+            return tree
+                .node(self.task_id)
+                .and_then(|node| node.parent)
+                .ok_or_else(|| Error::new(0, "当前任务没有可查询的父级"));
+        }
+        self.inner.parent_task_id()
+    }
+
     fn handle_allocator(&self) -> Option<crate::HandleAllocator> {
         self.inner.handle_allocator()
     }

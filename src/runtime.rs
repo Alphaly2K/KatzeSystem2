@@ -5,7 +5,7 @@
 //! 其他类型需要对应子系统按 [`TaskObject`] 协议实现，缺失时创建请求返回诊断。
 //!
 //! 同步消息、删除通知和对象命令在返回前完成预算续跑。普通对象执行期间仍接收删除标记与排队消息，
-//! 向执行中普通 VM 同步发送消息返回零。输入同步回调开放同一份区域、键和基类命令状态，图形通知开放响应槽；
+//! 向执行中普通 VM 同步发送消息返回零。输入同步回调开放同一份区域、键和基类命令状态，图形通知开放响应槽及几何查询；
 //! 其他需要直接借用执行中对象的操作返回诊断。
 
 use crate::kcs::{
@@ -506,6 +506,25 @@ fn run_nested<F: ObjectFactory>(
         budget,
         limit,
     } = store;
+    if let (
+        Some(task),
+        Execution::Command {
+            kind,
+            command,
+            buffers,
+            propagate,
+            ..
+        },
+    ) = (running.get(&target), &mut execution)
+    {
+        if *kind == kind::PLANE && matches!(command.code, 61 | 62) {
+            if !task.deleted {
+                crate::graphics::query_geometry(&resources.drawables, target, command, buffers)?;
+            }
+            **propagate = false;
+            return Ok(());
+        }
+    }
     if let Some(response) = resources.graphics_responses.get_mut(&target) {
         if let Execution::Command {
             command, propagate, ..
@@ -972,6 +991,13 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
 }
 
 impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
+    fn parent_task_id(&self) -> Result<u32> {
+        self.tree
+            .node(self.host.task_id)
+            .and_then(|node| node.parent)
+            .ok_or_else(|| Error::new(0, "当前任务没有可查询的父级"))
+    }
+
     fn handle_allocator(&self) -> Option<crate::HandleAllocator> {
         Some(self.host.handle_allocator())
     }
