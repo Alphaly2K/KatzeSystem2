@@ -13,6 +13,8 @@ mod state;
 pub use state::{CommandState, InputState};
 mod object;
 pub use object::{InputFactory, InputObject};
+mod coordinates;
+pub use coordinates::CoordinateMap;
 
 /// 输入区域的十五 DWORD 记录；可移植位掩码以存在标记代替指针槽。
 #[derive(Clone, Debug)]
