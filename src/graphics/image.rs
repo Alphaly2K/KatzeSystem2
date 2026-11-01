@@ -90,6 +90,11 @@ impl Image {
         &self.info
     }
 
+    pub(crate) fn use_pixel_canvas(&mut self) {
+        self.info.offset = [0; 2];
+        self.info.canvas_size = self.info.size;
+    }
+
     pub fn surface(&self) -> &Surface {
         &self.surface
     }
@@ -365,6 +370,48 @@ impl Images {
         self.insert(owner, image, has_alpha)
     }
 
+    pub(crate) fn load_fes<S: ResourceServices + ?Sized>(
+        &mut self,
+        handle: u32,
+        names: &[u8],
+        frame: i32,
+        services: &mut S,
+    ) -> Result<()> {
+        self.bind_pixels(handle, 0)?;
+        let names = &names[..names.iter().position(|&b| b == 0).unwrap_or(names.len())];
+        for token in names.split(|&b| b == b' ').filter(|s| !s.is_empty()) {
+            if token.len() >= 260 {
+                return Err(Error::new(0, "图像资源名超过基线缓冲区范围"));
+            }
+            let name = services.resolve(b"image", token)?;
+            let Some(bytes) = services.read(&name, ResourceMode::LooseFirst)? else {
+                continue;
+            };
+            if bytes.is_empty() {
+                continue;
+            }
+            let Some(frame) = hg3::decode_frame(&bytes, frame)? else {
+                continue;
+            };
+            let next = Image::from_frame(frame)?;
+            if self.pixel_handle(handle)? != 0 {
+                self.get_mut(handle)?.composite(&next);
+            } else {
+                let pixels = self.handles.allocate()?;
+                self.data.insert(
+                    pixels,
+                    ImageData {
+                        references: 1,
+                        has_alpha: Some(next.info().reserved != 0),
+                        image: next,
+                    },
+                );
+                self.entries.get_mut(&handle).unwrap().data = pixels;
+            }
+        }
+        Ok(())
+    }
+
     fn insert(&mut self, owner: u32, image: Image, has_alpha: Option<bool>) -> Result<u32> {
         if self.entries.len() == read::MAX_ITEMS {
             return Err(Error::new(0, "图像对象数量超过上限"));
@@ -444,6 +491,11 @@ impl Images {
 
     pub(crate) fn bind_pixels(&mut self, handle: u32, pixels: u32) -> Result<()> {
         let previous = self.entry_mut(handle)?.data;
+        if pixels == 0 {
+            self.entries.get_mut(&handle).unwrap().data = 0;
+            release_data(&mut self.data, previous);
+            return Ok(());
+        }
         let data = self
             .data
             .get_mut(&pixels)

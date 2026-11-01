@@ -85,7 +85,7 @@ POS2／SIZE2 指定图像资源，写法为 `resource[:frameId]`。对象应用�
 
 CIMAGE 状态应用已实现并用上述 387 个合法输入核对原应用函数。该类型使用 POS 的前两个分量、POS2、SIZE、SIZE2、PL、COLOR、BLEND、PRI、DISP、MASK 和 BTYPE；其他列不应用于该类型，PARENT 由公共对象分派层先处理。单独更新一个坐标时，另一个已有坐标也会经过整数读取和 f32 写回。PRI 的数组递增完成后，绘制优先级设置函数还按当前值决定是否加 20；父优先级保存传入值。元数据更新先执行 SIZE2，再执行一次性的 POS2。
 
-IMAGE 另应用 FILE、IDN、32 项 ID 映射和 PATHMODE，不使用 CIMAGE 的 SIZE／COLOR 初始化列。FILE 先保存请求名，再按宿主配置转换；空请求不改变当前资源名。IDN 先于本行 ID 映射执行，映射未启用时可直接指定帧 ID，启用后只接受 0～31 的映射槽位。范围外的映射读取返回 0。相同的 387 个合法输入已与原 IMAGE 状态应用结果一致，名称转换在此对照中关闭；配置驱动的名称转换和实际像素资源更新继续接入。
+IMAGE 另应用 FILE、IDN、32 项 ID 映射和 PATHMODE，不使用 CIMAGE 的 SIZE／COLOR 初始化列。FILE 先保存请求名，再按宿主配置转换；空请求不改变当前资源名。IDN 先于本行 ID 映射执行，映射未启用时可直接指定帧 ID，启用后只接受 0～31 的映射槽位。范围外的映射读取返回 0。相同的 387 个合法输入已与原 IMAGE 状态应用结果一致，名称转换在此对照中关闭；配置驱动的名称转换继续接入。普通文件的实际像素装载、失败和登记规则见 [IMAGE 文件更新](graphics.md#fes-image-文件更新)。
 
 CPLANE 使用 POS、BASE、SIZE、POS2、SIZE2、PRI、DISP、COLOR、BLEND、TYPE、EXPOS 和 VIEWPORT。POS 仅在 X／Y 至少一项存在时生效，未指定分量保持，单独 Z 不生效；BASE 的 W 写零。PRI 按银行递增后直接保存。BLEND 在 COLOR 之后覆盖颜色高字节。TYPE 只将输入 2 映射为 2，其余映射为 1；TYPE／EXPOS 单独变化不使属性或尺寸失效。387 组有效输入的属性、资源引用和标记均与原应用入口一致。
 

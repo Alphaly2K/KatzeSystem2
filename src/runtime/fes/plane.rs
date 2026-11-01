@@ -23,6 +23,9 @@ impl<F: ObjectFactory> Runtime<F> {
         if matches!(object.state, ObjectState::CImage(_)) {
             return self.update_fes_cimage(owner, objects, handle);
         }
+        if matches!(object.state, ObjectState::Image(_)) {
+            return self.update_fes_image(owner, objects, handle);
+        }
         if object.state.plane().is_none() {
             return match object.state {
                 ObjectState::Base => Ok(()),

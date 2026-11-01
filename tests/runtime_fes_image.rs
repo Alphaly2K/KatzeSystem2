@@ -12,7 +12,7 @@ use katze_system2::{
     },
     task::Command,
 };
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, collections::BTreeMap, io::Write, rc::Rc};
 
 struct Reject;
 impl ObjectFactory for Reject {
@@ -78,16 +78,17 @@ fn initialize(objects: &mut Objects, name: &str, attributes: ObjectAttributes) {
                 },
                 attributes,
             },
-            |_| unreachable!(),
+            |name| Ok(name.to_vec()),
         )
         .unwrap();
 }
 
 fn image(objects: &Objects, handle: u32) -> &fes::CImageState {
-    let ObjectState::CImage(state) = &objects.get(handle).unwrap().state else {
-        panic!()
-    };
-    state
+    match &objects.get(handle).unwrap().state {
+        ObjectState::CImage(state) => state,
+        ObjectState::Image(state) => &state.base,
+        _ => panic!(),
+    }
 }
 
 fn frame(runtime: &mut TestRuntime, budget: usize) -> RenderTarget {
@@ -350,4 +351,265 @@ fn cimage_metadata_waits_for_rebuild_and_empty_sources_keep_failure_flags() {
     assert_ne!(runtime.images().pixel_handle(empty).unwrap(), 0);
     objects.set_image_list(0, Rect::default());
     assert!(runtime.update_fes_object(0, &mut objects, swatch).is_err());
+}
+
+struct PixelFiles {
+    files: BTreeMap<Vec<u8>, Vec<u8>>,
+    reads: Rc<RefCell<Vec<Vec<u8>>>>,
+}
+
+impl ResourceServices for PixelFiles {
+    fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+        assert_eq!(category, b"image");
+        Ok(name.to_vec())
+    }
+
+    fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
+        assert_eq!(mode, ResourceMode::LooseFirst);
+        self.reads.borrow_mut().push(name.to_vec());
+        Ok(self.files.get(name).cloned())
+    }
+}
+
+fn pixel_file(color: u32) -> Vec<u8> {
+    let compress = |bytes: &[u8]| {
+        let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), Default::default());
+        encoder.write_all(bytes).unwrap();
+        encoder.finish().unwrap()
+    };
+    let delta = color
+        .to_le_bytes()
+        .map(|v| (v << 1) ^ 0u8.wrapping_sub(v >> 7));
+    let planes: Vec<_> = [6, 4, 2, 0]
+        .into_iter()
+        .map(|shift| {
+            delta
+                .iter()
+                .enumerate()
+                .fold(0, |p, (i, v)| p | (((v >> shift) & 3) << (2 * i)))
+        })
+        .collect();
+    let data = compress(&planes);
+    let control = compress(&[9, 1]);
+    let mut bytes = b"HG-3".to_vec();
+    for value in [12u32, 0x300, 0, 7] {
+        bytes.extend(value.to_le_bytes());
+    }
+    bytes.extend(b"stdinfo\0");
+    for value in [56u32, 40, 1, 1, 32, 1, 2, 10, 20, 0, 3, 4] {
+        bytes.extend(value.to_le_bytes());
+    }
+    bytes.extend(b"img0000\0");
+    for value in [
+        0,
+        (24 + data.len() + control.len()) as u32,
+        0,
+        1,
+        data.len() as u32,
+        4,
+        control.len() as u32,
+        2,
+    ] {
+        bytes.extend(value.to_le_bytes());
+    }
+    bytes.extend(data);
+    bytes.extend(control);
+    bytes
+}
+
+#[test]
+fn image_reload_preserves_wrapper_and_old_shares_while_updating_the_final_frame() {
+    let (mut runtime, mut objects, list) = setup();
+    let reads = Rc::new(RefCell::new(Vec::new()));
+    runtime.set_resources(PixelFiles {
+        files: BTreeMap::from([(b"sprite".to_vec(), pixel_file(0xff12_3456))]),
+        reads: reads.clone(),
+    });
+    let group = define(&mut objects, "CIMAGE", "group");
+    let sprite = define(&mut objects, "IMAGE", "sprite");
+    let panel = define(&mut objects, "PLANE", "panel");
+    initialize(
+        &mut objects,
+        "group",
+        ObjectAttributes {
+            position: [Some(1), Some(1), None],
+            ..Default::default()
+        },
+    );
+    initialize(
+        &mut objects,
+        "sprite",
+        ObjectAttributes {
+            parent: Some(ObjectReference {
+                name: "group".into(),
+                bank: 0,
+            }),
+            file: Some(b"sprite".to_vec()),
+            image_number: Some(7),
+            priority: Some(5),
+            display: Some(1),
+            position: [Some(1), Some(0), None],
+            ..Default::default()
+        },
+    );
+    initialize(
+        &mut objects,
+        "panel",
+        ObjectAttributes {
+            position: [Some(0), Some(0), None],
+            size: Some([8, 6]),
+            vram: Some([0, 0]),
+            priority: Some(500),
+            display: Some(1),
+            ..Default::default()
+        },
+    );
+    for handle in [group, sprite, panel] {
+        runtime.update_fes_object(0, &mut objects, handle).unwrap();
+    }
+    let wrapper = objects.get(sprite).unwrap().image_handle().unwrap();
+    let old_pixels = runtime.images().pixel_handle(wrapper).unwrap();
+    let shared = runtime.images_mut().share(wrapper).unwrap();
+    let info = runtime.images().get(wrapper).unwrap().info();
+    assert_eq!(info.offset, [0, 0]);
+    assert_eq!(info.canvas_size, [1, 1]);
+    assert_eq!(info.base, [3, 4]);
+    assert_eq!(image(&objects, sprite).base_point, [2., 2.]);
+    assert_eq!(image(&objects, sprite).size, [1, 1]);
+    let rectangle = Rect::from_xywh(3, 3, 1, 1);
+    assert_rectangle(&frame(&mut runtime, 1), rectangle, 0xff12_3456);
+
+    let ObjectState::Image(state) = &mut objects.get_mut(sprite).unwrap().state else {
+        panic!()
+    };
+    state.base.base_point = [3., 3.];
+    objects.invalidate(sprite).unwrap();
+    runtime.update_fes_object(0, &mut objects, sprite).unwrap();
+    assert_rectangle(
+        &frame(&mut runtime, 1),
+        Rect::from_xywh(2, 2, 1, 1),
+        0xff12_3456,
+    );
+    assert_eq!(reads.borrow().len(), 1);
+
+    initialize(
+        &mut objects,
+        "sprite",
+        ObjectAttributes {
+            image_number: Some(999),
+            ..Default::default()
+        },
+    );
+    runtime.update_fes_object(0, &mut objects, sprite).unwrap();
+    assert_eq!(objects.get(sprite).unwrap().image_handle(), Some(wrapper));
+    assert_eq!(runtime.images().pixel_handle(wrapper).unwrap(), 0);
+    assert_eq!(image(&objects, sprite).base_point, [3., 3.]);
+    assert!(!image(&objects, sprite).updates.needs_rebuild());
+    assert_eq!(runtime.images().pixel_handle(shared).unwrap(), old_pixels);
+    assert_eq!(send(&mut runtime, list, 294, 0, 0), 0);
+    assert_rectangle(&frame(&mut runtime, 1), Rect::default(), 0);
+    initialize(
+        &mut objects,
+        "sprite",
+        ObjectAttributes {
+            file: Some(b"sprite".to_vec()),
+            image_number: Some(999),
+            ..Default::default()
+        },
+    );
+    runtime.update_fes_object(0, &mut objects, sprite).unwrap();
+    assert_eq!(reads.borrow().len(), 2);
+
+    initialize(
+        &mut objects,
+        "sprite",
+        ObjectAttributes {
+            image_number: Some(7),
+            ..Default::default()
+        },
+    );
+    runtime.update_fes_object(0, &mut objects, sprite).unwrap();
+    assert_ne!(runtime.images().pixel_handle(wrapper).unwrap(), old_pixels);
+    runtime
+        .images_mut()
+        .get_mut(shared)
+        .unwrap()
+        .fill_rect_from_bottom(Rect::from_xywh(0, 0, 1, 1), 0xff77_8899);
+    assert_rectangle(&frame(&mut runtime, 1), rectangle, 0xff12_3456);
+    runtime.remove_fes_object(0, &mut objects, group).unwrap();
+    assert!(runtime.images().pixel_handle(wrapper).is_err());
+    assert_eq!(
+        runtime.images().get(shared).unwrap().surface().pixel(0, 0),
+        Some(0xff77_8899)
+    );
+    assert_rectangle(&frame(&mut runtime, 1), Rect::default(), 0);
+    runtime.images_mut().release(shared).unwrap();
+}
+
+#[test]
+fn image_files_share_the_mapped_frame_and_keep_the_first_successful_geometry() {
+    let (mut runtime, mut objects, _) = setup();
+    let reads = Rc::new(RefCell::new(Vec::new()));
+    runtime.set_resources(PixelFiles {
+        files: BTreeMap::from([
+            (b"first".to_vec(), pixel_file(0)),
+            (b"second".to_vec(), pixel_file(0xff44_5566)),
+        ]),
+        reads: reads.clone(),
+    });
+    let sprite = define(&mut objects, "IMAGE", "sprite");
+    initialize(
+        &mut objects,
+        "sprite",
+        ObjectAttributes {
+            file: Some(b" missing  first second missing ".to_vec()),
+            ..Default::default()
+        },
+    );
+    runtime.update_fes_object(0, &mut objects, sprite).unwrap();
+    let wrapper = objects.get(sprite).unwrap().image_handle().unwrap();
+    assert_eq!(runtime.images().pixel_handle(wrapper).unwrap(), 0);
+    assert_eq!(reads.borrow().len(), 4);
+    let mut attributes = ObjectAttributes::default();
+    attributes.frames[0] = Some(7);
+    initialize(&mut objects, "sprite", attributes);
+    runtime.update_fes_object(0, &mut objects, sprite).unwrap();
+    assert_eq!(reads.borrow().len(), 4);
+    initialize(
+        &mut objects,
+        "sprite",
+        ObjectAttributes {
+            image_number: Some(0),
+            ..Default::default()
+        },
+    );
+    runtime.update_fes_object(0, &mut objects, sprite).unwrap();
+    let loaded = runtime.images().get(wrapper).unwrap();
+    assert_eq!(loaded.surface().pixel(0, 0), Some(0x0044_5566));
+    assert_eq!(loaded.info().base, [3, 4]);
+    assert_eq!(image(&objects, sprite).base_point, [2., 2.]);
+    assert_eq!(reads.borrow().len(), 8);
+    initialize(
+        &mut objects,
+        "sprite",
+        ObjectAttributes {
+            file: Some(Vec::new()),
+            size_resource: Some(b"unused:7".to_vec()),
+            ..Default::default()
+        },
+    );
+    runtime.update_fes_object(0, &mut objects, sprite).unwrap();
+    assert_eq!(reads.borrow().len(), 8);
+    assert_ne!(runtime.images().pixel_handle(wrapper).unwrap(), 0);
+    initialize(
+        &mut objects,
+        "sprite",
+        ObjectAttributes {
+            file: Some(b"first\tsecond".to_vec()),
+            ..Default::default()
+        },
+    );
+    runtime.update_fes_object(0, &mut objects, sprite).unwrap();
+    assert_eq!(reads.borrow().last().unwrap(), b"first\tsecond");
+    assert_eq!(runtime.images().pixel_handle(wrapper).unwrap(), 0);
 }

@@ -70,7 +70,7 @@ FES 内部执行宏声明，初始化按以下顺序交给宿主：
 4. 注册子命令表，`Declarations` 报告 SUBCOMMAND。
 5. 开始 START 主流程。
 
-`ObjectDefinition.kind` 为基线类型表中的大写名称，`name` 为对象名，`banks` 为有效银行数。`ObjectInitialization` 包含目标引用和已求值的属性；`Option` 区分未指定字段与明确写零，POS 的三个分量分别保留。POS2／SIZE2 保存在 `position_resource`／`size_resource` 中，由宿主读取所指定图像帧的裁剪偏移／裁剪尺寸。`runtime::fes::Objects` 提供 BASE／CIMAGE／IMAGE／CPLANE／PLANE 的身份、银行绑定、父子关系及属性应用；两类平面及 CIMAGE 的下层媒体状态可显式更新。没有实际属性的行不发出请求。
+`ObjectDefinition.kind` 为基线类型表中的大写名称，`name` 为对象名，`banks` 为有效银行数。`ObjectInitialization` 包含目标引用和已求值的属性；`Option` 区分未指定字段与明确写零，POS 的三个分量分别保留。POS2／SIZE2 保存在 `position_resource`／`size_resource` 中，由宿主读取所指定图像帧的裁剪偏移／裁剪尺寸。`runtime::fes::Objects` 提供 BASE／CIMAGE／IMAGE／CPLANE／PLANE 的身份、银行绑定、父子关系及属性应用；两类平面、CIMAGE 及 IMAGE 普通文件来源的下层媒体状态可显式更新。没有实际属性的行不发出请求。
 
 `fes::ImageReference::parse` 将 POS2／SIZE2 的值拆为资源名称字节和帧 ID。省略帧号时取 0，冒号后读取带可选符号的十进制／十六进制整数前缀，非法前缀取零，不运行表达式。
 
@@ -92,7 +92,7 @@ FES 内部执行宏声明，初始化按以下顺序交给宿主：
 
 `selected_frame()` 返回当前映射后的帧 ID。初始映射未启用时，IDN 可直接指定任意帧 ID；设置任意 ID 列后启用映射，后续 IDN 仅接受 0～31。一次初始化中先应用 IDN，再更新 ID 映射，因此首次启用映射时仍可能保留范围外的当前编号，此时 `selected_frame()` 返回 0。几何资源通过 `base.resolve_geometry` 接入。
 
-IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的转换结果实际改变时置位；空 FILE 或转换结果相同不置位。`frame_mapping_changed` 初始为 true，写入任何 ID 列也置为 true；下次有效 IDN 在编号变化或此标记为 true 时请求装载并清除此标记。首次 IDN=0 因此也请求装载。ID 列本身只更新映射，非法 IDN 保留待应用标记。直接修改公开映射后应同时设置 `frame_mapping_changed`；实际来源装载仍由运行时后续接入。
+IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的转换结果实际改变时置位；空 FILE 或转换结果相同不置位。`frame_mapping_changed` 初始为 true，写入任何 ID 列也置为 true；下次有效 IDN 在编号变化或此标记为 true 时请求装载并清除此标记。首次 IDN=0 因此也请求装载。ID 列本身只更新映射，非法 IDN 保留待应用标记。直接修改公开映射后应同时设置 `frame_mapping_changed`；实际来源装载由运行时对象更新执行。
 
 宿主完成请求后用 `resume` 确认，待确认请求重复返回，数量和属性表达式只计算一次。字符串表必须在初始化前准备好，缺失字符串可能使后续参数移动。宿主只应在具备对应实现时确认声明或属性请求。`return_value` 保存最近一次 `break` 的值；不带参数的 `break` 将它重置为 0。
 
@@ -315,11 +315,11 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 
 `fes::CPlaneState` 通过只读查询提供位置、基点、尺寸、优先级、颜色、显示、创建类型、EXPOS、资源／VIEWPORT 引用及更新标记。`apply(&attributes, bank)` 返回本次是否使属性失效；`Objects::initialize` 同时标记 FES 后代。尺寸重建与属性失效独立，具体列规则见 [FES](fes.md)。
 
-`Runtime::update_fes_object(owner, &mut objects, handle)` 显式推进一个对象。BASE 无媒体操作，CPLANE／PLANE 使用实际对象工厂和命令路由创建／更新直属二维任务，`Object::task_id()` 返回可选编号。CIMAGE 通过共享类型 15 列表更新来源与登记，`Object::image_handle()` 查询可选来源包装；IMAGE 文件装载仍返回诊断。调用者按 FES 对象更新顺序推进，并将 objects 与 owner 保持同一生命周期，下层任务由此入口维护。CPLANE 在创建下层任务前读取 SIZE2，PLANE 在创建后读取；POS2 在属性更新时消费；读取共用 Runtime 的资源服务，按 image 类别补全名称，支持 HG-3 元数据。已有绑定的 VIEWPORT 更新返回命令 89 的诊断。此入口尚不执行运动和 FES 主体调度。
+`Runtime::update_fes_object(owner, &mut objects, handle)` 显式推进一个对象。BASE 无媒体操作，CPLANE／PLANE 使用实际对象工厂和命令路由创建／更新直属二维任务，`Object::task_id()` 返回可选编号。CIMAGE 与 IMAGE 通过共享类型 15 列表更新来源与登记，`Object::image_handle()` 查询可选来源包装；IMAGE 支持按当前映射帧装载普通 HG-3 文件及多文件合成，缺失文件或帧清空来源。原始数据来源与非零 PATHMODE 仍返回诊断。调用者按 FES 对象更新顺序推进，并将 objects 与 owner 保持同一生命周期，下层任务由此入口维护。CPLANE 在创建下层任务前读取 SIZE2，PLANE 在创建后读取；POS2 在属性更新时消费；读取共用 Runtime 的资源服务，按 image 类别补全名称，支持 HG-3 元数据。已有绑定的 VIEWPORT 更新返回命令 89 的诊断。此入口尚不执行运动和 FES 主体调度。
 
 `fes::PlaneState` 的 `base` 复用平面属性，`vram()` 返回独立的画布取样位置，`apply(&attributes, bank)` 另应用 VRAM。运行时 PLANE 需要先在 DrawingContext 提供画布目标，再通过 `render_frame` 输出；支持跨面块取样。`Objects::set_canvas_offset([x, y])` 保存共享绘制服务给出的画布偏移，`canvas_offset()` 查询该值；设置本身不使对象失效，在下一次 PLANE 属性更新时叠加到 VRAM。PLANE 的尺寸重建保留有效屏幕位置，其他属性仍等到失效后提交。当前支持 CPLANE／PLANE 父级的位置累加，基点仅沿直接为 PLANE 的父级累加。
 
-`Objects::set_image_list(task, clip)` 为 CIMAGE 绑定已初始化的共享列表和全局裁剪；列表必须是 owner 的直属类型 15 任务。更新按来源重建、属性登记及排序分别消费标记，支持 POS2／SIZE2、CIMAGE／IMAGE 父级位置及 PLANE 裁剪；具体时序见 [FES CIMAGE 更新](graphics.md#fes-cimage-更新)。`Objects::invalidate(handle)` 在直接显示属性修改或运动回写后标记对象及后代；直接来源修改还需请求 rebuild。
+`Objects::set_image_list(task, clip)` 为 CIMAGE／IMAGE 绑定已初始化的共享列表和全局裁剪；列表必须是 owner 的直属类型 15 任务。更新按来源重建、属性登记及排序分别消费标记，支持 POS2／SIZE2、CIMAGE／IMAGE 父级位置及 PLANE 裁剪；具体时序见 [CIMAGE](graphics.md#fes-cimage-更新) 与 [IMAGE](graphics.md#fes-image-文件更新) 更新。`Objects::invalidate(handle)` 在直接显示属性修改或运动回写后标记对象及后代；直接来源修改还需请求 rebuild。
 
 `Runtime::remove_fes_object(owner, &mut objects, handle)` 先向下层任务发送删除标记、移除图像当前槽号并释放来源包装，再移出 FES 子树；二维绘图登记立即清理，实际任务释放发生在树更新中。删除后调用者再次 publish_bindings。更新和移除错误保留已经完成的修改；工厂创建失败清除本次重建标记并保存 None，后续尺寸请求可重新触发创建。
 

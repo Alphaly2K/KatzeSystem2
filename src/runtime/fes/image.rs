@@ -11,14 +11,7 @@ impl<F: ObjectFactory> Runtime<F> {
         handle: u32,
     ) -> Result<()> {
         let list = self.check_fes_image_list(owner, objects)?;
-        let wrapper = match objects.get(handle).unwrap().image {
-            Some(image) => image,
-            None => {
-                let image = self.images_mut().create_empty(owner)?;
-                objects.get_mut(handle).unwrap().image = Some(image);
-                image
-            }
-        };
+        let wrapper = self.fes_image_wrapper(owner, objects, handle)?;
         let state = objects.get_mut(handle).unwrap().state.image_mut().unwrap();
         let prepared = state.updates.rebuild;
         if prepared {
@@ -44,6 +37,98 @@ impl<F: ObjectFactory> Runtime<F> {
                 objects.invalidate(handle)?;
             }
         }
+        self.register_fes_image(owner, objects, handle, list, wrapper, prepared)
+    }
+
+    pub(super) fn update_fes_image(
+        &mut self,
+        owner: u32,
+        objects: &mut Objects,
+        handle: u32,
+    ) -> Result<()> {
+        let list = self.check_fes_image_list(owner, objects)?;
+        let wrapper = self.fes_image_wrapper(owner, objects, handle)?;
+        let ObjectState::Image(state) = &objects.get(handle).unwrap().state else {
+            unreachable!()
+        };
+        let prepared = state.base.updates.rebuild;
+        if prepared {
+            if state.image_number == -1 || state.path_mode != 0 {
+                return Err(Error::new(0, "FES IMAGE 原始数据来源或 PATHMODE 尚未接入"));
+            }
+            if state
+                .file
+                .iter()
+                .take_while(|&&b| b != 0)
+                .all(|&b| b == b' ')
+            {
+                self.resources.images.bind_pixels(wrapper, 0)?;
+            } else {
+                let services = self
+                    .resources
+                    .services
+                    .as_mut()
+                    .ok_or_else(|| Error::new(0, "运行时未配置 FES 图像资源服务"))?;
+                self.resources.images.load_fes(
+                    wrapper,
+                    &state.file,
+                    state.selected_frame(),
+                    services.as_mut(),
+                )?;
+            }
+            if self.images().pixel_handle(wrapper)? != 0 {
+                let image = self.images_mut().get_mut(wrapper)?;
+                let info = *image.info();
+                let object = objects.get_mut(handle).unwrap();
+                let state = object.state.image_mut().unwrap();
+                if matches!(state.button_type, 0 | 1) {
+                    let (offset, base) = if state.button_type == 0 {
+                        image.use_pixel_canvas();
+                        (
+                            info.base.map(|v| v as f32),
+                            std::array::from_fn(|i| {
+                                info.base[i].wrapping_sub(info.offset[i]) as f32
+                            }),
+                        )
+                    } else {
+                        ([0.; 2], info.base.map(|v| v as f32))
+                    };
+                    let dirty = object.image_offset != offset || state.base_point != base;
+                    object.image_offset = offset;
+                    state.base_point = base;
+                    if state.size.contains(&-1) {
+                        state.size = info.size.map(|v| v as i32);
+                    }
+                    if dirty {
+                        objects.invalidate(handle)?;
+                    }
+                }
+            }
+        }
+        self.register_fes_image(owner, objects, handle, list, wrapper, prepared)
+    }
+
+    fn fes_image_wrapper(&mut self, owner: u32, objects: &mut Objects, handle: u32) -> Result<u32> {
+        match objects.get(handle).unwrap().image {
+            Some(image) => Ok(image),
+            None => {
+                let image = self.images_mut().create_empty(owner)?;
+                objects.get_mut(handle).unwrap().image = Some(image);
+                Ok(image)
+            }
+        }
+    }
+
+    fn register_fes_image(
+        &mut self,
+        owner: u32,
+        objects: &mut Objects,
+        handle: u32,
+        list: u32,
+        wrapper: u32,
+        prepared: bool,
+    ) -> Result<()> {
+        let file = matches!(objects.get(handle).unwrap().state, ObjectState::Image(_));
         let state = objects.get_mut(handle).unwrap().state.image_mut().unwrap();
         if state.updates.dirty || prepared {
             let reference = state.plane.clone();
@@ -70,16 +155,25 @@ impl<F: ObjectFactory> Runtime<F> {
             let state = objects.get(handle).unwrap().state.image().unwrap();
             let slot = state.parent_priority as u32;
             if pixels == 0 {
-                self.fes_command(owner, Some(list), 287, [slot, 0, 0], None)?;
+                if !file || slot != u32::MAX {
+                    self.fes_command(owner, Some(list), 287, [slot, 0, 0], None)?;
+                }
             } else if slot != u32::MAX {
                 let position = objects.image_position(handle);
+                let position: [f32; 2] = std::array::from_fn(|i| {
+                    if file {
+                        (plane_offset[i] as f32 + state.base_point[i]) + position[i]
+                    } else {
+                        position[i] + plane_offset[i] as f32
+                    }
+                });
                 let mut record = [
                     pixels,
                     0,
                     0,
                     0,
-                    (position[0] + plane_offset[0] as f32).to_bits(),
-                    (position[1] + plane_offset[1] as f32).to_bits(),
+                    position[0].to_bits(),
+                    position[1].to_bits(),
                     state.base_point[0].to_bits(),
                     state.base_point[1].to_bits(),
                     state.rotation.to_bits(),
