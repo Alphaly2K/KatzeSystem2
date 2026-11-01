@@ -10,7 +10,9 @@ use std::collections::{BTreeMap, BTreeSet};
 mod animation;
 mod image;
 mod plane;
+mod scene;
 pub use animation::ImageAnimationRequest;
+pub use scene::Scene;
 
 const TOP: &str = "_TOPOBJ_";
 
@@ -144,6 +146,7 @@ pub struct Objects {
     objects: BTreeMap<u32, Object>,
     bindings: BTreeMap<String, BTreeMap<i32, u32>>,
     counts: BTreeMap<String, u32>,
+    update_order: Vec<ObjectReference>,
     canvas_offset: [i32; 2],
     image_list: Option<u32>,
     image_clip: crate::graphics::Rect,
@@ -174,6 +177,7 @@ impl Objects {
             )]),
             bindings: BTreeMap::from([(TOP.to_owned(), BTreeMap::from([(0, top)]))]),
             counts: BTreeMap::from([(TOP.to_owned(), 1)]),
+            update_order: Vec::new(),
             canvas_offset: [0; 2],
             image_list: None,
             image_clip: crate::graphics::Rect::default(),
@@ -231,6 +235,13 @@ impl Objects {
         self.counts.get(name).copied().unwrap_or(0)
     }
 
+    /// 按声明和银行顺序解析当前绑定，保留重复记录并跳过已删除的银行。
+    pub fn update_order(&self) -> impl Iterator<Item = u32> + '_ {
+        self.update_order
+            .iter()
+            .filter_map(|target| self.lookup(&target.name, target.bank))
+    }
+
     /// 创建请求中的全部银行，返回新对象的标识，包括未取得名称绑定的重复项。
     pub fn define(&mut self, definition: &ObjectDefinition) -> Result<Vec<u32>> {
         if definition.name.is_empty()
@@ -241,7 +252,10 @@ impl Objects {
             return Err(Error::new(0, "FES 对象名称需要 1～31 个非零 ASCII 字节"));
         }
         let count = definition.banks as usize;
-        if count == 0 || count > read::MAX_ITEMS - self.objects.len() {
+        if count == 0
+            || count > read::MAX_ITEMS - self.objects.len()
+            || count > read::MAX_ITEMS - self.update_order.len()
+        {
             return Err(Error::new(0, "FES 对象数量超出上限"));
         }
         let initial = ObjectState::new(definition.kind)?;
@@ -276,6 +290,11 @@ impl Objects {
         self.counts
             .entry(definition.name.clone())
             .or_insert(definition.banks);
+        self.update_order
+            .extend((0..definition.banks).map(|bank| ObjectReference {
+                name: definition.name.clone(),
+                bank: bank as i32,
+            }));
         Ok(handles)
     }
 

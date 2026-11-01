@@ -119,6 +119,14 @@ fn definitions_keep_first_bindings_and_count_while_owning_duplicate_objects() {
         assert_eq!(objects.get(handle).unwrap().state.kind(), "IMAGE");
         assert_eq!(objects.get(handle).unwrap().parent(), Some(objects.top()));
     }
+    let order = objects.update_order().collect::<Vec<_>>();
+    assert_eq!(&order[..3], first.as_slice());
+    assert_eq!(&order[3..5], &first[..2]);
+    assert_eq!(
+        &order[5..10],
+        &[first[0], first[1], first[2], extension[3], extension[4]]
+    );
+    assert_eq!(&order[10..], &[upper, objects.top()]);
     assert_eq!(objects.len(), 13);
     assert_eq!(objects.get(objects.top()).unwrap().children().count(), 12);
     assert!(objects.get(foreign).is_none());

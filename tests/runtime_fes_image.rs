@@ -1202,3 +1202,71 @@ fn fes_animation_events_defer_loading_and_consume_requests_before_failed_loads()
         );
     }
 }
+
+#[test]
+fn fes_scenes_run_image_commands_and_flush_objects_before_waiting_or_exiting() {
+    for budget in [1, 4096] {
+        let (mut runtime, _, list) = setup();
+        runtime.set_budget(budget, 10000);
+        let mut pixels = pixel_file(0xffff_0000);
+        pixels[68..76].fill(0);
+        let mut animation = b"ANM\0".to_vec();
+        animation.resize(32, 0);
+        animation[8..12].copy_from_slice(&2u32.to_le_bytes());
+        for (opcode, values) in [(12u32, [128i32, 0, 0]), (0, [7, 3, 3])] {
+            animation.extend(opcode.to_le_bytes());
+            for value in values.into_iter().chain([0; 5]) {
+                animation.extend(0u32.to_le_bytes());
+                animation.extend(value.to_le_bytes());
+            }
+        }
+        let reads = Rc::new(RefCell::new(Vec::new()));
+        runtime.set_resources(PixelFiles {
+            files: BTreeMap::from([(b"raw".to_vec(), pixels), (b"walk.anm".to_vec(), animation)]),
+            reads: reads.clone(),
+        });
+        let program = fes::Program::from_text(b"#DEFINE\nIMAGE sprite\n#OBJECT FILE IDN PRI POS DISP\nsprite raw -1 5 2,1 1\n#START\nsprite setanm walk\nsprite anm\ndecode\nsprite anm STOP\nwait 2\nsprite anm\nexit 7\n").unwrap();
+        let mut scene =
+            katze_system2::runtime::fes::Scene::new(program, runtime.host().handle_allocator())
+                .unwrap();
+        scene
+            .objects_mut()
+            .unwrap()
+            .set_image_list(list, Rect::from_xywh(0, 0, 8, 6));
+        for now in [100, 101, 102] {
+            let mut complete = false;
+            for retry in 0..64 {
+                if runtime
+                    .update_fes_scene(0, &mut scene, now + if retry == 0 { 0 } else { 1000 })
+                    .unwrap()
+                {
+                    complete = true;
+                    break;
+                }
+            }
+            assert!(complete);
+            let sprite = scene.objects().lookup("sprite", 0).unwrap();
+            let request = scene
+                .objects()
+                .get(sprite)
+                .unwrap()
+                .image_animation_request()
+                .unwrap();
+            assert_eq!(request.playing(), i32::from(now == 102));
+            assert!(!request.is_pending());
+            assert_eq!(scene.exit_code(), if now == 102 { Some(7) } else { None });
+            send(&mut runtime, list, 298, 0, 0);
+            assert_eq!(
+                runtime.drawing().target.as_ref().unwrap().pixel(3, 3),
+                Some(0x80ff_0000)
+            );
+            assert_eq!(
+                &reads.borrow()[..2],
+                [b"raw".to_vec(), b"walk.anm".to_vec()]
+            );
+            assert_eq!(reads.borrow().len(), if now == 102 { 3 } else { 2 });
+        }
+        assert!(runtime.update_fes_scene(0, &mut scene, 1000).unwrap());
+        assert_eq!(reads.borrow().len(), 3);
+    }
+}
