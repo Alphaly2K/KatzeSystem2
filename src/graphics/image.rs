@@ -375,15 +375,26 @@ impl Images {
         handle: u32,
         names: &[u8],
         frame: i32,
+        direct: bool,
         services: &mut S,
-    ) -> Result<()> {
-        self.bind_pixels(handle, 0)?;
+    ) -> Result<bool> {
         let names = &names[..names.iter().position(|&b| b == 0).unwrap_or(names.len())];
-        for token in names.split(|&b| b == b' ').filter(|s| !s.is_empty()) {
+        if direct && names.is_empty() {
+            return Ok(false);
+        }
+        self.bind_pixels(handle, 0)?;
+        for token in names
+            .split(|&b| !direct && b == b' ')
+            .filter(|s| !s.is_empty())
+        {
             if token.len() >= 260 {
                 return Err(Error::new(0, "图像资源名超过基线缓冲区范围"));
             }
-            let name = services.resolve(b"image", token)?;
+            let name = if direct {
+                token.to_vec()
+            } else {
+                services.resolve(b"image", token)?
+            };
             let Some(bytes) = services.read(&name, ResourceMode::LooseFirst)? else {
                 continue;
             };
@@ -409,7 +420,7 @@ impl Images {
                 self.entries.get_mut(&handle).unwrap().data = pixels;
             }
         }
-        Ok(())
+        Ok(self.pixel_handle(handle)? != 0)
     }
 
     fn insert(&mut self, owner: u32, image: Image, has_alpha: Option<bool>) -> Result<u32> {

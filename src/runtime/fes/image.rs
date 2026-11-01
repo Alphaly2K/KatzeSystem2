@@ -53,16 +53,20 @@ impl<F: ObjectFactory> Runtime<F> {
         };
         let prepared = state.base.updates.rebuild;
         if prepared {
-            if state.image_number == -1 || state.path_mode != 0 {
-                return Err(Error::new(0, "FES IMAGE 原始数据来源或 PATHMODE 尚未接入"));
+            if state.image_number == -1 {
+                return Err(Error::new(0, "FES IMAGE 原始数据来源尚未接入"));
             }
-            if state
+            let name = &state.file[..state
                 .file
                 .iter()
-                .take_while(|&&b| b != 0)
-                .all(|&b| b == b' ')
-            {
-                self.resources.images.bind_pixels(wrapper, 0)?;
+                .position(|&b| b == 0)
+                .unwrap_or(state.file.len())];
+            let direct = state.path_mode != 0;
+            let loaded = if name.is_empty() || (!direct && name.iter().all(|&b| b == b' ')) {
+                if !direct {
+                    self.resources.images.bind_pixels(wrapper, 0)?;
+                }
+                false
             } else {
                 let services = self
                     .resources
@@ -71,12 +75,13 @@ impl<F: ObjectFactory> Runtime<F> {
                     .ok_or_else(|| Error::new(0, "运行时未配置 FES 图像资源服务"))?;
                 self.resources.images.load_fes(
                     wrapper,
-                    &state.file,
+                    name,
                     state.selected_frame(),
+                    direct,
                     services.as_mut(),
-                )?;
-            }
-            if self.images().pixel_handle(wrapper)? != 0 {
+                )?
+            };
+            if loaded {
                 let image = self.images_mut().get_mut(wrapper)?;
                 let info = *image.info();
                 let object = objects.get_mut(handle).unwrap();
@@ -96,7 +101,7 @@ impl<F: ObjectFactory> Runtime<F> {
                     let dirty = object.image_offset != offset || state.base_point != base;
                     object.image_offset = offset;
                     state.base_point = base;
-                    if state.size.contains(&-1) {
+                    if direct || state.size.contains(&-1) {
                         state.size = info.size.map(|v| v as i32);
                     }
                     if dirty {

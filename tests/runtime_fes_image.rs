@@ -613,3 +613,91 @@ fn image_files_share_the_mapped_frame_and_keep_the_first_successful_geometry() {
     assert_eq!(reads.borrow().last().unwrap(), b"first\tsecond");
     assert_eq!(runtime.images().pixel_handle(wrapper).unwrap(), 0);
 }
+
+struct DirectFiles(PixelFiles);
+
+impl ResourceServices for DirectFiles {
+    fn resolve(&mut self, _: &[u8], _: &[u8]) -> Result<Vec<u8>> {
+        panic!("直接路径不经过类别名称补全")
+    }
+
+    fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
+        self.0.read(name, mode)
+    }
+}
+
+#[test]
+fn image_direct_paths_keep_spaces_bypass_categories_and_replace_requested_dimensions() {
+    let (mut runtime, mut objects, _) = setup();
+    let reads = Rc::new(RefCell::new(Vec::new()));
+    runtime.set_resources(DirectFiles(PixelFiles {
+        files: BTreeMap::from([(b"raw sprite.hg3".to_vec(), pixel_file(0xff12_3456))]),
+        reads: reads.clone(),
+    }));
+    let sprite = define(&mut objects, "IMAGE", "sprite");
+    let ObjectState::Image(state) = &mut objects.get_mut(sprite).unwrap().state else {
+        panic!()
+    };
+    state.base.size = [123, 99];
+    initialize(
+        &mut objects,
+        "sprite",
+        ObjectAttributes {
+            file: Some(b"raw sprite.hg3".to_vec()),
+            image_number: Some(7),
+            path_mode: Some(1),
+            button_type: Some(1),
+            ..Default::default()
+        },
+    );
+    runtime.update_fes_object(0, &mut objects, sprite).unwrap();
+    let wrapper = objects.get(sprite).unwrap().image_handle().unwrap();
+    let pixels = runtime.images().pixel_handle(wrapper).unwrap();
+    assert_ne!(pixels, 0);
+    assert_eq!(image(&objects, sprite).size, [1, 1]);
+    assert_eq!(image(&objects, sprite).base_point, [3., 4.]);
+    let info = runtime.images().get(wrapper).unwrap().info();
+    assert_eq!(info.offset, [1, 2]);
+    assert_eq!(info.canvas_size, [10, 20]);
+    initialize(
+        &mut objects,
+        "sprite",
+        ObjectAttributes {
+            path_mode: Some(-1),
+            ..Default::default()
+        },
+    );
+    runtime.update_fes_object(0, &mut objects, sprite).unwrap();
+    assert_eq!(reads.borrow().len(), 1);
+
+    let ObjectState::Image(state) = &mut objects.get_mut(sprite).unwrap().state else {
+        panic!()
+    };
+    state.file.clear();
+    state.base.base_point = [8., 9.];
+    state.base.size = [9, 8];
+    state.base.updates.request_rebuild();
+    runtime.update_fes_object(0, &mut objects, sprite).unwrap();
+    assert_eq!(reads.borrow().len(), 1);
+    assert_eq!(runtime.images().pixel_handle(wrapper).unwrap(), pixels);
+    assert_eq!(image(&objects, sprite).base_point, [8., 9.]);
+    assert_eq!(image(&objects, sprite).size, [9, 8]);
+    assert!(!image(&objects, sprite).updates.needs_rebuild());
+
+    initialize(
+        &mut objects,
+        "sprite",
+        ObjectAttributes {
+            file: Some(b"missing sprite.hg3".to_vec()),
+            ..Default::default()
+        },
+    );
+    runtime.update_fes_object(0, &mut objects, sprite).unwrap();
+    assert_eq!(runtime.images().pixel_handle(wrapper).unwrap(), 0);
+    assert_eq!(image(&objects, sprite).base_point, [8., 9.]);
+    assert_eq!(image(&objects, sprite).size, [9, 8]);
+    assert_eq!(
+        &*reads.borrow(),
+        &[b"raw sprite.hg3".to_vec(), b"missing sprite.hg3".to_vec()]
+    );
+}
