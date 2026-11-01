@@ -16,7 +16,25 @@ use std::{
 };
 
 type Queries = Rc<RefCell<Vec<(u32, u32, bool)>>>;
-type TestRuntime = Runtime<FesFactory<GraphicsFactory<InputFactory<Factory>>>>;
+type TestRuntime = Runtime<ButtonFactory<FesFactory<GraphicsFactory<InputFactory<Factory>>>>>;
+
+struct ButtonFactory<F> {
+    fallback: F,
+    fail: Rc<Cell<bool>>,
+    attempts: Rc<Cell<u32>>,
+}
+impl<F: ObjectFactory> ObjectFactory for ButtonFactory<F> {
+    fn create(&mut self, id: u32, kind: u32, name: &[u8]) -> Result<Box<dyn TaskObject>> {
+        if kind == kind::BUTTON {
+            assert_eq!(name, b"low button");
+            self.attempts.set(self.attempts.get() + 1);
+            if self.fail.get() {
+                return Err(Error::new(0, "合成按钮创建失败"));
+            }
+        }
+        self.fallback.create(id, kind, name)
+    }
+}
 
 struct Factory {
     child: Rc<Cell<Option<u32>>>,
@@ -154,6 +172,8 @@ struct Setup {
     mask: Rc<Cell<bool>>,
     reads: Rc<RefCell<Vec<Vec<u8>>>>,
     child: Rc<Cell<Option<u32>>>,
+    fail_button: Rc<Cell<bool>>,
+    button_attempts: Rc<Cell<u32>>,
 }
 
 fn setup(budget: usize, source: &[u8]) -> Setup {
@@ -161,16 +181,22 @@ fn setup(budget: usize, source: &[u8]) -> Setup {
     let mask = Rc::new(Cell::new(false));
     let child = Rc::new(Cell::new(None));
     let reads = Rc::new(RefCell::new(Vec::new()));
+    let fail_button = Rc::new(Cell::new(false));
+    let button_attempts = Rc::new(Cell::new(0));
     let mut runtime = Runtime::new(
         0,
         kind::ROOT,
         Box::new(RootObject::new(1, 2)),
         State::new(8),
-        FesFactory {
-            fallback: GraphicsFactory {
-                fallback: InputFactory {
-                    fallback: Factory {
-                        child: child.clone(),
+        ButtonFactory {
+            fail: fail_button.clone(),
+            attempts: button_attempts.clone(),
+            fallback: FesFactory {
+                fallback: GraphicsFactory {
+                    fallback: InputFactory {
+                        fallback: Factory {
+                            child: child.clone(),
+                        },
                     },
                 },
             },
@@ -204,6 +230,8 @@ fn setup(budget: usize, source: &[u8]) -> Setup {
         mask,
         reads,
         child,
+        fail_button,
+        button_attempts,
     }
 }
 
@@ -246,7 +274,7 @@ fn fes_tasks_load_without_starting_then_drive_pixels_and_keep_exit_properties() 
                 (12, 3, false)
             ]
         );
-        assert_eq!(runtime.tree().children(fes).unwrap().count(), 2);
+        assert_eq!(runtime.tree().children(fes).unwrap().count(), 3);
         assert_eq!(
             runtime.drawing().target.as_ref().unwrap().pixel(2, 1),
             Some(0)
@@ -480,4 +508,98 @@ fn immediate_child_updates_can_delete_the_running_fes_owner_before_start() {
         assert!(runtime.object(fes).is_none());
         assert!(runtime.object(child).is_none());
     }
+}
+
+#[test]
+fn first_update_creates_one_button_before_loading_or_starting_the_scene() {
+    for depth in [1, 3, 5] {
+        let Setup {
+            mut runtime,
+            button_attempts,
+            ..
+        } = setup(1, b"#START\nexit 0\n");
+        let mut parent = 0;
+        for _ in 1..depth {
+            parent = runtime
+                .create(parent, kind::BASE, b"ancestor", b"")
+                .unwrap();
+        }
+        let fes = runtime.create(parent, kind::FES, b"unloaded", b"").unwrap();
+        runtime.input_coordinates_mut().logical_size = [800, 600];
+        runtime.host_mut().surface_size = [320, 240];
+        runtime.update(123, 1).unwrap();
+        let children: Vec<_> = runtime.tree().children(fes).unwrap().collect();
+        assert_eq!(children.len(), 1);
+        let button = children[0];
+        assert_eq!(runtime.tree().node(button).unwrap().kind, kind::BUTTON);
+        assert_eq!(runtime.object(button).unwrap().clock().time, 0);
+        assert!(runtime.drawables().get(button).is_none());
+        let region = runtime
+            .input_state(1)
+            .unwrap()
+            .regions()
+            .get(button)
+            .unwrap();
+        assert_eq!(region.priority(), depth);
+        assert_eq!(region.event_mask(), 7);
+        assert_eq!(
+            (
+                region.bounds().left,
+                region.bounds().top,
+                region.bounds().right,
+                region.bounds().bottom
+            ),
+            (0, 0, 320, 240)
+        );
+        assert_eq!(region.enabled(), 1);
+        runtime.host_mut().surface_size = [640, 480];
+        runtime.update(124, 1).unwrap();
+        assert_eq!(button_attempts.get(), 1);
+        assert_eq!(runtime.tree().children(fes).unwrap().count(), 1);
+        assert_eq!(runtime.object(button).unwrap().clock().time, 124);
+        assert_eq!(
+            runtime
+                .input_state(1)
+                .unwrap()
+                .regions()
+                .get(button)
+                .unwrap()
+                .bounds()
+                .right,
+            320
+        );
+        send(&mut runtime, button, 3, 0, 0);
+        runtime.update(125, 1).unwrap();
+        assert_eq!(runtime.tree().children(fes).unwrap().count(), 0);
+        assert_eq!(button_attempts.get(), 1);
+    }
+}
+
+#[test]
+fn failed_first_button_creation_is_reported_once_and_does_not_reserve_an_id() {
+    let Setup {
+        mut runtime,
+        fail_button,
+        button_attempts,
+        ..
+    } = setup(1, b"#START\nexit 0\n");
+    let fes = runtime.create(0, kind::FES, b"unloaded", b"").unwrap();
+    fail_button.set(true);
+    assert!(
+        runtime
+            .update(1, 1)
+            .unwrap_err()
+            .message
+            .contains("按钮创建失败")
+    );
+    assert_eq!(button_attempts.get(), 1);
+    assert_eq!(runtime.tree().children(fes).unwrap().count(), 0);
+    fail_button.set(false);
+    runtime.update(2, 1).unwrap();
+    assert_eq!(button_attempts.get(), 1);
+    assert_eq!(runtime.tree().children(fes).unwrap().count(), 0);
+    assert_eq!(
+        runtime.create(0, kind::BASE, b"unused", b"").unwrap(),
+        fes + 1
+    );
 }

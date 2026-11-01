@@ -14,6 +14,8 @@ pub trait Services {
     fn start(&mut self, clock: &mut TaskClock) -> Result<()>;
     /// 父任务命令 25 对应的原始正文；没有正文时返回空值。
     fn inherited_context(&self) -> Result<Vec<u8>>;
+    /// 辅助按钮优先级；直接父级为根时返回一。
+    fn button_priority(&self) -> Result<u32>;
 }
 
 impl<F: ObjectFactory> Services for ObjectHost<'_, F> {
@@ -81,6 +83,28 @@ impl<F: ObjectFactory> Services for ObjectHost<'_, F> {
             })
             .ok_or_else(|| Error::new(0, "FES 父任务上下文不可用"))
     }
+
+    fn button_priority(&self) -> Result<u32> {
+        let mut current = self
+            .tree
+            .node(self.host.task_id)
+            .and_then(|node| node.parent);
+        let mut depth = 1u32;
+        while let Some(id) = current {
+            let node = self
+                .tree
+                .node(id)
+                .ok_or_else(|| Error::new(0, "FES 祖先任务不存在"))?;
+            if node.kind == kind::ROOT {
+                return Ok(depth);
+            }
+            depth = depth
+                .checked_add(1)
+                .ok_or_else(|| Error::new(0, "FES 祖先层数超过上限"))?;
+            current = node.parent;
+        }
+        Err(Error::new(0, "FES 辅助按钮需要类型为根的祖先任务"))
+    }
 }
 
 /// 类型 34 的 FES 任务；构造后通过命令 337、338、340、339 显式初始化并启动。
@@ -99,6 +123,8 @@ pub struct FesObject {
     clip: crate::graphics::Rect,
     offset: [i32; 2],
     exit_published: bool,
+    first_update: bool,
+    input_button: Option<u32>,
 }
 
 impl FesObject {
@@ -118,6 +144,8 @@ impl FesObject {
             clip: crate::graphics::Rect::default(),
             offset: [0; 2],
             exit_published: false,
+            first_update: true,
+            input_button: None,
         }
     }
 
@@ -135,6 +163,37 @@ impl FesObject {
 
     pub fn sound_task(&self) -> u32 {
         self.sound
+    }
+
+    pub fn input_button(&self) -> Option<u32> {
+        self.input_button
+    }
+
+    fn prepare_input_button(&mut self, host: &mut dyn Host) -> Result<()> {
+        if !self.first_update {
+            return Ok(());
+        }
+        self.first_update = false;
+        let button = host.create_task_child(kind::BUTTON, b"low button", b"")?;
+        self.input_button = Some(button);
+        let [width, height] = host.surface_size();
+        let priority = services(host)?.button_priority()?;
+        let mut rectangle: Vec<u8> = [0, 0, width, height, priority, button]
+            .into_iter()
+            .flat_map(u32::to_le_bytes)
+            .collect();
+        self.send(
+            host,
+            button,
+            90,
+            [0, 0, 1],
+            &mut CommandBuffers {
+                data0: None,
+                data1: Some(&mut rectangle),
+            },
+        )?;
+        self.send(host, button, 93, [0, 1, 1], &mut CommandBuffers::default())?;
+        Ok(())
     }
 
     fn synchronize(&self, host: &mut dyn Host) {
@@ -190,7 +249,11 @@ impl FesObject {
     fn run_body(&mut self, host: &mut dyn Host, budget: usize) -> Result<bool> {
         self.synchronize(host);
         self.effects(host);
-        if self.base.control.deletion_requested != 0 || !self.started {
+        if self.base.control.deletion_requested != 0 {
+            return Ok(true);
+        }
+        self.prepare_input_button(host)?;
+        if !self.started {
             return Ok(true);
         }
         let scene = self
