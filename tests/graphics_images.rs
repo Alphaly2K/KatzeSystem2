@@ -588,3 +588,44 @@ fn runtime_blits_between_images_and_to_the_current_target_without_scaling_or_sta
         );
     }
 }
+
+#[test]
+fn loaded_images_use_the_stdinfo_alpha_flag_independently_of_pixel_alpha() {
+    struct AlphaImage(Vec<u8>);
+    impl ResourceServices for AlphaImage {
+        fn resolve(&mut self, _: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+            Ok(name.to_vec())
+        }
+        fn read(&mut self, _: &[u8], _: ResourceMode) -> Result<Option<Vec<u8>>> {
+            Ok(Some(self.0.clone()))
+        }
+    }
+    for flag in [0u32, 1, 2, u32::MAX] {
+        for color in [0x8011_2233u32, 0xff11_2233] {
+            let mut data = blob(7, color);
+            data[64..68].copy_from_slice(&flag.to_le_bytes());
+            let mut images = Images::default();
+            let source = images.load(1, b"x:7.hg3", &mut AlphaImage(data)).unwrap();
+            let mut list = katze_system2::graphics::ImageList::new(2, [3, 1], &mut images).unwrap();
+            list.set(
+                7,
+                source,
+                katze_system2::graphics::ImageListProperties {
+                    position: [1., 0.],
+                    ..Default::default()
+                },
+                &mut images,
+            )
+            .unwrap();
+            list.redraw(&mut images).unwrap();
+            let edge = if flag == 0 { 0 } else { color & 0xffffff };
+            assert_eq!(images.get(source).unwrap().info().reserved, flag);
+            assert_eq!(
+                images.get(list.image()).unwrap().surface().pixels(),
+                [edge, color, edge].map(u32::to_le_bytes).concat()
+            );
+            list.release(&mut images).unwrap();
+            images.release(source).unwrap();
+        }
+    }
+}

@@ -9,6 +9,7 @@ pub struct StandardInfo {
     pub bit_depth: u32,
     pub offset: [i32; 2],
     pub canvas_size: [u32; 2],
+    /// stdinfo 的 Alpha 标记；图像装载时零表示不透明，非零表示使用 Alpha。
     pub reserved: u32,
     pub base: [i32; 2],
 }

@@ -296,3 +296,56 @@ fn runtime_lists_keep_kcs_images_alive_and_feed_fes_canvas_planes() {
         assert!(runtime.redraw_image_list(&mut list).is_err());
     }
 }
+
+#[test]
+fn list_alpha_classification_stays_with_shared_pixels_and_waits_for_visible_geometry() {
+    for (initial, replacement, first_x, edge) in [
+        (0x8011_2233u32, 0xff44_5566u32, 1., 0x0044_5566),
+        (0xff11_2233, 0x8044_5566, 1., 0),
+        (0xff11_2233, 0x8044_5566, 9., 0x0044_5566),
+    ] {
+        let mut images = Images::default();
+        let source = images.create(1, [1, 1]).unwrap();
+        images
+            .get_mut(source)
+            .unwrap()
+            .pixels_mut()
+            .copy_from_slice(&initial.to_le_bytes());
+        let mut list = ImageList::new(2, [3, 1], &mut images).unwrap();
+        list.set(
+            7,
+            source,
+            ImageListProperties {
+                position: [first_x, 0.],
+                ..ImageListProperties::default()
+            },
+            &mut images,
+        )
+        .unwrap();
+        list.redraw(&mut images).unwrap();
+        let alias = images.share(source).unwrap();
+        images.release_owner(1);
+        assert!(images.get(source).is_err());
+        images.get_mut(alias).unwrap().fill_rect_from_bottom(
+            katze_system2::graphics::Rect::from_xywh(0, 0, 1, 1),
+            replacement,
+        );
+        list.set(
+            7,
+            alias,
+            ImageListProperties {
+                position: [1., 0.],
+                ..ImageListProperties::default()
+            },
+            &mut images,
+        )
+        .unwrap();
+        list.redraw(&mut images).unwrap();
+        assert_eq!(
+            images.get(list.image()).unwrap().surface().pixels(),
+            [edge, replacement, edge].map(u32::to_le_bytes).concat()
+        );
+        list.release(&mut images).unwrap();
+        images.release(alias).unwrap();
+    }
+}

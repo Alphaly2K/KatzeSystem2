@@ -161,15 +161,25 @@ impl Image {
         })
     }
 
-    fn list_is_opaque(&self, opacity: u8) -> bool {
-        opacity == 255 && self.surface.pixels().chunks_exact(4).all(|p| p[3] == 255)
-    }
-
-    fn draw_list_from(&mut self, source: &Self, position: [f32; 2], base: [f32; 2], opacity: u8) {
+    fn draw_list_from(
+        &mut self,
+        source: &Self,
+        position: [f32; 2],
+        base: [f32; 2],
+        opacity: u8,
+        has_alpha: &mut Option<bool>,
+    ) {
         let Some(region) = self.list_region(source, position, base) else {
             return;
         };
-        if source.list_is_opaque(opacity) {
+        let has_alpha = *has_alpha.get_or_insert_with(|| {
+            source
+                .surface
+                .pixels()
+                .chunks_exact(4)
+                .any(|pixel| pixel[3] != 255)
+        });
+        if opacity == 255 && !has_alpha {
             self.surface.copy_from(
                 &source.surface,
                 Rect::from_xywh(
@@ -238,6 +248,8 @@ struct ImageEntry {
 
 struct ImageData {
     references: usize,
+    // 矩形填充不使像素对象的 Alpha 分类失效。
+    has_alpha: Option<bool>,
     image: Image,
 }
 
@@ -260,7 +272,7 @@ impl Images {
     }
 
     pub fn create(&mut self, owner: u32, size: [u32; 2]) -> Result<u32> {
-        self.insert(owner, Image::new(size)?)
+        self.insert(owner, Image::new(size)?, None)
     }
 
     /// 接收已格式展开的名称列表，仅 ASCII 空格分隔，不解释引号。
@@ -294,10 +306,11 @@ impl Images {
         let Some(image) = image else {
             return Ok(0);
         };
-        self.insert(owner, image)
+        let has_alpha = Some(image.info().reserved != 0);
+        self.insert(owner, image, has_alpha)
     }
 
-    fn insert(&mut self, owner: u32, image: Image) -> Result<u32> {
+    fn insert(&mut self, owner: u32, image: Image, has_alpha: Option<bool>) -> Result<u32> {
         if self.entries.len() == read::MAX_ITEMS {
             return Err(Error::new(0, "图像对象数量超过上限"));
         }
@@ -306,6 +319,7 @@ impl Images {
             handle,
             ImageData {
                 references: 1,
+                has_alpha,
                 image,
             },
         );
@@ -486,12 +500,18 @@ impl Images {
         if source_data == target_data {
             return Err(Error::new(0, "图像列表自有图像不能同时用作绘制来源"));
         }
-        let source_image = self.data.remove(&source_data).unwrap();
+        let mut source_image = self.data.remove(&source_data).unwrap();
         self.data
             .get_mut(&target_data)
             .unwrap()
             .image
-            .draw_list_from(&source_image.image, position, base, opacity);
+            .draw_list_from(
+                &source_image.image,
+                position,
+                base,
+                opacity,
+                &mut source_image.has_alpha,
+            );
         self.data.insert(source_data, source_image);
         Ok(())
     }
