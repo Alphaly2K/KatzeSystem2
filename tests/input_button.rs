@@ -406,6 +406,15 @@ impl TaskObject for Receiver {
         budget: usize,
     ) -> Result<CommandOutcome> {
         if matches!(command.code, 6 | 9 | 10 | 64 | 65) {
+            if command.code == 9 {
+                let query = packet(command.sender, command.target, 96, [0, 1, 1]);
+                let mut value = 0x13579bdf;
+                host.dispatch_task_command(query, &mut CommandBuffers::default(), &mut value)?;
+                self.records.borrow_mut().push(Command {
+                    data: [value, 0, 0],
+                    ..query
+                });
+            }
             self.records.borrow_mut().push(*command);
             if let Some(reply) = self.reply.get() {
                 host.dispatch_task_command(
@@ -552,6 +561,7 @@ fn real_input_callbacks_share_response_buffers_and_deletion_cleanup() {
         records.borrow().last().unwrap(),
         &packet(2, 3, 9, [3, 0, 0])
     );
+    assert!(records.borrow().contains(&packet(3, 2, 96, [2, 0, 0])));
     assert_eq!(send(&mut runtime, 96, 0), 2);
     let mut a = [0; 8];
     let mut b = [0; 8];

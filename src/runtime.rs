@@ -580,18 +580,67 @@ fn run_nested<F: ObjectFactory>(
             return Ok(());
         }
     }
-    if let Some(response) = resources.graphics_responses.get_mut(&target) {
+    if resources.graphics_responses.contains_key(&target) {
         if let Execution::Command {
-            command, propagate, ..
+            kind,
+            command,
+            output,
+            propagate,
+            ..
         } = &mut execution
         {
             if command.code == 95 {
-                *response = command.data[1];
+                *resources.graphics_responses.get_mut(&target).unwrap() = command.data[1];
                 **propagate = false;
                 return Ok(());
             }
+            if matches!(*kind, kind::BUTTON | kind::PLANE) && command.code == 96 {
+                **propagate = false;
+                if running.get(&target).is_some_and(|task| task.deleted) {
+                    return Ok(());
+                }
+                let mut store = Store {
+                    numbers,
+                    host,
+                    resources,
+                    tree,
+                    objects,
+                    running,
+                    factory,
+                    budget,
+                    limit,
+                };
+                let mut input = 0;
+                route_command(
+                    store.reborrow(),
+                    target,
+                    Command {
+                        target: 0,
+                        sender: target,
+                        code: 34,
+                        data: [0; 3],
+                    },
+                    &mut CommandBuffers::default(),
+                    &mut input,
+                )?;
+                let mut value = 0;
+                route_command(
+                    store,
+                    target,
+                    Command {
+                        target: input,
+                        sender: target,
+                        code: 137,
+                        data: [target, 0, command.data[2]],
+                    },
+                    &mut CommandBuffers::default(),
+                    &mut value,
+                )?;
+                **output = value;
+                return Ok(());
+            }
         }
-        return Err(Error::new(0, "图形回调期间仅支持响应槽回写"));
+        return Err(Error::new(0, "图形回调期间仅支持响应槽回写和输入状态查询"));
     }
     if let Some(mut state) = resources.input_callbacks.remove(&target) {
         let saved = (host.task_id, host.task_time, host.task_origin);
