@@ -112,6 +112,31 @@ fn next_discards_all_subroutine_return_locations() {
 }
 
 #[test]
+fn acknowledged_exit_continues_the_subroutine_and_its_caller_in_the_same_frame() {
+    let program = fes::Program::from_text(
+        b"#START\n$0=$0+1\ncall SUB\n$1=$1+1\nwait 5\n#SUB\n$2=$2+1\nexit 37\n$1=999\n",
+    )
+    .unwrap();
+    let mut state = State::new(4);
+    let mut vm = fes::Interpreter::new(program).unwrap();
+    assert_eq!(
+        vm.run(&mut state, 128).unwrap(),
+        Step::Event(fes::Event::Exit(37))
+    );
+    assert_eq!(&state.shared[..3], &[1, 0, 1]);
+    assert_eq!(
+        vm.run(&mut state, 128).unwrap(),
+        Step::Event(fes::Event::Exit(37))
+    );
+    vm.resume();
+    assert_eq!(
+        vm.run(&mut state, 128).unwrap(),
+        Step::Event(fes::Event::Wait(5))
+    );
+    assert_eq!(&state.shared[..3], &[1, 1000, 1]);
+}
+
+#[test]
 fn break_ends_the_current_block_and_keeps_its_value_across_returns() {
     let program = fes::Program::from_text(
         b"#START\ncall OUTER\nemit done\nbreak\nexit 99\n#OUTER\ncall INNER\nemit returned\nbreak (4 + 5)\nexit 98\n#INNER\nbreak -1\nexit 97\n",

@@ -329,8 +329,7 @@ fn runtime_lists_keep_kcs_images_alive_and_feed_fes_canvas_planes() {
                     objects.initialize(&request, |_| unreachable!()).unwrap();
                     fes.resume();
                 }
-                Step::Event(fes::Event::Exit(0)) => fes.resume(),
-                Step::Halted => break,
+                Step::Event(fes::Event::Exit(0)) => break,
                 other => panic!("{other:?}"),
             }
         }

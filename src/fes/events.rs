@@ -16,7 +16,6 @@ pub(super) struct Invocation {
     object_block: Option<usize>,
     default: bool,
     pub(super) system: bool,
-    ended: bool,
 }
 
 impl Interpreter {
@@ -45,8 +44,7 @@ impl Interpreter {
         ) {
             return Err(Error::new(0, "未支持的 FES 对象事件"));
         }
-        if self.ended
-            || self.invocation.is_some()
+        if self.invocation.is_some()
             || !self.definitions.is_empty()
             || self.pre_declarations.is_some()
             || !self.initializers.is_empty()
@@ -84,7 +82,6 @@ impl Interpreter {
             object_block,
             default: default_block.is_some(),
             system: false,
-            ended: false,
         });
         self.dispatch_result = None;
         self.block = block;
@@ -123,10 +120,8 @@ impl Interpreter {
             object_block: Some(block),
             default: false,
             system: true,
-            ended: self.ended,
         });
         self.dispatch_result = None;
-        self.ended = false;
         self.block = block;
         self.pc = 0;
         Ok(true)
@@ -179,7 +174,6 @@ impl Interpreter {
     fn finish_event(&mut self, transfer: bool) {
         let invocation = self.invocation.take().unwrap();
         self.dispatch_result = Some(transfer);
-        self.ended |= invocation.ended;
         if !transfer {
             (self.block, self.pc) = invocation.main;
             self.pending = invocation.pending;

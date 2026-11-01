@@ -129,7 +129,7 @@ fn pending_or_failed_system_blocks_keep_their_cursor_and_reject_other_work() {
 }
 
 #[test]
-fn system_blocks_after_exit_keep_the_main_script_stopped() {
+fn system_blocks_between_exit_notifications_preserve_the_main_cursor() {
     for budget in [1, 4096] {
         let (mut runtime, mut scene) =
             setup("#START\n$0=$0+1\nexit 37\n#_FES_WAKE_\n$1=$1+1\n", budget);
@@ -137,25 +137,30 @@ fn system_blocks_after_exit_keep_the_main_script_stopped() {
         system(&mut runtime, &mut scene, "_FES_WAKE_");
         assert_eq!(scene.exit_code(), Some(37));
         update(&mut runtime, &mut scene, 101);
-        assert_eq!(&runtime.numbers().shared[..2], &[1, 1]);
+        assert_eq!(&runtime.numbers().shared[..2], &[2, 1]);
         assert_eq!(scene.exit_code(), Some(37));
     }
 }
 
 #[test]
-fn system_transfers_and_local_waits_keep_the_native_call_stack_effects() {
+fn system_transfers_local_waits_and_exits_keep_the_native_call_stack_effects() {
     for budget in [1, 4096] {
-        let (mut runtime, mut scene) = setup(
-            "#START\nwait 77\n$7=$7+1\n#_FES_SLEEP_\ncall SUB\n$1=$1*10+1\n#SUB\n$1=$1*10+3\nwait 5\n$1=999\n",
-            budget,
-        );
-        update(&mut runtime, &mut scene, 100);
-        system(&mut runtime, &mut scene, "_FES_SLEEP_");
-        assert_eq!(runtime.numbers().shared[1], 3);
-        assert_eq!(scene.deadline(), Some(177));
-        update(&mut runtime, &mut scene, 177);
-        assert_eq!(runtime.numbers().shared[1], 31);
-        assert_eq!(runtime.numbers().shared[7], 1);
+        for (operation, notification) in [("wait 5", None), ("exit 9", Some(9))] {
+            let source = format!(
+                "#START\nwait 77\n$7=$7+1\n#_FES_SLEEP_\ncall SUB\n$1=$1*10+1\n#SUB\n$1=$1*10+3\n{operation}\n$1=999\n"
+            );
+            let (mut runtime, mut scene) = setup(&source, budget);
+            update(&mut runtime, &mut scene, 100);
+            system(&mut runtime, &mut scene, "_FES_SLEEP_");
+            assert_eq!(runtime.numbers().shared[1], 3);
+            assert_eq!(scene.deadline(), Some(177));
+            assert_eq!(scene.exit_code(), None);
+            update(&mut runtime, &mut scene, 101);
+            assert_eq!(scene.exit_code(), notification);
+            update(&mut runtime, &mut scene, 177);
+            assert_eq!(runtime.numbers().shared[1], 31);
+            assert_eq!(runtime.numbers().shared[7], 1);
+        }
 
         let (mut runtime, mut scene) = setup(
             "#START\ncall MAIN\n$7=999\n#MAIN\nwait 77\n$7=$7+1\n#_FES_SLEEP_\n$1=$1*10+1\nnext DEST\n#DEST\n$1=$1*10+3\n",

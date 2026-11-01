@@ -26,7 +26,7 @@ fn runtime(budget: usize) -> Runtime<GraphicsFactory<Reject>> {
 }
 
 #[test]
-fn preparation_stops_before_start_and_exited_scenes_keep_updating_media() {
+fn preparation_stops_before_start_and_exit_notifications_keep_the_scene_scheduled() {
     use katze_system2::fes::{ObjectAttributes, ObjectInitialization, ObjectReference};
 
     let source = b"#DEFINE\nCPLANE panel\n#OBJECT SIZE COLOR DISP\npanel 2,2 0xff123456 1\n#START\n$0=$0+1\nexit 37\n";
@@ -60,7 +60,7 @@ fn preparation_stops_before_start_and_exited_scenes_keep_updating_media() {
             }
             assert!(completed);
             assert_eq!(scene.exit_code(), Some(37));
-            assert_eq!(runtime.numbers().shared[0], 1);
+            assert_eq!(runtime.numbers().shared[0], (now - 99) as i32);
             let task = scene.objects().get(panel).unwrap().task_id().unwrap();
             assert_eq!(
                 runtime

@@ -84,8 +84,7 @@ fn fes_events_create_real_planes_and_parent_changes_reach_pixels_and_deletion() 
                     objects.initialize(&request, |_| unreachable!()).unwrap();
                     interpreter.resume();
                 }
-                Step::Event(fes::Event::Exit(0)) => interpreter.resume(),
-                Step::Halted => break,
+                Step::Event(fes::Event::Exit(0)) => break,
                 other => panic!("{other:?}"),
             }
         }

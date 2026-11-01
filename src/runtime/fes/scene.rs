@@ -3,6 +3,7 @@ use crate::{
     Error, HandleAllocator, Result, Step, fes,
     runtime::{ObjectFactory, Runtime, Store},
 };
+use std::collections::VecDeque;
 
 /// 一份预先装载的 FES 执行状态；调用方绑定共享列表并在所属任务的主体时点推进。
 pub struct Scene {
@@ -12,6 +13,8 @@ pub struct Scene {
     frame_origin: u32,
     deadline: Option<u32>,
     exit_code: Option<i32>,
+    exit_request: Option<i32>,
+    queued_exits: VecDeque<i32>,
     invocation: Option<Invocation>,
     input: super::input::SystemInput,
     system_block: Option<String>,
@@ -51,6 +54,8 @@ impl Scene {
             frame_origin: 0,
             deadline: None,
             exit_code: None,
+            exit_request: None,
+            queued_exits: VecDeque::new(),
             invocation: None,
             input: super::input::SystemInput::default(),
             system_block: None,
@@ -91,13 +96,24 @@ impl Scene {
         }
     }
 
-    /// 退出码在最终对象更新完成后可用；退出后仍可逐轮更新媒体对象。
+    /// 最近已处理的退出通知；本轮最终对象更新完成后可用，不表示脚本停止。
     pub fn exit_code(&self) -> Option<i32> {
         self.exit_code.filter(|_| !self.is_pending())
     }
 
-    pub(super) fn exit_request(&self) -> Option<i32> {
-        self.exit_code
+    pub(super) fn take_exit_request(&mut self) -> Option<i32> {
+        self.exit_request.take()
+    }
+
+    fn publish_exit(&mut self, code: i32) {
+        self.exit_code = Some(code);
+        self.exit_request = Some(code);
+    }
+
+    fn publish_queued_exits(&mut self) {
+        while let Some(code) = self.queued_exits.pop_front() {
+            self.publish_exit(code);
+        }
     }
 
     pub(super) fn set_system_value(&mut self, name: &str, value: i32) {
@@ -290,8 +306,12 @@ impl<F: ObjectFactory> Store<'_, F> {
                         .initialize(&initialization, |name| Ok(name.to_vec()))?;
                     scene.interpreter.resume();
                 }
-                Step::Event(fes::Event::Exit(_)) => {
-                    return Err(Error::new(0, "FES 系统块退出事件队列尚未接入"));
+                Step::Event(fes::Event::Exit(code)) => {
+                    if scene.queued_exits.len() >= crate::read::MAX_ITEMS {
+                        return Err(Error::new(0, "FES 系统块退出事件队列超过上限"));
+                    }
+                    scene.queued_exits.push_back(code);
+                    scene.interpreter.finish_system_block()?;
                 }
                 Step::Event(fes::Event::Subcommand(call)) => {
                     return Err(Error::new(call.offset, "FES 系统块运动服务尚未接入"));
@@ -346,11 +366,11 @@ impl<F: ObjectFactory> Store<'_, F> {
                 updates: None,
                 resume_script: false,
             });
-            if scene.exit_code.is_some()
-                || scene
-                    .deadline
-                    .is_some_and(|deadline| now < deadline && !scene.input.left)
+            if scene
+                .deadline
+                .is_some_and(|deadline| now < deadline && !scene.input.left)
             {
+                scene.publish_queued_exits();
                 scene.finish_input();
                 scene.begin_updates(false);
             } else {
@@ -375,13 +395,11 @@ impl<F: ObjectFactory> Store<'_, F> {
             }
             match scene.interpreter.run(self.numbers, 1)? {
                 Step::Yield => (),
-                Step::Paused => return Err(Error::new(0, "FES 解释器出现未支持的暂停状态")),
-                Step::Halted => {
-                    scene.exit_code = Some(scene.interpreter.return_value);
-                    scene.finish_input();
-                    scene.begin_updates(false);
+                Step::Paused | Step::Halted => {
+                    return Err(Error::new(0, "FES 解释器出现未支持的停止状态"));
                 }
                 Step::Event(event) => {
+                    scene.publish_queued_exits();
                     let now = scene.invocation.as_ref().unwrap().now;
                     if scene.apply_initialization(&event)? {
                         scene.interpreter.resume();
@@ -419,8 +437,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                             scene.begin_updates(false);
                         }
                         fes::Event::Exit(code) => {
-                            scene.exit_code = Some(code);
-                            scene.begin_updates(false);
+                            scene.publish_exit(code);
                         }
                         fes::Event::CreateObject(_)
                         | fes::Event::InitializeObject(_)
@@ -447,7 +464,7 @@ mod tests {
     }
 
     #[test]
-    fn exit_keeps_input_until_the_next_round_without_clearing_release_or_touch_values() {
+    fn exit_continues_to_the_round_boundary_and_clears_clicks_but_keeps_release_and_touch() {
         for budget in [1, 4096] {
             let mut runtime = Runtime::new(
                 0,
@@ -475,10 +492,7 @@ mod tests {
                     }
                 }
                 assert!(complete);
-                assert_eq!(
-                    scene.interpreter().named["_CLICK_L_"][&0],
-                    if now == 100 { -1 } else { 0 }
-                );
+                assert_eq!(scene.interpreter().named["_CLICK_L_"][&0], 0);
                 assert_eq!(scene.interpreter().named["_RELEASE_UP_"][&0], -1);
                 assert_eq!(scene.interpreter().named["_TOUCH_"][&0], -1);
                 assert_eq!(scene.raw_input(), 16);

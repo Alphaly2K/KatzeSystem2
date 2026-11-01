@@ -148,7 +148,6 @@ pub struct FesObject {
     list: Option<u32>,
     clip: crate::graphics::Rect,
     offset: [i32; 2],
-    exit_published: bool,
     first_update: bool,
     input_button: Option<u32>,
     input_mode: u32,
@@ -173,7 +172,6 @@ impl FesObject {
             list: None,
             clip: crate::graphics::Rect::default(),
             offset: [0; 2],
-            exit_published: false,
             first_update: true,
             input_button: None,
             input_mode: 0,
@@ -434,11 +432,8 @@ impl FesObject {
             self.base.clock.previous_time,
             budget,
         );
-        if !self.exit_published {
-            if let Some(code) = self.scene.as_ref().unwrap().exit_request() {
-                self.base.control.property = code as u32;
-                self.exit_published = true;
-            }
+        if let Some(code) = self.scene.as_mut().unwrap().take_exit_request() {
+            self.base.control.property = code as u32;
         }
         self.effects(host);
         result

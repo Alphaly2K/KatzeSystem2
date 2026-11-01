@@ -74,8 +74,7 @@ fn fes_plane_samples_canvas_tiles_and_keeps_source_and_screen_positions_separate
                 objects.initialize(&request, |_| unreachable!()).unwrap();
                 interpreter.resume();
             }
-            Step::Event(fes::Event::Exit(0)) => interpreter.resume(),
-            Step::Halted => break,
+            Step::Event(fes::Event::Exit(0)) => break,
             other => panic!("{other:?}"),
         }
     }

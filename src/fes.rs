@@ -202,6 +202,7 @@ pub enum Event {
     Subcommand(Box<SubcommandCall>),
     Wait(i32),
     Frame,
+    /// 退出通知；宿主确认后从下一语句继续，任务生命周期由上层处理。
     Exit(i32),
 }
 
@@ -212,7 +213,6 @@ pub struct Interpreter {
     calls: Vec<(usize, usize)>,
     local: Vec<i32>,
     pending: Option<Event>,
-    ended: bool,
     pub return_value: i32,
     /// 当前 FES 的宿主命名值；对象句柄与系统值均由宿主更新。
     pub named: BTreeMap<String, BTreeMap<i32, i32>>,
@@ -283,7 +283,6 @@ impl Interpreter {
             calls: Vec::new(),
             local: vec![0; 512],
             pending: None,
-            ended: false,
             return_value: 0,
             named: BTreeMap::new(),
             invocation: None,
@@ -340,9 +339,6 @@ impl Interpreter {
     pub fn run(&mut self, state: &mut State, budget: usize) -> Result<Step<Event>> {
         if let Some(event) = &self.pending {
             return Ok(Step::Event(event.clone()));
-        }
-        if self.ended {
-            return Ok(Step::Halted);
         }
         for _ in 0..budget {
             if let Some(declarations) = self.pre_declarations.take() {
@@ -495,7 +491,6 @@ impl Interpreter {
                     } else {
                         self.eval(&args[1], state)?
                     };
-                    self.ended = true;
                     Event::Exit(code)
                 }
                 b"wait"

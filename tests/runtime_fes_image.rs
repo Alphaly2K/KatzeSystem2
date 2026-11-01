@@ -166,8 +166,7 @@ fn fes_cimage_events_reach_shared_canvas_final_frame_and_subtree_cleanup() {
                     objects.initialize(&request, |_| unreachable!()).unwrap();
                     interpreter.resume();
                 }
-                Step::Event(fes::Event::Exit(0)) => interpreter.resume(),
-                Step::Halted => break,
+                Step::Event(fes::Event::Exit(0)) => break,
                 other => panic!("{other:?}"),
             }
         }
@@ -1185,8 +1184,7 @@ fn fes_animation_events_defer_loading_and_consume_requests_before_failed_loads()
                     commands += 1;
                     interpreter.resume();
                 }
-                Step::Event(fes::Event::Exit(0)) => interpreter.resume(),
-                Step::Halted => break,
+                Step::Event(fes::Event::Exit(0)) => break,
                 other => panic!("{other:?}"),
             }
         }
@@ -1204,7 +1202,7 @@ fn fes_animation_events_defer_loading_and_consume_requests_before_failed_loads()
 }
 
 #[test]
-fn fes_scenes_run_image_commands_and_flush_objects_before_waiting_or_exiting() {
+fn fes_scenes_run_image_commands_and_repeat_blocks_after_exit_notifications() {
     for budget in [1, 4096] {
         let (mut runtime, _, list) = setup();
         runtime.set_budget(budget, 10000);
@@ -1252,7 +1250,7 @@ fn fes_scenes_run_image_commands_and_flush_objects_before_waiting_or_exiting() {
                 .unwrap()
                 .image_animation_request()
                 .unwrap();
-            assert_eq!(request.playing(), i32::from(now >= 102));
+            assert_eq!(request.playing(), i32::from(now == 102));
             assert!(!request.is_pending());
             assert_eq!(scene.exit_code(), if now >= 102 { Some(7) } else { None });
             send(&mut runtime, list, 298, 0, 0);
@@ -1264,7 +1262,14 @@ fn fes_scenes_run_image_commands_and_flush_objects_before_waiting_or_exiting() {
                 &reads.borrow()[..2],
                 [b"raw".to_vec(), b"walk.anm".to_vec()]
             );
-            assert_eq!(reads.borrow().len(), if now >= 102 { 3 } else { 2 });
+            assert_eq!(
+                reads.borrow().len(),
+                match now {
+                    102 => 3,
+                    1000 => 4,
+                    _ => 2,
+                }
+            );
         }
     }
 }

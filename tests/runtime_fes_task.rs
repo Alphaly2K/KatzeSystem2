@@ -315,7 +315,7 @@ fn fes_tasks_load_without_starting_then_drive_pixels_and_keep_exit_properties() 
         send(&mut runtime, fes, 24, 0, 77);
         runtime.update(103, 1).unwrap();
         assert_eq!(send(&mut runtime, fes, 23, 0, 0), 77);
-        assert_eq!(runtime.numbers().shared[0..2], [1, 1]);
+        assert_eq!(runtime.numbers().shared[0..2], [2, 1]);
         assert_eq!(*reads.borrow(), [b"complete.fes".to_vec()]);
         runtime.destroy(fes).unwrap();
         assert!(runtime.object(fes).is_none());
@@ -449,7 +449,7 @@ fn fes_start_reads_the_running_parent_elapsed_clock_and_current_context() {
         assert_eq!(send(&mut runtime, child, 23, 0, 0), 13);
         runtime.update(503, 1).unwrap();
         assert_eq!(send(&mut runtime, child, 23, 0, 0), 13);
-        assert_eq!(runtime.numbers().shared[0..2], [1, 1]);
+        assert_eq!(runtime.numbers().shared[0..2], [404, 2]);
         assert_eq!(*reads.borrow(), [b"complete.fes".to_vec()]);
     }
 }
@@ -818,5 +818,46 @@ fn media_failure_retries_pause_without_repeating_the_system_block() {
             3
         );
         runtime.update(100, 1).unwrap();
+    }
+}
+
+#[test]
+fn system_exit_notifications_wait_for_the_body_and_main_exits_continue_the_script() {
+    let source = b"#START\n$0=$0+1\nwait 77\nexit 37\n$1=$1+1\nwait 5\n#_FES_SLEEP_\n$2=$2+1\nexit 9\n$2=999\n#_FES_WAKE_\nexit 11\n";
+    for budget in [1, 4096] {
+        for drain_while_waiting in [false, true] {
+            let Setup { mut runtime, .. } = setup(budget, source);
+            let fes = runtime.create(0, kind::FES, b"scene", b"").unwrap();
+            send(&mut runtime, fes, 337, 0, 0);
+            file(&mut runtime, fes, b"complete.fes").unwrap();
+            send(&mut runtime, fes, 339, 0, 0);
+            send(&mut runtime, fes, 24, 0, 73);
+            send(&mut runtime, fes, 348, 0, 1);
+            runtime.update(20, 1).unwrap();
+            assert_eq!(send(&mut runtime, fes, 23, 0, 0), 73);
+            send(&mut runtime, fes, 348, 0, 2);
+            send(&mut runtime, fes, 348, 0, 0);
+            assert_eq!(send(&mut runtime, fes, 23, 0, 0), 73);
+            assert_eq!(runtime.numbers().shared[2], 2);
+            if drain_while_waiting {
+                runtime.update(21, 1).unwrap();
+                assert_eq!(send(&mut runtime, fes, 23, 0, 0), 11);
+                send(&mut runtime, fes, 24, 0, 91);
+                runtime.update(22, 1).unwrap();
+                assert_eq!(send(&mut runtime, fes, 23, 0, 0), 91);
+            }
+            runtime.update(77, 1).unwrap();
+            assert_eq!(send(&mut runtime, fes, 23, 0, 0), 37);
+            assert_eq!(&runtime.numbers().shared[..3], &[1, 1, 2]);
+            send(&mut runtime, fes, 24, 0, 73);
+            for now in [78, 82, 83] {
+                runtime.update(now, 1).unwrap();
+                assert_eq!(send(&mut runtime, fes, 23, 0, 0), 73);
+            }
+            assert_eq!(runtime.numbers().shared[0], 2);
+            runtime.update(160, 1).unwrap();
+            assert_eq!(send(&mut runtime, fes, 23, 0, 0), 37);
+            assert_eq!(&runtime.numbers().shared[..3], &[2, 2, 2]);
+        }
     }
 }
