@@ -268,49 +268,117 @@ impl Interpolation {
 }
 
 impl Drawables {
-    /// 按登记顺序与基点 Z 绘制基础三角形；仅处理默认坐标组及普通混合。
+    /// 按登记顺序与基点 Z 绘制非纹理三角形；纹理图元需要 render_frame 的独立画布。
     pub fn render_triangles(
         &mut self,
         target: &mut super::RenderTarget,
         projection: &Projection,
         parent: [f32; 16],
     ) -> Result<bool> {
+        self.render_to(target, None, projection, parent, TextureFilter::Point)
+    }
+
+    /// 读取画布面块并写入独立的最终帧；过滤显式选择，连续调用继续混合输出。
+    pub fn render_frame(
+        &mut self,
+        output: &mut super::RenderTarget,
+        canvas: &super::RenderTarget,
+        projection: &Projection,
+        parent: [f32; 16],
+        filter: TextureFilter,
+    ) -> Result<bool> {
+        self.render_to(output, Some(canvas), projection, parent, filter)
+    }
+
+    fn render_to(
+        &mut self,
+        output: &mut super::RenderTarget,
+        canvas: Option<&super::RenderTarget>,
+        projection: &Projection,
+        parent: [f32; 16],
+        filter: TextureFilter,
+    ) -> Result<bool> {
         self.order();
         let mut touched = false;
         for id in &self.order {
             let drawable = &self.entries[id];
-            if drawable.display() == 0 || drawable.triangles().is_empty() {
+            if drawable.display() == 0 {
+                continue;
+            }
+            let count = drawable
+                .canvas_triangles()
+                .map_or(drawable.triangles().len(), |t| t.len());
+            if count == 0 {
                 continue;
             }
             if drawable.blend_mode() != 0 {
                 return Err(Error::new(0, "三角形特殊混合模式尚未接入"));
             }
             let position = drawable.transform().position();
-            // 原设备入口单次对象提交最多读取 32 个三角形。
-            for index in 0..drawable.triangles().len().min(32) {
-                let vertices = drawable
-                    .projected_triangle(index, parent, projection, [position[0], position[1]], true)
-                    .unwrap();
-                if vertices
-                    .iter()
-                    .any(|v| v.position[2].is_finite() && !(0.0..=1.0).contains(&v.position[2]))
-                {
-                    return Err(Error::new(0, "三角形深度裁剪尚未接入"));
-                }
-                if vertices.iter().all(|v| v.color == vertices[0].color) {
-                    touched |= target.blend_triangle(
-                        vertices.map(|v| [v.position[0], v.position[1]]),
-                        vertices[0].color,
+            let origin = [position[0], position[1]];
+            if drawable.canvas_triangles().is_some() {
+                let canvas =
+                    canvas.ok_or_else(|| Error::new(0, "纹理图元需要独立画布输入与帧输出"))?;
+                // 纹理入口按面块分批提交，每批最多三十二条，直到列表结束。
+                for index in 0..count {
+                    let triangle = drawable.transformed_canvas_triangle(index, parent).unwrap();
+                    let vertices = projection.project_triangle(
+                        triangle.vertices,
+                        drawable.transform().base_point()[2],
+                        origin,
+                        true,
                     );
-                } else {
-                    if vertices.iter().any(|v| !v.rhw.is_finite() || v.rhw <= 0.) {
-                        return Err(Error::new(0, "颜色插值需要有限的正 RHW"));
+                    validate_depth(vertices)?;
+                    if let Some(texture) = canvas
+                        .tiles()
+                        .get(triangle.tile as usize)
+                        .and_then(Option::as_ref)
+                    {
+                        if vertices.iter().any(|v| !v.rhw.is_finite() || v.rhw <= 0.) {
+                            return Err(Error::new(0, "纹理插值需要有限的正 RHW"));
+                        }
+                        touched |=
+                            output.blend_textured_triangle(vertices, triangle.uv, texture, filter);
+                    } else {
+                        touched |= draw_colors(output, vertices)?;
                     }
-                    touched |= target.blend_projected_triangle(vertices);
+                }
+            } else {
+                // 非纹理入口只提交本对象的前三十二条。
+                for index in 0..count.min(32) {
+                    let vertices = drawable
+                        .projected_triangle(index, parent, projection, origin, true)
+                        .unwrap();
+                    validate_depth(vertices)?;
+                    touched |= draw_colors(output, vertices)?;
                 }
             }
         }
         Ok(touched)
+    }
+}
+
+fn validate_depth(vertices: [ProjectedVertex; 3]) -> Result<()> {
+    if vertices
+        .iter()
+        .any(|v| v.position[2].is_finite() && !(0.0..=1.0).contains(&v.position[2]))
+    {
+        return Err(Error::new(0, "三角形深度裁剪尚未接入"));
+    }
+    Ok(())
+}
+
+fn draw_colors(target: &mut super::RenderTarget, vertices: [ProjectedVertex; 3]) -> Result<bool> {
+    if vertices.iter().all(|v| v.color == vertices[0].color) {
+        Ok(target.blend_triangle(
+            vertices.map(|v| [v.position[0], v.position[1]]),
+            vertices[0].color,
+        ))
+    } else {
+        if vertices.iter().any(|v| !v.rhw.is_finite() || v.rhw <= 0.) {
+            return Err(Error::new(0, "颜色插值需要有限的正 RHW"));
+        }
+        Ok(target.blend_projected_triangle(vertices))
     }
 }
 

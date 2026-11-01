@@ -135,6 +135,25 @@ impl<F: ObjectFactory> Runtime<F> {
         Some(object.as_mut())
     }
 
+    /// 以当前画布为纹理输入，向独立目标提交画面；不清空目标或执行设备呈现。
+    pub fn render_frame(
+        &mut self,
+        output: &mut crate::graphics::RenderTarget,
+        projection: &crate::graphics::Projection,
+        parent: [f32; 16],
+        filter: crate::graphics::TextureFilter,
+    ) -> Result<bool> {
+        let canvas = self
+            .resources
+            .drawing
+            .target
+            .as_ref()
+            .ok_or_else(|| Error::new(0, "运行时未配置画布纹理输入"))?;
+        self.resources
+            .drawables
+            .render_frame(output, canvas, projection, parent, filter)
+    }
+
     /// 配置同步资源读取与类别名称补全；已有资源对象继续保留。
     pub fn set_resources(&mut self, services: impl crate::kcs::ResourceServices + 'static) {
         self.resources.services = Some(Box::new(services));

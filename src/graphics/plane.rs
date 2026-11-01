@@ -238,6 +238,14 @@ impl TaskObject for PlaneObject {
                     }
                 }
             }
+            83 => {
+                drawings(host)?.remove(id);
+                let drawable = Drawable::from_canvas(
+                    buffers.data1.as_deref().unwrap_or(&[]),
+                    command.data[0],
+                )?;
+                drawings(host)?.insert(id, drawable)?;
+            }
             49 | 51 | 55 | 66 => {
                 let value = words::<3>(buffers.data1.as_deref())?.map(f32::from_bits);
                 let drawings = drawings(host)?;

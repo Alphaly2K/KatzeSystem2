@@ -1,4 +1,4 @@
-use super::{ProjectedVertex, Projection, Transform};
+use super::{CanvasTriangle, ProjectedVertex, Projection, Transform};
 use crate::kcs::float_operation;
 use crate::{Error, Result, read};
 use std::cmp::Ordering;
@@ -14,13 +14,14 @@ pub struct Vertex {
 /// 登记在绘图管理器中的三角形列表及对象属性。
 #[derive(Clone, Debug, PartialEq)]
 pub struct Drawable {
-    transform: Transform,
-    triangles: Vec<[Vertex; 3]>,
-    bounds: [[f32; 3]; 2],
-    color: u32,
-    color_enabled: u32,
-    display: u32,
-    blend_mode: u32,
+    pub(super) transform: Transform,
+    pub(super) triangles: Vec<[Vertex; 3]>,
+    pub(super) canvas_triangles: Option<Vec<CanvasTriangle>>,
+    pub(super) bounds: [[f32; 3]; 2],
+    pub(super) color: u32,
+    pub(super) color_enabled: u32,
+    pub(super) display: u32,
+    pub(super) blend_mode: u32,
 }
 
 impl Default for Drawable {
@@ -28,6 +29,7 @@ impl Default for Drawable {
         Self {
             transform: Transform::default(),
             triangles: Vec::new(),
+            canvas_triangles: None,
             bounds: [[0.0; 3]; 2],
             color: u32::MAX,
             color_enabled: 0,
