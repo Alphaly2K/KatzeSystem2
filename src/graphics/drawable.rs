@@ -138,8 +138,8 @@ pub(super) fn arithmetic(op: u8, left: f32, right: f32) -> f32 {
 /// 按对象编号索引、按登记及优先级维护绘制顺序；任务编号不决定同级顺序。
 #[derive(Default)]
 pub struct Drawables {
-    entries: BTreeMap<u32, Drawable>,
-    order: Vec<u32>,
+    pub(super) entries: BTreeMap<u32, Drawable>,
+    pub(super) order: Vec<u32>,
     order_dirty: bool,
 }
 

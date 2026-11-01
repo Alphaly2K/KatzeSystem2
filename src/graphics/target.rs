@@ -73,6 +73,24 @@ impl RenderTarget {
         self.dirty.fill(false);
     }
 
+    /// 以全局整数像素中心绘制纯色三角形，跨面块保留相同的亚像素边界。
+    pub fn blend_triangle(&mut self, points: [[f32; 2]; 3], argb: u32) -> bool {
+        let mut touched = false;
+        for row in 0..self.grid[1] {
+            for column in 0..self.grid[0] {
+                let index = row as usize * self.grid[0] as usize + column as usize;
+                if let Some(surface) = &mut self.tiles[index] {
+                    let origin = [column * self.tile_size[0], row * self.tile_size[1]];
+                    if surface.blend_triangle_at(points, argb, origin) {
+                        self.dirty[index] = true;
+                        touched = true;
+                    }
+                }
+            }
+        }
+        touched
+    }
+
     pub fn pixel(&self, x: u32, y: u32) -> Option<u32> {
         if x >= self.size[0] || y >= self.size[1] {
             return None;
@@ -205,6 +223,17 @@ pub struct DrawingContext {
 }
 
 impl DrawingContext {
+    pub fn render_triangles(
+        &mut self,
+        drawables: &mut super::Drawables,
+        projection: &super::Projection,
+        parent: [f32; 16],
+    ) -> Result<bool> {
+        self.active_target().map_or(Ok(false), |target| {
+            drawables.render_triangles(target, projection, parent)
+        })
+    }
+
     pub fn clear_rect(&mut self, rect: Rect) -> bool {
         self.active_target()
             .is_some_and(|target| target.clear_rect(rect))

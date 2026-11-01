@@ -165,6 +165,17 @@ impl<F: ObjectFactory> Runtime<F> {
         &mut self.resources.drawables
     }
 
+    /// 更新完成后显式绘制基础纯色图元；帧清空和平台呈现由调用者驱动。
+    pub fn render_triangles(
+        &mut self,
+        projection: &crate::graphics::Projection,
+        parent: [f32; 16],
+    ) -> Result<bool> {
+        self.resources
+            .drawing
+            .render_triangles(&mut self.resources.drawables, projection, parent)
+    }
+
     pub fn host(&self) -> &HostState {
         &self.host
     }
