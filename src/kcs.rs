@@ -268,6 +268,11 @@ pub trait Host {
         false
     }
 
+    /// 普通 8 使用的渲染上下文尺寸，独立于输入坐标映射与当前绘图目标。
+    fn surface_size(&self) -> [u32; 2] {
+        [0; 2]
+    }
+
     /// 查询当前对象的直接父任务编号；未提供服务或没有父任务时返回诊断。
     fn parent_task_id(&self) -> Result<u32> {
         Err(Error::new(0, "宿主未提供当前任务父级查询"))
@@ -361,6 +366,10 @@ impl<T: Host + ?Sized> Host for &mut T {
     }
     fn input_pointer_control(&self) -> bool {
         (**self).input_pointer_control()
+    }
+
+    fn surface_size(&self) -> [u32; 2] {
+        (**self).surface_size()
     }
 
     fn next_task_child(&self, previous: Option<u32>) -> Result<Option<u32>> {

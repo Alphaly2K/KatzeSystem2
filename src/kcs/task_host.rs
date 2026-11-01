@@ -60,6 +60,10 @@ impl<'a, H: Host, S: TaskServices> TaskHost<'a, H, S> {
 }
 
 impl<H: Host, S: TaskServices> Host for TaskHost<'_, H, S> {
+    fn surface_size(&self) -> [u32; 2] {
+        self.inner.surface_size()
+    }
+
     fn parent_task_id(&self) -> Result<u32> {
         if let Some(tree) = self.services.task_tree() {
             return tree

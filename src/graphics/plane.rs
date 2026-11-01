@@ -14,6 +14,7 @@ pub struct PlaneObject {
     input_states: [[u32; 3]; 4],
     event_target: u32,
     event_response: u32,
+    hint_target: u32,
     input_configured: bool,
     display: u32,
     update_property: u32,
@@ -37,6 +38,7 @@ impl PlaneObject {
             input_states: [[0; 3]; 4],
             event_target: u32::MAX,
             event_response: 0,
+            hint_target: u32::MAX,
             input_configured: false,
             display: 1,
             update_property: 1,
@@ -56,6 +58,10 @@ impl PlaneObject {
 
     pub fn update_property(&self) -> u32 {
         self.update_property
+    }
+
+    pub fn hint_target(&self) -> u32 {
+        self.hint_target
     }
 
     pub fn blend_mode(&self) -> u32 {
@@ -175,20 +181,99 @@ impl PlaneObject {
     }
 
     fn change_input_state(&mut self, state: u32, host: &mut dyn Host) -> Result<()> {
+        let z = drawings(host)?
+            .get(self.id)
+            .and_then(|d| d.geometry_transform(true))
+            .map_or(0., |t| t.position()[2]);
         if let Some(slot) = self.input_states.get(state as usize).filter(|v| v[0] != 0) {
             let drawings = drawings(host)?;
-            let z = drawings
-                .get(self.id)
-                .and_then(|d| d.geometry_transform(true))
-                .map_or(0., |t| t.position()[2]);
             drawings.set_geometry_position(
                 self.id,
                 [slot[1] as i32 as f32, slot[2] as i32 as f32, z],
                 true,
             );
+            if state == 3 && self.hint_target != u32::MAX {
+                self.hide_hint(host)?;
+            }
             self.input_state = state;
+            if self.hint_target != u32::MAX {
+                if state == 1 {
+                    if self.update_property != 0 {
+                        self.show_hint(host)?;
+                    }
+                } else {
+                    self.hide_hint(host)?;
+                }
+            }
         }
         Ok(())
+    }
+
+    fn hide_hint(&self, host: &mut dyn Host) -> Result<()> {
+        self.send_command(
+            self.hint_target,
+            47,
+            [0; 3],
+            &mut CommandBuffers::default(),
+            &mut 0,
+            host,
+        )
+    }
+
+    fn show_hint(&self, host: &mut dyn Host) -> Result<()> {
+        let input = self.input_task(host)?;
+        let [surface_width, _] = host.surface_size();
+        let mut rect = [0; 16];
+        self.send_command(
+            input,
+            131,
+            [self.id, 0, 0],
+            &mut CommandBuffers {
+                data1: Some(&mut rect),
+                ..CommandBuffers::default()
+            },
+            &mut 0,
+            host,
+        )?;
+        let mut width = [0; 4];
+        let mut height = [0; 4];
+        self.send_command(
+            self.hint_target,
+            75,
+            [0; 3],
+            &mut CommandBuffers {
+                data0: Some(&mut width),
+                data1: Some(&mut height),
+            },
+            &mut 0,
+            host,
+        )?;
+        let position = hint_position(
+            surface_width,
+            words::<4>(Some(&rect))?,
+            [f32::from_le_bytes(width), f32::from_le_bytes(height)],
+        );
+        let mut vector = [0; 12];
+        write_words(Some(&mut vector), &position.map(f32::to_bits))?;
+        self.send_command(
+            self.hint_target,
+            51,
+            [0; 3],
+            &mut CommandBuffers {
+                data1: Some(&mut vector),
+                ..CommandBuffers::default()
+            },
+            &mut 0,
+            host,
+        )?;
+        self.send_command(
+            self.hint_target,
+            47,
+            [0, 1, 0],
+            &mut CommandBuffers::default(),
+            &mut 0,
+            host,
+        )
     }
 
     fn select_input_state(&mut self, host: &mut dyn Host) -> Result<()> {
@@ -666,6 +751,9 @@ impl TaskObject for PlaneObject {
                 if self.input_state != 3 {
                     self.select_input_state(host)?;
                 }
+                if command.data[1] == 0 && self.hint_target != u32::MAX {
+                    self.hide_hint(host)?;
+                }
                 self.forward(48, command, buffers, output, host)?;
             }
             61 | 62 => {
@@ -734,6 +822,10 @@ impl TaskObject for PlaneObject {
                     ],
                 )?;
             }
+            77 => {
+                self.hint_target = command.data[1];
+                self.hide_hint(host)?;
+            }
             78 => self.update_property = command.data[1],
             81 => {
                 let value = command.data[1];
@@ -788,6 +880,25 @@ impl TaskObject for PlaneObject {
         self.control.deletion_requested = 1;
         Ok(true)
     }
+}
+
+fn hint_position(surface_width: u32, rect: [u32; 4], size: [f32; 2]) -> [f32; 3] {
+    // 原尺寸转换返回 i64，定位只使用其低 DWORD；无效转换的低位为零。
+    let [width, height] = size.map(|value| {
+        if (-9_223_372_036_854_775_808.0..9_223_372_036_854_775_808.0).contains(&(value as f64)) {
+            value as i64 as u32
+        } else {
+            0
+        }
+    });
+    let above = rect[1].wrapping_sub(height);
+    let y = if (above as i32) >= 0 { above } else { rect[3] };
+    let half = rect[0].wrapping_sub(rect[2]).wrapping_add(width) >> 1;
+    let mut x = rect[0].wrapping_sub(half);
+    if x.wrapping_add(width) >= surface_width {
+        x = surface_width.wrapping_sub(width);
+    }
+    [(x as i32).max(0) as f32, y as i32 as f32, 0.]
 }
 
 fn truncate(value: f32) -> i32 {

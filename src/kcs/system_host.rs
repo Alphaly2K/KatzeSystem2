@@ -32,6 +32,10 @@ impl<'a, H: Host, S: SystemServices> SystemHost<'a, H, S> {
 }
 
 impl<H: Host, S: SystemServices> Host for SystemHost<'_, H, S> {
+    fn surface_size(&self) -> [u32; 2] {
+        self.inner.surface_size()
+    }
+
     fn parent_task_id(&self) -> Result<u32> {
         self.inner.parent_task_id()
     }

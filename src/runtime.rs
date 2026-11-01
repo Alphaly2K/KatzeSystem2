@@ -991,6 +991,10 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
 }
 
 impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
+    fn surface_size(&self) -> [u32; 2] {
+        self.host.surface_size
+    }
+
     fn parent_task_id(&self) -> Result<u32> {
         self.tree
             .node(self.host.task_id)

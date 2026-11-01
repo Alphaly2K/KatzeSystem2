@@ -706,6 +706,72 @@ fn geometry_changes_refresh_bounds_without_reprioritizing_or_scaling_the_region(
 }
 
 #[test]
+fn associated_hint_uses_input_bounds_and_context_width_and_keeps_display_gates() {
+    let (mut runtime, _, _, _) = setup();
+    runtime.host_mut().surface_size = [800, 600];
+    runtime.input_coordinates_mut().logical_size = [320, 240];
+    configure(&mut runtime, &mut states());
+    let hint = runtime.create(0, kind::PLANE, b"hint", b"").unwrap();
+    let rectangle = |runtime: &mut TestRuntime, width: f32| {
+        let mut data = bytes(&[0, 0, 0, width.to_bits(), 20.5f32.to_bits(), 0, 0, u32::MAX]);
+        runtime
+            .dispatch_command_with_buffers(
+                0,
+                packet(hint, 2, 42, [0; 3]),
+                &mut CommandBuffers {
+                    data1: Some(&mut data),
+                    ..CommandBuffers::default()
+                },
+            )
+            .unwrap();
+    };
+    rectangle(&mut runtime, 40.5);
+    send(&mut runtime, 3, 77, hint);
+    assert_eq!(runtime.drawables().get(hint).unwrap().display(), 0);
+    send(&mut runtime, 3, 73, 1);
+    let drawing = runtime.drawables().get(hint).unwrap();
+    assert_eq!(drawing.transform().position(), [760., 10., 0.]);
+    assert_eq!(drawing.display(), 1);
+    send(&mut runtime, 3, 78, 0);
+    send(&mut runtime, 3, 73, 1);
+    assert_eq!(runtime.drawables().get(hint).unwrap().display(), 1);
+    send(&mut runtime, 3, 73, 0);
+    send(&mut runtime, 3, 73, 1);
+    assert_eq!(runtime.drawables().get(hint).unwrap().display(), 0);
+    send(&mut runtime, 3, 78, 2);
+    send(&mut runtime, 3, 73, 1);
+    assert_eq!(runtime.drawables().get(hint).unwrap().display(), 1);
+    rectangle(&mut runtime, f32::NAN);
+    send(&mut runtime, 3, 73, 1);
+    assert_eq!(
+        runtime
+            .drawables()
+            .get(hint)
+            .unwrap()
+            .transform()
+            .position(),
+        [800., 10., 0.]
+    );
+    // 隐藏自身仍先处理当前选择，最后将关联提示隐藏。
+    runtime
+        .dispatch_command(0, packet(1, 0, 133, [3, 1, 0]))
+        .unwrap();
+    send(&mut runtime, 3, 47, 0);
+    assert_eq!(send(&mut runtime, 3, 74, 0), 1);
+    assert_eq!(runtime.drawables().get(hint).unwrap().display(), 0);
+    send(&mut runtime, 3, 73, 1);
+    let next = runtime.create(0, kind::PLANE, b"next", b"").unwrap();
+    runtime
+        .drawables_mut()
+        .insert(next, katze_system2::graphics::Drawable::default())
+        .unwrap();
+    runtime.drawables_mut().set_display(next, 7);
+    send(&mut runtime, 3, 77, next);
+    assert_eq!(runtime.drawables().get(hint).unwrap().display(), 1);
+    assert_eq!(runtime.drawables().get(next).unwrap().display(), 0);
+}
+
+#[test]
 fn bound_self_display_uses_parent_visibility_and_preserves_state_when_parent_drawing_is_missing() {
     let (mut runtime, _, _, _) = setup();
     let child = runtime.create(3, kind::PLANE, b"child", b"").unwrap();

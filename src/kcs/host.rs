@@ -119,6 +119,10 @@ impl std::ops::DerefMut for CoreHost<'_> {
 }
 
 impl Host for CoreHost<'_> {
+    fn surface_size(&self) -> [u32; 2] {
+        self.host.surface_size
+    }
+
     fn parent_task_id(&self) -> Result<u32> {
         self.task_tree
             .and_then(|tree| tree.node(self.host.task_id))

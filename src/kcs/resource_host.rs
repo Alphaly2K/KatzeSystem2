@@ -67,6 +67,10 @@ impl ResourceState {
 }
 
 impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
+    fn surface_size(&self) -> [u32; 2] {
+        self.inner.surface_size()
+    }
+
     fn parent_task_id(&self) -> Result<u32> {
         self.inner.parent_task_id()
     }
