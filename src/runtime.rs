@@ -111,13 +111,14 @@ impl<F: ObjectFactory> Runtime<F> {
     ) -> Self {
         let mut host = HostState::default();
         host.configured_shared_slots = numbers.shared.len() as u32;
+        let resources = Resources::with_handles(host.handle_allocator());
         Self {
             tree: TaskTree::new(root_id, root_kind),
             objects: BTreeMap::from([(root_id, root)]),
             running: BTreeMap::new(),
             numbers,
             host,
-            resources: Resources::default(),
+            resources,
             factory,
             budget: DEFAULT_BUDGET,
             limit: DEFAULT_LIMIT,
@@ -202,6 +203,7 @@ impl<F: ObjectFactory> Runtime<F> {
         &self.host
     }
 
+    /// 修改共享宿主状态；整体替换时须沿用原状态的 `handle_allocator()`。
     pub fn host_mut(&mut self) -> &mut HostState {
         &mut self.host
     }
@@ -970,6 +972,10 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
 }
 
 impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
+    fn handle_allocator(&self) -> Option<crate::HandleAllocator> {
+        Some(self.host.handle_allocator())
+    }
+
     fn image(&self, handle: u32) -> Result<&crate::graphics::Image> {
         self.resources.images.get(handle)
     }

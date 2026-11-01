@@ -60,6 +60,10 @@ impl<'a, H: Host, S: TaskServices> TaskHost<'a, H, S> {
 }
 
 impl<H: Host, S: TaskServices> Host for TaskHost<'_, H, S> {
+    fn handle_allocator(&self) -> Option<crate::HandleAllocator> {
+        self.inner.handle_allocator()
+    }
+
     fn drawables(&mut self) -> Option<&mut crate::graphics::Drawables> {
         self.inner.drawables()
     }

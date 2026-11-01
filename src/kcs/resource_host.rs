@@ -1,6 +1,6 @@
 use super::{Host, Interpreter, NativeReturn, TaskClock, strings};
 use crate::resource::{ResourceMode, XmlDocument};
-use crate::{Error, Result, read};
+use crate::{Error, HandleAllocator, Result, read};
 use std::collections::BTreeMap;
 
 /// 普通脚本的同步资源读取服务；None 表示未找到或无法打开。
@@ -20,28 +20,20 @@ pub struct ResourceHost<'a, H, S> {
     state: ResourceState,
 }
 
+#[derive(Default)]
 pub(crate) struct ResourceState {
     xml: BTreeMap<u32, XmlDocument>,
     images: BTreeMap<u32, Vec<u8>>,
-    next_handle: u32,
-}
-
-impl Default for ResourceState {
-    fn default() -> Self {
-        Self {
-            xml: BTreeMap::new(),
-            images: BTreeMap::new(),
-            next_handle: 1,
-        }
-    }
+    handles: HandleAllocator,
 }
 
 impl<'a, H: Host, S: ResourceServices> ResourceHost<'a, H, S> {
     pub fn new(inner: &'a mut H, services: &'a mut S) -> Self {
+        let handles = inner.handle_allocator().unwrap_or_default();
         Self {
             inner,
             services,
-            state: ResourceState::default(),
+            state: ResourceState::with_handles(handles),
         }
     }
 
@@ -52,6 +44,13 @@ impl<'a, H: Host, S: ResourceServices> ResourceHost<'a, H, S> {
 }
 
 impl ResourceState {
+    pub fn with_handles(handles: HandleAllocator) -> Self {
+        Self {
+            handles,
+            ..Self::default()
+        }
+    }
+
     pub fn image_data(&self, handle: u32) -> Result<&[u8]> {
         self.images
             .get(&handle)
@@ -63,15 +62,15 @@ impl ResourceState {
         if self.xml.len() + self.images.len() >= read::MAX_ITEMS {
             return Err(Error::new(offset, "KCS 资源对象数量超过上限"));
         }
-        let handle = self.next_handle;
-        self.next_handle = handle
-            .checked_add(1)
-            .ok_or_else(|| Error::new(offset, "KCS 资源句柄耗尽"))?;
-        Ok(handle)
+        self.handles.allocate_at(offset)
     }
 }
 
 impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
+    fn handle_allocator(&self) -> Option<HandleAllocator> {
+        Some(self.state.handles.clone())
+    }
+
     fn drawables(&mut self) -> Option<&mut crate::graphics::Drawables> {
         self.inner.drawables()
     }

@@ -1,7 +1,7 @@
 use super::{Host, Interpreter, MemoryCopyMode, NativeReturn, ScriptRandom, TaskClock};
 use super::{memory, numeric, strings};
 use crate::task::TaskTree;
-use crate::{Error, Result, expression, read, text};
+use crate::{Error, HandleAllocator, Result, expression, read, text};
 use std::collections::BTreeMap;
 
 pub(crate) fn hierarchy_query(
@@ -37,6 +37,7 @@ pub struct MenuItemRequest {
 
 /// 普通任务表的持久宿主状态；数值区由 `CoreHost::state` 单独提供，
 /// 以便同一份状态在多次 native 调用之间保留集合句柄、随机序列和请求队列。
+#[derive(Default)]
 pub struct HostState {
     pub configured_shared_slots: u32,
     pub debug_messages: Vec<Vec<u8>>,
@@ -54,33 +55,22 @@ pub struct HostState {
     pub random: ScriptRandom,
     integer_maps: BTreeMap<u32, BTreeMap<Vec<u8>, u32>>,
     sequence_maps: BTreeMap<u32, super::sequences::SequenceMap>,
-    next_collection_handle: u32,
-}
-
-impl Default for HostState {
-    fn default() -> Self {
-        Self {
-            configured_shared_slots: 0,
-            debug_messages: Vec::new(),
-            menu_item_requests: Vec::new(),
-            task_time: 0,
-            task_origin: 0,
-            task_id: 0,
-            system_time_ms: 0,
-            debug_mode: 0,
-            sequence_name_mode: 0,
-            surface_size: [0; 2],
-            pointer_position: [0; 2],
-            memory_copy_mode: MemoryCopyMode::default(),
-            random: ScriptRandom::default(),
-            integer_maps: BTreeMap::new(),
-            sequence_maps: BTreeMap::new(),
-            next_collection_handle: 1,
-        }
-    }
+    handles: HandleAllocator,
 }
 
 impl HostState {
+    /// 创建空宿主状态，并与外部资源存储共用句柄编号源。
+    pub fn with_handles(handles: HandleAllocator) -> Self {
+        Self {
+            handles,
+            ..Self::default()
+        }
+    }
+
+    pub fn handle_allocator(&self) -> HandleAllocator {
+        self.handles.clone()
+    }
+
     /// 保存任务时钟供 native 5 查询；不修改平台或其他状态。
     pub fn set_task_clock(&mut self, clock: &TaskClock) {
         self.task_origin = clock.origin;
@@ -91,6 +81,7 @@ impl HostState {
 /// 在已有数值状态上提供普通任务表中已核实的接口。
 pub struct CoreHost<'a> {
     pub state: &'a mut expression::State,
+    /// 与资源包装组合后，整体替换状态须沿用原状态的 `handle_allocator()`。
     pub host: HostState,
     pub task_tree: Option<&'a TaskTree>,
 }
@@ -128,6 +119,10 @@ impl std::ops::DerefMut for CoreHost<'_> {
 }
 
 impl Host for CoreHost<'_> {
+    fn handle_allocator(&self) -> Option<HandleAllocator> {
+        Some(self.host.handle_allocator())
+    }
+
     fn set_task_id(&mut self, id: u32) {
         self.host.task_id = id;
     }
@@ -182,10 +177,7 @@ pub(crate) fn call_native(
         if host.integer_maps.len() + host.sequence_maps.len() >= read::MAX_ITEMS {
             return Err(Error::new(vm.pc, "KCS 集合对象数量超过上限"));
         }
-        let handle = host.next_collection_handle;
-        host.next_collection_handle = handle
-            .checked_add(1)
-            .ok_or_else(|| Error::new(vm.pc, "KCS 集合对象句柄耗尽"))?;
+        let handle = host.handles.allocate_at(vm.pc)?;
         if index == 419 {
             host.sequence_maps.insert(handle, Default::default());
         } else {

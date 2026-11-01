@@ -6,6 +6,7 @@ pub mod cstl;
 pub mod expression;
 pub mod fes;
 pub mod graphics;
+mod handles;
 pub mod hg3;
 pub mod input;
 pub mod kcs;
@@ -16,6 +17,8 @@ pub mod task;
 mod text;
 
 use std::fmt;
+
+pub use handles::HandleAllocator;
 
 pub type Result<T> = std::result::Result<T, Error>;
 

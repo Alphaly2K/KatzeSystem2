@@ -73,6 +73,21 @@ impl ProgramLoader for Programs {
         data[64..70].copy_from_slice(b"value\0");
         data[80..85].copy_from_slice(b"text\0");
         match name {
+            b"mixed" => {
+                for (native, args, result) in [
+                    (112, vec![2, 1], 8),
+                    (365, vec![32], 0),
+                    (419, vec![], 12),
+                    (590, vec![48], 4),
+                    (515, vec![], 16),
+                ] {
+                    for value in &args {
+                        push(&mut code, *value);
+                    }
+                    ins(&mut code, 0x2b, &[native, args.len() as u32 * 4]);
+                    ins(&mut code, 0x26, &[result]);
+                }
+            }
             b"load" => {
                 for (native, address, result) in [(365, 32, 0), (590, 48, 4)] {
                     push(&mut code, address);
@@ -143,6 +158,12 @@ impl ProgramLoader for Programs {
                 ins(&mut code, 0x2b, &[590, 4]);
                 push(&mut code, 0xfeed_face);
                 ins(&mut code, 0x26, &[12]);
+            }
+            name if name.len() == 4 => {
+                let native = u32::from_le_bytes(name.try_into().unwrap());
+                assert!(matches!(native, 114 | 366 | 420 | 516 | 591));
+                load(&mut code, 0);
+                ins(&mut code, 0x2b, &[native, 4]);
             }
             _ => unreachable!(),
         }
@@ -246,4 +267,104 @@ fn null_resource_operations_work_without_services_and_actual_load_reports_missin
             .flat_map(u32::to_le_bytes)
             .collect::<Vec<_>>()
     );
+}
+
+#[test]
+fn mixed_runtime_handles_reject_other_types_and_never_reuse_released_numbers() {
+    fn handles(runtime: &Runtime<KcsFactory<Programs>>, id: u32) -> Vec<u32> {
+        runtime
+            .object(id)
+            .unwrap()
+            .interpreter()
+            .unwrap()
+            .read(0, 20)
+            .unwrap()
+            .chunks_exact(4)
+            .map(|bytes| u32::from_le_bytes(bytes.try_into().unwrap()))
+            .collect()
+    }
+
+    for budget in [1, 4096] {
+        let mut runtime = runtime();
+        runtime.set_budget(budget, 1 << 20);
+        runtime.set_resources(Files {
+            value: 17,
+            requests: Requests::default(),
+        });
+        let producer = runtime.create(0, kind::ORDINARY, b"mixed", b"").unwrap();
+        runtime.update(0, 0).unwrap();
+        let original = handles(&runtime, producer);
+        let unique: std::collections::BTreeSet<_> = original.iter().copied().collect();
+        assert_eq!(unique.len(), 5);
+        assert!(!unique.contains(&0));
+        for (kind, handle) in original.iter().enumerate() {
+            assert_eq!(runtime.images().get(*handle).is_ok(), kind == 2);
+            assert_eq!(runtime.image_data(*handle).is_ok(), kind == 0);
+        }
+
+        for (correct_type, native) in [366u32, 591, 114, 420, 516].into_iter().enumerate() {
+            for (other_type, handle) in original.iter().enumerate() {
+                if other_type == correct_type {
+                    continue;
+                }
+                let id = runtime
+                    .create(0, kind::ORDINARY, &native.to_le_bytes(), b"")
+                    .unwrap();
+                runtime
+                    .object_mut(id)
+                    .unwrap()
+                    .interpreter_mut()
+                    .unwrap()
+                    .write(0, &handle.to_le_bytes())
+                    .unwrap();
+                let error = runtime.update(0, 0).unwrap_err();
+                assert!(error.message.contains("句柄"), "{error}");
+                runtime.update(0, 0).unwrap();
+                runtime.destroy(id).unwrap();
+            }
+        }
+        // 每个原对象仍能由正确的入口释放，交叉释放没有损坏其存储。
+        for (native, handle) in [366u32, 591, 114, 420, 516].into_iter().zip(&original) {
+            let id = runtime
+                .create(0, kind::ORDINARY, &native.to_le_bytes(), b"")
+                .unwrap();
+            runtime
+                .object_mut(id)
+                .unwrap()
+                .interpreter_mut()
+                .unwrap()
+                .write(0, &handle.to_le_bytes())
+                .unwrap();
+            runtime.update(0, 0).unwrap();
+            runtime.destroy(id).unwrap();
+        }
+        assert!(runtime.images().get(original[2]).is_err());
+        assert!(runtime.image_data(original[0]).is_err());
+        runtime.destroy(producer).unwrap();
+        runtime.update(0, 0).unwrap();
+
+        let next = runtime.create(0, kind::ORDINARY, b"mixed", b"").unwrap();
+        assert_eq!(next, producer);
+        runtime.update(0, 0).unwrap();
+        let second = handles(&runtime, next);
+        assert!(second.iter().all(|handle| handle > unique.last().unwrap()));
+        runtime.destroy(next).unwrap();
+        assert!(runtime.images().get(second[2]).is_err());
+        assert!(runtime.image_data(second[0]).is_ok());
+
+        runtime.set_resources(Files {
+            value: 23,
+            requests: Requests::default(),
+        });
+        let next = runtime.create(0, kind::ORDINARY, b"mixed", b"").unwrap();
+        runtime.update(0, 0).unwrap();
+        let third = handles(&runtime, next);
+        assert!(
+            third
+                .iter()
+                .all(|handle| handle > second.iter().max().unwrap())
+        );
+        assert!(runtime.image_data(second[0]).is_ok());
+        assert!(runtime.images().get(second[2]).is_err());
+    }
 }

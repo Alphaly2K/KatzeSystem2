@@ -17,6 +17,14 @@ pub(super) struct Resources {
 }
 
 impl Resources {
+    pub fn with_handles(handles: crate::HandleAllocator) -> Self {
+        Self {
+            images: Images::with_handles(handles.clone()),
+            raw: ResourceState::with_handles(handles),
+            ..Self::default()
+        }
+    }
+
     pub fn call(
         &mut self,
         owner: u32,

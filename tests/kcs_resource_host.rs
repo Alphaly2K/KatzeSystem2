@@ -45,6 +45,61 @@ fn call(host: &mut impl Host, vm: &mut Interpreter, index: u32, args: &[u32]) ->
 }
 
 #[test]
+fn resource_wrappers_share_handles_with_collections_and_external_images() {
+    struct Files;
+    impl ResourceServices for Files {
+        fn resolve(&mut self, _: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+            Ok(name.to_vec())
+        }
+        fn read(&mut self, name: &[u8], _: ResourceMode) -> Result<Option<Vec<u8>>> {
+            Ok(match name {
+                b"xml" => Some(b"<?xml version=\"1.0\" encoding=\"UTF-8\"?><document/>".to_vec()),
+                b"raw" => Some(vec![7]),
+                b"bad" => Some(b"invalid XML".to_vec()),
+                b"empty" => Some(vec![]),
+                _ => None,
+            })
+        }
+    }
+    fn value(result: NativeReturn) -> u32 {
+        let NativeReturn::Value(handle) = result else {
+            panic!()
+        };
+        handle
+    }
+    let mut vm =
+        Interpreter::new(Program::from_code(&[], vec![0; 32], 16).unwrap(), vec![]).unwrap();
+    let mut numbers = State::new(0);
+    let mut core = CoreHost::new(&mut numbers);
+    let mut inner = &mut core;
+    let mut services = Files;
+    let mut host = ResourceHost::new(&mut inner, &mut services);
+    let mut images =
+        katze_system2::graphics::Images::with_handles(host.handle_allocator().unwrap());
+    let mut handles = vec![value(call(&mut host, &mut vm, 419, &[]))];
+    assert!(images.create(0, [u32::MAX, 2]).is_err());
+    for name in [b"missing\0".as_slice(), b"bad\0"] {
+        vm.write(0, name).unwrap();
+        assert_eq!(call(&mut host, &mut vm, 590, &[0]), NativeReturn::Value(0));
+    }
+    for name in [b"missing\0".as_slice(), b"empty\0"] {
+        vm.write(0, name).unwrap();
+        assert_eq!(call(&mut host, &mut vm, 365, &[0]), NativeReturn::Value(0));
+    }
+    handles.push(images.create(0, [1, 1]).unwrap());
+    for (native, name) in [(365, b"raw\0".as_slice()), (590, b"xml\0")] {
+        vm.write(0, name).unwrap();
+        handles.push(value(call(&mut host, &mut vm, native, &[0])));
+    }
+    handles.push(value(call(&mut host, &mut vm, 515, &[])));
+    assert_eq!(handles, [1, 2, 3, 4, 5]);
+    images.release(handles[1]).unwrap();
+    call(&mut host, &mut vm, 420, &[handles[0]]);
+    assert_eq!(value(call(&mut host, &mut vm, 419, &[])), 6);
+    assert_eq!(images.create(0, [0, 0]).unwrap(), 7);
+}
+
+#[test]
 fn xml_handles_keep_raw_fields_null_shortcuts_and_independent_lifetimes() {
     let mut vm = Interpreter::new(
         Program::from_code(&[], vec![0; 256], 64).unwrap(),

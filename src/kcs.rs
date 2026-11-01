@@ -227,6 +227,11 @@ pub struct TaskEffects {
 pub trait Host {
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn>;
 
+    /// 外层资源宿主共用的编号源；不创建句柄的宿主可以不提供。
+    fn handle_allocator(&self) -> Option<crate::HandleAllocator> {
+        None
+    }
+
     fn set_task_clock(&mut self, _clock: &TaskClock) {}
 
     fn set_task_id(&mut self, _id: u32) {}
@@ -307,6 +312,10 @@ pub trait Host {
 }
 
 impl<T: Host + ?Sized> Host for &mut T {
+    fn handle_allocator(&self) -> Option<crate::HandleAllocator> {
+        (**self).handle_allocator()
+    }
+
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn> {
         (**self).call(index, arguments, vm)
     }

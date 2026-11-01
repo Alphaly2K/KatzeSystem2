@@ -2,7 +2,7 @@ use super::{ImageRegion, Rect, Surface};
 use crate::hg3::{DecodedFrame, StandardInfo};
 use crate::kcs::ResourceServices;
 use crate::resource::ResourceMode;
-use crate::{Error, Result, hg3, read};
+use crate::{Error, HandleAllocator, Result, hg3, read};
 use std::collections::BTreeMap;
 
 /// 普通 111 的单个图像名称；帧号位于冒号后，扩展名按原名称重新拼接。
@@ -180,10 +180,18 @@ impl Image {
 #[derive(Default)]
 pub struct Images {
     entries: BTreeMap<u32, (u32, Image)>,
-    next_handle: u32,
+    handles: HandleAllocator,
 }
 
 impl Images {
+    /// 与其他类型的存储共用编号源，避免跨类型编号碰撞。
+    pub fn with_handles(handles: HandleAllocator) -> Self {
+        Self {
+            entries: BTreeMap::new(),
+            handles,
+        }
+    }
+
     pub fn create(&mut self, owner: u32, size: [u32; 2]) -> Result<u32> {
         self.insert(owner, Image::new(size)?)
     }
@@ -226,10 +234,7 @@ impl Images {
         if self.entries.len() == read::MAX_ITEMS {
             return Err(Error::new(0, "图像对象数量超过上限"));
         }
-        let handle = self.next_handle.max(1);
-        self.next_handle = handle
-            .checked_add(1)
-            .ok_or_else(|| Error::new(0, "图像句柄耗尽"))?;
+        let handle = self.handles.allocate()?;
         self.entries.insert(handle, (owner, image));
         Ok(handle)
     }
