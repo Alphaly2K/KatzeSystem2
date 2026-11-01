@@ -84,7 +84,7 @@ pub trait TaskObject {
     }
 }
 
-/// 只有基类控制与时钟的对象，用于根任务和不执行脚本的类型。
+/// 只有基类控制与时钟的对象。
 pub struct BaseObject {
     pub control: Control,
     pub clock: TaskClock,

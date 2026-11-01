@@ -10,6 +10,12 @@ pub struct PlaneObject {
     control: Control,
     clock: TaskClock,
     input_state: u32,
+    input_locked: bool,
+    input_states: [[u32; 3]; 4],
+    event_target: u32,
+    event_response: u32,
+    input_configured: bool,
+    display: u32,
     update_property: u32,
     blend_mode: u32,
     creation_flags: u32,
@@ -26,6 +32,12 @@ impl PlaneObject {
             control: Control::default(),
             clock: TaskClock::default(),
             input_state: 0,
+            input_locked: false,
+            input_states: [[0; 3]; 4],
+            event_target: u32::MAX,
+            event_response: 0,
+            input_configured: false,
+            display: 1,
             update_property: 1,
             blend_mode: 0,
             creation_flags: 1,
@@ -67,6 +79,191 @@ impl PlaneObject {
     /// 上次成功装载的 KX2 名称；清除图元或装载失败不改写此值。
     pub fn geometry_name(&self) -> &[u8] {
         &self.geometry_name
+    }
+
+    fn input_command(
+        &self,
+        code: u32,
+        data: [u32; 3],
+        buffers: &mut CommandBuffers<'_>,
+        host: &mut dyn Host,
+    ) -> Result<u32> {
+        let mut input = 0;
+        host.dispatch_task_command(
+            Command {
+                target: 0,
+                sender: self.id,
+                code: 34,
+                data: [0; 3],
+            },
+            &mut CommandBuffers::default(),
+            &mut input,
+        )?;
+        let mut output = 0;
+        self.send_command(input, code, data, buffers, &mut output, host)?;
+        Ok(output)
+    }
+
+    fn send_command(
+        &self,
+        target: u32,
+        code: u32,
+        data: [u32; 3],
+        buffers: &mut CommandBuffers<'_>,
+        output: &mut u32,
+        host: &mut dyn Host,
+    ) -> Result<()> {
+        host.dispatch_task_command(
+            Command {
+                target,
+                sender: self.id,
+                code,
+                data,
+            },
+            buffers,
+            output,
+        )?;
+        Ok(())
+    }
+
+    fn change_input_state(&mut self, state: u32, host: &mut dyn Host) -> Result<()> {
+        if let Some(slot) = self.input_states.get(state as usize).filter(|v| v[0] != 0) {
+            let drawings = drawings(host)?;
+            let z = drawings
+                .get(self.id)
+                .and_then(|d| d.geometry_transform(true))
+                .map_or(0., |t| t.position()[2]);
+            drawings.set_geometry_position(
+                self.id,
+                [slot[1] as i32 as f32, slot[2] as i32 as f32, z],
+                true,
+            );
+            self.input_state = state;
+        }
+        Ok(())
+    }
+
+    fn select_input_state(&mut self, host: &mut dyn Host) -> Result<()> {
+        let selected =
+            self.input_command(134, [self.id, 0, 0], &mut CommandBuffers::default(), host)?;
+        if selected != 0 && self.input_states[1][0] != 0 {
+            self.change_input_state(1, host)?;
+        } else if self.input_states[0][0] != 0 {
+            self.change_input_state(0, host)?;
+        }
+        Ok(())
+    }
+
+    fn configure_input(&mut self, command: &Command, host: &mut dyn Host) -> Result<()> {
+        if self.event_target == u32::MAX {
+            let (base, position) = drawings(host)?
+                .get(self.id)
+                .and_then(|d| d.geometry_transform(false))
+                .map(|t| (t.base_point(), t.position()))
+                .ok_or_else(|| Error::new(0, "输入区域登记需要已创建的二维图元"))?;
+            let origin: [f32; 2] = std::array::from_fn(|i| position[i] - base[i]);
+            let mut rect = [
+                truncate(origin[0]),
+                truncate(origin[1]),
+                truncate(origin[0] + self.size[0]),
+                truncate(origin[1] + self.size[1]),
+            ];
+            let logical = host.input_coordinates().logical_size;
+            if rect[0] <= 0 && rect[1] <= 0 && rect[2] >= logical[0] && rect[3] >= logical[1] {
+                rect = [-100_000, -100_000, 100_000, 100_000];
+            }
+            let priority = truncate(base[2]) as u32;
+            let mut region = [0; 60];
+            write_words(
+                Some(&mut region),
+                &[
+                    self.id,
+                    priority,
+                    7,
+                    rect[0] as u32,
+                    rect[1] as u32,
+                    rect[2] as u32,
+                    rect[3] as u32,
+                ],
+            )?;
+            self.input_command(
+                127,
+                [priority, 0, 0],
+                &mut CommandBuffers {
+                    data1: Some(&mut region),
+                    ..CommandBuffers::default()
+                },
+                host,
+            )?;
+            self.event_target = command.sender;
+            self.event_response = 1;
+        }
+        self.input_configured = true;
+        Ok(())
+    }
+
+    fn unregister_input(&mut self, propagation: u32, host: &mut dyn Host) -> Result<()> {
+        if self.event_target != u32::MAX {
+            self.input_command(
+                128,
+                [0, self.id, propagation],
+                &mut CommandBuffers::default(),
+                host,
+            )?;
+            self.event_target = u32::MAX;
+            self.event_response = 1;
+        }
+        Ok(())
+    }
+
+    fn enable_input(&self, enabled: u32, propagation: u32, host: &mut dyn Host) -> Result<()> {
+        if self.event_target != u32::MAX {
+            let mut input = 0;
+            host.dispatch_task_command(
+                Command {
+                    target: 0,
+                    sender: self.id,
+                    code: 34,
+                    data: [0; 3],
+                },
+                &mut CommandBuffers::default(),
+                &mut input,
+            )?;
+            let mut output = 0;
+            for code in [135].into_iter().chain((enabled == 0).then_some(133)) {
+                self.send_command(
+                    input,
+                    code,
+                    [self.id, enabled, propagation],
+                    &mut CommandBuffers::default(),
+                    &mut output,
+                    host,
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    fn notify_event(
+        &mut self,
+        code: u32,
+        data: [u32; 3],
+        buffers: &mut CommandBuffers<'_>,
+        host: &mut dyn Host,
+    ) -> Result<()> {
+        let mut output = 0;
+        host.dispatch_graphics_event(
+            &mut self.event_response,
+            Command {
+                target: self.event_target,
+                sender: self.id,
+                code,
+                data,
+            },
+            buffers,
+            &mut output,
+        )?;
+        Ok(())
     }
 
     fn forward(
@@ -136,6 +333,7 @@ impl TaskObject for PlaneObject {
         _budget: usize,
     ) -> Result<bool> {
         // 运动与历史网格只能由尚未接入的专属命令创建；基础平面主体不推进脚本。
+        self.event_response = 0;
         Ok(true)
     }
 
@@ -177,7 +375,65 @@ impl TaskObject for PlaneObject {
                     self.size = [0.0; 2];
                 }
                 if command.code == 3 {
+                    self.unregister_input(command.data[2], host)?;
                     self.control.deletion_requested = 1;
+                }
+            }
+            4 => {
+                if self.input_state == 3 {
+                    return Ok(CommandOutcome::finished(false));
+                }
+                let raw = self.input_command(
+                    137,
+                    [id, 0, command.data[2]],
+                    &mut CommandBuffers::default(),
+                    host,
+                )?;
+                if raw & 2 != 0 {
+                    if self.input_locked {
+                        return Ok(CommandOutcome::finished(false));
+                    }
+                    if command.data[1] != 0 {
+                        self.change_input_state(2, host)?;
+                    } else {
+                        self.select_input_state(host)?;
+                    }
+                }
+                *output = 1;
+                self.notify_event(
+                    if command.data[1] != 0 { 9 } else { 10 },
+                    [id, command.data[0], 0],
+                    &mut CommandBuffers::default(),
+                    host,
+                )?;
+                *output = self.event_response;
+                self.event_response = 0;
+            }
+            5 | 6 => {
+                *output = 1;
+                let mut empty = CommandBuffers::default();
+                self.notify_event(
+                    if command.code == 5 { 65 } else { 6 },
+                    if command.code == 5 {
+                        [id, command.data[0], 0]
+                    } else {
+                        [command.data[0], command.data[1], 0]
+                    },
+                    if command.code == 6 {
+                        buffers
+                    } else {
+                        &mut empty
+                    },
+                    host,
+                )?;
+                *output = self.event_response;
+                self.event_response = 0;
+            }
+            7 | 8 => {
+                if self.input_state != 3 && !self.input_locked {
+                    let selected = u32::from(command.code == 7);
+                    self.change_input_state(selected, host)?;
+                    self.notify_event(64, [id, selected, 0], &mut CommandBuffers::default(), host)?;
                 }
             }
             41 | 42 | 45 => {
@@ -289,6 +545,24 @@ impl TaskObject for PlaneObject {
             50 | 52 | 56 | 58 | 67 => {
                 self.forward(command.code, command, buffers, output, host)?;
             }
+            47 | 48 => {
+                if command.code == 47 {
+                    self.display = command.data[1];
+                }
+                let effective = if self.display == 0 {
+                    0
+                } else {
+                    command.data[1]
+                };
+                drawings(host)?.set_display(id, effective);
+                if command.code == 48 && self.input_configured {
+                    self.enable_input(effective, 0, host)?;
+                }
+                if self.input_state != 3 {
+                    self.select_input_state(host)?;
+                }
+                self.forward(48, command, buffers, output, host)?;
+            }
             61 | 62 => {
                 if let Some(transform) = drawings(host)?
                     .get(id)
@@ -308,7 +582,37 @@ impl TaskObject for PlaneObject {
             63 => {
                 drawings(host)?.set_alpha(id, command.data[1]);
             }
-            74 => *output = self.input_state,
+            72 | 90 => {
+                self.configure_input(command, host)?;
+                if command.code == 72 {
+                    let values = words::<12>(buffers.data0.as_deref())?;
+                    self.input_states =
+                        std::array::from_fn(|i| values[i * 3..i * 3 + 3].try_into().unwrap());
+                    if self.input_states[0][0] != 0 {
+                        self.change_input_state(0, host)?;
+                    }
+                }
+            }
+            73 => {
+                self.change_input_state(command.data[1] & 0xffff, host)?;
+                self.input_locked = command.data[1] >> 31 != 0;
+            }
+            74 => *output = self.input_state | if self.input_locked { 0x8000_0000 } else { 0 },
+            91 => {
+                self.input_states = [[0; 3]; 4];
+                self.unregister_input(command.data[2], host)?;
+            }
+            93 => self.enable_input(command.data[1], command.data[2], host)?,
+            95 => self.event_response = command.data[1],
+            96 => {
+                *output = self.input_command(
+                    137,
+                    [id, 0, command.data[2]],
+                    &mut CommandBuffers::default(),
+                    host,
+                )?;
+            }
+            97 => self.event_target = command.data[1],
             75 => {
                 write_words(buffers.data0.as_deref_mut(), &[self.size[0].to_bits()])?;
                 write_words(buffers.data1.as_deref_mut(), &[self.size[1].to_bits()])?;
@@ -340,7 +644,7 @@ impl TaskObject for PlaneObject {
                 self.forward(58, command, buffers, output, host)?;
             }
             60 | 71 | 85 | 86 => {}
-            4 | 7 | 8 | 41..=99 | 591 | 592 => {
+            41..=99 | 591 | 592 => {
                 return Err(Error::new(
                     0,
                     format!("二维对象命令 {} 尚未接入", command.code),
@@ -376,8 +680,17 @@ impl TaskObject for PlaneObject {
 
     fn request_delete(&mut self, host: &mut dyn Host, _budget: usize) -> Result<bool> {
         drawings(host)?.remove(self.id);
+        self.unregister_input(0, host)?;
         self.control.deletion_requested = 1;
         Ok(true)
+    }
+}
+
+fn truncate(value: f32) -> i32 {
+    if (-2147483648.0..2147483648.0).contains(&value) {
+        value as i32
+    } else {
+        i32::MIN
     }
 }
 

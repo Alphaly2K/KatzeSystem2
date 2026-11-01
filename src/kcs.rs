@@ -284,6 +284,17 @@ pub trait Host {
         Err(Error::new(0, "宿主未提供输入回调命令分派"))
     }
 
+    /// 图形事件同步路由期间开放命令 95 的响应槽；错误返回也保留已完成的回写。
+    fn dispatch_graphics_event(
+        &mut self,
+        _response: &mut u32,
+        command: crate::task::Command,
+        buffers: &mut crate::task::CommandBuffers<'_>,
+        output: &mut u32,
+    ) -> Result<bool> {
+        self.dispatch_task_command(command, buffers, output)
+    }
+
     /// 取走当前任务的待应用操作，并提供已保存的队列长度供宿主检查入队容量。
     fn take_task_effects(&mut self, _queued_messages: usize) -> TaskEffects {
         TaskEffects::default()
@@ -355,6 +366,16 @@ impl<T: Host + ?Sized> Host for &mut T {
         output: &mut u32,
     ) -> Result<bool> {
         (**self).dispatch_input_command(state, delivery, command, buffers, output)
+    }
+
+    fn dispatch_graphics_event(
+        &mut self,
+        response: &mut u32,
+        command: crate::task::Command,
+        buffers: &mut crate::task::CommandBuffers<'_>,
+        output: &mut u32,
+    ) -> Result<bool> {
+        (**self).dispatch_graphics_event(response, command, buffers, output)
     }
 }
 

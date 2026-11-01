@@ -5,7 +5,7 @@
 //! 其他类型需要对应子系统按 [`TaskObject`] 协议实现，缺失时创建请求返回诊断。
 //!
 //! 同步消息、删除通知和对象命令在返回前完成预算续跑。普通对象执行期间仍接收删除标记与排队消息，
-//! 向执行中普通 VM 同步发送消息返回零。输入同步回调开放同一份区域、键和基类命令状态；
+//! 向执行中普通 VM 同步发送消息返回零。输入同步回调开放同一份区域、键和基类命令状态，图形通知开放响应槽；
 //! 其他需要直接借用执行中对象的操作返回诊断。
 
 use crate::kcs::{
@@ -18,10 +18,12 @@ use std::collections::BTreeMap;
 mod graphics;
 mod object;
 mod resources;
+mod root;
 
 use resources::Resources;
 
 pub use object::{BaseObject, OrdinaryObject, TaskObject};
+pub use root::RootObject;
 
 /// 基线工厂中的对象类型编号。数值来自静态构造与类型追踪，具体工厂仍需逐类接入。
 pub mod kind {
@@ -489,7 +491,7 @@ struct Store<'a, F: ObjectFactory> {
 fn run_nested<F: ObjectFactory>(
     store: Store<'_, F>,
     target: u32,
-    execution: Execution<'_, '_>,
+    mut execution: Execution<'_, '_>,
 ) -> Result<()> {
     let Store {
         numbers,
@@ -502,6 +504,19 @@ fn run_nested<F: ObjectFactory>(
         budget,
         limit,
     } = store;
+    if let Some(response) = resources.graphics_responses.get_mut(&target) {
+        if let Execution::Command {
+            command, propagate, ..
+        } = &mut execution
+        {
+            if command.code == 95 {
+                *response = command.data[1];
+                **propagate = false;
+                return Ok(());
+            }
+        }
+        return Err(Error::new(0, "图形回调期间仅支持响应槽回写"));
+    }
     if let Some(mut state) = resources.input_callbacks.remove(&target) {
         let saved = (host.task_id, host.task_time, host.task_origin);
         let result = {
@@ -1023,6 +1038,25 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
             .insert(origin, std::mem::take(state));
         let result = route_command_mode(self.store(), origin, command, buffers, output, delivery);
         *state = self.resources.input_callbacks.remove(&origin).unwrap();
+        result
+    }
+
+    fn dispatch_graphics_event(
+        &mut self,
+        response: &mut u32,
+        command: Command,
+        buffers: &mut CommandBuffers<'_>,
+        output: &mut u32,
+    ) -> Result<bool> {
+        let origin = self.host.task_id;
+        if !self.running.contains_key(&origin)
+            || self.resources.graphics_responses.contains_key(&origin)
+        {
+            return Err(Error::new(0, "图形回调上下文不可用"));
+        }
+        self.resources.graphics_responses.insert(origin, *response);
+        let result = route_command(self.store(), origin, command, buffers, output);
+        *response = self.resources.graphics_responses.remove(&origin).unwrap();
         result
     }
 
