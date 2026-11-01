@@ -316,6 +316,9 @@ impl<F: ObjectFactory> Runtime<F> {
     pub fn input_coordinates_mut(&mut self) -> &mut crate::input::CoordinateMap {
         &mut self.resources.input_coordinates
     }
+    pub fn set_input_pointer_control(&mut self, enabled: bool) {
+        self.resources.input_pointer_control = enabled;
+    }
 
     /// 以已经转换的逻辑坐标同步分派一条输入事件。
     pub fn dispatch_input_key(&mut self, id: u32, event: crate::input::KeyEvent) -> Result<bool> {
@@ -961,6 +964,9 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
 
     fn input_coordinates(&self) -> crate::input::CoordinateMap {
         self.resources.input_coordinates
+    }
+    fn input_pointer_control(&self) -> bool {
+        self.resources.input_pointer_control
     }
     fn canvas_layout(&self) -> Result<Option<crate::graphics::CanvasLayout>> {
         self.resources

@@ -1,6 +1,6 @@
 # 输入区域与事件接口
 
-适配基线为 Windows CatSystem2 **2.6.1.90**。`input::Regions` 提供区域登记、属性命令、指针选择、滚轮和移动通知，`Events` 提供按键事件分派，`Keys` 提供设备扫描顺序、更新计数和重复触发。`InputObject` 和 `InputFactory` 已连接运行时的显式事件、对象命令与同步设备更新；平滑定位、配置绑定和平台采集继续实现。
+适配基线为 Windows CatSystem2 **2.6.1.90**。`input::Regions` 提供区域登记、属性命令、指针选择、滚轮和移动通知，`Events` 提供按键事件分派，`Keys` 提供设备扫描顺序、更新计数和重复触发。`InputObject` 和 `InputFactory` 已连接运行时的显式事件、对象命令、平滑定位与同步设备更新；配置绑定和平台采集继续实现。
 
 ## 登记与顺序
 
@@ -44,12 +44,13 @@
 
 130／135／136 总将 `geometry_dirty()` 置真，即使编号不存在；登记、删除、更改优先级及选择标记均不设置该标记。输入宿主完成区域重算后可调用 `clear_geometry_dirty()` 消费标记。除 134 外，上述命令均保留 output。
 
-输入对象另外处理以下命令；151／152 委托 Keys。已处理的输入命令消费当前分支，其他命令继续使用基类控制和删除门控。126～160 中未实现的专属编号返回诊断，包含 138／139 的平滑定位和 147 的图像掩码。单独的 Regions 接口只处理区域命令。
+输入对象另外处理以下命令；151／152 委托 Keys。已处理的输入命令消费当前分支，其他命令继续使用基类控制和删除门控。126～160 中未实现的专属编号返回诊断，包含 147 的图像掩码。单独的 Regions 接口只处理区域命令。
 
 |命令|参数与行为|
 |--:|:--|
 |126|即时查询设备指针并换算逻辑坐标，X／Y 分别写 data0／data1 缓冲区前四字节，保留尾部及 output；缺设备或缓冲区不足返回诊断|
 |137|将当前事件原始掩码写 output，仅将十六映射为二|
+|138／139|以 `data[1]` 的低／高无符号十六位作为逻辑 X／Y，门控通过后换算成设备目标；`data[0]` 以 i32 保存为剩余值，保存当前任务 elapsed，保留 output。138 额外检查指针控制配置，两者均需前台及逻辑范围内的目标，详细规则见平滑定位|
 |143|auto_hide 设为 `data[0]`，idle_limit 设为 update_rate 与 `data[1]` 的 u32 回绕乘积除六十；auto_hide 与 cursor_requested 均非零时显示光标并广播 22，保留 idle_count 和 output|
 |146|清零全部选择值，保存的设备位置设为 `[-1, -1]`，forced 置一；保持重算标记和捕获|
 |149|将自动光标状态 cursor_shown 写 data1 缓冲区前四字节，保留尾部及 output；与普通 native 149 的坐标查询不同|
@@ -72,7 +73,7 @@
 
 `CoordinateMap::to_device([x, y])` 提供指针定位所需的反向转换，返回设备点及原始逻辑点是否位于画布内。先对输入点按 logical_size 判断范围，再逐轴乘独立的 `device_units_per_logical` 并截断为 i32，按回绕加 configuration_offset，转 f32 后除以单精度的 device_scale 倒数，加 device_offset，再截断为 i32。倒数计算和除法各自舍入，不能改写为直接乘 device_scale；异常转换仍返回 i32::MIN，后续步骤继续。
 
-device_units_per_logical 初值为一，与 logical_scale 分别保存，调用方按配置赋值；不在运行时自动取 reciprocal，也不保证两个方向逐点互逆。反向换算不裁剪画布外点，范围标志也不受变换后设备位置影响。该核心已实现，138／139 的调用门控、持续移动及状态清理仍需接入。
+device_units_per_logical 初值为一，与 logical_scale 分别保存，调用方按配置赋值；不在运行时自动取 reciprocal，也不保证两个方向逐点互逆。反向换算不裁剪画布外点，范围标志也不受变换后设备位置影响；138／139 只接受范围标志为真的目标。
 
 ## 位掩码
 
@@ -135,9 +136,9 @@ device_units_per_logical 初值为一，与 logical_scale 分别保存，调用�
 
 ## 同步设备更新
 
-`InputDevice` 提供 poll、pointer、key、take_wheel、is_foreground、finish、commit、history、show_cursor 和 cursor_visible；每次调用返回 Result，错误停止当前推进，先前已发生的状态和回调修改保留。pointer 返回 `PointerSample { position, active }`，位置为物理设备整数。key 的 repeat 参数表示是否需要首次重复开关元数据，false 时仍须查询掩码。take_wheel 返回本轮待处理的原始非零标记，平台后端负责消费设备积累值。history 返回三十二个原始字节。
+`InputDevice` 提供 poll、pointer、key、take_wheel、is_foreground、finish、commit、history、show_cursor、cursor_visible、set_pointer 和 clear_keys；每次调用返回 Result，错误停止当前推进，先前已发生的状态和回调修改保留。pointer 返回 `PointerSample { position, active }`，位置为物理设备整数。key 的 repeat 参数表示是否需要首次重复开关元数据，false 时仍须查询掩码。take_wheel 返回本轮待处理的原始非零标记，平台后端负责消费设备积累值。history 返回三十二个原始字节。set_pointer 请求设备移动到物理点，不自动替换本轮已保存位置；clear_keys 清理设备键状态，后续查询继续由设备提供。
 
-`InputState::pointer()`／`pointer_mut()` 提供 `PointerState`。position 保存本轮物理位置，origin 保存按下／滚轮时额外查询的物理起点，移动通知结束后更新为 position；两者不能合并。active 保存帧首查询的原始值。cursor_requested 是手动显示意愿的设备读回，cursor_shown 是任务维护的自动显示状态，二者初值均为一；auto_hide、idle_limit、idle_count 和 forced 初值为零，drag_threshold 初值为二，history 初始清零。forced 是命令 146 的强制重算标记，平滑定位另行实现。
+`InputState::pointer()`／`pointer_mut()` 提供 `PointerState`。position 保存本轮位置，origin 保存按下／滚轮时额外查询的物理起点，移动通知结束后更新为 position；两者不能合并。active 保存帧首查询的原始值。cursor_requested 是手动显示意愿的设备读回，cursor_shown 是任务维护的自动显示状态，二者初值均为一；auto_hide、idle_limit、idle_count 和 forced 初值为零，drag_threshold 初值为二，history 初始清零。forced 是命令 146 的强制重算标记，定位字段见下文。
 
 `InputState::update_device(id, host)` 按以下次序同步执行，InputObject 的主体自动调用它：
 
@@ -150,9 +151,19 @@ device_units_per_logical 初值为一，与 logical_scale 分别保存，调用�
 
 自动光标显示／隐藏先更新 cursor_shown，再调用 show_cursor；需通知时广播消息 22，sender 为输入任务、target 为根编号零、data 为 `[0, visible, 0]`。回调可查询 149 或调用 150，修改即时影响后续判断；消费某个接收者不终止广播。手动命令 150 自身不广播，也不改变自动状态。
 
-本路径尚未执行 138／139 的平滑定位分支；配置绑定及平台采集也尚未提供。未绑定设备时，InputObject 主体返回缺少设备的诊断，显式事件入口仍可调用。
+move_remaining 为正时，帧首取样后进入下文的平滑定位分支，再继续按键、滚轮、拖动和收尾。配置绑定及平台采集尚未提供。未绑定设备时，InputObject 主体返回缺少设备的诊断，显式事件入口仍可调用。
 
-定位前的按键清理规则已核实，尚未接入命令：抑制为零时全部跳过；非零时按组再按键，清除启用且计数非零项的计数、设备掩码与消费值，零计数项和禁用键原样保留。捕获槽和原始事件状态均保持；最后解除抑制并调用设备清理。原事件入口在抑制下拒绝本次释放，因此没有释放通知。
+## 平滑定位
+
+`Runtime::set_input_pointer_control(enabled)` 设置 138 的配置门控，默认关闭；独立宿主实现 `Host::input_pointer_control()`，默认返回 false。138 配置关闭时直接消费，跳过设备访问；139 不检查这项配置。其他情况下先查询 is_foreground，再对打包的逻辑点调用 to_device；非前台或逻辑范围外均保留已有定位和按键状态。两个坐标均为 0～65535，低／高字不作 i16 符号扩展。
+
+目标有效时先执行按键清理。抑制为零时全部跳过；非零时清除启用且计数非零项的计数、设备掩码与消费值，零计数项和禁用键原样保留。捕获槽和原始事件状态均保持；随后解除抑制并调用 clear_keys。原事件入口在抑制下拒绝释放，因此没有释放通知。设备清理失败时已发生的修改保留，定位字段尚未替换；回调中同样即时生效。
+
+清理成功后，move_target 保存设备目标，move_remaining 保存 `data[0] as i32`，move_started 保存任务 `clock.elapsed()`；三者初值均为零。零或负剩余值仍替换目标与起点时间，但后续不进入自动移动分支。命令自身不调用 set_pointer。
+
+更新时若 move_remaining 为正，每轴按 i32 回绕计算 `old + (target - old) / remaining`，除法向零截断，然后调用 set_pointer(next)。原剩余值大于一时，新值按 u32 回绕计算 `remaining + move_started - now`，转为 i32 后至少为一；原值为一时归零。now 为本轮外层时刻，Runtime 使用 `clock.previous_time`，暂停不冻结这个输入；帧增量不参与该计算。
+
+原物理取样点不为 `[0, 0]` 时，按 next 重算选择，非活动状态仍使用 None；随后按自动光标门控显示并广播。原点取样跳过这两项。该分支清 idle_count，保留 forced；本轮保存位置按基线行为设置为 `[next.y, old.y]`，设备请求和选择通知继续使用 next。后续按键坐标及拖动检查使用这份保存位置。
 
 ## 输入对象与运行时
 
@@ -200,4 +211,6 @@ Runtime 在处理输入回调的直接命令时切换到输入任务的宿主编
 
 143／159 的 96 组序列、2,304 次更新混合任务速率、回绕阈值、门控和其他指针命令，760,825 次服务／通知调用及持久状态共 35,000,096 字节全部一致。新增一项常规运行时回归固定广播期间的嵌套 150／159、速率保留、阈值回绕、门控、143 保留计数及回调出错后的状态恢复。
 
-平面显示命令 47／48 会查询输入命令 134，并据此处理对象状态。平滑定位、坐标映射配置、显示联动、图像 Alpha 到位掩码、焦点导航及平台设备继续沿相应入口接入。
+138／139 和平滑定位的 120 组序列、3,840 次更新、1,268,531 次服务／通知调用及完整状态共 58,410,592 字节全部一致，覆盖门控、打包端点、正负剩余值、原点与非活动取样、时钟回绕和坐标保存。三项新增运行时回归固定禁用键／捕获保留、清理失败、暂停时刻、选择／光标顺序，以及移动回调中修改抑制。独立动态批次使用空区域表，非空区域选择和回调由已有核心对照及这些合成回归覆盖。
+
+平面显示命令 47／48 会查询输入命令 134，并据此处理对象状态。坐标映射配置、显示联动、图像 Alpha 到位掩码、焦点导航及平台设备继续沿相应入口接入。

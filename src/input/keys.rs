@@ -70,6 +70,18 @@ impl Keys {
         &self.enabled
     }
 
+    pub(crate) fn clear_held(&mut self) {
+        for (enabled, groups) in self.enabled.iter().zip(&mut self.records) {
+            if *enabled != 0 {
+                for state in groups {
+                    if state.count != 0 {
+                        *state = KeyState::default();
+                    }
+                }
+            }
+        }
+    }
+
     /// 命令 151 修改单键开关，152 将全部开关恢复为一；结果槽不变。
     pub fn dispatch_command(&mut self, command: &Command, _output: &mut u32) -> Result<bool> {
         match command.code {

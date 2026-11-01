@@ -254,6 +254,9 @@ pub trait Host {
     fn input_coordinates(&self) -> crate::input::CoordinateMap {
         crate::input::CoordinateMap::default()
     }
+    fn input_pointer_control(&self) -> bool {
+        false
+    }
 
     /// 查询当前对象在有符号编号游标之后的直属子任务；None 从首项开始。
     fn next_task_child(&self, _previous: Option<u32>) -> Result<Option<u32>> {
@@ -321,6 +324,9 @@ impl<T: Host + ?Sized> Host for &mut T {
     }
     fn input_coordinates(&self) -> crate::input::CoordinateMap {
         (**self).input_coordinates()
+    }
+    fn input_pointer_control(&self) -> bool {
+        (**self).input_pointer_control()
     }
 
     fn next_task_child(&self, previous: Option<u32>) -> Result<Option<u32>> {

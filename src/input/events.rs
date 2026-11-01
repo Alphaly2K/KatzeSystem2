@@ -111,6 +111,18 @@ impl Events {
         event: KeyEvent,
         mut route: impl FnMut(&mut Regions, Command) -> Result<Option<u32>>,
     ) -> Result<bool> {
+        self.dispatch_key_with_state(sender, regions, event, |_, regions, command| {
+            route(regions, command)
+        })
+    }
+
+    pub(crate) fn dispatch_key_with_state(
+        &mut self,
+        sender: u32,
+        regions: &mut Regions,
+        event: KeyEvent,
+        mut route: impl FnMut(&mut Self, &mut Regions, Command) -> Result<Option<u32>>,
+    ) -> Result<bool> {
         if self.suppressed != 0 {
             return Ok(false);
         }
@@ -132,7 +144,8 @@ impl Events {
             let Some(region) = candidate.filter(|region| accepts(region, event)) else {
                 return Ok(false);
             };
-            return Ok(route(regions, packet(sender, region.id(), event))? == Some(0));
+            let command = packet(sender, region.id(), event);
+            return Ok(route(self, regions, command)? == Some(0));
         }
         if event.pressed != 0 {
             self.captures[key] = 0;
@@ -156,7 +169,7 @@ impl Events {
             }
             let instance = region.instance;
             let command = packet(sender, region.id(), event);
-            if route(regions, command)? == Some(0) {
+            if route(self, regions, command)? == Some(0) {
                 self.captures[key] = if event.pressed != 0 {
                     regions.current(index, instance)?.1.id()
                 } else {

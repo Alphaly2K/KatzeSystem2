@@ -16,6 +16,7 @@ pub struct CommandState {
     pub pointer: PointerState,
     pub update_rate: u32,
     raw_state: u32,
+    pub(super) suppressed: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -59,6 +60,27 @@ impl CommandState {
                     .0;
                 write(buffers.data0.as_deref_mut(), &point[0].to_le_bytes())?;
                 write(buffers.data1.as_deref_mut(), &point[1].to_le_bytes())?;
+            }
+            138 | 139 => {
+                if command.code == 138 && !host.input_pointer_control() {
+                    return Ok(false);
+                }
+                if !super::update::device(host)?.is_foreground()? {
+                    return Ok(false);
+                }
+                let packed = command.data[1];
+                let point = [(packed & 0xffff) as i32, (packed >> 16) as i32];
+                let (target, inside) = host.input_coordinates().to_device(point);
+                if inside {
+                    if self.suppressed != 0 {
+                        self.keys.clear_held();
+                        self.suppressed = 0;
+                        super::update::device(host)?.clear_keys()?;
+                    }
+                    self.pointer.move_target = target;
+                    self.pointer.move_remaining = command.data[0] as i32;
+                    self.pointer.move_started = self.clock.elapsed();
+                }
             }
             143 => {
                 self.pointer.auto_hide = command.data[0];
@@ -134,6 +156,7 @@ impl CommandState {
             pointer,
             update_rate,
             raw_state,
+            suppressed,
         } = self;
         (
             regions,
@@ -144,6 +167,7 @@ impl CommandState {
                 pointer,
                 update_rate,
                 raw_state,
+                suppressed,
             },
         )
     }
@@ -198,8 +222,12 @@ impl InputState {
         host: &mut dyn Host,
     ) -> Result<bool> {
         self.commands.raw_state = self.events.raw_state();
-        self.commands
-            .dispatch_command(kind, command, buffers, output, host)
+        self.commands.suppressed = self.events.suppressed();
+        let result = self
+            .commands
+            .dispatch_command(kind, command, buffers, output, host);
+        self.events.set_suppressed(self.commands.suppressed);
+        result
     }
 
     pub fn dispatch_key(&mut self, id: u32, event: KeyEvent, host: &mut dyn Host) -> Result<bool> {
@@ -209,11 +237,17 @@ impl InputState {
             self.events.raw_state()
         };
         let (regions, mut callback) = self.commands.split(raw);
-        let result = self
-            .events
-            .dispatch_key(id, regions, event, |regions, command| {
-                callback.route(host, regions, command, &mut CommandBuffers::default())
-            });
+        let result =
+            self.events
+                .dispatch_key_with_state(id, regions, event, |events, regions, command| {
+                    callback.route(
+                        host,
+                        events,
+                        regions,
+                        command,
+                        &mut CommandBuffers::default(),
+                    )
+                });
         self.commands.raw_state = self.events.raw_state();
         result
     }
@@ -227,7 +261,13 @@ impl InputState {
         let (regions, mut callback) = self.commands.split(self.events.raw_state());
         regions.update_pointer_selection(id, point, |regions, command| {
             callback
-                .route(host, regions, command, &mut CommandBuffers::default())
+                .route(
+                    host,
+                    &mut self.events,
+                    regions,
+                    command,
+                    &mut CommandBuffers::default(),
+                )
                 .map(|_| ())
         })
     }
@@ -240,7 +280,9 @@ impl InputState {
     ) -> Result<()> {
         let (regions, mut callback) = self.commands.split(self.events.raw_state());
         regions.dispatch_pointer_motion(id, motion, |regions, command, buffers| {
-            callback.route(host, regions, command, buffers).map(|_| ())
+            callback
+                .route(host, &mut self.events, regions, command, buffers)
+                .map(|_| ())
         })
     }
 
@@ -271,12 +313,14 @@ pub(super) struct Callback<'a> {
     pointer: &'a mut PointerState,
     update_rate: &'a mut u32,
     raw_state: &'a mut u32,
+    suppressed: &'a mut u32,
 }
 
 impl Callback<'_> {
     pub(super) fn route(
         &mut self,
         host: &mut dyn Host,
+        events: &mut Events,
         regions: &mut Regions,
         command: Command,
         buffers: &mut CommandBuffers<'_>,
@@ -289,6 +333,7 @@ impl Callback<'_> {
             pointer: std::mem::take(self.pointer),
             update_rate: *self.update_rate,
             raw_state: *self.raw_state,
+            suppressed: events.suppressed(),
         };
         let mut output = 1;
         let result = host.dispatch_input_command(
@@ -305,6 +350,8 @@ impl Callback<'_> {
         *self.pointer = state.pointer;
         *self.update_rate = state.update_rate;
         *self.raw_state = state.raw_state;
+        *self.suppressed = state.suppressed;
+        events.set_suppressed(state.suppressed);
         result.map(|found| found.then_some(output))
     }
 }

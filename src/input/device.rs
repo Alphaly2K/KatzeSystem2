@@ -20,6 +20,8 @@ pub trait InputDevice {
     fn history(&mut self) -> Result<[u8; 32]>;
     fn show_cursor(&mut self, visible: u32) -> Result<()>;
     fn cursor_visible(&mut self) -> Result<u32>;
+    fn set_pointer(&mut self, position: [i32; 2]) -> Result<()>;
+    fn clear_keys(&mut self) -> Result<()>;
 }
 
 /// 输入任务的原始设备位置、拖动起点和光标状态。
@@ -28,6 +30,9 @@ pub struct PointerState {
     pub position: [i32; 2],
     pub origin: [i32; 2],
     pub active: u32,
+    pub move_started: u32,
+    pub move_remaining: i32,
+    pub move_target: [i32; 2],
     pub cursor_requested: u32,
     pub cursor_shown: u32,
     pub auto_hide: u32,
@@ -44,6 +49,9 @@ impl Default for PointerState {
             position: [0; 2],
             origin: [0; 2],
             active: 0,
+            move_started: 0,
+            move_remaining: 0,
+            move_target: [0; 2],
             cursor_requested: 1,
             cursor_shown: 1,
             auto_hide: 0,

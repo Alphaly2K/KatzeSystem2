@@ -191,7 +191,7 @@ impl TaskObject for Receiver {
                 *output = 1;
                 if self.mode.get() == 3 {
                     send(host, self.id, 24, 0, 0x87654321)?;
-                    send(host, self.id, 138, 0, 0)?;
+                    send(host, self.id, 140, 0, 0)?;
                 }
             }
             (4, 4, _) => {
@@ -224,7 +224,10 @@ impl TaskObject for Receiver {
                 send(host, self.id, 159, 0, 0)?;
             }
             (11, 22, 2) => {
-                send(host, self.id, 138, 0, 0)?;
+                send(host, self.id, 140, 0, 0)?;
+            }
+            (12, 6, 2) => {
+                send(host, self.id, 139, 5, 50 | 60 << 16)?;
             }
             _ => *output = 0,
         }
@@ -371,7 +374,7 @@ fn scanning_callbacks_modify_later_keys_and_restore_all_state_on_errors() -> Res
             })
         })
         .unwrap_err();
-    assert!(error.message.contains("138"));
+    assert!(error.message.contains("140"));
     assert_eq!(
         runtime.input_state(1).unwrap().keys().records()[0][0].mask,
         3
@@ -499,6 +502,10 @@ struct DeviceState {
     cursor: u32,
     shows: Vec<u32>,
     calls: Vec<&'static str>,
+    foreground: bool,
+    moves: Vec<[i32; 2]>,
+    clear_calls: usize,
+    fail_clear: bool,
 }
 
 impl DeviceState {
@@ -517,6 +524,10 @@ impl DeviceState {
             cursor: 1,
             shows: Vec::new(),
             calls: Vec::new(),
+            foreground: true,
+            moves: Vec::new(),
+            clear_calls: 0,
+            fail_clear: false,
         }
     }
 }
@@ -560,8 +571,9 @@ impl InputDevice for Device {
         Ok(std::mem::take(&mut state.wheel))
     }
     fn is_foreground(&mut self) -> Result<bool> {
-        self.0.borrow_mut().calls.push("foreground");
-        Ok(true)
+        let mut state = self.0.borrow_mut();
+        state.calls.push("foreground");
+        Ok(state.foreground)
     }
     fn finish(&mut self) -> Result<()> {
         self.0.borrow_mut().calls.push("finish");
@@ -584,6 +596,21 @@ impl InputDevice for Device {
     }
     fn cursor_visible(&mut self) -> Result<u32> {
         Ok(self.0.borrow().cursor)
+    }
+    fn set_pointer(&mut self, position: [i32; 2]) -> Result<()> {
+        let mut state = self.0.borrow_mut();
+        state.calls.push("set_pointer");
+        state.moves.push(position);
+        Ok(())
+    }
+    fn clear_keys(&mut self) -> Result<()> {
+        let mut state = self.0.borrow_mut();
+        state.calls.push("clear_keys");
+        state.clear_calls += 1;
+        if state.fail_clear {
+            return Err(Error::new(0, "合成设备清理失败"));
+        }
+        Ok(())
     }
 }
 
@@ -844,7 +871,7 @@ fn cursor_commands_keep_nested_changes_and_restore_state_after_callback_errors()
         input_command(&mut runtime, 143, [7, 1, 0])
             .unwrap_err()
             .message
-            .contains("138")
+            .contains("140")
     );
     let input = runtime.input_state(1).unwrap();
     assert_eq!(input.pointer().auto_hide, 7);
@@ -855,5 +882,213 @@ fn cursor_commands_keep_nested_changes_and_restore_state_after_callback_errors()
     mode.set(0);
     input_command(&mut runtime, 159, [0; 3])?;
     assert_eq!(runtime.input_state(1).unwrap().pointer().idle_count, 0);
+    Ok(())
+}
+
+#[test]
+fn positioning_gates_and_cleanup_preserve_captures_disabled_keys_and_partial_errors() -> Result<()>
+{
+    let (mut runtime, mode, _) = runtime(6);
+    register(&mut runtime, 2, 0, [0; 4]);
+    runtime.scan_input_keys(1, [0; 2], |key, group| {
+        Ok(KeySample {
+            mask: if key < 2 && group == 0 { 2 } else { 0 },
+            repeat: 1,
+        })
+    })?;
+    mode.set(0);
+    assert!(runtime.dispatch_input_key(1, event(2))?);
+    input_command(&mut runtime, 151, [1, 0, 0])?;
+    let state = Rc::new(RefCell::new(DeviceState::new([0; 2])));
+    runtime.set_input_device(Device(state.clone()))?;
+    runtime.input_coordinates_mut().logical_size = [640, 480];
+    runtime.input_coordinates_mut().device_scale = 2.;
+    runtime.input_coordinates_mut().configuration_offset = [1, -1];
+    let clock = runtime.object_mut(1).unwrap().state().1;
+    clock.time = 100;
+    clock.origin = 10;
+    let input = runtime.input_state_mut(1).unwrap();
+    input.events_mut().set_suppressed(7);
+    input.pointer_mut().move_target = [-8, -9];
+    input.pointer_mut().move_remaining = 99;
+    let packed = 10 | 20 << 16;
+    input_command(&mut runtime, 138, [5, packed, 0])?;
+    assert_eq!(state.borrow().calls, ["pointer"]);
+    state.borrow_mut().foreground = false;
+    input_command(&mut runtime, 139, [5, packed, 0])?;
+    state.borrow_mut().foreground = true;
+    input_command(&mut runtime, 139, [5, 640 | 20 << 16, 0])?;
+    assert_eq!(
+        runtime.input_state(1).unwrap().pointer().move_target,
+        [-8, -9]
+    );
+    assert_eq!(runtime.input_state(1).unwrap().events().suppressed(), 7);
+    assert_eq!(state.borrow().clear_calls, 0);
+
+    state.borrow_mut().fail_clear = true;
+    assert!(
+        input_command(&mut runtime, 139, [5, packed, 0])
+            .unwrap_err()
+            .message
+            .contains("合成设备清理失败")
+    );
+    let input = runtime.input_state(1).unwrap();
+    assert_eq!(input.events().suppressed(), 0);
+    assert_eq!(input.events().captures()[0], 2);
+    assert_eq!(input.events().raw_state(), 2);
+    assert_eq!(input.keys().records()[0][0], Default::default());
+    assert_eq!(input.keys().records()[1][0].count, 1);
+    assert_eq!(input.keys().records()[1][0].mask, 2);
+    assert_eq!(input.pointer().move_target, [-8, -9]);
+    assert_eq!(input.pointer().move_remaining, 99);
+
+    state.borrow_mut().fail_clear = false;
+    runtime.set_input_pointer_control(true);
+    runtime
+        .input_state_mut(1)
+        .unwrap()
+        .events_mut()
+        .set_suppressed(1);
+    input_command(&mut runtime, 138, [u32::MAX, packed, 0])?;
+    let pointer = runtime.input_state(1).unwrap().pointer();
+    assert_eq!(pointer.move_target, [22, 38]);
+    assert_eq!(pointer.move_remaining, -1);
+    assert_eq!(pointer.move_started, 90);
+    assert_eq!(state.borrow().clear_calls, 2);
+    runtime.input_coordinates_mut().logical_size = [65_536; 2];
+    input_command(&mut runtime, 139, [0, u32::MAX, 0])?;
+    assert_eq!(
+        runtime.input_state(1).unwrap().pointer().move_target,
+        [131_072, 131_068]
+    );
+    assert_eq!(runtime.input_state(1).unwrap().pointer().move_remaining, 0);
+    assert_eq!(state.borrow().clear_calls, 2);
+    assert!(state.borrow().moves.is_empty());
+    Ok(())
+}
+
+#[test]
+fn positioning_keeps_global_time_while_paused_and_the_baseline_saved_point() -> Result<()> {
+    let (mut runtime, _, records) = runtime(0);
+    register(&mut runtime, 2, 0, [18, 28, 23, 33]);
+    let state = Rc::new(RefCell::new(DeviceState::new([10, 20])));
+    runtime.set_input_device(Device(state.clone()))?;
+    runtime.input_coordinates_mut().logical_size = [1000; 2];
+    let clock = runtime.object_mut(1).unwrap().state().1;
+    clock.time = 100;
+    clock.previous_time = 100;
+    clock.origin = 10;
+    clock.paused = 1;
+    input_command(&mut runtime, 139, [10, 110 | 120 << 16, 0])?;
+    let pointer = runtime.input_state_mut(1).unwrap().pointer_mut();
+    pointer.auto_hide = 1;
+    pointer.cursor_shown = 0;
+    pointer.idle_count = 55;
+    pointer.forced = 1;
+    assert!(runtime.update(101, 999)?);
+    let pointer = runtime.input_state(1).unwrap().pointer();
+    assert_eq!(pointer.move_remaining, 1);
+    assert_eq!(pointer.position, [30, 20]);
+    assert_eq!(pointer.idle_count, 0);
+    assert_eq!(pointer.forced, 1);
+    assert_eq!(state.borrow().moves, [[20, 30]]);
+    assert_eq!(
+        records
+            .borrow()
+            .iter()
+            .map(|r| (r.packet.code, r.packet.target, r.packet.data))
+            .collect::<Vec<_>>(),
+        [(7, 2, [20, 30, 0]), (22, 2, [0, 1, 0]), (22, 3, [0, 1, 0])]
+    );
+    assert!(runtime.update(102, 1)?);
+    assert_eq!(state.borrow().moves, [[20, 30], [110, 120]]);
+    assert_eq!(runtime.input_state(1).unwrap().pointer().move_remaining, 0);
+    assert_eq!(
+        runtime.input_state(1).unwrap().pointer().position,
+        [120, 20]
+    );
+    assert_eq!(records.borrow().last().unwrap().packet.code, 8);
+    assert_eq!(runtime.object(1).unwrap().clock().time, 100);
+
+    state.borrow_mut().sample.position = [0; 2];
+    let pointer = runtime.input_state_mut(1).unwrap().pointer_mut();
+    pointer.move_target = [5, 6];
+    pointer.move_remaining = 1;
+    pointer.cursor_shown = 0;
+    pointer.idle_count = 9;
+    assert!(runtime.update(103, 1)?);
+    assert_eq!(state.borrow().moves.last(), Some(&[5, 6]));
+    let pointer = runtime.input_state(1).unwrap().pointer();
+    assert_eq!(pointer.position, [6, 0]);
+    assert_eq!(pointer.cursor_shown, 0);
+    assert_eq!(pointer.idle_count, 0);
+    assert_eq!(state.borrow().shows, [1]);
+    Ok(())
+}
+
+#[test]
+fn positioning_in_motion_callbacks_clears_suppression_even_after_device_errors() -> Result<()> {
+    let (mut runtime, mode, records) = runtime(6);
+    register(&mut runtime, 2, 1, [0; 4]);
+    register(&mut runtime, 3, 0, [0; 4]);
+    runtime.scan_input_keys(1, [0; 2], |key, group| {
+        Ok(KeySample {
+            mask: if key == 0 && group == 0 { 2 } else { 0 },
+            repeat: 1,
+        })
+    })?;
+    mode.set(0);
+    assert!(runtime.dispatch_input_key(1, event(2))?);
+    let state = Rc::new(RefCell::new(DeviceState::new([0; 2])));
+    runtime.set_input_device(Device(state.clone()))?;
+    runtime.input_coordinates_mut().logical_size = [100; 2];
+    mode.set(12);
+    records.borrow_mut().clear();
+    state.borrow_mut().fail_clear = true;
+    runtime
+        .input_state_mut(1)
+        .unwrap()
+        .events_mut()
+        .set_suppressed(1);
+    let motion = PointerMotion {
+        code: 6,
+        previous: [0; 2],
+        current: [10; 2],
+    };
+    assert!(
+        runtime
+            .dispatch_input_motion(1, motion)
+            .unwrap_err()
+            .message
+            .contains("合成设备清理失败")
+    );
+    assert_eq!(runtime.input_state(1).unwrap().events().suppressed(), 0);
+    assert_eq!(
+        runtime.input_state(1).unwrap().keys().records()[0][0],
+        Default::default()
+    );
+    assert_eq!(records.borrow().len(), 1);
+    state.borrow_mut().fail_clear = false;
+    runtime
+        .input_state_mut(1)
+        .unwrap()
+        .events_mut()
+        .set_suppressed(1);
+    runtime.dispatch_input_motion(1, motion)?;
+    let input = runtime.input_state(1).unwrap();
+    assert_eq!(input.events().suppressed(), 0);
+    assert_eq!(input.events().captures()[0], 2);
+    assert_eq!(input.events().raw_state(), 2);
+    assert_eq!(input.pointer().move_target, [50, 60]);
+    assert_eq!(
+        records
+            .borrow()
+            .iter()
+            .map(|r| r.packet.target)
+            .collect::<Vec<_>>(),
+        [2, 2, 3]
+    );
+    assert!(runtime.dispatch_input_key(1, event(2))?);
+    assert_eq!(state.borrow().clear_calls, 2);
     Ok(())
 }

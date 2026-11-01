@@ -9,9 +9,39 @@ use crate::{Error, Result, read};
 impl InputState {
     pub fn update_device(&mut self, id: u32, host: &mut dyn Host) -> Result<()> {
         device(host)?.poll()?;
-        let sample = device(host)?.pointer()?;
+        let mut sample = device(host)?.pointer()?;
         self.commands.pointer.active = sample.active;
-        if sample.position == self.commands.pointer.position
+        if self.commands.pointer.move_remaining > 0 {
+            let old = sample.position;
+            let p = &self.commands.pointer;
+            let next = std::array::from_fn(|i| {
+                old[i].wrapping_add(p.move_target[i].wrapping_sub(old[i]) / p.move_remaining)
+            });
+            device(host)?.set_pointer(next)?;
+            let p = &mut self.commands.pointer;
+            p.move_remaining = if p.move_remaining > 1 {
+                (p.move_started
+                    .wrapping_sub(self.commands.clock.previous_time)
+                    .wrapping_add(p.move_remaining as u32) as i32)
+                    .max(1)
+            } else {
+                0
+            };
+            if old != [0; 2] {
+                let point = if sample.active != 0 {
+                    Some(host.input_coordinates().to_logical(next).0)
+                } else {
+                    None
+                };
+                self.update_pointer_selection(id, point, host)?;
+                if self.cursor_needs_showing() {
+                    self.show_cursor(id, 1, true, host)?;
+                }
+            }
+            self.commands.pointer.idle_count = 0;
+            // 基线在定位分支中把新 Y 写入本轮 X，Y 仍保留取样值。
+            sample.position = [next[1], old[1]];
+        } else if sample.position == self.commands.pointer.position
             && !self.commands.regions.geometry_dirty()
         {
             if sample.active != 0 {
@@ -23,13 +53,13 @@ impl InputState {
                         && p.cursor_shown != 0
                         && p.idle_count >= p.idle_limit
                     {
-                        self.commands.show_cursor(id, 0, true, host)?;
+                        self.show_cursor(id, 0, true, host)?;
                     }
                 }
             } else if self.commands.pointer.forced == 0 {
                 self.commands.pointer.idle_count = 0;
                 if self.cursor_needs_showing() {
-                    self.commands.show_cursor(id, 1, false, host)?;
+                    self.show_cursor(id, 1, false, host)?;
                 }
             }
         } else {
@@ -43,7 +73,7 @@ impl InputState {
             if self.commands.pointer.forced == 0 && changed {
                 self.commands.pointer.idle_count = 0;
                 if self.cursor_needs_showing() {
-                    self.commands.show_cursor(id, 1, true, host)?;
+                    self.show_cursor(id, 1, true, host)?;
                 }
             }
             self.commands.pointer.forced = 0;
@@ -104,11 +134,30 @@ impl InputState {
         p.auto_hide != 0 && p.cursor_requested != 0 && p.cursor_shown == 0
     }
 
+    fn show_cursor(
+        &mut self,
+        id: u32,
+        visible: u32,
+        notify: bool,
+        host: &mut dyn Host,
+    ) -> Result<()> {
+        self.commands.suppressed = self.events.suppressed();
+        let result = self.commands.show_cursor(id, visible, notify, host);
+        self.events.set_suppressed(self.commands.suppressed);
+        result
+    }
+
     fn wheel(&mut self, id: u32, point: [i32; 2], host: &mut dyn Host) -> Result<()> {
         let (regions, mut callback) = self.commands.split(self.events.raw_state());
         regions.dispatch_wheel(id, point, |regions, command| {
             callback
-                .route(host, regions, command, &mut CommandBuffers::default())
+                .route(
+                    host,
+                    &mut self.events,
+                    regions,
+                    command,
+                    &mut CommandBuffers::default(),
+                )
                 .map(|_| ())
         })
     }

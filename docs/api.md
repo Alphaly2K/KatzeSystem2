@@ -15,7 +15,7 @@
 |`resource`|启动归档类别配置、名称补全、目录索引、KIF 解密及虚拟名路由|自动挂载、列表读取、补丁发现、缓存及别名|
 |`hg3`|0x300 帧目录、标准元数据、按 ID 选帧及原生 32 位完整帧像素解码|其他位深、切片及其他图像编码|
 |`graphics`|BGRA8 渲染面、裁剪填充／复制／普通混合，图像装载与持有、绘图变换／投影／三角形及排序、KX2 几何装载、显式画布图元、画布矩形／源变换／延迟切割及独立帧提交、基础二维任务及图元脚本接口、纯色／渐变三角形和纹理 CPU 核心、分块渲染目标及绘图状态|完整帧自动驱动、缩放／特殊混合、输入绑定、缓存和设备呈现|
-|`input`|两级双向坐标转换、区域和键命令、四组扫描与重复、捕获、位图及指针通知、滚轮、移动阈值、自动光标、快照查询；对象、显式入口及同步设备更新|平滑定位、平台设备与映射配置、图像生成掩码和焦点导航|
+|`input`|两级双向坐标转换、区域和键命令、四组扫描与重复、捕获、位图及指针通知、滚轮、移动阈值、平滑定位、自动光标、快照查询；对象、显式入口及同步设备更新|平台设备与映射配置、图像生成掩码和焦点导航|
 |`task`|任务编号、父子索引、子树移除、编号回收、直接命令与类型广播路由、基类控制、整数时钟及同步树更新／销毁调度|类型专属对象与序列化|
 |`runtime`|任务树、对象存储、普通宿主状态与对象工厂的整合；普通对象、基类对象、任务 native、78／79／80／82／83／84／100／101、111／112／114／115／117、365／366／368、590～593|其他对象类型、系统 native 组合、程序装载时点|
 
@@ -291,7 +291,9 @@ FES 内部执行宏声明，初始化按以下顺序交给宿主：
 
 `Runtime::input_state(id)`／`input_state_mut(id)` 查询输入状态。`dispatch_input_key`、`scan_input_keys`、`update_input_selection`、`dispatch_input_motion` 将逻辑坐标和设备查询连接到真实任务命令路由。接收者回调可以修改正在执行的输入任务的区域、键开关、指针及基类状态，后续遍历立即生效，错误返回也保留已发生的修改。完整协议见[输入对象](input.md#输入对象与运行时)。
 
-`Runtime::set_input_device(device)` 绑定同步 `input::InputDevice`，为已有输入对象逐个查询初始位置；之后新建输入对象在登记前查询，失败不占用编号。共享映射通过 `input_coordinates()`／`input_coordinates_mut()` 配置。InputObject 主体自动执行轮询、选择、按键、滚轮、拖动、光标及更新收尾；未绑定设备返回诊断，显式事件入口仍可使用。平滑定位及平台采集继续实现，设备协议及查询次序见[同步设备更新](input.md#同步设备更新)。独立输入宿主提供 `Host::input_device`／`input_coordinates` 和 `dispatch_input_command(state, delivery, command, buffers, output)`，delivery 区分直接分派与广播，返回值表示目标可达性。
+`Runtime::set_input_device(device)` 绑定同步 `input::InputDevice`，为已有输入对象逐个查询初始位置；之后新建输入对象在登记前查询，失败不占用编号。共享映射通过 `input_coordinates()`／`input_coordinates_mut()` 配置。InputObject 主体自动执行轮询、定位、选择、按键、滚轮、拖动、光标及更新收尾；未绑定设备返回诊断，显式事件入口仍可使用。平台采集继续实现，设备协议及查询次序见[同步设备更新](input.md#同步设备更新)。独立输入宿主提供 `Host::input_device`／`input_coordinates` 和 `dispatch_input_command(state, delivery, command, buffers, output)`，delivery 区分直接分派与广播，返回值表示目标可达性。
+
+`Runtime::set_input_pointer_control(enabled)` 设置命令 138 的配置门控，默认 false；139 仍可在前台请求有效目标。独立宿主实现 `Host::input_pointer_control`。两个命令接受打包的无符号十六位逻辑坐标，清理受抑制的键状态后保存定位目标、剩余值和任务 elapsed；设备通过 set_pointer 和 clear_keys 完成对应操作。时刻及坐标约定见[平滑定位](input.md#平滑定位)。
 
 `InputState::set_update_rate(rate)` 设置自动隐藏命令 143 所需的任务速率，默认零；配置宿主提供实际值，`update_rate()` 查询原值。143 设置开关与阈值，159 重置空闲计数，二者按门控调用设备并广播 22。输入命令的回调修改及错误前已发生的副作用保留，详见[对象命令](input.md#对象命令)。
 
