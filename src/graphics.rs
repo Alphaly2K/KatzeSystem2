@@ -8,6 +8,8 @@ mod transform;
 pub use transform::Transform;
 mod canvas;
 pub use canvas::CanvasTriangle;
+mod canvas_layout;
+pub use canvas_layout::CanvasLayout;
 mod drawable;
 pub use drawable::{Drawable, Drawables, Vertex};
 mod plane;
