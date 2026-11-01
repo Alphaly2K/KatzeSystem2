@@ -96,6 +96,9 @@ impl CommandState {
                 self.pointer.position = [-1; 2];
                 self.pointer.forced = 1;
             }
+            147 => self
+                .regions
+                .set_image_mask(command.data[0], command.data[1], host)?,
             149 => write(
                 buffers.data1.as_deref_mut(),
                 &self.pointer.cursor_shown.to_le_bytes(),

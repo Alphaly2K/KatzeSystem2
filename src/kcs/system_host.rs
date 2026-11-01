@@ -36,6 +36,10 @@ impl<H: Host, S: SystemServices> Host for SystemHost<'_, H, S> {
         self.inner.drawables()
     }
 
+    fn image(&self, handle: u32) -> Result<&crate::graphics::Image> {
+        self.inner.image(handle)
+    }
+
     fn canvas_layout(&self) -> Result<Option<crate::graphics::CanvasLayout>> {
         self.inner.canvas_layout()
     }

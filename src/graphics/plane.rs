@@ -639,6 +639,14 @@ impl TaskObject for PlaneObject {
                 )?;
             }
             97 => self.event_target = command.data[1],
+            98 => {
+                self.input_command(
+                    147,
+                    [id, command.data[1], command.data[2]],
+                    &mut CommandBuffers::default(),
+                    host,
+                )?;
+            }
             75 => {
                 write_words(buffers.data0.as_deref_mut(), &[self.size[0].to_bits()])?;
                 write_words(buffers.data1.as_deref_mut(), &[self.size[1].to_bits()])?;

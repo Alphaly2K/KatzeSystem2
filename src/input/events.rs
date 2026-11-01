@@ -11,15 +11,40 @@ pub struct HitMask {
 
 impl HitMask {
     pub fn new(size: [u32; 2], bytes: Vec<u8>) -> Result<Self> {
-        let [width, height] = size;
-        let length = (width as usize)
-            .div_ceil(8)
-            .checked_mul(height as usize)
-            .filter(|&length| length <= read::MAX_BYTES);
-        if width > i32::MAX as u32 - 7 || height > i32::MAX as u32 || length != Some(bytes.len()) {
+        if mask_length(size)? != bytes.len() {
             return Err(Error::new(0, "输入位掩码尺寸或字节长度无效"));
         }
         Ok(Self { size, bytes })
+    }
+
+    /// 按完整画布及图像偏移生成独立命中位图；Alpha 非零的像素置位。
+    pub fn from_image(image: &crate::graphics::Image) -> Result<Self> {
+        let size = Self::image_size(image);
+        let mut bytes = vec![0; mask_length(size)?];
+        let width = image.info().size[0] as usize;
+        let offset = image.info().offset.map(|value| value as u32);
+        let stride = (size[0] as usize).div_ceil(8);
+        for (index, pixel) in image.surface().pixels().chunks_exact(4).enumerate() {
+            if pixel[3] != 0 {
+                let x = offset[0].wrapping_add((index % width) as u32);
+                let y = offset[1].wrapping_add((index / width) as u32);
+                if x < size[0] && y < size[1] {
+                    bytes[y as usize * stride + x as usize / 8] |= 1 << (x % 8);
+                }
+            }
+        }
+        Ok(Self { size, bytes })
+    }
+
+    pub(super) fn image_size(image: &crate::graphics::Image) -> [u32; 2] {
+        std::array::from_fn(|i| {
+            let info = image.info();
+            if info.canvas_size[i] == 0 {
+                info.size[i]
+            } else {
+                info.canvas_size[i]
+            }
+        })
     }
 
     pub fn size(&self) -> [u32; 2] {
@@ -40,6 +65,18 @@ impl HitMask {
         let index = y as usize * (self.size[0] as usize).div_ceil(8) + x as usize / 8;
         self.bytes[index] & (1 << (x % 8)) != 0
     }
+}
+
+fn mask_length(size: [u32; 2]) -> Result<usize> {
+    let [width, height] = size;
+    let length = (width as usize)
+        .div_ceil(8)
+        .checked_mul(height as usize)
+        .filter(|&length| length <= read::MAX_BYTES);
+    if width > i32::MAX as u32 - 7 || height > i32::MAX as u32 {
+        return Err(Error::new(0, "输入位掩码尺寸或字节长度无效"));
+    }
+    length.ok_or_else(|| Error::new(0, "输入位掩码尺寸或字节长度无效"))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

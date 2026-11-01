@@ -238,6 +238,11 @@ pub trait Host {
         None
     }
 
+    /// 已解码图像的借用；调用方在同步命令结束前完成像素读取。
+    fn image(&self, _handle: u32) -> Result<&crate::graphics::Image> {
+        Err(Error::new(0, "宿主未提供解码图像查询"))
+    }
+
     /// 具体对象创建纹理包装时读取的布局，独立于当前像素访问开关。
     fn canvas_layout(&self) -> Result<Option<crate::graphics::CanvasLayout>> {
         Ok(None)
@@ -320,6 +325,10 @@ impl<T: Host + ?Sized> Host for &mut T {
 
     fn drawables(&mut self) -> Option<&mut crate::graphics::Drawables> {
         (**self).drawables()
+    }
+
+    fn image(&self, handle: u32) -> Result<&crate::graphics::Image> {
+        (**self).image(handle)
     }
 
     fn canvas_layout(&self) -> Result<Option<crate::graphics::CanvasLayout>> {

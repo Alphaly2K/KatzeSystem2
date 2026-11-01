@@ -970,6 +970,9 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
 }
 
 impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
+    fn image(&self, handle: u32) -> Result<&crate::graphics::Image> {
+        self.resources.images.get(handle)
+    }
     fn input_device(&mut self) -> Option<&mut dyn crate::input::InputDevice> {
         self.resources
             .input_device

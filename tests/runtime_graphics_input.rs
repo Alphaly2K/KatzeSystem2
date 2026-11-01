@@ -5,7 +5,7 @@ use katze_system2::{
     Error, Result, expression,
     graphics::{GraphicsFactory, RenderTarget},
     input::{InputFactory, KeyEvent, KeyEventKind},
-    kcs::{Host, Interpreter, NativeReturn},
+    kcs::{Host, Interpreter, NativeReturn, Program},
     runtime::{BaseObject, ObjectFactory, RootObject, Runtime, TaskObject, kind},
     task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock},
 };
@@ -95,6 +95,29 @@ impl TaskObject for Receiver {
         host: &mut dyn Host,
         budget: usize,
     ) -> Result<CommandOutcome> {
+        if command.code == 800 {
+            let mut vm = Interpreter::new(Program::from_code(&[], vec![], 16)?, vec![])?;
+            let NativeReturn::Value(handle) = host.call(112, &bytes(&[3, 2]), &mut vm)? else {
+                unreachable!();
+            };
+            for (x, y, color) in [(0, 1, 0x010000ff), (2, 0, 0x8000ff00)] {
+                assert_eq!(
+                    host.call(117, &bytes(&[handle, x, y, 1, 1, color]), &mut vm)?,
+                    NativeReturn::Continue
+                );
+            }
+            host.dispatch_task_command(
+                packet(3, command.target, 98, [0, handle, 1]),
+                &mut CommandBuffers::default(),
+                &mut 0,
+            )?;
+            assert_eq!(
+                host.call(114, &bytes(&[handle]), &mut vm)?,
+                NativeReturn::Continue
+            );
+            *output = handle;
+            return Ok(CommandOutcome::finished(false));
+        }
         if matches!(command.code, 6 | 9 | 10 | 48 | 64 | 65) {
             self.records.borrow_mut().push(*command);
             if matches!(command.code, 6 | 9 | 10 | 65) {
@@ -680,4 +703,70 @@ fn geometry_changes_refresh_bounds_without_reprioritizing_or_scaling_the_region(
             .is_empty()
     );
     assert!(runtime.input_state(1).unwrap().regions().geometry_dirty());
+}
+
+#[test]
+fn allocated_image_masks_survive_release_and_gate_plane_selection_and_capture() {
+    let (mut runtime, records, _, _) = setup();
+    assert_eq!(send(&mut runtime, 3, 98, u32::MAX), 0);
+    configure(&mut runtime, &mut states());
+    let handle = send(&mut runtime, 2, 800, 0);
+    assert_ne!(handle, 0);
+    assert!(runtime.images().get(handle).is_err());
+    let mask = runtime
+        .input_state(1)
+        .unwrap()
+        .regions()
+        .get(3)
+        .unwrap()
+        .hit_mask()
+        .unwrap();
+    assert_eq!(mask.size(), [3, 2]);
+    assert_eq!(mask.bytes(), [1, 4]);
+    runtime.update_input_selection(1, Some([20, 30])).unwrap();
+    assert_eq!(send(&mut runtime, 3, 74, 0), 1);
+    let pressed = KeyEvent {
+        point: [20, 30],
+        ..event(1)
+    };
+    assert!(runtime.dispatch_input_key(1, pressed).unwrap());
+    assert_eq!(runtime.input_state(1).unwrap().events().captures()[0], 3);
+    let released = KeyEvent {
+        point: [21, 30],
+        ..event(0)
+    };
+    assert!(runtime.dispatch_input_key(1, released).unwrap());
+    runtime.update_input_selection(1, Some([21, 30])).unwrap();
+    assert_eq!(send(&mut runtime, 3, 74, 0), 0);
+    let count = records.borrow().len();
+    assert!(
+        !runtime
+            .dispatch_input_key(
+                1,
+                KeyEvent {
+                    point: [21, 30],
+                    ..event(1)
+                }
+            )
+            .unwrap()
+    );
+    assert_eq!(records.borrow().len(), count);
+    assert!(
+        runtime
+            .dispatch_command(0, packet(3, 2, 98, [0, handle, 0]))
+            .is_err()
+    );
+    assert!(
+        runtime
+            .input_state(1)
+            .unwrap()
+            .regions()
+            .get(3)
+            .unwrap()
+            .hit_mask()
+            .is_none()
+    );
+    send(&mut runtime, 3, 98, 0);
+    runtime.update_input_selection(1, Some([21, 30])).unwrap();
+    assert_eq!(send(&mut runtime, 3, 74, 0), 1);
 }

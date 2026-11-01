@@ -115,6 +115,26 @@ impl Regions {
         true
     }
 
+    fn set_image_mask(&mut self, id: u32, handle: u32, host: &dyn crate::kcs::Host) -> Result<()> {
+        let Some(index) = self.index(id) else {
+            return Ok(());
+        };
+        let region = &mut self.records[index];
+        if handle == 0 {
+            if region.mask.take().is_some() {
+                region.words[11..14].fill(0);
+            }
+        } else {
+            region.mask = None;
+            region.words[11] = 0;
+            let image = host.image(handle)?;
+            region.words[12..14].copy_from_slice(&HitMask::image_size(image));
+            region.mask = Some(HitMask::from_image(image)?);
+            region.words[11] = 1;
+        }
+        Ok(())
+    }
+
     /// 矩形或启用属性变动要求后续输入更新重新检查命中区域。
     pub fn geometry_dirty(&self) -> bool {
         self.geometry_dirty
