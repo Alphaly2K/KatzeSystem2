@@ -1,10 +1,12 @@
 //! FES 对象的身份、银行绑定与属性状态，独立于下层任务编号。
 
 use crate::fes::{
-    CImageState, ImageState, ObjectDefinition, ObjectInitialization, ObjectReference,
+    CImageState, CPlaneState, ImageState, ObjectDefinition, ObjectInitialization, ObjectReference,
 };
 use crate::{Error, HandleAllocator, Result, read};
 use std::collections::{BTreeMap, BTreeSet};
+
+mod plane;
 
 const TOP: &str = "_TOPOBJ_";
 
@@ -14,6 +16,7 @@ pub enum ObjectState {
     Base,
     CImage(Box<CImageState>),
     Image(Box<ImageState>),
+    CPlane(Box<CPlaneState>),
 }
 
 impl ObjectState {
@@ -22,6 +25,7 @@ impl ObjectState {
             Self::Base => "BASE",
             Self::CImage(_) => "CIMAGE",
             Self::Image(_) => "IMAGE",
+            Self::CPlane(_) => "CPLANE",
         }
     }
 
@@ -30,6 +34,7 @@ impl ObjectState {
             "BASE" => Self::Base,
             "CIMAGE" => Self::CImage(Box::default()),
             "IMAGE" => Self::Image(Box::default()),
+            "CPLANE" => Self::CPlane(Box::default()),
             _ => return Err(Error::new(0, format!("FES 对象类型 {kind} 尚未接入"))),
         })
     }
@@ -43,6 +48,7 @@ pub struct Object {
     bank: u32,
     parent: Option<u32>,
     children: BTreeSet<u32>,
+    task_id: Option<u32>,
     pub state: ObjectState,
 }
 
@@ -65,6 +71,11 @@ impl Object {
 
     pub fn children(&self) -> impl Iterator<Item = u32> + '_ {
         self.children.iter().copied()
+    }
+
+    /// CPLANE 更新所创建的下层任务；尚未创建或创建失败时为 None。
+    pub fn task_id(&self) -> Option<u32> {
+        self.task_id
     }
 }
 
@@ -92,6 +103,7 @@ impl Objects {
                     bank: 0,
                     parent: None,
                     children: BTreeSet::new(),
+                    task_id: None,
                     state: ObjectState::Base,
                 },
             )]),
@@ -158,6 +170,7 @@ impl Objects {
                     bank: bank as u32,
                     parent: Some(self.top),
                     children: BTreeSet::new(),
+                    task_id: None,
                     state: initial.clone(),
                 },
             );
@@ -242,15 +255,34 @@ impl Objects {
             if let Some(parent) = &initialization.attributes.parent {
                 self.set_parent(handle, self.lookup(&parent.name, parent.bank))?;
             }
-            match &mut self.objects.get_mut(&handle).unwrap().state {
-                ObjectState::Base => (),
-                ObjectState::CImage(state) => state.apply(&initialization.attributes, bank as u32),
+            let dirty = match &mut self.objects.get_mut(&handle).unwrap().state {
+                ObjectState::Base => false,
+                ObjectState::CImage(state) => {
+                    state.apply(&initialization.attributes, bank as u32);
+                    false
+                }
                 ObjectState::Image(state) => {
                     state.apply(&initialization.attributes, bank as u32, &mut transform_name)?;
+                    false
                 }
+                ObjectState::CPlane(state) => state.apply(&initialization.attributes, bank as u32),
+            };
+            if dirty {
+                self.invalidate(handle);
             }
         }
         Ok(())
+    }
+
+    fn invalidate(&mut self, handle: u32) {
+        let mut pending = vec![handle];
+        while let Some(handle) = pending.pop() {
+            let object = self.objects.get_mut(&handle).unwrap();
+            if let ObjectState::CPlane(state) = &mut object.state {
+                state.dirty = true;
+            }
+            pending.extend(object.children.iter().copied());
+        }
     }
 
     /// 移出对象及后代，后代先返回；调用方负责释放其下层媒体资源和任务。

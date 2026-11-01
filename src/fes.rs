@@ -11,6 +11,7 @@ mod keyblocks;
 mod macros;
 mod objects;
 mod params;
+mod plane;
 mod resources;
 mod subcommands;
 pub use attributes::{ObjectAttributes, ObjectInitialization, ObjectReference};
@@ -19,6 +20,7 @@ pub use image::{CImageState, ImageState};
 pub use keyblocks::KeyBlock;
 pub use objects::ObjectDefinition;
 pub use params::parse as parameters;
+pub use plane::CPlaneState;
 pub use resources::ImageReference;
 use std::collections::{BTreeMap, VecDeque};
 pub use subcommands::{
