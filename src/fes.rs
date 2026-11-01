@@ -20,7 +20,7 @@ pub use image::{CImageState, ImageState};
 pub use keyblocks::KeyBlock;
 pub use objects::ObjectDefinition;
 pub use params::parse as parameters;
-pub use plane::CPlaneState;
+pub use plane::{CPlaneState, PlaneState};
 pub use resources::ImageReference;
 use std::collections::{BTreeMap, VecDeque};
 pub use subcommands::{

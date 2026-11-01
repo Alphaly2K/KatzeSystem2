@@ -5,7 +5,7 @@ use crate::task::{Command, CommandBuffers};
 use crate::{Error, Result};
 
 impl<F: ObjectFactory> Runtime<F> {
-    /// 显式推进一个 FES 对象的下层更新；CPLANE 创建的任务直属 owner。
+    /// 显式推进一个 FES 对象的下层更新；平面创建的任务直属 owner。
     /// 调用方按 FES 更新顺序调用，并将对象存储与 owner 保持同一生命周期。
     pub fn update_fes_object(
         &mut self,
@@ -17,19 +17,25 @@ impl<F: ObjectFactory> Runtime<F> {
             return Err(Error::new(0, "FES 所属任务不存在"));
         }
         let object = objects
-            .get_mut(handle)
+            .get(handle)
             .ok_or_else(|| Error::new(0, "FES 对象标识无效"))?;
-        let ObjectState::CPlane(state) = &mut object.state else {
+        let canvas = matches!(object.state, ObjectState::Plane(_));
+        if object.state.plane().is_none() {
             return match object.state {
                 ObjectState::Base => Ok(()),
                 _ => Err(Error::new(0, "FES 图像对象更新尚未接入共享绘制服务")),
             };
-        };
+        }
+        let creation_position = objects.plane_position(handle);
+        let object = objects.get_mut(handle).unwrap();
+        let state = object.state.plane_mut().unwrap();
         let mut task = object.task_id;
         self.check_fes_plane_binding(owner, task)?;
         if state.rebuild {
-            if let Some(resource) = &state.size_resource {
-                state.size = self.fes_image_geometry(resource, true)?;
+            if !canvas {
+                if let Some(resource) = &state.size_resource {
+                    state.size = self.fes_image_geometry(resource, true)?;
+                }
             }
             if let Some(old) = task {
                 self.fes_plane_command(owner, Some(old), 3, [0; 3], None)?;
@@ -44,6 +50,11 @@ impl<F: ObjectFactory> Runtime<F> {
             };
             object.task_id = task;
             self.fes_plane_command(owner, task, 84, [0, state.creation_type, 0], None)?;
+            if canvas {
+                if let Some(resource) = &state.size_resource {
+                    state.size = self.fes_image_geometry(resource, true)?;
+                }
+            }
             let mut rectangle = [0; 32];
             for (i, value) in [
                 0,
@@ -51,34 +62,45 @@ impl<F: ObjectFactory> Runtime<F> {
                 0,
                 (state.size[0] as f32).to_bits(),
                 (state.size[1] as f32).to_bits(),
-                32,
+                if canvas { 4 } else { 32 },
                 1,
-                state.color,
+                if canvas { u32::MAX } else { state.color },
             ]
             .into_iter()
             .enumerate()
             {
                 rectangle[i * 4..i * 4 + 4].copy_from_slice(&value.to_le_bytes());
             }
-            self.fes_plane_command(owner, task, 42, [0; 3], Some(&mut rectangle))?;
+            self.fes_plane_command(
+                owner,
+                task,
+                if canvas { 41 } else { 42 },
+                [0; 3],
+                Some(&mut rectangle),
+            )?;
+            if canvas {
+                let mut bytes = creation_position[..3]
+                    .iter()
+                    .flat_map(|v| v.to_le_bytes())
+                    .collect::<Vec<_>>();
+                self.fes_plane_command(owner, task, 51, [0, 0, 1], Some(&mut bytes))?;
+            }
             state.rebuild = false;
         }
         let viewport = state.viewport.clone();
         if let Some(viewport) = objects.lookup(&viewport.name, viewport.bank) {
-            let target_dirty = matches!(
-                &objects.get(viewport).unwrap().state,
-                ObjectState::CPlane(state) if state.dirty
-            );
-            let ObjectState::CPlane(state) = &objects.get(handle).unwrap().state else {
-                unreachable!()
-            };
+            let target_dirty = objects
+                .get(viewport)
+                .unwrap()
+                .state
+                .plane()
+                .is_some_and(|state| state.dirty);
+            let state = objects.get(handle).unwrap().state.plane().unwrap();
             if state.viewport_dirty || target_dirty {
                 return Err(Error::new(0, "FES VIEWPORT 更新需要二维对象命令 89"));
             }
         }
-        let ObjectState::CPlane(state) = &mut objects.get_mut(handle).unwrap().state else {
-            unreachable!()
-        };
+        let state = objects.get_mut(handle).unwrap().state.plane_mut().unwrap();
         if !state.dirty {
             return Ok(());
         }
@@ -91,23 +113,30 @@ impl<F: ObjectFactory> Runtime<F> {
             }
         }
         let position = objects.plane_position(handle);
-        let ObjectState::CPlane(state) = &objects.get(handle).unwrap().state else {
-            unreachable!()
-        };
-        for (code, value) in [
-            (51, [position[0], position[1], position[2]]),
-            (
-                49,
+        let base = objects.plane_base_point(handle);
+        let object = objects.get(handle).unwrap();
+        let state = object.state.plane().unwrap();
+        let mut vectors = vec![
+            (51, 0, [position[0], position[1], position[2]]),
+            (49, 0, [base[0], base[1], state.priority as f32]),
+        ];
+        if let ObjectState::Plane(plane) = &object.state {
+            let vram = plane.vram();
+            let offset = objects.canvas_offset;
+            vectors.push((
+                51,
+                1,
                 [
-                    state.base_point[0],
-                    state.base_point[1],
-                    state.priority as f32,
+                    offset[0].wrapping_add(integer_position(vram[0])) as f32,
+                    offset[1].wrapping_add(integer_position(vram[1])) as f32,
+                    vram[2],
                 ],
-            ),
-            (66, [1.0; 3]),
-        ] {
+            ));
+        }
+        vectors.push((66, 0, [1.0; 3]));
+        for (code, source, value) in vectors {
             let mut bytes = value.map(f32::to_le_bytes).concat();
-            self.fes_plane_command(owner, task, code, [0, 0, 1], Some(&mut bytes))?;
+            self.fes_plane_command(owner, task, code, [source, 0, 1], Some(&mut bytes))?;
         }
         let mut matrix = crate::graphics::Transform::default()
             .matrix()
@@ -121,10 +150,13 @@ impl<F: ObjectFactory> Runtime<F> {
         ] {
             self.fes_plane_command(owner, task, code, data, None)?;
         }
-        let ObjectState::CPlane(state) = &mut objects.get_mut(handle).unwrap().state else {
-            unreachable!()
-        };
-        state.dirty = false;
+        objects
+            .get_mut(handle)
+            .unwrap()
+            .state
+            .plane_mut()
+            .unwrap()
+            .dirty = false;
         Ok(())
     }
 
@@ -225,7 +257,7 @@ impl Objects {
         let mut next = Some(handle);
         while let Some(handle) = next {
             let object = self.get(handle).unwrap();
-            let ObjectState::CPlane(state) = &object.state else {
+            let Some(state) = object.state.plane() else {
                 break;
             };
             chain.push(state.position);
@@ -234,5 +266,28 @@ impl Objects {
         chain.into_iter().rev().fold([0.0; 4], |parent, local| {
             std::array::from_fn(|i| local[i] + parent[i])
         })
+    }
+
+    fn plane_base_point(&self, handle: u32) -> [f32; 4] {
+        let mut chain = Vec::new();
+        let mut next = Some(handle);
+        while let Some(handle) = next {
+            let object = self.get(handle).unwrap();
+            chain.push(object.state.plane().unwrap().base_point);
+            next = object
+                .parent
+                .filter(|&parent| matches!(self.get(parent).unwrap().state, ObjectState::Plane(_)));
+        }
+        chain.into_iter().rev().fold([0.0; 4], |parent, local| {
+            std::array::from_fn(|i| local[i] + parent[i])
+        })
+    }
+}
+
+fn integer_position(value: f32) -> i32 {
+    if (-2147483648.0..2147483648.0).contains(&value) {
+        value as i32
+    } else {
+        i32::MIN
     }
 }

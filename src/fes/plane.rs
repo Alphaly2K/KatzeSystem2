@@ -173,3 +173,39 @@ impl CPlaneState {
         dirty
     }
 }
+
+/// PLANE 复用平面属性，并保存独立的画布取样位置。
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlaneState {
+    pub base: CPlaneState,
+    vram: [f32; 4],
+}
+
+impl Default for PlaneState {
+    fn default() -> Self {
+        Self {
+            base: CPlaneState::default(),
+            vram: [0.0, 0.0, 0.0, 1.0],
+        }
+    }
+}
+
+impl PlaneState {
+    pub fn vram(&self) -> [f32; 4] {
+        self.vram
+    }
+
+    /// 返回本次是否使属性失效；VRAM 独立于屏幕位置和尺寸重建。
+    pub fn apply(&mut self, attributes: &ObjectAttributes, bank: u32) -> bool {
+        let mut dirty = self.base.apply(attributes, bank);
+        if let Some(vram) = attributes.vram {
+            let next = [vram[0] as f32, vram[1] as f32, 0.0, 0.0];
+            if self.vram != next {
+                self.vram = next;
+                self.base.dirty = true;
+                dirty = true;
+            }
+        }
+        dirty
+    }
+}

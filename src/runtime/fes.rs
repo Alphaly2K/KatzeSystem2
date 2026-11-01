@@ -2,6 +2,7 @@
 
 use crate::fes::{
     CImageState, CPlaneState, ImageState, ObjectDefinition, ObjectInitialization, ObjectReference,
+    PlaneState,
 };
 use crate::{Error, HandleAllocator, Result, read};
 use std::collections::{BTreeMap, BTreeSet};
@@ -17,6 +18,7 @@ pub enum ObjectState {
     CImage(Box<CImageState>),
     Image(Box<ImageState>),
     CPlane(Box<CPlaneState>),
+    Plane(Box<PlaneState>),
 }
 
 impl ObjectState {
@@ -26,6 +28,7 @@ impl ObjectState {
             Self::CImage(_) => "CIMAGE",
             Self::Image(_) => "IMAGE",
             Self::CPlane(_) => "CPLANE",
+            Self::Plane(_) => "PLANE",
         }
     }
 
@@ -35,8 +38,25 @@ impl ObjectState {
             "CIMAGE" => Self::CImage(Box::default()),
             "IMAGE" => Self::Image(Box::default()),
             "CPLANE" => Self::CPlane(Box::default()),
+            "PLANE" => Self::Plane(Box::default()),
             _ => return Err(Error::new(0, format!("FES 对象类型 {kind} 尚未接入"))),
         })
+    }
+
+    fn plane(&self) -> Option<&CPlaneState> {
+        match self {
+            Self::CPlane(state) => Some(state),
+            Self::Plane(state) => Some(&state.base),
+            _ => None,
+        }
+    }
+
+    fn plane_mut(&mut self) -> Option<&mut CPlaneState> {
+        match self {
+            Self::CPlane(state) => Some(state),
+            Self::Plane(state) => Some(&mut state.base),
+            _ => None,
+        }
     }
 }
 
@@ -73,7 +93,7 @@ impl Object {
         self.children.iter().copied()
     }
 
-    /// CPLANE 更新所创建的下层任务；尚未创建或创建失败时为 None。
+    /// 平面更新所创建的下层任务；尚未创建或创建失败时为 None。
     pub fn task_id(&self) -> Option<u32> {
         self.task_id
     }
@@ -86,6 +106,7 @@ pub struct Objects {
     objects: BTreeMap<u32, Object>,
     bindings: BTreeMap<String, BTreeMap<i32, u32>>,
     counts: BTreeMap<String, u32>,
+    canvas_offset: [i32; 2],
 }
 
 impl Objects {
@@ -109,11 +130,21 @@ impl Objects {
             )]),
             bindings: BTreeMap::from([(TOP.to_owned(), BTreeMap::from([(0, top)]))]),
             counts: BTreeMap::from([(TOP.to_owned(), 1)]),
+            canvas_offset: [0; 2],
         })
     }
 
     pub fn top(&self) -> u32 {
         self.top
+    }
+
+    pub fn canvas_offset(&self) -> [i32; 2] {
+        self.canvas_offset
+    }
+
+    /// 保存共享绘制服务提供的画布偏移；在后续 PLANE 属性更新时应用。
+    pub fn set_canvas_offset(&mut self, offset: [i32; 2]) {
+        self.canvas_offset = offset;
     }
 
     /// 包含根对象及重复声明产生的未绑定对象。
@@ -266,6 +297,7 @@ impl Objects {
                     false
                 }
                 ObjectState::CPlane(state) => state.apply(&initialization.attributes, bank as u32),
+                ObjectState::Plane(state) => state.apply(&initialization.attributes, bank as u32),
             };
             if dirty {
                 self.invalidate(handle);
@@ -278,7 +310,7 @@ impl Objects {
         let mut pending = vec![handle];
         while let Some(handle) = pending.pop() {
             let object = self.objects.get_mut(&handle).unwrap();
-            if let ObjectState::CPlane(state) = &mut object.state {
+            if let Some(state) = object.state.plane_mut() {
                 state.dirty = true;
             }
             pending.extend(object.children.iter().copied());
