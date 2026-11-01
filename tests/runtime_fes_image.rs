@@ -1046,11 +1046,29 @@ fn list_animation_commands_share_random_and_automatic_updates_use_the_body_time(
             runtime.drawing().target.as_ref().unwrap().pixel(3, 3),
             Some(0x8000_00ff)
         );
+        send(&mut runtime, list, 301, 5, 0);
+        let mut expected = runtime.host().random.clone();
+        expected.next_integer();
+        assert_eq!(send(&mut runtime, list, 306, 5, 0), 0);
+        assert_eq!(
+            runtime.host().random.clone().next_integer(),
+            expected.next_integer()
+        );
+        send(&mut runtime, list, 298, 0, 0);
+        assert_eq!(
+            runtime.drawing().target.as_ref().unwrap().pixel(3, 3),
+            Some(0x80ff_0000)
+        );
+        runtime.update(1002, 100).unwrap();
+        assert_eq!(
+            runtime.drawing().target.as_ref().unwrap().pixel(3, 3),
+            Some(0x80ff_0000)
+        );
         assert!(load(&mut runtime, &mut b"invalid.anm\0".to_vec()).is_err());
         send(&mut runtime, list, 298, 0, 0);
         assert_eq!(
             runtime.drawing().target.as_ref().unwrap().pixel(3, 3),
-            Some(0xff00_00ff)
+            Some(0xffff_0000)
         );
         assert_eq!(
             reads.borrow().as_slice(),

@@ -281,6 +281,18 @@ pub trait Host {
         list.update_animations(now, budget, images)
     }
 
+    fn restart_image_list_animation(
+        &mut self,
+        list: &mut crate::graphics::ImageList,
+        key: u32,
+        budget: usize,
+    ) -> Result<bool> {
+        let images = self
+            .images_mut()
+            .ok_or_else(|| Error::new(0, "宿主未提供图像存储"))?;
+        list.restart_animation(key, budget, images)
+    }
+
     /// 具体对象创建纹理包装时读取的布局，独立于当前像素访问开关。
     fn canvas_layout(&self) -> Result<Option<crate::graphics::CanvasLayout>> {
         Ok(None)
@@ -412,6 +424,15 @@ impl<T: Host + ?Sized> Host for &mut T {
         budget: usize,
     ) -> Result<bool> {
         (**self).update_image_list_animations(list, now, budget)
+    }
+
+    fn restart_image_list_animation(
+        &mut self,
+        list: &mut crate::graphics::ImageList,
+        key: u32,
+        budget: usize,
+    ) -> Result<bool> {
+        (**self).restart_image_list_animation(list, key, budget)
     }
 
     fn create_task_child(&mut self, kind: u32, name: &[u8], context: &[u8]) -> Result<u32> {

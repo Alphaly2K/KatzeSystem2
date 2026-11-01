@@ -473,3 +473,84 @@ fn animated_lists_freeze_budgeted_time_and_keep_hidden_pixels_until_visible_inva
     );
     list.release(&mut images).unwrap();
 }
+
+#[test]
+fn list_restart_runs_once_across_budget_yields_and_invalidates_hidden_or_unanimated_entries() {
+    for budget in [1, 4096] {
+        for scenario in 0..4 {
+            let reset_frame = scenario & 1 != 0;
+            let hidden = scenario & 2 != 0;
+            let playing = if hidden { -3 } else { 0 };
+            let mut images = Images::default();
+            let mut list = ImageList::new(1, [4, 3], &mut images).unwrap();
+            let mut frames = vec![
+                (2, 0xff00_00ff, [0; 2], [0; 2]),
+                (7, 0xff00_ff00, [0; 2], [0; 2]),
+            ];
+            if reset_frame {
+                frames.push((10000, 0xffff_0000, [0; 2], [0; 2]));
+            }
+            list.set_hg3(
+                7,
+                &hg3(&frames),
+                ImageListProperties {
+                    position: [1., 1.],
+                    ..Default::default()
+                },
+                &mut images,
+            )
+            .unwrap();
+            let code = animation(&[
+                (16, [0, 1, 0]),
+                (13, [i32::from(!hidden), 0, 0]),
+                (0, [7, 3, 3]),
+                (0, [2, 4, 4]),
+            ]);
+            list.load_animation(7, &code).unwrap();
+            list.set_animation_playing(7, playing).unwrap();
+            list.update(&mut images).unwrap();
+            assert!(list.dirty_rectangles().next().is_none());
+            let mut completed = false;
+            for _ in 0..16 {
+                if list.restart_animation(7, budget, &mut images).unwrap() {
+                    completed = true;
+                    break;
+                }
+                assert!(list.restart_animation(8, budget, &mut images).is_err());
+                assert!(list.update(&mut images).is_err());
+            }
+            assert!(completed);
+            let state = list.animation(7).unwrap();
+            assert_eq!(state.playing, playing);
+            assert!(!state.reset_time_on_update);
+            assert_eq!(state.timeline.as_ref().unwrap().interpreter.variables[0], 1);
+            assert_eq!(state.display().image, if reset_frame { 10000 } else { 7 });
+            assert_eq!(state.display().visible, i32::from(!hidden));
+            assert!(list.dirty_rectangles().next().is_some());
+            list.update(&mut images).unwrap();
+            let pixel = images
+                .get(list.image())
+                .unwrap()
+                .surface()
+                .pixel(1, 1)
+                .unwrap();
+            assert_eq!(pixel >> 24, if hidden { 0 } else { 255 });
+            if !hidden {
+                assert_eq!(
+                    pixel,
+                    if reset_frame {
+                        0xffff_0000
+                    } else {
+                        0xff00_ff00
+                    }
+                );
+            }
+            assert!(list.restart_animation(8, budget, &mut images).unwrap());
+            assert!(list.dirty_rectangles().next().is_none());
+            assert!(list.load_animation(7, b"invalid").is_err());
+            assert!(list.restart_animation(7, budget, &mut images).unwrap());
+            assert!(list.dirty_rectangles().next().is_some());
+            list.release(&mut images).unwrap();
+        }
+    }
+}

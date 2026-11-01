@@ -344,6 +344,15 @@ impl TaskObject for ImageListObject {
                     .ok_or_else(|| Error::new(0, "图像列表尚未创建"))?;
                 *output = list.set_priority(key, b as i32, images(host)?)? as u32;
             }
+            306 => {
+                let list = self
+                    .list
+                    .as_mut()
+                    .ok_or_else(|| Error::new(0, "图像列表尚未创建"))?;
+                if !host.restart_image_list_animation(list, key, budget)? {
+                    return Ok(CommandOutcome::RESUME);
+                }
+            }
             308 => {
                 let list = self
                     .list

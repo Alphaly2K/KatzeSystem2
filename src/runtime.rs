@@ -1055,6 +1055,17 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         })
     }
 
+    fn restart_image_list_animation(
+        &mut self,
+        list: &mut crate::graphics::ImageList,
+        key: u32,
+        budget: usize,
+    ) -> Result<bool> {
+        list.restart_animation_with_random(key, budget, &mut self.resources.images, &mut || {
+            self.host.random.next_integer()
+        })
+    }
+
     fn create_task_child(&mut self, kind: u32, name: &[u8], context: &[u8]) -> Result<u32> {
         let parent = self.host.task_id;
         create_object(self.store(), parent, kind, name, context)
