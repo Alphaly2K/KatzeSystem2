@@ -649,14 +649,19 @@ impl TaskObject for PlaneObject {
                 if command.code == 47 {
                     self.display = command.data[1];
                 }
-                let effective = if self.display == 0 {
-                    0
+                let inherited = command.code == 47 && self.parent_offset.is_some();
+                let incoming = if inherited {
+                    let parent = host.parent_task_id()?;
+                    drawings(host)?.get(parent).map(Drawable::display)
                 } else {
-                    command.data[1]
+                    Some(command.data[1])
                 };
-                drawings(host)?.set_display(id, effective);
-                if command.code == 48 && self.input_configured {
-                    self.enable_input(effective, 0, host)?;
+                if let Some(incoming) = incoming {
+                    let effective = if self.display == 0 { 0 } else { incoming };
+                    drawings(host)?.set_display(id, effective);
+                    if (command.code == 48 || inherited) && self.input_configured {
+                        self.enable_input(effective, 0, host)?;
+                    }
                 }
                 if self.input_state != 3 {
                     self.select_input_state(host)?;

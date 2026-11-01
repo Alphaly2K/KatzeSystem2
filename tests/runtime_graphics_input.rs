@@ -706,6 +706,51 @@ fn geometry_changes_refresh_bounds_without_reprioritizing_or_scaling_the_region(
 }
 
 #[test]
+fn bound_self_display_uses_parent_visibility_and_preserves_state_when_parent_drawing_is_missing() {
+    let (mut runtime, _, _, _) = setup();
+    let child = runtime.create(3, kind::PLANE, b"child", b"").unwrap();
+    runtime
+        .drawables_mut()
+        .insert(child, katze_system2::graphics::Drawable::default())
+        .unwrap();
+    send(&mut runtime, child, 90, 0);
+    let mut offset = [0; 12];
+    runtime
+        .dispatch_command_with_buffers(
+            0,
+            packet(child, 2, 53, [0; 3]),
+            &mut CommandBuffers {
+                data1: Some(&mut offset),
+                ..CommandBuffers::default()
+            },
+        )
+        .unwrap();
+    let display = |runtime: &TestRuntime| {
+        (
+            runtime.drawables().get(child).unwrap().display(),
+            runtime
+                .input_state(1)
+                .unwrap()
+                .regions()
+                .get(child)
+                .unwrap()
+                .enabled(),
+        )
+    };
+    runtime.drawables_mut().set_display(3, 0);
+    send(&mut runtime, child, 47, 1);
+    assert_eq!(display(&runtime), (0, 0));
+    runtime.drawables_mut().set_display(3, 7);
+    send(&mut runtime, child, 47, 2);
+    assert_eq!(display(&runtime), (7, 7));
+    runtime.drawables_mut().remove(3);
+    send(&mut runtime, child, 47, 0);
+    assert_eq!(display(&runtime), (7, 7));
+    send(&mut runtime, child, 48, 9);
+    assert_eq!(display(&runtime), (0, 0));
+}
+
+#[test]
 fn inherited_geometry_refreshes_regions_after_parent_changes_but_not_on_binding() {
     let (mut runtime, _, _, _) = setup();
     let child = runtime.create(3, kind::PLANE, b"child", b"").unwrap();
