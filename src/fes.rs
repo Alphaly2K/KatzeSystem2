@@ -297,6 +297,16 @@ impl Interpreter {
     pub fn resume(&mut self) {
         self.pending = None;
     }
+    pub(crate) fn initialization_pending(&self) -> bool {
+        self.pre_declarations.is_some()
+            || !self.definitions.is_empty()
+            || !self.initializers.is_empty()
+            || self.declarations.is_some()
+            || matches!(
+                self.pending,
+                Some(Event::CreateObject(_) | Event::InitializeObject(_) | Event::Declarations(_))
+            )
+    }
     pub(crate) fn set_object_bank_count(&mut self, name: &str, count: u32) {
         self.object_banks.insert(name.to_owned(), count);
     }

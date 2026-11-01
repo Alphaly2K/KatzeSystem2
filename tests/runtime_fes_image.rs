@@ -1233,7 +1233,7 @@ fn fes_scenes_run_image_commands_and_flush_objects_before_waiting_or_exiting() {
             .objects_mut()
             .unwrap()
             .set_image_list(list, Rect::from_xywh(0, 0, 8, 6));
-        for now in [100, 101, 102] {
+        for now in [100, 101, 102, 1000] {
             let mut complete = false;
             for retry in 0..64 {
                 if runtime
@@ -1252,9 +1252,9 @@ fn fes_scenes_run_image_commands_and_flush_objects_before_waiting_or_exiting() {
                 .unwrap()
                 .image_animation_request()
                 .unwrap();
-            assert_eq!(request.playing(), i32::from(now == 102));
+            assert_eq!(request.playing(), i32::from(now >= 102));
             assert!(!request.is_pending());
-            assert_eq!(scene.exit_code(), if now == 102 { Some(7) } else { None });
+            assert_eq!(scene.exit_code(), if now >= 102 { Some(7) } else { None });
             send(&mut runtime, list, 298, 0, 0);
             assert_eq!(
                 runtime.drawing().target.as_ref().unwrap().pixel(3, 3),
@@ -1264,9 +1264,7 @@ fn fes_scenes_run_image_commands_and_flush_objects_before_waiting_or_exiting() {
                 &reads.borrow()[..2],
                 [b"raw".to_vec(), b"walk.anm".to_vec()]
             );
-            assert_eq!(reads.borrow().len(), if now == 102 { 3 } else { 2 });
+            assert_eq!(reads.borrow().len(), if now >= 102 { 3 } else { 2 });
         }
-        assert!(runtime.update_fes_scene(0, &mut scene, 1000).unwrap());
-        assert_eq!(reads.borrow().len(), 3);
     }
 }

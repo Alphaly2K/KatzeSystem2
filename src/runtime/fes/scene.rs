@@ -54,13 +54,64 @@ impl Scene {
         self.deadline
     }
 
-    /// 退出码在最终对象更新完成后可用；所属任务的结束通知由调用方处理。
+    /// 退出码在最终对象更新完成后可用；退出后仍可逐轮更新媒体对象。
     pub fn exit_code(&self) -> Option<i32> {
         self.exit_code.filter(|_| self.invocation.is_none())
     }
 
     pub fn is_pending(&self) -> bool {
         self.invocation.is_some()
+    }
+
+    /// 只处理装载期声明和属性，不进入 START 或推进下层媒体对象。
+    /// 返回 false 时保留初始化游标，下一次调用继续处理。
+    pub fn prepare(
+        &mut self,
+        numbers: &mut crate::expression::State,
+        budget: usize,
+    ) -> Result<bool> {
+        if self.invocation.is_some() {
+            return Err(Error::new(0, "FES 本轮推进尚未完成"));
+        }
+        for _ in 0..budget.max(1) {
+            if !self.interpreter.initialization_pending() {
+                return Ok(true);
+            }
+            match self.interpreter.run(numbers, 1)? {
+                Step::Yield => (),
+                Step::Event(event) if self.apply_initialization(&event)? => {
+                    self.interpreter.resume();
+                }
+                _ => return Err(Error::new(0, "FES 装载期出现执行事件")),
+            }
+        }
+        Ok(!self.interpreter.initialization_pending())
+    }
+
+    fn apply_initialization(&mut self, event: &fes::Event) -> Result<bool> {
+        match event {
+            fes::Event::CreateObject(definition) => {
+                self.objects.define(definition)?;
+                self.objects.publish_bindings(&mut self.interpreter);
+            }
+            fes::Event::InitializeObject(initialization) => {
+                self.objects
+                    .initialize(initialization, |name| Ok(name.to_vec()))?;
+            }
+            fes::Event::Declarations(declarations) => {
+                if let Some(declaration) = declarations
+                    .iter()
+                    .find(|declaration| declaration.header.as_slice() != b"SUBCOMMAND")
+                {
+                    return Err(Error::new(
+                        declaration.lines.first().map_or(0, |line| line.offset),
+                        "FES 声明需要对应的运行时服务",
+                    ));
+                }
+            }
+            _ => return Ok(false),
+        }
+        Ok(true)
     }
 
     fn begin_updates(&mut self, resume_script: bool) {
@@ -92,9 +143,6 @@ impl<F: ObjectFactory> Store<'_, F> {
         }
         scene.owner = Some(owner);
         if scene.invocation.is_none() {
-            if scene.exit_code.is_some() {
-                return Ok(true);
-            }
             if scene
                 .deadline
                 .is_some_and(|deadline| deadline.wrapping_add(7) < 7)
@@ -115,7 +163,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                 updates: None,
                 resume_script: false,
             });
-            if scene.deadline.is_some_and(|deadline| now < deadline) {
+            if scene.exit_code.is_some() || scene.deadline.is_some_and(|deadline| now < deadline) {
                 scene.begin_updates(false);
             } else {
                 scene.deadline = None;
@@ -146,16 +194,11 @@ impl<F: ObjectFactory> Store<'_, F> {
                 }
                 Step::Event(event) => {
                     let now = scene.invocation.as_ref().unwrap().now;
+                    if scene.apply_initialization(&event)? {
+                        scene.interpreter.resume();
+                        continue;
+                    }
                     match event {
-                        fes::Event::CreateObject(definition) => {
-                            scene.objects.define(&definition)?;
-                            scene.objects.publish_bindings(&mut scene.interpreter);
-                        }
-                        fes::Event::InitializeObject(initialization) => {
-                            scene
-                                .objects
-                                .initialize(&initialization, |name| Ok(name.to_vec()))?;
-                        }
                         fes::Event::Command(line) => {
                             let args = scene.interpreter.parameters(&line.bytes, self.numbers)?;
                             if args.first().is_some_and(|name| name == b"decode") {
@@ -168,17 +211,6 @@ impl<F: ObjectFactory> Store<'_, F> {
                                 self.numbers,
                             )? {
                                 return Err(Error::new(line.offset, "FES 对象命令尚未接入"));
-                            }
-                        }
-                        fes::Event::Declarations(declarations) => {
-                            if let Some(declaration) = declarations
-                                .iter()
-                                .find(|declaration| declaration.header.as_slice() != b"SUBCOMMAND")
-                            {
-                                return Err(Error::new(
-                                    declaration.lines.first().map_or(0, |line| line.offset),
-                                    "FES 声明需要对应的运行时服务",
-                                ));
                             }
                         }
                         fes::Event::Subcommand(call) => {
@@ -199,6 +231,9 @@ impl<F: ObjectFactory> Store<'_, F> {
                             scene.exit_code = Some(code);
                             scene.begin_updates(false);
                         }
+                        fes::Event::CreateObject(_)
+                        | fes::Event::InitializeObject(_)
+                        | fes::Event::Declarations(_) => unreachable!(),
                     }
                     scene.interpreter.resume();
                 }
