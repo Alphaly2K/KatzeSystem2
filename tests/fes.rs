@@ -952,3 +952,57 @@ fn subcommand_current_overrides_event_bank_and_restores_state_after_errors() {
     assert_eq!(vm.named["value"][&0], 19);
     assert_eq!(vm.event_context().unwrap().bank, 3);
 }
+
+#[test]
+fn button_columns_keep_image_mask_input_type_and_enable_updates_distinct() {
+    let mut button = fes::ButtonState::default();
+    let attributes = fes::ObjectAttributes {
+        size: Some([3, 4]),
+        color: Some(123),
+        enabled: Some(21),
+        display: Some(1),
+        mask: Some(9),
+        object_type: Some(2),
+        button_type: Some(4),
+        ..Default::default()
+    };
+    assert!(
+        button
+            .apply(&attributes, 0, |name| Ok(name.to_vec()))
+            .unwrap()
+    );
+    assert_eq!(button.image.base.size, [3, 4]);
+    assert_eq!(button.image.base.color, -1);
+    assert_eq!(
+        (
+            button.image.base.mask,
+            button.image.base.button_type,
+            button.mask_type
+        ),
+        (9, 4, 2)
+    );
+    assert_eq!(button.enabled, 21);
+    assert!(button.image.base.updates.needs_rebuild());
+    button.image.base.updates = Default::default();
+    assert!(
+        !button
+            .apply(&attributes, 0, |name| Ok(name.to_vec()))
+            .unwrap()
+    );
+    assert!(!button.image.base.updates.needs_rebuild());
+    assert!(!button.image.base.updates.is_dirty());
+    assert!(
+        !button
+            .apply(
+                &fes::ObjectAttributes {
+                    enabled: Some(0),
+                    ..Default::default()
+                },
+                0,
+                |name| Ok(name.to_vec())
+            )
+            .unwrap()
+    );
+    assert!(button.image.base.updates.is_dirty());
+    assert_eq!(button.enabled, 0);
+}

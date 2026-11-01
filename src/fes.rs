@@ -5,6 +5,7 @@ use crate::{
 };
 
 mod attributes;
+mod button;
 mod events;
 mod image;
 mod keyblocks;
@@ -15,6 +16,7 @@ mod plane;
 mod resources;
 mod subcommands;
 pub use attributes::{ObjectAttributes, ObjectInitialization, ObjectReference};
+pub use button::ButtonState;
 pub use events::EventContext;
 pub use image::{CImageState, ImageState, ImageUpdates};
 pub use keyblocks::KeyBlock;

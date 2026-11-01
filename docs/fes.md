@@ -87,6 +87,8 @@ CIMAGE 状态应用已实现并用上述 387 个合法输入核对原应用函�
 
 IMAGE 另应用 FILE、IDN、32 项 ID 映射和 PATHMODE，不使用 CIMAGE 的 SIZE／COLOR 初始化列。FILE 先保存请求名，再按宿主配置转换；空请求不改变当前资源名。IDN 先于本行 ID 映射执行，映射未启用时可直接指定帧 ID，启用后只接受 0～31 的映射槽位。范围外的映射读取返回 0。相同的 387 个合法输入已与原 IMAGE 状态应用结果一致，名称转换在此对照中关闭；配置驱动的名称转换继续接入。普通文件的实际像素装载、失败和登记规则见 [IMAGE 文件更新](graphics.md#fes-image-文件更新)。
 
+BUTTON 的 `fes::ButtonState` 继承 IMAGE，另应用 SIZE、ENABLE、DEFAULT、KEY_U／D／L／R、TYPE、KEYBLOCK 和 SYSKEY。SIZE 仅在变化时请求来源重建；ENABLE 初值为一，保留原始数值，只在变化时标记按钮自身，不递归使后代失效。默认事件组为空，方向目标为空，KEYBLOCK 初值为 −1,0,0，SYSKEY 初值为 −1。TYPE 保存原值，在下层区域登记时决定是否使用图像 Alpha 掩码，与图像的 MASK／BTYPE 分别维护。TYPE、事件和导航配置单独变化不请求属性更新。387 组合法属性输入已与原 BUTTON 应用入口一致；运行时下层任务、输入回调和导航继续接入。
+
 CPLANE 使用 POS、BASE、SIZE、POS2、SIZE2、PRI、DISP、COLOR、BLEND、TYPE、EXPOS 和 VIEWPORT。POS 仅在 X／Y 至少一项存在时生效，未指定分量保持，单独 Z 不生效；BASE 的 W 写零。PRI 按银行递增后直接保存。BLEND 在 COLOR 之后覆盖颜色高字节。TYPE 只将输入 2 映射为 2，其余映射为 1；TYPE／EXPOS 单独变化不使属性或尺寸失效。387 组有效输入的属性、资源引用和标记均与原应用入口一致。
 
 CPLANE 的尺寸重建与属性更新分别触发。SIZE 总使尺寸失效，即使数值未变；SIZE2 保留引用，在重建时读取裁剪尺寸。重建先标记旧任务删除，再在 FES 所属任务下创建类型 2 的二维任务；只发创建类型和矩形命令，不自动恢复旧任务的位置、基点或显示。属性失效时先应用一次性 POS2，再提交有效位置、基点 XY 与 PRI、默认缩放及矩阵、颜色、显示和混合模式。位置沿 CPLANE／PLANE 父级累加，基点只沿直接为 PLANE 的父级累加；属性失效会标记 FES 后代。运动、有效 VIEWPORT 对应的二维命令 89 仍待接入。缺失的元数据文件或帧得到零尺寸／零位置，无法读取的格式返回诊断。

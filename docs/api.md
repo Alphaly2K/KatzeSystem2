@@ -94,6 +94,8 @@ FES 内部执行宏声明，初始化按以下顺序交给宿主：
 
 IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的转换结果实际改变时置位；空 FILE 或转换结果相同不置位。`frame_mapping_changed` 初始为 true，写入任何 ID 列也置为 true；下次有效 IDN 在编号变化或此标记为 true 时请求装载并清除此标记。首次 IDN=0 因此也请求装载。ID 列本身只更新映射，非法 IDN 保留待应用标记。直接修改公开映射后应同时设置 `frame_mapping_changed`；实际来源装载由运行时对象更新执行。
 
+`fes::ButtonState` 组合 IMAGE 状态与输入启用、默认事件组、四向目标、TYPE、KEYBLOCK 坐标和系统键。`apply(attributes, bank, transform_name)` 返回本次是否需要递归使后代失效；SIZE 变化另请求来源重建，ENABLE 保留原始值，变化时只标记按钮自身。TYPE 与 MASK 分别保存。默认事件组和方向目标各少于 32 字节。该结构用于状态应用，运行时 BUTTON 创建与事件／导航服务继续接入。
+
 宿主完成请求后用 `resume` 确认，待确认请求重复返回，数量和属性表达式只计算一次。字符串表必须在初始化前准备好，缺失字符串可能使后续参数移动。宿主只应在具备对应实现时确认声明或属性请求。`return_value` 保存最近一次 `break` 的值；不带参数的 `break` 将它重置为 0。
 
 `Interpreter::object_reference(input, state)` 解析对象名及银行表达式。名称精确匹配；省略银行号或值为 −1 时，已知多银行对象保留 −1 表示整个数组，其他对象归一为 0。其他引用的查找和银行范围由宿主处理。KEY_* 中名称为 `0` 的引用解码为空名称和银行 0，表示解绑。对整个数组指定 PRI 时，`sequential_priority` 为真，宿主应按银行号递增优先级。
