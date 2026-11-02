@@ -98,13 +98,15 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 
 `fes::ButtonState` 组合 IMAGE 状态与输入启用、默认事件组、四向目标、TYPE、KEYBLOCK 坐标和系统键。`apply(attributes, bank, transform_name)` 返回本次是否需要递归使后代失效；SIZE 变化另请求来源重建，ENABLE 保留原始值，变化时只标记按钮自身。TYPE 与 MASK 分别保存。默认事件组和方向目标各少于 32 字节。运行时已支持 BUTTON 装载创建、图像更新、输入区域、对象事件、网格导航、系统键分派与关联 SLIDER／SCROLL2 的方向调整。
 
-`fes::SliderState` 提供 SLIDER 的初始化属性、原始范围／数值、矩形、方向、Alpha 和独立的 `SliderUpdates` 请求。`apply(attributes, bank)` 仅应用 FILE、PL、POS2、PRI、DISP、ENABLE，返回本次是否需要使后代失效；ENABLE 变化只标记自身。`set_range`／`set_position` 保留原始值和通知参数，不执行范围限制。运动接口只传递 Alpha，详见[SLIDER 属性核心](graphics.md#fes-slider-属性核心)。运行时已连接下层任务、媒体更新和父级通知。`fes::Scroll2State` 组合此状态与独立页长，FES 媒体通过类型 41 的对应命令提交，下层绘制与输入任务仍待实现。
+`fes::SliderState` 提供 SLIDER 的初始化属性、原始范围／数值、矩形、方向、Alpha 和独立的 `SliderUpdates` 请求。`apply(attributes, bank)` 仅应用 FILE、PL、POS2、PRI、DISP、ENABLE，返回本次是否需要使后代失效；ENABLE 变化只标记自身。`set_range`／`set_position` 保留原始值和通知参数，不执行范围限制。运动接口只传递 Alpha，详见[SLIDER 属性核心](graphics.md#fes-slider-属性核心)。运行时已连接下层任务、媒体更新和父级通知。`fes::Scroll2State` 组合此状态与独立页长，FES 媒体通过类型 41 的对应命令提交，`input::Scroll2Object` 负责状态图像、输入及生命周期。
 
 `input::SliderControl` 提供下层滑块独立的范围、行程、数值、像素位置与拖动状态。`set_range` 只保存端点，`set_position` 先限制数值，非拖动状态再更新像素；`update_pixel_position` 可显式刷新。`position_at_pixel` 使用基线的半步阈值返回从零起算的数值，除法异常及过大查询返回诊断。FES 原始请求与这一状态分层保存，换算规则见 [SLIDER 下层范围换算](graphics.md#slider-下层范围换算)。
 
 `input::Scroll2Control` 保存滚动条范围、页长、行程、轨道及滑块长度和拖动状态。默认范围为 `[0, 10]`，页长为 4。修改范围或尺寸后用 `rebuild_geometry()` 重建滑块和行程，再通过 `set_position`／`update_pixel_position` 刷新位置；几何重建本身保留数值和像素位置。`position_at_pixel` 查询数值，零有效跨度返回零。页长、最小长度与整数规则见 [SCROLL2 下层范围及几何](graphics.md#scroll2-下层范围及几何)。
 
-`Scroll2Control::compose_images(frames, vertical)` 使用当前 `knob_extent` 和 `minimum_extent`，从已解码帧表生成四份独立状态图像；false 为横向，true 为纵向。调用方先设置这两个长度，方法不重建数值几何、不读取资源，也不修改来源。帧分组、偏移与缩放规则见 [SCROLL2 状态图像](graphics.md#scroll2-状态图像)。实际类型 41 任务的持有、列表登记和输入协议仍待连接。
+`Scroll2Control::compose_images(frames, vertical)` 使用当前 `knob_extent` 和 `minimum_extent`，从已解码帧表生成四份独立状态图像；false 为横向，true 为纵向。调用方先设置这两个长度，方法不重建数值几何、不读取资源，也不修改来源。帧分组、偏移与缩放规则见 [SCROLL2 状态图像](graphics.md#scroll2-状态图像)。`Scroll2Object` 已复用此入口持有状态图像并连接列表和输入。
+
+`input::Scroll2Object::new(id)` 创建未装载的类型 41 任务；`values()` 查询下层数值与几何，`buttons()` 按轨道／滑块顺序返回可选任务编号，`direction()`、`current_state()`、`loaded()` 和 `alpha()` 查询实际状态。与运行时组合时由 InputFactory 创建，独立宿主须提供资源、图像存储和任务路由。命令及释放契约见 [SCROLL2 下层任务](graphics.md#scroll2-下层任务协议)。
 
 宿主完成请求后用 `resume` 确认，待确认请求重复返回，数量和属性表达式只计算一次。字符串表必须在初始化前准备好，缺失字符串可能使后续参数移动。宿主只应在具备对应实现时确认声明或属性请求。`return_value` 保存最近一次 `break` 的值；不带参数的 `break` 将它重置为 0。
 
@@ -318,7 +320,7 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 
 `CanvasLayout::new(tile_size, grid, step)` 与 `triangulate(source)` 将已变换的源几何切成逐块画布三角形，保留原顺序、颜色及局部 UV。步长、整数裁剪门控和资源上限见[画布几何切割](graphics.md#画布几何切割)。`Drawable::from_canvas_source` 与平面命令 41 保留源和包装两套变换；源变化后通过 `prepare_canvas` 更新，帧提交自动准备可见对象。直接查询与属性选择契约见[画布纹理包装](graphics.md#画布纹理包装)。
 
-对象实现 `runtime::TaskObject`：基类控制与时钟、可选 VM、创建上下文、主体、对象命令、排队与同步消息、删除通知和释放。默认空操作的 `begin_update()` 在时钟和子任务更新前执行，用于按钮的每轮响应重置。除对象命令外，返回 `false` 的方法表示本次预算耗尽，续跑由运行时完成；对象命令返回 `task::CommandOutcome`，完成状态与传播状态分开表达。库提供 `BaseObject`（只有控制与时钟）与 `OrdinaryObject`（包裹 `OrdinaryTask`）。`ObjectFactory::create` 按类型编号创建对象；`KcsFactory` 经 `ProgramLoader` 按名称装载普通 KCS，`external_bytes` 指定 VM 外部区容量。`graphics::GraphicsFactory { fallback }` 创建类型 2 的 `PlaneObject`，其他类型委托 fallback；基础平面提供基类控制、几何及查询、显示与输入绑定、事件响应、内部子任务传播及绘图登记清理，运动等缺失入口返回诊断，详见[二维任务对象](graphics.md#基础二维任务对象)。`input::InputFactory { fallback }` 创建类型 11 的 InputObject、类型 6 的 ButtonObject 和类型 42 的 SliderObject，提供设备输入、矩形按钮与滑块事件；命令与约束见[输入接口](input.md)。音频和文字类型继续由对应工厂提供，`kind` 保存基线类型编号。
+对象实现 `runtime::TaskObject`：基类控制与时钟、可选 VM、创建上下文、主体、对象命令、排队与同步消息、删除通知和释放。默认空操作的 `begin_update()` 在时钟和子任务更新前执行，用于按钮的每轮响应重置。除对象命令外，返回 `false` 的方法表示本次预算耗尽，续跑由运行时完成；对象命令返回 `task::CommandOutcome`，完成状态与传播状态分开表达。库提供 `BaseObject`（只有控制与时钟）与 `OrdinaryObject`（包裹 `OrdinaryTask`）。`ObjectFactory::create` 按类型编号创建对象；`KcsFactory` 经 `ProgramLoader` 按名称装载普通 KCS，`external_bytes` 指定 VM 外部区容量。`graphics::GraphicsFactory { fallback }` 创建类型 2 的 `PlaneObject`，其他类型委托 fallback；基础平面提供基类控制、几何及查询、显示与输入绑定、事件响应、内部子任务传播及绘图登记清理，运动等缺失入口返回诊断，详见[二维任务对象](graphics.md#基础二维任务对象)。`input::InputFactory { fallback }` 创建类型 11 的 InputObject、类型 6 的 ButtonObject、类型 42 的 SliderObject 和类型 41 的 Scroll2Object，提供设备输入、矩形按钮及滑动控件事件；命令与约束见[输入接口](input.md)。音频和文字类型继续由对应工厂提供，`kind` 保存基线类型编号。
 
 `runtime::fes::FesFactory { fallback }` 创建未装载的类型 34 任务。运行时依次使用 337 初始化、338 通过文件名缓冲区装载、340 绑定直属共享列表、339 立即启动；338 与 340 可以交换先后。此后由 `Runtime::update` 自动推进。337 的第二数据项用零表示运行时隐式共享状态，338 和 25／26 的字节数据通过 `CommandBuffers.data1` 提供。命令、预算、错误及当前支持范围见[图形文档的 FES 任务对象](graphics.md#fes-任务对象)。TaskObject 的 `creation_context()` 为上下文继承提供只读视图，`accepts_deferred_delete()` 为消费 TaskEffects 的对象开放嵌套删除请求；两者默认不提供。
 
@@ -340,9 +342,9 @@ FesObject 的通用按下键槽按媒体声明顺序扫描当前启用的 SYSKEY
 
 `Services::dispatch_control_event(scene, target, event, budget)` 接收滑动控件的同步通知，默认委托普通事件入口。运行时在媒体命令返回前完成事件脚本，并保留回调对当前场景的修改；`decode` 等待中的主流程位置及调用栈在处理器结束后恢复。该入口不会自动刷新媒体，也不开放事件处理器内部再次分派事件。公开 `Runtime::dispatch_fes_event` 继续要求当前推进已经完成。
 
-`runtime::fes::Objects::new(handles)` 为一份 FES 建立独立的对象存储，并登记 `_TOPOBJ_` 银行 0 的根 BASE 对象；与 Runtime 组合时传入 `runtime.host().handle_allocator()`。FES 对象标识来自共享不透明编号源，与任务编号分别使用。`define(&definition)` 接受有效的非零银行数，返回此次新创建的全部标识；目前支持 BASE、CIMAGE、IMAGE、BUTTON、CPLANE、PLANE、SLIDER 和 SCROLL2 的对象状态，其他类型返回诊断。SLIDER 已接入状态、数值命令、settbl 帧表、运动、关联导航及媒体准备／更新，父级输入通知及媒体更新中的同步回调均执行事件脚本。名称限定为 1～31 个非零 ASCII 字节。`get`／`get_mut` 查询实际对象及 `ObjectState`，`len` 包括根及重复声明的未绑定对象。`MediaRecord::kind()` 保存声明类型，`task_id()` 查询 BUTTON／SLIDER 下层编号；`Object::slider_task_ids()` 查询全部声明创建的滑块任务。`update_order()` 按声明及银行顺序查询当前绑定，保留重复记录并跳过缺失银行；新声明占据银行空洞后，旧记录也会解析到新绑定。
+`runtime::fes::Objects::new(handles)` 为一份 FES 建立独立的对象存储，并登记 `_TOPOBJ_` 银行 0 的根 BASE 对象；与 Runtime 组合时传入 `runtime.host().handle_allocator()`。FES 对象标识来自共享不透明编号源，与任务编号分别使用。`define(&definition)` 接受有效的非零银行数，返回此次新创建的全部标识；目前支持 BASE、CIMAGE、IMAGE、BUTTON、CPLANE、PLANE、SLIDER 和 SCROLL2 的对象状态，其他类型返回诊断。SLIDER 已接入状态、数值命令、settbl 帧表、运动、关联导航及媒体准备／更新，父级输入通知及媒体更新中的同步回调均执行事件脚本。名称限定为 1～31 个非零 ASCII 字节。`get`／`get_mut` 查询实际对象及 `ObjectState`，`len` 包括根及重复声明的未绑定对象。`MediaRecord::kind()` 保存声明类型，`task_id()` 查询 BUTTON／SLIDER／SCROLL2 下层编号；`Object::slider_task_ids()` 查询全部声明创建的滑块任务。`update_order()` 按声明及银行顺序查询当前绑定，保留重复记录并跳过缺失银行；新声明占据银行空洞后，旧记录也会解析到新绑定。
 
-`fes::Scroll2State { control, page }` 在通用滑动属性之外保存独立页长；`set_page(range, page)` 请求范围更新。`ObjectState::Scroll2` 支持初始化、数值及帧表命令和 Alpha 运动，操作示例与参数规则见 [SCROLL2](graphics.md#fes-scroll2-属性核心)。FES 侧经 `ObjectFactory` 创建类型 41、名称为 `FE scroll2` 的直属任务，并完成媒体、导航、父级通知及暂停协议；当前宿主提供该下层任务实现，默认 `InputFactory` 尚未提供它。
+`fes::Scroll2State { control, page }` 在通用滑动属性之外保存独立页长；`set_page(range, page)` 请求范围更新。`ObjectState::Scroll2` 支持初始化、数值及帧表命令和 Alpha 运动，操作示例与参数规则见 [SCROLL2](graphics.md#fes-scroll2-属性核心)。FES 侧经 `ObjectFactory` 创建类型 41、名称为 `FE scroll2` 的直属任务，并完成媒体、导航、父级通知及暂停协议；`InputFactory` 已提供这一类型的 `Scroll2Object`。`Object::scroll2_task_ids()` 查询该对象全部声明创建的下层编号。
 
 `lookup(name, bank)` 精确查找名称／银行，缺失返回 None；−1 在这里不展开数组。重复 DEFINE 仍创建对象，但已有银行保留原绑定，新银行取得各自的首次绑定；`count(name)` 始终保留首次登记的数组数量。创建完成后先调用 `publish_bindings(&mut interpreter)`，再确认事件；该入口同步对象命名值和解释器的数组数量，保留其他系统命名值。删除后同样需要同步。显式银行可访问超出首次数量的新绑定，省略银行号的数组展开继续使用首次数量。
 

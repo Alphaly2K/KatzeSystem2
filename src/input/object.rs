@@ -121,7 +121,7 @@ impl TaskObject for InputObject {
     }
 }
 
-/// 创建输入、矩形按钮和滑块任务，其余类型委托已有工厂。
+/// 创建输入、矩形按钮及滑动控件任务，其余类型委托已有工厂。
 pub struct InputFactory<F> {
     pub fallback: F,
 }
@@ -132,6 +132,7 @@ impl<F: ObjectFactory> ObjectFactory for InputFactory<F> {
             kind::INPUT => Ok(Box::new(InputObject::new(id))),
             kind::BUTTON => Ok(Box::new(super::ButtonObject::new(id))),
             kind::SLIDER => Ok(Box::new(super::SliderObject::new(id))),
+            kind::SCROLL2 => Ok(Box::new(super::Scroll2Object::new(id))),
             _ => self.fallback.create(id, object_kind, name),
         }
     }

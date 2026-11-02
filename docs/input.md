@@ -177,7 +177,7 @@ move_remaining 为正时，帧首取样后进入下文的平滑定位分支，�
 
 ## 输入对象与运行时
 
-`InputFactory { fallback }` 创建类型十一的 `InputObject::new(id)`、类型六的 `ButtonObject::new(id)` 和类型四十二的 `SliderObject::new(id)`，其他类型委托已有工厂，可与图形、KCS 工厂组合。对象保存编号、独立的 `InputState`、控制与时钟；非空创建上下文、普通 KCS 消息队列及同步 VM 消息尚不支持，返回诊断。删除先恢复光标并标记，树更新时释放，重新创建取得全新的区域、键和捕获状态。
+`InputFactory { fallback }` 创建类型十一的 `InputObject::new(id)`、类型六的 `ButtonObject::new(id)`、类型四十二的 `SliderObject::new(id)` 和类型四十一的 `Scroll2Object::new(id)`，其他类型委托已有工厂，可与图形、KCS 工厂组合。InputObject 保存编号、独立的 `InputState`、控制与时钟；非空创建上下文、普通 KCS 消息队列及同步 VM 消息尚不支持，返回诊断。删除先恢复光标并标记，树更新时释放，重新创建取得全新的区域、键和捕获状态。
 
 `Runtime::set_input_device(device)` 绑定同步设备，并逐个读取已有输入对象的初始位置；绑定后新建输入对象在树登记前读取初始位置，失败不占用编号。初始化只修改 position 和 active，不覆盖按键、捕获或其他指针状态。绑定及初始化错误保留此前完成的修改。`input_coordinates()`／`input_coordinates_mut()` 提供共享 CoordinateMap，配置由调用方准备。
 

@@ -1626,93 +1626,106 @@ impl ResourceServices for SliderFiles {
 }
 
 #[test]
-fn slider_drag_reaches_fes_events_and_the_next_media_update_without_renotifying() {
-    let source = b"#DEFINE\nSLIDER bar\n#OBJECT FILE POS2 DISP ENABLE\nbar control bounds 1 7\n#START\nbar page 0 6\nbar pos 2\nwait 1000\n#bar.SCRL_P\n@ getpos 0 1 2\n$3=$3+1\n#bar.FOCUS\n$4=$4+1\n#bar.UNFOCUS\n$5=$5+1\n";
-    for budget in [1, 4096] {
-        let Setup {
-            mut runtime,
-            pointer,
-            ..
-        } = setup(budget, source);
-        runtime.input_coordinates_mut().logical_size = [8, 6];
-        let sprite = slider_sprite();
-        let mut bounds = sprite.clone();
-        bounds[36..40].copy_from_slice(&7u32.to_le_bytes());
-        runtime.set_resources(SliderFiles(Files {
-            files: [
-                (b"complete.fes".to_vec(), packed(source)),
-                (b"control".to_vec(), sprite),
-                (b"bounds".to_vec(), bounds),
-            ]
-            .into(),
-            reads: Rc::default(),
-            fail_media: Rc::new(Cell::new(false)),
-        }));
-        let fes = runtime.create(0, kind::FES, b"scene", b"").unwrap();
-        send(&mut runtime, fes, 337, 0, 0);
-        file(&mut runtime, fes, b"complete.fes").unwrap();
-        let slider = runtime
-            .tree()
-            .children(fes)
-            .unwrap()
-            .find(|&id| runtime.tree().node(id).unwrap().kind == kind::SLIDER)
-            .unwrap();
-        let list = runtime.create(fes, kind::IMAGE_LIST, b"list", b"").unwrap();
-        send(&mut runtime, list, 285, 8, 6);
-        send(&mut runtime, fes, 340, 0, list);
-        send(&mut runtime, fes, 339, 0, 0);
-        let buttons: Vec<_> = runtime.tree().children(slider).unwrap().collect();
-        assert_eq!(buttons.len(), 2);
-        let knob = buttons[1];
-        pointer.set(PointerSample {
-            position: [2, 0],
-            active: 1,
-        });
-        runtime.input_state_mut(1).unwrap().pointer_mut().active = 1;
-        runtime.update_input_selection(1, Some([2, 0])).unwrap();
-        assert_eq!(runtime.numbers().shared[4], 1);
-        send(&mut runtime, knob, 95, 0, 0);
-        let event = |pressed| KeyEvent {
-            kind: KeyEventKind::Change,
-            code: 4,
-            key: 0,
-            pressed,
-            mask: 2,
-            point: [2, 0],
-        };
-        assert!(runtime.dispatch_input_key(1, event(1)).unwrap());
-        pointer.set(PointerSample {
-            position: [5, 0],
-            active: 1,
-        });
-        runtime
-            .dispatch_input_motion(
-                1,
-                katze_system2::input::PointerMotion {
-                    code: 6,
-                    previous: [2, 0],
-                    current: [5, 0],
-                },
-            )
-            .unwrap();
-        assert_eq!(runtime.numbers().shared[..4], [5, 0, 0, 1]);
-        assert!(runtime.dispatch_input_key(1, event(0)).unwrap());
-        assert_eq!(runtime.numbers().shared[3], 1);
-        runtime.update(1, 1).unwrap();
-        assert_eq!(runtime.numbers().shared[..4], [5, 0, 0, 1]);
-        send(&mut runtime, list, 298, 0, 0);
-        let target = runtime.drawing().target.as_ref().unwrap();
-        assert_eq!(target.pixel(5, 0), Some(0xff000000));
-        assert_eq!(target.pixel(2, 0), Some(0));
-        for paused in [1, 2, 0] {
-            send(&mut runtime, fes, 348, 0, paused);
+fn sliding_controls_drag_reaches_fes_events_and_the_next_media_update_without_renotifying() {
+    for (name, kind, page, expected) in [
+        ("SLIDER", kind::SLIDER, "", 5),
+        ("SCROLL2", kind::SCROLL2, " 1", 4),
+    ] {
+        let source = format!(
+            "#DEFINE\n{name} bar\n#OBJECT FILE POS2 DISP ENABLE\nbar control bounds 1 7\n#START\nbar page 0 6{page}\nbar pos 2\nwait 1000\n#bar.SCRL_P\n@ getpos 0 1 2\n$3=$3+1\n#bar.FOCUS\n$4=$4+1\n#bar.UNFOCUS\n$5=$5+1\n"
+        );
+        let source = source.as_bytes();
+        for budget in [1, 4096] {
+            let Setup {
+                mut runtime,
+                pointer,
+                ..
+            } = setup(budget, source);
+            runtime.input_coordinates_mut().logical_size = [8, 6];
+            let sprite = slider_sprite();
+            let mut bounds = sprite.clone();
+            bounds[36..40].copy_from_slice(&7u32.to_le_bytes());
+            runtime.set_resources(SliderFiles(Files {
+                files: [
+                    (b"complete.fes".to_vec(), packed(source)),
+                    (b"control".to_vec(), sprite),
+                    (b"bounds".to_vec(), bounds),
+                ]
+                .into(),
+                reads: Rc::default(),
+                fail_media: Rc::new(Cell::new(false)),
+            }));
+            let fes = runtime.create(0, kind::FES, b"scene", b"").unwrap();
+            send(&mut runtime, fes, 337, 0, 0);
+            file(&mut runtime, fes, b"complete.fes").unwrap();
+            let slider = runtime
+                .tree()
+                .children(fes)
+                .unwrap()
+                .find(|&id| runtime.tree().node(id).unwrap().kind == kind)
+                .unwrap();
+            let list = runtime.create(fes, kind::IMAGE_LIST, b"list", b"").unwrap();
+            send(&mut runtime, list, 285, 8, 6);
+            send(&mut runtime, fes, 340, 0, list);
+            send(&mut runtime, fes, 339, 0, 0);
+            let buttons: Vec<_> = runtime.tree().children(slider).unwrap().collect();
+            assert_eq!(buttons.len(), 2);
+            let knob = buttons[1];
+            pointer.set(PointerSample {
+                position: [2, 0],
+                active: 1,
+            });
+            runtime.input_state_mut(1).unwrap().pointer_mut().active = 1;
+            runtime.update_input_selection(1, Some([2, 0])).unwrap();
+            assert_eq!(runtime.numbers().shared[4], 1);
+            send(&mut runtime, knob, 95, 0, 0);
+            let event = |pressed| KeyEvent {
+                kind: KeyEventKind::Change,
+                code: 4,
+                key: 0,
+                pressed,
+                mask: 2,
+                point: [2, 0],
+            };
+            assert!(runtime.dispatch_input_key(1, event(1)).unwrap());
+            pointer.set(PointerSample {
+                position: [5, 0],
+                active: 1,
+            });
+            runtime
+                .dispatch_input_motion(
+                    1,
+                    katze_system2::input::PointerMotion {
+                        code: 6,
+                        previous: [2, 0],
+                        current: [5, 0],
+                    },
+                )
+                .unwrap();
+            assert_eq!(runtime.numbers().shared[..4], [expected, 0, 0, 1]);
+            assert!(runtime.dispatch_input_key(1, event(0)).unwrap());
+            assert_eq!(runtime.numbers().shared[3], 1);
+            runtime.update(1, 1).unwrap();
+            assert_eq!(runtime.numbers().shared[..4], [expected, 0, 0, 1]);
             send(&mut runtime, list, 298, 0, 0);
-            assert_eq!(
-                runtime.drawing().target.as_ref().unwrap().pixel(5, 0),
-                Some(if paused != 0 { 0 } else { 0xff000000 })
-            );
-            let area = runtime.input_state(1).unwrap().regions().get(knob).unwrap();
-            assert_eq!(area.enabled(), if paused != 0 { 0 } else { 7 });
+            let target = runtime.drawing().target.as_ref().unwrap();
+            assert_eq!(target.pixel(expected as u32, 0), Some(0xff000000));
+            assert_eq!(target.pixel(2, 0), Some(0));
+            for paused in [1, 2, 0] {
+                send(&mut runtime, fes, 348, 0, paused);
+                send(&mut runtime, list, 298, 0, 0);
+                assert_eq!(
+                    runtime
+                        .drawing()
+                        .target
+                        .as_ref()
+                        .unwrap()
+                        .pixel(expected as u32, 0),
+                    Some(if paused != 0 { 0 } else { 0xff000000 })
+                );
+                let area = runtime.input_state(1).unwrap().regions().get(knob).unwrap();
+                assert_eq!(area.enabled(), if paused != 0 { 0 } else { 7 });
+            }
         }
     }
 }

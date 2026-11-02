@@ -20,6 +20,8 @@ pub use slider::SliderControl;
 mod scroll2;
 pub use scroll2::Scroll2Control;
 mod scroll2_images;
+mod scroll2_task;
+pub use scroll2_task::Scroll2Object;
 mod slider_task;
 pub use slider_task::SliderObject;
 mod coordinates;

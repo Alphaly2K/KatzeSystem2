@@ -10,7 +10,11 @@ use katze_system2::{
     runtime::{ObjectFactory, RootObject, Runtime, TaskObject, kind},
     task::{Command, CommandOutcome, Control, TaskClock},
 };
-use std::{cell::RefCell, io::Write, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    io::Write,
+    rc::Rc,
+};
 
 struct Reject;
 impl ObjectFactory for Reject {
@@ -75,14 +79,18 @@ impl TaskObject for Parent {
         self.root.request_delete(h, b)
     }
 }
-struct Files(Vec<u8>);
+struct Files {
+    bytes: Vec<u8>,
+    reads: Rc<Cell<usize>>,
+}
 impl ResourceServices for Files {
     fn resolve(&mut self, _: &[u8], _: &[u8]) -> Result<Vec<u8>> {
         unreachable!()
     }
     fn read(&mut self, n: &[u8], m: ResourceMode) -> Result<Option<Vec<u8>>> {
         assert_eq!(m, ResourceMode::LooseFirst);
-        Ok((n == b"synthetic").then(|| self.0.clone()))
+        self.reads.set(self.reads.get() + 1);
+        Ok((n == b"synthetic").then(|| self.bytes.clone()))
     }
 }
 #[derive(Default)]
@@ -165,12 +173,15 @@ fn buffer(e: &mut Engine, id: u32, code: u32, data: &mut [u8]) {
     .unwrap();
 }
 fn fixture() -> Vec<u8> {
+    fixture_color(0xff12_3456)
+}
+fn fixture_color(color: u32) -> Vec<u8> {
     let zip = |input: &[u8]| {
         let mut z = flate2::write::ZlibEncoder::new(Vec::new(), Default::default());
         z.write_all(input).unwrap();
         z.finish().unwrap()
     };
-    let delta = 0xff12_3456u32
+    let delta = color
         .to_le_bytes()
         .map(|v| (v << 1) ^ 0u8.wrapping_sub(v >> 7));
     let planes: Vec<_> = [6, 4, 2, 0]
@@ -210,8 +221,12 @@ struct Fixture {
     events: Rc<RefCell<Vec<Command>>>,
     device: Rc<RefCell<DeviceState>>,
     configuration: Vec<u8>,
+    reads: Rc<Cell<usize>>,
 }
 fn setup() -> Fixture {
+    setup_control(kind::SLIDER, fixture(), 365)
+}
+fn setup_control(kind: u32, data: Vec<u8>, load: u32) -> Fixture {
     let events = Rc::default();
     let mut e = Runtime::new(
         0,
@@ -238,13 +253,17 @@ fn setup() -> Fixture {
     e.drawing_mut().target = Some(RenderTarget::new([32, 16]).unwrap());
     let list = e.create(0, kind::IMAGE_LIST, b"list", b"").unwrap();
     send(&mut e, list, 285, 32, 16);
-    e.set_resources(Files(fixture()));
-    let slider = e.create(0, kind::SLIDER, b"slider", b"").unwrap();
+    let reads = Rc::new(Cell::new(0));
+    e.set_resources(Files {
+        bytes: data,
+        reads: reads.clone(),
+    });
+    let slider = e.create(0, kind, b"control", b"").unwrap();
     let mut cfg = vec![0; 0x124];
     cfg[..4].copy_from_slice(&list.to_le_bytes());
     cfg[4..13].copy_from_slice(b"synthetic");
     cfg[0x108..].copy_from_slice(&bytes(&[5, 2, 2, 22, 6, 1, 2]));
-    buffer(&mut e, slider, 365, &mut cfg);
+    buffer(&mut e, slider, load, &mut cfg);
     Fixture {
         engine: e,
         list,
@@ -252,6 +271,7 @@ fn setup() -> Fixture {
         events,
         device: d,
         configuration: cfg,
+        reads,
     }
 }
 fn draw(e: &mut Engine, list: u32, x: u32, y: u32) -> u32 {
@@ -408,6 +428,217 @@ fn slider_missing_reload_and_deferred_destruction_remove_cross_task_entries() {
         let next = e.create(0, kind::SLIDER, b"next", b"").unwrap();
         assert_eq!(next, slider);
         buffer(&mut e, next, 365, &mut cfg);
+        e.destroy(0).unwrap();
+        assert!(e.tree().node(0).is_none());
+    }
+}
+
+const SCROLL_COLORS: [u32; 4] = [0xff123456, 0xff56789a, 0xff345678, 0xff789abc];
+fn scroll_fixture() -> Vec<u8> {
+    let mut out = b"HG-3".to_vec();
+    out.extend(bytes(&[12, 0x300]));
+    for (state, color) in SCROLL_COLORS.into_iter().enumerate() {
+        for part in 0..3 {
+            let mut block = fixture_color(color)[12..].to_vec();
+            let next = if state == 3 && part == 2 {
+                0
+            } else {
+                block.len() as u32
+            };
+            block[..4].copy_from_slice(&next.to_le_bytes());
+            block[4..8].copy_from_slice(&(state as u32 * 100 + part).to_le_bytes());
+            out.extend(block);
+        }
+    }
+    out
+}
+
+#[test]
+fn scroll_buttons_page_drag_and_preserve_state_selection_across_enable_and_frame_commands() {
+    let Fixture {
+        engine: mut e,
+        list,
+        slider: scroll,
+        events,
+        device,
+        ..
+    } = setup_control(kind::SCROLL2, scroll_fixture(), 374);
+    let children: Vec<_> = e.tree().children(scroll).unwrap().collect();
+    assert_eq!(children.len(), 2);
+    let [track, knob] = [children[0], children[1]];
+    assert_eq!(send(&mut e, scroll, 378, 0, 0), 0);
+    assert_eq!(
+        e.input_state(1)
+            .unwrap()
+            .regions()
+            .get(knob)
+            .unwrap()
+            .bounds(),
+        Rect::from_xywh(2, 2, 8, 1)
+    );
+    assert_eq!(draw(&mut e, list, 3, 4), SCROLL_COLORS[0]);
+    buffer(&mut e, scroll, 376, &mut bytes(&[0, 10, 3]));
+    send(&mut e, scroll, 377, 1, 5);
+    assert_eq!(events.borrow().last().unwrap().data, [0, 5, 0]);
+    assert_eq!(
+        e.input_state(1)
+            .unwrap()
+            .regions()
+            .get(knob)
+            .unwrap()
+            .bounds(),
+        Rect::from_xywh(12, 2, 6, 1)
+    );
+    device.borrow_mut().point = [12, 2];
+    e.update_input_selection(1, Some([12, 2])).unwrap();
+    assert_eq!(draw(&mut e, list, 13, 4), SCROLL_COLORS[2]);
+    send(&mut e, scroll, 381, 2, 0);
+    send(&mut e, scroll, 382, 0, 0);
+    assert_eq!(draw(&mut e, list, 13, 4), SCROLL_COLORS[2]);
+    send(&mut e, scroll, 375, 0, 0);
+    assert_eq!(draw(&mut e, list, 13, 4), SCROLL_COLORS[2]);
+    assert_eq!(
+        e.input_state(1)
+            .unwrap()
+            .regions()
+            .get(track)
+            .unwrap()
+            .enabled(),
+        0
+    );
+    send(&mut e, scroll, 375, 0, 7);
+    e.update_input_selection(1, Some([12, 2])).unwrap();
+    send(&mut e, knob, 95, 0, 0);
+    let mut key = event(1);
+    key.point = [12, 2];
+    assert!(e.dispatch_input_key(1, key).unwrap());
+    assert_eq!(
+        e.input_state(1)
+            .unwrap()
+            .regions()
+            .get(knob)
+            .unwrap()
+            .bounds(),
+        Rect::default()
+    );
+    assert_eq!(draw(&mut e, list, 13, 4), SCROLL_COLORS[3]);
+    e.dispatch_input_motion(
+        1,
+        PointerMotion {
+            code: 6,
+            previous: [12, 2],
+            current: [18, 2],
+        },
+    )
+    .unwrap();
+    assert_eq!(events.borrow().last().unwrap().data, [0, 7, 0]);
+    assert_eq!(draw(&mut e, list, 17, 4), SCROLL_COLORS[3]);
+    let count = events.borrow().len();
+    key.pressed = 0;
+    assert!(e.dispatch_input_key(1, key).unwrap());
+    assert_eq!(events.borrow().len(), count);
+    assert_eq!(
+        e.input_state(1)
+            .unwrap()
+            .regions()
+            .get(knob)
+            .unwrap()
+            .bounds(),
+        Rect::from_xywh(16, 2, 6, 1)
+    );
+    device.borrow_mut().point = [4, 3];
+    e.update_input_selection(1, Some([4, 3])).unwrap();
+    key.point = [4, 3];
+    key.pressed = 1;
+    send(&mut e, track, 95, 0, 0);
+    assert!(e.dispatch_input_key(1, key).unwrap());
+    assert_eq!(events.borrow().last().unwrap().data, [0, 4, 0]);
+    assert_eq!(
+        e.input_state(1)
+            .unwrap()
+            .regions()
+            .get(knob)
+            .unwrap()
+            .bounds(),
+        Rect::from_xywh(10, 2, 6, 1)
+    );
+    assert_eq!(draw(&mut e, list, 11, 4), SCROLL_COLORS[0]);
+    e.dispatch_input_motion(
+        1,
+        PointerMotion {
+            code: 6,
+            previous: [4, 3],
+            current: [20, 3],
+        },
+    )
+    .unwrap();
+    assert_eq!(draw(&mut e, list, 11, 4), SCROLL_COLORS[0]);
+    key.pressed = 0;
+    assert!(e.dispatch_input_key(1, key).unwrap());
+    send(&mut e, scroll, 65, knob, 0);
+    assert_eq!(device.borrow().touches, 1);
+}
+
+#[test]
+fn scroll_range_reload_keeps_positions_and_children_then_releases_list_and_input_bindings() {
+    for budget in [1, 4096] {
+        let Fixture {
+            engine: mut e,
+            list,
+            slider: scroll,
+            configuration: mut cfg,
+            reads,
+            ..
+        } = setup_control(kind::SCROLL2, scroll_fixture(), 374);
+        e.set_budget(budget, 1000);
+        assert_eq!(reads.get(), 1);
+        let children: Vec<_> = e.tree().children(scroll).unwrap().collect();
+        buffer(&mut e, scroll, 376, &mut bytes(&[0, 10, 3]));
+        send(&mut e, scroll, 377, 0, 4);
+        assert_eq!(draw(&mut e, list, 11, 4), SCROLL_COLORS[0]);
+        buffer(&mut e, scroll, 376, &mut bytes(&[0, 10, 6]));
+        assert_eq!(reads.get(), 3);
+        assert_eq!(draw(&mut e, list, 3, 4), SCROLL_COLORS[0]);
+        assert_eq!(
+            e.input_state(1)
+                .unwrap()
+                .regions()
+                .get(children[1])
+                .unwrap()
+                .bounds(),
+            Rect::from_xywh(10, 2, 12, 1)
+        );
+        send(&mut e, scroll, 377, 1, 4);
+        assert_eq!(draw(&mut e, list, 11, 4), SCROLL_COLORS[0]);
+        cfg[4..0x108].fill(0);
+        cfg[4..11].copy_from_slice(b"missing");
+        buffer(&mut e, scroll, 374, &mut cfg);
+        assert_eq!(send(&mut e, list, 294, 0, 0), 0);
+        assert_eq!(
+            e.tree().children(scroll).unwrap().collect::<Vec<_>>(),
+            children
+        );
+        cfg[4..0x108].fill(0);
+        cfg[4..13].copy_from_slice(b"synthetic");
+        buffer(&mut e, scroll, 374, &mut cfg);
+        assert_eq!(send(&mut e, list, 294, 0, 0), 1);
+        assert_eq!(
+            e.tree().children(scroll).unwrap().collect::<Vec<_>>(),
+            children
+        );
+        send(&mut e, scroll, 3, 0, 0);
+        assert_eq!(send(&mut e, list, 294, 0, 0), 1);
+        e.update(1, 1).unwrap();
+        assert!(e.object(scroll).is_none());
+        for child in children {
+            assert!(e.object(child).is_none());
+            assert!(e.input_state(1).unwrap().regions().get(child).is_none());
+        }
+        assert_eq!(send(&mut e, list, 294, 0, 0), 0);
+        assert_eq!(draw(&mut e, list, 3, 4), 0);
+        let next = e.create(0, kind::SCROLL2, b"next", b"").unwrap();
+        assert_eq!(next, scroll);
+        buffer(&mut e, next, 374, &mut cfg);
         e.destroy(0).unwrap();
         assert!(e.tree().node(0).is_none());
     }
