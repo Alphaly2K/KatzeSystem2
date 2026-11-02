@@ -123,7 +123,11 @@ impl InputDevice for Device {
     fn cursor_visible(&mut self) -> Result<u32> {
         Ok(1)
     }
-    fn set_pointer(&mut self, _: [i32; 2]) -> Result<()> {
+    fn set_pointer(&mut self, position: [i32; 2]) -> Result<()> {
+        self.pointer.set(PointerSample {
+            position,
+            ..self.pointer.get()
+        });
         Ok(())
     }
     fn clear_keys(&mut self) -> Result<()> {
@@ -735,6 +739,132 @@ fn start_button_scene(runtime: &mut TestRuntime) -> (u32, u32, Vec<u32>) {
     send(runtime, fes, 339, 0, 0);
     runtime.update(101, 1).unwrap();
     (fes, list, buttons)
+}
+
+#[test]
+fn direction_events_precede_pointer_moves_and_preserve_the_previous_pressed_bank() {
+    let source = b"#KEYBLOCK 1\n0 2,1\n#DEFINE\nBUTTON item[2]\n#OBJECT SIZE POS KEYBLOCK PRI\nitem[0] 32,16 0,0 0,0,0 5\nitem[1] 32,16 40,0 0,1,0 6\n#START\nitem[1] keypos 1 8 4\nwait 1000\n#item.TOUCH\n$0=(_PUSH_RIGHT_==item[1])\n$1=@\n$2=(_PUSH_RIGHT_!=item[0])\n$5=(_RELEASE_RIGHT_==item[0])\n#item.FOCUS\n$3=$3*10+@+1\n#item.UNFOCUS\n$4=$4*10+@+1\n";
+    for budget in [1, 4096] {
+        let Setup {
+            mut runtime,
+            pointer,
+            ..
+        } = setup(budget, source);
+        runtime.input_coordinates_mut().logical_size = [64, 32];
+        pointer.set(PointerSample {
+            position: [1, 1],
+            active: 1,
+        });
+        let (_, _, buttons) = start_button_scene(&mut runtime);
+        runtime.update_input_selection(1, Some([1, 1])).unwrap();
+        assert_eq!(runtime.numbers().shared[3], 1);
+        assert_eq!(send(&mut runtime, buttons[0], 4, 7, 1), 0);
+        send(&mut runtime, buttons[1], 5, 0, 0);
+        assert_eq!(&runtime.numbers().shared[..5], &[1, 1, 1, 1, 0]);
+        assert_eq!(pointer.get().position, [1, 1]);
+        let movement = runtime.input_state(1).unwrap().pointer();
+        assert_eq!(movement.move_target, [48, 4]);
+        assert_eq!(movement.move_remaining, 1);
+        assert_eq!(send(&mut runtime, buttons[0], 4, 7, 0), 1);
+        send(&mut runtime, buttons[1], 5, 0, 0);
+        assert_eq!(runtime.numbers().shared[5], 1);
+        runtime.update(102, 1).unwrap();
+        assert_eq!(pointer.get().position, [48, 4]);
+        assert_eq!(&runtime.numbers().shared[3..5], &[12, 1]);
+        assert_eq!(runtime.input_state(1).unwrap().pointer().move_remaining, 0);
+
+        assert_eq!(send(&mut runtime, buttons[1], 4, 6, 1), 0);
+        assert_eq!(&runtime.numbers().shared[3..5], &[12, 1]);
+        assert_eq!(
+            runtime.input_state(1).unwrap().pointer().move_target,
+            [16, 8]
+        );
+        runtime.update(103, 1).unwrap();
+        assert_eq!(pointer.get().position, [16, 8]);
+        assert_eq!(&runtime.numbers().shared[3..5], &[121, 12]);
+    }
+}
+
+#[test]
+fn direction_fallback_distinguishes_enabled_focus_disabled_hits_and_preferred_targets() {
+    for (focus, hit, source_enabled, preferred_enabled, response, moved) in [
+        (false, false, 1, 21, 0, true),
+        (false, false, 1, 0, 1, false),
+        (true, false, 1, 1, 1, false),
+        (true, false, 0, 1, 0, true),
+        (false, true, 0, 1, 0, true),
+        (false, true, 0, 0, 0, false),
+    ] {
+        let source = format!(
+            "#DEFINE\nBUTTON item[2]\n#OBJECT SIZE POS ENABLE PRI\nitem[0] 32,16 0,0 {source_enabled} 5\nitem[1] 32,16 40,0 {preferred_enabled} 6\n#START\nitem[1] noact\nwait 1000\n#item.TOUCH\n$0=(_PUSH_RIGHT_==item[1])\n"
+        );
+        for budget in [1, 4096] {
+            let Setup {
+                mut runtime,
+                pointer,
+                ..
+            } = setup(budget, source.as_bytes());
+            runtime.input_coordinates_mut().logical_size = [64, 32];
+            pointer.set(PointerSample {
+                position: [60, 25],
+                active: 1,
+            });
+            let (fes, _, buttons) = start_button_scene(&mut runtime);
+            if focus {
+                send(&mut runtime, fes, 64, buttons[0], 1);
+            }
+            if hit {
+                pointer.set(PointerSample {
+                    position: [1, 1],
+                    active: 1,
+                });
+            }
+            assert_eq!(send(&mut runtime, buttons[0], 4, 7, 1), response);
+            send(&mut runtime, buttons[1], 5, 0, 0);
+            assert_eq!(runtime.numbers().shared[0], i32::from(moved));
+            let pointer = runtime.input_state(1).unwrap().pointer();
+            assert_eq!(pointer.move_remaining, i32::from(moved));
+            if moved {
+                assert_eq!(pointer.move_target, [56, 8]);
+            }
+        }
+    }
+}
+
+#[test]
+fn direction_media_retry_keeps_a_newer_pointer_request() {
+    let source = b"#KEYBLOCK 1\n0 2,1\n#DEFINE\nBUTTON item[2]\n#OBJECT SIZE POS KEYBLOCK PRI FILE PATHMODE\nitem[0] 32,16 0,0 0,0,0 5 absent 1\nitem[1] 32,16 40,0 0,1,0 6 absent 1\n#START\nwait 1000\n#item.TOUCH\n$0=$0+1\n@ size 33 16\n@ keypos 1 8 4\n";
+    for budget in [1, 4096] {
+        let Setup {
+            mut runtime,
+            fail_media,
+            ..
+        } = setup(budget, source);
+        runtime.input_coordinates_mut().logical_size = [64, 32];
+        let (fes, _, buttons) = start_button_scene(&mut runtime);
+        send(&mut runtime, fes, 64, buttons[0], 1);
+        send(&mut runtime, buttons[1], 5, 0, 0);
+        fail_media.set(true);
+        assert!(
+            runtime
+                .dispatch_command(0, command(buttons[0], 4, 7, 1))
+                .unwrap_err()
+                .message
+                .contains("媒体读取失败")
+        );
+        assert_eq!(runtime.numbers().shared[0], 1);
+        assert_eq!(
+            runtime.input_state(1).unwrap().pointer().move_target,
+            [48, 4]
+        );
+        send(&mut runtime, 1, 139, 0, 12 | (13 << 16));
+        fail_media.set(false);
+        assert_eq!(send(&mut runtime, buttons[0], 4, 7, 1), 0);
+        assert_eq!(runtime.numbers().shared[0], 1);
+        let movement = runtime.input_state(1).unwrap().pointer();
+        assert_eq!(movement.move_target, [12, 13]);
+        assert_eq!(movement.move_remaining, 0);
+    }
 }
 
 #[test]

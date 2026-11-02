@@ -17,6 +17,7 @@ mod plane;
 mod scene;
 mod task;
 pub use animation::ImageAnimationRequest;
+pub use navigation::NavigationOutcome;
 pub use scene::Scene;
 pub use task::{FesFactory, FesObject, Services};
 

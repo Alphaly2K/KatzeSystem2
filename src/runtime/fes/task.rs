@@ -1,4 +1,4 @@
-use super::Scene;
+use super::{NavigationOutcome, Scene};
 use crate::kcs::{Host, Interpreter};
 use crate::runtime::{BaseObject, ObjectFactory, ObjectHost, TaskLifecycle, TaskObject, kind};
 use crate::task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock};
@@ -40,6 +40,18 @@ pub trait Services {
         cursor: &mut usize,
         budget: usize,
     ) -> Result<bool>;
+    /// 网格选择的默认实现；关联控件可返回 Handled 消费方向输入。
+    fn navigate_button(
+        &mut self,
+        scene: &mut Scene,
+        source: &fes::ObjectReference,
+        direction: usize,
+    ) -> Result<NavigationOutcome> {
+        Ok(scene
+            .objects()
+            .navigate_button(scene.keyblocks(), source, direction)?
+            .map_or(NavigationOutcome::Unhandled, NavigationOutcome::Target))
+    }
 }
 
 impl<F: ObjectFactory> Services for ObjectHost<'_, F> {
@@ -211,6 +223,15 @@ struct InputEvent {
     refresh: bool,
     cursor: usize,
     preserve_output: bool,
+    move_pointer: bool,
+    response: InputResponse,
+}
+
+#[derive(Clone, Copy)]
+enum InputResponse {
+    IfUnhandled,
+    Always,
+    None,
 }
 
 impl FesObject {
@@ -352,6 +373,28 @@ impl FesObject {
                 self.pressed = None;
             }
         }
+        if self.input_event.as_ref().unwrap().move_pointer {
+            let target = self.input_event.as_ref().unwrap().target.as_ref().unwrap();
+            let point = self
+                .scene
+                .as_ref()
+                .unwrap()
+                .objects()
+                .navigation_pointer(target);
+            if let Some([x, y]) = point {
+                let packed = (x as u16 as u32) | ((y as u16 as u32) << 16);
+                self.send(
+                    host,
+                    self.input,
+                    139,
+                    [1, packed, 0],
+                    &mut CommandBuffers::default(),
+                )?;
+            } else {
+                self.input_event.as_mut().unwrap().response = InputResponse::Always;
+            }
+            self.input_event.as_mut().unwrap().move_pointer = false;
+        }
         let event = self.input_event.as_ref().unwrap();
         if !event.response_done {
             let handled = event.handled.unwrap();
@@ -363,9 +406,11 @@ impl FesObject {
                     [0; 3],
                     &mut CommandBuffers::default(),
                 )?;
-            } else if !handled
-                && (matches!(command.code, 9 | 10) || command.code == 65 && event.target.is_some())
-            {
+            } else if match event.response {
+                InputResponse::IfUnhandled => !handled,
+                InputResponse::Always => true,
+                InputResponse::None => false,
+            } {
                 self.send(
                     host,
                     command.sender,
@@ -441,6 +486,8 @@ impl FesObject {
         };
         let key = command.data[1];
         let mut clear_selection = false;
+        let mut move_pointer = false;
+        let mut response = InputResponse::IfUnhandled;
         let target = match command.code {
             64 => {
                 let target = find();
@@ -452,31 +499,8 @@ impl FesObject {
             }
             65 => find(),
             9 => {
-                if (4..=7).contains(&key) {
-                    if self
-                        .scene
-                        .as_ref()
-                        .unwrap()
-                        .objects()
-                        .media_records()
-                        .iter()
-                        .any(|record| record.task_id().is_some())
-                    {
-                        return Err(Error::new(0, "FES BUTTON 导航尚未接入"));
-                    }
-                    self.pointer_position(host, 0)?;
-                }
                 let objects = self.scene.as_ref().unwrap().objects();
-                if !matches!(key, 0 | 1 | 8..=11)
-                    && objects.update_order().any(|handle| {
-                        matches!(&objects.get(handle).unwrap().state,
-                            super::ObjectState::Button(button) if button.system_key != -1)
-                    })
-                {
-                    return Err(Error::new(0, "FES SYSKEY 路由尚未接入"));
-                }
                 let target = self.focus.clone().filter(|target| {
-                    let objects = self.scene.as_ref().unwrap().objects();
                     !objects
                         .lookup(&target.name, target.bank)
                         .and_then(|handle| objects.get(handle))
@@ -486,7 +510,33 @@ impl FesObject {
                         })
                 });
                 self.pressed = target.clone();
-                target
+                if (4..=7).contains(&key) {
+                    match self.navigate_input(key, host)? {
+                        NavigationOutcome::Target(target) => {
+                            move_pointer = true;
+                            response = InputResponse::None;
+                            Some(target)
+                        }
+                        NavigationOutcome::Handled => {
+                            response = InputResponse::None;
+                            None
+                        }
+                        NavigationOutcome::Unhandled => {
+                            response = InputResponse::Always;
+                            None
+                        }
+                    }
+                } else {
+                    if !matches!(key, 0 | 1 | 8..=11)
+                        && objects.update_order().any(|handle| {
+                            matches!(&objects.get(handle).unwrap().state,
+                                super::ObjectState::Button(button) if button.system_key != -1)
+                        })
+                    {
+                        return Err(Error::new(0, "FES SYSKEY 路由尚未接入"));
+                    }
+                    target
+                }
             }
             10 => self.pressed.clone(),
             _ => unreachable!(),
@@ -494,6 +544,7 @@ impl FesObject {
         let event = match (command.code, key) {
             (9, 0) => Some(2),
             (9, 1) => Some(3),
+            (9, 4..=7) if move_pointer => Some(key + 7),
             (9, 8) => Some(6),
             (9, 9) => Some(7),
             (9, 10) => Some(9),
@@ -506,6 +557,9 @@ impl FesObject {
             _ => None,
         };
         let touch = command.code == 65 && target.is_some();
+        if command.code == 64 || command.code == 65 && !touch {
+            response = InputResponse::None;
+        }
         self.input_event = Some(InputEvent {
             target,
             event,
@@ -515,8 +569,68 @@ impl FesObject {
             refresh: !touch,
             cursor: 0,
             preserve_output: touch,
+            move_pointer,
+            response,
         });
         Ok(true)
+    }
+
+    fn navigate_input(&mut self, key: u32, host: &mut dyn Host) -> Result<NavigationOutcome> {
+        let objects = self.scene.as_ref().unwrap().objects();
+        let current_exists = self
+            .focus
+            .as_ref()
+            .is_some_and(|target| objects.lookup(&target.name, target.bank).is_some());
+        if !current_exists {
+            let point = self.pointer_position(host, 0)?;
+            if let Some(target) = objects.navigation_hit(point, host)? {
+                self.focus = Some(target);
+            } else {
+                return Ok(self.preferred_navigation());
+            }
+        }
+        let target = self.focus.as_ref().unwrap().clone();
+        let result = services(host)?.navigate_button(
+            self.scene.as_mut().unwrap(),
+            &target,
+            (key - 4) as usize,
+        )?;
+        match result {
+            NavigationOutcome::Target(target) => {
+                self.focus = Some(target.clone());
+                Ok(NavigationOutcome::Target(target))
+            }
+            NavigationOutcome::Unhandled => {
+                if self
+                    .scene
+                    .as_ref()
+                    .unwrap()
+                    .objects()
+                    .enabled_button(&target)
+                {
+                    Ok(NavigationOutcome::Unhandled)
+                } else {
+                    Ok(match self.preferred_navigation() {
+                        NavigationOutcome::Unhandled => NavigationOutcome::Handled,
+                        result => result,
+                    })
+                }
+            }
+            result => Ok(result),
+        }
+    }
+
+    fn preferred_navigation(&mut self) -> NavigationOutcome {
+        let scene = self.scene.as_ref().unwrap();
+        if let Some(target) = scene
+            .preferred_focus()
+            .filter(|target| scene.objects().enabled_button(target))
+        {
+            self.focus = Some(target.clone());
+            NavigationOutcome::Target(target.clone())
+        } else {
+            NavigationOutcome::Unhandled
+        }
     }
 
     fn prepare_input_button(&mut self, host: &mut dyn Host) -> Result<()> {
