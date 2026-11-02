@@ -1,6 +1,7 @@
 //! CatSystem2 2.6.1.90 的脚本与图形核心。
 
 pub mod anm;
+pub mod audio;
 pub mod cst;
 pub mod cstl;
 pub mod expression;
