@@ -2,6 +2,7 @@
 
 use std::ops::Range;
 
+mod effects;
 mod font;
 mod layout;
 mod line_breaks;
@@ -10,7 +11,8 @@ mod page;
 mod playback;
 mod timing;
 
-pub use font::{Font, GlyphMask};
+pub use effects::GlyphEffects;
+pub use font::{Font, GlyphMask, GlyphPaint};
 pub use layout::{Layout, LayoutEntry, LayoutSettings, VerticalAlignment};
 pub use line_breaks::BreakCharacters;
 pub use page::Page;

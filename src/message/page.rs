@@ -1,8 +1,8 @@
 use super::markup::ParseState;
 use super::playback::Playback;
 use super::{
-    AtomKind, DisplayUpdate, GlyphMask, Layout, LayoutSettings, Markup, Schedule, StyleDefaults,
-    TextEncoding, TimingSettings,
+    AtomKind, DisplayUpdate, GlyphEffects, GlyphMask, GlyphPaint, Layout, LayoutSettings, Markup,
+    Schedule, StyleDefaults, TextEncoding, TimingSettings,
 };
 use crate::{Error, Result, graphics::Surface, read};
 
@@ -135,6 +135,51 @@ impl Page {
                     .wrapping_add(mask.offset()[i])
             });
             changed |= target.blend_from(&image, image.bounds(), at, 255);
+        }
+        Ok(changed)
+    }
+
+    /// 使用基线的一百二十八像素方形字形面，依登记顺序合成效果和前景。
+    pub fn paint(
+        &self,
+        target: &mut Surface,
+        origin: [i32; 2],
+        effects: &GlyphEffects,
+        double_coverage: bool,
+        mut glyph: impl FnMut(char, u32) -> Result<GlyphMask>,
+    ) -> Result<bool> {
+        self.require_prepared()?;
+        let mut changed = false;
+        let mut canvas = Surface::new([128; 2])?;
+        for entry in &self.layout.entries {
+            if !entry.glyph() || !self.playback.visible[entry.atom.unwrap()] {
+                continue;
+            }
+            let AtomKind::Character(character) = entry.kind else {
+                unreachable!()
+            };
+            let style = self.markup.atoms[entry.atom.unwrap()].style;
+            let mask = glyph(character, entry.size[1] as u32)?;
+            if mask.coverage().is_empty() {
+                continue;
+            }
+            canvas.clear(0);
+            let bounds = mask.paint(
+                &mut canvas,
+                &GlyphPaint {
+                    color: if entry.group.is_some_and(|group| group.ruby) {
+                        style.ruby_color
+                    } else {
+                        style.text_color
+                    },
+                    shadow_color: style.shadow_color,
+                    font_size: entry.size[1] as u32,
+                    double_coverage,
+                    effects: *effects,
+                },
+            )?;
+            let at = std::array::from_fn(|i| origin[i].wrapping_add(entry.position[i]));
+            changed |= target.blend_from(&canvas, bounds, at, 255);
         }
         Ok(changed)
     }

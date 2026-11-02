@@ -1,8 +1,8 @@
 use katze_system2::{
     graphics::Surface,
     message::{
-        BreakCharacters, Font, GlyphMask, LayoutSettings, Page, StyleDefaults, TextEncoding,
-        TimingSettings, VerticalAlignment,
+        BreakCharacters, Font, GlyphEffects, GlyphMask, LayoutSettings, Page, StyleDefaults,
+        TextEncoding, TimingSettings, VerticalAlignment,
     },
 };
 
@@ -131,6 +131,30 @@ fn prepared_page_paints_visible_text_and_ruby_with_their_respective_styles() {
             .pixels()
             .chunks_exact(4)
             .any(|p| p == [0x11, 0x22, 0x33, 255])
+    );
+    target.clear(0);
+    requests.clear();
+    page.paint(
+        &mut target,
+        [0; 2],
+        &GlyphEffects {
+            outline: true,
+            shadow: true,
+            ..Default::default()
+        },
+        false,
+        |c, size| {
+            requests.push((c, size));
+            font.rasterize(c, size)
+        },
+    )
+    .unwrap();
+    assert_eq!(requests, [('A', 20), ('A', 20), ('A', 12)]);
+    assert!(
+        target
+            .pixels()
+            .chunks_exact(4)
+            .any(|p| p[..3] == [0; 3] && p[3] > 0)
     );
     target.clear(0);
     assert!(
