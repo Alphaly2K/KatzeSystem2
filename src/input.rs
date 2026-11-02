@@ -15,6 +15,8 @@ mod object;
 pub use object::{InputFactory, InputObject};
 mod button;
 pub use button::ButtonObject;
+mod slider;
+pub use slider::SliderControl;
 mod coordinates;
 pub use coordinates::CoordinateMap;
 mod device;

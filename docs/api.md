@@ -100,6 +100,8 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 
 `fes::SliderState` 提供 SLIDER 的初始化属性、原始范围／数值、矩形、方向、Alpha 和独立的 `SliderUpdates` 请求。`apply(attributes, bank)` 仅应用 FILE、PL、POS2、PRI、DISP、ENABLE，返回本次是否需要使后代失效；ENABLE 变化只标记自身。`set_range`／`set_position` 保留原始值和通知参数，不执行范围限制。运动接口只传递 Alpha，详见[SLIDER 属性核心](graphics.md#fes-slider-属性核心)。`Objects::define` 已接入这一类型，数值命令与 BUTTON 的反向关联导航可独立使用；配置装载、下层任务和绘制继续接入，运行时媒体准备与更新返回明确诊断。
 
+`input::SliderControl` 提供下层滑块独立的范围、行程、数值、像素位置与拖动状态。`set_range` 只保存端点，`set_position` 先限制数值，非拖动状态再更新像素；`update_pixel_position` 可显式刷新。`position_at_pixel` 使用基线的半步阈值返回从零起算的数值，除法异常及过大查询返回诊断。FES 原始请求与这一状态分层保存，换算规则见 [SLIDER 下层范围换算](graphics.md#slider-下层范围换算)。
+
 宿主完成请求后用 `resume` 确认，待确认请求重复返回，数量和属性表达式只计算一次。字符串表必须在初始化前准备好，缺失字符串可能使后续参数移动。宿主只应在具备对应实现时确认声明或属性请求。`return_value` 保存最近一次 `break` 的值；不带参数的 `break` 将它重置为 0。
 
 `Interpreter::object_reference(input, state)` 解析对象名及银行表达式。名称精确匹配；省略银行号或值为 −1 时，已知多银行对象保留 −1 表示整个数组，其他对象归一为 0。其他引用的查找和银行范围由宿主处理。KEY_* 中名称为 `0` 的引用解码为空名称和银行 0，表示解绑。对整个数组指定 PRI 时，`sequential_priority` 为真，宿主应按银行号递增优先级。
