@@ -3,9 +3,12 @@ use katze_system2::{
     expression::State,
     graphics::{GraphicsFactory, Projection, RenderTarget, TextureFilter, Transform},
     input::{InputDevice, InputFactory, KeyEvent, KeyEventKind, KeySample, PointerSample},
-    kcs::{Host, Interpreter, ResourceServices},
+    kcs::{Host, Interpreter, Program, ResourceServices},
     resource::ResourceMode,
-    runtime::{BaseObject, ObjectFactory, RootObject, Runtime, TaskObject, fes::FesFactory, kind},
+    runtime::{
+        BaseObject, ObjectFactory, OrdinaryObject, RootObject, Runtime, TaskObject,
+        fes::FesFactory, kind,
+    },
     task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock},
 };
 use std::{
@@ -52,6 +55,35 @@ struct Factory {
 }
 impl ObjectFactory for Factory {
     fn create(&mut self, id: u32, kind: u32, name: &[u8]) -> Result<Box<dyn TaskObject>> {
+        if kind == kind::ORDINARY && name == b"native driver" {
+            fn ins(code: &mut Vec<u8>, op: u8, args: &[u32]) {
+                code.push(op);
+                for value in args {
+                    code.push(3);
+                    code.extend(value.to_le_bytes());
+                }
+            }
+            let mut code = Vec::new();
+            ins(&mut code, 0x25, &[0xdead_beef]);
+            for (native, args) in [(449, vec![3, 4]), (447, vec![3, 64]), (448, vec![3])] {
+                for value in &args {
+                    ins(&mut code, 0x25, &[*value]);
+                }
+                ins(&mut code, 0x2b, &[native, args.len() as u32 * 4]);
+            }
+            ins(&mut code, 0x26, &[0]);
+            ins(&mut code, 0x3b, &[]);
+            let mut data = vec![0; 128];
+            data[32..36].copy_from_slice(&7u32.to_le_bytes());
+            let format = b"complete_%d[G32]\0";
+            data[64..64 + format.len()].copy_from_slice(format);
+            let mut task = katze_system2::kcs::OrdinaryTask::new(
+                Program::from_code(&code, data, 128)?,
+                Vec::new(),
+            )?;
+            task.task_id = id;
+            return Ok(Box::new(OrdinaryObject::new(task)));
+        }
         if kind != kind::BASE {
             return Err(Error::new(0, "合成工厂没有该类型"));
         }
@@ -81,6 +113,12 @@ struct Files {
     fail_media: Rc<Cell<bool>>,
 }
 impl ResourceServices for Files {
+    fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+        assert_eq!(category, b"fes");
+        assert!(name == b"complete_7" || name.is_empty());
+        Ok(b"complete.fes\0ignored".to_vec())
+    }
+
     fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
         assert_eq!(mode, ResourceMode::LooseFirst);
         self.reads.borrow_mut().push(name.to_vec());
@@ -338,6 +376,53 @@ fn fes_tasks_load_without_starting_then_drive_pixels_and_keep_exit_properties() 
         assert!(runtime.object(list).is_none());
         assert_eq!(runtime.drawables_mut().order().len(), 0);
         assert!(runtime.update(104, 1).unwrap());
+    }
+}
+
+#[test]
+fn ordinary_natives_bind_load_and_start_fes_with_shared_values_and_pixels() {
+    let source = b"#DEFINE\nCIMAGE sprite\nPLANE view\n#OBJECT SIZE COLOR PRI POS DISP\nsprite 2,2 0xff123456 5 1,1 1\n#OBJECT POS SIZE VRAM PRI DISP\nview 0,0 8,6 0,0 500 1\n#START\n$0=$0+1\nwait 20\n";
+    for budget in [1, 4096] {
+        for empty_name in [false, true] {
+            let Setup {
+                mut runtime, reads, ..
+            } = setup(budget, source);
+            let fes = runtime.create(0, kind::FES, b"scene", b"").unwrap();
+            let list = runtime.create(fes, kind::IMAGE_LIST, b"list", b"").unwrap();
+            assert_eq!((fes, list), (3, 4));
+            send(&mut runtime, list, 285, 8, 6);
+            send(&mut runtime, list, 289, 1, 0);
+            let caller = runtime
+                .create(0, kind::ORDINARY, b"native driver", b"")
+                .unwrap();
+            if empty_name {
+                runtime
+                    .object_mut(caller)
+                    .unwrap()
+                    .interpreter_mut()
+                    .unwrap()
+                    .write(64, &[0])
+                    .unwrap();
+            }
+            runtime.update(0, 1).unwrap();
+            assert_eq!(runtime.numbers().shared[0], 1);
+            assert_eq!(*reads.borrow(), [b"complete.fes".to_vec()]);
+            let vm = runtime.object(caller).unwrap().interpreter().unwrap();
+            assert_eq!(vm.read(0, 4).unwrap(), 0xdead_beefu32.to_le_bytes());
+            assert!(vm.stack_bytes().is_empty());
+            runtime.update(1, 1).unwrap();
+            let mut output = RenderTarget::new([8, 6]).unwrap();
+            runtime
+                .render_frame(
+                    &mut output,
+                    &Projection::default(),
+                    *Transform::default().matrix(),
+                    TextureFilter::Point,
+                )
+                .unwrap();
+            assert_eq!(output.pixel(1, 1), Some(0xff123456));
+            assert_eq!(runtime.numbers().shared[0], 1);
+        }
     }
 }
 

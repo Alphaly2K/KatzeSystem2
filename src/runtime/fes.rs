@@ -13,6 +13,7 @@ mod commands;
 mod image;
 mod input;
 mod motion;
+mod natives;
 mod navigation;
 mod plane;
 mod scene;

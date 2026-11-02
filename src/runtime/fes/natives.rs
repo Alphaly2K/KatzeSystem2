@@ -1,0 +1,55 @@
+use crate::kcs::{Interpreter, NativeReturn, format_string};
+use crate::runtime::{ObjectFactory, ObjectHost};
+use crate::task::CommandBuffers;
+use crate::{Error, Result, read};
+
+impl<F: ObjectFactory> ObjectHost<'_, F> {
+    pub(in crate::runtime) fn fes_native(
+        &mut self,
+        index: u32,
+        arguments: &[u8],
+        vm: &mut Interpreter,
+    ) -> Result<NativeReturn> {
+        let length = if index == 448 { 4 } else { 8 };
+        if arguments.len() != length {
+            return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+        }
+        let target = read::u32_at(arguments, 0)?;
+        match index {
+            447 => {
+                let formatted = format_string(vm, read::u32_at(arguments, 4)?, 0)?;
+                let mut name = self
+                    .resources
+                    .services
+                    .as_mut()
+                    .ok_or_else(|| Error::new(vm.pc, "运行时未配置 FES 资源服务"))?
+                    .resolve(b"fes", &formatted)?;
+                name.truncate(
+                    name.iter()
+                        .position(|&byte| byte == 0)
+                        .unwrap_or(name.len()),
+                );
+                name.push(0);
+                // 共享数值上下文由运行时持有，337 以零选择该状态。
+                self.command_target(target, 337, [0; 3])?;
+                self.command_target_with_buffers(
+                    target,
+                    338,
+                    [0; 3],
+                    &mut CommandBuffers {
+                        data1: Some(&mut name),
+                        ..CommandBuffers::default()
+                    },
+                )?;
+            }
+            448 => {
+                self.command_target(target, 339, [0; 3])?;
+            }
+            449 => {
+                self.command_target(target, 340, [0, read::u32_at(arguments, 4)?, 0])?;
+            }
+            _ => unreachable!(),
+        }
+        Ok(NativeReturn::Continue)
+    }
+}

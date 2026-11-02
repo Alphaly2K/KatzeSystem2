@@ -1505,6 +1505,9 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         if matches!(index, 611..=619 | 695 | 884) {
             return self.message_native(index, arguments, vm);
         }
+        if matches!(index, 447..=449) {
+            return self.fes_native(index, arguments, vm);
+        }
         if index == 149 {
             if arguments.len() != 8 {
                 return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
