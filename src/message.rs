@@ -6,11 +6,13 @@ mod layout;
 mod line_breaks;
 mod markup;
 mod page;
+mod playback;
 mod timing;
 
 pub use layout::{Layout, LayoutEntry, LayoutSettings, VerticalAlignment};
 pub use line_breaks::BreakCharacters;
 pub use page::Page;
+pub use playback::DisplayUpdate;
 pub use timing::{Schedule, TimingSettings};
 
 /// 已解码文字仍保留原文字对象路径，供布局及消息更新使用。

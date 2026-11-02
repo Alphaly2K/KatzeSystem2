@@ -1,6 +1,8 @@
 use super::markup::ParseState;
+use super::playback::Playback;
 use super::{
-    AtomKind, Layout, LayoutSettings, Markup, Schedule, StyleDefaults, TextEncoding, TimingSettings,
+    AtomKind, DisplayUpdate, Layout, LayoutSettings, Markup, Schedule, StyleDefaults, TextEncoding,
+    TimingSettings,
 };
 use crate::{Error, Result, read};
 
@@ -17,6 +19,7 @@ pub struct Page {
     layout: Layout,
     atom_times: Vec<Option<u32>>,
     schedule: Schedule,
+    playback: Playback,
     dirty: bool,
 }
 
@@ -44,6 +47,7 @@ impl Page {
                 deadlines: Vec::new(),
                 accumulated_units: 0,
             },
+            playback: Playback::default(),
             dirty: true,
         }
     }
@@ -67,6 +71,44 @@ impl Page {
 
     pub fn is_dirty(&self) -> bool {
         self.dirty
+    }
+
+    pub fn speed(&self) -> u32 {
+        self.playback.speed()
+    }
+
+    /// 十为普通速度；变化时以最近处理的时间和已显示记录时间为新基准。
+    pub fn set_speed(&mut self, speed: u32) {
+        self.playback.set_speed(speed);
+    }
+
+    /// 查询上次准备结果中的字形可见性；控制记录为 false，越界为 None。
+    pub fn is_visible(&self, layout_index: usize) -> Option<bool> {
+        self.layout
+            .entries
+            .get(layout_index)
+            .map(|entry| entry.glyph() && self.playback.visible[entry.atom.unwrap()])
+    }
+
+    /// 普通逐字显示；MAX 时刻强制显示，MAX 分隔上限表示扫描全部记录。
+    pub fn advance(&mut self, now: u32, segment_limit: u32) -> Result<DisplayUpdate> {
+        self.require_prepared()?;
+        Ok(self
+            .playback
+            .advance(&self.layout, &self.schedule, now, segment_limit))
+    }
+
+    pub fn remaining(&self, segment_limit: u32) -> Result<u32> {
+        self.require_prepared()?;
+        Ok(self.playback.remaining(&self.layout, segment_limit))
+    }
+
+    fn require_prepared(&self) -> Result<()> {
+        if self.dirty {
+            Err(Error::new(0, "消息页需要先完成准备"))
+        } else {
+            Ok(())
+        }
     }
 
     /// 同一次 prepare 前的追加可共同组成一个标记或分组。
@@ -93,9 +135,11 @@ impl Page {
         self.dirty = true;
     }
 
-    /// 清空来源、记录、样式和累计计数，恢复创建时的配置。
+    /// 清空来源、记录、样式和累计计数，恢复创建时的配置，保留显示速度。
     pub fn clear(&mut self) {
+        let speed = self.playback.speed();
         *self = Self::new(self.defaults, self.encoding);
+        self.playback.set_speed(speed);
     }
 
     /// 返回是否重新准备。失败时保留上次结果和待解析来源，可修正服务后重试。
@@ -172,6 +216,7 @@ impl Page {
             accumulated_units,
         };
         self.state = state;
+        self.playback.visible.resize(self.markup.atoms.len(), false);
         self.parsed_bytes = self.source.len();
         self.dirty = false;
         Ok(true)
