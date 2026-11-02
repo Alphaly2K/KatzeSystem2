@@ -10,6 +10,7 @@ mod handles;
 pub mod hg3;
 pub mod input;
 pub mod kcs;
+pub mod message;
 mod read;
 pub mod resource;
 pub mod runtime;
