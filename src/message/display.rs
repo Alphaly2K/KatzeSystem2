@@ -100,6 +100,24 @@ impl Display {
         self.page.set_speed(speed);
     }
 
+    /// 从完整来源重新解析并准备；成功后替换配置、像素和进度，保留速度。
+    pub fn reconfigure(
+        &mut self,
+        defaults: StyleDefaults,
+        size: [u32; 2],
+        settings: DisplaySettings,
+        layout: &LayoutSettings,
+        timing: &TimingSettings,
+        measure: impl FnMut(char, u32) -> Result<i32>,
+    ) -> Result<()> {
+        let mut replacement = Self::new(defaults, self.page.encoding, size, settings)?;
+        replacement.append(self.page.source())?;
+        replacement.set_speed(self.page.speed());
+        replacement.prepare(layout, timing, measure)?;
+        *self = replacement;
+        Ok(())
+    }
+
     pub fn clear(&mut self) {
         self.page.clear();
         self.surface.clear(0);

@@ -331,3 +331,111 @@ fn reveal_dirty_includes_prepared_source_and_repeated_active_alpha_updates() {
     display.clear();
     assert_eq!(display.dirty_rectangle(), second);
 }
+
+#[test]
+fn reconfiguration_replays_source_discards_old_breaks_and_resets_display_time() {
+    let mut display = display(0, r"\f+3;AB[C");
+    let mut narrow = layout();
+    narrow.width = 10;
+    display.invalidate_layout();
+    display.prepare(&narrow, &timing(), |_, _| Ok(10)).unwrap();
+    display.append("/D]E").unwrap();
+    display.prepare(&narrow, &timing(), |_, _| Ok(10)).unwrap();
+    display.advance(100, u32::MAX, mask).unwrap();
+    display.set_speed(37);
+    assert!(display.dirty_rectangle().is_some());
+    assert!(
+        display
+            .page()
+            .layout()
+            .entries
+            .iter()
+            .any(|entry| entry.atom.is_none())
+    );
+    let mut defaults = defaults();
+    defaults.text_sizes = [30; 5];
+    defaults.ruby_sizes = [18; 5];
+    defaults.text_color = 0xff99_aabb;
+    let mut wide = layout();
+    wide.width = 100;
+    wide.normal_size = 30;
+    display
+        .reconfigure(
+            defaults,
+            [100, 64],
+            DisplaySettings {
+                reveal_width: 4,
+                ..Default::default()
+            },
+            &wide,
+            &timing(),
+            |_, _| Ok(10),
+        )
+        .unwrap();
+    assert_eq!(display.page().source(), r"\f+3;AB[C/D]E");
+    assert_eq!(display.page().speed(), 37);
+    assert_eq!(display.page().remaining(u32::MAX).unwrap(), 5);
+    assert_eq!(display.dirty_rectangle(), None);
+    assert_eq!(display.surface().size(), [100, 64]);
+    for surface in [display.surface(), display.source_surface().unwrap()] {
+        assert!(surface.pixels().iter().all(|&byte| byte == 0));
+    }
+    let entries = &display.page().layout().entries;
+    assert_eq!(entries.len(), 5);
+    assert!(entries.iter().all(|entry| entry.atom.is_some()));
+    assert_eq!(entries[0].size[1], 33);
+    assert_eq!(entries[3].size[1], 18);
+    assert!(entries[3].group.unwrap().ruby);
+    display.advance(0, u32::MAX, mask).unwrap();
+    assert_eq!(display.advance(2, u32::MAX, mask).unwrap().completed, [0]);
+    display.clear();
+    display.append("Z").unwrap();
+    display.prepare(&wide, &timing(), |_, _| Ok(10)).unwrap();
+    assert_eq!(display.page().layout().entries[0].size[1], 30);
+    assert_eq!(
+        display.page().markup().atoms[0].style.text_color,
+        0xff99_aabb
+    );
+    assert_eq!(display.page().speed(), 37);
+}
+
+#[test]
+fn failed_reconfiguration_preserves_pixels_pending_source_and_progress_for_retry() {
+    let mut display = display(4, "A");
+    display.advance(0, u32::MAX, mask).unwrap();
+    display.set_speed(37);
+    display.append("[B").unwrap();
+    let before = display.clone();
+    for size in [[0, 64], [100, 64]] {
+        assert!(
+            display
+                .reconfigure(
+                    defaults(),
+                    size,
+                    *display.settings(),
+                    &layout(),
+                    &timing(),
+                    |_, _| Err(Error::new(0, "metrics unavailable")),
+                )
+                .is_err()
+        );
+        assert_eq!(display, before);
+    }
+    display
+        .reconfigure(
+            defaults(),
+            [100, 64],
+            DisplaySettings::default(),
+            &layout(),
+            &timing(),
+            |_, _| Ok(10),
+        )
+        .unwrap();
+    assert_eq!(display.page().source(), "A[B");
+    assert!(!display.page().is_dirty());
+    assert_eq!(display.page().remaining(u32::MAX).unwrap(), 2);
+    assert_eq!(display.page().speed(), 37);
+    assert_eq!(display.source_surface(), None);
+    assert!(display.surface().pixels().iter().all(|&byte| byte == 0));
+    assert_eq!(display.dirty_rectangle(), None);
+}
