@@ -172,11 +172,25 @@ impl Surface {
 
     /// 使用基线普通 32 位 Alpha 规则绘制，并向全零的左右邻接像素延展边缘 RGB。
     pub fn blend_from(&mut self, source: &Self, rect: Rect, at: [i32; 2], opacity: u8) -> bool {
-        let Some(region) = self.clip_blend(source, rect, at) else {
-            return false;
-        };
+        self.blend_from_bounds(source, rect, at, opacity).is_some()
+    }
+
+    pub(crate) fn blend_from_bounds(
+        &mut self,
+        source: &Self,
+        rect: Rect,
+        at: [i32; 2],
+        opacity: u8,
+    ) -> Option<Rect> {
+        let region = self.clip_blend(source, rect, at)?;
+        let bounds = Rect::from_xywh(
+            region.x as i32,
+            region.y as i32,
+            region.width as i32,
+            region.height as i32,
+        );
         self.blend_region(source, region, opacity);
-        true
+        Some(bounds)
     }
 
     fn blend_region(&mut self, source: &Self, region: ImageRegion, opacity: u8) {

@@ -1,5 +1,6 @@
 use katze_system2::{
     Error, Result,
+    graphics::Rect,
     message::{
         BreakCharacters, Display, DisplaySettings, Font, GlyphEffects, GlyphMask, GlyphState,
         LayoutSettings, StyleDefaults, TextEncoding, TimingSettings, VerticalAlignment,
@@ -144,6 +145,7 @@ fn raster_failure_retries_only_the_failed_glyph_and_preserves_pending_color_sync
                 .is_err()
         );
         assert_eq!(display.page().glyph_state(2), Some(GlyphState::Hidden));
+        assert_eq!(display.dirty_rectangle(), Some(Rect::from_xywh(0, 0, 7, 7)));
         assert_eq!(
             display.page().glyph_state(0),
             Some(if width == 0 {
@@ -242,5 +244,90 @@ fn offscreen_records_complete_without_requesting_glyphs() {
         assert_eq!(result.prepared, [0]);
         assert_eq!(result.completed, [0]);
         assert!(display.surface().pixels().iter().all(|&p| p == 0));
+        assert_eq!(display.dirty_rectangle(), None);
     }
+}
+
+#[test]
+fn ordinary_dirty_uses_clipped_blit_and_survives_clear_until_acknowledged() {
+    for encoding in [TextEncoding::Cp932, TextEncoding::Unicode] {
+        let mut display =
+            Display::new(defaults(), encoding, [80, 48], DisplaySettings::default()).unwrap();
+        display.append("A").unwrap();
+        assert_eq!(display.dirty_rectangle(), None);
+        let mut layout = layout();
+        layout.encoding = encoding;
+        let mut timing = timing();
+        timing.encoding = encoding;
+        layout.offset = [-2, -1];
+        display.invalidate_layout();
+        display.prepare(&layout, &timing, |_, _| Ok(10)).unwrap();
+        display.advance(u32::MAX, u32::MAX, mask).unwrap();
+        let (height, top_pixel) = if encoding == TextEncoding::Cp932 {
+            (6, 0)
+        } else {
+            (7, 0xff33_2211)
+        };
+        let expected = Some(Rect::from_xywh(0, 0, 5, height));
+        assert_eq!(display.surface().pixel(1, 0), Some(top_pixel));
+        assert_eq!(display.dirty_rectangle(), expected);
+        assert_eq!(display.dirty_rectangle(), expected);
+        display.clear();
+        assert_eq!(display.dirty_rectangle(), expected);
+        display.prepare(&layout, &timing, |_, _| Ok(10)).unwrap();
+        display.advance(u32::MAX, u32::MAX, mask).unwrap();
+        assert_eq!(display.dirty_rectangle(), expected);
+        display.clear_dirty();
+        assert_eq!(display.dirty_rectangle(), None);
+
+        display.append("AB").unwrap();
+        display.prepare(&layout, &timing, |_, _| Ok(10)).unwrap();
+        display.advance(u32::MAX, u32::MAX, mask).unwrap();
+        assert_eq!(
+            display.dirty_rectangle(),
+            Some(Rect::from_xywh(0, 0, 15, height))
+        );
+        display.clear_dirty();
+        layout.offset = [4, 2];
+        display.invalidate_layout();
+        display.prepare(&layout, &timing, |_, _| Ok(10)).unwrap();
+        display.advance(u32::MAX, u32::MAX, mask).unwrap();
+        assert_eq!(display.dirty_rectangle(), None);
+        display.clear();
+        assert_eq!(display.dirty_rectangle(), None);
+    }
+}
+
+#[test]
+fn reveal_dirty_includes_prepared_source_and_repeated_active_alpha_updates() {
+    let mut display = display(4, "A\u{ffff}B");
+    display.advance(0, 0, mask).unwrap();
+    let first = Some(Rect::from_xywh(0, 0, 7, 7));
+    assert_eq!(display.dirty_rectangle(), first);
+    assert!(
+        display
+            .surface()
+            .pixels()
+            .chunks_exact(4)
+            .all(|p| p[3] == 0)
+    );
+    display.clear_dirty();
+    let repeated = display.advance(0, 0, |_, _| unreachable!()).unwrap();
+    assert!(repeated.prepared.is_empty());
+    assert_eq!(display.dirty_rectangle(), first);
+    display.advance(100, 0, mask).unwrap();
+    display.clear_dirty();
+    display.advance(100, 0, mask).unwrap();
+    assert_eq!(display.dirty_rectangle(), None);
+
+    display.advance(0, u32::MAX, mask).unwrap();
+    let second = Some(Rect::from_xywh(10, 0, 7, 7));
+    assert_eq!(display.dirty_rectangle(), second);
+    display.clear_dirty();
+    display.advance(0, u32::MAX, mask).unwrap();
+    assert_eq!(display.dirty_rectangle(), None);
+    display.advance(3, u32::MAX, mask).unwrap();
+    assert_eq!(display.dirty_rectangle(), second);
+    display.clear();
+    assert_eq!(display.dirty_rectangle(), second);
 }

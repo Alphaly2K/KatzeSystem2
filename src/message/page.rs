@@ -10,7 +10,7 @@ use crate::{Error, Result, graphics::Surface, read};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Page {
     defaults: StyleDefaults,
-    encoding: TextEncoding,
+    pub(super) encoding: TextEncoding,
     source: String,
     characters: usize,
     parsed_bytes: usize,

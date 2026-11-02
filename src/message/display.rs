@@ -37,6 +37,7 @@ pub struct Display {
     normal_size: u32,
     character_delay: u32,
     colors_dirty: bool,
+    dirty: Option<Rect>,
 }
 
 impl Display {
@@ -66,6 +67,7 @@ impl Display {
             normal_size: defaults.text_sizes[2],
             character_delay: 0,
             colors_dirty: false,
+            dirty: None,
         })
     }
 
@@ -80,6 +82,13 @@ impl Display {
     }
     pub fn source_surface(&self) -> Option<&Surface> {
         self.source.as_ref()
+    }
+    /// 查询累计更新区域；读取后仍保留，直到显式清除。
+    pub fn dirty_rectangle(&self) -> Option<Rect> {
+        self.dirty
+    }
+    pub fn clear_dirty(&mut self) {
+        self.dirty = None;
     }
     pub fn append(&mut self, text: &str) -> Result<()> {
         self.page.append(text)
@@ -126,17 +135,28 @@ impl Display {
     ) -> Result<DisplayProgress> {
         self.page.require_prepared()?;
         let mut canvas = Surface::new([128; 2])?;
+        let encoding = self.page.encoding;
         let Some(reveal) = &self.reveal else {
             let settings = self.settings;
             let surface = &mut self.surface;
             let bounds = &mut self.bounds;
+            let dirty = &mut self.dirty;
             let update = self
                 .page
                 .advance_painted(now, segment_limit, |entry, style| {
-                    if let Some(rect) =
-                        draw(entry, style, surface, &mut canvas, &settings, &mut glyph)?
-                    {
-                        bounds[entry.atom.unwrap()] = rect;
+                    if let Some(drawn) = draw(
+                        entry,
+                        style,
+                        surface,
+                        &mut canvas,
+                        &settings,
+                        encoding,
+                        &mut glyph,
+                    )? {
+                        bounds[entry.atom.unwrap()] = drawn.bounds;
+                        if let Some(rect) = drawn.dirty {
+                            record_dirty(dirty, rect, surface.bounds());
+                        }
                     }
                     Ok(())
                 })?;
@@ -163,15 +183,19 @@ impl Display {
                 continue;
             }
             let style = self.page.markup().atoms[atom].style;
-            if let Some(rect) = draw(
+            if let Some(drawn) = draw(
                 entry,
                 style,
                 source,
                 &mut canvas,
                 &self.settings,
+                encoding,
                 &mut glyph,
             )? {
-                self.bounds[atom] = rect;
+                self.bounds[atom] = drawn.bounds;
+                if let Some(rect) = drawn.dirty {
+                    record_dirty(&mut self.dirty, rect, source.bounds());
+                }
             }
             self.page.playback.states[atom] = GlyphState::Revealing;
             self.colors_dirty = true;
@@ -197,7 +221,20 @@ impl Display {
                         bounds: self.bounds[atom],
                         start: self.starts[index].unwrap(),
                     };
-                    if reveal.apply(&mut self.surface, source, &glyph, phase)? {
+                    let complete = reveal.apply(&mut self.surface, source, &glyph, phase)?;
+                    if phase >= glyph.start {
+                        record_dirty(
+                            &mut self.dirty,
+                            Rect {
+                                left: glyph.position[0].wrapping_add(glyph.bounds.left),
+                                top: glyph.position[1].wrapping_add(glyph.bounds.top),
+                                right: glyph.position[0].wrapping_add(glyph.bounds.right),
+                                bottom: glyph.position[1].wrapping_add(glyph.bounds.bottom),
+                            },
+                            self.surface.bounds(),
+                        );
+                    }
+                    if complete {
                         self.page.playback.states[atom] = GlyphState::Complete;
                         progress.completed.push(index);
                     } else {
@@ -226,14 +263,21 @@ fn segment_end(layout: &Layout, limit: u32) -> usize {
     layout.entries.len()
 }
 
+#[derive(Default)]
+struct DrawnGlyph {
+    bounds: Rect,
+    dirty: Option<Rect>,
+}
+
 fn draw(
     entry: &LayoutEntry,
     style: Style,
     target: &mut Surface,
     canvas: &mut Surface,
     settings: &DisplaySettings,
+    encoding: TextEncoding,
     glyph: &mut impl FnMut(char, u32) -> Result<GlyphMask>,
-) -> Result<Option<Rect>> {
+) -> Result<Option<DrawnGlyph>> {
     if Rect::from_xywh(entry.position[0], entry.position[1], 128, 128)
         .intersect(target.bounds())
         .is_none()
@@ -245,7 +289,7 @@ fn draw(
     };
     let mask = glyph(character, entry.size[1] as u32)?;
     if mask.coverage().is_empty() {
-        return Ok(Some(Rect::default()));
+        return Ok(Some(DrawnGlyph::default()));
     }
     canvas.clear(0);
     let bounds = mask.paint(
@@ -262,6 +306,30 @@ fn draw(
             effects: settings.effects,
         },
     )?;
-    target.blend_from(canvas, bounds, entry.position, 255);
-    Ok(Some(bounds))
+    let mut source = bounds;
+    let mut at = entry.position;
+    if encoding == TextEncoding::Unicode && at[1] < 0 {
+        // Unicode 保留原高度，将负 Y 的来源起点下移，再从目标顶部绘制。
+        source.top = source.top.wrapping_sub(at[1]);
+        source.bottom = source.bottom.wrapping_sub(at[1]);
+        at[1] = 0;
+    }
+    Ok(Some(DrawnGlyph {
+        bounds,
+        dirty: target.blend_from_bounds(canvas, source, at, 255),
+    }))
+}
+
+fn record_dirty(dirty: &mut Option<Rect>, rect: Rect, bounds: Rect) {
+    if let Some(rect) = rect.intersect(bounds) {
+        *dirty = Some(match *dirty {
+            Some(previous) => Rect {
+                left: previous.left.min(rect.left),
+                top: previous.top.min(rect.top),
+                right: previous.right.max(rect.right),
+                bottom: previous.bottom.max(rect.bottom),
+            },
+            None => rect,
+        });
+    }
 }
