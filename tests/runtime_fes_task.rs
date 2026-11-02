@@ -742,6 +742,105 @@ fn start_button_scene(runtime: &mut TestRuntime) -> (u32, u32, Vec<u32>) {
 }
 
 #[test]
+fn system_keys_scan_live_records_without_replacing_focus_or_release_targets() {
+    let source = br"#DEFINE
+BUTTON first
+BUTTON skipped
+BUTTON first
+BUTTON last
+BUTTON focus[2]
+#OBJECT SIZE PRI ENABLE SYSKEY
+first 2,2 5 21 12
+skipped 2,2 6 1 12
+last 2,2 7 0 12
+focus[0] 2,2 8 1 -1
+focus[1] 2,2 9 1 -2
+#START
+wait 1000
+#first.PUSH_L
+$0=$0*10+1
+skipped enable 0
+last enable 1
+#skipped.PUSH_L
+$0=$0*10+2
+#last.PUSH_L
+$0=$0*10+3
+#focus.PUSH_L
+$2=$2*10+@+1
+#focus.RELEASE_L
+$3=$3*10+@+1
+";
+    for budget in [1, 4096] {
+        let Setup { mut runtime, .. } = setup(budget, source);
+        let (fes, _, buttons) = start_button_scene(&mut runtime);
+        send(&mut runtime, fes, 64, buttons[4], 1);
+        assert_eq!(send(&mut runtime, buttons[4], 4, 12, 1), 0);
+        assert_eq!(runtime.numbers().shared[0], 113);
+        assert_eq!(runtime.numbers().shared[2], 0);
+        assert_eq!(send(&mut runtime, buttons[4], 4, 0, 0), 0);
+        assert_eq!(runtime.numbers().shared[3], 1);
+        assert_eq!(send(&mut runtime, buttons[4], 4, 0, 1), 0);
+        assert_eq!(runtime.numbers().shared[2], 1);
+        // 新焦点不改写已经保存的释放目标。
+        send(&mut runtime, fes, 64, buttons[5], 1);
+        assert_eq!(send(&mut runtime, buttons[4], 4, 0, 0), 0);
+        assert_eq!(runtime.numbers().shared[3], 11);
+        assert_eq!(send(&mut runtime, buttons[4], 4, 0, 1), 0);
+        assert_eq!(runtime.numbers().shared[2], 12);
+        assert_eq!(runtime.numbers().shared[0], 113);
+
+        assert_eq!(send(&mut runtime, buttons[4], 4, u32::MAX - 1, 1), 0);
+        assert_eq!(runtime.numbers().shared[2], 122);
+        assert_eq!(send(&mut runtime, buttons[4], 4, u32::MAX, 1), 1);
+        assert_eq!(runtime.numbers().shared[2], 122);
+        assert_eq!(send(&mut runtime, buttons[4], 4, 12, 0), 1);
+        assert_eq!(runtime.numbers().shared[0], 113);
+    }
+}
+
+#[test]
+fn system_key_retries_keep_completed_matches_and_default_only_responses() {
+    for decode in ["", "decode\n$2=$2+1\n"] {
+        let source = format!(
+            "#DEFINE\nBUTTON clean\nBUTTON dirty\n#OBJECT SIZE DEFAULT PRI SYSKEY\nclean 2,2 DEFAULT 5 12\ndirty 2,2 DEFAULT 6 12\n#OBJECT FILE PATHMODE\ndirty absent 1\n#START\nwait 1000\n#DEFAULT.PUSH_L\n$0=$0*10+(_CLICK_L_==clean)+2*(_CLICK_L_==dirty)\n@ size 3 4\n{decode}#DEFAULT.RELEASE_L\n$1=$1+1\n"
+        );
+        for budget in [1, 4096] {
+            let Setup {
+                mut runtime,
+                fail_media,
+                ..
+            } = setup(budget, source.as_bytes());
+            let (fes, _, buttons) = start_button_scene(&mut runtime);
+            send(&mut runtime, fes, 64, buttons[0], 1);
+            fail_media.set(true);
+            let press = command(buttons[0], 4, 12, 1);
+            for _ in 0..2 {
+                assert!(
+                    runtime
+                        .dispatch_command(0, press)
+                        .unwrap_err()
+                        .message
+                        .contains("媒体读取失败")
+                );
+                assert_eq!(runtime.numbers().shared[0], 12);
+                assert_eq!(runtime.numbers().shared[2], i32::from(!decode.is_empty()));
+            }
+            fail_media.set(false);
+            assert_eq!(runtime.dispatch_command(0, press).unwrap(), 1);
+            assert_eq!(runtime.numbers().shared[0], 12);
+            assert_eq!(
+                runtime.numbers().shared[2],
+                2 * i32::from(!decode.is_empty())
+            );
+            assert_eq!(send(&mut runtime, buttons[0], 4, 12, 0), 1);
+            assert_eq!(runtime.numbers().shared[1], 0);
+            assert_eq!(send(&mut runtime, buttons[0], 4, 0, 0), 1);
+            assert_eq!(runtime.numbers().shared[1], 1);
+        }
+    }
+}
+
+#[test]
 fn direction_events_precede_pointer_moves_and_preserve_the_previous_pressed_bank() {
     let source = b"#KEYBLOCK 1\n0 2,1\n#DEFINE\nBUTTON item[2]\n#OBJECT SIZE POS KEYBLOCK PRI\nitem[0] 32,16 0,0 0,0,0 5\nitem[1] 32,16 40,0 0,1,0 6\n#START\nitem[1] keypos 1 8 4\nwait 1000\n#item.TOUCH\n$0=(_PUSH_RIGHT_==item[1])\n$1=@\n$2=(_PUSH_RIGHT_!=item[0])\n$5=(_RELEASE_RIGHT_==item[0])\n#item.FOCUS\n$3=$3*10+@+1\n#item.UNFOCUS\n$4=$4*10+@+1\n";
     for budget in [1, 4096] {

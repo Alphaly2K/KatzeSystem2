@@ -225,6 +225,14 @@ struct InputEvent {
     preserve_output: bool,
     move_pointer: bool,
     response: InputResponse,
+    system_key: Option<SystemKeyInput>,
+}
+
+struct SystemKeyInput {
+    key: u32,
+    cursor: usize,
+    target: Option<fes::ObjectReference>,
+    handled: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -344,6 +352,12 @@ impl FesObject {
         }
         if matches!(command.code, 9 | 10) {
             *output = 0;
+        }
+        if self.input_event.as_ref().unwrap().system_key.is_some()
+            && self.input_event.as_ref().unwrap().handled.is_none()
+            && !self.system_key_events(host, budget)?
+        {
+            return Ok(false);
         }
         if self.input_event.as_ref().unwrap().handled.is_none() {
             let event = self.input_event.as_ref().unwrap();
@@ -488,6 +502,7 @@ impl FesObject {
         let mut clear_selection = false;
         let mut move_pointer = false;
         let mut response = InputResponse::IfUnhandled;
+        let mut system_key = None;
         let target = match command.code {
             64 => {
                 let target = find();
@@ -526,15 +541,15 @@ impl FesObject {
                             None
                         }
                     }
+                } else if !matches!(key, 0 | 1 | 8..=11) {
+                    system_key = Some(SystemKeyInput {
+                        key,
+                        cursor: 0,
+                        target: None,
+                        handled: false,
+                    });
+                    None
                 } else {
-                    if !matches!(key, 0 | 1 | 8..=11)
-                        && objects.update_order().any(|handle| {
-                            matches!(&objects.get(handle).unwrap().state,
-                                super::ObjectState::Button(button) if button.system_key != -1)
-                        })
-                    {
-                        return Err(Error::new(0, "FES SYSKEY 路由尚未接入"));
-                    }
                     target
                 }
             }
@@ -571,8 +586,47 @@ impl FesObject {
             preserve_output: touch,
             move_pointer,
             response,
+            system_key,
         });
         Ok(true)
+    }
+
+    fn system_key_events(&mut self, host: &mut dyn Host, budget: usize) -> Result<bool> {
+        let event = self.input_event.as_mut().unwrap();
+        let input = event.system_key.as_mut().unwrap();
+        let scene = self.scene.as_mut().unwrap();
+        for _ in 0..budget.max(1) {
+            if input.target.is_none() {
+                let objects = scene.objects();
+                let Some(record) = objects.media_records().get(input.cursor) else {
+                    event.handled = Some(input.handled);
+                    return Ok(true);
+                };
+                let target = record.target();
+                let matched = objects
+                    .lookup(&target.name, target.bank)
+                    .and_then(|handle| objects.get(handle))
+                    .is_some_and(|object| {
+                        matches!(&object.state, super::ObjectState::Button(button)
+                            if button.enabled != 0 && button.system_key != -1
+                                && button.system_key as u32 == input.key)
+                    });
+                input.target = matched.then(|| target.clone());
+                if input.target.is_none() {
+                    input.cursor += 1;
+                    continue;
+                }
+            }
+            let Some(handled) =
+                services(host)?.dispatch_event(scene, input.target.as_ref(), 2, budget)?
+            else {
+                return Ok(false);
+            };
+            input.handled |= handled;
+            input.target = None;
+            input.cursor += 1;
+        }
+        Ok(false)
     }
 
     fn navigate_input(&mut self, key: u32, host: &mut dyn Host) -> Result<NavigationOutcome> {

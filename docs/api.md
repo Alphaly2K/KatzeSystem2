@@ -96,7 +96,7 @@ FES 内部执行宏声明，初始化按以下顺序交给宿主：
 
 IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的转换结果实际改变时置位；空 FILE 或转换结果相同不置位。`frame_mapping_changed` 初始为 true，写入任何 ID 列也置为 true；下次有效 IDN 在编号变化或此标记为 true 时请求装载并清除此标记。首次 IDN=0 因此也请求装载。ID 列本身只更新映射，非法 IDN 保留待应用标记。直接修改公开映射后应同时设置 `frame_mapping_changed`；实际来源装载由运行时对象更新执行。
 
-`fes::ButtonState` 组合 IMAGE 状态与输入启用、默认事件组、四向目标、TYPE、KEYBLOCK 坐标和系统键。`apply(attributes, bank, transform_name)` 返回本次是否需要递归使后代失效；SIZE 变化另请求来源重建，ENABLE 保留原始值，变化时只标记按钮自身。TYPE 与 MASK 分别保存。默认事件组和方向目标各少于 32 字节。运行时已支持 BUTTON 装载创建、图像更新、输入区域与对象事件；导航继续接入。
+`fes::ButtonState` 组合 IMAGE 状态与输入启用、默认事件组、四向目标、TYPE、KEYBLOCK 坐标和系统键。`apply(attributes, bank, transform_name)` 返回本次是否需要递归使后代失效；SIZE 变化另请求来源重建，ENABLE 保留原始值，变化时只标记按钮自身。TYPE 与 MASK 分别保存。默认事件组和方向目标各少于 32 字节。运行时已支持 BUTTON 装载创建、图像更新、输入区域、对象事件、网格导航与系统键分派；关联控件继续接入。
 
 宿主完成请求后用 `resume` 确认，待确认请求重复返回，数量和属性表达式只计算一次。字符串表必须在初始化前准备好，缺失字符串可能使后续参数移动。宿主只应在具备对应实现时确认声明或属性请求。`return_value` 保存最近一次 `break` 的值；不带参数的 `break` 将它重置为 0。
 
@@ -322,6 +322,8 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 `Scene::keyblocks()` 查询装载时解码的第一段 KEYBLOCK；在 `prepare` 完成后使用。表的数值表达式只执行一次，后续同名声明不覆盖。`Objects::navigate_button(blocks, source, direction)` 提供无副作用的基础 BUTTON 网格选择，方向 0～3 为上／下／左／右，返回可选目标名称和银行。缺失目标、非 BUTTON、零 ENABLE 或负网格号返回 None；无效方向、越界网格号或搜索超过查询上限返回诊断。选择保留基线的名称顺序、水平查找和距离规则，KEY_* 配置不参与此版本的选择，详见[焦点网格](fes.md#焦点网格)。
 
 `Services::navigate_button(scene, source, direction)` 默认调用上述基础选择，返回 `NavigationOutcome::Target(reference)` 或 `Unhandled`；专属控件服务也可返回 `Handled` 表示已消费方向输入。当前库尚未提供关联滑动控件。FesObject 负责起点命中、默认焦点回退、方向命名值、输入 139 移动请求和媒体刷新；成功导航跳过默认 95 响应，实际焦点事件由后续输入更新产生。命中、坐标和失败续跑规则见[方向输入](graphics.md#fes-方向输入与指针定位)。
+
+FesObject 的通用按下键槽按媒体声明顺序扫描当前启用的 SYSKEY 匹配按钮，逐个分派 PUSH_L；重复声明保留，后续记录读取处理器修改后的属性。至少一个对象自身处理器存在时跳过默认响应，DEFAULT 单独存在仍响应。释放使用保存的按下目标，不扫描 SYSKEY；扫描游标与当前处理器支持预算和错误续跑，详见[系统键分派](graphics.md#fes-系统键分派)。
 
 `Runtime::dispatch_fes_system_block(owner, &mut scene, name)` 同步执行 `_FES_SLEEP_`／`_FES_WAKE_`，返回 false 后以同一名称续跑；普通推进、对象修改及另一个系统块须等到本次完成。缺失块直接完成。该入口不推进系统帧，不切换媒体显示；通常保留主流程位置和等待，`next` 按系统块的调用深度规则处理。局部 `wait` 结束本次分派；系统块 `exit` 结束本次分派并将返回码排队，到下一次普通场景推进才发布。未知命令和运动返回诊断并保留待处理事件。命令 348 在系统块后刷新对象并切换显示，`FesObject::paused()` 查询专属暂停原始值；完整契约见[暂停与唤醒](graphics.md#fes-专属暂停与唤醒)。
 
