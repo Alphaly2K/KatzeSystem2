@@ -2,6 +2,47 @@ use super::Scene;
 use crate::{Error, Result, expression::State};
 
 impl Scene {
+    pub(super) fn key_skip_command(
+        &mut self,
+        args: &[Vec<u8>],
+        numbers: &mut State,
+    ) -> Result<bool> {
+        if args.first().is_none_or(|name| name != b"keyskip") {
+            return Ok(false);
+        }
+        let (mut enabled, mut ctrl, mut continuous) = (true, false, false);
+        let mut index = 1;
+        while let Some(value) = args.get(index) {
+            if value.eq_ignore_ascii_case(b"on") {
+                enabled = true;
+            } else if value.eq_ignore_ascii_case(b"off") {
+                enabled = false;
+            } else if value.eq_ignore_ascii_case(b"ctrl") {
+                ctrl = true;
+            } else if value.eq_ignore_ascii_case(b"cont") {
+                continuous = true;
+            } else if value.eq_ignore_ascii_case(b"force") {
+                index += 1;
+                self.input.forced = args
+                    .get(index)
+                    .map_or(Ok(0), |bytes| self.interpreter.eval(bytes, numbers))?
+                    != 0;
+                if self.input.forced {
+                    self.input.left = true;
+                    self.input.mode = true;
+                    self.set_system_value("_CLICK_L_", -1);
+                }
+            } else {
+                enabled = self.interpreter.eval(value, numbers)? != 0;
+            }
+            index += 1;
+        }
+        self.input.cancel_enabled = enabled;
+        self.input.ctrl = ctrl;
+        self.input.continuous = continuous;
+        Ok(true)
+    }
+
     pub(super) fn wait_command(
         &mut self,
         args: &[Vec<u8>],
@@ -52,7 +93,7 @@ impl Scene {
             -1 => {
                 if !self.objects.motion_active(self.objects.top())? {
                     self.deadline = Some(0);
-                } else if self.input.left {
+                } else if self.input.cancel_enabled && self.input.left {
                     self.objects.request_motion_finish(self.objects.top())?;
                 }
                 return Ok(true);
@@ -60,7 +101,9 @@ impl Scene {
             -2 if now.wrapping_sub(self.frame_origin) >= self.frame_wait => return Ok(false),
             -2 => (),
             -4 => {
-                if self.input.left {
+                if self.input.left
+                    && (!self.input.mode || self.input.ctrl || self.input.cancel_enabled)
+                {
                     return Ok(false);
                 }
                 if let Some(target) = &self.wait_target {
@@ -85,7 +128,7 @@ impl Scene {
             _ if now >= deadline => return Ok(false),
             _ => (),
         }
-        if self.input.left {
+        if self.input.cancel_enabled && (self.input.mode || self.input.left) {
             self.objects.request_motion_finish(self.objects.top())?;
             Ok(false)
         } else {

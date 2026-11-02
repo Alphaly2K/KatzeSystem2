@@ -347,6 +347,8 @@ FES IMAGE 的 `IDN=−1` 接收完整名称的原始来源，不受 PATHMODE 影
 
 `Objects::dispatch_object_command(interpreter, line, state)` 消费 `disp`／`size`／`keypos`／`setid`／`getid`／`enable`／`pri`／`pos2`／`delay`／`ismot`，返回 true 后调用者确认事件，其他命令返回 false。目标银行与数值参数使用 FES 自身的局部／命名值作用域；图形修改延后到对象更新，`getid` 即时写入共享变量编号。Scene 的普通推进和系统块自动调用；缺失目标的整行表达式回退、非 IMAGE 的编号查询返回诊断。类型、缺省值、数组停止规则和资源时点见[对象控制命令](graphics.md#fes-对象控制命令)。
 
+Scene 消费 `keyskip` 并即时更新等待取消模式，`forced_key_skip()` 查询保存的 force 标志；它与当前输入模式分别维护，完整规则见[等待取消](graphics.md#fes-等待取消与-keyskip)。
+
 Scene 消费 `noact`／`lockactive` 并按主体时点处理通知。`preferred_focus()` 返回已生效的默认焦点引用，`focus_lock()` 返回已生效的原始整数锁值，均不包含尚在排队的修改。完整规则见[默认焦点与焦点锁](graphics.md#fes-默认焦点与焦点锁)。
 
 `Objects::dispatch_image_animation(interpreter, line, state)` 消费 `Event::Command` 中的 IMAGE `setanm`／`anm` 请求；返回 true 后可确认事件，其他命令返回 false。`Object::image_animation_request()` 查询保存的名称、播放开关及待处理标记。命令阶段不装载，`update_fes_object` 在来源登记后、排序前消费请求；播放重新读取动画并启动，暂停只更新开关。完整参数、类型门控及失败契约见 [FES 动画请求](graphics.md#fes-image-动画请求)。

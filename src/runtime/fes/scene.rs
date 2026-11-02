@@ -141,6 +141,10 @@ impl Scene {
         self.deadline
     }
 
+    pub fn forced_key_skip(&self) -> bool {
+        self.input.forced
+    }
+
     pub fn raw_input(&self) -> u32 {
         self.input.raw
     }
@@ -205,12 +209,15 @@ impl Scene {
     }
 
     /// 完成值区分普通对象命令与会结束本次控制器执行的全局命令。
-    fn navigation_command(
+    fn control_command(
         &mut self,
         args: &[Vec<u8>],
         offset: usize,
         numbers: &mut crate::expression::State,
     ) -> Result<Option<bool>> {
+        if self.key_skip_command(args, numbers)? {
+            return Ok(Some(false));
+        }
         if args.first().is_some_and(|name| name == b"lockactive") {
             let value = args
                 .get(1)
@@ -626,7 +633,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                     {
                         scene.interpreter.finish_event_handler()?;
                     } else if let Some(stop) =
-                        scene.navigation_command(&args, line.offset, self.numbers)?
+                        scene.control_command(&args, line.offset, self.numbers)?
                     {
                         if stop {
                             scene.interpreter.finish_event_handler()?;
@@ -955,7 +962,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                                 continue;
                             }
                             if let Some(stop) =
-                                scene.navigation_command(&args, line.offset, self.numbers)?
+                                scene.control_command(&args, line.offset, self.numbers)?
                             {
                                 if stop {
                                     scene.publish_notifications();

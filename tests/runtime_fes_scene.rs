@@ -113,6 +113,117 @@ fn object_waits_evaluate_banks_once_and_scan_past_missing_banks() {
 }
 
 #[test]
+fn keyskip_force_preserves_active_mode_and_cont_reuses_clicks_until_reconfigured() {
+    for budget in [1, 4096] {
+        let (mut forced_runtime, mut scene) = {
+            let runtime = runtime(budget);
+            let scene = Scene::new(
+                Program::from_text(b"#START\nkeyskip OFF CTRL CONT FORCE ($0+=1)\n$1=_CLICK_L_\nwait 1\nkeyskip force 0\n$2=_CLICK_L_\n$3+=1\nwait frame 1000\n$4+=1\nwait 1000\n").unwrap(),
+                runtime.host().handle_allocator(),
+            ).unwrap();
+            (runtime, scene)
+        };
+        update(&mut forced_runtime, &mut scene, 100);
+        assert_eq!(&forced_runtime.numbers().shared[..5], &[1, -1, 0, 0, 0]);
+        assert!(scene.forced_key_skip());
+        assert_eq!(scene.raw_input(), 0);
+        update(&mut forced_runtime, &mut scene, 101);
+        assert_eq!(&forced_runtime.numbers().shared[..5], &[1, -1, -1, 1, 0]);
+        assert!(!scene.forced_key_skip());
+        assert_eq!(scene.deadline(), Some(u32::MAX - 1));
+        update(&mut forced_runtime, &mut scene, 102);
+        assert_eq!(forced_runtime.numbers().shared[4], 1);
+        assert_eq!(scene.deadline(), Some(1102));
+
+        for continuous in [false, true] {
+            let mut runtime = runtime(budget);
+            let source = format!(
+                "#START\nkeyskip{}\nwait 1000\n$0+=1\nwait 1000\n$1+=1\nkeyskip\nwait 1000\n$2+=1\n",
+                if continuous { " cont" } else { "" }
+            );
+            let mut scene = Scene::new(
+                Program::from_text(source.as_bytes()).unwrap(),
+                runtime.host().handle_allocator(),
+            )
+            .unwrap();
+            update(&mut runtime, &mut scene, 100);
+            assert_eq!(
+                runtime.dispatch_fes_event(0, &mut scene, None, 2).unwrap(),
+                Some(false)
+            );
+            update(&mut runtime, &mut scene, 101);
+            assert_eq!(&runtime.numbers().shared[..3], &[1, 0, 0]);
+            update(&mut runtime, &mut scene, 102);
+            assert_eq!(
+                &runtime.numbers().shared[..3],
+                &[1, i32::from(continuous), 0]
+            );
+            update(&mut runtime, &mut scene, 103);
+            assert_eq!(runtime.numbers().shared[2], 0);
+        }
+    }
+}
+
+#[test]
+fn keyskip_off_blocks_timed_and_root_cancellation_but_plain_object_clicks_still_continue() {
+    for budget in [1, 4096] {
+        for (wait, mode, ctrl, continues) in [
+            ("wait obj", false, false, true),
+            ("wait obj", true, false, false),
+            ("wait obj", true, true, true),
+            ("wait", false, false, false),
+            ("wait frame 1000", false, false, false),
+            ("wait 1000", false, false, false),
+        ] {
+            let mut runtime = runtime(budget);
+            let source = format!(
+                "#DEFINE\nBASE obj\n#START\nkeyskip off{}\n{wait}\n$0+=1\nwait 1000\n",
+                if ctrl { " ctrl" } else { "" }
+            );
+            let mut scene = Scene::new(
+                Program::from_text(source.as_bytes()).unwrap(),
+                runtime.host().handle_allocator(),
+            )
+            .unwrap();
+            let mut prepared = false;
+            for _ in 0..32 {
+                if scene.prepare(runtime.numbers_mut(), budget).unwrap() {
+                    prepared = true;
+                    break;
+                }
+            }
+            assert!(prepared);
+            let handle = scene.objects().lookup("obj", 0).unwrap();
+            scene
+                .objects_mut()
+                .unwrap()
+                .start_motion(
+                    handle,
+                    katze_system2::kcs::Program::from_code(&[0x3b], vec![], 64).unwrap(),
+                    &[],
+                    0,
+                )
+                .unwrap();
+            update(&mut runtime, &mut scene, 100);
+            assert_eq!(
+                runtime
+                    .dispatch_fes_event(0, &mut scene, None, if mode { 19 } else { 2 })
+                    .unwrap(),
+                Some(false)
+            );
+            update(&mut runtime, &mut scene, 101);
+            assert_eq!(
+                runtime.numbers().shared[0],
+                i32::from(continues),
+                "{wait} mode={mode} ctrl={ctrl}"
+            );
+            let queue = scene.objects().get(handle).unwrap().motions();
+            assert_eq!(queue.task(1).unwrap().state().unwrap().finishing, 0);
+        }
+    }
+}
+
+#[test]
 fn preparation_stops_before_start_and_exit_notifications_keep_the_scene_scheduled() {
     use katze_system2::fes::{ObjectAttributes, ObjectInitialization, ObjectReference};
 

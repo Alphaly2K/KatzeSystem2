@@ -1,9 +1,27 @@
-#[derive(Default)]
 pub(super) struct SystemInput {
     pub raw: u32,
     pub left: bool,
     pub mode: bool,
+    pub cancel_enabled: bool,
+    pub ctrl: bool,
+    pub continuous: bool,
+    pub forced: bool,
     transient: bool,
+}
+
+impl Default for SystemInput {
+    fn default() -> Self {
+        Self {
+            raw: 0,
+            left: false,
+            mode: false,
+            cancel_enabled: true,
+            ctrl: false,
+            continuous: false,
+            forced: false,
+            transient: false,
+        }
+    }
 }
 
 pub(super) const TRANSIENT_NAMES: [&str; 11] = [
@@ -60,7 +78,7 @@ impl SystemInput {
     }
 
     pub fn finish(&mut self) -> bool {
-        if !self.mode {
+        if !self.mode && !self.continuous {
             self.left = false;
         }
         std::mem::take(&mut self.transient)
