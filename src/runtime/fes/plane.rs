@@ -236,6 +236,7 @@ impl<F: ObjectFactory> Store<'_, F> {
         objects: &mut Objects,
         handle: u32,
     ) -> Result<()> {
+        objects.require_motion_idle()?;
         if self.tree.node(owner).is_none() {
             return Err(Error::new(0, "FES 所属任务不存在"));
         }

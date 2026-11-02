@@ -35,6 +35,16 @@ pub struct MotionQueue {
     updated: bool,
 }
 
+impl std::fmt::Debug for MotionQueue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MotionQueue")
+            .field("len", &self.len())
+            .field("speed", &self.speed)
+            .field("pending", &self.is_pending())
+            .finish_non_exhaustive()
+    }
+}
+
 impl Default for MotionQueue {
     fn default() -> Self {
         let mut properties = [0; 36];

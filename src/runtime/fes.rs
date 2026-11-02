@@ -12,6 +12,7 @@ mod button;
 mod commands;
 mod image;
 mod input;
+mod motion;
 mod navigation;
 mod plane;
 mod scene;
@@ -147,6 +148,7 @@ pub struct Object {
     image_offset: [f32; 2],
     animation: ImageAnimationRequest,
     button_update: Option<crate::fes::ImageUpdates>,
+    motions: crate::kcs::MotionQueue,
     pub state: ObjectState,
 }
 
@@ -200,6 +202,10 @@ impl Object {
     pub fn image_animation_request(&self) -> Option<&ImageAnimationRequest> {
         self.state.image_source().map(|_| &self.animation)
     }
+
+    pub fn motions(&self) -> &crate::kcs::MotionQueue {
+        &self.motions
+    }
 }
 
 /// 一份 FES 的对象存储。绑定保留首次值，数量表与对象表分别维护。
@@ -214,6 +220,7 @@ pub struct Objects {
     image_list: Option<u32>,
     input_task: Option<u32>,
     image_clip: crate::graphics::Rect,
+    motion_update: Option<motion::Traversal>,
 }
 
 impl Objects {
@@ -239,6 +246,7 @@ impl Objects {
                     image_offset: [0.; 2],
                     animation: ImageAnimationRequest::default(),
                     button_update: None,
+                    motions: crate::kcs::MotionQueue::default(),
                     state: ObjectState::Base,
                 },
             )]),
@@ -249,6 +257,7 @@ impl Objects {
             image_list: None,
             input_task: None,
             image_clip: crate::graphics::Rect::default(),
+            motion_update: None,
         })
     }
 
@@ -324,6 +333,7 @@ impl Objects {
 
     /// 创建请求中的全部银行，返回新对象的标识，包括未取得名称绑定的重复项。
     pub fn define(&mut self, definition: &ObjectDefinition) -> Result<Vec<u32>> {
+        self.require_motion_idle()?;
         if definition.name.is_empty()
             || definition.name.len() > 31
             || !definition.name.is_ascii()
@@ -360,6 +370,7 @@ impl Objects {
                     image_offset: [0.; 2],
                     animation: ImageAnimationRequest::default(),
                     button_update: None,
+                    motions: crate::kcs::MotionQueue::default(),
                     state: initial.clone(),
                 },
             );
@@ -403,6 +414,7 @@ impl Objects {
 
     /// 修改 FES 父子关系，不改变任务树；None 解除父级。循环和根重挂返回诊断。
     pub fn set_parent(&mut self, handle: u32, parent: Option<u32>) -> Result<()> {
+        self.require_motion_idle()?;
         let object = self
             .get(handle)
             .ok_or_else(|| Error::new(0, "FES 对象标识无效"))?;
@@ -440,6 +452,7 @@ impl Objects {
         initialization: &ObjectInitialization,
         mut transform_name: impl FnMut(&[u8]) -> Result<Vec<u8>>,
     ) -> Result<()> {
+        self.require_motion_idle()?;
         let ObjectReference { name, bank } = &initialization.target;
         let banks = if *bank == -1 {
             0..i64::from(self.count(name))
@@ -495,6 +508,7 @@ impl Objects {
     /// 移出对象及后代，后代先返回；调用方负责释放其下层媒体资源和任务。
     /// 删除不修改名称数量表，也不会把重复声明的未绑定对象提升为绑定。
     pub fn remove(&mut self, handle: u32) -> Result<Vec<Object>> {
+        self.require_motion_idle()?;
         if handle == self.top {
             return Err(Error::new(0, "FES 根对象随整个对象存储释放"));
         }

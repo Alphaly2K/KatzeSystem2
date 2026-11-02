@@ -1,0 +1,106 @@
+use super::{ObjectState, Objects};
+use crate::kcs::{MotionHost, MotionState, MotionTask, Program};
+use crate::{Error, Result};
+
+pub(super) struct Traversal {
+    now: u32,
+    order: Vec<u32>,
+    cursor: usize,
+}
+
+impl Objects {
+    pub(super) fn require_motion_idle(&self) -> Result<()> {
+        if self.motion_update.is_some() {
+            return Err(Error::new(0, "FES 对象运动更新尚未完成"));
+        }
+        Ok(())
+    }
+
+    /// 查询目标及其后代是否仍有活动运动，独立于最近一次媒体刷新。
+    pub fn motion_active(&self, handle: u32) -> Result<bool> {
+        let mut stack = vec![handle];
+        while let Some(handle) = stack.pop() {
+            let object = self
+                .get(handle)
+                .ok_or_else(|| Error::new(0, "FES 对象标识无效"))?;
+            if object.motions.any_running(None)? {
+                return Ok(true);
+            }
+            stack.extend(object.children());
+        }
+        Ok(false)
+    }
+
+    /// 向对象加入分组零的运动；delay 为运动入口开始前的时间偏移。
+    pub fn start_motion(
+        &mut self,
+        handle: u32,
+        program: Program,
+        parameters: &[f32],
+        delay: u32,
+    ) -> Result<u32> {
+        self.require_motion_idle()?;
+        let object = self
+            .get(handle)
+            .ok_or_else(|| Error::new(0, "FES 对象标识无效"))?;
+        if object.state.image().is_none() && !matches!(object.state, ObjectState::Base) {
+            return Err(Error::new(0, "FES 此对象类型的运动属性尚未接入"));
+        }
+        let state = MotionState::with_parameters(parameters)?;
+        let capture = !self.motion_active(handle)?;
+        let object = self.get_mut(handle).unwrap();
+        if capture {
+            if let Some(image) = object.state.image() {
+                object.motions.base_properties = image.motion_properties();
+            }
+        }
+        object
+            .motions
+            .insert(MotionTask::new(program, state, delay)?, 0)
+    }
+
+    /// 先子后父推进根对象子树；false 后以同一宿主续跑，期间不修改对象树。
+    pub fn update_motions(
+        &mut self,
+        now: u32,
+        host: &mut MotionHost,
+        budget_per_task: usize,
+    ) -> Result<bool> {
+        if self.motion_update.is_none() {
+            let mut order = Vec::new();
+            let mut stack = vec![self.top];
+            while let Some(handle) = stack.pop() {
+                order.push(handle);
+                stack.extend(self.get(handle).unwrap().children());
+            }
+            order.reverse();
+            self.motion_update = Some(Traversal {
+                now,
+                order,
+                cursor: 0,
+            });
+        }
+        loop {
+            let traversal = self.motion_update.as_ref().unwrap();
+            let Some(&handle) = traversal.order.get(traversal.cursor) else {
+                self.motion_update = None;
+                return Ok(true);
+            };
+            let object = self.objects.get_mut(&handle).unwrap();
+            if !object
+                .motions
+                .update_object(traversal.now, host, budget_per_task.max(1))?
+            {
+                return Ok(false);
+            }
+            if object.motions.was_updated() {
+                if let Some(image) = object.state.image_mut() {
+                    if image.apply_motion_properties(object.motions.properties()) {
+                        self.invalidate(handle)?;
+                    }
+                }
+            }
+            self.motion_update.as_mut().unwrap().cursor += 1;
+        }
+    }
+}
