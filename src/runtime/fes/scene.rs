@@ -490,11 +490,16 @@ impl<F: ObjectFactory> Store<'_, F> {
         if scene.is_pending() {
             return Err(Error::new(0, "FES 推进尚未完成，不能切换媒体睡眠状态"));
         }
-        let handles = scene.objects.update_order().collect::<Vec<_>>();
         for index in 0..scene.objects.update_order.len() {
             self.update_fes_scene_record(owner, scene, index)?;
         }
-        for handle in handles {
+        for record in &scene.objects.update_order {
+            let Some(handle) = scene
+                .objects
+                .lookup(&record.target.name, record.target.bank)
+            else {
+                continue;
+            };
             let object = scene.objects.get(handle).unwrap();
             if let super::ObjectState::Button(button) = &object.state {
                 self.fes_command(
@@ -504,6 +509,24 @@ impl<F: ObjectFactory> Store<'_, F> {
                     [0, if sleeping { 0 } else { button.enabled as u32 }, 0],
                     None,
                 )?;
+            }
+            if let super::ObjectState::Slider(slider) = &object.state {
+                if record.task_id.is_some() {
+                    self.fes_command(
+                        owner,
+                        object.task_id,
+                        367,
+                        [0, if sleeping { 0 } else { slider.enabled as u32 }, 1],
+                        None,
+                    )?;
+                    self.fes_command(
+                        owner,
+                        object.task_id,
+                        366,
+                        [0, if sleeping { 0 } else { slider.display as u32 }, 1],
+                        None,
+                    )?;
+                }
             }
             if let Some(image) = object.state.image() {
                 self.fes_command(

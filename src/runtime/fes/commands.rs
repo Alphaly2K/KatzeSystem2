@@ -11,6 +11,7 @@ enum Command {
     Priority(i32),
     Position(fes::ImageReference),
     Attach(Option<fes::ObjectReference>),
+    Frame(u32, i32),
 }
 
 impl Objects {
@@ -43,6 +44,7 @@ impl Objects {
                 | b"getpos"
                 | b"load"
                 | b"attach"
+                | b"settbl"
         ) {
             return Ok(false);
         }
@@ -111,6 +113,7 @@ impl Objects {
             b"enable" => Command::Enable(i32::from(number(2, 0)? != 0)),
             b"pri" if args.len() > 2 => Command::Priority(number(2, 0)?),
             b"attach" => Command::Attach(control),
+            b"settbl" => Command::Frame(number(2, 0)? as u32, number(3, 0)?),
             b"pos2" if args.len() > 2 => {
                 let frame = number(3, 0)?;
                 let file = &args[2];
@@ -214,6 +217,17 @@ impl Objects {
                         button.enabled = *value;
                     } else if let ObjectState::Slider(slider) = &mut object.state {
                         slider.set_enabled(*value);
+                    }
+                }
+                Command::Frame(index, frame) => {
+                    if let Some(image) = object.state.image_source_mut() {
+                        if let Some(slot) = image.frames.get_mut(*index as usize) {
+                            *slot = *frame;
+                            image.frame_table_enabled = true;
+                            image.frame_mapping_changed = true;
+                        }
+                    } else if let ObjectState::Slider(slider) = &mut object.state {
+                        slider.set_frame(*index, *frame as u32);
                     }
                 }
                 Command::GetId(_) => unreachable!(),

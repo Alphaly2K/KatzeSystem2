@@ -170,3 +170,124 @@ fn slider_motion_uses_alpha_without_invalidating_descendants_or_replacing_numeri
         assert_eq!(properties[6], 0);
     }
 }
+
+#[test]
+fn frame_table_commands_keep_evaluation_bank_holes_and_media_flags_distinct() {
+    let mut objects = Objects::new(HandleAllocator::default()).unwrap();
+    let handles = objects
+        .define(&ObjectDefinition {
+            kind: "SLIDER",
+            name: "item".into(),
+            banks: 4,
+        })
+        .unwrap();
+    let mut interpreter =
+        fes::Interpreter::new(fes::Program::from_text(b"#START\nwait 99\n").unwrap()).unwrap();
+    let mut numbers = State::new(8);
+    let dispatch = |objects: &mut Objects,
+                    interpreter: &mut fes::Interpreter,
+                    numbers: &mut State,
+                    bytes: &[u8]| {
+        assert!(
+            objects
+                .dispatch_object_command(
+                    interpreter,
+                    &fes::Line {
+                        offset: 0,
+                        bytes: bytes.to_vec()
+                    },
+                    numbers
+                )
+                .unwrap()
+        );
+    };
+    objects.publish_bindings(&mut interpreter);
+    dispatch(
+        &mut objects,
+        &mut interpreter,
+        &mut numbers,
+        b"item settbl ($0+=1) ($0+=1) ($0+=100)",
+    );
+    assert_eq!(numbers.shared[0], 2);
+    for &handle in &handles {
+        assert_eq!(slider(&objects, handle).frames, [0, 2, 2, 3]);
+        let ObjectState::Slider(state) = &mut objects.get_mut(handle).unwrap().state else {
+            unreachable!()
+        };
+        assert!(state.updates.frames);
+        state.updates.frames = false;
+    }
+    objects.remove(handles[2]).unwrap();
+    dispatch(
+        &mut objects,
+        &mut interpreter,
+        &mut numbers,
+        b"item settbl 3 -1",
+    );
+    for (index, &handle) in handles.iter().enumerate().filter(|(index, _)| *index != 2) {
+        assert_eq!(
+            slider(&objects, handle).frames[3],
+            if index < 2 { u32::MAX } else { 3 }
+        );
+        assert_eq!(slider(&objects, handle).updates.frames, index < 2);
+    }
+    objects.get_mut(handles[1]).unwrap().state = ObjectState::Base;
+    objects
+        .define(&ObjectDefinition {
+            kind: "BASE",
+            name: "item".into(),
+            banks: 3,
+        })
+        .unwrap();
+    objects.publish_bindings(&mut interpreter);
+    dispatch(
+        &mut objects,
+        &mut interpreter,
+        &mut numbers,
+        b"item settbl 0 9",
+    );
+    assert_eq!(slider(&objects, handles[0]).frames[0], 9);
+    assert_eq!(slider(&objects, handles[3]).frames[0], 9);
+
+    fn image(objects: &mut Objects, handle: u32) -> &mut fes::ImageState {
+        match &mut objects.get_mut(handle).unwrap().state {
+            ObjectState::Image(image) => image,
+            ObjectState::Button(button) => &mut button.image,
+            _ => unreachable!(),
+        }
+    }
+    for (index, kind) in ["IMAGE", "BUTTON"].into_iter().enumerate() {
+        let name = kind.to_ascii_lowercase();
+        let handle = objects
+            .define(&ObjectDefinition {
+                kind,
+                name: name.clone(),
+                banks: 1,
+            })
+            .unwrap()[0];
+        objects.publish_bindings(&mut interpreter);
+        let state = image(&mut objects, handle);
+        state.frame_mapping_changed = false;
+        state.frame_table_enabled = false;
+        let updates = state.base.updates.clone();
+        dispatch(
+            &mut objects,
+            &mut interpreter,
+            &mut numbers,
+            format!("{name} settbl -1 ($0+=1)").as_bytes(),
+        );
+        let state = image(&mut objects, handle);
+        assert!(!state.frame_mapping_changed && !state.frame_table_enabled);
+        assert_eq!(numbers.shared[0], 3 + index as i32);
+        dispatch(
+            &mut objects,
+            &mut interpreter,
+            &mut numbers,
+            format!("{name} settbl 2 7").as_bytes(),
+        );
+        let state = image(&mut objects, handle);
+        assert_eq!(state.frames[2], 7);
+        assert!(state.frame_mapping_changed && state.frame_table_enabled);
+        assert_eq!(state.base.updates, updates);
+    }
+}

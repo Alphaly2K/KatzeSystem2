@@ -1614,7 +1614,7 @@ impl ResourceServices for SliderFiles {
 
 #[test]
 fn slider_drag_reaches_fes_events_and_the_next_media_update_without_renotifying() {
-    let source = b"#DEFINE\nSLIDER bar\n#OBJECT FILE POS2 DISP\nbar control bounds 1\n#START\nbar page 0 6\nbar pos 2\nwait 1000\n#bar.SCRL_P\n@ getpos 0 1 2\n$3=$3+1\n#bar.FOCUS\n$4=$4+1\n#bar.UNFOCUS\n$5=$5+1\n";
+    let source = b"#DEFINE\nSLIDER bar\n#OBJECT FILE POS2 DISP ENABLE\nbar control bounds 1 7\n#START\nbar page 0 6\nbar pos 2\nwait 1000\n#bar.SCRL_P\n@ getpos 0 1 2\n$3=$3+1\n#bar.FOCUS\n$4=$4+1\n#bar.UNFOCUS\n$5=$5+1\n";
     for budget in [1, 4096] {
         let Setup {
             mut runtime,
@@ -1691,6 +1691,16 @@ fn slider_drag_reaches_fes_events_and_the_next_media_update_without_renotifying(
         let target = runtime.drawing().target.as_ref().unwrap();
         assert_eq!(target.pixel(5, 0), Some(0xff000000));
         assert_eq!(target.pixel(2, 0), Some(0));
+        for paused in [1, 2, 0] {
+            send(&mut runtime, fes, 348, 0, paused);
+            send(&mut runtime, list, 298, 0, 0);
+            assert_eq!(
+                runtime.drawing().target.as_ref().unwrap().pixel(5, 0),
+                Some(if paused != 0 { 0 } else { 0xff000000 })
+            );
+            let area = runtime.input_state(1).unwrap().regions().get(knob).unwrap();
+            assert_eq!(area.enabled(), if paused != 0 { 0 } else { 7 });
+        }
     }
 }
 
