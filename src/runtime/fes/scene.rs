@@ -702,6 +702,10 @@ impl<F: ObjectFactory> Store<'_, F> {
                 Step::Event(fes::Event::Wait(_)) => scene.interpreter.finish_event_handler()?,
                 Step::Event(fes::Event::Command(line)) => {
                     let args = scene.interpreter.parameters(&line.bytes, self.numbers)?;
+                    if self.fes_font_command(&args, line.offset)? {
+                        scene.interpreter.resume();
+                        continue;
+                    }
                     if args.first().is_some_and(|name| name == b"decode") {
                         if scene.deferred_decodes == crate::read::MAX_ITEMS {
                             return Err(Error::new(line.offset, "FES 提交请求数量超过上限"));
@@ -1036,6 +1040,10 @@ impl<F: ObjectFactory> Store<'_, F> {
                     match event {
                         fes::Event::Command(line) => {
                             let args = scene.interpreter.parameters(&line.bytes, self.numbers)?;
+                            if self.fes_font_command(&args, line.offset)? {
+                                scene.interpreter.resume();
+                                continue;
+                            }
                             if args.first().is_some_and(|name| name == b"decode") {
                                 scene.publish_notifications();
                                 scene.begin_updates(true);

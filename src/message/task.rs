@@ -23,6 +23,11 @@ pub struct FontRequest {
 
 /// 同步选择字体、度量并生成六十四级灰度遮罩；不支持的请求应返回诊断。
 pub trait FontServices {
+    /// 注册 CP932 文件名指定的字体；false 表示平台未接受该文件。
+    fn add_resource(&mut self, _name: &[u8]) -> Result<bool> {
+        Err(Error::new(0, "字体服务未提供字体资源注册"))
+    }
+
     fn validate(&mut self, request: &FontRequest) -> Result<()>;
     fn measure(&mut self, request: &FontRequest, character: char, size: u32) -> Result<i32>;
     fn rasterize(&mut self, request: &FontRequest, character: char, size: u32)
