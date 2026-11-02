@@ -52,6 +52,14 @@ impl ButtonObject {
     pub fn response(&self) -> u32 {
         self.response
     }
+
+    pub(crate) fn response_mut(&mut self) -> &mut u32 {
+        &mut self.response
+    }
+
+    pub(crate) fn take_for_callback(&mut self) -> Self {
+        std::mem::replace(self, Self::new(self.id))
+    }
     pub fn rectangle(&self) -> Rect {
         self.rectangle
     }
@@ -118,17 +126,13 @@ impl ButtonObject {
         data: [u32; 3],
         buffers: &mut CommandBuffers<'_>,
     ) -> Result<()> {
-        host.dispatch_graphics_event(
-            &mut self.response,
-            Command {
-                target: self.target,
-                sender: self.id,
-                code,
-                data,
-            },
-            buffers,
-            &mut 0,
-        )?;
+        let command = Command {
+            target: self.target,
+            sender: self.id,
+            code,
+            data,
+        };
+        host.dispatch_button_event(self, command, buffers, &mut 0)?;
         Ok(())
     }
 

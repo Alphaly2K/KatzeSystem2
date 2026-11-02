@@ -106,7 +106,16 @@ impl Scene {
     }
 
     pub(super) fn record_input_event(&mut self, event: u32) {
+        self.record_object_input(event, None);
+    }
+
+    fn record_object_input(&mut self, event: u32, object: Option<u32>) {
         if let Some((name, value)) = self.input.record(event) {
+            let value = if value == -1 {
+                object.map_or(-1, |handle| handle as i32)
+            } else {
+                value
+            };
             self.set_system_value(name, value);
         }
     }
@@ -247,6 +256,25 @@ impl<F: ObjectFactory> Runtime<F> {
 }
 
 impl<F: ObjectFactory> Store<'_, F> {
+    pub(in crate::runtime) fn refresh_fes_media(
+        &mut self,
+        owner: u32,
+        scene: &mut Scene,
+        cursor: &mut usize,
+    ) -> Result<bool> {
+        if scene.is_pending() {
+            return Err(Error::new(0, "FES 事件尚未完成，不能刷新媒体"));
+        }
+        for _ in 0..self.budget.max(1) {
+            if *cursor == scene.objects.update_order.len() {
+                return Ok(true);
+            }
+            self.update_fes_record(owner, &mut scene.objects, *cursor)?;
+            *cursor += 1;
+        }
+        Ok(*cursor == scene.objects.update_order.len())
+    }
+
     pub(in crate::runtime) fn prepare_fes_scene(
         &mut self,
         owner: u32,
@@ -400,18 +428,19 @@ impl<F: ObjectFactory> Store<'_, F> {
             }
         } else {
             scene.owner = Some(owner);
-            let object = match target {
+            let handle = match target {
                 Some(target) => match scene.objects.lookup(&target.name, target.bank) {
-                    Some(handle) => Some(scene.objects.get(handle).unwrap()),
+                    Some(handle) => Some(handle),
                     None => return Ok(Some(false)),
                 },
                 None => None,
             };
-            let default = object.and_then(|object| match &object.state {
-                super::ObjectState::Button(button) => Some(button.default_events.clone()),
-                _ => None,
-            });
-            scene.record_input_event(event);
+            let default =
+                handle.and_then(|handle| match &scene.objects.get(handle).unwrap().state {
+                    super::ObjectState::Button(button) => Some(button.default_events.clone()),
+                    _ => None,
+                });
+            scene.record_object_input(event, handle);
             let name = match event {
                 0 => "FOCUS",
                 1 => "UNFOCUS",

@@ -25,6 +25,21 @@ pub trait Services {
     ) -> Result<bool>;
     /// 刷新当前媒体属性后隐藏或恢复显示，唤醒时强制提交共享列表。
     fn set_media_sleep(&mut self, scene: &mut Scene, sleeping: bool) -> Result<()>;
+    /// 推进输入事件；None 表示预算耗尽，完成值表示对象自身处理器存在。
+    fn dispatch_event(
+        &mut self,
+        scene: &mut Scene,
+        target: Option<&fes::ObjectReference>,
+        event: u32,
+        budget: usize,
+    ) -> Result<Option<bool>>;
+    /// 按声明顺序刷新媒体，成功后推进 cursor；失败保留当前位置。
+    fn refresh_media(
+        &mut self,
+        scene: &mut Scene,
+        cursor: &mut usize,
+        budget: usize,
+    ) -> Result<bool>;
 }
 
 impl<F: ObjectFactory> Services for ObjectHost<'_, F> {
@@ -57,6 +72,31 @@ impl<F: ObjectFactory> Services for ObjectHost<'_, F> {
     fn set_media_sleep(&mut self, scene: &mut Scene, sleeping: bool) -> Result<()> {
         let owner = self.host.task_id;
         self.store().set_fes_media_sleep(owner, scene, sleeping)
+    }
+
+    fn dispatch_event(
+        &mut self,
+        scene: &mut Scene,
+        target: Option<&fes::ObjectReference>,
+        event: u32,
+        budget: usize,
+    ) -> Result<Option<bool>> {
+        let owner = self.host.task_id;
+        let mut store = self.store();
+        store.budget = budget.max(1);
+        store.dispatch_fes_event(owner, scene, target, event)
+    }
+
+    fn refresh_media(
+        &mut self,
+        scene: &mut Scene,
+        cursor: &mut usize,
+        budget: usize,
+    ) -> Result<bool> {
+        let owner = self.host.task_id;
+        let mut store = self.store();
+        store.budget = budget.max(1);
+        store.refresh_fes_media(owner, scene, cursor)
     }
 
     fn start(&mut self, clock: &mut TaskClock) -> Result<()> {
@@ -157,6 +197,20 @@ pub struct FesObject {
     last_input: u32,
     paused: u32,
     pause_script_done: bool,
+    focus: Option<fes::ObjectReference>,
+    pressed: Option<fes::ObjectReference>,
+    input_event: Option<InputEvent>,
+}
+
+struct InputEvent {
+    target: Option<fes::ObjectReference>,
+    event: Option<u32>,
+    handled: Option<bool>,
+    response_done: bool,
+    clear_pressed: bool,
+    refresh: bool,
+    cursor: usize,
+    preserve_output: bool,
 }
 
 impl FesObject {
@@ -181,6 +235,9 @@ impl FesObject {
             last_input: 0,
             paused: 0,
             pause_script_done: false,
+            focus: None,
+            pressed: None,
+            input_event: None,
         }
     }
 
@@ -256,7 +313,86 @@ impl FesObject {
         command: &Command,
         output: &mut u32,
         host: &mut dyn Host,
-    ) -> Result<()> {
+        budget: usize,
+    ) -> Result<bool> {
+        if self.input_event.is_none() {
+            if !self.begin_input_event(command, output, host)? {
+                return Ok(true);
+            }
+            self.pending = Some(*command);
+        }
+        if matches!(command.code, 9 | 10) {
+            *output = 0;
+        }
+        if self.input_event.as_ref().unwrap().handled.is_none() {
+            let event = self.input_event.as_ref().unwrap();
+            let handled = if let Some(code) = event.event {
+                let target = event.target.clone();
+                let Some(handled) = services(host)?.dispatch_event(
+                    self.scene.as_mut().unwrap(),
+                    target.as_ref(),
+                    code,
+                    budget,
+                )?
+                else {
+                    return Ok(false);
+                };
+                handled
+            } else {
+                false
+            };
+            self.input_event.as_mut().unwrap().handled = Some(handled);
+            if self.input_event.as_ref().unwrap().clear_pressed {
+                self.pressed = None;
+            }
+        }
+        let event = self.input_event.as_ref().unwrap();
+        if !event.response_done {
+            let handled = event.handled.unwrap();
+            if command.code == 10 && handled && command.data[1] < 2 {
+                self.send(
+                    host,
+                    self.input,
+                    146,
+                    [0; 3],
+                    &mut CommandBuffers::default(),
+                )?;
+            } else if !handled
+                && (matches!(command.code, 9 | 10) || command.code == 65 && event.target.is_some())
+            {
+                self.send(
+                    host,
+                    command.sender,
+                    95,
+                    [0, 1, 1],
+                    &mut CommandBuffers::default(),
+                )?;
+            }
+            self.input_event.as_mut().unwrap().response_done = true;
+        }
+        if self.input_event.as_ref().unwrap().refresh {
+            if let Some(scene) = &mut self.scene {
+                let cursor = &mut self.input_event.as_mut().unwrap().cursor;
+                if !services(host)?.refresh_media(scene, cursor, budget)? {
+                    return Ok(false);
+                }
+            }
+        }
+        if !self.input_event.as_ref().unwrap().preserve_output {
+            *output = 0;
+        }
+        self.input_event = None;
+        self.pending = None;
+        self.effects(host);
+        Ok(true)
+    }
+
+    fn begin_input_event(
+        &mut self,
+        command: &Command,
+        output: &mut u32,
+        host: &mut dyn Host,
+    ) -> Result<bool> {
         if self.scene.is_none() && matches!(command.code, 9 | 10) {
             return Err(Error::new(0, "FES 按下与释放事件需要已装载脚本"));
         }
@@ -285,21 +421,68 @@ impl FesObject {
             } else {
                 *output = 0;
             }
-            return Ok(());
+            return Ok(false);
         }
         self.update_pointer_values(host)?;
-        if self.scene.as_ref().is_some_and(|scene| {
-            scene
+        let find = || {
+            self.scene
+                .as_ref()?
                 .objects()
                 .media_records()
                 .iter()
-                .any(|record| record.task_id() == Some(command.data[0]))
-        }) {
-            return Err(Error::new(0, "FES BUTTON 对象事件尚未接入"));
-        }
-        *output = 0;
+                .find(|record| record.task_id() == Some(command.data[0]))
+                .map(|record| record.target().clone())
+        };
         let key = command.data[1];
-        // 未匹配对象的通知使用系统命名值。
+        let mut clear_pressed = false;
+        let target = match command.code {
+            64 => {
+                let target = find();
+                self.focus = if key != 0 { target.clone() } else { None };
+                clear_pressed = self.focus.is_none();
+                target
+            }
+            65 => find(),
+            9 => {
+                if (4..=7).contains(&key) {
+                    if self
+                        .scene
+                        .as_ref()
+                        .unwrap()
+                        .objects()
+                        .media_records()
+                        .iter()
+                        .any(|record| record.task_id().is_some())
+                    {
+                        return Err(Error::new(0, "FES BUTTON 导航尚未接入"));
+                    }
+                    self.pointer_position(host, 0)?;
+                }
+                let objects = self.scene.as_ref().unwrap().objects();
+                if !matches!(key, 0 | 1 | 8..=11)
+                    && objects.update_order().any(|handle| {
+                        matches!(&objects.get(handle).unwrap().state,
+                            super::ObjectState::Button(button) if button.system_key != -1)
+                    })
+                {
+                    return Err(Error::new(0, "FES SYSKEY 路由尚未接入"));
+                }
+                let target = self.focus.clone().filter(|target| {
+                    let objects = self.scene.as_ref().unwrap().objects();
+                    !objects
+                        .lookup(&target.name, target.bank)
+                        .and_then(|handle| objects.get(handle))
+                        .is_some_and(|object| {
+                            matches!(&object.state,
+                            super::ObjectState::Button(button) if button.enabled == 0)
+                        })
+                });
+                self.pressed = target.clone();
+                target
+            }
+            10 => self.pressed.clone(),
+            _ => unreachable!(),
+        };
         let event = match (command.code, key) {
             (9, 0) => Some(2),
             (9, 1) => Some(3),
@@ -310,25 +493,22 @@ impl FesObject {
             (10, 0) => Some(4),
             (10, 1) => Some(5),
             (10, 4..=7) => Some(key + 11),
+            (64, _) if target.is_some() => Some(u32::from(key == 0)),
+            (65, _) if target.is_some() => Some(21),
             _ => None,
         };
-        if command.code == 9 && (4..=7).contains(&key) {
-            self.pointer_position(host, 0)?;
-        }
-        if let Some(event) = event {
-            self.scene.as_mut().unwrap().record_input_event(event);
-        }
-        if matches!(command.code, 9 | 10) {
-            // 未匹配对象处理器时，控制器响应槽保持构造初值一。
-            self.send(
-                host,
-                command.sender,
-                95,
-                [0, 1, 1],
-                &mut CommandBuffers::default(),
-            )?;
-        }
-        Ok(())
+        let touch = command.code == 65 && target.is_some();
+        self.input_event = Some(InputEvent {
+            target,
+            event,
+            handled: None,
+            response_done: false,
+            clear_pressed,
+            refresh: !touch,
+            cursor: 0,
+            preserve_output: touch,
+        });
+        Ok(true)
     }
 
     fn prepare_input_button(&mut self, host: &mut dyn Host) -> Result<()> {
@@ -530,7 +710,11 @@ impl TaskObject for FesObject {
         self.synchronize(host);
         let b = command.data[1];
         match command.code {
-            9 | 10 | 64 | 65 => self.input_event(command, output, host)?,
+            9 | 10 | 64 | 65 => {
+                if !self.input_event(command, output, host, budget)? {
+                    return Ok(CommandOutcome::RESUME);
+                }
+            }
             3 => {
                 self.request_delete(host, budget)?;
             }

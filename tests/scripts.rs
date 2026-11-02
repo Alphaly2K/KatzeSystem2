@@ -349,7 +349,10 @@ fn fes_control_flow_merges_blocks_and_keeps_local_state_per_instance() {
         Step::Event(fes::Event::Exit(7))
     );
     vm.resume();
-    assert_eq!(vm.run(&mut state, 100).unwrap(), Step::Halted);
+    assert_eq!(
+        vm.run(&mut state, 100).unwrap(),
+        Step::Event(fes::Event::Frame)
+    );
     let mut other =
         fes::Interpreter::new(fes::Program::from_text(b"#START\nexit \\1").unwrap()).unwrap();
     assert_eq!(

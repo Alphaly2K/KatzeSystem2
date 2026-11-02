@@ -94,7 +94,7 @@ FES 内部执行宏声明，初始化按以下顺序交给宿主：
 
 IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的转换结果实际改变时置位；空 FILE 或转换结果相同不置位。`frame_mapping_changed` 初始为 true，写入任何 ID 列也置为 true；下次有效 IDN 在编号变化或此标记为 true 时请求装载并清除此标记。首次 IDN=0 因此也请求装载。ID 列本身只更新映射，非法 IDN 保留待应用标记。直接修改公开映射后应同时设置 `frame_mapping_changed`；实际来源装载由运行时对象更新执行。
 
-`fes::ButtonState` 组合 IMAGE 状态与输入启用、默认事件组、四向目标、TYPE、KEYBLOCK 坐标和系统键。`apply(attributes, bank, transform_name)` 返回本次是否需要递归使后代失效；SIZE 变化另请求来源重建，ENABLE 保留原始值，变化时只标记按钮自身。TYPE 与 MASK 分别保存。默认事件组和方向目标各少于 32 字节。运行时已支持 BUTTON 装载创建、图像更新及输入区域；对象事件和导航继续接入。
+`fes::ButtonState` 组合 IMAGE 状态与输入启用、默认事件组、四向目标、TYPE、KEYBLOCK 坐标和系统键。`apply(attributes, bank, transform_name)` 返回本次是否需要递归使后代失效；SIZE 变化另请求来源重建，ENABLE 保留原始值，变化时只标记按钮自身。TYPE 与 MASK 分别保存。默认事件组和方向目标各少于 32 字节。运行时已支持 BUTTON 装载创建、图像更新、输入区域与对象事件；导航继续接入。
 
 宿主完成请求后用 `resume` 确认，待确认请求重复返回，数量和属性表达式只计算一次。字符串表必须在初始化前准备好，缺失字符串可能使后续参数移动。宿主只应在具备对应实现时确认声明或属性请求。`return_value` 保存最近一次 `break` 的值；不带参数的 `break` 将它重置为 0。
 
@@ -319,7 +319,7 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 
 `Runtime::dispatch_fes_system_block(owner, &mut scene, name)` 同步执行 `_FES_SLEEP_`／`_FES_WAKE_`，返回 false 后以同一名称续跑；普通推进、对象修改及另一个系统块须等到本次完成。缺失块直接完成。该入口不推进系统帧，不切换媒体显示；通常保留主流程位置和等待，`next` 按系统块的调用深度规则处理。局部 `wait` 结束本次分派；系统块 `exit` 结束本次分派并将返回码排队，到下一次普通场景推进才发布。未知命令和运动返回诊断并保留待处理事件。命令 348 在系统块后刷新对象并切换显示，`FesObject::paused()` 查询专属暂停原始值；完整契约见[暂停与唤醒](graphics.md#fes-专属暂停与唤醒)。
 
-`Runtime::dispatch_fes_event(owner, &mut scene, target, event)` 分派控制器输入事件。`target` 为可选 `ObjectReference`；事件编号为 0～21，其中 0／1／2／3／4／5／8／21 分别对应 FOCUS／UNFOCUS／PUSH_L／PUSH_R／RELEASE_L／RELEASE_R／SCRL_P／TOUCH，其余编号只更新系统输入命名值。返回 `None` 表示预算耗尽，须以相同目标和编号续跑；`Some(bool)` 表示完成，布尔值只取对象自身处理器是否存在，默认事件组单独执行时为 false。该入口执行对象命令和显式 decode，不在分派末尾自动刷新媒体，不修改任务时钟或系统帧。局部 wait 结束当前处理器，exit 另将通知排队；主等待、调用及 next 规则与解释器一致。失败时保留游标，普通更新、系统块和其他对象事件须待本次完成。
+`Runtime::dispatch_fes_event(owner, &mut scene, target, event)` 分派控制器输入事件。`target` 为可选 `ObjectReference`；事件编号为 0～21，其中 0／1／2／3／4／5／8／21 分别对应 FOCUS／UNFOCUS／PUSH_L／PUSH_R／RELEASE_L／RELEASE_R／SCRL_P／TOUCH，其余编号只更新系统输入命名值。命中目标时，系统按下、方向释放和触碰值使用对象句柄；无目标为 −1，缺失目标跳过写入，左右点击释放仍为零。返回 `None` 表示预算耗尽，须以相同目标和编号续跑；`Some(bool)` 表示完成，布尔值只取对象自身处理器是否存在，默认事件组单独执行时为 false。该入口执行对象命令和显式 decode，不在分派末尾自动刷新媒体，不修改任务时钟或系统帧。局部 wait 结束当前处理器，exit 另将通知排队；主等待、调用及 next 规则与解释器一致。失败时保留游标，普通更新、系统块和其他对象事件须待本次完成。
 
 `runtime::fes::Objects::new(handles)` 为一份 FES 建立独立的对象存储，并登记 `_TOPOBJ_` 银行 0 的根 BASE 对象；与 Runtime 组合时传入 `runtime.host().handle_allocator()`。FES 对象标识来自共享不透明编号源，与任务编号分别使用。`define(&definition)` 接受有效的非零银行数，返回此次新创建的全部标识；目前支持 BASE、CIMAGE、IMAGE、BUTTON、CPLANE 和 PLANE，其他类型返回诊断。名称限定为 1～31 个非零 ASCII 字节。`get`／`get_mut` 查询实际对象及 `ObjectState`，`len` 包括根及重复声明的未绑定对象。`update_order()` 按声明及银行顺序查询当前绑定，保留重复记录并跳过缺失银行；新声明占据银行空洞后，旧记录也会解析到新绑定。
 
@@ -333,7 +333,7 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 
 `Objects::media_records()` 按声明／银行顺序提供 `MediaRecord`，通过 `target()`、`image_handle()`、`task_id()` 查询名称引用、包装及该记录创建的 BUTTON 编号；其他类型的记录 task_id 为 None。`Runtime::update_fes_record(owner, objects, index)` 用当前名称绑定和记录包装推进；Scene 普通收尾、decode 及暂停刷新自动采用这一入口。`update_fes_object` 则使用对象的当前包装。先完成 `prepare_fes_scene` 再显式逐记录更新，可保留装载早于更新的时序；记录编号越界返回诊断。类型的不同取图规则见[媒体记录](graphics.md#fes-媒体记录与来源包装)。
 
-BUTTON 先通过 `prepare_fes_scene` 或任务 338 完成下层创建，再由对象更新复用 IMAGE 并维护实际输入区域、启用值、优先级及可选 Alpha 掩码。`Objects::set_input_task(id)` 显式绑定输入任务，`input_task()` 查询当前绑定；缺省由根命令 34 查询。输入服务错误保留尚未提交的按钮更新，后续以同一场景续跑。脚本 enable 将非零归一为一，初始化 ENABLE 保留原始值；区域与显示分别维护。对象事件、导航、坐标锁及拖动命令仍返回诊断，详细行为见[BUTTON 区域更新](graphics.md#fes-button-区域更新)。
+BUTTON 先通过 `prepare_fes_scene` 或任务 338 完成下层创建，再由对象更新复用 IMAGE 并维护实际输入区域、启用值、优先级及可选 Alpha 掩码。`Objects::set_input_task(id)` 显式绑定输入任务，`input_task()` 查询当前绑定；缺省由根命令 34 查询。输入服务错误保留尚未提交的按钮更新，后续以同一场景续跑。脚本 enable 将非零归一为一，初始化 ENABLE 保留原始值；区域与显示分别维护。对象事件通过任务 9／10／64／65 或显式场景分派接入，导航、坐标锁及拖动命令继续诊断；详细行为见[BUTTON 区域更新](graphics.md#fes-button-区域更新)。
 
 FES IMAGE 的 `IDN=−1` 接收完整名称的原始来源，不受 PATHMODE 影响；`Object::raw_image_handle` 返回其非持有查询句柄，零表示没有来源。像素和原始数据独立保留，登记优先使用像素；普通装载缺帧后可退回旧原始来源。FES 持有的数据随替换、对象删除或所属任务实际回收释放，列表已经解码的帧继续存活。原始来源登记以当前更新记录的包装保存来源身份，可用 308 反查；具体几何和槽号规则见[原始来源更新](graphics.md#fes-image-原始来源更新)。
 
@@ -348,6 +348,8 @@ FES IMAGE 的 `IDN=−1` 接收完整名称的原始来源，不受 PATHMODE 影
 `Runtime::remove_fes_object(owner, &mut objects, handle)` 先向下层任务发送删除标记、移除图像当前槽号并释放来源包装，再移出 FES 子树；二维绘图登记立即清理，实际任务释放发生在树更新中。删除后调用者再次 publish_bindings。更新和移除错误保留已经完成的修改；工厂创建失败清除本次重建标记并保存 None，后续尺寸请求可重新触发创建。
 
 图形事件的同步响应通过 `Host::dispatch_graphics_event(response, command, buffers, output)` 开放。运行时回调中的命令 95 改写当前平面的响应，返回错误时也保留此前修改；其余需要重入完整平面对象的命令返回诊断。移动通知使用同一份 CommandBuffers，事件接收者返回的普通 output 与平面响应分别保存。
+
+矩形按钮使用 `Host::dispatch_button_event(button, command, buffers, output)`。运行时在回调期间开放同一份 ButtonObject，允许同步响应、区域、启用、掩码及基类命令；错误返回后保留已完成修改，回调结束后恢复原对象及宿主身份。回调中的主体重入继续诊断；独立宿主的默认实现复用图形响应入口。
 
 `Runtime::input_state(id)`／`input_state_mut(id)` 查询输入状态。`dispatch_input_key`、`scan_input_keys`、`update_input_selection`、`dispatch_input_motion` 将逻辑坐标和设备查询连接到真实任务命令路由。接收者回调可以修改正在执行的输入任务的区域、键开关、指针及基类状态，后续遍历立即生效，错误返回也保留已发生的修改。完整协议见[输入对象](input.md#输入对象与运行时)。
 

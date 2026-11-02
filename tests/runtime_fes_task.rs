@@ -669,12 +669,13 @@ fn auxiliary_input_reaches_script_values_and_transients_clear_after_the_round() 
         assert_eq!(send(&mut runtime, button, 4, 0, 0), 1);
         assert_eq!(send(&mut runtime, fes, 64, button, 1), 0);
         assert_eq!(send(&mut runtime, fes, 65, button, 1), 0);
+        assert_eq!(send(&mut runtime, button, 4, 4, 1), 1);
     }
 }
 
 #[test]
 fn button_load_creates_each_declaration_before_start_and_rebinding_keeps_the_tasks() {
-    let source = b"#DEFINE\nBUTTON item[2]\nBUTTON item[3]\n#OBJECT SIZE PRI ENABLE\nitem 2,2 5 21\nitem[2] 2,2 7 21\n#START\n$0=$0+1\nwait 99\n";
+    let source = b"#DEFINE\nBUTTON item[2]\nBUTTON item[3]\n#OBJECT SIZE PRI ENABLE\nitem 2,2 5 21\nitem[2] 2,2 7 21\n#START\n$0=$0+1\nwait 99\n#item.FOCUS\n$6=$6+@+1\n";
     for budget in [1, 4096] {
         let Setup {
             mut runtime, reads, ..
@@ -705,15 +706,10 @@ fn button_load_creates_each_declaration_before_start_and_rebinding_keeps_the_tas
         }
         assert_eq!(runtime.tree().children(fes).unwrap().count(), 7);
         for button in buttons {
-            assert!(
-                runtime
-                    .dispatch_command(0, command(fes, 64, button, 1))
-                    .unwrap_err()
-                    .message
-                    .contains("BUTTON 对象事件尚未接入")
-            );
+            assert_eq!(send(&mut runtime, fes, 64, button, 1), 0);
         }
         assert_eq!(runtime.numbers().shared[0], 1);
+        assert_eq!(runtime.numbers().shared[6], 9);
         runtime.destroy(fes).unwrap();
         assert!(
             runtime
@@ -723,6 +719,169 @@ fn button_load_creates_each_declaration_before_start_and_rebinding_keeps_the_tas
                 .records()
                 .is_empty()
         );
+    }
+}
+
+fn start_button_scene(runtime: &mut TestRuntime) -> (u32, u32, Vec<u32>) {
+    runtime.update(100, 1).unwrap();
+    let fes = runtime.create(0, kind::FES, b"scene", b"").unwrap();
+    send(runtime, fes, 337, 0, 0);
+    file(runtime, fes, b"complete.fes").unwrap();
+    let buttons = runtime.tree().children(fes).unwrap().collect();
+    let list = runtime.create(fes, kind::IMAGE_LIST, b"list", b"").unwrap();
+    send(runtime, list, 285, 8, 6);
+    send(runtime, list, 289, 0, 0);
+    send(runtime, fes, 340, 0, list);
+    send(runtime, fes, 339, 0, 0);
+    runtime.update(101, 1).unwrap();
+    (fes, list, buttons)
+}
+
+#[test]
+fn button_events_keep_pressed_banks_and_defer_touch_media_refresh() {
+    let source = b"#DEFINE\nBUTTON item[2]\nCIMAGE fill\n#OBJECT SIZE PRI ENABLE DEFAULT POS\nitem 2,2 5 21 DEFAULT 0,0\nitem[1] 2,2 6 21 DEFAULT 4,0\n#OBJECT SIZE COLOR PRI POS DISP\nfill 2,2 0xff112233 30 0,3 1\n#START\nwait 1000\n$7=_CLICK_L_\nwait 1000\n#DEFAULT.PUSH_L\n$0=$0*10+1\n#item.PUSH_L\n$0=$0*10+2\n$1=@\n$5=(_CLICK_L_==item[@])\n#item.RELEASE_L\n$2=@+10\n@ enable 0\n#item.FOCUS\n$3=$3*10+@+1\n#item.TOUCH\n$4=$4+1\nfill disp 0\n";
+    for budget in [1, 4096] {
+        let Setup {
+            mut runtime,
+            pointer,
+            ..
+        } = setup(budget, source);
+        pointer.set(PointerSample {
+            position: [1, 1],
+            active: 1,
+        });
+        runtime.input_coordinates_mut().logical_size = [8, 6];
+        let (fes, list, buttons) = start_button_scene(&mut runtime);
+        assert_eq!(buttons.len(), 2);
+        runtime.update_input_selection(1, Some([1, 1])).unwrap();
+        assert_eq!(runtime.numbers().shared[3], 1);
+        assert_eq!(send(&mut runtime, buttons[0], 4, 0, 1), 0);
+        assert_eq!(&runtime.numbers().shared[..2], &[12, 0]);
+        assert_eq!(runtime.numbers().shared[5], 1);
+        // 只发布新焦点；UNFOCUS 会另行清除保存的按下目标。
+        send(&mut runtime, fes, 64, buttons[1], 1);
+        assert_eq!(runtime.numbers().shared[3], 12);
+        assert_eq!(send(&mut runtime, buttons[0], 4, 0, 0), 0);
+        assert_eq!(runtime.numbers().shared[2], 10);
+        assert_eq!(
+            runtime
+                .input_state(1)
+                .unwrap()
+                .regions()
+                .get(buttons[0])
+                .unwrap()
+                .enabled(),
+            0
+        );
+        assert_eq!(
+            runtime
+                .input_state(1)
+                .unwrap()
+                .regions()
+                .get(buttons[1])
+                .unwrap()
+                .enabled(),
+            21
+        );
+        send(&mut runtime, fes, 64, buttons[0], 1);
+        assert_eq!(send(&mut runtime, buttons[0], 4, 0, 1), 1);
+        assert_eq!(runtime.numbers().shared[0], 12);
+        send(&mut runtime, fes, 64, buttons[1], 1);
+        assert_eq!(send(&mut runtime, buttons[1], 4, 0, 1), 0);
+        assert_eq!(&runtime.numbers().shared[..2], &[1212, 1]);
+        assert_eq!(runtime.numbers().shared[5], 1);
+        send(&mut runtime, fes, 64, buttons[1], 0);
+        assert_eq!(send(&mut runtime, buttons[1], 4, 0, 0), 1);
+        assert_eq!(runtime.numbers().shared[2], 10);
+        send(&mut runtime, list, 298, 0, 0);
+        assert_eq!(
+            runtime.drawing().target.as_ref().unwrap().pixel(0, 3),
+            Some(0xff112233)
+        );
+        assert_eq!(send(&mut runtime, buttons[1], 5, 0, 0), 0);
+        assert_eq!(runtime.numbers().shared[4], 1);
+        send(&mut runtime, list, 298, 0, 0);
+        assert_eq!(
+            runtime.drawing().target.as_ref().unwrap().pixel(0, 3),
+            Some(0xff112233)
+        );
+        send(&mut runtime, fes, 64, u32::MAX, 0);
+        send(&mut runtime, list, 298, 0, 0);
+        assert_eq!(
+            runtime.drawing().target.as_ref().unwrap().pixel(0, 3),
+            Some(0)
+        );
+        runtime.update(102, 1).unwrap();
+        assert_eq!(runtime.numbers().shared[7], 0);
+    }
+}
+
+#[test]
+fn default_only_button_events_respond_and_retry_media_without_repeating_script_effects() {
+    for decode in ["", "decode\n$2=$2+1\n"] {
+        let source = format!(
+            "#DEFINE\nBUTTON item\n#OBJECT FILE PATHMODE SIZE DEFAULT PRI\nitem absent 1 2,2 DEFAULT 5\n#START\nwait 1000\n#DEFAULT.PUSH_L\n$0=$0+1\n@ size 3 4\n{decode}#DEFAULT.RELEASE_L\n$1=$1+1\n"
+        );
+        for budget in [1, 4096] {
+            let Setup {
+                mut runtime,
+                fail_media,
+                reads,
+                ..
+            } = setup(budget, source.as_bytes());
+            let (fes, _, buttons) = start_button_scene(&mut runtime);
+            let button = buttons[0];
+            send(&mut runtime, fes, 64, button, 1);
+            assert_eq!(
+                reads
+                    .borrow()
+                    .iter()
+                    .filter(|name| name.as_slice() == b"absent")
+                    .count(),
+                1
+            );
+            fail_media.set(true);
+            assert!(
+                runtime
+                    .dispatch_command(0, command(button, 4, 0, 1))
+                    .unwrap_err()
+                    .message
+                    .contains("媒体读取失败")
+            );
+            assert_eq!(runtime.numbers().shared[0], 1);
+            assert_eq!(runtime.numbers().shared[2], 0);
+            assert!(
+                runtime
+                    .dispatch_command(0, command(fes, 64, button, 0))
+                    .unwrap_err()
+                    .message
+                    .contains("上一次命令")
+            );
+            fail_media.set(false);
+            assert_eq!(send(&mut runtime, button, 4, 0, 1), 1);
+            assert_eq!(runtime.numbers().shared[0], 1);
+            assert_eq!(runtime.numbers().shared[2], i32::from(!decode.is_empty()));
+            assert_eq!(
+                reads
+                    .borrow()
+                    .iter()
+                    .filter(|name| name.as_slice() == b"absent")
+                    .count(),
+                3
+            );
+            assert_eq!(
+                runtime
+                    .input_state(1)
+                    .unwrap()
+                    .regions()
+                    .get(button)
+                    .unwrap()
+                    .bounds(),
+                katze_system2::graphics::Rect::from_xywh(0, 0, 3, 4)
+            );
+            assert_eq!(send(&mut runtime, button, 4, 0, 0), 1);
+            assert_eq!(runtime.numbers().shared[1], 1);
+        }
     }
 }
 

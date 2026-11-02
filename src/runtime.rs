@@ -580,6 +580,57 @@ fn run_nested<F: ObjectFactory>(
             return Ok(());
         }
     }
+    if let Some(mut button) = resources.button_callbacks.remove(&target) {
+        let saved = (host.task_id, host.task_time, host.task_origin);
+        let result = {
+            let mut nested = ObjectHost {
+                numbers,
+                host,
+                resources,
+                tree,
+                objects,
+                running,
+                factory,
+                context: Vec::new(),
+                budget,
+                limit,
+            };
+            nested.host.task_id = target;
+            nested.set_task_clock(button.clock());
+            match execution {
+                Execution::Command {
+                    kind,
+                    command,
+                    buffers,
+                    output,
+                    propagate,
+                } => drain(budget, limit, || {
+                    let outcome = button.dispatch_command_with_buffers(
+                        kind,
+                        command,
+                        buffers,
+                        output,
+                        &mut nested,
+                        budget,
+                    )?;
+                    *propagate = outcome.propagate;
+                    Ok(outcome.done)
+                }),
+                Execution::Delete => {
+                    drain(budget, limit, || button.request_delete(&mut nested, budget))
+                }
+                Execution::MarkDestroying => drain(budget, limit, || {
+                    button.mark_destroying(&mut nested, budget)
+                }),
+                _ => Err(Error::new(0, "按钮回调期间不支持重新执行该任务")),
+            }
+        };
+        resources.button_callbacks.insert(target, button);
+        host.task_id = saved.0;
+        host.task_time = saved.1;
+        host.task_origin = saved.2;
+        return result;
+    }
     if resources.graphics_responses.contains_key(&target) {
         if let Execution::Command {
             kind,
@@ -1251,6 +1302,27 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         self.resources.graphics_responses.insert(origin, *response);
         let result = route_command(self.store(), origin, command, buffers, output);
         *response = self.resources.graphics_responses.remove(&origin).unwrap();
+        result
+    }
+
+    fn dispatch_button_event(
+        &mut self,
+        button: &mut crate::input::ButtonObject,
+        command: Command,
+        buffers: &mut CommandBuffers<'_>,
+        output: &mut u32,
+    ) -> Result<bool> {
+        let origin = self.host.task_id;
+        if !self.running.contains_key(&origin)
+            || self.resources.button_callbacks.contains_key(&origin)
+        {
+            return Err(Error::new(0, "按钮回调上下文不可用"));
+        }
+        self.resources
+            .button_callbacks
+            .insert(origin, button.take_for_callback());
+        let result = route_command(self.store(), origin, command, buffers, output);
+        *button = self.resources.button_callbacks.remove(&origin).unwrap();
         result
     }
 

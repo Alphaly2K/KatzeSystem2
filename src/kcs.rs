@@ -370,6 +370,17 @@ pub trait Host {
         self.dispatch_task_command(command, buffers, output)
     }
 
+    /// 矩形按钮事件期间开放同一份按钮状态，保留同步属性命令的修改。
+    fn dispatch_button_event(
+        &mut self,
+        button: &mut crate::input::ButtonObject,
+        command: crate::task::Command,
+        buffers: &mut crate::task::CommandBuffers<'_>,
+        output: &mut u32,
+    ) -> Result<bool> {
+        self.dispatch_graphics_event(button.response_mut(), command, buffers, output)
+    }
+
     /// 取走当前任务的待应用操作，并提供已保存的队列长度供宿主检查入队容量。
     fn take_task_effects(&mut self, _queued_messages: usize) -> TaskEffects {
         TaskEffects::default()
@@ -510,6 +521,16 @@ impl<T: Host + ?Sized> Host for &mut T {
         output: &mut u32,
     ) -> Result<bool> {
         (**self).dispatch_graphics_event(response, command, buffers, output)
+    }
+
+    fn dispatch_button_event(
+        &mut self,
+        button: &mut crate::input::ButtonObject,
+        command: crate::task::Command,
+        buffers: &mut crate::task::CommandBuffers<'_>,
+        output: &mut u32,
+    ) -> Result<bool> {
+        (**self).dispatch_button_event(button, command, buffers, output)
     }
 }
 

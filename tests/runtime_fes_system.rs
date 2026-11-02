@@ -78,7 +78,10 @@ fn object_events_preserve_waits_queue_exits_and_transfer_only_the_main_cursor() 
             assert_eq!(runtime.numbers().shared[1], expected);
             assert_eq!(scene.deadline(), if transferred { None } else { Some(177) });
             assert_eq!(scene.exit_code(), None);
-            assert_eq!(scene.interpreter().named["_CLICK_L_"][&0], -1);
+            assert_eq!(
+                scene.interpreter().named["_CLICK_L_"][&0],
+                scene.objects().lookup("button", 0).unwrap() as i32
+            );
             update(&mut runtime, &mut scene, 101);
             assert_eq!(scene.exit_code(), exit);
             assert_eq!(scene.interpreter().named["_CLICK_L_"][&0], 0);
@@ -127,6 +130,38 @@ fn failed_object_events_keep_their_cursor_and_reject_other_dispatches() {
         );
         assert_eq!(runtime.numbers().shared[1], 1);
         assert_eq!(scene.deadline(), Some(177));
+    }
+}
+
+#[test]
+fn system_input_values_keep_object_identity_without_event_handlers() {
+    let (mut runtime, mut scene) = setup("#DEFINE\nBASE button\n#START\nwait 77\n", 1);
+    update(&mut runtime, &mut scene, 100);
+    let target = katze_system2::fes::ObjectReference {
+        name: "button".into(),
+        bank: 0,
+    };
+    let missing = katze_system2::fes::ObjectReference {
+        name: "absent".into(),
+        bank: 0,
+    };
+    let handle = scene.objects().lookup("button", 0).unwrap() as i32;
+    for (target, code, name, expected) in [
+        (Some(&target), 3, "_CLICK_R_", handle),
+        (None, 3, "_CLICK_R_", -1),
+        (Some(&target), 3, "_CLICK_R_", handle),
+        (Some(&missing), 3, "_CLICK_R_", handle),
+        (Some(&target), 5, "_CLICK_R_", 0),
+        (Some(&target), 6, "_SCRL_U_", handle),
+        (Some(&target), 21, "_TOUCH_", handle),
+    ] {
+        assert_eq!(
+            runtime
+                .dispatch_fes_event(0, &mut scene, target, code)
+                .unwrap(),
+            Some(false)
+        );
+        assert_eq!(scene.interpreter().named[name][&0], expected);
     }
 }
 
