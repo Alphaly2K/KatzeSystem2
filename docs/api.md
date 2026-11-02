@@ -96,11 +96,13 @@ FES 内部执行宏声明，初始化按以下顺序交给宿主：
 
 IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的转换结果实际改变时置位；空 FILE 或转换结果相同不置位。`frame_mapping_changed` 初始为 true，写入任何 ID 列也置为 true；下次有效 IDN 在编号变化或此标记为 true 时请求装载并清除此标记。首次 IDN=0 因此也请求装载。ID 列本身只更新映射，非法 IDN 保留待应用标记。直接修改公开映射后应同时设置 `frame_mapping_changed`；实际来源装载由运行时对象更新执行。
 
-`fes::ButtonState` 组合 IMAGE 状态与输入启用、默认事件组、四向目标、TYPE、KEYBLOCK 坐标和系统键。`apply(attributes, bank, transform_name)` 返回本次是否需要递归使后代失效；SIZE 变化另请求来源重建，ENABLE 保留原始值，变化时只标记按钮自身。TYPE 与 MASK 分别保存。默认事件组和方向目标各少于 32 字节。运行时已支持 BUTTON 装载创建、图像更新、输入区域、对象事件、网格导航、系统键分派与关联 SLIDER 的方向调整；控件媒体配置继续接入。
+`fes::ButtonState` 组合 IMAGE 状态与输入启用、默认事件组、四向目标、TYPE、KEYBLOCK 坐标和系统键。`apply(attributes, bank, transform_name)` 返回本次是否需要递归使后代失效；SIZE 变化另请求来源重建，ENABLE 保留原始值，变化时只标记按钮自身。TYPE 与 MASK 分别保存。默认事件组和方向目标各少于 32 字节。运行时已支持 BUTTON 装载创建、图像更新、输入区域、对象事件、网格导航、系统键分派与关联 SLIDER／SCROLL2 的方向调整。
 
-`fes::SliderState` 提供 SLIDER 的初始化属性、原始范围／数值、矩形、方向、Alpha 和独立的 `SliderUpdates` 请求。`apply(attributes, bank)` 仅应用 FILE、PL、POS2、PRI、DISP、ENABLE，返回本次是否需要使后代失效；ENABLE 变化只标记自身。`set_range`／`set_position` 保留原始值和通知参数，不执行范围限制。运动接口只传递 Alpha，详见[SLIDER 属性核心](graphics.md#fes-slider-属性核心)。`Objects::define` 已接入这一类型，数值命令与 BUTTON 的反向关联导航可独立使用；配置装载、下层任务和绘制继续接入，运行时媒体准备与更新返回明确诊断。
+`fes::SliderState` 提供 SLIDER 的初始化属性、原始范围／数值、矩形、方向、Alpha 和独立的 `SliderUpdates` 请求。`apply(attributes, bank)` 仅应用 FILE、PL、POS2、PRI、DISP、ENABLE，返回本次是否需要使后代失效；ENABLE 变化只标记自身。`set_range`／`set_position` 保留原始值和通知参数，不执行范围限制。运动接口只传递 Alpha，详见[SLIDER 属性核心](graphics.md#fes-slider-属性核心)。运行时已连接下层任务、媒体更新和父级通知。`fes::Scroll2State` 组合此状态与独立页长，FES 媒体通过类型 41 的对应命令提交，下层绘制与输入任务仍待实现。
 
 `input::SliderControl` 提供下层滑块独立的范围、行程、数值、像素位置与拖动状态。`set_range` 只保存端点，`set_position` 先限制数值，非拖动状态再更新像素；`update_pixel_position` 可显式刷新。`position_at_pixel` 使用基线的半步阈值返回从零起算的数值，除法异常及过大查询返回诊断。FES 原始请求与这一状态分层保存，换算规则见 [SLIDER 下层范围换算](graphics.md#slider-下层范围换算)。
+
+`input::Scroll2Control` 保存滚动条范围、页长、行程、轨道及滑块长度和拖动状态。默认范围为 `[0, 10]`，页长为 4。修改范围或尺寸后用 `rebuild_geometry()` 重建滑块和行程，再通过 `set_position`／`update_pixel_position` 刷新位置；几何重建本身保留数值和像素位置。`position_at_pixel` 查询数值，零有效跨度返回零。页长、最小长度与整数规则见 [SCROLL2 下层范围及几何](graphics.md#scroll2-下层范围及几何)。
 
 宿主完成请求后用 `resume` 确认，待确认请求重复返回，数量和属性表达式只计算一次。字符串表必须在初始化前准备好，缺失字符串可能使后续参数移动。宿主只应在具备对应实现时确认声明或属性请求。`return_value` 保存最近一次 `break` 的值；不带参数的 `break` 将它重置为 0。
 

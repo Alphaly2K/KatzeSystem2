@@ -17,6 +17,8 @@ mod button;
 pub use button::ButtonObject;
 mod slider;
 pub use slider::SliderControl;
+mod scroll2;
+pub use scroll2::Scroll2Control;
 mod slider_task;
 pub use slider_task::SliderObject;
 mod coordinates;
