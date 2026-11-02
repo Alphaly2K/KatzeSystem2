@@ -14,16 +14,21 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             78 => 12,
             79 => 16,
             80 | 83 => 4,
-            82 | 88 | 92 => 8,
+            82 | 88 | 92 | 105 | 848 | 849 => 8,
             84 | 101 => 20,
             100 => 12,
+            104 => 28,
             _ => unreachable!(),
         };
         if arguments.len() < 4 || arguments.len() > count || !arguments.len().is_multiple_of(4) {
             return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
         }
+        let route_zero = matches!(index, 104 | 105 | 848 | 849);
+        if route_zero && arguments.len() != count {
+            return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+        }
         let target = u32::from_le_bytes(arguments[..4].try_into().unwrap());
-        if target == 0 {
+        if target == 0 && !route_zero {
             return Ok(NativeReturn::Continue);
         }
         if arguments.len() != count {
@@ -113,6 +118,37 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             }
             92 => {
                 self.command_target(target, 47, [0, word(1), 1])?;
+            }
+            105 | 848 | 849 => {
+                let code = match index {
+                    105 => 93,
+                    848 => 99,
+                    _ => 100,
+                };
+                self.command_target(target, code, [0, word(1), 0])?;
+            }
+            104 => {
+                let values = [
+                    word(1),
+                    word(2),
+                    word(1).wrapping_add(word(3)),
+                    word(2).wrapping_add(word(4)),
+                    word(5),
+                    word(6),
+                ];
+                let mut rectangle = [0; 24];
+                for (bytes, value) in rectangle.chunks_exact_mut(4).zip(values) {
+                    bytes.copy_from_slice(&value.to_le_bytes());
+                }
+                self.command_target_with_buffers(
+                    target,
+                    90,
+                    [0; 3],
+                    &mut CommandBuffers {
+                        data0: None,
+                        data1: Some(&mut rectangle),
+                    },
+                )?;
             }
             _ => unreachable!(),
         }

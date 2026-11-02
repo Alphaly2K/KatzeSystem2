@@ -5,7 +5,7 @@ use katze_system2::{
         ButtonObject, CoordinateMap, InputDevice, InputFactory, KeyEvent, KeyEventKind, KeySample,
         PointerSample,
     },
-    kcs::{Host, Interpreter, NativeReturn},
+    kcs::{Host, Interpreter, NativeReturn, Program},
     runtime::{BaseObject, ObjectFactory, RootObject, Runtime, TaskObject, kind},
     task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock},
 };
@@ -405,6 +405,19 @@ impl TaskObject for Receiver {
         host: &mut dyn Host,
         budget: usize,
     ) -> Result<CommandOutcome> {
+        if command.code == 800 {
+            let mut vm = Interpreter::new(Program::from_code(&[], vec![], 16)?, vec![])?;
+            let native = if command.data[0] == 0 {
+                104
+            } else {
+                command.data[0]
+            };
+            assert_eq!(
+                host.call(native, buffers.data1.as_deref().unwrap(), &mut vm)?,
+                NativeReturn::Continue
+            );
+            return Ok(CommandOutcome::finished(false));
+        }
         if matches!(command.code, 6 | 9 | 10 | 64 | 65) {
             if command.code == 9 {
                 let query = packet(command.sender, command.target, 96, [0, 1, 1]);
@@ -609,4 +622,129 @@ fn frame_reset_happens_before_children_can_write_the_response() {
     runtime.update(2, 1).unwrap();
     assert_eq!(send(&mut runtime, 4, 1), 73);
     assert_eq!(send(&mut runtime, 4, 1), 0);
+}
+
+#[test]
+fn ordinary_rectangle_registration_reaches_button_and_input_with_wrapped_endpoints() {
+    for budget in [1, 4096] {
+        let (mut runtime, _, _, _) = setup();
+        runtime.set_budget(budget, 1 << 20);
+        let button = runtime.create(0, kind::BUTTON, b"native", b"").unwrap();
+        let mut arguments = bytes(&[
+            button,
+            i32::MAX as u32,
+            (-10i32) as u32,
+            10,
+            20,
+            0x8000_0000,
+            0xfedc_ba98,
+        ]);
+        runtime
+            .dispatch_command_with_buffers(
+                0,
+                packet(2, 0, 800, [0; 3]),
+                &mut CommandBuffers {
+                    data0: None,
+                    data1: Some(&mut arguments),
+                },
+            )
+            .unwrap();
+        let region = runtime
+            .input_state(1)
+            .unwrap()
+            .regions()
+            .get(button)
+            .unwrap();
+        assert_eq!(region.bounds(), rect([i32::MAX, -10, i32::MIN + 9, 10]));
+        assert_eq!(region.priority(), i32::MIN);
+        assert_eq!(region.event_mask(), 7);
+        let mut arguments = bytes(&[button, 0x8000_0001]);
+        runtime
+            .dispatch_command_with_buffers(
+                0,
+                packet(2, 0, 800, [105, 0, 0]),
+                &mut CommandBuffers {
+                    data0: None,
+                    data1: Some(&mut arguments),
+                },
+            )
+            .unwrap();
+        let region = runtime
+            .input_state(1)
+            .unwrap()
+            .regions()
+            .get(button)
+            .unwrap();
+        assert_eq!(region.enabled(), 0x8000_0001);
+        let mut arguments = bytes(&[button, 0xffff_fffe]);
+        runtime
+            .dispatch_command_with_buffers(
+                0,
+                packet(2, 0, 800, [848, 0, 0]),
+                &mut CommandBuffers {
+                    data0: None,
+                    data1: Some(&mut arguments),
+                },
+            )
+            .unwrap();
+        let region = runtime
+            .input_state(1)
+            .unwrap()
+            .regions()
+            .get(button)
+            .unwrap();
+        assert_eq!(region.selection_enabled(), 0xffff_fffe);
+        let mut arguments = bytes(&[button, 0x8000_0002]);
+        runtime
+            .dispatch_command_with_buffers(
+                0,
+                packet(2, 0, 800, [849, 0, 0]),
+                &mut CommandBuffers {
+                    data0: None,
+                    data1: Some(&mut arguments),
+                },
+            )
+            .unwrap();
+        let region = runtime
+            .input_state(1)
+            .unwrap()
+            .regions()
+            .get(button)
+            .unwrap();
+        assert_eq!(region.motion_enabled(), 0x8000_0002);
+        let initial = region.clone();
+        let mut arguments = bytes(&[button, 0, 0, 800, 600, 9, 0]);
+        runtime
+            .dispatch_command_with_buffers(
+                0,
+                packet(2, 0, 800, [0; 3]),
+                &mut CommandBuffers {
+                    data0: None,
+                    data1: Some(&mut arguments),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            runtime
+                .input_state(1)
+                .unwrap()
+                .regions()
+                .get(button)
+                .unwrap(),
+            &initial
+        );
+        let mut arguments = bytes(&[0]);
+        assert!(
+            runtime
+                .dispatch_command_with_buffers(
+                    0,
+                    packet(2, 0, 800, [0; 3]),
+                    &mut CommandBuffers {
+                        data0: None,
+                        data1: Some(&mut arguments)
+                    },
+                )
+                .is_err()
+        );
+    }
 }
