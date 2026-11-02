@@ -1503,3 +1503,193 @@ fn load_retry_keeps_a_record_wrapper_created_before_a_failed_button() {
         assert_eq!(snapshots[0], snapshots[1]);
     }
 }
+
+#[test]
+fn slider_parent_callbacks_use_the_sender_and_keep_raw_positions_while_paused() {
+    let source = b"#DEFINE\nSLIDER item[2]\nSLIDER item[3]\nBASE other\n#START\nwait 1000\n#item.SCRL_P\n@ getpos 0 1 2\n$3=$3*10+@+1\n$4=_MOUSE_X_\n$5=_MOUSE_Y_\n#item.FOCUS\n$6=$6*10+@+1\n#item.UNFOCUS\n$7=$7*10+@+1\n";
+    for budget in [1, 4096] {
+        for paused in [false, true] {
+            let Setup {
+                mut runtime,
+                pointer,
+                ..
+            } = setup(budget, source);
+            let fes = runtime.create(0, kind::FES, b"scene", b"").unwrap();
+            send(&mut runtime, fes, 337, 0, 0);
+            file(&mut runtime, fes, b"complete.fes").unwrap();
+            let sliders: Vec<_> = runtime
+                .tree()
+                .children(fes)
+                .unwrap()
+                .filter(|&id| runtime.tree().node(id).unwrap().kind == kind::SLIDER)
+                .collect();
+            assert_eq!(sliders.len(), 5);
+            if paused {
+                send(&mut runtime, fes, 348, 0, 1);
+            }
+            pointer.set(PointerSample {
+                position: [12, -4],
+                active: 1,
+            });
+            runtime.input_state_mut(1).unwrap().pointer_mut().active = 1;
+            let mut notify = |sender: u32, code: u32, value: u32| {
+                runtime
+                    .dispatch_command(
+                        0,
+                        Command {
+                            target: fes,
+                            sender,
+                            code,
+                            data: [0xabcdef01, value, 1],
+                        },
+                    )
+                    .unwrap()
+            };
+            assert_eq!(notify(sliders[0], 27, (-3i32) as u32), 0);
+            assert_eq!(notify(sliders[4], 27, i32::MIN as u32), 0);
+            assert_eq!(notify(sliders[4], 28, 0x80000000), 0);
+            assert_eq!(notify(sliders[4], 28, 0), 0);
+            assert_eq!(notify(99, 27, 55), 0);
+            assert_eq!(runtime.numbers().shared, [i32::MIN, 0, 0, 13, 12, -4, 3, 3]);
+            send(&mut runtime, fes, 3, 0, 0);
+            runtime
+                .dispatch_command(
+                    0,
+                    Command {
+                        target: fes,
+                        sender: sliders[4],
+                        code: 27,
+                        data: [0, 55, 0],
+                    },
+                )
+                .unwrap();
+            assert_eq!(runtime.numbers().shared[0], i32::MIN);
+        }
+    }
+}
+
+fn slider_sprite() -> Vec<u8> {
+    let zip = |input: &[u8]| {
+        let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), Default::default());
+        encoder.write_all(input).unwrap();
+        encoder.finish().unwrap()
+    };
+    let data = zip(&[0, 0, 0, 64]);
+    let control = zip(&[9, 1]);
+    let mut out = b"HG-3".to_vec();
+    for n in [12u32, 0x300, 0, 0] {
+        out.extend(n.to_le_bytes());
+    }
+    out.extend(b"stdinfo\0");
+    for n in [56u32, 40, 1, 1, 32, 0, 0, 1, 1, 1, 0, 0] {
+        out.extend(n.to_le_bytes());
+    }
+    out.extend(b"img0000\0");
+    for n in [
+        0,
+        (24 + data.len() + control.len()) as u32,
+        0,
+        1,
+        data.len() as u32,
+        4,
+        control.len() as u32,
+        2,
+    ] {
+        out.extend(n.to_le_bytes());
+    }
+    out.extend(data);
+    out.extend(control);
+    out
+}
+struct SliderFiles(Files);
+impl ResourceServices for SliderFiles {
+    fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+        assert_eq!(category, b"image");
+        Ok(name.to_vec())
+    }
+    fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
+        self.0.read(name, mode)
+    }
+}
+
+#[test]
+fn slider_drag_reaches_fes_events_and_the_next_media_update_without_renotifying() {
+    let source = b"#DEFINE\nSLIDER bar\n#OBJECT FILE POS2 DISP\nbar control bounds 1\n#START\nbar page 0 6\nbar pos 2\nwait 1000\n#bar.SCRL_P\n@ getpos 0 1 2\n$3=$3+1\n#bar.FOCUS\n$4=$4+1\n#bar.UNFOCUS\n$5=$5+1\n";
+    for budget in [1, 4096] {
+        let Setup {
+            mut runtime,
+            pointer,
+            ..
+        } = setup(budget, source);
+        runtime.input_coordinates_mut().logical_size = [8, 6];
+        let sprite = slider_sprite();
+        let mut bounds = sprite.clone();
+        bounds[36..40].copy_from_slice(&7u32.to_le_bytes());
+        runtime.set_resources(SliderFiles(Files {
+            files: [
+                (b"complete.fes".to_vec(), packed(source)),
+                (b"control".to_vec(), sprite),
+                (b"bounds".to_vec(), bounds),
+            ]
+            .into(),
+            reads: Rc::default(),
+            fail_media: Rc::new(Cell::new(false)),
+        }));
+        let fes = runtime.create(0, kind::FES, b"scene", b"").unwrap();
+        send(&mut runtime, fes, 337, 0, 0);
+        file(&mut runtime, fes, b"complete.fes").unwrap();
+        let slider = runtime
+            .tree()
+            .children(fes)
+            .unwrap()
+            .find(|&id| runtime.tree().node(id).unwrap().kind == kind::SLIDER)
+            .unwrap();
+        let list = runtime.create(fes, kind::IMAGE_LIST, b"list", b"").unwrap();
+        send(&mut runtime, list, 285, 8, 6);
+        send(&mut runtime, fes, 340, 0, list);
+        send(&mut runtime, fes, 339, 0, 0);
+        let buttons: Vec<_> = runtime.tree().children(slider).unwrap().collect();
+        assert_eq!(buttons.len(), 2);
+        let knob = buttons[1];
+        pointer.set(PointerSample {
+            position: [2, 0],
+            active: 1,
+        });
+        runtime.input_state_mut(1).unwrap().pointer_mut().active = 1;
+        runtime.update_input_selection(1, Some([2, 0])).unwrap();
+        assert_eq!(runtime.numbers().shared[4], 1);
+        send(&mut runtime, knob, 95, 0, 0);
+        let event = |pressed| KeyEvent {
+            kind: KeyEventKind::Change,
+            code: 4,
+            key: 0,
+            pressed,
+            mask: 2,
+            point: [2, 0],
+        };
+        assert!(runtime.dispatch_input_key(1, event(1)).unwrap());
+        pointer.set(PointerSample {
+            position: [5, 0],
+            active: 1,
+        });
+        runtime
+            .dispatch_input_motion(
+                1,
+                katze_system2::input::PointerMotion {
+                    code: 6,
+                    previous: [2, 0],
+                    current: [5, 0],
+                },
+            )
+            .unwrap();
+        assert_eq!(runtime.numbers().shared[..4], [5, 0, 0, 1]);
+        assert!(runtime.dispatch_input_key(1, event(0)).unwrap());
+        assert_eq!(runtime.numbers().shared[3], 1);
+        runtime.update(1, 1).unwrap();
+        assert_eq!(runtime.numbers().shared[..4], [5, 0, 0, 1]);
+        send(&mut runtime, list, 298, 0, 0);
+        let target = runtime.drawing().target.as_ref().unwrap();
+        assert_eq!(target.pixel(5, 0), Some(0xff000000));
+        assert_eq!(target.pixel(2, 0), Some(0));
+    }
+}

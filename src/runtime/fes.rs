@@ -28,6 +28,7 @@ const TOP: &str = "_TOPOBJ_";
 /// 按声明及银行顺序保存的媒体绑定；名称查找仍使用当前对象表。
 #[derive(Debug)]
 pub struct MediaRecord {
+    kind: &'static str,
     target: ObjectReference,
     image: Option<u32>,
     task_id: Option<u32>,
@@ -35,6 +36,10 @@ pub struct MediaRecord {
 }
 
 impl MediaRecord {
+    pub fn kind(&self) -> &'static str {
+        self.kind
+    }
+
     pub fn target(&self) -> &ObjectReference {
         &self.target
     }
@@ -422,6 +427,7 @@ impl Objects {
             .or_insert(definition.banks);
         self.update_order
             .extend((0..definition.banks).map(|bank| MediaRecord {
+                kind: definition.kind,
                 target: ObjectReference {
                     name: definition.name.clone(),
                     bank: bank as i32,

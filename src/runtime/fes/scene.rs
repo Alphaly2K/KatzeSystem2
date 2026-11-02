@@ -123,6 +123,25 @@ impl Scene {
         &self.objects
     }
 
+    pub(super) fn notify_slider_position(
+        &mut self,
+        target: &fes::ObjectReference,
+        value: i32,
+    ) -> Result<bool> {
+        let Some(handle) = self.objects.lookup(&target.name, target.bank) else {
+            return Ok(false);
+        };
+        let state = self
+            .objects
+            .get_mut(handle)
+            .unwrap()
+            .state
+            .slider_mut()
+            .ok_or_else(|| Error::new(0, "FES 滑块通知的名称绑定类型不匹配"))?;
+        state.set_position(value, 0);
+        Ok(true)
+    }
+
     /// 装载时解码的第一段 KEYBLOCK；后续同名声明不覆盖此表。
     pub fn keyblocks(&self) -> &[fes::KeyBlock] {
         &self.keyblocks

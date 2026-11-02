@@ -209,6 +209,12 @@ pub struct FesObject {
     focus: Option<fes::ObjectReference>,
     pressed: Option<fes::ObjectReference>,
     input_event: Option<InputEvent>,
+    control_event: Option<ControlEvent>,
+}
+
+struct ControlEvent {
+    cursor: usize,
+    target: Option<fes::ObjectReference>,
 }
 
 struct InputEvent {
@@ -264,6 +270,7 @@ impl FesObject {
             focus: None,
             pressed: None,
             input_event: None,
+            control_event: None,
         }
     }
 
@@ -447,6 +454,74 @@ impl FesObject {
         self.pending = None;
         self.effects(host);
         Ok(true)
+    }
+
+    fn control_event(
+        &mut self,
+        command: &Command,
+        host: &mut dyn Host,
+        budget: usize,
+    ) -> Result<bool> {
+        if self.control_event.is_none() {
+            self.update_pointer_values(host)?;
+            self.control_event = Some(ControlEvent {
+                cursor: 0,
+                target: None,
+            });
+            self.pending = Some(*command);
+        }
+        for _ in 0..budget.max(1) {
+            if self.control_event.as_ref().unwrap().target.is_none() {
+                let cursor = self.control_event.as_ref().unwrap().cursor;
+                let Some(record) = self
+                    .scene
+                    .as_ref()
+                    .and_then(|scene| scene.objects().media_records().get(cursor))
+                else {
+                    self.control_event = None;
+                    self.pending = None;
+                    self.effects(host);
+                    return Ok(true);
+                };
+                let target = record.target().clone();
+                let matched = record.kind() == "SLIDER"
+                    && record.task_id() == Some(command.sender)
+                    && self
+                        .scene
+                        .as_ref()
+                        .unwrap()
+                        .objects()
+                        .lookup(&target.name, target.bank)
+                        .is_some();
+                if !matched {
+                    self.control_event.as_mut().unwrap().cursor += 1;
+                    continue;
+                }
+                if command.code == 27 {
+                    self.scene
+                        .as_mut()
+                        .unwrap()
+                        .notify_slider_position(&target, command.data[1] as i32)?;
+                }
+                self.control_event.as_mut().unwrap().target = Some(target);
+            }
+            let target = self.control_event.as_ref().unwrap().target.clone().unwrap();
+            let event = if command.code == 27 {
+                8
+            } else {
+                u32::from(command.data[1] == 0)
+            };
+            if services(host)?
+                .dispatch_event(self.scene.as_mut().unwrap(), Some(&target), event, budget)?
+                .is_none()
+            {
+                return Ok(false);
+            }
+            let state = self.control_event.as_mut().unwrap();
+            state.target = None;
+            state.cursor += 1;
+        }
+        Ok(false)
     }
 
     fn begin_input_event(
@@ -883,6 +958,11 @@ impl TaskObject for FesObject {
         self.synchronize(host);
         let b = command.data[1];
         match command.code {
+            27 | 28 => {
+                if !self.control_event(command, host, budget)? {
+                    return Ok(CommandOutcome::RESUME);
+                }
+            }
             9 | 10 | 64 | 65 => {
                 if !self.input_event(command, output, host, budget)? {
                     return Ok(CommandOutcome::RESUME);
@@ -1035,7 +1115,7 @@ impl TaskObject for FesObject {
                 self.effects(host);
                 return Ok(CommandOutcome::finished(true));
             }
-            19 | 27 | 28 | 177 | 178 | 341..=347 | 349..=358 => {
+            19 | 177 | 178 | 341..=347 | 349..=358 => {
                 return Err(Error::new(0, "FES 专属命令尚未接入"));
             }
             _ => {
