@@ -47,7 +47,7 @@ impl MediaRecord {
     pub fn image_handle(&self) -> Option<u32> {
         self.image
     }
-    /// 装载记录创建的 BUTTON 或 SLIDER 编号，其他类型返回 None。
+    /// 装载记录创建的 BUTTON、SLIDER 或 SCROLL2 编号，其他类型返回 None。
     pub fn task_id(&self) -> Option<u32> {
         self.task_id
     }
@@ -232,6 +232,14 @@ impl Object {
             .iter()
             .copied()
             .filter(|_| matches!(self.state, ObjectState::Slider(_)))
+    }
+
+    /// 装载记录所创建的全部 SCROLL2 任务。
+    pub fn scroll2_task_ids(&self) -> impl Iterator<Item = u32> + '_ {
+        self.input_tasks
+            .iter()
+            .copied()
+            .filter(|_| matches!(self.state, ObjectState::Scroll2(_)))
     }
 
     /// IMAGE 独立持有的原始图像数据；零表示没有来源，查询不增加持有。

@@ -1212,7 +1212,7 @@ fn advance_control_event(
                 return Ok(true);
             };
             let target = record.target().clone();
-            let matched = record.kind() == "SLIDER"
+            let matched = matches!(record.kind(), "SLIDER" | "SCROLL2")
                 && record.task_id() == Some(command.sender)
                 && scene
                     .as_ref()

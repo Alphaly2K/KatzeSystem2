@@ -98,7 +98,7 @@ impl Objects {
         )
     }
 
-    /// 当前网格无目标时，先调整关联 SLIDER；未消费再查相邻网格。
+    /// 当前网格无目标时，先调整关联滑动控件；未消费再查相邻网格。
     /// 范围读取会消费其待更新请求，包括方向不匹配或数值到达边界的情况。
     pub fn navigate_button_with_controls(
         &mut self,
@@ -112,7 +112,7 @@ impl Objects {
             Search::Target(target) => Ok(NavigationOutcome::Target(target)),
             Search::Unhandled => Ok(NavigationOutcome::Unhandled),
             Search::Control(handle) => {
-                if self.adjust_linked_slider(handle, direction) {
+                if self.adjust_linked_control(handle, direction) {
                     return Ok(NavigationOutcome::Handled);
                 }
                 Ok(self
@@ -122,7 +122,7 @@ impl Objects {
         }
     }
 
-    fn adjust_linked_slider(&mut self, handle: u32, direction: usize) -> bool {
+    fn adjust_linked_control(&mut self, handle: u32, direction: usize) -> bool {
         let ObjectState::Button(button) = &self.get(handle).unwrap().state else {
             unreachable!()
         };
@@ -130,8 +130,10 @@ impl Objects {
         let Some(handle) = self.lookup(&control.name, control.bank) else {
             return false;
         };
-        let ObjectState::Slider(slider) = &mut self.get_mut(handle).unwrap().state else {
-            return false;
+        let (slider, page) = match &mut self.get_mut(handle).unwrap().state {
+            ObjectState::Slider(slider) => (slider.as_mut(), 0),
+            ObjectState::Scroll2(scroll) => (&mut scroll.control, scroll.page),
+            _ => return false,
         };
         slider.updates.range = false;
         let axis = if slider.vertical != 0 { 0 } else { 2 };
@@ -143,7 +145,7 @@ impl Objects {
             return false;
         };
         let next = slider.position.wrapping_add(delta);
-        if next < slider.range[0] || next > slider.range[1] {
+        if next < slider.range[0] || next > slider.range[1].wrapping_sub(page) {
             return false;
         }
         slider.set_position(next, 1);

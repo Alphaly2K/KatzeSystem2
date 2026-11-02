@@ -16,12 +16,14 @@ use std::{
 };
 
 type Queries = Rc<RefCell<Vec<(u32, u32, bool)>>>;
+type ControlCalls = Rc<RefCell<Vec<(Command, Vec<u8>)>>>;
 type TestRuntime = Runtime<ButtonFactory<FesFactory<GraphicsFactory<InputFactory<Factory>>>>>;
 
 struct ButtonFactory<F> {
     fallback: F,
     fail: Rc<Cell<bool>>,
     attempts: Rc<Cell<u32>>,
+    scroll: Option<ControlCalls>,
 }
 impl<F: ObjectFactory> ObjectFactory for ButtonFactory<F> {
     fn create(&mut self, id: u32, kind: u32, name: &[u8]) -> Result<Box<dyn TaskObject>> {
@@ -30,6 +32,16 @@ impl<F: ObjectFactory> ObjectFactory for ButtonFactory<F> {
         }
         if kind == kind::BUTTON && self.fail.get() {
             return Err(Error::new(0, "合成按钮创建失败"));
+        }
+        if kind == kind::SCROLL2 {
+            if let Some(calls) = &self.scroll {
+                assert_eq!(name, b"FE scroll2");
+                return Ok(Box::new(ScrollTransport {
+                    id,
+                    base: BaseObject::new(),
+                    calls: calls.clone(),
+                }));
+            }
         }
         self.fallback.create(id, kind, name)
     }
@@ -203,6 +215,7 @@ fn setup(budget: usize, source: &[u8]) -> Setup {
         ButtonFactory {
             fail: fail_button.clone(),
             attempts: button_attempts.clone(),
+            scroll: None,
             fallback: FesFactory {
                 fallback: GraphicsFactory {
                     fallback: InputFactory {
@@ -1756,5 +1769,187 @@ fn linked_slider_callbacks_finish_inside_media_updates_and_preserve_main_waits()
             assert_eq!(pixels.pixel(3, 0), Some(0xff000000));
             assert_eq!(pixels.pixel(4, 0), Some(0));
         }
+    }
+}
+
+struct ScrollTransport {
+    id: u32,
+    base: BaseObject,
+    calls: ControlCalls,
+}
+
+impl TaskObject for ScrollTransport {
+    fn control(&self) -> &Control {
+        self.base.control()
+    }
+    fn clock(&self) -> &TaskClock {
+        self.base.clock()
+    }
+    fn state(&mut self) -> (&mut Control, &mut TaskClock) {
+        self.base.state()
+    }
+    fn interpreter(&self) -> Option<&Interpreter> {
+        None
+    }
+    fn interpreter_mut(&mut self) -> Option<&mut Interpreter> {
+        None
+    }
+    fn set_creation_context(&mut self, context: &[u8]) -> Result<()> {
+        self.base.set_creation_context(context)
+    }
+    fn update_body(&mut self, _: &mut dyn Host, _: u32, _: usize) -> Result<bool> {
+        Ok(true)
+    }
+    fn dispatch_command(
+        &mut self,
+        kind: u32,
+        command: &Command,
+        output: &mut u32,
+        host: &mut dyn Host,
+        budget: usize,
+    ) -> Result<CommandOutcome> {
+        self.dispatch_command_with_buffers(
+            kind,
+            command,
+            &mut CommandBuffers::default(),
+            output,
+            host,
+            budget,
+        )
+    }
+    fn dispatch_command_with_buffers(
+        &mut self,
+        kind: u32,
+        command: &Command,
+        buffers: &mut CommandBuffers<'_>,
+        output: &mut u32,
+        host: &mut dyn Host,
+        budget: usize,
+    ) -> Result<CommandOutcome> {
+        if !(374..=382).contains(&command.code) {
+            return self
+                .base
+                .dispatch_command(kind, command, output, host, budget);
+        }
+        self.calls.borrow_mut().push((
+            *command,
+            buffers.data1.as_deref().unwrap_or_default().to_vec(),
+        ));
+        if command.code == 377 && command.data[0] != 0 {
+            let mut value = 0;
+            assert!(host.dispatch_task_command(
+                Command {
+                    target: command.sender,
+                    sender: self.id,
+                    code: 27,
+                    data: [0, command.data[1], 1],
+                },
+                &mut CommandBuffers::default(),
+                &mut value
+            )?);
+        }
+        Ok(CommandOutcome::finished(false))
+    }
+    fn enqueue_message(&mut self, message: [u32; 4]) -> Result<()> {
+        self.base.enqueue_message(message)
+    }
+    fn dispatch_message(
+        &mut self,
+        message: &mut [u32; 4],
+        output: &mut u32,
+        host: &mut dyn Host,
+        budget: usize,
+    ) -> Result<bool> {
+        self.base.dispatch_message(message, output, host, budget)
+    }
+    fn request_delete(&mut self, host: &mut dyn Host, budget: usize) -> Result<bool> {
+        self.base.request_delete(host, budget)
+    }
+}
+
+#[test]
+fn scroll2_media_routes_pages_and_synchronous_notifications_and_restores_sleep_state() {
+    let source = b"#KEYBLOCK 1\n0 1,1\n#DEFINE\nBUTTON nav\nSCROLL2 bar\n#OBJECT SIZE POS KEYBLOCK PRI\nnav 2,2 0,3 0,0,0 5\n#OBJECT DISP ENABLE\nbar 1 7\n#START\nnav attach bar\nbar page 0 9 3\nbar pos 2\nwait 1000\n$6=$6+1\nbar getpos 0 1 2\nwait 9999\n#bar.SCRL_P\n@ getpos 0 1 2\n$3=$3+1\n@ pos 4\n@ page 0 12 5\n#bar.FOCUS\n$7=$7+1\n#bar.UNFOCUS\n$7=$7+10\n";
+    for budget in [1, 4096] {
+        let Setup {
+            mut runtime,
+            pointer,
+            ..
+        } = setup(budget, source);
+        let calls = ControlCalls::default();
+        runtime.factory_mut().scroll = Some(calls.clone());
+        let (fes, _, children) = start_button_scene(&mut runtime);
+        let nav = children
+            .iter()
+            .copied()
+            .find(|&id| runtime.tree().node(id).unwrap().kind == kind::BUTTON)
+            .unwrap();
+        let scroll = children
+            .into_iter()
+            .find(|&id| runtime.tree().node(id).unwrap().kind == kind::SCROLL2)
+            .unwrap();
+        let range = calls
+            .borrow()
+            .iter()
+            .find(|(command, _)| command.code == 376)
+            .unwrap()
+            .1
+            .clone();
+        assert_eq!(range, [0i32, 9, 3].map(i32::to_le_bytes).concat());
+        calls.borrow_mut().clear();
+        pointer.set(PointerSample {
+            position: [1, 4],
+            active: 1,
+        });
+        runtime.input_state_mut(1).unwrap().pointer_mut().active = 1;
+        runtime.update_input_selection(1, Some([1, 4])).unwrap();
+        assert_eq!(send(&mut runtime, nav, 4, 7, 1), 0);
+        assert_eq!(&runtime.numbers().shared[..4], &[3, 0, 0, 1]);
+        assert_eq!(calls.borrow().len(), 1);
+        assert_eq!(calls.borrow()[0].0.code, 377);
+        assert_eq!(calls.borrow()[0].0.data, [1, 3, 1]);
+        calls.borrow_mut().clear();
+        runtime.update(102, 1).unwrap();
+        assert_eq!(calls.borrow().len(), 1);
+        assert_eq!(calls.borrow()[0].0.code, 376);
+        assert_eq!(
+            calls.borrow()[0].1,
+            [0i32, 12, 5].map(i32::to_le_bytes).concat()
+        );
+        runtime.update(1200, 1).unwrap();
+        assert_eq!(&runtime.numbers().shared[..7], &[4, 0, 0, 1, 0, 0, 1]);
+        calls.borrow_mut().clear();
+        send(&mut runtime, fes, 348, 0, 1);
+        for value in [7, 0] {
+            runtime
+                .dispatch_command(
+                    0,
+                    Command {
+                        target: fes,
+                        sender: scroll,
+                        code: 28,
+                        data: [0xabcdef01, value, 1],
+                    },
+                )
+                .unwrap();
+        }
+        assert_eq!(runtime.numbers().shared[7], 11);
+        send(&mut runtime, fes, 348, 0, 0);
+        assert_eq!(
+            calls
+                .borrow()
+                .iter()
+                .map(|(command, _)| (command.code, command.data))
+                .collect::<Vec<_>>(),
+            [
+                (375, [0, 0, 1]),
+                (379, [0, 0, 1]),
+                (375, [0, 7, 1]),
+                (379, [0, 1, 1]),
+            ]
+        );
+        send(&mut runtime, fes, 3, 0, 0);
+        runtime.update(1201, 1).unwrap();
+        assert!(runtime.object(scroll).is_none());
     }
 }

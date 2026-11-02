@@ -97,3 +97,68 @@ fn scroll2_scripts_keep_page_length_queries_and_load_traversal_independent() {
         }
     }
 }
+
+#[test]
+fn linked_scroll2_navigation_subtracts_pages_with_wrapping_and_consumes_range_requests() {
+    use katze_system2::runtime::fes::NavigationOutcome;
+    for (range, page, position, direction, expected) in [
+        ([0, 9], 3, 5, 3, Some(6)),
+        ([0, 9], 3, 6, 3, None),
+        ([0, 3], -3, 3, 3, Some(4)),
+        ([0, i32::MIN], 1, i32::MAX - 1, 3, Some(i32::MAX)),
+        ([i32::MIN, i32::MAX], -1, i32::MIN + 1, 2, Some(i32::MIN)),
+        ([0, 9], 3, 5, 0, None),
+    ] {
+        let mut objects = Objects::new(HandleAllocator::default()).unwrap();
+        for (kind, name) in [("SCROLL2", "bar"), ("BUTTON", "nav")] {
+            objects
+                .define(&fes::ObjectDefinition {
+                    kind,
+                    name: name.into(),
+                    banks: 1,
+                })
+                .unwrap();
+        }
+        let nav = ObjectReference {
+            name: "nav".into(),
+            bank: 0,
+        };
+        let handle = objects.lookup(&nav.name, nav.bank).unwrap();
+        let ObjectState::Button(button) = &mut objects.get_mut(handle).unwrap().state else {
+            panic!()
+        };
+        button.keyblock = [0; 3];
+        button
+            .set_control(Some(&ObjectReference {
+                name: "bar".into(),
+                bank: 0,
+            }))
+            .unwrap();
+        let handle = objects.lookup("bar", 0).unwrap();
+        let ObjectState::Scroll2(scroll) = &mut objects.get_mut(handle).unwrap().state else {
+            panic!()
+        };
+        scroll.set_page(range, page);
+        scroll.control.position = position;
+        scroll.control.enabled = 0;
+        let blocks = [fes::KeyBlock {
+            size: [1, 1],
+            neighbors: [-1; 4],
+        }];
+        assert_eq!(
+            objects
+                .navigate_button_with_controls(&blocks, &nav, direction)
+                .unwrap(),
+            if expected.is_some() {
+                NavigationOutcome::Handled
+            } else {
+                NavigationOutcome::Unhandled
+            }
+        );
+        let scroll = control(&objects, 0);
+        assert_eq!(scroll.control.position, expected.unwrap_or(position));
+        assert!(!scroll.control.updates.range);
+        assert_eq!(scroll.control.updates.position, expected.is_some());
+        assert_eq!(scroll.control.notification, i32::from(expected.is_some()));
+    }
+}

@@ -1,4 +1,4 @@
-use super::{ObjectState, Objects};
+use super::{ObjectState, Objects, slider::ControlKind};
 use crate::{
     Error, Result,
     graphics::Rect,
@@ -24,11 +24,8 @@ impl<F: ObjectFactory> Store<'_, F> {
             return Ok(());
         };
         let object = objects.get(handle).unwrap();
-        if matches!(object.state, ObjectState::Scroll2(_)) {
-            return Err(Error::new(0, "FES SCROLL2 下层任务尚未接入"));
-        }
         let button = matches!(object.state, ObjectState::Button(_));
-        let slider = matches!(object.state, ObjectState::Slider(_));
+        let control = ControlKind::of(&object.state);
         if object.state.image().is_some() && record.image.is_none() {
             let wrapper = self.resources.images.create_empty(owner)?;
             let object = objects.get_mut(handle).unwrap();
@@ -36,11 +33,12 @@ impl<F: ObjectFactory> Store<'_, F> {
             object.images.push(wrapper);
             objects.update_order[index].image = Some(wrapper);
         }
-        if (button || slider) && objects.update_order[index].task_id.is_none() {
+        if (button || control.is_some()) && objects.update_order[index].task_id.is_none() {
             let (kind, name) = if button {
                 (kind::BUTTON, b"FE Button".as_slice())
             } else {
-                (kind::SLIDER, b"FE slider".as_slice())
+                let protocol = control.unwrap();
+                (protocol.task_kind(), protocol.task_name())
             };
             let task = create_object(self.reborrow(), owner, kind, name, b"")?;
             let object = objects.get_mut(handle).unwrap();

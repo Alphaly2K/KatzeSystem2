@@ -89,8 +89,8 @@ impl<F: ObjectFactory> Store<'_, F> {
         if matches!(object.state, ObjectState::Button(_)) {
             return self.update_fes_button(owner, objects, handle, image);
         }
-        if matches!(object.state, ObjectState::Slider(_)) {
-            return self.update_fes_slider(owner, objects, handle);
+        if object.state.control().is_some() {
+            return self.update_fes_control(owner, objects, handle);
         }
         if object.state.plane().is_none() {
             return match object.state {
@@ -254,8 +254,8 @@ impl<F: ObjectFactory> Store<'_, F> {
             pending.extend(object.children());
             if matches!(object.state, ObjectState::Button(_)) {
                 self.check_fes_button_binding(owner, object.task_id)?;
-            } else if matches!(object.state, ObjectState::Slider(_)) {
-                self.check_fes_slider_binding(owner, object.task_id)?;
+            } else if let Some(protocol) = super::slider::ControlKind::of(&object.state) {
+                self.check_fes_control_binding(owner, object.task_id, protocol)?;
             } else {
                 self.check_fes_plane_binding(owner, object.task_id)?;
             }

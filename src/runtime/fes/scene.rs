@@ -510,19 +510,20 @@ impl<F: ObjectFactory> Store<'_, F> {
                     None,
                 )?;
             }
-            if let super::ObjectState::Slider(slider) = &object.state {
+            if let Some(slider) = object.state.control() {
+                let protocol = super::slider::ControlKind::of(&object.state).unwrap();
                 if record.task_id.is_some() {
                     self.fes_command(
                         owner,
                         object.task_id,
-                        367,
+                        protocol.command(367),
                         [0, if sleeping { 0 } else { slider.enabled as u32 }, 1],
                         None,
                     )?;
                     self.fes_command(
                         owner,
                         object.task_id,
-                        366,
+                        protocol.command(366),
                         [0, if sleeping { 0 } else { slider.display as u32 }, 1],
                         None,
                     )?;

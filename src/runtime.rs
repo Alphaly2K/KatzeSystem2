@@ -37,6 +37,7 @@ pub mod kind {
     pub const SOUND: u32 = 13;
     pub const IMAGE_LIST: u32 = 15;
     pub const FES: u32 = 34;
+    pub const SCROLL2: u32 = 41;
     pub const SLIDER: u32 = 42;
 }
 
