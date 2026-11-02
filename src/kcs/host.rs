@@ -52,6 +52,7 @@ pub struct HostState {
     /// 消息记录生成显示时间时使用的全局比例；None 表示尚无时间上下文。
     pub message_time_scale: Option<u32>,
     pub message_defaults: Option<crate::message::MessageDefaults>,
+    pub system_settings: Option<crate::settings::SystemSettings>,
     /// 外层输入宿主提供的当前逻辑画布坐标；保留画布外的值。
     pub pointer_position: [i32; 2],
     pub memory_copy_mode: MemoryCopyMode,
@@ -177,6 +178,30 @@ pub(crate) fn call_native(
     arguments: &[u8],
     vm: &mut Interpreter,
 ) -> Result<NativeReturn> {
+    if matches!(index, 359 | 360) {
+        let count = if index == 359 { 4 } else { 3 };
+        if arguments.len() != count * 4 {
+            return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+        }
+        for (index, address) in arguments.chunks_exact(4).enumerate() {
+            let address = u32::from_le_bytes(address.try_into().unwrap());
+            // 原地址解析器对区外起点返回空指针；地址零仍指向普通区首字节。
+            if vm.read(address, 1).is_err() {
+                continue;
+            }
+            let block = host
+                .system_settings
+                .as_mut()
+                .ok_or_else(|| Error::new(vm.pc, "宿主未配置全局设置"))?
+                .block_mut(index);
+            if count == 4 {
+                vm.write(address, block)?;
+            } else {
+                block.copy_from_slice(vm.read(address, block.len())?);
+            }
+        }
+        return Ok(NativeReturn::Continue);
+    }
     if matches!(index, 0 | 2 | 3) {
         return Ok(NativeReturn::Continue);
     }

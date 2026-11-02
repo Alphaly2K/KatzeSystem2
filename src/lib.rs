@@ -15,6 +15,7 @@ pub mod message;
 mod read;
 pub mod resource;
 pub mod runtime;
+pub mod settings;
 pub mod task;
 mod text;
 
