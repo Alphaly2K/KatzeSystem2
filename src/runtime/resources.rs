@@ -15,9 +15,32 @@ pub(super) struct Resources {
     pub input_device: Option<Box<dyn crate::input::InputDevice>>,
     pub input_coordinates: crate::input::CoordinateMap,
     pub input_pointer_control: bool,
+    pub motion_host: crate::kcs::MotionHost,
+    motion_programs: std::collections::BTreeMap<String, crate::kcs::Program>,
 }
 
 impl Resources {
+    pub fn load_motion(&mut self, name: &[u8]) -> Result<Option<crate::kcs::Program>> {
+        let name = &name[..name
+            .iter()
+            .position(|&byte| byte == 0)
+            .unwrap_or(name.len())];
+        let key = crate::text::cp932(name)?.to_uppercase();
+        if let Some(program) = self.motion_programs.get(&key) {
+            return Ok(Some(program.clone()));
+        }
+        let services = self
+            .services
+            .as_deref_mut()
+            .ok_or_else(|| Error::new(0, "运行时未配置 FES 运动资源服务"))?;
+        let Some(bytes) = services.read(name, crate::resource::ResourceMode::LooseFirst)? else {
+            return Ok(None);
+        };
+        let program = crate::kcs::Program::parse(&bytes)?;
+        self.motion_programs.insert(key, program.clone());
+        Ok(Some(program))
+    }
+
     pub fn with_handles(handles: crate::HandleAllocator) -> Self {
         Self {
             images: Images::with_handles(handles.clone()),

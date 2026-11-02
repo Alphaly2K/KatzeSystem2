@@ -66,6 +66,7 @@ fn object_events_preserve_waits_queue_exits_and_transfer_only_the_main_cursor() 
         for (body, expected, transferred, exit) in [
             ("$1=1\n", 1, false, None),
             ("$1=1\nwait 5\n$1=99\n", 1, false, None),
+            ("$1=1\ndecode\n$1=99\n", 1, false, None),
             ("$1=1\nexit 9\n$1=99\n", 1, false, Some(9)),
             ("$1=1\nnext DEST\n#DEST\n$1=99\nwait 5\n", 1, true, None),
             ("call SUB\n$1=$1*10+2\n#SUB\n$1=3\nwait 5\n", 3, false, None),
@@ -171,6 +172,7 @@ fn system_blocks_preserve_the_main_wait_and_stop_at_local_wait_or_break() {
         ("$1=$1*10+1\n", 1, 0),
         ("call SUB\n$1=$1*10+1\n#SUB\n$1=$1*10+3\n", 31, 0),
         ("$1=1\nwait 5\n$1=12\n", 1, 0),
+        ("$1=1\ndecode\n$1=12\n", 1, 0),
         ("$1=1\nbreak 7\n$1=12\n", 1, 7),
     ];
     for budget in [1, 4096] {
@@ -266,7 +268,7 @@ fn system_blocks_between_exit_notifications_preserve_the_main_cursor() {
 #[test]
 fn system_transfers_local_waits_and_exits_keep_the_native_call_stack_effects() {
     for budget in [1, 4096] {
-        for (operation, notification) in [("wait 5", None), ("exit 9", Some(9))] {
+        for (operation, notification) in [("wait 5", None), ("exit 9", Some(9)), ("decode", None)] {
             let source = format!(
                 "#START\nwait 77\n$7=$7+1\n#_FES_SLEEP_\ncall SUB\n$1=$1*10+1\n#SUB\n$1=$1*10+3\n{operation}\n$1=999\n"
             );

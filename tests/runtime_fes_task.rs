@@ -823,15 +823,12 @@ fn system_key_retries_keep_completed_matches_and_default_only_responses() {
                         .contains("媒体读取失败")
                 );
                 assert_eq!(runtime.numbers().shared[0], 12);
-                assert_eq!(runtime.numbers().shared[2], i32::from(!decode.is_empty()));
+                assert_eq!(runtime.numbers().shared[2], 0);
             }
             fail_media.set(false);
             assert_eq!(runtime.dispatch_command(0, press).unwrap(), 1);
             assert_eq!(runtime.numbers().shared[0], 12);
-            assert_eq!(
-                runtime.numbers().shared[2],
-                2 * i32::from(!decode.is_empty())
-            );
+            assert_eq!(runtime.numbers().shared[2], 0);
             assert_eq!(send(&mut runtime, buttons[0], 4, 12, 0), 1);
             assert_eq!(runtime.numbers().shared[1], 0);
             assert_eq!(send(&mut runtime, buttons[0], 4, 0, 0), 1);
@@ -1080,7 +1077,7 @@ fn focus_lock_preserves_pressed_targets_after_unfocus_and_missing_selections() {
 
 #[test]
 fn button_events_keep_pressed_banks_and_defer_touch_media_refresh() {
-    let source = b"#DEFINE\nBUTTON item[2]\nCIMAGE fill\n#OBJECT SIZE PRI ENABLE DEFAULT POS\nitem 2,2 5 21 DEFAULT 0,0\nitem[1] 2,2 6 21 DEFAULT 4,0\n#OBJECT SIZE COLOR PRI POS DISP\nfill 2,2 0xff112233 30 0,3 1\n#START\nwait 1000\n$7=_CLICK_L_\nwait 1000\n#DEFAULT.PUSH_L\n$0=$0*10+1\n#item.PUSH_L\n$0=$0*10+2\n$1=@\n$5=(_CLICK_L_==item[@])\n#item.RELEASE_L\n$2=@+10\n@ enable 0\n#item.FOCUS\n$3=$3*10+@+1\n#item.TOUCH\n$4=$4+1\nfill disp 0\n";
+    let source = b"#DEFINE\nBUTTON item[2]\nCIMAGE fill\n#OBJECT SIZE PRI ENABLE DEFAULT POS\nitem 2,2 5 21 DEFAULT 0,0\nitem[1] 2,2 6 21 DEFAULT 4,0\n#OBJECT SIZE COLOR PRI POS DISP\nfill 2,2 0xff112233 30 0,3 1\n#START\nwait 1000\n$7=_CLICK_L_\nwait 1000\n#DEFAULT.PUSH_L\n$0=$0*10+1\n$6=1\ndecode\n$6=99\n#item.PUSH_L\n$0=$0*10+2\n$1=@\n$5=(_CLICK_L_==item[@])\n#item.RELEASE_L\n$2=@+10\n@ enable 0\n#item.FOCUS\n$3=$3*10+@+1\n#item.TOUCH\n$4=$4+1\nfill disp 0\n";
     for budget in [1, 4096] {
         let Setup {
             mut runtime,
@@ -1098,6 +1095,7 @@ fn button_events_keep_pressed_banks_and_defer_touch_media_refresh() {
         assert_eq!(runtime.numbers().shared[3], 1);
         assert_eq!(send(&mut runtime, buttons[0], 4, 0, 1), 0);
         assert_eq!(&runtime.numbers().shared[..2], &[12, 0]);
+        assert_eq!(runtime.numbers().shared[6], 1);
         assert_eq!(runtime.numbers().shared[5], 1);
         // 只发布新焦点；UNFOCUS 会另行清除保存的按下目标。
         send(&mut runtime, fes, 64, buttons[1], 1);
@@ -1201,7 +1199,7 @@ fn default_only_button_events_respond_and_retry_media_without_repeating_script_e
             fail_media.set(false);
             assert_eq!(send(&mut runtime, button, 4, 0, 1), 1);
             assert_eq!(runtime.numbers().shared[0], 1);
-            assert_eq!(runtime.numbers().shared[2], i32::from(!decode.is_empty()));
+            assert_eq!(runtime.numbers().shared[2], 0);
             assert_eq!(
                 reads
                     .borrow()

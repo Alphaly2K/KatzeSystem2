@@ -3,7 +3,7 @@ use crate::{
     Error, HandleAllocator, Result, Step, fes,
     runtime::{ObjectFactory, Runtime, Store},
 };
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 
 /// 一份预先装载的 FES 执行状态；调用方绑定共享列表并在所属任务的主体时点推进。
 pub struct Scene {
@@ -21,22 +21,33 @@ pub struct Scene {
     input: super::input::SystemInput,
     system_block: Option<String>,
     object_event: Option<ObjectEvent>,
-    handler_updates: Option<usize>,
+    deferred_decodes: usize,
     keyblocks: Vec<fes::KeyBlock>,
     media_preparation: Option<usize>,
     media_prepared: usize,
+    motion_names: BTreeMap<Vec<u8>, Vec<u8>>,
+    motion_call: Option<MotionCall>,
 }
 
 struct Invocation {
     now: u32,
     updates: Option<(usize, usize)>,
     resume_script: bool,
+    motions_done: bool,
+    media_passes: usize,
 }
 
 struct ObjectEvent {
     target: Option<fes::ObjectReference>,
     event: u32,
     handled: bool,
+}
+
+struct MotionCall {
+    name: Vec<u8>,
+    bank: i64,
+    end: i64,
+    prepared: Option<(u32, Vec<f32>)>,
 }
 
 enum Notification {
@@ -81,10 +92,12 @@ impl Scene {
             input: super::input::SystemInput::default(),
             system_block: None,
             object_event: None,
-            handler_updates: None,
+            deferred_decodes: 0,
             keyblocks: Vec::new(),
             media_preparation: None,
             media_prepared: 0,
+            motion_names: BTreeMap::new(),
+            motion_call: None,
         })
     }
 
@@ -322,6 +335,7 @@ impl Scene {
         let invocation = self.invocation.as_mut().unwrap();
         invocation.updates = Some((self.objects.update_order.len(), 0));
         invocation.resume_script = resume_script;
+        invocation.media_passes = 1 + std::mem::take(&mut self.deferred_decodes);
     }
 }
 
@@ -499,7 +513,7 @@ impl<F: ObjectFactory> Store<'_, F> {
             }
             scene.system_block = Some(name.to_owned());
         }
-        if !self.run_fes_handler(owner, scene)? {
+        if !self.run_fes_handler(scene)? {
             return Ok(false);
         }
         scene.system_block = None;
@@ -573,32 +587,25 @@ impl<F: ObjectFactory> Store<'_, F> {
                 handled: scene.interpreter.object_handler_exists(),
             });
         }
-        if !self.run_fes_handler(owner, scene)? {
+        if !self.run_fes_handler(scene)? {
             return Ok(None);
         }
         Ok(Some(scene.object_event.take().unwrap().handled))
     }
 
-    fn run_fes_handler(&mut self, owner: u32, scene: &mut Scene) -> Result<bool> {
+    fn run_fes_handler(&mut self, scene: &mut Scene) -> Result<bool> {
         for _ in 0..self.budget.max(1) {
-            if let Some(cursor) = &mut scene.handler_updates {
-                if *cursor < scene.objects.update_order.len() {
-                    self.update_fes_record(owner, &mut scene.objects, *cursor)?;
-                    *cursor += 1;
-                } else {
-                    scene.handler_updates = None;
-                    scene.interpreter.resume();
-                }
-                continue;
-            }
             match scene.interpreter.run(self.numbers, 1)? {
                 Step::Yield => (),
                 Step::Event(fes::Event::Wait(_)) => scene.interpreter.finish_event_handler()?,
                 Step::Event(fes::Event::Command(line)) => {
                     let args = scene.interpreter.parameters(&line.bytes, self.numbers)?;
                     if args.first().is_some_and(|name| name == b"decode") {
-                        scene.handler_updates = Some(0);
-                        continue;
+                        if scene.deferred_decodes == crate::read::MAX_ITEMS {
+                            return Err(Error::new(line.offset, "FES 提交请求数量超过上限"));
+                        }
+                        scene.deferred_decodes += 1;
+                        scene.interpreter.finish_event_handler()?;
                     } else if let Some(stop) =
                         scene.navigation_command(&args, line.offset, self.numbers)?
                     {
@@ -633,7 +640,10 @@ impl<F: ObjectFactory> Store<'_, F> {
                     scene.interpreter.finish_event_handler()?;
                 }
                 Step::Event(fes::Event::Subcommand(call)) => {
-                    return Err(Error::new(call.offset, "FES 事件运动服务尚未接入"));
+                    if !self.run_fes_subcommand(scene, &call)? {
+                        return Ok(false);
+                    }
+                    scene.interpreter.resume();
                 }
                 _ => return Err(Error::new(0, "FES 事件出现未支持的执行状态")),
             }
@@ -645,6 +655,86 @@ impl<F: ObjectFactory> Store<'_, F> {
             }
         }
         Ok(false)
+    }
+
+    fn run_fes_subcommand(
+        &mut self,
+        scene: &mut Scene,
+        call: &fes::SubcommandCall,
+    ) -> Result<bool> {
+        let result = (|| {
+            if scene.motion_call.is_none() {
+                if !scene.motion_names.contains_key(&call.binding.name) {
+                    let services = self
+                        .resources
+                        .services
+                        .as_deref_mut()
+                        .ok_or_else(|| Error::new(0, "运行时未配置 FES 运动资源服务"))?;
+                    let name = services.resolve(b"mot", &call.binding.target)?;
+                    scene.motion_names.insert(call.binding.name.clone(), name);
+                }
+                let (bank, end) = if call.target.bank == -1 {
+                    (0, i64::from(scene.objects.count(&call.target.name)))
+                } else {
+                    (i64::from(call.target.bank), i64::from(call.target.bank) + 1)
+                };
+                scene.motion_call = Some(MotionCall {
+                    name: scene.motion_names[&call.binding.name].clone(),
+                    bank,
+                    end,
+                    prepared: None,
+                });
+            }
+            for _ in 0..self.budget.max(1) {
+                let pending = scene.motion_call.as_ref().unwrap();
+                if pending.bank >= pending.end {
+                    scene.motion_call = None;
+                    return Ok(true);
+                }
+                if pending.prepared.is_none() {
+                    let Some(handle) = scene.objects.lookup(&call.target.name, pending.bank as i32)
+                    else {
+                        scene.motion_call = None;
+                        return Ok(true);
+                    };
+                    let object = scene.objects.get(handle).unwrap();
+                    let context = match &object.state {
+                        super::ObjectState::Base => fes::SubcommandContext::default(),
+                        state => state
+                            .image()
+                            .ok_or_else(|| Error::new(0, "FES 此对象类型的运动属性尚未接入"))?
+                            .subcommand_context(),
+                    };
+                    let parameters = scene.interpreter.subcommand_arguments(
+                        &call.binding,
+                        &call.arguments,
+                        &context,
+                        self.numbers,
+                    )?;
+                    scene.objects.capture_motion_base(handle)?;
+                    scene.motion_call.as_mut().unwrap().prepared = Some((handle, parameters));
+                }
+                let pending = scene.motion_call.as_ref().unwrap();
+                if let Some(program) = self.resources.load_motion(&pending.name)? {
+                    let (handle, parameters) = pending.prepared.as_ref().unwrap();
+                    scene.objects.insert_motion(
+                        *handle,
+                        program,
+                        crate::kcs::MotionState::with_parameters(parameters)?,
+                        0,
+                    )?;
+                }
+                let pending = scene.motion_call.as_mut().unwrap();
+                pending.bank += 1;
+                pending.prepared = None;
+                if pending.bank == pending.end {
+                    scene.motion_call = None;
+                    return Ok(true);
+                }
+            }
+            Ok(false)
+        })();
+        result.map_err(|error: Error| Error::new(call.offset + error.offset, error.message))
     }
 
     pub(in crate::runtime) fn update_fes_scene(
@@ -683,6 +773,8 @@ impl<F: ObjectFactory> Store<'_, F> {
                 now,
                 updates: None,
                 resume_script: false,
+                motions_done: false,
+                media_passes: 0,
             });
             if scene
                 .deadline
@@ -702,11 +794,41 @@ impl<F: ObjectFactory> Store<'_, F> {
             {
                 return Ok(false);
             }
+            let invocation = scene.invocation.as_ref().unwrap();
+            if invocation.updates.is_some() && !invocation.resume_script && !invocation.motions_done
+            {
+                std::mem::swap(
+                    &mut self.host.random,
+                    &mut self.resources.motion_host.random,
+                );
+                let result = scene.objects.update_motions(
+                    invocation.now,
+                    &mut self.resources.motion_host,
+                    self.budget,
+                );
+                std::mem::swap(
+                    &mut self.host.random,
+                    &mut self.resources.motion_host.random,
+                );
+                self.host
+                    .debug_messages
+                    .append(&mut self.resources.motion_host.debug_messages);
+                if !result? {
+                    return Ok(false);
+                }
+                scene.invocation.as_mut().unwrap().motions_done = true;
+            }
             if let Some((count, cursor)) = &mut scene.invocation.as_mut().unwrap().updates {
                 if *cursor < *count {
                     self.update_fes_record(owner, &mut scene.objects, *cursor)?;
                     *cursor += 1;
                 } else {
+                    let invocation = scene.invocation.as_mut().unwrap();
+                    if invocation.media_passes > 1 {
+                        invocation.media_passes -= 1;
+                        invocation.updates.as_mut().unwrap().1 = 0;
+                        continue;
+                    }
                     if scene.invocation.as_ref().unwrap().resume_script {
                         scene.interpreter.resume();
                         scene.invocation.as_mut().unwrap().updates = None;
@@ -755,7 +877,9 @@ impl<F: ObjectFactory> Store<'_, F> {
                             }
                         }
                         fes::Event::Subcommand(call) => {
-                            return Err(Error::new(call.offset, "FES 运动服务尚未接入"));
+                            if !self.run_fes_subcommand(scene, &call)? {
+                                return Ok(false);
+                            }
                         }
                         fes::Event::Wait(duration) => {
                             if duration < 0 {

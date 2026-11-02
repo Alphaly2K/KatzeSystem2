@@ -39,6 +39,12 @@ impl Objects {
         parameters: &[f32],
         delay: u32,
     ) -> Result<u32> {
+        let state = MotionState::with_parameters(parameters)?;
+        self.capture_motion_base(handle)?;
+        self.insert_motion(handle, program, state, delay)
+    }
+
+    pub(super) fn capture_motion_base(&mut self, handle: u32) -> Result<()> {
         self.require_motion_idle()?;
         let object = self
             .get(handle)
@@ -46,7 +52,6 @@ impl Objects {
         if object.state.image().is_none() && !matches!(object.state, ObjectState::Base) {
             return Err(Error::new(0, "FES 此对象类型的运动属性尚未接入"));
         }
-        let state = MotionState::with_parameters(parameters)?;
         let capture = !self.motion_active(handle)?;
         let object = self.get_mut(handle).unwrap();
         if capture {
@@ -54,7 +59,18 @@ impl Objects {
                 object.motions.base_properties = image.motion_properties();
             }
         }
-        object
+        Ok(())
+    }
+
+    pub(super) fn insert_motion(
+        &mut self,
+        handle: u32,
+        program: Program,
+        state: MotionState,
+        delay: u32,
+    ) -> Result<u32> {
+        self.get_mut(handle)
+            .unwrap()
             .motions
             .insert(MotionTask::new(program, state, delay)?, 0)
     }
