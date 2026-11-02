@@ -29,7 +29,10 @@ pub trait Services {
 
 impl<F: ObjectFactory> Services for ObjectHost<'_, F> {
     fn prepare(&mut self, scene: &mut Scene, budget: usize) -> Result<bool> {
-        scene.prepare(self.numbers, budget)
+        let owner = self.host.task_id;
+        let mut store = self.store();
+        store.budget = budget.max(1);
+        store.prepare_fes_scene(owner, scene)
     }
 
     fn update(&mut self, scene: &mut Scene, now: u32, budget: usize) -> Result<bool> {
@@ -285,9 +288,18 @@ impl FesObject {
             return Ok(());
         }
         self.update_pointer_values(host)?;
+        if self.scene.as_ref().is_some_and(|scene| {
+            scene.objects().update_order().any(|handle| {
+                let object = scene.objects().get(handle).unwrap();
+                matches!(object.state, super::ObjectState::Button(_))
+                    && object.task_id() == Some(command.data[0])
+            })
+        }) {
+            return Err(Error::new(0, "FES BUTTON 对象事件尚未接入"));
+        }
         *output = 0;
         let key = command.data[1];
-        // 当前已接入的 FES 类型均不参与按钮编号匹配，事件使用系统命名值。
+        // 未匹配对象的通知使用系统命名值。
         let event = match (command.code, key) {
             (9, 0) => Some(2),
             (9, 1) => Some(3),
@@ -392,6 +404,7 @@ impl FesObject {
                 objects.set_image_list(list, self.clip);
             }
             objects.set_canvas_offset(self.offset);
+            objects.set_input_task(self.input);
         }
         Ok(())
     }

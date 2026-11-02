@@ -18,6 +18,8 @@ pub struct Scene {
     invocation: Option<Invocation>,
     input: super::input::SystemInput,
     system_block: Option<String>,
+    media_preparation: Option<usize>,
+    media_prepared: usize,
 }
 
 struct Invocation {
@@ -59,6 +61,8 @@ impl Scene {
             invocation: None,
             input: super::input::SystemInput::default(),
             system_block: None,
+            media_preparation: None,
+            media_prepared: 0,
         })
     }
 
@@ -125,7 +129,7 @@ impl Scene {
     }
 
     pub fn is_pending(&self) -> bool {
-        self.invocation.is_some() || self.system_block.is_some()
+        self.invocation.is_some() || self.system_block.is_some() || self.media_preparation.is_some()
     }
 
     /// 只处理装载期声明和属性，不进入 START 或推进下层媒体对象。
@@ -195,6 +199,11 @@ impl Scene {
 }
 
 impl<F: ObjectFactory> Runtime<F> {
+    /// 完成装载期声明、属性和下层媒体创建；false 后继续调用，尚未执行 START。
+    pub fn prepare_fes_scene(&mut self, owner: u32, scene: &mut Scene) -> Result<bool> {
+        self.store().prepare_fes_scene(owner, scene)
+    }
+
     /// 同步推进睡眠／唤醒系统块；false 后用同一名称继续预算续跑。
     pub fn dispatch_fes_system_block(
         &mut self,
@@ -212,6 +221,44 @@ impl<F: ObjectFactory> Runtime<F> {
 }
 
 impl<F: ObjectFactory> Store<'_, F> {
+    pub(in crate::runtime) fn prepare_fes_scene(
+        &mut self,
+        owner: u32,
+        scene: &mut Scene,
+    ) -> Result<bool> {
+        if scene.invocation.is_some() || scene.system_block.is_some() {
+            return Err(Error::new(0, "FES 本轮推进尚未完成"));
+        }
+        if self.tree.node(owner).is_none() || scene.owner.is_some_and(|bound| bound != owner) {
+            return Err(Error::new(0, "FES 装载所属任务无效"));
+        }
+        scene.owner = Some(owner);
+        if scene.media_preparation.is_none() && !scene.prepare(self.numbers, self.budget)? {
+            return Ok(false);
+        }
+        self.prepare_fes_media(owner, scene)
+    }
+
+    fn prepare_fes_media(&mut self, owner: u32, scene: &mut Scene) -> Result<bool> {
+        if scene.media_prepared == scene.objects.update_order.len() {
+            return Ok(true);
+        }
+        let cursor = scene.media_preparation.get_or_insert(scene.media_prepared);
+        for _ in 0..self.budget.max(1) {
+            if let Some(reference) = scene.objects.update_order.get(*cursor) {
+                if let Some(handle) = scene.objects.lookup(&reference.name, reference.bank) {
+                    self.prepare_fes_object(owner, &mut scene.objects, handle)?;
+                }
+                *cursor += 1;
+            } else {
+                scene.media_prepared = *cursor;
+                scene.media_preparation = None;
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
     pub(in crate::runtime) fn set_fes_media_sleep(
         &mut self,
         owner: u32,
@@ -227,6 +274,15 @@ impl<F: ObjectFactory> Store<'_, F> {
         }
         for handle in handles {
             let object = scene.objects.get(handle).unwrap();
+            if let super::ObjectState::Button(button) = &object.state {
+                self.fes_command(
+                    owner,
+                    object.task_id,
+                    93,
+                    [0, if sleeping { 0 } else { button.enabled as u32 }, 0],
+                    None,
+                )?;
+            }
             if let Some(image) = object.state.image() {
                 self.fes_command(
                     owner,
@@ -267,7 +323,7 @@ impl<F: ObjectFactory> Store<'_, F> {
         if self.tree.node(owner).is_none() || scene.owner.is_some_and(|bound| bound != owner) {
             return Err(Error::new(0, "FES 系统块所属任务无效"));
         }
-        if scene.invocation.is_some() {
+        if scene.invocation.is_some() || scene.media_preparation.is_some() {
             return Err(Error::new(0, "FES 本轮推进尚未完成"));
         }
         if let Some(pending) = &scene.system_block {
@@ -396,6 +452,12 @@ impl<F: ObjectFactory> Store<'_, F> {
                     return Ok(true);
                 }
                 continue;
+            }
+            if !scene.interpreter.initialization_pending()
+                && scene.media_prepared != scene.objects.update_order.len()
+                && !self.prepare_fes_media(owner, scene)?
+            {
+                return Ok(false);
             }
             match scene.interpreter.run(self.numbers, 1)? {
                 Step::Yield => (),

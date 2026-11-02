@@ -3,10 +3,11 @@ use katze_system2::{
     expression::State,
     fes::{self, ObjectAttributes, ObjectDefinition, ObjectInitialization, ObjectReference},
     graphics::{GraphicsFactory, Projection, Rect, RenderTarget, TextureFilter, Transform},
+    input::InputFactory,
     kcs::ResourceServices,
     resource::ResourceMode,
     runtime::{
-        BaseObject, ObjectFactory, Runtime, TaskObject,
+        BaseObject, ObjectFactory, RootObject, Runtime, TaskObject,
         fes::{ObjectState, Objects},
         kind,
     },
@@ -21,7 +22,7 @@ impl ObjectFactory for Reject {
     }
 }
 
-type TestRuntime = Runtime<GraphicsFactory<Reject>>;
+type TestRuntime = Runtime<GraphicsFactory<InputFactory<Reject>>>;
 
 fn send(runtime: &mut TestRuntime, task: u32, code: u32, a: u32, b: u32) -> u32 {
     runtime
@@ -68,7 +69,9 @@ fn setup() -> (TestRuntime, Objects, u32) {
         kind::ROOT,
         Box::new(BaseObject::new()),
         State::new(0),
-        GraphicsFactory { fallback: Reject },
+        GraphicsFactory {
+            fallback: InputFactory { fallback: Reject },
+        },
     );
     runtime.host_mut().surface_size = [8, 6];
     let drawing = runtime.drawing_mut();
@@ -439,6 +442,192 @@ fn pixel_file(color: u32) -> Vec<u8> {
     bytes.extend(data);
     bytes.extend(control);
     bytes
+}
+
+#[test]
+fn duplicate_button_image_sources_report_the_missing_record_wrapper() {
+    let (mut runtime, _, list) = setup();
+    let program = fes::Program::from_text(
+        b"#DEFINE\nBUTTON item\nBUTTON item\n#OBJECT FILE\nitem sprite\n#START\nwait 1\n",
+    )
+    .unwrap();
+    let mut scene =
+        katze_system2::runtime::fes::Scene::new(program, runtime.host().handle_allocator())
+            .unwrap();
+    scene
+        .objects_mut()
+        .unwrap()
+        .set_image_list(list, Rect::from_xywh(0, 0, 8, 6));
+    let error = runtime.update_fes_scene(0, &mut scene, 100).unwrap_err();
+    assert!(
+        error
+            .message
+            .contains("重复 BUTTON 声明的独立图像包装尚未接入")
+    );
+    assert_eq!(send(&mut runtime, list, 294, 0, 0), 0);
+}
+
+#[test]
+fn fes_buttons_retry_input_after_image_loading_and_update_real_regions_and_pixels() {
+    for budget in [1, 4096] {
+        let mut runtime = Runtime::new(
+            0,
+            kind::ROOT,
+            Box::new(RootObject::new(1, 0)),
+            State::new(1),
+            GraphicsFactory {
+                fallback: InputFactory { fallback: Reject },
+            },
+        );
+        runtime.set_budget(budget, 10000);
+        runtime.host_mut().surface_size = [8, 6];
+        runtime.input_coordinates_mut().logical_size = [8, 6];
+        runtime.drawing_mut().enabled = true;
+        runtime.drawing_mut().active = true;
+        runtime.drawing_mut().target = Some(RenderTarget::new([8, 6]).unwrap());
+        let placeholder = runtime
+            .create(0, kind::IMAGE_LIST, b"input placeholder", b"")
+            .unwrap();
+        assert_eq!(placeholder, 1);
+        let list = runtime.create(0, kind::IMAGE_LIST, b"list", b"").unwrap();
+        assert_eq!(list, 2);
+        send(&mut runtime, list, 285, 8, 6);
+        send(&mut runtime, list, 289, 0, 0);
+        let mut pixels = pixel_file(0xffff_0000);
+        pixels[48..56].fill(0);
+        pixels[68..76].fill(0);
+        let reads = Rc::new(RefCell::new(Vec::new()));
+        runtime.set_resources(PixelFiles {
+            files: BTreeMap::from([(b"sprite".to_vec(), pixels)]),
+            reads: reads.clone(),
+        });
+        let program = fes::Program::from_text(b"#DEFINE\nBUTTON item[2]\n#OBJECT FILE IDN PRI POS ENABLE TYPE DISP\nitem sprite 7 5 1,1 21 1 1\n#OBJECT POS\nitem[1] 4,1\n#START\n$0=$0+1\nwait 1\nitem[0] enable 0\nitem[1] pri 9\nwait 1\nitem[1] disp 0\nitem[0] enable -3\nitem[0] size 2 2\nwait 99\n").unwrap();
+        let mut scene =
+            katze_system2::runtime::fes::Scene::new(program, runtime.host().handle_allocator())
+                .unwrap();
+        scene
+            .objects_mut()
+            .unwrap()
+            .set_image_list(list, Rect::from_xywh(0, 0, 8, 6));
+        let mut prepared = false;
+        for _ in 0..64 {
+            if runtime.prepare_fes_scene(0, &mut scene).unwrap() {
+                prepared = true;
+                break;
+            }
+        }
+        assert!(prepared);
+        assert_eq!(runtime.numbers().shared[0], 0);
+        assert!(reads.borrow().is_empty());
+        let handles = [
+            scene.objects().lookup("item", 0).unwrap(),
+            scene.objects().lookup("item", 1).unwrap(),
+        ];
+        let tasks = handles.map(|id| scene.objects().get(id).unwrap().task_id().unwrap());
+        assert_eq!(runtime.tree().children(0).unwrap().count(), 4);
+        assert!(runtime.prepare_fes_scene(0, &mut scene).unwrap());
+        assert_eq!(runtime.tree().children(0).unwrap().count(), 4);
+
+        // Root 的输入编号先指向列表；失败发生在 IMAGE 更新完成之后。
+        let mut failed = false;
+        for _ in 0..64 {
+            match runtime.update_fes_scene(0, &mut scene, 100) {
+                Ok(false) => (),
+                Err(error) => {
+                    assert!(error.message.contains("输入任务绑定失效"));
+                    failed = true;
+                    break;
+                }
+                Ok(true) => panic!("未诊断错误的输入绑定"),
+            }
+        }
+        assert!(failed);
+        assert_eq!(&*reads.borrow(), &[b"sprite".to_vec()]);
+        assert_eq!(runtime.numbers().shared[0], 1);
+        // 替换错误类型的服务，保留输入编号和场景续跑。
+        runtime.destroy(placeholder).unwrap();
+        runtime.update(0, 0).unwrap();
+        assert_eq!(runtime.create(0, kind::INPUT, b"input", b"").unwrap(), 1);
+        assert!(scene.is_pending());
+        for now in [100, 101, 102] {
+            let mut complete = false;
+            for _ in 0..64 {
+                if runtime.update_fes_scene(0, &mut scene, now).unwrap() {
+                    complete = true;
+                    break;
+                }
+            }
+            assert!(complete);
+            assert_eq!(runtime.numbers().shared[0], 1);
+            assert_eq!(runtime.input_state(1).unwrap().regions().records().len(), 2);
+            assert_eq!(send(&mut runtime, list, 294, 0, 0), 2);
+            for (bank, &task) in tasks.iter().enumerate() {
+                let ObjectState::Button(button) =
+                    &scene.objects().get(handles[bank]).unwrap().state
+                else {
+                    panic!()
+                };
+                assert_eq!(button.image.base.parent_priority, 5 + bank as i32);
+                let region = runtime.input_state(1).unwrap().regions().get(task).unwrap();
+                assert_eq!(
+                    region.enabled(),
+                    if bank == 0 && now == 101 {
+                        0
+                    } else if bank == 0 && now == 102 {
+                        1
+                    } else {
+                        21
+                    }
+                );
+                assert_eq!(
+                    region.priority(),
+                    if bank == 1 && now >= 101 {
+                        129
+                    } else {
+                        125 + bank as i32
+                    }
+                );
+                let size = if bank == 0 && now == 102 { 2 } else { 1 };
+                assert_eq!(
+                    region.bounds(),
+                    Rect::from_xywh(if bank == 0 { 1 } else { 4 }, 1, size, size)
+                );
+                let mask = region.hit_mask().unwrap();
+                assert!(mask.contains([0, 0], [0, 0]));
+                assert!(!mask.contains([0, 0], [1, 0]));
+            }
+            assert_eq!(reads.borrow().len(), if now == 102 { 3 } else { 2 });
+            send(&mut runtime, list, 298, 0, 0);
+            for (x, color) in [
+                (1, 0xffff_0000),
+                (4, if now == 102 { 0 } else { 0xffff_0000 }),
+            ] {
+                assert_eq!(
+                    runtime.drawing().target.as_ref().unwrap().pixel(x, 1),
+                    Some(color)
+                );
+            }
+        }
+        let wrappers = handles.map(|id| scene.objects().get(id).unwrap().image_handle().unwrap());
+        for (handle, task) in handles.into_iter().zip(tasks) {
+            runtime
+                .remove_fes_object(0, scene.objects_mut().unwrap(), handle)
+                .unwrap();
+            assert!(
+                runtime
+                    .input_state(1)
+                    .unwrap()
+                    .regions()
+                    .get(task)
+                    .is_none()
+            );
+            runtime.destroy(task).unwrap();
+        }
+        assert_eq!(send(&mut runtime, list, 294, 0, 0), 0);
+        for wrapper in wrappers {
+            assert!(runtime.images().get(wrapper).is_err());
+        }
+    }
 }
 
 #[test]

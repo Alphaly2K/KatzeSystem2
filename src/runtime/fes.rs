@@ -1,13 +1,14 @@
 //! FES 对象的身份、银行绑定与属性状态，独立于下层任务编号。
 
 use crate::fes::{
-    CImageState, CPlaneState, ImageState, ObjectDefinition, ObjectInitialization, ObjectReference,
-    PlaneState,
+    ButtonState, CImageState, CPlaneState, ImageState, ObjectDefinition, ObjectInitialization,
+    ObjectReference, PlaneState,
 };
 use crate::{Error, HandleAllocator, Result, read};
 use std::collections::{BTreeMap, BTreeSet};
 
 mod animation;
+mod button;
 mod commands;
 mod image;
 mod input;
@@ -26,6 +27,7 @@ pub enum ObjectState {
     Base,
     CImage(Box<CImageState>),
     Image(Box<ImageState>),
+    Button(Box<ButtonState>),
     CPlane(Box<CPlaneState>),
     Plane(Box<PlaneState>),
 }
@@ -36,6 +38,7 @@ impl ObjectState {
             Self::Base => "BASE",
             Self::CImage(_) => "CIMAGE",
             Self::Image(_) => "IMAGE",
+            Self::Button(_) => "BUTTON",
             Self::CPlane(_) => "CPLANE",
             Self::Plane(_) => "PLANE",
         }
@@ -46,6 +49,7 @@ impl ObjectState {
             "BASE" => Self::Base,
             "CIMAGE" => Self::CImage(Box::default()),
             "IMAGE" => Self::Image(Box::default()),
+            "BUTTON" => Self::Button(Box::default()),
             "CPLANE" => Self::CPlane(Box::default()),
             "PLANE" => Self::Plane(Box::default()),
             _ => return Err(Error::new(0, format!("FES 对象类型 {kind} 尚未接入"))),
@@ -72,6 +76,7 @@ impl ObjectState {
         match self {
             Self::CImage(state) => Some(state),
             Self::Image(state) => Some(&state.base),
+            Self::Button(state) => Some(&state.image.base),
             _ => None,
         }
     }
@@ -80,6 +85,23 @@ impl ObjectState {
         match self {
             Self::CImage(state) => Some(state),
             Self::Image(state) => Some(&mut state.base),
+            Self::Button(state) => Some(&mut state.image.base),
+            _ => None,
+        }
+    }
+
+    fn image_source(&self) -> Option<&ImageState> {
+        match self {
+            Self::Image(state) => Some(state),
+            Self::Button(state) => Some(&state.image),
+            _ => None,
+        }
+    }
+
+    fn image_source_mut(&mut self) -> Option<&mut ImageState> {
+        match self {
+            Self::Image(state) => Some(state),
+            Self::Button(state) => Some(&mut state.image),
             _ => None,
         }
     }
@@ -98,6 +120,8 @@ pub struct Object {
     raw_image: u32,
     image_offset: [f32; 2],
     animation: ImageAnimationRequest,
+    button_update: Option<crate::fes::ImageUpdates>,
+    button_duplicate: bool,
     pub state: ObjectState,
 }
 
@@ -139,7 +163,7 @@ impl Object {
 
     /// IMAGE 保存的请求；列表动画的实时播放与显示状态由共享列表维护。
     pub fn image_animation_request(&self) -> Option<&ImageAnimationRequest> {
-        matches!(self.state, ObjectState::Image(_)).then_some(&self.animation)
+        self.state.image_source().map(|_| &self.animation)
     }
 }
 
@@ -153,6 +177,7 @@ pub struct Objects {
     update_order: Vec<ObjectReference>,
     canvas_offset: [i32; 2],
     image_list: Option<u32>,
+    input_task: Option<u32>,
     image_clip: crate::graphics::Rect,
 }
 
@@ -176,6 +201,8 @@ impl Objects {
                     raw_image: 0,
                     image_offset: [0.; 2],
                     animation: ImageAnimationRequest::default(),
+                    button_update: None,
+                    button_duplicate: false,
                     state: ObjectState::Base,
                 },
             )]),
@@ -184,6 +211,7 @@ impl Objects {
             update_order: Vec::new(),
             canvas_offset: [0; 2],
             image_list: None,
+            input_task: None,
             image_clip: crate::graphics::Rect::default(),
         })
     }
@@ -210,6 +238,14 @@ impl Objects {
 
     pub fn image_list(&self) -> Option<u32> {
         self.image_list
+    }
+
+    pub fn set_input_task(&mut self, task: u32) {
+        self.input_task = Some(task);
+    }
+
+    pub fn input_task(&self) -> Option<u32> {
+        self.input_task
     }
 
     /// 包含根对象及重复声明产生的未绑定对象。
@@ -281,6 +317,8 @@ impl Objects {
                     raw_image: 0,
                     image_offset: [0.; 2],
                     animation: ImageAnimationRequest::default(),
+                    button_update: None,
+                    button_duplicate: false,
                     state: initial.clone(),
                 },
             );
@@ -376,6 +414,9 @@ impl Objects {
                 ObjectState::Image(state) => {
                     state.apply(&initialization.attributes, bank as u32, &mut transform_name)?
                 }
+                ObjectState::Button(state) => {
+                    state.apply(&initialization.attributes, bank as u32, &mut transform_name)?
+                }
                 ObjectState::CPlane(state) => state.apply(&initialization.attributes, bank as u32),
                 ObjectState::Plane(state) => state.apply(&initialization.attributes, bank as u32),
             };
@@ -397,10 +438,8 @@ impl Objects {
             if let Some(state) = object.state.plane_mut() {
                 state.dirty = true;
             }
-            match &mut object.state {
-                ObjectState::CImage(state) => state.updates.invalidate(),
-                ObjectState::Image(state) => state.base.updates.invalidate(),
-                _ => (),
+            if let Some(state) = object.state.image_mut() {
+                state.updates.invalidate();
             }
             pending.extend(object.children.iter().copied());
         }

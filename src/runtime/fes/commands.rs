@@ -6,6 +6,7 @@ enum Command {
     Size([i32; 2]),
     SetId(i32),
     GetId(i32),
+    Enable(i32),
     Priority(i32),
     Position(fes::ImageReference),
 }
@@ -70,10 +71,7 @@ impl Objects {
             b"size" => Command::Size([number(2, 0)?, number(3, 0)?]),
             b"setid" => Command::SetId(number(2, 0)?),
             b"getid" => Command::GetId(number(2, 0)?),
-            b"enable" => {
-                number(2, 0)?;
-                return Ok(true);
-            }
+            b"enable" => Command::Enable(i32::from(number(2, 0)? != 0)),
             b"pri" if args.len() > 2 => Command::Priority(number(2, 0)?),
             b"pos2" if args.len() > 2 => {
                 let frame = number(3, 0)?;
@@ -91,7 +89,7 @@ impl Objects {
         };
         if let Command::GetId(index) = command {
             let handle = self.lookup(&target.name, target.bank).unwrap();
-            let ObjectState::Image(image) = &self.get(handle).unwrap().state else {
+            let Some(image) = self.get(handle).unwrap().state.image_source() else {
                 return Err(Error::new(
                     line.offset,
                     "FES getid 目标类型不支持可移植的编号查询",
@@ -109,7 +107,7 @@ impl Objects {
         };
         for bank in banks {
             let Some(handle) = self.lookup(&target.name, bank as i32) else {
-                if matches!(command, Command::Position(_)) {
+                if matches!(command, Command::Position(_) | Command::Enable(_)) {
                     continue;
                 }
                 break;
@@ -138,7 +136,7 @@ impl Objects {
                     }
                 }
                 Command::SetId(value) => {
-                    if let ObjectState::Image(image) = &mut object.state {
+                    if let Some(image) = object.state.image_source_mut() {
                         image.apply(
                             &fes::ObjectAttributes {
                                 image_number: Some(*value),
@@ -161,6 +159,12 @@ impl Objects {
                     if let Some(image) = object.state.image_mut() {
                         image.position_resource = Some(reference.clone());
                         dirty = true;
+                    }
+                }
+                Command::Enable(value) => {
+                    if let ObjectState::Button(button) = &mut object.state {
+                        button.image.base.updates.dirty |= button.enabled != *value;
+                        button.enabled = *value;
                     }
                 }
                 Command::GetId(_) => unreachable!(),

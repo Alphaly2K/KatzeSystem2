@@ -1,4 +1,4 @@
-use super::{ObjectState, Objects};
+use super::Objects;
 use crate::{
     Error, Result,
     expression::State,
@@ -78,7 +78,7 @@ impl Objects {
         for bank in banks {
             if let Some(handle) = self.lookup(&target.name, bank as i32) {
                 let object = self.get_mut(handle).unwrap();
-                if matches!(object.state, ObjectState::Image(_)) {
+                if object.state.image_source().is_some() {
                     if command == b"setanm" {
                         object.animation.name.clone_from(&name);
                     } else {

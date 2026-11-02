@@ -50,9 +50,7 @@ impl<F: ObjectFactory> Store<'_, F> {
     ) -> Result<()> {
         let list = self.check_fes_image_list(owner, objects)?;
         let wrapper = self.fes_image_wrapper(owner, objects, handle)?;
-        let ObjectState::Image(state) = &objects.get(handle).unwrap().state else {
-            unreachable!()
-        };
+        let state = objects.get(handle).unwrap().state.image_source().unwrap();
         let prepared = state.base.updates.rebuild;
         if prepared {
             let name = &state.file[..state
@@ -131,7 +129,12 @@ impl<F: ObjectFactory> Store<'_, F> {
         self.update_fes_image_priority(owner, objects, handle, list)
     }
 
-    fn fes_image_wrapper(&mut self, owner: u32, objects: &mut Objects, handle: u32) -> Result<u32> {
+    pub(super) fn fes_image_wrapper(
+        &mut self,
+        owner: u32,
+        objects: &mut Objects,
+        handle: u32,
+    ) -> Result<u32> {
         match objects.get(handle).unwrap().image {
             Some(image) => Ok(image),
             None => {
@@ -151,7 +154,7 @@ impl<F: ObjectFactory> Store<'_, F> {
         wrapper: u32,
         prepared: bool,
     ) -> Result<()> {
-        let file = matches!(objects.get(handle).unwrap().state, ObjectState::Image(_));
+        let file = objects.get(handle).unwrap().state.image_source().is_some();
         let state = objects.get_mut(handle).unwrap().state.image_mut().unwrap();
         if state.updates.dirty || prepared {
             let reference = state.plane.clone();
@@ -266,7 +269,7 @@ impl<F: ObjectFactory> Store<'_, F> {
 }
 
 impl Objects {
-    fn image_position(&self, handle: u32) -> [f32; 2] {
+    pub(super) fn image_position(&self, handle: u32) -> [f32; 2] {
         let mut chain = Vec::new();
         let mut next = Some(handle);
         while let Some(handle) = next {

@@ -25,8 +25,7 @@ struct ButtonFactory<F> {
 }
 impl<F: ObjectFactory> ObjectFactory for ButtonFactory<F> {
     fn create(&mut self, id: u32, kind: u32, name: &[u8]) -> Result<Box<dyn TaskObject>> {
-        if kind == kind::BUTTON {
-            assert_eq!(name, b"low button");
+        if kind == kind::BUTTON && name == b"low button" {
             self.attempts.set(self.attempts.get() + 1);
             if self.fail.get() {
                 return Err(Error::new(0, "合成按钮创建失败"));
@@ -674,8 +673,60 @@ fn auxiliary_input_reaches_script_values_and_transients_clear_after_the_round() 
 }
 
 #[test]
+fn button_load_creates_each_declaration_before_start_and_rebinding_keeps_the_tasks() {
+    let source = b"#DEFINE\nBUTTON item[2]\nBUTTON item[3]\n#OBJECT SIZE PRI ENABLE\nitem 2,2 5 21\nitem[2] 2,2 7 21\n#START\n$0=$0+1\nwait 99\n";
+    for budget in [1, 4096] {
+        let Setup {
+            mut runtime, reads, ..
+        } = setup(budget, source);
+        let fes = runtime.create(0, kind::FES, b"scene", b"").unwrap();
+        send(&mut runtime, fes, 337, 0, 0);
+        file(&mut runtime, fes, b"complete.fes").unwrap();
+        let buttons: Vec<_> = runtime.tree().children(fes).unwrap().collect();
+        assert_eq!(buttons.len(), 5);
+        for &id in &buttons {
+            assert_eq!(runtime.tree().node(id).unwrap().kind, kind::BUTTON);
+            assert!(runtime.input_state(1).unwrap().regions().get(id).is_none());
+        }
+        assert_eq!(runtime.numbers().shared[0], 0);
+        let list = runtime.create(fes, kind::IMAGE_LIST, b"list", b"").unwrap();
+        send(&mut runtime, list, 285, 8, 6);
+        send(&mut runtime, fes, 340, 0, list);
+        send(&mut runtime, fes, 339, 0, 0);
+        assert_eq!(runtime.numbers().shared[0], 1);
+        assert_eq!(*reads.borrow(), [b"complete.fes".to_vec()]);
+        for (index, &id) in buttons.iter().enumerate() {
+            let region = runtime.input_state(1).unwrap().regions().get(id);
+            if index < 2 {
+                assert!(region.is_none());
+            } else {
+                assert_eq!(region.unwrap().enabled(), 21);
+            }
+        }
+        assert_eq!(runtime.tree().children(fes).unwrap().count(), 7);
+        assert!(
+            runtime
+                .dispatch_command(0, command(fes, 64, buttons[2], 1))
+                .unwrap_err()
+                .message
+                .contains("BUTTON 对象事件尚未接入")
+        );
+        assert_eq!(runtime.numbers().shared[0], 1);
+        runtime.destroy(fes).unwrap();
+        assert!(
+            runtime
+                .input_state(1)
+                .unwrap()
+                .regions()
+                .records()
+                .is_empty()
+        );
+    }
+}
+
+#[test]
 fn dedicated_pause_hides_refreshed_media_and_wakes_with_current_fes_display() {
-    let source = b"#DEFINE\nCIMAGE sprite\nCPLANE panel\nPLANE view\n#OBJECT SIZE COLOR PRI POS DISP\nsprite 2,2 0xff123456 5 1,1 21\npanel 1,1 0xff654321 100 5,4 94\n#OBJECT POS SIZE VRAM PRI DISP\nview 0,0 8,6 0,0 500 57\n#START\n$0=$0+1\nwait 77\n$1=$1+1\n#_FES_SLEEP_\n$2=$2+1\nsprite size 3 3\nsprite pri ($4+=1)\n#_FES_WAKE_\n$3=$3+1\nsprite size 4 4\npanel pri 99\n";
+    let source = b"#DEFINE\nCIMAGE sprite\nCPLANE panel\nPLANE view\nBUTTON control\n#OBJECT SIZE PRI ENABLE\ncontrol 2,2 8 21\n#OBJECT SIZE COLOR PRI POS DISP\nsprite 2,2 0xff123456 5 1,1 21\npanel 1,1 0xff654321 100 5,4 94\n#OBJECT POS SIZE VRAM PRI DISP\nview 0,0 8,6 0,0 500 57\n#START\n$0=$0+1\nwait 77\n$1=$1+1\n#_FES_SLEEP_\n$2=$2+1\nsprite size 3 3\nsprite pri ($4+=1)\n#_FES_WAKE_\n$3=$3+1\nsprite size 4 4\npanel pri 99\n";
     for budget in [1, 4096] {
         let Setup { mut runtime, .. } = setup(budget, source);
         let fes = runtime.create(0, kind::FES, b"scene", b"").unwrap();
@@ -684,7 +735,23 @@ fn dedicated_pause_hides_refreshed_media_and_wakes_with_current_fes_display() {
         send(&mut runtime, list, 285, 8, 6);
         send(&mut runtime, fes, 340, 0, list);
         file(&mut runtime, fes, b"complete.fes").unwrap();
+        let control = runtime
+            .tree()
+            .children(fes)
+            .unwrap()
+            .find(|id| runtime.tree().node(*id).unwrap().kind == kind::BUTTON)
+            .unwrap();
         send(&mut runtime, fes, 339, 0, 0);
+        assert_eq!(
+            runtime
+                .input_state(1)
+                .unwrap()
+                .regions()
+                .get(control)
+                .unwrap()
+                .enabled(),
+            21
+        );
         runtime.update(1, 1).unwrap();
         assert_eq!(
             runtime.drawing().target.as_ref().unwrap().pixel(1, 1),
@@ -701,6 +768,16 @@ fn dedicated_pause_hides_refreshed_media_and_wakes_with_current_fes_display() {
             send(&mut runtime, fes, 348, 0, value);
             assert_eq!(runtime.numbers().shared[2], count);
             assert_eq!(runtime.numbers().shared[4], count);
+            assert_eq!(
+                runtime
+                    .input_state(1)
+                    .unwrap()
+                    .regions()
+                    .get(control)
+                    .unwrap()
+                    .enabled(),
+                if value == 0 { 21 } else { 0 }
+            );
         }
         runtime.update(123, 1).unwrap();
         assert_eq!(&runtime.numbers().shared[..4], &[1, 0, 2, 0]);
@@ -716,6 +793,16 @@ fn dedicated_pause_hides_refreshed_media_and_wakes_with_current_fes_display() {
         }
         send(&mut runtime, list, 310, 0, 0);
         send(&mut runtime, fes, 348, 0, 0);
+        assert_eq!(
+            runtime
+                .input_state(1)
+                .unwrap()
+                .regions()
+                .get(control)
+                .unwrap()
+                .enabled(),
+            21
+        );
         assert_eq!(runtime.numbers().shared[3], 1);
         assert_eq!(
             runtime.drawing().target.as_ref().unwrap().pixel(1, 1),

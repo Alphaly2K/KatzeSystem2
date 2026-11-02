@@ -48,6 +48,9 @@ impl<F: ObjectFactory> Store<'_, F> {
         if matches!(object.state, ObjectState::Image(_)) {
             return self.update_fes_image(owner, objects, handle);
         }
+        if matches!(object.state, ObjectState::Button(_)) {
+            return self.update_fes_button(owner, objects, handle);
+        }
         if object.state.plane().is_none() {
             return match object.state {
                 ObjectState::Base => Ok(()),
@@ -207,18 +210,24 @@ impl<F: ObjectFactory> Store<'_, F> {
                 .get(id)
                 .ok_or_else(|| Error::new(0, "FES 对象标识无效"))?;
             pending.extend(object.children());
-            self.check_fes_plane_binding(owner, object.task_id)?;
+            if matches!(object.state, ObjectState::Button(_)) {
+                self.check_fes_button_binding(owner, object.task_id)?;
+            } else {
+                self.check_fes_plane_binding(owner, object.task_id)?;
+            }
             if object.task_id.is_some() {
                 self.fes_command(owner, object.task_id, 3, [0; 3], None)?;
             }
             if let Some(image) = object.image {
-                let list = self.check_fes_image_list(owner, objects)?;
                 let slot = object
                     .state
                     .image()
                     .ok_or_else(|| Error::new(0, "FES 图像来源与对象类型不匹配"))?
                     .parent_priority;
-                self.fes_command(owner, Some(list), 287, [slot as u32, 0, 0], None)?;
+                if objects.image_list.is_some() {
+                    let list = self.check_fes_image_list(owner, objects)?;
+                    self.fes_command(owner, Some(list), 287, [slot as u32, 0, 0], None)?;
+                }
                 self.resources.images.release(image)?;
                 objects.get_mut(id).unwrap().image = None;
             }
@@ -299,7 +308,7 @@ impl<F: ObjectFactory> Store<'_, F> {
 }
 
 impl Objects {
-    fn plane_position(&self, handle: u32) -> [f32; 4] {
+    pub(super) fn plane_position(&self, handle: u32) -> [f32; 4] {
         let mut chain = Vec::new();
         let mut next = Some(handle);
         while let Some(handle) = next {
@@ -315,7 +324,7 @@ impl Objects {
         })
     }
 
-    fn plane_base_point(&self, handle: u32) -> [f32; 4] {
+    pub(super) fn plane_base_point(&self, handle: u32) -> [f32; 4] {
         let mut chain = Vec::new();
         let mut next = Some(handle);
         while let Some(handle) = next {
