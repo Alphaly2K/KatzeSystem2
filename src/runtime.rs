@@ -398,6 +398,7 @@ impl<F: ObjectFactory> Runtime<F> {
             objects: &mut self.objects,
             running: &mut self.running,
             factory: &mut self.factory,
+            fes_scene: None,
             budget: self.budget,
             limit: self.limit,
         }
@@ -420,6 +421,7 @@ impl<F: ObjectFactory> Runtime<F> {
             objects: &mut self.objects,
             running: &mut self.running,
             factory: &mut self.factory,
+            fes_scene: None,
             context: Vec::new(),
             budget: self.budget,
             limit: self.limit,
@@ -498,6 +500,21 @@ struct RunningTask {
     effects: TaskEffects,
 }
 
+// 媒体命令返回前可能同步通知正在更新的 FES，回调借用同一份场景。
+struct FesSceneLoan<'a> {
+    owner: u32,
+    scene: &'a mut fes::Scene,
+}
+
+impl FesSceneLoan<'_> {
+    fn reborrow(&mut self) -> FesSceneLoan<'_> {
+        FesSceneLoan {
+            owner: self.owner,
+            scene: self.scene,
+        }
+    }
+}
+
 /// 一次嵌套执行需要的可变部分。
 struct Store<'a, F: ObjectFactory> {
     numbers: &'a mut expression::State,
@@ -507,6 +524,7 @@ struct Store<'a, F: ObjectFactory> {
     objects: &'a mut BTreeMap<u32, Box<dyn TaskObject>>,
     running: &'a mut BTreeMap<u32, RunningTask>,
     factory: &'a mut F,
+    fes_scene: Option<FesSceneLoan<'a>>,
     budget: usize,
     limit: usize,
 }
@@ -521,6 +539,7 @@ impl<F: ObjectFactory> Store<'_, F> {
             objects: self.objects,
             running: self.running,
             factory: self.factory,
+            fes_scene: self.fes_scene.as_mut().map(FesSceneLoan::reborrow),
             budget: self.budget,
             limit: self.limit,
         }
@@ -541,6 +560,7 @@ fn run_nested<F: ObjectFactory>(
         objects,
         running,
         factory,
+        mut fes_scene,
         budget,
         limit,
     } = store;
@@ -582,6 +602,51 @@ fn run_nested<F: ObjectFactory>(
             return Ok(());
         }
     }
+    if fes_scene.as_ref().is_some_and(|loan| loan.owner == target) {
+        if let Execution::Command {
+            command, propagate, ..
+        } = &mut execution
+        {
+            if matches!(command.code, 27 | 28) {
+                **propagate = false;
+                if running.get(&target).is_some_and(|task| task.deleted) {
+                    return Ok(());
+                }
+                let loan = fes_scene.take().unwrap();
+                let saved = (host.task_id, host.task_time, host.task_origin);
+                let result = {
+                    let mut nested = ObjectHost {
+                        numbers,
+                        host,
+                        resources,
+                        tree,
+                        objects,
+                        running,
+                        factory,
+                        fes_scene: None,
+                        context: Vec::new(),
+                        budget,
+                        limit,
+                    };
+                    nested.host.task_id = target;
+                    let clock = nested.running[&target].clock.clone();
+                    nested.set_task_clock(&clock);
+                    fes::dispatch_borrowed_control_event(
+                        target,
+                        loan.scene,
+                        command,
+                        &mut nested,
+                        budget,
+                        limit,
+                    )
+                };
+                host.task_id = saved.0;
+                host.task_time = saved.1;
+                host.task_origin = saved.2;
+                return result;
+            }
+        }
+    }
     if let Some(mut button) = resources.button_callbacks.remove(&target) {
         let saved = (host.task_id, host.task_time, host.task_origin);
         let result = {
@@ -593,6 +658,7 @@ fn run_nested<F: ObjectFactory>(
                 objects,
                 running,
                 factory,
+                fes_scene,
                 context: Vec::new(),
                 budget,
                 limit,
@@ -660,6 +726,7 @@ fn run_nested<F: ObjectFactory>(
                     objects,
                     running,
                     factory,
+                    fes_scene,
                     budget,
                     limit,
                 };
@@ -706,6 +773,7 @@ fn run_nested<F: ObjectFactory>(
                 objects,
                 running,
                 factory,
+                fes_scene,
                 context: Vec::new(),
                 budget,
                 limit,
@@ -760,6 +828,7 @@ fn run_nested<F: ObjectFactory>(
             objects: &mut *objects,
             running: &mut *running,
             factory: &mut *factory,
+            fes_scene,
             context: Vec::new(),
             budget,
             limit,
@@ -879,6 +948,7 @@ fn route_command_mode<F: ObjectFactory>(
         objects,
         running,
         factory,
+        mut fes_scene,
         budget,
         limit,
     } = store;
@@ -894,6 +964,7 @@ fn route_command_mode<F: ObjectFactory>(
                 objects: &mut *objects,
                 running: &mut *running,
                 factory: &mut *factory,
+                fes_scene: fes_scene.as_mut().map(FesSceneLoan::reborrow),
                 budget,
                 limit,
             },
@@ -929,6 +1000,7 @@ struct ObjectHost<'a, F: ObjectFactory> {
     objects: &'a mut BTreeMap<u32, Box<dyn TaskObject>>,
     running: &'a mut BTreeMap<u32, RunningTask>,
     factory: &'a mut F,
+    fes_scene: Option<FesSceneLoan<'a>>,
     context: Vec<u8>,
     budget: usize,
     limit: usize,
@@ -944,6 +1016,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             objects: &mut *self.objects,
             running: &mut *self.running,
             factory: &mut *self.factory,
+            fes_scene: self.fes_scene.as_mut().map(FesSceneLoan::reborrow),
             budget: self.budget,
             limit: self.limit,
         }
@@ -1420,6 +1493,7 @@ impl<F: ObjectFactory> TaskLifecycle<'_, F> {
             objects: &mut *self.objects,
             running: &mut *self.running,
             factory: &mut *self.factory,
+            fes_scene: None,
             budget: self.budget,
             limit: self.limit,
         }

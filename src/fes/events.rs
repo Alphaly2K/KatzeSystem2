@@ -30,6 +30,27 @@ impl Interpreter {
         event: &str,
         default_handler: Option<&str>,
     ) -> Result<bool> {
+        self.dispatch_event_inner(object, bank, event, default_handler, false)
+    }
+
+    pub(crate) fn dispatch_event_at_host_boundary(
+        &mut self,
+        object: &str,
+        bank: i32,
+        event: &str,
+        default_handler: Option<&str>,
+    ) -> Result<bool> {
+        self.dispatch_event_inner(object, bank, event, default_handler, true)
+    }
+
+    fn dispatch_event_inner(
+        &mut self,
+        object: &str,
+        bank: i32,
+        event: &str,
+        default_handler: Option<&str>,
+        host_boundary: bool,
+    ) -> Result<bool> {
         if !matches!(
             event,
             "FOCUS"
@@ -51,10 +72,11 @@ impl Interpreter {
         {
             return Err(Error::new(0, "FES 无法在当前状态分派事件"));
         }
-        if self
-            .pending
-            .as_ref()
-            .is_some_and(|e| !matches!(e, Event::Wait(_) | Event::Frame))
+        if !host_boundary
+            && self
+                .pending
+                .as_ref()
+                .is_some_and(|e| !matches!(e, Event::Wait(_) | Event::Frame))
         {
             return Err(Error::new(0, "FES 需要先完成当前宿主操作"));
         }
@@ -188,6 +210,57 @@ impl Interpreter {
         if !transfer {
             (self.block, self.pc) = invocation.main;
             self.pending = invocation.pending;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Step, expression::State, fes::Program};
+
+    #[test]
+    fn host_callback_restores_the_pending_command_and_main_call_position() {
+        for budget in [1, 64] {
+            let program = Program::from_text(b"#START\ncall MAIN\n$0=$0+1\nwait 99\n#MAIN\ndecode\n$1=$1+1\n#bar.SCRL_P\n$2=$2+1\nwait 3\n$2=999\n").unwrap();
+            let mut vm = Interpreter::new(program).unwrap();
+            let mut numbers = State::new(8);
+            let pending = loop {
+                match vm.run(&mut numbers, budget).unwrap() {
+                    Step::Yield => (),
+                    Step::Event(event @ Event::Command(_)) => break event,
+                    step => panic!("{step:?}"),
+                }
+            };
+            assert!(vm.dispatch_event("bar", 0, "SCRL_P", None).is_err());
+            assert!(
+                vm.dispatch_event_at_host_boundary("bar", 0, "SCRL_P", None)
+                    .unwrap()
+            );
+            assert!(
+                vm.dispatch_event_at_host_boundary("bar", 0, "SCRL_P", None)
+                    .is_err()
+            );
+            loop {
+                match vm.run(&mut numbers, budget).unwrap() {
+                    Step::Yield => (),
+                    Step::Event(Event::Wait(3)) => vm.finish_event_handler().unwrap(),
+                    step => panic!("{step:?}"),
+                }
+                if vm.take_dispatch_result().is_some() {
+                    break;
+                }
+            }
+            assert_eq!(vm.run(&mut numbers, budget).unwrap(), Step::Event(pending));
+            vm.resume();
+            loop {
+                match vm.run(&mut numbers, budget).unwrap() {
+                    Step::Yield => (),
+                    Step::Event(Event::Wait(99)) => break,
+                    step => panic!("{step:?}"),
+                }
+            }
+            assert_eq!(&numbers.shared[..3], &[1, 1, 1]);
         }
     }
 }

@@ -66,7 +66,7 @@ impl<F: ObjectFactory> Store<'_, F> {
         self.update_fes_object_image(owner, objects, handle, image)
     }
 
-    fn update_fes_object_image(
+    pub(super) fn update_fes_object_image(
         &mut self,
         owner: u32,
         objects: &mut Objects,

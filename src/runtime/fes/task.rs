@@ -33,6 +33,16 @@ pub trait Services {
         event: u32,
         budget: usize,
     ) -> Result<Option<bool>>;
+    /// 推进控件的同步通知；宿主已暂停当前媒体更新时允许保存其待完成命令。
+    fn dispatch_control_event(
+        &mut self,
+        scene: &mut Scene,
+        target: &fes::ObjectReference,
+        event: u32,
+        budget: usize,
+    ) -> Result<Option<bool>> {
+        self.dispatch_event(scene, Some(target), event, budget)
+    }
     /// 按声明顺序刷新媒体，成功后推进 cursor；失败保留当前位置。
     fn refresh_media(
         &mut self,
@@ -94,6 +104,19 @@ impl<F: ObjectFactory> Services for ObjectHost<'_, F> {
         let mut store = self.store();
         store.budget = budget.max(1);
         store.dispatch_fes_event(owner, scene, target, event)
+    }
+
+    fn dispatch_control_event(
+        &mut self,
+        scene: &mut Scene,
+        target: &fes::ObjectReference,
+        event: u32,
+        budget: usize,
+    ) -> Result<Option<bool>> {
+        let owner = self.host.task_id;
+        let mut store = self.store();
+        store.budget = budget.max(1);
+        store.dispatch_fes_control_event(owner, scene, target, event)
     }
 
     fn refresh_media(
@@ -212,6 +235,7 @@ pub struct FesObject {
     control_event: Option<ControlEvent>,
 }
 
+#[derive(Default)]
 struct ControlEvent {
     cursor: usize,
     target: Option<fes::ObjectReference>,
@@ -322,23 +346,7 @@ impl FesObject {
         if !self.initialized {
             return Ok(());
         }
-        let outside = self.send(
-            host,
-            self.input,
-            153,
-            [0, 0, 1],
-            &mut CommandBuffers::default(),
-        )?;
-        let point = if outside == 0 {
-            self.pointer_position(host, 1)?
-        } else {
-            [i32::MIN; 2]
-        };
-        if let Some(scene) = &mut self.scene {
-            scene.set_system_value("_MOUSE_X_", point[0]);
-            scene.set_system_value("_MOUSE_Y_", point[1]);
-        }
-        Ok(())
+        update_pointer_values(self.id, self.input, self.scene.as_mut(), host)
     }
 
     fn input_event(
@@ -464,64 +472,22 @@ impl FesObject {
     ) -> Result<bool> {
         if self.control_event.is_none() {
             self.update_pointer_values(host)?;
-            self.control_event = Some(ControlEvent {
-                cursor: 0,
-                target: None,
-            });
+            self.control_event = Some(ControlEvent::default());
             self.pending = Some(*command);
         }
-        for _ in 0..budget.max(1) {
-            if self.control_event.as_ref().unwrap().target.is_none() {
-                let cursor = self.control_event.as_ref().unwrap().cursor;
-                let Some(record) = self
-                    .scene
-                    .as_ref()
-                    .and_then(|scene| scene.objects().media_records().get(cursor))
-                else {
-                    self.control_event = None;
-                    self.pending = None;
-                    self.effects(host);
-                    return Ok(true);
-                };
-                let target = record.target().clone();
-                let matched = record.kind() == "SLIDER"
-                    && record.task_id() == Some(command.sender)
-                    && self
-                        .scene
-                        .as_ref()
-                        .unwrap()
-                        .objects()
-                        .lookup(&target.name, target.bank)
-                        .is_some();
-                if !matched {
-                    self.control_event.as_mut().unwrap().cursor += 1;
-                    continue;
-                }
-                if command.code == 27 {
-                    self.scene
-                        .as_mut()
-                        .unwrap()
-                        .notify_slider_position(&target, command.data[1] as i32)?;
-                }
-                self.control_event.as_mut().unwrap().target = Some(target);
-            }
-            let target = self.control_event.as_ref().unwrap().target.clone().unwrap();
-            let event = if command.code == 27 {
-                8
-            } else {
-                u32::from(command.data[1] == 0)
-            };
-            if services(host)?
-                .dispatch_event(self.scene.as_mut().unwrap(), Some(&target), event, budget)?
-                .is_none()
-            {
-                return Ok(false);
-            }
-            let state = self.control_event.as_mut().unwrap();
-            state.target = None;
-            state.cursor += 1;
+        let done = advance_control_event(
+            self.scene.as_mut(),
+            self.control_event.as_mut().unwrap(),
+            command,
+            host,
+            budget,
+        )?;
+        if done {
+            self.control_event = None;
+            self.pending = None;
+            self.effects(host);
         }
-        Ok(false)
+        Ok(done)
     }
 
     fn begin_input_event(
@@ -809,20 +775,7 @@ impl FesObject {
         data: [u32; 3],
         buffers: &mut CommandBuffers<'_>,
     ) -> Result<u32> {
-        let mut output = 0;
-        if !host.dispatch_task_command(
-            Command {
-                target,
-                sender: self.id,
-                code,
-                data,
-            },
-            buffers,
-            &mut output,
-        )? {
-            return Err(Error::new(0, "FES 服务任务不可达"));
-        }
-        Ok(output)
+        send(self.id, host, target, code, data, buffers)
     }
 
     fn bind(&mut self) -> Result<()> {
@@ -1178,6 +1131,146 @@ fn name(bytes: &[u8], capacity: usize) -> Result<&[u8]> {
         return Err(Error::new(0, "FES 名称或上下文超过容量"));
     }
     Ok(&bytes[..end])
+}
+
+fn send(
+    owner: u32,
+    host: &mut dyn Host,
+    target: u32,
+    code: u32,
+    data: [u32; 3],
+    buffers: &mut CommandBuffers<'_>,
+) -> Result<u32> {
+    let mut output = 0;
+    if !host.dispatch_task_command(
+        Command {
+            target,
+            sender: owner,
+            code,
+            data,
+        },
+        buffers,
+        &mut output,
+    )? {
+        return Err(Error::new(0, "FES 服务任务不可达"));
+    }
+    Ok(output)
+}
+
+fn update_pointer_values(
+    owner: u32,
+    input: u32,
+    scene: Option<&mut Scene>,
+    host: &mut dyn Host,
+) -> Result<()> {
+    let outside = send(
+        owner,
+        host,
+        input,
+        153,
+        [0, 0, 1],
+        &mut CommandBuffers::default(),
+    )?;
+    let point = if outside == 0 {
+        let mut x = [0; 4];
+        let mut y = [0; 4];
+        send(
+            owner,
+            host,
+            input,
+            126,
+            [0, 0, 1],
+            &mut CommandBuffers {
+                data0: Some(&mut x),
+                data1: Some(&mut y),
+            },
+        )?;
+        [i32::from_le_bytes(x), i32::from_le_bytes(y)]
+    } else {
+        [i32::MIN; 2]
+    };
+    if let Some(scene) = scene {
+        scene.set_system_value("_MOUSE_X_", point[0]);
+        scene.set_system_value("_MOUSE_Y_", point[1]);
+    }
+    Ok(())
+}
+
+fn advance_control_event(
+    mut scene: Option<&mut Scene>,
+    state: &mut ControlEvent,
+    command: &Command,
+    host: &mut dyn Host,
+    budget: usize,
+) -> Result<bool> {
+    for _ in 0..budget.max(1) {
+        if state.target.is_none() {
+            let Some(record) = scene
+                .as_ref()
+                .and_then(|scene| scene.objects().media_records().get(state.cursor))
+            else {
+                return Ok(true);
+            };
+            let target = record.target().clone();
+            let matched = record.kind() == "SLIDER"
+                && record.task_id() == Some(command.sender)
+                && scene
+                    .as_ref()
+                    .unwrap()
+                    .objects()
+                    .lookup(&target.name, target.bank)
+                    .is_some();
+            if !matched {
+                state.cursor += 1;
+                continue;
+            }
+            if command.code == 27 {
+                scene
+                    .as_mut()
+                    .unwrap()
+                    .notify_slider_position(&target, command.data[1] as i32)?;
+            }
+            state.target = Some(target);
+        }
+        let event = if command.code == 27 {
+            8
+        } else {
+            u32::from(command.data[1] == 0)
+        };
+        if services(host)?
+            .dispatch_control_event(
+                scene.as_deref_mut().unwrap(),
+                state.target.as_ref().unwrap(),
+                event,
+                budget,
+            )?
+            .is_none()
+        {
+            return Ok(false);
+        }
+        state.target = None;
+        state.cursor += 1;
+    }
+    Ok(false)
+}
+
+pub(in crate::runtime) fn dispatch_borrowed_control_event(
+    owner: u32,
+    scene: &mut Scene,
+    command: &Command,
+    host: &mut dyn Host,
+    budget: usize,
+    limit: usize,
+) -> Result<()> {
+    let input = scene
+        .objects()
+        .input_task()
+        .ok_or_else(|| Error::new(0, "FES 控件同步通知缺少输入任务绑定"))?;
+    update_pointer_values(owner, input, Some(scene), host)?;
+    let mut state = ControlEvent::default();
+    crate::runtime::drain(budget, limit, || {
+        advance_control_event(Some(&mut *scene), &mut state, command, host, budget)
+    })
 }
 
 #[cfg(test)]

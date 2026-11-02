@@ -1,7 +1,7 @@
-use super::{ObjectState, Objects};
+use super::{ObjectState, Objects, Scene};
 use crate::{
     Error, Result,
-    runtime::{ObjectFactory, Store, kind, route_with_buffers},
+    runtime::{FesSceneLoan, ObjectFactory, Store, kind, route_with_buffers},
     task::{Command, CommandBuffers},
 };
 
@@ -24,6 +24,62 @@ impl<F: ObjectFactory> Store<'_, F> {
         objects: &mut Objects,
         handle: u32,
     ) -> Result<()> {
+        let task = self.prepare_fes_slider_update(owner, objects, handle)?;
+        if let Some(data) = position_request(objects, handle) {
+            self.slider_command(owner, task, 369, data, None)?;
+            finish_position(objects, handle);
+        }
+        self.finish_fes_slider_update(owner, objects, handle, task)
+    }
+
+    pub(super) fn update_fes_scene_record(
+        &mut self,
+        owner: u32,
+        scene: &mut Scene,
+        index: usize,
+    ) -> Result<()> {
+        if self.tree.node(owner).is_none() {
+            return Err(Error::new(0, "FES 所属任务不存在"));
+        }
+        self.prepare_fes_object(owner, &mut scene.objects, index)?;
+        let record = &scene.objects.update_order[index];
+        let Some(handle) = scene
+            .objects
+            .lookup(&record.target.name, record.target.bank)
+        else {
+            return Ok(());
+        };
+        let image = record.image;
+        if !matches!(
+            scene.objects.get(handle).unwrap().state,
+            ObjectState::Slider(_)
+        ) {
+            return self.update_fes_object_image(owner, &mut scene.objects, handle, image);
+        }
+        let task = self.prepare_fes_slider_update(owner, &mut scene.objects, handle)?;
+        if let Some(data) = position_request(&mut scene.objects, handle) {
+            let loan = data[0] != 0
+                && self.running.contains_key(&owner)
+                && self
+                    .tree
+                    .node(owner)
+                    .is_some_and(|node| node.kind == kind::FES);
+            let mut store = self.reborrow();
+            if loan {
+                store.fes_scene = Some(FesSceneLoan { owner, scene });
+            }
+            store.slider_command(owner, task, 369, data, None)?;
+            finish_position(&mut scene.objects, handle);
+        }
+        self.finish_fes_slider_update(owner, &mut scene.objects, handle, task)
+    }
+
+    fn prepare_fes_slider_update(
+        &mut self,
+        owner: u32,
+        objects: &mut Objects,
+        handle: u32,
+    ) -> Result<u32> {
         let object = objects.get(handle).unwrap();
         self.check_fes_slider_binding(owner, object.task_id)?;
         let task = object
@@ -106,26 +162,16 @@ impl<F: ObjectFactory> Store<'_, F> {
             let mut range = state.range.map(i32::to_le_bytes).concat();
             self.slider_command(owner, task, 368, [0, 0, 1], Some(&mut range))?;
         }
-        let state = objects.get_mut(handle).unwrap().state.slider_mut().unwrap();
-        if state.updates.position {
-            let value = state.position;
-            let notification = std::mem::take(&mut state.notification);
-            self.slider_command(
-                owner,
-                task,
-                369,
-                [notification as u32, value as u32, 1],
-                None,
-            )?;
-            objects
-                .get_mut(handle)
-                .unwrap()
-                .state
-                .slider_mut()
-                .unwrap()
-                .updates
-                .position = false;
-        }
+        Ok(task)
+    }
+
+    fn finish_fes_slider_update(
+        &mut self,
+        owner: u32,
+        objects: &mut Objects,
+        handle: u32,
+        task: u32,
+    ) -> Result<()> {
         let state = objects.get_mut(handle).unwrap().state.slider_mut().unwrap();
         if state.updates.alpha {
             state.updates.alpha = false;
@@ -188,4 +234,26 @@ fn integer_position(value: f32) -> i32 {
     } else {
         i32::MIN
     }
+}
+
+fn position_request(objects: &mut Objects, handle: u32) -> Option<[u32; 3]> {
+    let state = objects.get_mut(handle).unwrap().state.slider_mut().unwrap();
+    state.updates.position.then(|| {
+        [
+            std::mem::take(&mut state.notification) as u32,
+            state.position as u32,
+            1,
+        ]
+    })
+}
+
+fn finish_position(objects: &mut Objects, handle: u32) {
+    objects
+        .get_mut(handle)
+        .unwrap()
+        .state
+        .slider_mut()
+        .unwrap()
+        .updates
+        .position = false;
 }

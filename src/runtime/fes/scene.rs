@@ -10,7 +10,7 @@ mod wait;
 /// 一份预先装载的 FES 执行状态；调用方绑定共享列表并在所属任务的主体时点推进。
 pub struct Scene {
     interpreter: fes::Interpreter,
-    objects: Objects,
+    pub(super) objects: Objects,
     owner: Option<u32>,
     frame_origin: u32,
     deadline: Option<u32>,
@@ -436,7 +436,7 @@ impl<F: ObjectFactory> Store<'_, F> {
             if *cursor == scene.objects.update_order.len() {
                 return Ok(true);
             }
-            self.update_fes_record(owner, &mut scene.objects, *cursor)?;
+            self.update_fes_scene_record(owner, scene, *cursor)?;
             *cursor += 1;
         }
         Ok(*cursor == scene.objects.update_order.len())
@@ -492,7 +492,7 @@ impl<F: ObjectFactory> Store<'_, F> {
         }
         let handles = scene.objects.update_order().collect::<Vec<_>>();
         for index in 0..scene.objects.update_order.len() {
-            self.update_fes_record(owner, &mut scene.objects, index)?;
+            self.update_fes_scene_record(owner, scene, index)?;
         }
         for handle in handles {
             let object = scene.objects.get(handle).unwrap();
@@ -576,13 +576,34 @@ impl<F: ObjectFactory> Store<'_, F> {
         target: Option<&fes::ObjectReference>,
         event: u32,
     ) -> Result<Option<bool>> {
+        self.dispatch_fes_event_inner(owner, scene, target, event, false)
+    }
+
+    pub(in crate::runtime) fn dispatch_fes_control_event(
+        &mut self,
+        owner: u32,
+        scene: &mut Scene,
+        target: &fes::ObjectReference,
+        event: u32,
+    ) -> Result<Option<bool>> {
+        self.dispatch_fes_event_inner(owner, scene, Some(target), event, true)
+    }
+
+    fn dispatch_fes_event_inner(
+        &mut self,
+        owner: u32,
+        scene: &mut Scene,
+        target: Option<&fes::ObjectReference>,
+        event: u32,
+        host_boundary: bool,
+    ) -> Result<Option<bool>> {
         if event > 21 {
             return Err(Error::new(0, "FES 输入事件编号无效"));
         }
         if self.tree.node(owner).is_none() || scene.owner.is_some_and(|bound| bound != owner) {
             return Err(Error::new(0, "FES 事件所属任务无效"));
         }
-        if scene.invocation.is_some()
+        if (scene.invocation.is_some() && !host_boundary)
             || scene.system_block.is_some()
             || scene.media_preparation.is_some()
             || scene.interpreter.initialization_pending()
@@ -622,12 +643,20 @@ impl<F: ObjectFactory> Store<'_, F> {
             let Some(target) = target else {
                 return Ok(Some(false));
             };
-            if !scene.interpreter.dispatch_event(
-                &target.name,
-                target.bank,
-                name,
-                default.as_deref().map(crate::text::ascii).transpose()?,
-            )? {
+            let default = default.as_deref().map(crate::text::ascii).transpose()?;
+            let dispatched = if host_boundary {
+                scene.interpreter.dispatch_event_at_host_boundary(
+                    &target.name,
+                    target.bank,
+                    name,
+                    default,
+                )?
+            } else {
+                scene
+                    .interpreter
+                    .dispatch_event(&target.name, target.bank, name, default)?
+            };
+            if !dispatched {
                 return Ok(Some(false));
             }
             scene.object_event = Some(ObjectEvent {
@@ -941,10 +970,17 @@ impl<F: ObjectFactory> Store<'_, F> {
                 }
                 scene.invocation.as_mut().unwrap().motions_done = true;
             }
-            if let Some((count, cursor)) = &mut scene.invocation.as_mut().unwrap().updates {
-                if *cursor < *count {
-                    self.update_fes_record(owner, &mut scene.objects, *cursor)?;
-                    *cursor += 1;
+            if let Some((count, cursor)) = scene.invocation.as_ref().unwrap().updates {
+                if cursor < count {
+                    self.update_fes_scene_record(owner, scene, cursor)?;
+                    scene
+                        .invocation
+                        .as_mut()
+                        .unwrap()
+                        .updates
+                        .as_mut()
+                        .unwrap()
+                        .1 += 1;
                 } else {
                     let invocation = scene.invocation.as_mut().unwrap();
                     if invocation.media_passes > 1 {

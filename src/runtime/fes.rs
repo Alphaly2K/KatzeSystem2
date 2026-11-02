@@ -21,6 +21,7 @@ mod task;
 pub use animation::ImageAnimationRequest;
 pub use navigation::NavigationOutcome;
 pub use scene::Scene;
+pub(super) use task::dispatch_borrowed_control_event;
 pub use task::{FesFactory, FesObject, Services};
 
 const TOP: &str = "_TOPOBJ_";

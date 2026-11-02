@@ -1693,3 +1693,58 @@ fn slider_drag_reaches_fes_events_and_the_next_media_update_without_renotifying(
         assert_eq!(target.pixel(2, 0), Some(0));
     }
 }
+
+#[test]
+fn linked_slider_callbacks_finish_inside_media_updates_and_preserve_main_waits() {
+    let source = b"#KEYBLOCK 1\n0 1,1\n#DEFINE\nBUTTON nav\nSLIDER bar\n#OBJECT SIZE POS KEYBLOCK PRI\nnav 2,2 0,3 0,0,0 5\n#OBJECT FILE POS2 DISP\nbar control bounds 1\n#START\nnav attach bar\nbar page 0 6\nbar pos 2\nwait 1000\n$6=$6+1\nbar getpos 0 1 2\nbar disp 1\nbar enable 1\nwait 9999\n#bar.SCRL_P\n@ getpos 0 1 2\n$3=$3+1\n$4=_MOUSE_X_\n$5=_MOUSE_Y_\n@ pos 4\n@ page 0 9\nif ($7)\n@ disp 0\n@ enable 0\nendif\n";
+    for budget in [1, 4096] {
+        for hide in [false, true] {
+            let Setup {
+                mut runtime,
+                pointer,
+                ..
+            } = setup(budget, source);
+            runtime.numbers_mut().shared[7] = i32::from(hide);
+            runtime.input_coordinates_mut().logical_size = [8, 6];
+            let sprite = slider_sprite();
+            let mut bounds = sprite.clone();
+            bounds[36..40].copy_from_slice(&7u32.to_le_bytes());
+            runtime.set_resources(SliderFiles(Files {
+                files: [
+                    (b"complete.fes".to_vec(), packed(source)),
+                    (b"control".to_vec(), sprite),
+                    (b"bounds".to_vec(), bounds),
+                ]
+                .into(),
+                reads: Rc::default(),
+                fail_media: Rc::new(Cell::new(false)),
+            }));
+            let (_, list, children) = start_button_scene(&mut runtime);
+            let nav = children
+                .into_iter()
+                .find(|&id| runtime.tree().node(id).unwrap().kind == kind::BUTTON)
+                .unwrap();
+            pointer.set(PointerSample {
+                position: [1, 4],
+                active: 1,
+            });
+            runtime.input_state_mut(1).unwrap().pointer_mut().active = 1;
+            runtime.update_input_selection(1, Some([1, 4])).unwrap();
+            assert_eq!(send(&mut runtime, nav, 4, 7, 1), 0);
+            assert_eq!(&runtime.numbers().shared[..7], &[3, 0, 0, 1, 1, 4, 0]);
+            send(&mut runtime, list, 298, 0, 0);
+            let pixels = runtime.drawing().target.as_ref().unwrap();
+            assert_eq!(pixels.pixel(3, 0), Some(if hide { 0 } else { 0xff000000 }));
+            assert_eq!(pixels.pixel(4, 0), Some(0));
+            runtime.update(102, 1).unwrap();
+            assert_eq!(runtime.numbers().shared[3], 1);
+            assert_eq!(runtime.numbers().shared[6], 0);
+            runtime.update(1200, 1).unwrap();
+            assert_eq!(&runtime.numbers().shared[..7], &[4, 0, 0, 1, 1, 4, 1]);
+            send(&mut runtime, list, 298, 0, 0);
+            let pixels = runtime.drawing().target.as_ref().unwrap();
+            assert_eq!(pixels.pixel(3, 0), Some(0xff000000));
+            assert_eq!(pixels.pixel(4, 0), Some(0));
+        }
+    }
+}
