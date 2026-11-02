@@ -14,7 +14,9 @@ pub struct Scene {
     deadline: Option<u32>,
     exit_code: Option<i32>,
     exit_request: Option<i32>,
-    queued_exits: VecDeque<i32>,
+    notifications: VecDeque<Notification>,
+    preferred_focus: Option<fes::ObjectReference>,
+    focus_lock: i32,
     invocation: Option<Invocation>,
     input: super::input::SystemInput,
     system_block: Option<String>,
@@ -35,6 +37,12 @@ struct ObjectEvent {
     target: Option<fes::ObjectReference>,
     event: u32,
     handled: bool,
+}
+
+enum Notification {
+    Exit(i32),
+    PreferredFocus(fes::ObjectReference),
+    FocusLock(i32),
 }
 
 impl Scene {
@@ -66,7 +74,9 @@ impl Scene {
             deadline: None,
             exit_code: None,
             exit_request: None,
-            queued_exits: VecDeque::new(),
+            notifications: VecDeque::new(),
+            preferred_focus: None,
+            focus_lock: 0,
             invocation: None,
             input: super::input::SystemInput::default(),
             system_block: None,
@@ -108,6 +118,14 @@ impl Scene {
         self.input.raw
     }
 
+    pub fn preferred_focus(&self) -> Option<&fes::ObjectReference> {
+        self.preferred_focus.as_ref()
+    }
+
+    pub fn focus_lock(&self) -> i32 {
+        self.focus_lock
+    }
+
     pub(super) fn set_raw_input(&mut self, value: u32) {
         self.input.raw = value;
     }
@@ -141,10 +159,78 @@ impl Scene {
         self.exit_request = Some(code);
     }
 
-    fn publish_queued_exits(&mut self) {
-        while let Some(code) = self.queued_exits.pop_front() {
-            self.publish_exit(code);
+    fn publish_notifications(&mut self) {
+        while let Some(notification) = self.notifications.pop_front() {
+            match notification {
+                Notification::Exit(code) => self.publish_exit(code),
+                Notification::PreferredFocus(target) => self.preferred_focus = Some(target),
+                Notification::FocusLock(value) => self.focus_lock = value,
+            }
         }
+    }
+
+    fn notify(&mut self, notification: Notification) -> Result<()> {
+        if self.notifications.len() >= crate::read::MAX_ITEMS {
+            return Err(Error::new(0, "FES 任务通知队列超过上限"));
+        }
+        self.notifications.push_back(notification);
+        Ok(())
+    }
+
+    /// 完成值区分普通对象命令与会结束本次控制器执行的全局命令。
+    fn navigation_command(
+        &mut self,
+        args: &[Vec<u8>],
+        offset: usize,
+        numbers: &mut crate::expression::State,
+    ) -> Result<Option<bool>> {
+        if args.first().is_some_and(|name| name == b"lockactive") {
+            let value = args
+                .get(1)
+                .map_or(Ok(0), |bytes| self.interpreter.eval(bytes, numbers))?;
+            self.notify(Notification::FocusLock(value))?;
+            return Ok(Some(true));
+        }
+        if !args.get(1).is_some_and(|name| name == b"noact") {
+            return Ok(None);
+        }
+        let mut target = if args[0] == b"@" {
+            let context = self
+                .interpreter
+                .event_context()
+                .ok_or_else(|| Error::new(offset, "FES 当前没有事件对象"))?;
+            fes::ObjectReference {
+                name: context.object.clone(),
+                bank: context.bank,
+            }
+        } else {
+            self.interpreter.object_reference(&args[0], numbers)?
+        };
+        let count = self.objects.count(&target.name);
+        if count == 0 {
+            return Err(Error::new(
+                offset,
+                "FES 默认焦点目标不存在，表达式回退尚未接入",
+            ));
+        }
+        if target.bank == -1 {
+            if count != 1 {
+                return Ok(Some(false));
+            }
+            target.bank = 0;
+        }
+        if let Some(bytes) = args.get(2) {
+            self.interpreter.eval(bytes, numbers)?;
+        }
+        if self
+            .objects
+            .lookup(&target.name, target.bank)
+            .and_then(|handle| self.objects.get(handle))
+            .is_some_and(|object| matches!(object.state, super::ObjectState::Button(_)))
+        {
+            self.notify(Notification::PreferredFocus(target))?;
+        }
+        Ok(Some(false))
     }
 
     pub(super) fn set_system_value(&mut self, name: &str, value: i32) {
@@ -513,18 +599,28 @@ impl<F: ObjectFactory> Store<'_, F> {
                     if args.first().is_some_and(|name| name == b"decode") {
                         scene.handler_updates = Some(0);
                         continue;
-                    } else if !scene.objects.dispatch_image_animation(
-                        &mut scene.interpreter,
-                        &line,
-                        self.numbers,
-                    )? && !scene.objects.dispatch_object_command(
-                        &mut scene.interpreter,
-                        &line,
-                        self.numbers,
-                    )? {
-                        return Err(Error::new(line.offset, "FES 事件对象命令尚未接入"));
+                    } else if let Some(stop) =
+                        scene.navigation_command(&args, line.offset, self.numbers)?
+                    {
+                        if stop {
+                            scene.interpreter.finish_event_handler()?;
+                        } else {
+                            scene.interpreter.resume();
+                        }
+                    } else {
+                        if !scene.objects.dispatch_image_animation(
+                            &mut scene.interpreter,
+                            &line,
+                            self.numbers,
+                        )? && !scene.objects.dispatch_object_command(
+                            &mut scene.interpreter,
+                            &line,
+                            self.numbers,
+                        )? {
+                            return Err(Error::new(line.offset, "FES 事件对象命令尚未接入"));
+                        }
+                        scene.interpreter.resume();
                     }
-                    scene.interpreter.resume();
                 }
                 Step::Event(fes::Event::InitializeObject(initialization)) => {
                     scene
@@ -533,10 +629,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                     scene.interpreter.resume();
                 }
                 Step::Event(fes::Event::Exit(code)) => {
-                    if scene.queued_exits.len() >= crate::read::MAX_ITEMS {
-                        return Err(Error::new(0, "FES 事件退出通知队列超过上限"));
-                    }
-                    scene.queued_exits.push_back(code);
+                    scene.notify(Notification::Exit(code))?;
                     scene.interpreter.finish_event_handler()?;
                 }
                 Step::Event(fes::Event::Subcommand(call)) => {
@@ -595,7 +688,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                 .deadline
                 .is_some_and(|deadline| now < deadline && !scene.input.left)
             {
-                scene.publish_queued_exits();
+                scene.publish_notifications();
                 scene.finish_input();
                 scene.begin_updates(false);
             } else {
@@ -630,7 +723,6 @@ impl<F: ObjectFactory> Store<'_, F> {
                     return Err(Error::new(0, "FES 解释器出现未支持的停止状态"));
                 }
                 Step::Event(event) => {
-                    scene.publish_queued_exits();
                     let now = scene.invocation.as_ref().unwrap().now;
                     if scene.apply_initialization(&event, self.numbers)? {
                         scene.interpreter.resume();
@@ -640,10 +732,17 @@ impl<F: ObjectFactory> Store<'_, F> {
                         fes::Event::Command(line) => {
                             let args = scene.interpreter.parameters(&line.bytes, self.numbers)?;
                             if args.first().is_some_and(|name| name == b"decode") {
+                                scene.publish_notifications();
                                 scene.begin_updates(true);
                                 continue;
                             }
-                            if !scene.objects.dispatch_image_animation(
+                            if let Some(stop) =
+                                scene.navigation_command(&args, line.offset, self.numbers)?
+                            {
+                                if stop {
+                                    scene.publish_notifications();
+                                }
+                            } else if !scene.objects.dispatch_image_animation(
                                 &mut scene.interpreter,
                                 &line,
                                 self.numbers,
@@ -662,16 +761,19 @@ impl<F: ObjectFactory> Store<'_, F> {
                             if duration < 0 {
                                 return Err(Error::new(0, "FES 特殊等待尚未接入"));
                             }
+                            scene.publish_notifications();
                             scene.deadline = Some(now.wrapping_add(duration.max(1) as u32));
                             scene.finish_input();
                             scene.begin_updates(false);
                         }
                         fes::Event::Frame => {
+                            scene.publish_notifications();
                             scene.deadline = Some(now.wrapping_add(1));
                             scene.finish_input();
                             scene.begin_updates(false);
                         }
                         fes::Event::Exit(code) => {
+                            scene.publish_notifications();
                             scene.publish_exit(code);
                         }
                         fes::Event::CreateObject(_)

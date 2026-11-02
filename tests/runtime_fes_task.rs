@@ -738,6 +738,118 @@ fn start_button_scene(runtime: &mut TestRuntime) -> (u32, u32, Vec<u32>) {
 }
 
 #[test]
+fn focus_notifications_wait_for_the_body_and_lock_commands_end_local_handlers() {
+    use katze_system2::{fes, runtime::fes::Scene};
+    let source = b"#DEFINE\nBUTTON item[3]\nBASE other\n#START\nitem noact ($0+=100)\nother noact ($0+=1)\nitem[1] noact ($0+=1)\nlockactive ($0+=1)\n$5=$5+1\nwait 1000\n#_FES_SLEEP_\nitem[2] noact ($0+=1)\nlockactive -3\n$6=$6+1\n#_FES_WAKE_\nlockactive\n$6=$6+100\n#item.FOCUS\nitem[0] noact\nlockactive 7\n$6=$6+1000\n";
+    for budget in [1, 4096] {
+        let mut runtime = setup(budget, b"#START\nwait 1000\n").runtime;
+        let mut scene = Scene::new(
+            fes::Program::from_text(source).unwrap(),
+            runtime.host().handle_allocator(),
+        )
+        .unwrap();
+        let list = runtime.create(0, kind::IMAGE_LIST, b"list", b"").unwrap();
+        send(&mut runtime, list, 285, 8, 6);
+        scene
+            .objects_mut()
+            .unwrap()
+            .set_image_list(list, katze_system2::graphics::Rect::from_xywh(0, 0, 8, 6));
+        let update = |runtime: &mut TestRuntime, scene: &mut Scene, now| {
+            for _ in 0..128 {
+                if runtime.update_fes_scene(0, scene, now).unwrap() {
+                    return;
+                }
+            }
+            panic!("合成焦点场景没有完成本轮");
+        };
+        update(&mut runtime, &mut scene, 100);
+        assert_eq!(runtime.numbers().shared[0], 3);
+        assert_eq!(runtime.numbers().shared[5], 1);
+        assert_eq!(scene.focus_lock(), 3);
+        assert_eq!(scene.preferred_focus().unwrap().bank, 1);
+        for _ in 0..128 {
+            if runtime
+                .dispatch_fes_system_block(0, &mut scene, "_FES_SLEEP_")
+                .unwrap()
+            {
+                break;
+            }
+        }
+        assert!(!scene.is_pending());
+        assert_eq!(runtime.numbers().shared[0], 4);
+        assert_eq!(runtime.numbers().shared[6], 0);
+        assert_eq!(scene.focus_lock(), 3);
+        assert_eq!(scene.preferred_focus().unwrap().bank, 1);
+        update(&mut runtime, &mut scene, 101);
+        assert_eq!(scene.focus_lock(), -3);
+        assert_eq!(scene.preferred_focus().unwrap().bank, 2);
+        let target = fes::ObjectReference {
+            name: "item".into(),
+            bank: 1,
+        };
+        let mut handled = None;
+        for _ in 0..128 {
+            handled = runtime
+                .dispatch_fes_event(0, &mut scene, Some(&target), 0)
+                .unwrap();
+            if handled.is_some() {
+                break;
+            }
+        }
+        assert_eq!(handled, Some(true));
+        assert_eq!(scene.focus_lock(), -3);
+        assert_eq!(scene.preferred_focus().unwrap().bank, 2);
+        update(&mut runtime, &mut scene, 102);
+        assert_eq!(scene.focus_lock(), 7);
+        assert_eq!(scene.preferred_focus().unwrap().bank, 0);
+        for _ in 0..128 {
+            if runtime
+                .dispatch_fes_system_block(0, &mut scene, "_FES_WAKE_")
+                .unwrap()
+            {
+                break;
+            }
+        }
+        assert!(!scene.is_pending());
+        assert_eq!(scene.focus_lock(), 7);
+        update(&mut runtime, &mut scene, 103);
+        assert_eq!(scene.focus_lock(), 0);
+        assert_eq!(runtime.numbers().shared[6], 0);
+    }
+}
+
+#[test]
+fn focus_lock_preserves_pressed_targets_after_unfocus_and_missing_selections() {
+    let source = b"#DEFINE\nBUTTON item\n#OBJECT SIZE PRI\nitem 2,2 5\n#START\nlockactive -3\nwait 1000\n#item.PUSH_L\n$0=$0+1\n#item.RELEASE_L\n$1=$1+1\n#item.UNFOCUS\n$2=$2+1\n#_FES_SLEEP_\nlockactive 0\n";
+    for budget in [1, 4096] {
+        let mut runtime = setup(budget, source).runtime;
+        let (fes, _, buttons) = start_button_scene(&mut runtime);
+        let button = buttons[0];
+        send(&mut runtime, fes, 64, button, 1);
+        send(&mut runtime, button, 4, 0, 1);
+        send(&mut runtime, fes, 64, u32::MAX, 1);
+        send(&mut runtime, button, 4, 0, 0);
+        assert_eq!(&runtime.numbers().shared[..2], &[1, 1]);
+        send(&mut runtime, button, 4, 0, 1);
+        send(&mut runtime, fes, 64, button, 0);
+        send(&mut runtime, button, 4, 0, 0);
+        assert_eq!(&runtime.numbers().shared[..3], &[2, 2, 1]);
+        send(&mut runtime, button, 4, 0, 1);
+        send(&mut runtime, button, 4, 0, 0);
+        assert_eq!(&runtime.numbers().shared[..3], &[2, 2, 1]);
+
+        send(&mut runtime, fes, 348, 0, 1);
+        send(&mut runtime, fes, 348, 0, 0);
+        runtime.update(102, 1).unwrap();
+        send(&mut runtime, fes, 64, button, 1);
+        send(&mut runtime, button, 4, 0, 1);
+        send(&mut runtime, fes, 64, u32::MAX, 1);
+        send(&mut runtime, button, 4, 0, 0);
+        assert_eq!(&runtime.numbers().shared[..3], &[3, 2, 1]);
+    }
+}
+
+#[test]
 fn button_events_keep_pressed_banks_and_defer_touch_media_refresh() {
     let source = b"#DEFINE\nBUTTON item[2]\nCIMAGE fill\n#OBJECT SIZE PRI ENABLE DEFAULT POS\nitem 2,2 5 21 DEFAULT 0,0\nitem[1] 2,2 6 21 DEFAULT 4,0\n#OBJECT SIZE COLOR PRI POS DISP\nfill 2,2 0xff112233 30 0,3 1\n#START\nwait 1000\n$7=_CLICK_L_\nwait 1000\n#DEFAULT.PUSH_L\n$0=$0*10+1\n#item.PUSH_L\n$0=$0*10+2\n$1=@\n$5=(_CLICK_L_==item[@])\n#item.RELEASE_L\n$2=@+10\n@ enable 0\n#item.FOCUS\n$3=$3*10+@+1\n#item.TOUCH\n$4=$4+1\nfill disp 0\n";
     for budget in [1, 4096] {

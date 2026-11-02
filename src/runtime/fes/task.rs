@@ -207,7 +207,7 @@ struct InputEvent {
     event: Option<u32>,
     handled: Option<bool>,
     response_done: bool,
-    clear_pressed: bool,
+    clear_selection: bool,
     refresh: bool,
     cursor: usize,
     preserve_output: bool,
@@ -342,7 +342,13 @@ impl FesObject {
                 false
             };
             self.input_event.as_mut().unwrap().handled = Some(handled);
-            if self.input_event.as_ref().unwrap().clear_pressed {
+            if self.input_event.as_ref().unwrap().clear_selection
+                && self
+                    .scene
+                    .as_ref()
+                    .is_none_or(|scene| scene.focus_lock() == 0)
+            {
+                self.focus = None;
                 self.pressed = None;
             }
         }
@@ -434,12 +440,14 @@ impl FesObject {
                 .map(|record| record.target().clone())
         };
         let key = command.data[1];
-        let mut clear_pressed = false;
+        let mut clear_selection = false;
         let target = match command.code {
             64 => {
                 let target = find();
-                self.focus = if key != 0 { target.clone() } else { None };
-                clear_pressed = self.focus.is_none();
+                if target.is_some() {
+                    self.focus = if key != 0 { target.clone() } else { None };
+                }
+                clear_selection = target.is_none() || key == 0;
                 target
             }
             65 => find(),
@@ -503,7 +511,7 @@ impl FesObject {
             event,
             handled: None,
             response_done: false,
-            clear_pressed,
+            clear_selection,
             refresh: !touch,
             cursor: 0,
             preserve_output: touch,

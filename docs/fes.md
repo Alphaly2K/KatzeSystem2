@@ -298,6 +298,8 @@ mappedOperand = "[", integer, "]" | literal ;
 
 对象内建控制 `disp`／`size`／`keypos`／`setid`／`getid`／`enable`／`pri`／`pos2` 已由运行时对象存储消费，普通推进和睡眠／唤醒系统块共用。签名、类型分派、数组遍历及尚未接入的表达式回退见[图形接口](graphics.md#fes-对象控制命令)。
 
+Scene 另消费 `button noact [value]` 与 `lockactive [value]`，分别排队默认焦点和原始焦点锁。普通主体消费通知；对象／系统处理器内的 lockactive 结束当前处理器。参数与时点见[默认焦点与焦点锁](graphics.md#fes-默认焦点与焦点锁)。
+
 `execfes`、`execkcs`、`endfes`、`endkcs`、`send` 等命令需要子任务和父子通信接口；`_EXITCODE_` 表示子任务状态。对象命令也有不同签名，例如同名 `load` 对图像与音频的参数不同。
 
 完整运行需解释对象初始化列、宏、子命令绑定、事件和子任务协议。只识别普通命令头无法覆盖这些输入。
