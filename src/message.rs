@@ -5,9 +5,11 @@ use std::ops::Range;
 mod layout;
 mod line_breaks;
 mod markup;
+mod timing;
 
 pub use layout::{Layout, LayoutEntry, LayoutSettings, VerticalAlignment};
 pub use line_breaks::BreakCharacters;
+pub use timing::{Schedule, TimingSettings};
 
 /// 已解码文字仍保留原文字对象路径，供布局及消息更新使用。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

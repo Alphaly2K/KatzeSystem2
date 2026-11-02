@@ -239,17 +239,7 @@ impl Layout {
             if settings.line_breaking {
                 end = self.adjust_break(start, end, settings.width.wrapping_sub(x), settings);
                 next = end + 1;
-                if wrapped {
-                    for entry in self.entries[start..=end].iter().rev() {
-                        if entry.glyph() {
-                            break;
-                        }
-                        if entry.line_break(settings.encoding) {
-                            wrapped = false;
-                            break;
-                        }
-                    }
-                }
+                wrapped &= !self.entries[end].line_break(settings.encoding);
             }
             wrapped &= next < self.entries.len();
             let mut x = left.wrapping_add(settings.offset[0]).wrapping_add(shift);
