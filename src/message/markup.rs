@@ -165,6 +165,14 @@ impl Parser<'_> {
             }
             'x' | 'y' => {
                 if let Some(value) = self.number() {
+                    let group = if c.eq_ignore_ascii_case(&'x') && matches!(value, 1 | 2) {
+                        Some(TextGroup {
+                            index: self.next_group,
+                            ruby: value == 2,
+                        })
+                    } else {
+                        None
+                    };
                     self.emit(
                         start,
                         if c.eq_ignore_ascii_case(&'x') {
@@ -172,7 +180,7 @@ impl Parser<'_> {
                         } else {
                             AtomKind::Y(value)
                         },
-                        None,
+                        group,
                     );
                 }
             }

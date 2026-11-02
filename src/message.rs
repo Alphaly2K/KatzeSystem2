@@ -2,7 +2,17 @@
 
 use std::ops::Range;
 
+mod layout;
 mod markup;
+
+pub use layout::{Layout, LayoutEntry, LayoutSettings, VerticalAlignment};
+
+/// 已解码文字仍保留原文字对象路径，供布局及消息更新使用。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextEncoding {
+    Cp932,
+    Unicode,
+}
 
 /// 颜色保留消息语法中的 AABBGGRR；绘制时调用 message_color_argb 换算。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
