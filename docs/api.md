@@ -28,7 +28,9 @@
 
 `message::Reveal` 提供水平渐显的过渡表、原始时间换算、整面颜色同步和逐字形 Alpha 更新，来源保存完整像素，目标持续保留显示状态。`Layout::reveal_starts` 生成跨行起点，`RevealGlyph` 组合起点、消息面位置和局部绘制范围；接口约束见[水平渐显核心](message.md#水平渐显核心)。持久页面推进见下文的 `Display`，脚本完成等待继续接入消息对象。
 
-`message::Display::new(defaults, encoding, size, settings)` 持有消息页与持久像素，串联追加、准备、普通逐字／渐显、效果绘制及清空；`advance` 返回首次处理、首次完成的布局下标和当前范围完成状态。`surface()` 可直接合成到最终画面，`page()` 提供只读布局与 `GlyphState` 查询，`source_surface()` 查询可选的完整渐显来源。`dirty_rectangle()` 查询累计更新范围，`clear_dirty()` 显式清除登记；`clear()` 保留既有登记。`reconfigure(defaults, size, settings, &layout, &timing, measure)` 按新配置重解析完整来源，准备成功后重建像素、清空脏区与显示进度并保留速度；失败时原对象保持。服务失败后保留已处理状态并可重试，详见[持久消息显示](message.md#持久消息显示)。消息任务、输入翻页及脚本等待继续接入。
+`message::Display::new(defaults, encoding, size, settings)` 持有消息页与持久像素，串联追加、准备、普通逐字／渐显、效果绘制及清空；`advance` 返回首次处理、首次完成的布局下标和当前范围完成状态。`surface()` 可直接合成到最终画面，`page()` 提供只读布局与 `GlyphState` 查询，`source_surface()` 查询可选的完整渐显来源。`dirty_rectangle()` 查询累计更新范围，`clear_dirty()` 显式清除登记；`clear()` 保留既有登记。`reconfigure(defaults, size, settings, &layout, &timing, measure)` 按新配置重解析完整来源，准备成功后重建像素、清空脏区与显示进度并保留速度；失败时原对象保持。服务失败后保留已处理状态并可重试，详见[持久消息显示](message.md#持久消息显示)。消息任务见下段，输入翻页及脚本等待继续接入。
+
+`message::MessageFactory { fallback }` 创建类型 48／63 的 `MessageObject`，复用平面属性与生命周期，接入配置、追加、分隔、逐字／渐显、强制显示、速度、剩余数量和画布提交。调用前通过 `Runtime::set_fonts` 绑定 `FontServices`，通过 `host_mut().message_time_scale` 配置消息全局时间比例；独立宿主提供相应字体、可见性与提交服务。原配置使用显式 `CommandBuffers`，不解引用进程指针。已接入命令与配置契约见[消息任务对象](message.md#消息任务对象)；普通 KCS 文字 native、CST 消息及完成等待继续接入。
 
 ## 数值状态
 
@@ -329,7 +331,7 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 
 `CanvasLayout::new(tile_size, grid, step)` 与 `triangulate(source)` 将已变换的源几何切成逐块画布三角形，保留原顺序、颜色及局部 UV。步长、整数裁剪门控和资源上限见[画布几何切割](graphics.md#画布几何切割)。`Drawable::from_canvas_source` 与平面命令 41 保留源和包装两套变换；源变化后通过 `prepare_canvas` 更新，帧提交自动准备可见对象。直接查询与属性选择契约见[画布纹理包装](graphics.md#画布纹理包装)。
 
-对象实现 `runtime::TaskObject`：基类控制与时钟、可选 VM、创建上下文、主体、对象命令、排队与同步消息、删除通知和释放。默认空操作的 `begin_update()` 在时钟和子任务更新前执行，用于按钮的每轮响应重置。除对象命令外，返回 `false` 的方法表示本次预算耗尽，续跑由运行时完成；对象命令返回 `task::CommandOutcome`，完成状态与传播状态分开表达。库提供 `BaseObject`（只有控制与时钟）与 `OrdinaryObject`（包裹 `OrdinaryTask`）。`ObjectFactory::create` 按类型编号创建对象；`KcsFactory` 经 `ProgramLoader` 按名称装载普通 KCS，`external_bytes` 指定 VM 外部区容量。`graphics::GraphicsFactory { fallback }` 创建类型 2 的 `PlaneObject`，其他类型委托 fallback；基础平面提供基类控制、几何及查询、显示与输入绑定、事件响应、内部子任务传播及绘图登记清理，运动等缺失入口返回诊断，详见[二维任务对象](graphics.md#基础二维任务对象)。`input::InputFactory { fallback }` 创建类型 11 的 InputObject、类型 6 的 ButtonObject、类型 42 的 SliderObject 和类型 41 的 Scroll2Object，提供设备输入、矩形按钮及滑动控件事件；命令与约束见[输入接口](input.md)。音频和文字类型继续由对应工厂提供，`kind` 保存基线类型编号。
+对象实现 `runtime::TaskObject`：基类控制与时钟、可选 VM、创建上下文、主体、对象命令、排队与同步消息、删除通知和释放。默认空操作的 `begin_update()` 在时钟和子任务更新前执行，用于按钮的每轮响应重置。除对象命令外，返回 `false` 的方法表示本次预算耗尽，续跑由运行时完成；对象命令返回 `task::CommandOutcome`，完成状态与传播状态分开表达。库提供 `BaseObject`（只有控制与时钟）与 `OrdinaryObject`（包裹 `OrdinaryTask`）。`ObjectFactory::create` 按类型编号创建对象；`KcsFactory` 经 `ProgramLoader` 按名称装载普通 KCS，`external_bytes` 指定 VM 外部区容量。`graphics::GraphicsFactory { fallback }` 创建类型 2 的 `PlaneObject`，其他类型委托 fallback；基础平面提供基类控制、几何及查询、显示与输入绑定、事件响应、内部子任务传播及绘图登记清理，运动等缺失入口返回诊断，详见[二维任务对象](graphics.md#基础二维任务对象)。`input::InputFactory { fallback }` 创建类型 11 的 InputObject、类型 6 的 ButtonObject、类型 42 的 SliderObject 和类型 41 的 Scroll2Object，提供设备输入、矩形按钮及滑动控件事件；命令与约束见[输入接口](input.md)。文字类型由 `message::MessageFactory` 提供，音频工厂继续接入；`kind` 保存基线类型编号。
 
 `runtime::fes::FesFactory { fallback }` 创建未装载的类型 34 任务。运行时依次使用 337 初始化、338 通过文件名缓冲区装载、340 绑定直属共享列表、339 立即启动；338 与 340 可以交换先后。此后由 `Runtime::update` 自动推进。337 的第二数据项用零表示运行时隐式共享状态，338 和 25／26 的字节数据通过 `CommandBuffers.data1` 提供。命令、预算、错误及当前支持范围见[图形文档的 FES 任务对象](graphics.md#fes-任务对象)。TaskObject 的 `creation_context()` 为上下文继承提供只读视图，`accepts_deferred_delete()` 为消费 TaskEffects 的对象开放嵌套删除请求；两者默认不提供。
 

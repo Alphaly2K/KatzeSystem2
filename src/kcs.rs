@@ -248,6 +248,30 @@ pub trait Host {
         None
     }
 
+    fn fonts(&mut self) -> Option<&mut dyn crate::message::FontServices> {
+        None
+    }
+
+    fn message_time_scale(&self) -> Option<u32> {
+        None
+    }
+
+    fn message_plane_display(&mut self, id: u32) -> Result<Option<u32>> {
+        self.drawables()
+            .map(|drawings| drawings.get(id).map(crate::graphics::Drawable::display))
+            .ok_or_else(|| Error::new(0, "宿主未提供绘图对象服务"))
+    }
+
+    /// 将顶端起始的消息原始像素复制到画布，返回是否触及目标。
+    fn submit_message(
+        &mut self,
+        _surface: &crate::graphics::Surface,
+        _rectangle: crate::graphics::Rect,
+        _at: [i32; 2],
+    ) -> Result<bool> {
+        Err(Error::new(0, "宿主未提供消息画布提交服务"))
+    }
+
     /// 已解码图像的借用；调用方在同步命令结束前完成像素读取。
     fn image(&self, _handle: u32) -> Result<&crate::graphics::Image> {
         Err(Error::new(0, "宿主未提供解码图像查询"))
@@ -426,6 +450,27 @@ impl<T: Host + ?Sized> Host for &mut T {
 
     fn images_mut(&mut self) -> Option<&mut crate::graphics::Images> {
         (**self).images_mut()
+    }
+
+    fn fonts(&mut self) -> Option<&mut dyn crate::message::FontServices> {
+        (**self).fonts()
+    }
+
+    fn message_time_scale(&self) -> Option<u32> {
+        (**self).message_time_scale()
+    }
+
+    fn message_plane_display(&mut self, id: u32) -> Result<Option<u32>> {
+        (**self).message_plane_display(id)
+    }
+
+    fn submit_message(
+        &mut self,
+        surface: &crate::graphics::Surface,
+        rectangle: crate::graphics::Rect,
+        at: [i32; 2],
+    ) -> Result<bool> {
+        (**self).submit_message(surface, rectangle, at)
     }
 
     fn update_image_list(

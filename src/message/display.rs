@@ -120,13 +120,18 @@ impl Display {
 
     pub fn clear(&mut self) {
         self.page.clear();
+        self.clear_pixels();
+        self.starts.clear();
+        self.bounds.clear();
+        self.colors_dirty = false;
+    }
+
+    /// 清空两份像素，保留来源、布局、字形进度与累计脏区。
+    pub fn clear_pixels(&mut self) {
         self.surface.clear(0);
         if let Some(source) = &mut self.source {
             source.clear(0);
         }
-        self.starts.clear();
-        self.bounds.clear();
-        self.colors_dirty = false;
     }
 
     pub fn prepare(

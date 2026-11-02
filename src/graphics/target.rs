@@ -187,6 +187,26 @@ impl RenderTarget {
             at[0].wrapping_add(info.offset[0]),
             at[1].wrapping_add(info.offset[1]),
         ];
+        self.copy_surface_region(source.surface(), rect, source_origin, at, true)
+    }
+
+    /// 从顶端起始的渲染面复制原始 BGRA，保留 Alpha 和透明像素的 RGB。
+    /// 来源独立裁剪，裁剪不平移传入的目标起点。
+    pub fn copy_surface(&mut self, source: &Surface, rect: Rect, at: [i32; 2]) -> bool {
+        let Some(rect) = rect.intersect(source.bounds()) else {
+            return false;
+        };
+        self.copy_surface_region(source, rect, [rect.left, rect.top], at, false)
+    }
+
+    fn copy_surface_region(
+        &mut self,
+        input: &Surface,
+        rect: Rect,
+        source_origin: [i32; 2],
+        at: [i32; 2],
+        bottom_up: bool,
+    ) -> bool {
         let target_rect =
             Rect::from_xywh(at[0], at[1], rect.right - rect.left, rect.bottom - rect.top);
         let Some(target_rect) = target_rect.intersect(Rect::from_xywh(
@@ -197,7 +217,6 @@ impl RenderTarget {
         )) else {
             return false;
         };
-        let input = source.surface();
         let mut touched = false;
         for row in 0..self.grid[1] {
             for column in 0..self.grid[0] {
@@ -220,9 +239,12 @@ impl RenderTarget {
                 let source_x = source_origin[0] + clipped.left - at[0];
                 let source_y = source_origin[1] + clipped.top - at[1];
                 for line in 0..clipped.bottom - clipped.top {
-                    let from = (info.size[1] as i32 - source_y - line - 1) as usize
-                        * input.stride()
-                        + source_x as usize * 4;
+                    let source_line = if bottom_up {
+                        input.size()[1] as i32 - source_y - line - 1
+                    } else {
+                        source_y + line
+                    };
+                    let from = source_line as usize * input.stride() + source_x as usize * 4;
                     let dest = (clipped.top - y + line) as usize * surface.stride()
                         + (clipped.left - x) as usize * 4;
                     surface.pixels[dest..dest + width]
@@ -264,6 +286,11 @@ impl DrawingContext {
     pub fn copy_image(&mut self, source: &Image, rect: Rect, at: [i32; 2]) -> bool {
         self.active_target()
             .is_some_and(|target| target.copy_image(source, rect, at))
+    }
+
+    pub fn copy_surface(&mut self, source: &Surface, rect: Rect, at: [i32; 2]) -> bool {
+        self.active_target()
+            .is_some_and(|target| target.copy_surface(source, rect, at))
     }
 
     fn active_target(&mut self) -> Option<&mut RenderTarget> {

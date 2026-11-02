@@ -39,6 +39,8 @@ pub mod kind {
     pub const FES: u32 = 34;
     pub const SCROLL2: u32 = 41;
     pub const SLIDER: u32 = 42;
+    pub const STRING_PLANE: u32 = 48;
+    pub const STRING_PLANE_UTF8: u32 = 63;
 }
 
 /// 默认的单次推进预算；预算耗尽时同步入口继续推进到完成。
@@ -165,6 +167,11 @@ impl<F: ObjectFactory> Runtime<F> {
     /// 配置同步资源读取与类别名称补全；已有资源对象继续保留。
     pub fn set_resources(&mut self, services: impl crate::kcs::ResourceServices + 'static) {
         self.resources.services = Some(Box::new(services));
+    }
+
+    /// 配置消息对象使用的字体选择、度量与灰度字形服务。
+    pub fn set_fonts(&mut self, fonts: impl crate::message::FontServices + 'static) {
+        self.resources.fonts = Some(Box::new(fonts));
     }
 
     pub fn images(&self) -> &crate::graphics::Images {
@@ -1257,6 +1264,38 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
 
     fn images_mut(&mut self) -> Option<&mut crate::graphics::Images> {
         Some(&mut self.resources.images)
+    }
+
+    fn fonts(&mut self) -> Option<&mut dyn crate::message::FontServices> {
+        self.resources
+            .fonts
+            .as_mut()
+            .map(|fonts| fonts.as_mut() as _)
+    }
+
+    fn message_time_scale(&self) -> Option<u32> {
+        self.host.message_time_scale
+    }
+
+    fn message_plane_display(&mut self, id: u32) -> Result<Option<u32>> {
+        let drawing = &self.resources.drawing;
+        if drawing.mode != 0 || !drawing.enabled {
+            return Ok(None);
+        }
+        Ok(self
+            .resources
+            .drawables
+            .get(id)
+            .map(crate::graphics::Drawable::display))
+    }
+
+    fn submit_message(
+        &mut self,
+        surface: &crate::graphics::Surface,
+        rectangle: crate::graphics::Rect,
+        at: [i32; 2],
+    ) -> Result<bool> {
+        Ok(self.resources.drawing.copy_surface(surface, rectangle, at))
     }
 
     fn update_image_list(

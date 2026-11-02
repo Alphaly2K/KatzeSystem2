@@ -98,6 +98,27 @@ impl<H: Host, S: TaskServices> Host for TaskHost<'_, H, S> {
         self.inner.images_mut()
     }
 
+    fn fonts(&mut self) -> Option<&mut dyn crate::message::FontServices> {
+        self.inner.fonts()
+    }
+
+    fn message_time_scale(&self) -> Option<u32> {
+        self.inner.message_time_scale()
+    }
+
+    fn message_plane_display(&mut self, id: u32) -> Result<Option<u32>> {
+        self.inner.message_plane_display(id)
+    }
+
+    fn submit_message(
+        &mut self,
+        surface: &crate::graphics::Surface,
+        rectangle: crate::graphics::Rect,
+        at: [i32; 2],
+    ) -> Result<bool> {
+        self.inner.submit_message(surface, rectangle, at)
+    }
+
     fn update_image_list(
         &mut self,
         list: &mut crate::graphics::ImageList,

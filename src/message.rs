@@ -11,6 +11,7 @@ mod markup;
 mod page;
 mod playback;
 mod reveal;
+mod task;
 mod timing;
 
 pub use display::{Display, DisplayProgress, DisplaySettings};
@@ -21,6 +22,7 @@ pub use line_breaks::BreakCharacters;
 pub use page::Page;
 pub use playback::{DisplayUpdate, GlyphState};
 pub use reveal::{Reveal, RevealGlyph};
+pub use task::{FontRequest, FontServices, MessageFactory, MessageObject};
 pub use timing::{Schedule, TimingSettings};
 
 /// 已解码文字仍保留原文字对象路径，供布局及消息更新使用。

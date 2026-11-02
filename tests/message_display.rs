@@ -219,6 +219,14 @@ fn display_paints_font_effects_and_ruby_and_clear_preserves_speed() {
             .any(|p| p == [0x44, 0x55, 0x66, 255])
     );
     display.set_speed(37);
+    let page = display.page().clone();
+    let dirty = display.dirty_rectangle();
+    display.clear_pixels();
+    assert_eq!(display.page(), &page);
+    assert_eq!(display.dirty_rectangle(), dirty);
+    for surface in [display.surface(), display.source_surface().unwrap()] {
+        assert!(surface.pixels().iter().all(|&byte| byte == 0));
+    }
     display.clear();
     assert!(display.page().is_dirty());
     assert_eq!(display.page().speed(), 37);
