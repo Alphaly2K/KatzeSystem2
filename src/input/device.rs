@@ -22,6 +22,10 @@ pub trait InputDevice {
     fn cursor_visible(&mut self) -> Result<u32>;
     fn set_pointer(&mut self, position: [i32; 2]) -> Result<()>;
     fn clear_keys(&mut self) -> Result<()>;
+    /// 清空触摸接触点映射和活动计数，保留鼠标及按键状态。
+    fn clear_touches(&mut self) -> Result<()> {
+        Err(crate::Error::new(0, "输入设备未提供触摸重置"))
+    }
 }
 
 /// 输入任务的原始设备位置、拖动起点和光标状态。

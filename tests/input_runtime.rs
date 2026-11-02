@@ -612,6 +612,10 @@ impl InputDevice for Device {
         }
         Ok(())
     }
+    fn clear_touches(&mut self) -> Result<()> {
+        self.0.borrow_mut().calls.push("clear_touches");
+        Ok(())
+    }
 }
 
 fn input_command(runtime: &mut TestRuntime, code: u32, data: [u32; 3]) -> Result<u32> {
@@ -796,6 +800,11 @@ fn wheel_ignores_event_masks_and_snapshot_commands_preserve_buffer_tails() -> Re
         &std::array::from_fn::<_, 32, _>(|i| i as u8)
     );
     assert_eq!(&history[32..], &[0xaa; 4]);
+    let cached = runtime.input_state(1).unwrap().pointer().clone();
+    let calls = state.borrow().calls.len();
+    input_command(&mut runtime, 156, [0x1234, 0x5678, 0])?;
+    assert_eq!(&state.borrow().calls[calls..], &["clear_touches"]);
+    assert_eq!(runtime.input_state(1).unwrap().pointer(), &cached);
     input_command(&mut runtime, 160, [0; 3])?;
     assert_eq!(input_command(&mut runtime, 153, [0; 3])?, 0);
     state.borrow_mut().sample.active = 0;

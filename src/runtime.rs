@@ -37,6 +37,7 @@ pub mod kind {
     pub const SOUND: u32 = 13;
     pub const IMAGE_LIST: u32 = 15;
     pub const FES: u32 = 34;
+    pub const SLIDER: u32 = 42;
 }
 
 /// 默认的单次推进预算；预算耗尽时同步入口继续推进到完成。
@@ -480,6 +481,7 @@ enum Execution<'a, 'b> {
     },
     Delete,
     MarkDestroying,
+    PrepareRelease,
     Input {
         action: &'a mut InputAction<'b>,
     },
@@ -793,6 +795,9 @@ fn run_nested<F: ObjectFactory>(
             }
             Execution::MarkDestroying => drain(budget, limit, || {
                 object.mark_destroying(&mut nested, budget)
+            }),
+            Execution::PrepareRelease => drain(budget, limit, || {
+                object.prepare_release(&mut nested, budget)
             }),
             Execution::Input { action } => {
                 nested.set_task_clock(object.clock());
@@ -1461,5 +1466,9 @@ impl<F: ObjectFactory> Lifecycle for TaskLifecycle<'_, F> {
         self.resources.drawables.remove(id);
         self.objects.remove(&id);
         Ok(())
+    }
+
+    fn prepare_release(&mut self, tree: &mut TaskTree, id: u32) -> Result<()> {
+        run_nested(self.store(tree), id, Execution::PrepareRelease)
     }
 }

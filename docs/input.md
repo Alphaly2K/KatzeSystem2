@@ -59,6 +59,7 @@
 |149|将自动光标状态 cursor_shown 写 data1 缓冲区前四字节，保留尾部及 output；与普通 native 149 的坐标查询不同|
 |150|调用设备 show_cursor(data[1])，随后读取 cursor_visible 到 cursor_requested；不改 cursor_shown|
 |153|将最近一次主体查询的 active 是否为零写 output|
+|156|调用设备 clear_touches，清空触摸接触点映射和活动计数；保留输入任务状态及 output，忽略数据项|
 |159|auto_hide 与 cursor_requested 均非零时显示光标并广播 22，随后将 idle_count 清零；门控不满足时也清计数，保留 output|
 |160|将最近完成更新保存的三十二字节 history 写 data1 缓冲区，保留尾部及 output；空指针跳过|
 
@@ -176,7 +177,7 @@ move_remaining 为正时，帧首取样后进入下文的平滑定位分支，�
 
 ## 输入对象与运行时
 
-`InputFactory { fallback }` 创建类型十一的 `InputObject::new(id)` 和类型六的 `ButtonObject::new(id)`，其他类型委托已有工厂，可与图形、KCS 工厂组合。对象保存编号、独立的 `InputState`、控制与时钟；非空创建上下文、普通 KCS 消息队列及同步 VM 消息尚不支持，返回诊断。删除先恢复光标并标记，树更新时释放，重新创建取得全新的区域、键和捕获状态。
+`InputFactory { fallback }` 创建类型十一的 `InputObject::new(id)`、类型六的 `ButtonObject::new(id)` 和类型四十二的 `SliderObject::new(id)`，其他类型委托已有工厂，可与图形、KCS 工厂组合。对象保存编号、独立的 `InputState`、控制与时钟；非空创建上下文、普通 KCS 消息队列及同步 VM 消息尚不支持，返回诊断。删除先恢复光标并标记，树更新时释放，重新创建取得全新的区域、键和捕获状态。
 
 `Runtime::set_input_device(device)` 绑定同步设备，并逐个读取已有输入对象的初始位置；绑定后新建输入对象在树登记前读取初始位置，失败不占用编号。初始化只修改 position 和 active，不覆盖按键、捕获或其他指针状态。绑定及初始化错误保留此前完成的修改。`input_coordinates()`／`input_coordinates_mut()` 提供共享 CoordinateMap，配置由调用方准备。
 
@@ -248,3 +249,5 @@ Runtime 在处理输入回调的直接命令时切换到输入任务的宿主编
 图像掩码的 320 组序列、2,560 次 147 请求、7,360 份区域记录及位图共 543,656 字节与独立模型一致；其中 2,240 次请求后的完整区域数据及位图共 477,096 字节又与 Rust 实现一致。两项纯合成回归覆盖尺寸回退、偏移、行对齐、非零 Alpha、首项替换、失效句柄及失败状态；运行时回归串联图像创建／填充／释放、平面 98、选择及按键捕获。平面转发的 81 组数据、绑定和删除组合一致。
 
 平面显示命令 47／48 查询输入命令 134，并据此处理对象状态；显示联动和图像 Alpha 位图已接入。FES 的基础焦点导航通过输入 139 请求后续主体移动，规则见[方向输入](graphics.md#fes-方向输入与指针定位)。坐标映射的自动配置及平台设备继续沿相应入口接入。
+
+类型 42 滑块的范围、来源、两个直属按钮及交互协议见[滑块下层任务](graphics.md#slider-下层任务协议)。`InputDevice::clear_touches` 供触摸消息使用；默认返回缺少服务诊断，设备实现应清空接触点登记及活动数量，保留鼠标与按键状态。该命令不清空输入任务保存的三十二字节历史缓存。

@@ -92,6 +92,11 @@ pub trait TaskObject {
     }
 
     /// 子树已经释放；释放对象持有的资源和执行状态。
+    fn prepare_release(&mut self, _host: &mut dyn Host, _budget: usize) -> Result<bool> {
+        Ok(true)
+    }
+
+    /// 宿主登记已解除；释放对象自身的资源和执行状态。
     fn release(&mut self) -> Result<()> {
         Ok(())
     }

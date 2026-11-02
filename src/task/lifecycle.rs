@@ -20,6 +20,11 @@ pub trait Lifecycle {
     fn mark_destroying(&mut self, tree: &mut TaskTree, id: u32) -> Result<()>;
 
     /// 子树已释放，释放当前对象的资源及执行状态。
+    fn prepare_release(&mut self, _tree: &mut TaskTree, _id: u32) -> Result<()> {
+        Ok(())
+    }
+
+    /// 宿主登记已解除，释放当前对象的资源及执行状态。
     fn release(&mut self, id: u32) -> Result<()>;
 }
 
@@ -161,6 +166,7 @@ impl TaskTree {
                         frames.push(Frame::Enter(child));
                         continue;
                     }
+                    lifecycle.prepare_release(self, id)?;
                     lifecycle.release(id)?;
                     if let Some(node) = self.nodes.remove(&(id as i32)) {
                         if let Some(parent) =

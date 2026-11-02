@@ -171,7 +171,7 @@ impl TaskObject for ImageListObject {
         match command.code {
             19 | 300 | 311 | 312 => (),
             285 => self.initialize([a, b], host)?,
-            286 => {
+            286 | 288 => {
                 if let Some(list) = &mut self.list {
                     let data = words::<15>(buffers.data1.as_deref())?;
                     if data[0] != 0 || data[1] != 0 {
@@ -189,13 +189,16 @@ impl TaskObject for ImageListObject {
                         if data[0] != 0 {
                             list.set_pixels(key, data[0], properties, images(host)?)?;
                         } else {
+                            if command.code == 288 {
+                                return Err(Error::new(0, "图像列表原始来源属性更新尚未接入"));
+                            }
                             let frames = ImageList::decode_hg3(host.image_data(data[1])?)?;
                             list.set_frames(key, frames, properties, images(host)?)?;
                         }
                     } else if data[1..4].iter().any(|&value| value != 0) {
                         return Err(Error::new(0, "图像列表其他来源类型尚未接入"));
                     }
-                    if data[14] != 0 {
+                    if command.code == 286 && data[14] != 0 {
                         list.set_source_identity(key, data[14]);
                     }
                 }

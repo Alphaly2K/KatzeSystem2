@@ -124,6 +124,7 @@ impl CommandState {
                 self.pointer.cursor_requested = device.cursor_visible()?;
             }
             153 => *output = u32::from(self.pointer.active == 0),
+            156 => super::update::device(host)?.clear_touches()?,
             159 => {
                 if self.pointer.auto_hide != 0 && self.pointer.cursor_requested != 0 {
                     self.show_cursor(command.target, 1, true, host)?;
