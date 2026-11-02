@@ -268,7 +268,13 @@ fn system_blocks_between_exit_notifications_preserve_the_main_cursor() {
 #[test]
 fn system_transfers_local_waits_and_exits_keep_the_native_call_stack_effects() {
     for budget in [1, 4096] {
-        for (operation, notification) in [("wait 5", None), ("exit 9", Some(9)), ("decode", None)] {
+        for (operation, notification) in [
+            ("wait 5", None),
+            ("wait", None),
+            ("wait frame ($2+=1)", None),
+            ("exit 9", Some(9)),
+            ("decode", None),
+        ] {
             let source = format!(
                 "#START\nwait 77\n$7=$7+1\n#_FES_SLEEP_\ncall SUB\n$1=$1*10+1\n#SUB\n$1=$1*10+3\n{operation}\n$1=999\n"
             );

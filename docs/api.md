@@ -315,7 +315,7 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 
 `RootObject::new(input_task, sound_task)` 保存输入与声音任务编号，命令 34／35 原样返回相应值；任务删除后不会自动选择替代编号。该对象作为 Runtime 的显式根参数使用，子任务由调用者创建，自动启动链仍待接入。根对象遵循专属命令消费规则，其余未实现的专属入口返回诊断。
 
-`runtime::fes::Scene::new(program, handles)` 组合预先装载的 FES 解释器和对象存储；与 Runtime 共用 `runtime.host().handle_allocator()`。调用前通过 `objects_mut()?.set_image_list(list, clip)` 绑定共享列表；`Runtime::update_fes_scene(owner, &mut scene, now)` 消费已支持的脚本事件并按声明顺序更新对象，返回 false 时继续调用以完成预算续跑，期间保留原时刻和游标。true 表示本轮完成，`exit_code()` 在本轮最终对象更新完成后返回最近已处理的退出通知值，不表示脚本停止。`deadline()` 查询原始等待期限，`raw_input()` 查询控制器保存的原始输入掩码，`is_pending()` 查询续跑状态，`objects()`／`interpreter()` 提供只读查询；推进未完成时 `objects_mut()` 返回诊断。首次推进绑定 owner，后续不能更换。调用方在所属任务主体时点推进，保证该任务时钟已经更新；下层动画命令继续使用任务自身时钟。支持范围和未接入服务见[场景推进](graphics.md#fes-场景推进)。
+`runtime::fes::Scene::new(program, handles)` 组合预先装载的 FES 解释器和对象存储；与 Runtime 共用 `runtime.host().handle_allocator()`。调用前通过 `objects_mut()?.set_image_list(list, clip)` 绑定共享列表；`Runtime::update_fes_scene(owner, &mut scene, now)` 消费已支持的脚本事件并按声明顺序更新对象，返回 false 时继续调用以完成预算续跑，期间保留原时刻和游标。true 表示本轮完成，`exit_code()` 在本轮最终对象更新完成后返回最近已处理的退出通知值，不表示脚本停止。`deadline()` 查询原始等待期限，包含根运动 `0xffffffff`、绝对帧 `0xfffffffe` 和对象 `0xfffffffc`；完成恢复时点见[完成等待](graphics.md#fes-运动与帧完成等待)。`raw_input()` 查询控制器保存的原始输入掩码，`is_pending()` 查询续跑状态，`objects()`／`interpreter()` 提供只读查询；推进未完成时 `objects_mut()` 返回诊断。首次推进绑定 owner，后续不能更换。调用方在所属任务主体时点推进，保证该任务时钟已经更新；下层动画命令继续使用任务自身时钟。支持范围和未接入服务见[场景推进](graphics.md#fes-场景推进)。
 
 `Scene::prepare(&mut state, budget)` 只消费装载期声明和对象属性，返回 false 后继续调用；完成时尚未进入 START，也未创建下层媒体任务。可以重复调用。使用与 Runtime 相同的 `numbers_mut()`，初始化表达式的副作用会立即保留。`Runtime::prepare_fes_scene(owner, &mut scene)` 在此基础上创建图像空包装及 BUTTON 的直属类型 6 任务，不执行 START、读取图像内容或登记输入区域；false 后继续调用，已完成的创建不重复。每条 CIMAGE／IMAGE／BUTTON 记录分配独立包装，BUTTON 另创建直属任务；后一次覆盖对象的当前包装及任务编号，记录保留各自绑定用于更新、事件反查与回收。普通 update 也会在进入 START 前完成这一准备。退出通知由任务层写入属性槽，脚本继续到等待或块末尾；后续 update 按普通规则推进。每条新通知可覆盖属性，期间的外部改写保持到下一条通知；场景本身不删除所属任务。
 
@@ -356,6 +356,8 @@ Scene 消费 `noact`／`lockactive` 并按主体时点处理通知。`preferred_
 `Objects::set_image_list(task, clip)` 为 CIMAGE／IMAGE 绑定已初始化的共享列表和全局裁剪；列表必须是 owner 的直属类型 15 任务。更新按来源重建、属性登记及排序分别消费标记，支持 POS2／SIZE2、CIMAGE／IMAGE 父级位置及 PLANE 裁剪；具体时序见 [CIMAGE](graphics.md#fes-cimage-更新) 与 [IMAGE](graphics.md#fes-image-文件更新) 更新。`Objects::invalidate(handle)` 在直接显示属性修改或运动回写后标记对象及后代；直接来源修改还需请求 rebuild。
 
 `Objects::start_motion(handle, program, parameters, delay)` 向对象加入分组零的运动，返回对象内的运动编号；当前支持 BASE、CIMAGE、IMAGE 和 BUTTON。目标及其后代都没有活动运动时，从图像当前属性捕获基准；有活动运动时沿用已有基准。`motion_active(handle)` 查询目标及其后代，`Object::motions()` 只读查询目标自身队列，`motion_delay()` 查询脚本为后续运动保存的原始开始偏移。`delay` 不改变已经插入的运动；`ismot` 包含尚未到开始时刻的活动条目。`update_motions(now, &mut host, budget_per_task)` 显式按先子后父的顺序推进根对象子树，并回写图像属性及后代失效标记；false 后继续调用，时间、已完成对象与当前队列均保留。续跑期间不得直接修改属性，创建、初始化、重挂、删除及加入运动会返回诊断。Scene 在等待或帧边界自动调用该入口，再按声明顺序刷新媒体；普通 decode 的中间提交先刷新媒体并继续脚本，运动每轮最终阶段执行一次。处理器只加入运动，后续普通更新才执行。失败重试保留已完成的运动阶段；运动与普通 KCS 共用随机序列和调试消息，详见[对象运动](graphics.md#fes-对象运动)。
+
+`Objects::request_motion_finish(handle)` 仅向目标及后代请求结束，保留队列和延迟，供后续普通更新执行；已有运动续跑时返回诊断。
 
 `Objects::stop_motions(handle, &mut host, budget_per_task)` 请求目标及后代结束，以零时刻更新子树，再清空目标自身队列和运动延迟。false 后继续同一目标的停止；此时普通运动更新或其他目标停止返回诊断。后代队列和延迟保留，运动脚本自行响应结束请求。Scene 的 `object stop` 逐银行调用，并支持事件对象 `@` 和银行空洞；媒体仍在后续提交边界刷新。
 

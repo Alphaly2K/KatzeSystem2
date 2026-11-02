@@ -5,6 +5,8 @@ use crate::{
 };
 use std::collections::{BTreeMap, VecDeque};
 
+mod wait;
+
 /// 一份预先装载的 FES 执行状态；调用方绑定共享列表并在所属任务的主体时点推进。
 pub struct Scene {
     interpreter: fes::Interpreter,
@@ -12,6 +14,8 @@ pub struct Scene {
     owner: Option<u32>,
     frame_origin: u32,
     deadline: Option<u32>,
+    frame_wait: u32,
+    wait_target: Option<fes::ObjectReference>,
     exit_code: Option<i32>,
     exit_request: Option<i32>,
     notifications: VecDeque<Notification>,
@@ -90,6 +94,8 @@ impl Scene {
             owner: None,
             frame_origin: 0,
             deadline: None,
+            frame_wait: 0,
+            wait_target: None,
             exit_code: None,
             exit_request: None,
             notifications: VecDeque::new(),
@@ -614,6 +620,11 @@ impl<F: ObjectFactory> Store<'_, F> {
                         }
                         scene.deferred_decodes += 1;
                         scene.interpreter.finish_event_handler()?;
+                    } else if scene
+                        .wait_command(&args, line.offset, 0, self.numbers)?
+                        .is_some()
+                    {
+                        scene.interpreter.finish_event_handler()?;
                     } else if let Some(stop) =
                         scene.navigation_command(&args, line.offset, self.numbers)?
                     {
@@ -853,12 +864,6 @@ impl<F: ObjectFactory> Store<'_, F> {
         }
         scene.owner = Some(owner);
         if scene.invocation.is_none() {
-            if scene
-                .deadline
-                .is_some_and(|deadline| deadline.wrapping_add(7) < 7)
-            {
-                return Err(Error::new(0, "FES 特殊等待期限需要对象完成状态服务"));
-            }
             if scene.frame_origin == 0 {
                 scene.frame_origin = now.wrapping_sub(1);
             }
@@ -868,6 +873,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                 .entry("_FRAME_".to_owned())
                 .or_default()
                 .insert(0, now.wrapping_sub(scene.frame_origin) as i32);
+            let waiting = scene.waiting_at_start(now)?;
             scene.invocation = Some(Invocation {
                 now,
                 updates: None,
@@ -875,10 +881,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                 motions_done: false,
                 media_passes: 0,
             });
-            if scene
-                .deadline
-                .is_some_and(|deadline| now < deadline && !scene.input.left)
-            {
+            if waiting {
                 scene.publish_notifications();
                 scene.finish_input();
                 scene.begin_updates(false);
@@ -941,6 +944,16 @@ impl<F: ObjectFactory> Store<'_, F> {
                                 scene.begin_updates(true);
                                 continue;
                             }
+                            if let Some(deadline) =
+                                scene.wait_command(&args, line.offset, now, self.numbers)?
+                            {
+                                scene.deadline = Some(deadline);
+                                scene.publish_notifications();
+                                scene.finish_input();
+                                scene.begin_updates(false);
+                                scene.interpreter.resume();
+                                continue;
+                            }
                             if let Some(stop) =
                                 scene.navigation_command(&args, line.offset, self.numbers)?
                             {
@@ -971,9 +984,6 @@ impl<F: ObjectFactory> Store<'_, F> {
                             }
                         }
                         fes::Event::Wait(duration) => {
-                            if duration < 0 {
-                                return Err(Error::new(0, "FES 特殊等待尚未接入"));
-                            }
                             scene.publish_notifications();
                             scene.deadline = Some(now.wrapping_add(duration.max(1) as u32));
                             scene.finish_input();

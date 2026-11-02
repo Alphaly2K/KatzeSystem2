@@ -25,6 +25,93 @@ fn runtime(budget: usize) -> Runtime<GraphicsFactory<Reject>> {
     runtime
 }
 
+fn update(runtime: &mut Runtime<GraphicsFactory<Reject>>, scene: &mut Scene, now: u32) {
+    for _ in 0..128 {
+        if runtime.update_fes_scene(0, scene, now).unwrap() {
+            return;
+        }
+    }
+    panic!("合成场景没有完成本轮更新");
+}
+
+#[test]
+fn frame_waits_use_absolute_scene_time_and_negative_durations_still_yield_one_round() {
+    let source =
+        b"#START\nwait frame ($2+=3)\n$0+=1\nwait frame 3\n$1+=1\nwait -9\n$3+=1\nwait 1000\n";
+    for budget in [1, 4096] {
+        let mut runtime = runtime(budget);
+        let mut scene = Scene::new(
+            Program::from_text(source).unwrap(),
+            runtime.host().handle_allocator(),
+        )
+        .unwrap();
+        for (now, values, deadline) in [
+            (100, [0, 0, 3, 0], u32::MAX - 1),
+            (101, [0, 0, 3, 0], u32::MAX - 1),
+            (102, [1, 0, 3, 0], u32::MAX - 1),
+            (103, [1, 1, 3, 0], 104),
+            (104, [1, 1, 3, 1], 1104),
+        ] {
+            update(&mut runtime, &mut scene, now);
+            assert_eq!(runtime.numbers().shared[..4], values);
+            assert_eq!(scene.deadline(), Some(deadline));
+            assert_eq!(scene.interpreter().named["_FRAME_"][&0], now as i32 - 99);
+        }
+    }
+}
+
+#[test]
+fn object_waits_evaluate_banks_once_and_scan_past_missing_banks() {
+    let source =
+        b"#DEFINE\nBASE obj[3]\n#START\nwait obj[($2+=1)-1]\n$0+=1\nwait obj\n$1+=1\nwait 1000\n";
+    for budget in [1, 4096] {
+        let mut runtime = runtime(budget);
+        let mut scene = Scene::new(
+            Program::from_text(source).unwrap(),
+            runtime.host().handle_allocator(),
+        )
+        .unwrap();
+        let mut prepared = false;
+        for _ in 0..32 {
+            if scene.prepare(runtime.numbers_mut(), budget).unwrap() {
+                prepared = true;
+                break;
+            }
+        }
+        assert!(prepared);
+        let missing = scene.objects().lookup("obj", 1).unwrap();
+        let running = scene.objects().lookup("obj", 2).unwrap();
+        let objects = scene.objects_mut().unwrap();
+        objects.remove(missing).unwrap();
+        objects
+            .start_motion(
+                running,
+                katze_system2::kcs::Program::from_code(&[0x3b], vec![], 64).unwrap(),
+                &[],
+                0,
+            )
+            .unwrap();
+        for (now, expected) in [(100, [0, 0, 1]), (101, [1, 0, 1]), (102, [1, 0, 1])] {
+            update(&mut runtime, &mut scene, now);
+            assert_eq!(runtime.numbers().shared[..3], expected);
+            assert_eq!(scene.deadline(), Some(u32::MAX - 3));
+        }
+        while !scene
+            .objects_mut()
+            .unwrap()
+            .stop_motions(
+                running,
+                &mut katze_system2::kcs::MotionHost::default(),
+                budget,
+            )
+            .unwrap()
+        {}
+        update(&mut runtime, &mut scene, 103);
+        assert_eq!(&runtime.numbers().shared[..3], &[1, 1, 1]);
+        assert_eq!(scene.deadline(), Some(1103));
+    }
+}
+
 #[test]
 fn preparation_stops_before_start_and_exit_notifications_keep_the_scene_scheduled() {
     use katze_system2::fes::{ObjectAttributes, ObjectInitialization, ObjectReference};

@@ -843,3 +843,89 @@ fn scene_stop_skips_bank_holes_and_event_stop_applies_before_media_submission() 
         );
     }
 }
+
+#[test]
+fn root_motion_wait_defers_resumption_and_click_requests_finish_without_clearing_descendants() {
+    for budget in [1, 4096] {
+        for target in ["", " obj"] {
+            for click in [false, true] {
+                let source = format!(
+                    "#DEFINE\nCIMAGE obj[2]\n#OBJECT SIZE COLOR PRI POS DISP\nobj[0] 1,1 0xff112233 5 0,0 1\nobj[1] 1,1 0xff445566 6 2,0 1\n#START\nwait{target}\n$0+=1\nwait 1000\n"
+                );
+                let mut setup = scene_setup(source.as_bytes(), budget);
+                let mut prepared = false;
+                for _ in 0..64 {
+                    if setup
+                        .scene
+                        .prepare(setup.runtime.numbers_mut(), budget)
+                        .unwrap()
+                    {
+                        prepared = true;
+                        break;
+                    }
+                }
+                assert!(prepared);
+                let parent = setup.scene.objects().lookup("obj", 0).unwrap();
+                let child = setup.scene.objects().lookup("obj", 1).unwrap();
+                let objects = setup.scene.objects_mut().unwrap();
+                objects.set_parent(child, Some(parent)).unwrap();
+                objects
+                    .start_motion(
+                        child,
+                        if click {
+                            finishable_movement()
+                        } else {
+                            movement(true)
+                        },
+                        &[3.],
+                        0,
+                    )
+                    .unwrap();
+                update_scene(&mut setup, 100);
+                assert_eq!(setup.runtime.numbers().shared[0], 0);
+                if click {
+                    assert_eq!(
+                        setup
+                            .runtime
+                            .dispatch_fes_event(0, &mut setup.scene, None, 2)
+                            .unwrap(),
+                        Some(false)
+                    );
+                }
+                update_scene(&mut setup, 101);
+                if target.is_empty() {
+                    assert_eq!(setup.runtime.numbers().shared[0], 0);
+                    assert_eq!(
+                        setup.scene.deadline(),
+                        Some(if click { u32::MAX } else { 0 })
+                    );
+                    assert!(
+                        setup
+                            .scene
+                            .objects()
+                            .get(child)
+                            .unwrap()
+                            .motions()
+                            .is_empty()
+                    );
+                    update_scene(&mut setup, 102);
+                    if click {
+                        assert_eq!(setup.runtime.numbers().shared[0], 0);
+                        assert_eq!(setup.scene.deadline(), Some(0));
+                        update_scene(&mut setup, 103);
+                    }
+                    assert_eq!(setup.runtime.numbers().shared[0], 1);
+                } else {
+                    assert_eq!(setup.runtime.numbers().shared[0], 1);
+                    assert_eq!(setup.scene.deadline(), Some(1101));
+                    assert_eq!(setup.scene.objects().motion_active(parent).unwrap(), click);
+                    if click {
+                        let queue = setup.scene.objects().get(child).unwrap().motions();
+                        assert_eq!(queue.task(1).unwrap().state().unwrap().finishing, 0);
+                        assert_eq!(counter(setup.scene.objects(), child, 1), 2);
+                    }
+                }
+            }
+        }
+    }
+}

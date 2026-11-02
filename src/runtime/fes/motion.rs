@@ -33,6 +33,20 @@ impl Objects {
         Ok(false)
     }
 
+    /// 仅向目标及后代请求结束；队列在后续正常更新中执行，不清空或重设延迟。
+    pub fn request_motion_finish(&mut self, handle: u32) -> Result<()> {
+        self.require_motion_idle()?;
+        let mut stack = vec![handle];
+        while let Some(handle) = stack.pop() {
+            let object = self
+                .get_mut(handle)
+                .ok_or_else(|| Error::new(0, "FES 对象标识无效"))?;
+            stack.extend(object.children());
+            object.motions.request_finish_group(None)?;
+        }
+        Ok(())
+    }
+
     /// 向对象加入分组零的运动；delay 为运动入口开始前的时间偏移。
     pub fn start_motion(
         &mut self,
