@@ -12,6 +12,8 @@
 |adler2|2.0.1|MIT|[许可](licenses/adler2-2.0.1/LICENSE-MIT)|
 |simd-adler32|0.3.10|MIT|[许可](licenses/simd-adler32-0.3.10/LICENSE.md)|
 |roxmltree|0.20.0|MIT|[许可](licenses/roxmltree-0.20.0/LICENSE-MIT)|
+|fontdue|0.9.3|MIT|[许可](licenses/fontdue-0.9.3/LICENSE-MIT)|
+|ttf-parser|0.21.1|MIT|[许可](licenses/ttf-parser-0.21.1/LICENSE-MIT)|
 |blowfish|0.9.1|MIT|[许可](licenses/blowfish-0.9.1/LICENSE-MIT)|
 |cipher|0.4.4|MIT|[许可](licenses/cipher-0.4.4/LICENSE-MIT)|
 |inout|0.1.4|MIT|[许可](licenses/inout-0.1.4/LICENSE-MIT)|

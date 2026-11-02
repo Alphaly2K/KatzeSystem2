@@ -22,7 +22,9 @@
 
 尚未实现的 KCS 宿主和无效 ANM 指令在执行时返回错误。CST 和 FES 的宿主命令返回事件，由宿主处理；宿主不能通过空实现确认一个尚未支持的命令。成功读取容器不代表该程序的所有执行路径都已实现。
 
-消息文本可通过 `message::Markup::parse(text, &defaults)` 解析，输入已解码为 Unicode，字体尺寸与三种默认颜色由调用者提供。输出保留逐字符样式、分组及 UTF-8 来源区间。`Markup::layout(&settings, measure)` 使用字宽闭包完成换行、禁则、分组、悬挂缩进、对齐及注音定位；设置保留 CP932／Unicode 对象路径，`BreakCharacters::for_encoding` 提供对应默认集合。`Markup::schedule(&layout, &timing, initial_units)` 将等待、字间隔及注音关联换算为逐记录显示时间，返回下一片段可使用的累计计数。`message::Page` 提供延后解析的追加、整页准备、布局失效和清空，保留样式、分组编号、旧自动换行及显示时间；失败后可重试。`Page::advance` 推进普通逐字显示并返回首次显示的布局下标及当前范围完成状态，`remaining` 查询尚未显示的字形数量，`set_speed` 切换速度并维护时间基准。实际绘字、渐显及宿主等待继续接入，详见 [消息标记接口](message.md)。
+消息文本可通过 `message::Markup::parse(text, &defaults)` 解析，输入已解码为 Unicode，字体尺寸与三种默认颜色由调用者提供。输出保留逐字符样式、分组及 UTF-8 来源区间。`Markup::layout(&settings, measure)` 使用字宽闭包完成换行、禁则、分组、悬挂缩进、对齐及注音定位；设置保留 CP932／Unicode 对象路径，`BreakCharacters::for_encoding` 提供对应默认集合。`Markup::schedule(&layout, &timing, initial_units)` 将等待、字间隔及注音关联换算为逐记录显示时间，返回下一片段可使用的累计计数。`message::Page` 提供延后解析的追加、整页准备、布局失效和清空，保留样式、分组编号、旧自动换行及显示时间；失败后可重试。`Page::advance` 推进普通逐字显示并返回首次显示的布局下标及当前范围完成状态，`remaining` 查询尚未显示的字形数量，`set_speed` 切换速度并维护时间基准。完整字形效果、渐显及宿主等待继续接入，详见 [消息标记接口](message.md)。
+
+`message::Font::from_bytes(bytes, collection_index)` 提供显式字体的整数度量与六十四级灰度遮罩，不查询系统字体或自动处理缺字回退。`GlyphMask::colorize` 使用消息颜色及基线覆盖表生成 BGRA 像素。`Page::paint_foreground(&mut surface, origin, glyph)` 将已显示的正文／注音前景混合到目标，调用者负责重绘背景；完整阴影、字体配置、渐显及宿主等待继续接入，具体约束见[字形与前景绘制](message.md#显式字体与前景绘制)。
 
 ## 数值状态
 

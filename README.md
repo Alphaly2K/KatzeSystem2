@@ -1,6 +1,6 @@
 # KatzeSystem2
 
-CatSystem2 的开源重实现，当前适配基线为 Windows CatSystem2 2.6.1.90。现阶段提供 Rust 脚本解释库、图像解码、基础像素接口和脚本检查工具，尚未提供完整游戏播放器。
+CatSystem2 的开源重实现，当前适配基线为 Windows CatSystem2 2.6.1.90。现阶段提供 Rust 脚本解释库、图像解码、图形与文字基础接口和脚本检查工具，尚未提供完整游戏播放器。
 
 需要 Rust 1.87 或更新版本。
 

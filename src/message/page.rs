@@ -1,10 +1,10 @@
 use super::markup::ParseState;
 use super::playback::Playback;
 use super::{
-    AtomKind, DisplayUpdate, Layout, LayoutSettings, Markup, Schedule, StyleDefaults, TextEncoding,
-    TimingSettings,
+    AtomKind, DisplayUpdate, GlyphMask, Layout, LayoutSettings, Markup, Schedule, StyleDefaults,
+    TextEncoding, TimingSettings,
 };
-use crate::{Error, Result, read};
+use crate::{Error, Result, graphics::Surface, read};
 
 /// 持有一页消息的来源、解析状态、布局及显示时间；追加文字在 prepare 时解析。
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -101,6 +101,42 @@ impl Page {
     pub fn remaining(&self, segment_limit: u32) -> Result<u32> {
         self.require_prepared()?;
         Ok(self.playback.remaining(&self.layout, segment_limit))
+    }
+
+    /// 按登记顺序混合已显示的正文和注音前景；不清空目标，不生成阴影或渐显。
+    pub fn paint_foreground(
+        &self,
+        target: &mut Surface,
+        origin: [i32; 2],
+        mut glyph: impl FnMut(char, u32) -> Result<GlyphMask>,
+    ) -> Result<bool> {
+        self.require_prepared()?;
+        let mut changed = false;
+        for entry in &self.layout.entries {
+            if !entry.glyph() || !self.playback.visible[entry.atom.unwrap()] {
+                continue;
+            }
+            let AtomKind::Character(character) = entry.kind else {
+                unreachable!()
+            };
+            let style = self.markup.atoms[entry.atom.unwrap()].style;
+            let mask = glyph(character, entry.size[1] as u32)?;
+            let image = mask.colorize(
+                if entry.group.is_some_and(|group| group.ruby) {
+                    style.ruby_color
+                } else {
+                    style.text_color
+                },
+                false,
+            )?;
+            let at = std::array::from_fn(|i| {
+                origin[i]
+                    .wrapping_add(entry.position[i])
+                    .wrapping_add(mask.offset()[i])
+            });
+            changed |= target.blend_from(&image, image.bounds(), at, 255);
+        }
+        Ok(changed)
     }
 
     fn require_prepared(&self) -> Result<()> {
