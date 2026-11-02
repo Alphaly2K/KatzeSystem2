@@ -1,6 +1,6 @@
 /// 普通 359／360 使用的全局配置块，按基线字节布局保存。
 ///
-/// 由配置宿主提供初值；写回只修改配置，不触发设备或消息对象更新。
+/// 配置覆盖和脚本写回只修改数据，不触发设备或消息对象更新。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SystemSettings {
     pub sound: [u8; 0x15fc],
@@ -9,7 +9,150 @@ pub struct SystemSettings {
     pub window: [u8; 0x0c],
 }
 
+impl Default for SystemSettings {
+    fn default() -> Self {
+        let mut settings = Self {
+            sound: [0; 0x15fc],
+            message: [0; 0x48],
+            effects: [0; 0x20],
+            window: [0; 0x0c],
+        };
+        put(&mut settings.sound, 0x10, 1);
+        for channel in 0..48 {
+            let offset = 20 + channel * 116;
+            for (field, value) in [(0, 1), (36, 100), (80, 100)] {
+                put(&mut settings.sound, offset + field, value);
+            }
+        }
+        for offset in (0x15d4..0x15e8).step_by(4) {
+            put(&mut settings.sound, offset, 100);
+        }
+        for (block, values) in [
+            (
+                &mut settings.message[..],
+                &[
+                    4,
+                    4,
+                    0,
+                    15,
+                    5,
+                    1,
+                    0,
+                    1,
+                    0,
+                    100,
+                    0,
+                    u32::MAX,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                ][..],
+            ),
+            (&mut settings.effects[..], &[0, 0, 1, 1, 1, 5, 0, 0][..]),
+            (&mut settings.window[..], &[u32::MAX, 1, 1][..]),
+        ] {
+            for (bytes, value) in block.chunks_exact_mut(4).zip(values) {
+                bytes.copy_from_slice(&value.to_le_bytes());
+            }
+        }
+        settings
+    }
+}
+
 impl SystemSettings {
+    /// 按用户设置 XML 覆盖已存在的配置；缺失字段保留，非法整数前缀取零。
+    pub fn apply_xml(&mut self, input: &[u8]) -> crate::Result<()> {
+        let xml = crate::resource::XmlDocument::parse(input)?;
+        apply_words(
+            &mut self.sound,
+            &[
+                (0x15d8, b"VOICE/vol_bgm"),
+                (0x15dc, b"VOICE/vol_se"),
+                (0x15e0, b"VOICE/vol_voice"),
+                (0x15e4, b"VOICE/vol_play"),
+                (0x15d4, b"VOICE/vol_master"),
+                (0x10, b"VOICE/cont_voice"),
+                (0x15e8, b"VOICE/mute_master"),
+                (0x15ec, b"VOICE/mute_bgm"),
+                (0x15f0, b"VOICE/mute_se"),
+                (0x15f4, b"VOICE/mute_voice"),
+                (0x15f8, b"VOICE/mute_play"),
+            ],
+            &xml,
+        )?;
+        for channel in 0..48 {
+            let offset = 20 + channel * 116;
+            let value = xml.integer(
+                format!("VOICE/play{channel:02}").as_bytes(),
+                word(&self.sound, offset),
+            )?;
+            put(&mut self.sound, offset, value);
+        }
+        apply_words(
+            &mut self.message,
+            &[
+                (0, b"MESSAGE/speed"),
+                (4, b"MESSAGE/auto_p"),
+                (12, b"MESSAGE/base"),
+                (16, b"MESSAGE/CHAR"),
+                (8, b"MESSAGE/ind"),
+                (24, b"MESSAGE/cont"),
+                (20, b"MESSAGE/still"),
+                (28, b"MESSAGE/waitpcm"),
+                (32, b"MESSAGE/skip_full"),
+                (36, b"MESSAGE/log_limit"),
+                (40, b"MESSAGE/enable_read"),
+                (44, b"MESSAGE/read_color"),
+                (48, b"MESSAGE/skipspeed"),
+                (52, b"MESSAGE/contskip"),
+                (56, b"MESSAGE/wipe"),
+                (60, b"MESSAGE/ctrlmode"),
+                (64, b"MESSAGE/autoleft"),
+                (68, b"MESSAGE/enable_read_sel"),
+            ],
+            &xml,
+        )?;
+        apply_words(
+            &mut self.effects,
+            &[
+                (0, b"EFFECT/speed"),
+                (8, b"EFFECT/help"),
+                (12, b"EFFECT/auto_c"),
+                (16, b"EFFECT/auto_cd"),
+                (20, b"EFFECT/auto_cds"),
+                (24, b"EFFECT/dramatic"),
+                (4, b"EFFECT/skipdraw"),
+                (28, b"EFFECT/skipmot"),
+            ],
+            &xml,
+        )?;
+        apply_words(
+            &mut self.window,
+            &[
+                (0, b"GAME/wndcolor"),
+                (4, b"GAME/enabledrag"),
+                (8, b"GAME/drawwnd"),
+            ],
+            &xml,
+        )
+    }
+
+    /// 用主音量乘四类音量，保留 DWORD 乘法回绕后除以一百的顺序。
+    pub fn refresh_sound_volumes(&mut self) {
+        let master = word(&self.sound, 0x15d4);
+        for index in 0..4 {
+            let volume = word(&self.sound, 0x15d8 + index * 4);
+            put(
+                &mut self.sound,
+                index * 4,
+                volume.wrapping_mul(master) / 100,
+            );
+        }
+    }
+
     pub(crate) fn block_mut(&mut self, index: usize) -> &mut [u8] {
         match index {
             0 => &mut self.sound,
@@ -19,4 +162,23 @@ impl SystemSettings {
             _ => unreachable!(),
         }
     }
+}
+
+fn apply_words(
+    block: &mut [u8],
+    fields: &[(usize, &[u8])],
+    xml: &crate::resource::XmlDocument,
+) -> crate::Result<()> {
+    for &(offset, path) in fields {
+        put(block, offset, xml.integer(path, word(block, offset))?);
+    }
+    Ok(())
+}
+
+fn word(block: &[u8], offset: usize) -> u32 {
+    u32::from_le_bytes(block[offset..offset + 4].try_into().unwrap())
+}
+
+fn put(block: &mut [u8], offset: usize, value: u32) {
+    block[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
 }
