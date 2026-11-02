@@ -13,7 +13,7 @@ enum Command {
 }
 
 impl Objects {
-    /// 消费 disp／size／keypos／setid／getid／enable／pri／pos2；其他命令返回 false。
+    /// 消费已支持的对象属性及运动状态命令；其他命令返回 false。
     /// 属性请求在后续对象更新时生效；不执行目标缺失时的整行表达式回退。
     pub fn dispatch_object_command(
         &mut self,
@@ -27,7 +27,16 @@ impl Objects {
         };
         if !matches!(
             name,
-            b"disp" | b"size" | b"keypos" | b"setid" | b"getid" | b"enable" | b"pri" | b"pos2"
+            b"disp"
+                | b"size"
+                | b"keypos"
+                | b"setid"
+                | b"getid"
+                | b"enable"
+                | b"pri"
+                | b"pos2"
+                | b"delay"
+                | b"ismot"
         ) {
             return Ok(false);
         }
@@ -53,6 +62,9 @@ impl Objects {
                 line.offset,
                 "FES 对象目标不存在，整行表达式回退尚未接入",
             ));
+        }
+        if matches!(name, b"delay" | b"ismot") {
+            return self.dispatch_motion_metadata(interpreter, line.offset, &args, &target, state);
         }
         if self.count(&target.name) == 1 {
             target.bank = 0;
@@ -177,6 +189,47 @@ impl Objects {
             }
             if dirty {
                 self.invalidate(handle)?;
+            }
+        }
+        Ok(true)
+    }
+
+    fn dispatch_motion_metadata(
+        &mut self,
+        interpreter: &mut fes::Interpreter,
+        offset: usize,
+        args: &[Vec<u8>],
+        target: &fes::ObjectReference,
+        state: &mut State,
+    ) -> Result<bool> {
+        let delay = args[1] == b"delay";
+        if !delay && args.len() < 3 {
+            return Ok(true);
+        }
+        let value = args.get(2).map_or(Ok(0), |bytes| {
+            interpreter
+                .eval(bytes, state)
+                .map_err(|error| Error::new(offset + error.offset, error.message))
+        })?;
+        let banks = if target.bank == -1 {
+            0..i64::from(self.count(&target.name))
+        } else {
+            i64::from(target.bank)..i64::from(target.bank) + 1
+        };
+        let mut active = false;
+        for bank in banks {
+            let Some(handle) = self.lookup(&target.name, bank as i32) else {
+                return Ok(true);
+            };
+            if delay {
+                self.get_mut(handle).unwrap().motion_delay = value as u32;
+            } else {
+                active |= self.motion_active(handle)?;
+            }
+        }
+        if !delay {
+            if let Some(slot) = state.shared.get_mut(value as usize) {
+                *slot = i32::from(active);
             }
         }
         Ok(true)

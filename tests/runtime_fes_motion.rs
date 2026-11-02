@@ -528,3 +528,165 @@ fn missing_motion_resources_continue_the_script_and_can_load_on_a_later_call() {
         }
     }
 }
+
+fn metadata(
+    objects: &mut Objects,
+    interpreter: &mut fes::Interpreter,
+    numbers: &mut State,
+    line: &[u8],
+) -> Result<()> {
+    assert!(objects.dispatch_object_command(
+        interpreter,
+        &fes::Line {
+            offset: 100,
+            bytes: line.to_vec()
+        },
+        numbers,
+    )?);
+    Ok(())
+}
+
+#[test]
+fn motion_metadata_keeps_raw_delays_and_preserves_the_destination_at_a_bank_hole() {
+    let mut objects = Objects::new(HandleAllocator::default()).unwrap();
+    let handles = objects
+        .define(&ObjectDefinition {
+            kind: "CIMAGE",
+            name: "item".into(),
+            banks: 4,
+        })
+        .unwrap();
+    objects.get_mut(handles[1]).unwrap().state = ObjectState::Image(Box::default());
+    objects.get_mut(handles[2]).unwrap().state = ObjectState::CPlane(Box::default());
+    objects.get_mut(handles[3]).unwrap().state = ObjectState::Base;
+    objects.set_parent(handles[1], Some(handles[0])).unwrap();
+    let mut interpreter =
+        fes::Interpreter::new(fes::Program::from_text(b"#START\nwait 1000\n").unwrap()).unwrap();
+    objects.publish_bindings(&mut interpreter);
+    let mut numbers = State::new(16);
+    numbers.current = 13;
+    metadata(
+        &mut objects,
+        &mut interpreter,
+        &mut numbers,
+        b"item delay ($0+=1) ($0+=10)",
+    )
+    .unwrap();
+    assert_eq!(numbers.shared[0], 1);
+    for &handle in &handles {
+        assert_eq!(objects.get(handle).unwrap().motion_delay(), 1);
+    }
+    objects
+        .start_motion(handles[1], movement(false), &[2.], 0)
+        .unwrap();
+    metadata(
+        &mut objects,
+        &mut interpreter,
+        &mut numbers,
+        b"item[0] ismot 4",
+    )
+    .unwrap();
+    assert_eq!(numbers.shared[4], 1);
+    metadata(
+        &mut objects,
+        &mut interpreter,
+        &mut numbers,
+        b"item[3] ismot 4",
+    )
+    .unwrap();
+    assert_eq!(numbers.shared[4], 0);
+    metadata(
+        &mut objects,
+        &mut interpreter,
+        &mut numbers,
+        b"item[3] delay -3",
+    )
+    .unwrap();
+    assert_eq!(
+        objects.get(handles[3]).unwrap().motion_delay(),
+        u32::MAX - 2
+    );
+
+    objects.remove(handles[2]).unwrap();
+    metadata(
+        &mut objects,
+        &mut interpreter,
+        &mut numbers,
+        b"item delay 21",
+    )
+    .unwrap();
+    assert_eq!(objects.get(handles[0]).unwrap().motion_delay(), 21);
+    assert_eq!(objects.get(handles[1]).unwrap().motion_delay(), 21);
+    assert_eq!(
+        objects.get(handles[3]).unwrap().motion_delay(),
+        u32::MAX - 2
+    );
+    numbers.shared[2] = 91;
+    metadata(
+        &mut objects,
+        &mut interpreter,
+        &mut numbers,
+        b"item ismot 2 ($0+=10)",
+    )
+    .unwrap();
+    assert_eq!(numbers.shared[2], 91);
+    assert_eq!(numbers.shared[0], 1);
+    metadata(
+        &mut objects,
+        &mut interpreter,
+        &mut numbers,
+        b"item[1] ismot ($0+=1)",
+    )
+    .unwrap();
+    assert_eq!(numbers.shared[0], 2);
+    assert_eq!(numbers.shared[2], 1);
+    metadata(&mut objects, &mut interpreter, &mut numbers, b"item ismot").unwrap();
+    metadata(
+        &mut objects,
+        &mut interpreter,
+        &mut numbers,
+        b"item[3] delay",
+    )
+    .unwrap();
+    assert_eq!(objects.get(handles[3]).unwrap().motion_delay(), 0);
+    assert!(
+        metadata(
+            &mut objects,
+            &mut interpreter,
+            &mut numbers,
+            b"item[99] delay ($0+=1)"
+        )
+        .unwrap_err()
+        .message
+        .contains("整行表达式回退")
+    );
+    assert_eq!(numbers.shared[0], 2);
+    assert_eq!(numbers.current, 13);
+}
+
+#[test]
+fn scene_motion_delay_defers_vm_execution_and_running_queries_include_unstarted_entries() {
+    let source = b"#DEFINE\nCIMAGE obj[2]\n#OBJECT SIZE COLOR PRI POS DISP\nobj[0] 1,1 0xff112233 5 10,0 1\nobj[1] 1,1 0xff445566 6 20,0 1\n#SUBCOMMAND\noneshot move motion p[2] : [0]\n#START\nobj delay ($0+=3)\nobj move 2\nobj ismot 2\nwait 1000\n";
+    for budget in [1, 4096] {
+        let mut setup = scene_setup(source, budget);
+        for now in 100..=103 {
+            update_scene(&mut setup, now);
+            assert_eq!(setup.runtime.numbers().shared[0], 3);
+            assert_eq!(setup.runtime.numbers().shared[2], 1);
+            for (bank, initial) in [10., 20.].into_iter().enumerate() {
+                let handle = setup.scene.objects().lookup("obj", bank as i32).unwrap();
+                let object = setup.scene.objects().get(handle).unwrap();
+                assert_eq!(object.motion_delay(), 3);
+                assert_eq!(object.motions().task(1).unwrap().base_time, 3);
+                assert_eq!(
+                    counter(setup.scene.objects(), handle, 1),
+                    u32::from(now == 103)
+                );
+                assert_eq!(
+                    position(setup.scene.objects(), handle),
+                    initial + if now == 103 { 2. } else { 0. }
+                );
+            }
+        }
+    }
+}

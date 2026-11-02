@@ -149,6 +149,7 @@ pub struct Object {
     animation: ImageAnimationRequest,
     button_update: Option<crate::fes::ImageUpdates>,
     motions: crate::kcs::MotionQueue,
+    motion_delay: u32,
     pub state: ObjectState,
 }
 
@@ -206,6 +207,10 @@ impl Object {
     pub fn motions(&self) -> &crate::kcs::MotionQueue {
         &self.motions
     }
+
+    pub fn motion_delay(&self) -> u32 {
+        self.motion_delay
+    }
 }
 
 /// 一份 FES 的对象存储。绑定保留首次值，数量表与对象表分别维护。
@@ -247,6 +252,7 @@ impl Objects {
                     animation: ImageAnimationRequest::default(),
                     button_update: None,
                     motions: crate::kcs::MotionQueue::default(),
+                    motion_delay: 0,
                     state: ObjectState::Base,
                 },
             )]),
@@ -371,6 +377,7 @@ impl Objects {
                     animation: ImageAnimationRequest::default(),
                     button_update: None,
                     motions: crate::kcs::MotionQueue::default(),
+                    motion_delay: 0,
                     state: initial.clone(),
                 },
             );

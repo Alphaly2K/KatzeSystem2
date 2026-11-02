@@ -721,7 +721,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                         *handle,
                         program,
                         crate::kcs::MotionState::with_parameters(parameters)?,
-                        0,
+                        scene.objects.get(*handle).unwrap().motion_delay(),
                     )?;
                 }
                 let pending = scene.motion_call.as_mut().unwrap();
