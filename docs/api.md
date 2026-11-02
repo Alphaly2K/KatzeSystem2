@@ -317,6 +317,8 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 
 `Scene::prepare(&mut state, budget)` 只消费装载期声明和对象属性，返回 false 后继续调用；完成时尚未进入 START，也未创建下层媒体任务。可以重复调用。使用与 Runtime 相同的 `numbers_mut()`，初始化表达式的副作用会立即保留。`Runtime::prepare_fes_scene(owner, &mut scene)` 在此基础上创建图像空包装及 BUTTON 的直属类型 6 任务，不执行 START、读取图像内容或登记输入区域；false 后继续调用，已完成的创建不重复。每条 CIMAGE／IMAGE／BUTTON 记录分配独立包装，BUTTON 另创建直属任务；后一次覆盖对象的当前包装及任务编号，记录保留各自绑定用于更新、事件反查与回收。普通 update 也会在进入 START 前完成这一准备。退出通知由任务层写入属性槽，脚本继续到等待或块末尾；后续 update 按普通规则推进。每条新通知可覆盖属性，期间的外部改写保持到下一条通知；场景本身不删除所属任务。
 
+`Scene::keyblocks()` 查询装载时解码的第一段 KEYBLOCK；在 `prepare` 完成后使用。表的数值表达式只执行一次，后续同名声明不覆盖。`Objects::navigate_button(blocks, source, direction)` 提供无副作用的基础 BUTTON 网格选择，方向 0～3 为上／下／左／右，返回可选目标名称和银行。缺失目标、非 BUTTON、零 ENABLE 或负网格号返回 None；无效方向、越界网格号或搜索超过查询上限返回诊断。选择保留基线的名称顺序、水平查找和距离规则，KEY_* 配置不参与此版本的选择，详见[焦点网格](fes.md#焦点网格)。该接口不发布焦点事件、移动指针或调整关联滑动控件；任务层连接继续接入。
+
 `Runtime::dispatch_fes_system_block(owner, &mut scene, name)` 同步执行 `_FES_SLEEP_`／`_FES_WAKE_`，返回 false 后以同一名称续跑；普通推进、对象修改及另一个系统块须等到本次完成。缺失块直接完成。该入口不推进系统帧，不切换媒体显示；通常保留主流程位置和等待，`next` 按系统块的调用深度规则处理。局部 `wait` 结束本次分派；系统块 `exit` 结束本次分派并将返回码排队，到下一次普通场景推进才发布。未知命令和运动返回诊断并保留待处理事件。命令 348 在系统块后刷新对象并切换显示，`FesObject::paused()` 查询专属暂停原始值；完整契约见[暂停与唤醒](graphics.md#fes-专属暂停与唤醒)。
 
 `Runtime::dispatch_fes_event(owner, &mut scene, target, event)` 分派控制器输入事件。`target` 为可选 `ObjectReference`；事件编号为 0～21，其中 0／1／2／3／4／5／8／21 分别对应 FOCUS／UNFOCUS／PUSH_L／PUSH_R／RELEASE_L／RELEASE_R／SCRL_P／TOUCH，其余编号只更新系统输入命名值。命中目标时，系统按下、方向释放和触碰值使用对象句柄；无目标为 −1，缺失目标跳过写入，左右点击释放仍为零。返回 `None` 表示预算耗尽，须以相同目标和编号续跑；`Some(bool)` 表示完成，布尔值只取对象自身处理器是否存在，默认事件组单独执行时为 false。该入口执行对象命令和显式 decode，不在分派末尾自动刷新媒体，不修改任务时钟或系统帧。局部 wait 结束当前处理器，exit 另将通知排队；主等待、调用及 next 规则与解释器一致。失败时保留游标，普通更新、系统块和其他对象事件须待本次完成。

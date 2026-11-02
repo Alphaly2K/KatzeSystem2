@@ -12,6 +12,7 @@ mod button;
 mod commands;
 mod image;
 mod input;
+mod navigation;
 mod plane;
 mod scene;
 mod task;

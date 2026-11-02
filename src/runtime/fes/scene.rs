@@ -20,6 +20,7 @@ pub struct Scene {
     system_block: Option<String>,
     object_event: Option<ObjectEvent>,
     handler_updates: Option<usize>,
+    keyblocks: Vec<fes::KeyBlock>,
     media_preparation: Option<usize>,
     media_prepared: usize,
 }
@@ -71,6 +72,7 @@ impl Scene {
             system_block: None,
             object_event: None,
             handler_updates: None,
+            keyblocks: Vec::new(),
             media_preparation: None,
             media_prepared: 0,
         })
@@ -82,6 +84,11 @@ impl Scene {
 
     pub fn objects(&self) -> &Objects {
         &self.objects
+    }
+
+    /// 装载时解码的第一段 KEYBLOCK；后续同名声明不覆盖此表。
+    pub fn keyblocks(&self) -> &[fes::KeyBlock] {
+        &self.keyblocks
     }
 
     /// 同一次预算续跑期间保持对象绑定和属性稳定。
@@ -171,7 +178,7 @@ impl Scene {
             }
             match self.interpreter.run(numbers, 1)? {
                 Step::Yield => (),
-                Step::Event(event) if self.apply_initialization(&event)? => {
+                Step::Event(event) if self.apply_initialization(&event, numbers)? => {
                     self.interpreter.resume();
                 }
                 _ => return Err(Error::new(0, "FES 装载期出现执行事件")),
@@ -180,7 +187,11 @@ impl Scene {
         Ok(!self.interpreter.initialization_pending())
     }
 
-    fn apply_initialization(&mut self, event: &fes::Event) -> Result<bool> {
+    fn apply_initialization(
+        &mut self,
+        event: &fes::Event,
+        numbers: &mut crate::expression::State,
+    ) -> Result<bool> {
         match event {
             fes::Event::CreateObject(definition) => {
                 self.objects.define(definition)?;
@@ -191,14 +202,21 @@ impl Scene {
                     .initialize(initialization, |name| Ok(name.to_vec()))?;
             }
             fes::Event::Declarations(declarations) => {
-                if let Some(declaration) = declarations
-                    .iter()
-                    .find(|declaration| declaration.header.as_slice() != b"SUBCOMMAND")
-                {
+                if let Some(declaration) = declarations.iter().find(|declaration| {
+                    !matches!(
+                        declaration.header.split(u8::is_ascii_whitespace).next(),
+                        Some(b"SUBCOMMAND" | b"KEYBLOCK")
+                    )
+                }) {
                     return Err(Error::new(
                         declaration.lines.first().map_or(0, |line| line.offset),
                         "FES 声明需要对应的运行时服务",
                     ));
+                }
+                if declarations.iter().any(|declaration| {
+                    declaration.header.split(u8::is_ascii_whitespace).next() == Some(b"KEYBLOCK")
+                }) {
+                    self.keyblocks = self.interpreter.keyblocks(numbers)?;
                 }
             }
             _ => return Ok(false),
@@ -614,7 +632,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                 Step::Event(event) => {
                     scene.publish_queued_exits();
                     let now = scene.invocation.as_ref().unwrap().now;
-                    if scene.apply_initialization(&event)? {
+                    if scene.apply_initialization(&event, self.numbers)? {
                         scene.interpreter.resume();
                         continue;
                     }
