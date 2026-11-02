@@ -653,6 +653,17 @@ impl ProgramLoader for Programs {
         }
         let mut code = vec![];
         ins(&mut code, 0x25, &[0xdeadbeef]);
+        if name == b"base-z" {
+            call(&mut code, 88, &[0]);
+            call(&mut code, 92, &[0]);
+            call(&mut code, 88, &[999, 0x7fc12345]);
+            call(&mut code, 92, &[999, 1]);
+            call(&mut code, 88, &[1, 12f32.to_bits()]);
+            call(&mut code, 92, &[1, 0x80000000]);
+            ins(&mut code, 0x26, &[0]);
+            ins(&mut code, 0x3b, &[]);
+            return Ok(Some(Program::from_code(&code, vec![0; 16], 128)?));
+        }
         for native in [79, 80, 83, 84, 100, 101] {
             call(&mut code, native, &[0]);
         }
@@ -699,7 +710,13 @@ impl ProgramLoader for Programs {
 #[test]
 fn ordinary_graphics_natives_preserve_stack_and_replace_geometry_under_both_budgets() {
     for budget in [1, 4096] {
-        for name in [b"rectangle".as_slice(), b"empty", b"replaced", b"cleared"] {
+        for name in [
+            b"rectangle".as_slice(),
+            b"empty",
+            b"replaced",
+            b"cleared",
+            b"base-z",
+        ] {
             let mut runtime = Runtime::new(
                 0,
                 kind::ROOT,
@@ -711,6 +728,22 @@ fn ordinary_graphics_natives_preserve_stack_and_replace_geometry_under_both_budg
             );
             runtime.set_budget(budget, 1 << 20);
             assert_eq!(runtime.create(0, kind::PLANE, b"plane", b"").unwrap(), 1);
+            if name == b"base-z" {
+                runtime
+                    .drawables_mut()
+                    .insert(1, Drawable::default())
+                    .unwrap();
+                runtime.drawables_mut().set_base_point(1, [3., -4., 5.]);
+                let sibling = runtime.create(0, kind::PLANE, b"sibling", b"").unwrap();
+                runtime
+                    .drawables_mut()
+                    .insert(sibling, Drawable::default())
+                    .unwrap();
+                runtime
+                    .drawables_mut()
+                    .set_base_point(sibling, [0., 0., 10.]);
+                assert_eq!(runtime.drawables_mut().order(), [1, sibling]);
+            }
             let caller = runtime.create(0, kind::ORDINARY, name, b"").unwrap();
             runtime.update(1, 1).unwrap();
             let vm = runtime.object(caller).unwrap().interpreter().unwrap();
@@ -722,7 +755,12 @@ fn ordinary_graphics_natives_preserve_stack_and_replace_geometry_under_both_budg
                 continue;
             }
             let drawable = drawable.unwrap();
-            if name == b"rectangle" {
+            if name == b"base-z" {
+                assert_eq!(drawable.transform().base_point(), [3., -4., 12.]);
+                assert_eq!(drawable.transform().position(), [0.; 3]);
+                assert_eq!(drawable.display(), 0x80000000);
+                assert_eq!(runtime.drawables_mut().order(), [2, 1]);
+            } else if name == b"rectangle" {
                 assert_eq!(drawable.triangles().len(), 2);
                 assert_eq!(drawable.triangles()[0][1].position, [-2., 0., 0.]);
                 assert_eq!(drawable.triangles()[0][0].color, 0x80445566);

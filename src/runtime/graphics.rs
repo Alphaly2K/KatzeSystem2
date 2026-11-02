@@ -14,7 +14,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             78 => 12,
             79 => 16,
             80 | 83 => 4,
-            82 => 8,
+            82 | 88 | 92 => 8,
             84 | 101 => 20,
             100 => 12,
             _ => unreachable!(),
@@ -91,8 +91,28 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     },
                 )?;
             }
+            88 => {
+                let mut vector = [0; 12];
+                for code in [61, 49] {
+                    if code == 49 {
+                        vector[8..12].copy_from_slice(&arguments[4..8]);
+                    }
+                    self.command_target_with_buffers(
+                        target,
+                        code,
+                        [0, 0, 1],
+                        &mut CommandBuffers {
+                            data0: None,
+                            data1: Some(&mut vector),
+                        },
+                    )?;
+                }
+            }
             100 => {
                 self.command_target(target, 59, [word(2), word(1), 0])?;
+            }
+            92 => {
+                self.command_target(target, 47, [0, word(1), 1])?;
             }
             _ => unreachable!(),
         }
