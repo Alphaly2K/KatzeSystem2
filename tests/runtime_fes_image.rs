@@ -291,6 +291,61 @@ fn plane_binding_clips_the_canvas_source_before_the_plane_samples_it() {
         Rect::from_xywh(2, 1, 3, 2),
         0xff11_2233,
     );
+    define(&mut objects, "PLANE", "alternate");
+    initialize(
+        &mut objects,
+        "alternate",
+        ObjectAttributes {
+            size: Some([2, 1]),
+            vram: Some([5, 0]),
+            ..Default::default()
+        },
+    );
+    let wrapper = objects.get(swatch).unwrap().image_handle().unwrap();
+    let pixels = runtime.images().pixel_handle(wrapper).unwrap();
+    let mut interpreter =
+        fes::Interpreter::new(fes::Program::from_text(b"#START\nwait 9\n").unwrap()).unwrap();
+    objects.publish_bindings(&mut interpreter);
+    for (reference, canvas, visible, redraw) in [
+        ("alternate", Rect::default(), Rect::default(), false),
+        ("0", Rect::default(), Rect::default(), false),
+        (
+            "panel",
+            Rect::from_xywh(2, 1, 3, 2),
+            Rect::from_xywh(3, 3, 3, 2),
+            false,
+        ),
+        (
+            "alternate",
+            Rect::from_xywh(5, 0, 2, 1),
+            Rect::default(),
+            true,
+        ),
+    ] {
+        assert!(
+            objects
+                .dispatch_object_command(
+                    &mut interpreter,
+                    &fes::Line {
+                        offset: 0,
+                        bytes: format!("swatch pl {reference}").into_bytes()
+                    },
+                    runtime.numbers_mut(),
+                )
+                .unwrap()
+        );
+        runtime.update_fes_object(0, &mut objects, swatch).unwrap();
+        assert_eq!(runtime.images().pixel_handle(wrapper).unwrap(), pixels);
+        if redraw {
+            send(&mut runtime, objects.image_list().unwrap(), 298, 0, 0);
+        }
+        assert_rectangle(&frame(&mut runtime, 1), visible, 0xff11_2233);
+        assert_rectangle(
+            runtime.drawing().target.as_ref().unwrap(),
+            canvas,
+            0xff11_2233,
+        );
+    }
 }
 
 struct Metadata(Rc<RefCell<Vec<Vec<u8>>>>);

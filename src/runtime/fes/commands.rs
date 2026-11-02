@@ -12,6 +12,7 @@ enum Command {
     Position(fes::ImageReference),
     Attach(Option<fes::ObjectReference>),
     Frame(u32, i32),
+    Plane(fes::ObjectReference),
 }
 
 impl Objects {
@@ -45,6 +46,7 @@ impl Objects {
                 | b"load"
                 | b"attach"
                 | b"settbl"
+                | b"pl"
         ) {
             return Ok(false);
         }
@@ -89,6 +91,24 @@ impl Objects {
         if name == b"getid" && target.bank == -1 {
             return Ok(true);
         }
+        let plane = if name == b"pl" {
+            let Some(reference) = args
+                .get(2)
+                .filter(|reference| !reference.is_empty() && reference[0] != b'[')
+            else {
+                return Ok(true);
+            };
+            let reference = interpreter.object_reference(reference, state)?;
+            if reference.name.len() >= 32 || reference.name.as_bytes().contains(&0) {
+                return Err(Error::new(
+                    line.offset,
+                    "FES 平面引用名称超过存储上限或包含零字节",
+                ));
+            }
+            Some(reference)
+        } else {
+            None
+        };
         let control = if name == b"attach" {
             args.get(2)
                 .filter(|arg| !arg.is_empty())
@@ -114,6 +134,7 @@ impl Objects {
             b"pri" if args.len() > 2 => Command::Priority(number(2, 0)?),
             b"attach" => Command::Attach(control),
             b"settbl" => Command::Frame(number(2, 0)? as u32, number(3, 0)?),
+            b"pl" => Command::Plane(plane.unwrap()),
             b"pos2" if args.len() > 2 => {
                 let frame = number(3, 0)?;
                 let file = &args[2];
@@ -234,6 +255,15 @@ impl Objects {
                 Command::Attach(control) => {
                     if let ObjectState::Button(button) = &mut object.state {
                         button.set_control(control.as_ref())?;
+                    }
+                }
+                Command::Plane(reference) => {
+                    let Some(image) = object.state.image_mut() else {
+                        break;
+                    };
+                    if image.plane != *reference {
+                        image.plane.clone_from(reference);
+                        dirty = true;
                     }
                 }
             }

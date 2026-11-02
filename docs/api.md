@@ -360,7 +360,7 @@ BUTTON 先通过 `prepare_fes_scene` 或任务 338 完成下层创建，再由�
 
 FES IMAGE 的 `IDN=−1` 接收完整名称的原始来源，不受 PATHMODE 影响；`Object::raw_image_handle` 返回其非持有查询句柄，零表示没有来源。像素和原始数据独立保留，登记优先使用像素；普通装载缺帧后可退回旧原始来源。FES 持有的数据随替换、对象删除或所属任务实际回收释放，列表已经解码的帧继续存活。原始来源登记以当前更新记录的包装保存来源身份，可用 308 反查；具体几何和槽号规则见[原始来源更新](graphics.md#fes-image-原始来源更新)。
 
-`Objects::dispatch_object_command(interpreter, line, state)` 消费 `disp`／`size`／`keypos`／`setid`／`getid`／`enable`／`pri`／`pos2`／`delay`／`ismot`／`attach`，以及 SLIDER 的 `pos`／`page`／`getpos`／`load`，返回 true 后调用者确认事件，其他命令返回 false。目标银行与数值参数使用 FES 自身的局部／命名值作用域；图形修改延后到对象更新，`getid` 即时写入共享变量编号。Scene 的普通推进和系统块自动调用；缺失目标的整行表达式回退、非 IMAGE 的编号查询返回诊断。类型、缺省值、数组停止规则和资源时点见[对象控制命令](graphics.md#fes-对象控制命令)。
+`Objects::dispatch_object_command(interpreter, line, state)` 消费 `disp`／`size`／`keypos`／`setid`／`getid`／`enable`／`pri`／`pos2`／`delay`／`ismot`／`attach`／`settbl`／`pl`，以及 SLIDER 的 `pos`／`page`／`getpos`／`load`，返回 true 后调用者确认事件，其他命令返回 false。目标银行与数值参数使用 FES 自身的局部／命名值作用域；图形修改延后到对象更新，`getid` 即时写入共享变量编号。Scene 的普通推进和系统块自动调用；缺失目标的整行表达式回退、非 IMAGE 的编号查询返回诊断。类型、缺省值、数组停止规则和资源时点见[对象控制命令](graphics.md#fes-对象控制命令)。
 
 Scene 消费 `keyskip` 并即时更新等待取消模式，`forced_key_skip()` 查询保存的 force 标志；它与当前输入模式分别维护，完整规则见[等待取消](graphics.md#fes-等待取消与-keyskip)。
 

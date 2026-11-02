@@ -31,6 +31,89 @@ fn object_command(
 }
 
 #[test]
+fn plane_links_evaluate_once_stop_at_holes_or_controls_and_only_invalidate_changed_references() {
+    for hole in [false, true] {
+        let mut objects = Objects::new(HandleAllocator::default()).unwrap();
+        let ids = objects.define(&definition("CIMAGE", "item", 4)).unwrap();
+        objects.get_mut(ids[1]).unwrap().state = ObjectState::Image(Box::default());
+        objects.get_mut(ids[2]).unwrap().state = ObjectState::Scroll2(Box::default());
+        objects.get_mut(ids[3]).unwrap().state = ObjectState::Button(Box::default());
+        objects.set_parent(ids[3], Some(ids[0])).unwrap();
+        objects.define(&definition("PLANE", "planes", 2)).unwrap();
+        if hole {
+            objects.remove(ids[2]).unwrap();
+        }
+        let mut interpreter =
+            fes::Interpreter::new(fes::Program::from_text(b"#START\nwait 9\n").unwrap()).unwrap();
+        objects.publish_bindings(&mut interpreter);
+        let mut numbers = State::new(4);
+        assert!(
+            object_command(
+                &mut objects,
+                &mut interpreter,
+                &mut numbers,
+                b"item pl planes[($0+=1)] ($0+=100)"
+            )
+            .unwrap()
+        );
+        assert_eq!(numbers.shared[0], 1);
+        let ObjectState::CImage(first) = &objects.get(ids[0]).unwrap().state else {
+            panic!()
+        };
+        assert_eq!(
+            first.plane,
+            ObjectReference {
+                name: "planes".into(),
+                bank: 1
+            }
+        );
+        assert!(first.updates.is_dirty());
+        assert!(!first.updates.needs_rebuild());
+        let ObjectState::Image(second) = &objects.get(ids[1]).unwrap().state else {
+            panic!()
+        };
+        assert_eq!(second.base.plane, first.plane);
+        let ObjectState::Button(child) = &objects.get(ids[3]).unwrap().state else {
+            panic!()
+        };
+        assert!(child.image.base.plane.name.is_empty());
+        assert!(child.image.base.updates.is_dirty());
+        if !hole {
+            let ObjectState::Scroll2(scroll) = &objects.get(ids[2]).unwrap().state else {
+                panic!()
+            };
+            assert!(scroll.control.plane.name.is_empty());
+            assert_eq!(scroll.control.updates, Default::default());
+        }
+        let ObjectState::CImage(first) = &mut objects.get_mut(ids[0]).unwrap().state else {
+            panic!()
+        };
+        first.updates = Default::default();
+        let ObjectState::Button(child) = &mut objects.get_mut(ids[3]).unwrap().state else {
+            panic!()
+        };
+        child.image.base.updates = Default::default();
+        numbers.shared[0] = 0;
+        for command in [
+            b"item[($0+=1)-1] pl planes[($0+=1)-1]".as_slice(),
+            b"item pl",
+            b"item pl [($0+=100)]",
+        ] {
+            assert!(object_command(&mut objects, &mut interpreter, &mut numbers, command).unwrap());
+        }
+        assert_eq!(numbers.shared[0], 2);
+        let ObjectState::CImage(first) = &objects.get(ids[0]).unwrap().state else {
+            panic!()
+        };
+        assert!(!first.updates.is_dirty());
+        let ObjectState::Button(child) = &objects.get(ids[3]).unwrap().state else {
+            panic!()
+        };
+        assert!(!child.image.base.updates.is_dirty());
+    }
+}
+
+#[test]
 fn object_commands_evaluate_once_and_keep_distinct_bank_and_type_traversal_rules() {
     for hole in [false, true] {
         let mut objects = Objects::new(HandleAllocator::default()).unwrap();
