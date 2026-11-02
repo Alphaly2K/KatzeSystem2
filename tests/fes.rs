@@ -804,6 +804,38 @@ fn cimage_keeps_source_property_and_priority_updates_independent() {
 }
 
 #[test]
+fn cimage_key_position_keeps_cached_offsets_across_modes_and_same_size_updates() {
+    let mut image = fes::CImageState::default();
+    assert_eq!(image.key_position, [0; 2]);
+    image.set_size([2; 2]);
+    assert_eq!(image.key_position, [-14, -6]);
+    image.updates = Default::default();
+    image.set_key_position(0, [99; 2]);
+    image.set_key_position(0, [99; 2]);
+    assert_eq!(image.key_position, [-12, -4]);
+    image.set_size([2; 2]);
+    assert_eq!(image.key_position, [-14, -6]);
+    assert!(!image.updates.needs_rebuild());
+    assert!(!image.updates.is_dirty());
+
+    image.set_key_position(-3, [i32::MAX, i32::MIN]);
+    image.set_size([33, -3]);
+    assert_eq!(image.key_position_mode, -3);
+    assert_eq!(image.key_position, [i32::MAX, i32::MIN]);
+    image.updates = Default::default();
+    image.set_key_position(0, [0; 2]);
+    assert_eq!(image.key_position, [i32::MIN + 16, i32::MAX]);
+    image.set_size([33, -3]);
+    assert_eq!(image.key_position, [17, -11]);
+    assert!(!image.updates.needs_rebuild());
+    image.set_size([16, 17]);
+    image.set_key_position(0, [0; 2]);
+    assert_eq!(image.key_position, [8, 18]);
+    image.set_size([i32::MIN, i32::MAX]);
+    assert_eq!(image.key_position, [i32::MAX - 15, i32::MAX - 8]);
+}
+
+#[test]
 fn cimage_resolves_size_before_consuming_position_resource() {
     let mut image = fes::CImageState::default();
     image.apply(

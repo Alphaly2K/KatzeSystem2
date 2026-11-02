@@ -173,7 +173,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                 .state
                 .image_mut()
                 .unwrap()
-                .size = size;
+                .set_size(size);
         }
         let state = objects.get(handle).unwrap().state.image().unwrap();
         let mut size = state.size;

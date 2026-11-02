@@ -171,6 +171,70 @@ fn object_commands_evaluate_once_and_keep_distinct_bank_and_type_traversal_rules
 }
 
 #[test]
+fn keypos_evaluates_once_skips_other_types_and_stops_at_missing_banks() {
+    let mut objects = Objects::new(HandleAllocator::default()).unwrap();
+    let handles = objects.define(&definition("BUTTON", "item", 6)).unwrap();
+    objects.get_mut(handles[0]).unwrap().state = ObjectState::CImage(Box::default());
+    objects.get_mut(handles[1]).unwrap().state = ObjectState::Base;
+    objects.get_mut(handles[2]).unwrap().state = ObjectState::Image(Box::default());
+    objects.remove(handles[4]).unwrap();
+    let mut interpreter =
+        fes::Interpreter::new(fes::Program::from_text(b"#START\nexit 0\n").unwrap()).unwrap();
+    objects.publish_bindings(&mut interpreter);
+    let mut numbers = State::new(4);
+    for line in [
+        b"item keypos ($0+=1) ($0+=1) ($0+=1)".as_slice(),
+        b"item[3] size 32 16",
+    ] {
+        assert!(object_command(&mut objects, &mut interpreter, &mut numbers, line).unwrap());
+    }
+    assert_eq!(numbers.shared[0], 3);
+    let ObjectState::Button(last) = &objects.get(handles[5]).unwrap().state else {
+        panic!()
+    };
+    assert_eq!(last.image.base.key_position, [0; 2]);
+    for index in [0, 2, 3] {
+        let state = &objects.get(handles[index]).unwrap().state;
+        let image = match state {
+            ObjectState::CImage(image) => image.as_ref(),
+            ObjectState::Image(image) => &image.base,
+            ObjectState::Button(button) => &button.image.base,
+            _ => panic!(),
+        };
+        assert_eq!(image.key_position_mode, 1);
+        assert_eq!(image.key_position, [2, 3]);
+        assert!(!image.updates.is_dirty());
+    }
+    assert!(
+        object_command(
+            &mut objects,
+            &mut interpreter,
+            &mut numbers,
+            b"item[3] keypos 0 ($0+=1) ($0+=1)"
+        )
+        .unwrap()
+    );
+    assert_eq!(numbers.shared[0], 5);
+    let ObjectState::Button(button) = &objects.get(handles[3]).unwrap().state else {
+        panic!()
+    };
+    assert_eq!(button.image.base.key_position, [26, 11]);
+    assert!(
+        object_command(
+            &mut objects,
+            &mut interpreter,
+            &mut numbers,
+            b"item[3] keypos"
+        )
+        .unwrap()
+    );
+    let ObjectState::Button(button) = &objects.get(handles[3]).unwrap().state else {
+        panic!()
+    };
+    assert_eq!(button.image.base.key_position, [50, 19]);
+}
+
+#[test]
 fn id_commands_query_logical_frames_and_guard_arrays_and_shared_destinations() {
     let mut objects = Objects::new(HandleAllocator::default()).unwrap();
     let single = objects.define(&definition("IMAGE", "single", 1)).unwrap()[0];

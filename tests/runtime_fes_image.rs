@@ -341,6 +341,7 @@ fn cimage_metadata_waits_for_rebuild_and_empty_sources_keep_failure_flags() {
     );
     runtime.update_fes_object(0, &mut objects, swatch).unwrap();
     assert_eq!(image(&objects, swatch).size, [3, 2]);
+    assert_eq!(image(&objects, swatch).key_position, [-13, -6]);
     assert_eq!(image(&objects, swatch).position, [2., 1.]);
     assert_eq!(
         &*reads.borrow(),

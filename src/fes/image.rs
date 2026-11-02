@@ -41,6 +41,9 @@ pub struct CImageState {
     pub scale: [f32; 2],
     pub rotation: f32,
     pub size: [i32; 2],
+    pub key_position_mode: i32,
+    /// 导航定位的缓存偏移；尺寸写入与零模式 keypos 使用不同的更新规则。
+    pub key_position: [i32; 2],
     pub plane: ObjectReference,
     pub color: i32,
     pub blend: i32,
@@ -63,6 +66,8 @@ impl Default for CImageState {
             scale: [1.0; 2],
             rotation: 0.0,
             size: [-1; 2],
+            key_position_mode: 0,
+            key_position: [0; 2],
             plane: ObjectReference {
                 name: String::new(),
                 bank: 0,
@@ -82,6 +87,33 @@ impl Default for CImageState {
 }
 
 impl CImageState {
+    /// 相同尺寸仍重设零模式的导航偏移，但只在尺寸变化时请求重建。
+    pub fn set_size(&mut self, size: [i32; 2]) {
+        self.updates.rebuild |= replace(&mut self.size, size);
+        if self.key_position_mode == 0 {
+            self.key_position = [size[0].wrapping_sub(16), size[1].wrapping_sub(8)];
+        }
+    }
+
+    /// 非零模式保存指定偏移，零模式按各轴尺寸向旧偏移累加。
+    pub fn set_key_position(&mut self, mode: i32, position: [i32; 2]) {
+        self.key_position_mode = mode;
+        if mode != 0 {
+            self.key_position = position;
+        } else {
+            for (offset, size) in self.key_position.iter_mut().zip(self.size) {
+                let increment = if size > 32 {
+                    size - 16
+                } else if size > 16 {
+                    size - 8
+                } else {
+                    size / 2
+                };
+                *offset = offset.wrapping_add(increment);
+            }
+        }
+    }
+
     pub fn subcommand_context(&self) -> SubcommandContext {
         SubcommandContext {
             base: [self.base_point[0], self.base_point[1], self.priority as f32],
@@ -143,7 +175,7 @@ impl CImageState {
     pub fn apply(&mut self, attributes: &ObjectAttributes, bank: u32) -> bool {
         let dirty = self.apply_visual(attributes, bank);
         if let Some(size) = attributes.size {
-            self.updates.rebuild |= replace(&mut self.size, size);
+            self.set_size(size);
         }
         if let Some(color) = attributes.color {
             self.color = color;
@@ -209,10 +241,7 @@ impl CImageState {
         mut metadata: impl FnMut(&ImageReference) -> Result<StandardInfo>,
     ) -> Result<()> {
         if let Some(resource) = &self.size_resource {
-            self.updates.rebuild |= replace(
-                &mut self.size,
-                metadata(resource)?.size.map(|value| value as i32),
-            );
+            self.set_size(metadata(resource)?.size.map(|value| value as i32));
         }
         if let Some(resource) = self.position_resource.take() {
             self.updates.dirty |= replace(

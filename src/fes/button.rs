@@ -44,8 +44,7 @@ impl ButtonState {
     ) -> Result<bool> {
         let dirty = self.image.apply(attributes, bank, transform_name)?;
         if let Some(size) = attributes.size {
-            self.image.base.updates.rebuild |= self.image.base.size != size;
-            self.image.base.size = size;
+            self.image.base.set_size(size);
         }
         if let Some(enabled) = attributes.enabled {
             self.image.base.updates.dirty |= self.enabled != enabled;

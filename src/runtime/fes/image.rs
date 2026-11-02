@@ -20,7 +20,7 @@ impl<F: ObjectFactory> Store<'_, F> {
         let prepared = state.updates.rebuild;
         if prepared {
             if let Some(resource) = &state.size_resource {
-                state.size = self.fes_image_geometry(resource, true)?;
+                state.set_size(self.fes_image_geometry(resource, true)?);
             }
             if let Err(error) = self
                 .resources
@@ -127,7 +127,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                     object.image_offset = offset;
                     state.base_point = base;
                     if direct || state.size.contains(&-1) {
-                        state.size = info.size.map(|v| v as i32);
+                        state.set_size(info.size.map(|v| v as i32));
                     }
                     if dirty {
                         objects.invalidate(handle)?;

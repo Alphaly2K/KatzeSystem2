@@ -80,7 +80,9 @@ FES 内部执行宏声明，初始化按以下顺序交给宿主：
 
 `fes::CImageState` 保存 CIMAGE 的坐标、尺寸、颜色、平面引用和显示属性。宿主按具体银行调用 `apply(&attributes, bank)`；返回本次是否使显示属性失效，供宿主递归标记后代。此接口仅应用该类型的有效列，不用于 IMAGE 等其他对象。父子对象关系应由宿主先处理，资源查找和绘制也由宿主负责。
 
-`updates: ImageUpdates` 分别保存属性、来源和排序更新，构造时均为 false，可通过 `is_dirty()`、`needs_rebuild()`、`priority_changed()` 查询。尺寸实际变化才请求重建；颜色每次写入均请求重建，包括相同颜色。POS2 每次写入使属性失效；SIZE2 只保存引用，后续来源准备时读取。PRI 只请求排序更新。直接修改公开显示字段后调用 `updates.invalidate()`，直接修改尺寸／颜色后调用 `updates.request_rebuild()`；后代失效由对象存储维护。
+`updates: ImageUpdates` 分别保存属性、来源和排序更新，构造时均为 false，可通过 `is_dirty()`、`needs_rebuild()`、`priority_changed()` 查询。尺寸实际变化才请求重建；颜色每次写入均请求重建，包括相同颜色。POS2 每次写入使属性失效；SIZE2 只保存引用，后续来源准备时读取。PRI 只请求排序更新。直接修改公开显示字段后调用 `updates.invalidate()`，修改颜色后调用 `updates.request_rebuild()`；后代失效由对象存储维护。
+
+尺寸通过 `set_size([width, height])` 修改，同时维护导航偏移缓存及来源重建标记。`set_key_position(mode, [x, y])` 对应对象命令 `keypos`，保存原始模式与偏移，不请求媒体更新；零模式累加和相同尺寸重设的规则见[对象控制命令](graphics.md#fes-对象控制命令)。直接改写 `size` 会绕过缓存维护。
 
 `base_point`、`scale`、`rotation` 保存运动可修改的二维基点、缩放及弧度旋转。`subcommand_context()` 提供调用换算所需的当前状态；其中 base 的 Z 分量使用对象优先级。`motion_properties()` 生成运动传递区，`apply_motion_properties(&properties)` 回写位置、基点、缩放、旋转、Alpha、优先级和 display。IMAGE 使用 `base` 上的相同接口。每次新运动更新前，把当前属性交给 `MotionTask::set_properties`；更新完成后读取 `state().properties` 并回写。预算续跑期间维持同一份输入。
 
@@ -339,7 +341,7 @@ BUTTON 先通过 `prepare_fes_scene` 或任务 338 完成下层创建，再由�
 
 FES IMAGE 的 `IDN=−1` 接收完整名称的原始来源，不受 PATHMODE 影响；`Object::raw_image_handle` 返回其非持有查询句柄，零表示没有来源。像素和原始数据独立保留，登记优先使用像素；普通装载缺帧后可退回旧原始来源。FES 持有的数据随替换、对象删除或所属任务实际回收释放，列表已经解码的帧继续存活。原始来源登记以当前更新记录的包装保存来源身份，可用 308 反查；具体几何和槽号规则见[原始来源更新](graphics.md#fes-image-原始来源更新)。
 
-`Objects::dispatch_object_command(interpreter, line, state)` 消费 `disp`／`size`／`setid`／`getid`／`enable`／`pri`／`pos2`，返回 true 后调用者确认事件，其他命令返回 false。目标银行与数值参数使用 FES 自身的局部／命名值作用域；图形修改延后到对象更新，`getid` 即时写入共享变量编号。Scene 的普通推进和系统块自动调用；缺失目标的整行表达式回退、非 IMAGE 的编号查询返回诊断。类型、缺省值、数组停止规则和资源时点见[对象控制命令](graphics.md#fes-对象控制命令)。
+`Objects::dispatch_object_command(interpreter, line, state)` 消费 `disp`／`size`／`keypos`／`setid`／`getid`／`enable`／`pri`／`pos2`，返回 true 后调用者确认事件，其他命令返回 false。目标银行与数值参数使用 FES 自身的局部／命名值作用域；图形修改延后到对象更新，`getid` 即时写入共享变量编号。Scene 的普通推进和系统块自动调用；缺失目标的整行表达式回退、非 IMAGE 的编号查询返回诊断。类型、缺省值、数组停止规则和资源时点见[对象控制命令](graphics.md#fes-对象控制命令)。
 
 `Objects::dispatch_image_animation(interpreter, line, state)` 消费 `Event::Command` 中的 IMAGE `setanm`／`anm` 请求；返回 true 后可确认事件，其他命令返回 false。`Object::image_animation_request()` 查询保存的名称、播放开关及待处理标记。命令阶段不装载，`update_fes_object` 在来源登记后、排序前消费请求；播放重新读取动画并启动，暂停只更新开关。完整参数、类型门控及失败契约见 [FES 动画请求](graphics.md#fes-image-动画请求)。
 

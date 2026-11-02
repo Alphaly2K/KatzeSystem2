@@ -4,6 +4,7 @@ use crate::{Error, Result, expression::State, fes};
 enum Command {
     Display(i32),
     Size([i32; 2]),
+    KeyPosition(i32, [i32; 2]),
     SetId(i32),
     GetId(i32),
     Enable(i32),
@@ -12,7 +13,7 @@ enum Command {
 }
 
 impl Objects {
-    /// 消费 disp／size／setid／getid／enable／pri／pos2；其他命令返回 false。
+    /// 消费 disp／size／keypos／setid／getid／enable／pri／pos2；其他命令返回 false。
     /// 属性请求在后续对象更新时生效；不执行目标缺失时的整行表达式回退。
     pub fn dispatch_object_command(
         &mut self,
@@ -26,7 +27,7 @@ impl Objects {
         };
         if !matches!(
             name,
-            b"disp" | b"size" | b"setid" | b"getid" | b"enable" | b"pri" | b"pos2"
+            b"disp" | b"size" | b"keypos" | b"setid" | b"getid" | b"enable" | b"pri" | b"pos2"
         ) {
             return Ok(false);
         }
@@ -69,6 +70,7 @@ impl Objects {
         let command = match name {
             b"disp" => Command::Display(i32::from(number(2, 1)? != 0)),
             b"size" => Command::Size([number(2, 0)?, number(3, 0)?]),
+            b"keypos" => Command::KeyPosition(number(2, 0)?, [number(3, 0)?, number(4, 0)?]),
             b"setid" => Command::SetId(number(2, 0)?),
             b"getid" => Command::GetId(number(2, 0)?),
             b"enable" => Command::Enable(i32::from(number(2, 0)? != 0)),
@@ -126,13 +128,17 @@ impl Objects {
                 }
                 Command::Size(size) => {
                     if let Some(image) = object.state.image_mut() {
-                        image.updates.rebuild |= image.size != *size;
-                        image.size = *size;
+                        image.set_size(*size);
                     } else if let Some(plane) = object.state.plane_mut() {
                         plane.size = *size;
                         plane.rebuild = true;
                     } else {
                         break;
+                    }
+                }
+                Command::KeyPosition(mode, position) => {
+                    if let Some(image) = object.state.image_mut() {
+                        image.set_key_position(*mode, *position);
                     }
                 }
                 Command::SetId(value) => {
