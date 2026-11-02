@@ -14,6 +14,7 @@ mod objects;
 mod params;
 mod plane;
 mod resources;
+mod slider;
 mod subcommands;
 pub use attributes::{ObjectAttributes, ObjectInitialization, ObjectReference};
 pub use button::ButtonState;
@@ -24,6 +25,7 @@ pub use objects::ObjectDefinition;
 pub use params::parse as parameters;
 pub use plane::{CPlaneState, PlaneState};
 pub use resources::ImageReference;
+pub use slider::{SliderState, SliderUpdates};
 use std::collections::{BTreeMap, VecDeque};
 pub use subcommands::{
     MappedArgument, Subcommand, SubcommandCall, SubcommandContext, SubcommandMode,
