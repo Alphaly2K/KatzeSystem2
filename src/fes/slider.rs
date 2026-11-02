@@ -10,6 +10,7 @@ pub struct SliderUpdates {
     pub position: bool,
     pub alpha: bool,
     pub dirty: bool,
+    pub frames: bool,
 }
 
 /// SLIDER 的属性及数值控制状态；配置装载、按钮关联和绘制由运行时处理。
@@ -27,6 +28,7 @@ pub struct SliderState {
     pub vertical: i32,
     pub alpha: u32,
     pub notification: i32,
+    pub frames: [u32; 4],
     pub updates: SliderUpdates,
 }
 
@@ -48,6 +50,7 @@ impl Default for SliderState {
             vertical: 0,
             alpha: 255,
             notification: 0,
+            frames: [0, 0, 2, 3],
             updates: SliderUpdates::default(),
         }
     }
@@ -127,6 +130,13 @@ impl SliderState {
     pub fn set_alpha(&mut self, alpha: u32) {
         self.alpha = alpha;
         self.updates.alpha = true;
+    }
+
+    pub fn set_frame(&mut self, state: u32, frame: u32) {
+        if let Some(slot) = self.frames.get_mut(state as usize) {
+            *slot = frame;
+            self.updates.frames = true;
+        }
     }
 
     /// 返回本次是否需使后代失效；ENABLE 只标记自身，资源请求独立保留。

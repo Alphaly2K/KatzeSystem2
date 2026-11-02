@@ -381,9 +381,11 @@ fn cimage_metadata_waits_for_rebuild_and_empty_sources_keep_failure_flags() {
     assert!(runtime.update_fes_object(0, &mut objects, swatch).is_err());
 }
 
+type FileReads = Rc<RefCell<Vec<Vec<u8>>>>;
+
 struct PixelFiles {
     files: BTreeMap<Vec<u8>, Vec<u8>>,
-    reads: Rc<RefCell<Vec<Vec<u8>>>>,
+    reads: FileReads,
 }
 
 impl ResourceServices for PixelFiles {
@@ -1699,5 +1701,185 @@ fn fes_scenes_run_image_commands_and_repeat_blocks_after_exit_notifications() {
                 }
             );
         }
+    }
+}
+
+fn slider_scene() -> (TestRuntime, Objects, u32, FileReads) {
+    let mut runtime = Runtime::new(
+        0,
+        kind::ROOT,
+        Box::new(RootObject::new(1, 0)),
+        State::new(0),
+        GraphicsFactory {
+            fallback: InputFactory { fallback: Reject },
+        },
+    );
+    runtime.host_mut().surface_size = [8, 6];
+    runtime.input_coordinates_mut().logical_size = [8, 6];
+    runtime.create(0, kind::INPUT, b"input", b"").unwrap();
+    runtime.drawing_mut().enabled = true;
+    runtime.drawing_mut().active = true;
+    runtime.drawing_mut().target = Some(RenderTarget::new([8, 6]).unwrap());
+    let list = runtime.create(0, kind::IMAGE_LIST, b"list", b"").unwrap();
+    send(&mut runtime, list, 285, 8, 6);
+    let mut source = pixel_file(0xff123456);
+    source[16..20].copy_from_slice(&0u32.to_le_bytes());
+    source[56..60].copy_from_slice(&3u32.to_le_bytes());
+    source[60..64].copy_from_slice(&3u32.to_le_bytes());
+    let reads = Rc::default();
+    runtime.set_resources(PixelFiles {
+        files: [
+            (b"control".to_vec(), source),
+            (b"bounds".to_vec(), pixel_file(0xff123456)),
+        ]
+        .into(),
+        reads: Rc::clone(&reads),
+    });
+    let mut objects = Objects::new(runtime.host().handle_allocator()).unwrap();
+    objects.set_image_list(list, Rect::from_xywh(0, 0, 8, 6));
+    (runtime, objects, list, reads)
+}
+
+#[test]
+fn fes_slider_updates_reach_buttons_and_pixels_and_defer_metadata_until_reload() {
+    let (mut runtime, mut objects, list, reads) = slider_scene();
+    define(&mut objects, "PLANE", "vp");
+    initialize(
+        &mut objects,
+        "vp",
+        ObjectAttributes {
+            position: [Some(1), Some(1), None],
+            ..Default::default()
+        },
+    );
+    let slider = define(&mut objects, "SLIDER", "slider");
+    let ObjectState::Slider(state) = &mut objects.get_mut(slider).unwrap().state else {
+        panic!()
+    };
+    state
+        .set_plane(&ObjectReference {
+            name: "vp".into(),
+            bank: 0,
+        })
+        .unwrap();
+    state.set_file(b"control").unwrap();
+    state.set_rectangle([0, 0, 7, 3]);
+    state.set_range([0, 4]);
+    state.set_position(2, 0);
+    state.set_display(1);
+    runtime.update_fes_record(0, &mut objects, 1).unwrap();
+    let object = objects.get(slider).unwrap();
+    let task = object.task_id().unwrap();
+    assert_eq!(object.slider_task_ids().collect::<Vec<_>>(), [task]);
+    assert_eq!(runtime.tree().node(task).unwrap().kind, kind::SLIDER);
+    let ObjectState::Slider(state) = &object.state else {
+        panic!()
+    };
+    assert_eq!(state.vertical, 0);
+    assert_eq!(state.updates, Default::default());
+    let buttons: Vec<_> = runtime.tree().children(task).unwrap().collect();
+    assert_eq!(buttons.len(), 2);
+    assert_eq!(
+        runtime
+            .input_state(1)
+            .unwrap()
+            .regions()
+            .get(buttons[1])
+            .unwrap()
+            .bounds(),
+        Rect::from_xywh(2, 0, 1, 1)
+    );
+    send(&mut runtime, list, 298, 0, 0);
+    assert_eq!(
+        runtime.drawing().target.as_ref().unwrap().pixel(4, 3),
+        Some(0xff123456)
+    );
+    assert_eq!(*reads.borrow(), [b"control".to_vec()]);
+    let ObjectState::Slider(state) = &mut objects.get_mut(slider).unwrap().state else {
+        panic!()
+    };
+    state.request_position_resource(b"bounds:7").unwrap();
+    runtime.update_fes_object(0, &mut objects, slider).unwrap();
+    let ObjectState::Slider(state) = &mut objects.get_mut(slider).unwrap().state else {
+        panic!()
+    };
+    assert!(state.updates.metadata);
+    assert_eq!(state.rectangle, [0, 0, 7, 3]);
+    assert_eq!(reads.borrow().len(), 1);
+    state.set_file(b"control").unwrap();
+    runtime.update_fes_object(0, &mut objects, slider).unwrap();
+    let ObjectState::Slider(state) = &objects.get(slider).unwrap().state else {
+        panic!()
+    };
+    assert_eq!(state.rectangle, [1, 2, 2, 3]);
+    assert!(!state.updates.metadata);
+    assert_eq!(
+        *reads.borrow(),
+        [
+            b"control".to_vec(),
+            b"bounds".to_vec(),
+            b"bounds".to_vec(),
+            b"control".to_vec()
+        ]
+    );
+    assert_eq!(
+        runtime.tree().children(task).unwrap().collect::<Vec<_>>(),
+        buttons
+    );
+    send(&mut runtime, list, 298, 0, 0);
+    assert_eq!(
+        runtime.drawing().target.as_ref().unwrap().pixel(3, 5),
+        Some(0xff123456)
+    );
+}
+
+#[test]
+fn duplicate_slider_declarations_keep_each_lower_task_and_remove_all_owned_entries() {
+    for budget in [1, 4096] {
+        let (mut runtime, mut objects, list, _) = slider_scene();
+        runtime.set_budget(budget, 1000);
+        let slider = define(&mut objects, "SLIDER", "slider");
+        define(&mut objects, "SLIDER", "slider");
+        let ObjectState::Slider(state) = &mut objects.get_mut(slider).unwrap().state else {
+            panic!()
+        };
+        state.set_file(b"control").unwrap();
+        state.set_rectangle([0, 0, 7, 3]);
+        runtime.update_fes_record(0, &mut objects, 0).unwrap();
+        let first = objects.get(slider).unwrap().task_id().unwrap();
+        runtime.update_fes_record(0, &mut objects, 1).unwrap();
+        let object = objects.get(slider).unwrap();
+        let second = object.task_id().unwrap();
+        assert_ne!(first, second);
+        assert_eq!(
+            object.slider_task_ids().collect::<Vec<_>>(),
+            [first, second]
+        );
+        assert!(object.button_task_ids().next().is_none());
+        assert_eq!(objects.media_records()[0].task_id(), Some(first));
+        assert_eq!(objects.media_records()[1].task_id(), Some(second));
+        assert_eq!(send(&mut runtime, list, 294, 0, 0), 1);
+        let buttons: Vec<_> = runtime.tree().children(first).unwrap().collect();
+        runtime.remove_fes_object(0, &mut objects, slider).unwrap();
+        for task in [first, second] {
+            assert_eq!(
+                runtime.object(task).unwrap().control().deletion_requested,
+                1
+            );
+        }
+        for task in [first, second] {
+            runtime.destroy(task).unwrap();
+        }
+        for button in buttons {
+            assert!(
+                runtime
+                    .input_state(1)
+                    .unwrap()
+                    .regions()
+                    .get(button)
+                    .is_none()
+            );
+        }
+        assert_eq!(send(&mut runtime, list, 294, 0, 0), 0);
     }
 }

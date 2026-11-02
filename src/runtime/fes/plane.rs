@@ -90,7 +90,7 @@ impl<F: ObjectFactory> Store<'_, F> {
             return self.update_fes_button(owner, objects, handle, image);
         }
         if matches!(object.state, ObjectState::Slider(_)) {
-            return Err(Error::new(0, "FES SLIDER 配置装载与下层任务尚未接入"));
+            return self.update_fes_slider(owner, objects, handle);
         }
         if object.state.plane().is_none() {
             return match object.state {
@@ -254,10 +254,12 @@ impl<F: ObjectFactory> Store<'_, F> {
             pending.extend(object.children());
             if matches!(object.state, ObjectState::Button(_)) {
                 self.check_fes_button_binding(owner, object.task_id)?;
+            } else if matches!(object.state, ObjectState::Slider(_)) {
+                self.check_fes_slider_binding(owner, object.task_id)?;
             } else {
                 self.check_fes_plane_binding(owner, object.task_id)?;
             }
-            let mut tasks = object.button_tasks.clone();
+            let mut tasks = object.input_tasks.clone();
             if let Some(task) = object.task_id {
                 if !tasks.contains(&task) {
                     tasks.push(task);

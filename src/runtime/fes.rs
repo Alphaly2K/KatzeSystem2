@@ -16,6 +16,7 @@ mod motion;
 mod navigation;
 mod plane;
 mod scene;
+mod slider;
 mod task;
 pub use animation::ImageAnimationRequest;
 pub use navigation::NavigationOutcome;
@@ -40,7 +41,7 @@ impl MediaRecord {
     pub fn image_handle(&self) -> Option<u32> {
         self.image
     }
-    /// 装载记录创建的 BUTTON 编号，其他类型返回 None。
+    /// 装载记录创建的 BUTTON 或 SLIDER 编号，其他类型返回 None。
     pub fn task_id(&self) -> Option<u32> {
         self.task_id
     }
@@ -133,6 +134,20 @@ impl ObjectState {
             _ => None,
         }
     }
+
+    fn slider(&self) -> Option<&SliderState> {
+        match self {
+            Self::Slider(state) => Some(state),
+            _ => None,
+        }
+    }
+
+    fn slider_mut(&mut self) -> Option<&mut SliderState> {
+        match self {
+            Self::Slider(state) => Some(state),
+            _ => None,
+        }
+    }
 }
 
 /// 一个 FES 对象。handle 是不透明标识，不是任务编号；重复声明也有独立身份。
@@ -146,7 +161,7 @@ pub struct Object {
     task_id: Option<u32>,
     image: Option<u32>,
     images: Vec<u32>,
-    button_tasks: Vec<u32>,
+    input_tasks: Vec<u32>,
     raw_image: u32,
     image_offset: [f32; 2],
     animation: ImageAnimationRequest,
@@ -177,7 +192,7 @@ impl Object {
         self.children.iter().copied()
     }
 
-    /// 当前下层任务；重复 BUTTON 声明覆盖此编号，各记录的编号另行保留。
+    /// 当前下层任务；重复声明覆盖此编号，各记录的编号另行保留。
     pub fn task_id(&self) -> Option<u32> {
         self.task_id
     }
@@ -194,7 +209,18 @@ impl Object {
 
     /// 装载记录所创建的全部按钮；当前编号另由 task_id 查询。
     pub fn button_task_ids(&self) -> impl Iterator<Item = u32> + '_ {
-        self.button_tasks.iter().copied()
+        self.input_tasks
+            .iter()
+            .copied()
+            .filter(|_| matches!(self.state, ObjectState::Button(_)))
+    }
+
+    /// 装载记录所创建的全部滑块任务。
+    pub fn slider_task_ids(&self) -> impl Iterator<Item = u32> + '_ {
+        self.input_tasks
+            .iter()
+            .copied()
+            .filter(|_| matches!(self.state, ObjectState::Slider(_)))
     }
 
     /// IMAGE 独立持有的原始图像数据；零表示没有来源，查询不增加持有。
@@ -249,7 +275,7 @@ impl Objects {
                     task_id: None,
                     image: None,
                     images: Vec::new(),
-                    button_tasks: Vec::new(),
+                    input_tasks: Vec::new(),
                     raw_image: 0,
                     image_offset: [0.; 2],
                     animation: ImageAnimationRequest::default(),
@@ -374,7 +400,7 @@ impl Objects {
                     task_id: None,
                     image: None,
                     images: Vec::new(),
-                    button_tasks: Vec::new(),
+                    input_tasks: Vec::new(),
                     raw_image: 0,
                     image_offset: [0.; 2],
                     animation: ImageAnimationRequest::default(),
@@ -552,7 +578,7 @@ impl Objects {
                     .is_some_and(|image| object.images.contains(&image))
                     || record
                         .task_id
-                        .is_some_and(|task| object.button_tasks.contains(&task))
+                        .is_some_and(|task| object.input_tasks.contains(&task))
                 {
                     record.image = None;
                     record.task_id = None;

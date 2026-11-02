@@ -24,10 +24,8 @@ impl<F: ObjectFactory> Store<'_, F> {
             return Ok(());
         };
         let object = objects.get(handle).unwrap();
-        if matches!(object.state, ObjectState::Slider(_)) {
-            return Err(Error::new(0, "FES SLIDER 配置装载与下层任务尚未接入"));
-        }
         let button = matches!(object.state, ObjectState::Button(_));
+        let slider = matches!(object.state, ObjectState::Slider(_));
         if object.state.image().is_some() && record.image.is_none() {
             let wrapper = self.resources.images.create_empty(owner)?;
             let object = objects.get_mut(handle).unwrap();
@@ -35,11 +33,16 @@ impl<F: ObjectFactory> Store<'_, F> {
             object.images.push(wrapper);
             objects.update_order[index].image = Some(wrapper);
         }
-        if button && objects.update_order[index].task_id.is_none() {
-            let task = create_object(self.reborrow(), owner, kind::BUTTON, b"FE Button", b"")?;
+        if (button || slider) && objects.update_order[index].task_id.is_none() {
+            let (kind, name) = if button {
+                (kind::BUTTON, b"FE Button".as_slice())
+            } else {
+                (kind::SLIDER, b"FE slider".as_slice())
+            };
+            let task = create_object(self.reborrow(), owner, kind, name, b"")?;
             let object = objects.get_mut(handle).unwrap();
             object.task_id = Some(task);
-            object.button_tasks.push(task);
+            object.input_tasks.push(task);
             objects.update_order[index].task_id = Some(task);
         }
         objects.update_order[index].prepared = true;
