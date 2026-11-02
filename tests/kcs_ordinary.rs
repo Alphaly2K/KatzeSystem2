@@ -148,12 +148,12 @@ fn implicit_code_end_stops_on_the_following_update_across_budget_resumption() {
 #[test]
 fn shared_host_receives_each_task_id_and_keeps_system_milliseconds_independent() {
     let mut code = Vec::new();
-    for (native, target) in [(68, 0), (5, 4), (4, 8), (465, 12)] {
+    for (native, target) in [(68, 0), (5, 4), (4, 8), (465, 12), (938, 16)] {
         ins(&mut code, 0x2b, &[(3, native), (3, 0)]);
         ins(&mut code, 0x26, &[(3, target)]);
     }
     code.push(0x3b);
-    let program = Program::from_code(&code, vec![0; 16], 64).unwrap();
+    let program = Program::from_code(&code, vec![0; 20], 64).unwrap();
     let mut state = State::new(8);
     let mut host = CoreHost::new(&mut state);
     for (task_id, origin, now, system_time_ms, elapsed) in [
@@ -166,11 +166,13 @@ fn shared_host_receives_each_task_id_and_keeps_system_milliseconds_independent()
         host.system_time_ms = system_time_ms;
         let debug_mode = system_time_ms ^ 0x1234_5678;
         host.debug_mode = debug_mode;
+        host.sound_config_enabled = task_id;
         assert!(task.update(now, 1, &mut host, 100).unwrap());
         assert_eq!(
             values(&task),
             [task_id, elapsed, system_time_ms, debug_mode]
         );
+        assert_eq!(task.interpreter.read(16, 4).unwrap(), task_id.to_le_bytes());
         assert_eq!(task.running, 0);
     }
 }

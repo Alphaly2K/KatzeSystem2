@@ -47,6 +47,8 @@ pub struct HostState {
     pub task_id: u32,
     pub system_time_ms: u32,
     pub debug_mode: u32,
+    /// 新声音分类配置的启用字段；与声音管理器或设备是否存在分别保存。
+    pub sound_config_enabled: u32,
     pub sequence_name_mode: u32,
     pub surface_size: [u32; 2],
     /// 消息记录生成显示时间时使用的全局比例；None 表示尚无时间上下文。
@@ -213,6 +215,9 @@ pub(crate) fn call_native(
     }
     if index == 465 {
         return Ok(NativeReturn::Value(host.debug_mode));
+    }
+    if index == 938 {
+        return Ok(NativeReturn::Value(host.sound_config_enabled));
     }
     if index == 65 {
         return Ok(NativeReturn::YieldVoid);

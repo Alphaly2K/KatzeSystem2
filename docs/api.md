@@ -38,6 +38,8 @@
 
 `audio::SoundFactory { enabled, fallback }` 创建类型 13 声音任务。`SoundObject::audio()` 及 `TaskObject::audio_state()` 查询 `SoundState`，其中 `loop_points()` 为循环范围，`channel_time(0..64)` 为原始空闲通道累计时刻。运行时普通 400 使用资源服务按 sound 类别补全／读取表，经根 35 查询目标并逐条发送 199；没有返回值。资源提供者负责声音分类配置，未接入的播放命令返回诊断。禁用、删除、缓冲区和部分失败契约见[声音任务](audio.md#声音任务)及[普通装载](audio.md#普通-kcs-装载)。
 
+普通 938 直接返回 `HostState::sound_config_enabled`，不读取参数或归一化结果。该字段默认零，表示新声音分类配置的启用状态，由配置宿主同步提供，独立于声音任务的设备门控。
+
 `settings::SystemSettings` 保存 sound／message／effects／window 四块基线配置。`Default` 提供构造初值，`apply_xml(bytes)` 覆盖已有字段并保留缺失值，`refresh_sound_volumes()` 显式重算四路有效音量。准备后设置 `CoreHost::system_settings` 或 `Runtime::host_mut().system_settings`。普通 359 依序复制四块到 VM，360 从 VM 写回前三块；两者不压值。地址零有效，起点在区外的地址跳过，合法起点的容量不足继续诊断。自动装载和媒体应用尚待接入，具体大小、XML 范围与部分失败契约见[全局设置](settings.md)。
 
 ## 数值状态
