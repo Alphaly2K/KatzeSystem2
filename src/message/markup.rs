@@ -13,10 +13,35 @@ struct Parser<'a> {
     atoms: Vec<Atom>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct ParseState {
+    pub style: Style,
+    pub restore_color: u32,
+    pub next_group: u32,
+}
+
+impl ParseState {
+    pub fn new(defaults: &StyleDefaults) -> Self {
+        Self {
+            style: defaults.style(),
+            restore_color: defaults.text_color,
+            next_group: 0,
+        }
+    }
+}
+
 impl Markup {
     /// 解析正文标记，保留逐字符样式、不可断行组和原始等待操作。
     /// 已识别但尚未实现的标记返回其反斜杠位置；未知转义显示其后字符。
     pub fn parse(input: &str, defaults: &StyleDefaults) -> Result<Self> {
+        Self::parse_from(input, defaults, &mut ParseState::new(defaults))
+    }
+
+    pub(super) fn parse_from(
+        input: &str,
+        defaults: &StyleDefaults,
+        state: &mut ParseState,
+    ) -> Result<Self> {
         if input.len() > read::MAX_BYTES {
             return Err(Error::new(0, "消息文本超过存储上限"));
         }
@@ -35,13 +60,20 @@ impl Markup {
             characters,
             position: 0,
             defaults,
-            style: defaults.style(),
-            restore_color: defaults.text_color,
+            style: state.style,
+            restore_color: state.restore_color,
             group: None,
-            next_group: 0,
+            next_group: state.next_group,
             atoms: Vec::new(),
         };
         parser.run()?;
+        *state = ParseState {
+            style: parser.style,
+            restore_color: parser.restore_color,
+            next_group: parser
+                .next_group
+                .wrapping_add(u32::from(parser.group.is_some())),
+        };
         Ok(Self {
             atoms: parser.atoms,
             final_style: parser.style,

@@ -31,6 +31,18 @@ impl Markup {
         if self.atoms.len() > read::MAX_ITEMS || layout.entries.len() > read::MAX_ITEMS {
             return Err(Error::new(0, "消息显示时序条目数量超过上限"));
         }
+        let (times, accumulated_units) = self.atom_times(settings, initial_units)?;
+        Ok(Schedule {
+            deadlines: self.bind_times(layout, &times)?,
+            accumulated_units,
+        })
+    }
+
+    pub(super) fn atom_times(
+        &self,
+        settings: &TimingSettings,
+        initial_units: u32,
+    ) -> Result<(Vec<Option<u32>>, u32)> {
         let mut units = initial_units;
         let mut times = Vec::with_capacity(self.atoms.len());
         for atom in &self.atoms {
@@ -89,6 +101,10 @@ impl Markup {
                 }
             }
         }
+        Ok((times, units))
+    }
+
+    pub(super) fn bind_times(&self, layout: &Layout, times: &[Option<u32>]) -> Result<Vec<u32>> {
         let mut deadlines = Vec::with_capacity(layout.entries.len());
         for (index, entry) in layout.entries.iter().enumerate() {
             let deadline = if let Some(atom) = entry.atom {
@@ -117,9 +133,6 @@ impl Markup {
             };
             deadlines.push(deadline);
         }
-        Ok(Schedule {
-            deadlines,
-            accumulated_units: units,
-        })
+        Ok(deadlines)
     }
 }

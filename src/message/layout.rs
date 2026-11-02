@@ -83,8 +83,21 @@ impl Markup {
     pub fn layout(
         &self,
         settings: &LayoutSettings,
-        mut measure: impl FnMut(char, u32) -> Result<i32>,
+        measure: impl FnMut(char, u32) -> Result<i32>,
     ) -> Result<Layout> {
+        let mut layout = Layout {
+            entries: self.entries(measure)?,
+            cursor: None,
+            bottom: 0,
+        };
+        layout.arrange(settings)?;
+        Ok(layout)
+    }
+
+    pub(super) fn entries(
+        &self,
+        mut measure: impl FnMut(char, u32) -> Result<i32>,
+    ) -> Result<Vec<LayoutEntry>> {
         if self.atoms.len() > read::MAX_ITEMS {
             return Err(Error::new(0, "消息布局输入条目数量超过上限"));
         }
@@ -143,19 +156,17 @@ impl Markup {
                 display_anchor: None,
             });
         }
-        let mut layout = Layout {
-            entries,
-            cursor: None,
-            bottom: 0,
-        };
-        layout.horizontal(settings)?;
-        layout.vertical(settings);
-        layout.ruby(settings)?;
-        Ok(layout)
+        Ok(entries)
     }
 }
 
 impl Layout {
+    pub(super) fn arrange(&mut self, settings: &LayoutSettings) -> Result<()> {
+        self.horizontal(settings)?;
+        self.vertical(settings);
+        self.ruby(settings)
+    }
+
     fn horizontal(&mut self, settings: &LayoutSettings) -> Result<()> {
         let [left, top, right] = settings.margins;
         let right = settings.width.wrapping_sub(right);
