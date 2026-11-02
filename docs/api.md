@@ -22,7 +22,7 @@
 
 尚未实现的 KCS 宿主和无效 ANM 指令在执行时返回错误。CST 和 FES 的宿主命令返回事件，由宿主处理；宿主不能通过空实现确认一个尚未支持的命令。成功读取容器不代表该程序的所有执行路径都已实现。
 
-消息文本可通过 `message::Markup::parse(text, &defaults)` 解析，输入已解码为 Unicode，字体尺寸与三种默认颜色由调用者提供。输出保留逐字符样式、分组及 UTF-8 来源区间。`Markup::layout(&settings, measure)` 使用字宽闭包完成基础换行、对齐及注音定位，设置保留 CP932／Unicode 对象路径。消息页和等待完成继续接入，详见 [消息标记接口](message.md)。
+消息文本可通过 `message::Markup::parse(text, &defaults)` 解析，输入已解码为 Unicode，字体尺寸与三种默认颜色由调用者提供。输出保留逐字符样式、分组及 UTF-8 来源区间。`Markup::layout(&settings, measure)` 使用字宽闭包完成换行、禁则、分组、悬挂缩进、对齐及注音定位；设置保留 CP932／Unicode 对象路径，`BreakCharacters::for_encoding` 提供对应默认集合。消息页和等待完成继续接入，详见 [消息标记接口](message.md)。
 
 ## 数值状态
 

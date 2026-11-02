@@ -23,6 +23,10 @@ fn settings() -> LayoutSettings {
         normal_size: 10,
         ruby_offset: 1,
         vertical_alignment: VerticalAlignment::Preserve,
+        line_breaking: false,
+        word_wrap: false,
+        hanging_indent: false,
+        break_characters: Default::default(),
     }
 }
 

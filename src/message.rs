@@ -3,9 +3,11 @@
 use std::ops::Range;
 
 mod layout;
+mod line_breaks;
 mod markup;
 
 pub use layout::{Layout, LayoutEntry, LayoutSettings, VerticalAlignment};
+pub use line_breaks::BreakCharacters;
 
 /// 已解码文字仍保留原文字对象路径，供布局及消息更新使用。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -57,7 +59,7 @@ pub enum Alignment {
     Right,
 }
 
-/// 同一 index 的正文与注音属于同一个不可断行组。
+/// 同一 index 标识同组正文和注音；布局按可用宽度维护其分组。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TextGroup {
     pub index: u32,

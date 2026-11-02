@@ -1,4 +1,4 @@
-use super::{Alignment, AtomKind, Markup, TextEncoding, TextGroup, Wait};
+use super::{Alignment, AtomKind, BreakCharacters, Markup, TextEncoding, TextGroup, Wait};
 use crate::{Error, Result, read};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -9,7 +9,7 @@ pub enum VerticalAlignment {
 }
 
 /// 逻辑窗口宽度、左／上／右边距和消息局部偏移分别保存。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LayoutSettings {
     pub encoding: TextEncoding,
     pub width: i32,
@@ -20,6 +20,11 @@ pub struct LayoutSettings {
     pub normal_size: i32,
     pub ruby_offset: i32,
     pub vertical_alignment: VerticalAlignment,
+    pub line_breaking: bool,
+    /// Unicode 路径按半角空格保持单词；CP932 路径忽略此开关。
+    pub word_wrap: bool,
+    pub hanging_indent: bool,
+    pub break_characters: BreakCharacters,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -36,7 +41,7 @@ pub struct LayoutEntry {
 }
 
 impl LayoutEntry {
-    fn code(&self) -> u32 {
+    pub(super) fn code(&self) -> u32 {
         match self.kind {
             AtomKind::Character(c) => c as u32,
             AtomKind::NewLine => 0,
@@ -50,16 +55,20 @@ impl LayoutEntry {
         }
     }
 
-    fn glyph(&self) -> bool {
+    pub(super) fn glyph(&self) -> bool {
         self.code() > 9 && self.code() != 0xffff
     }
 
-    fn ruby(&self) -> bool {
+    pub(super) fn ruby(&self) -> bool {
         self.group.is_some_and(|group| group.ruby)
+    }
+
+    pub(super) fn line_break(&self, encoding: TextEncoding) -> bool {
+        self.code() == 0 || (encoding == TextEncoding::Unicode && self.code() == 8)
     }
 }
 
-/// 无禁则调整、无悬挂缩进的已度量布局。
+/// 已度量的文字及控制记录，包含自动换行与注音显示关联。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Layout {
     pub entries: Vec<LayoutEntry>,
@@ -155,7 +164,32 @@ impl Layout {
         let mut line = 0;
         let mut last_size = 0;
         let mut alignment = Alignment::Left;
+        let rules = &settings.break_characters;
+        let indent = if settings.hanging_indent {
+            self.first_glyph(0)
+                .filter(|&i| self.entries[i].in_set(&rules.indent_open))
+                .map_or(0, |i| {
+                    self.entries[i].size[0].wrapping_add(settings.character_spacing)
+                })
+        } else {
+            0
+        };
+        let mut indented = false;
+        let mut seen_glyph = false;
         while start < self.entries.len() {
+            if seen_glyph {
+                let first = self.first_glyph(start);
+                if settings.hanging_indent
+                    && first.is_some_and(|i| self.entries[i].in_set(&rules.indent_open))
+                {
+                    indented = false;
+                } else if !settings.hanging_indent
+                    || first.is_none_or(|i| !self.entries[i].in_set(&rules.indent_keep))
+                {
+                    indented = true;
+                }
+            }
+            let shift = if indented { indent } else { 0 };
             if last_size == 0 {
                 last_size = if self.entries[start].glyph() {
                     self.entries[start].size[1]
@@ -166,13 +200,14 @@ impl Layout {
             let mut height = last_size;
             let mut end = start;
             let mut next = start;
-            let mut x = left.wrapping_add(settings.offset[0]);
+            let mut x = left.wrapping_add(settings.offset[0]).wrapping_add(shift);
             let mut first_character = y != top;
             let mut wrapped = false;
             while next < self.entries.len() {
                 let entry = &mut self.entries[next];
+                seen_glyph |= entry.glyph();
                 match entry.code() {
-                    0 => {
+                    _ if entry.line_break(settings.encoding) => {
                         end = next;
                         next += 1;
                         break;
@@ -201,8 +236,24 @@ impl Layout {
                 end = next;
                 next += 1;
             }
-            let mut x = left.wrapping_add(settings.offset[0]);
-            let mut remaining = right.wrapping_sub(left);
+            if settings.line_breaking {
+                end = self.adjust_break(start, end, settings.width.wrapping_sub(x), settings);
+                next = end + 1;
+                if wrapped {
+                    for entry in self.entries[start..=end].iter().rev() {
+                        if entry.glyph() {
+                            break;
+                        }
+                        if entry.line_break(settings.encoding) {
+                            wrapped = false;
+                            break;
+                        }
+                    }
+                }
+            }
+            wrapped &= next < self.entries.len();
+            let mut x = left.wrapping_add(settings.offset[0]).wrapping_add(shift);
+            let mut remaining = right.wrapping_sub(left).wrapping_sub(shift);
             let mut i = start;
             while i <= end {
                 if alignment != Alignment::Left {
@@ -303,7 +354,7 @@ impl Layout {
         let mut start = 0;
         while start < self.entries.len() {
             let end = (start..self.entries.len())
-                .find(|&i| self.entries[i].code() == 0)
+                .find(|&i| self.entries[i].line_break(settings.encoding))
                 .unwrap_or(self.entries.len());
             let mut height = self.entries[start..end]
                 .iter()
@@ -359,10 +410,12 @@ impl Layout {
             let base_width = self.entries[start..middle]
                 .iter()
                 .fold(0i32, |sum, e| sum.wrapping_add(e.size[0]));
-            let base_x = self.entries[start..middle]
-                .iter()
-                .find(|e| e.glyph())
-                .map_or(-1, |e| e.position[0]);
+            let mut base_x = -1;
+            for entry in &self.entries[start..middle] {
+                if base_x < 0 && entry.glyph() {
+                    base_x = entry.position[0];
+                }
+            }
             let ruby_width = self.entries[middle..end]
                 .iter()
                 .fold(0i32, |sum, e| sum.wrapping_add(e.size[0]));
