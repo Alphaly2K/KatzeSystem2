@@ -30,7 +30,7 @@
 
 `message::Display::new(defaults, encoding, size, settings)` 持有消息页与持久像素，串联追加、准备、普通逐字／渐显、效果绘制及清空；`advance` 返回首次处理、首次完成的布局下标和当前范围完成状态。`surface()` 可直接合成到最终画面，`page()` 提供只读布局与 `GlyphState` 查询，`source_surface()` 查询可选的完整渐显来源。`dirty_rectangle()` 查询累计更新范围，`clear_dirty()` 显式清除登记；`clear()` 保留既有登记。`reconfigure(defaults, size, settings, &layout, &timing, measure)` 按新配置重解析完整来源，准备成功后重建像素、清空脏区与显示进度并保留速度；失败时原对象保持。服务失败后保留已处理状态并可重试，详见[持久消息显示](message.md#持久消息显示)。消息任务见下段，输入翻页及脚本等待继续接入。
 
-`message::MessageFactory { fallback }` 创建类型 48／63 的 `MessageObject`，复用平面属性与生命周期，接入配置、追加、分隔、逐字／渐显、强制显示、速度、剩余数量和画布提交。调用前通过 `Runtime::set_fonts` 绑定 `FontServices`，通过 `host_mut().message_time_scale` 配置消息全局时间比例；独立宿主提供相应字体、可见性与提交服务。原配置使用显式 `CommandBuffers`，不解引用进程指针。已接入命令与配置契约见[消息任务对象](message.md#消息任务对象)；普通 KCS 文字 native、CST 消息及完成等待继续接入。
+`message::MessageFactory { fallback }` 创建类型 48／63 的 `MessageObject`，复用平面属性与生命周期，接入默认配置、配置、追加、分隔、逐字／渐显、强制显示、速度、剩余数量和画布提交。调用前通过 `Runtime::set_fonts` 绑定 `FontServices`，通过 `host_mut().message_time_scale` 配置消息全局时间比例，按需设置 `host_mut().message_defaults = Some(MessageDefaults { .. })`；独立宿主提供相应字体、默认配置、可见性与提交服务。原配置使用显式 `CommandBuffers`，不解引用进程指针。运行时接入普通 611～619、695 和 884，配置地址可来自 VM 普通区或外部区，数量查询要求有效类型 48 对象。具体契约见[消息任务对象](message.md#消息任务对象)和[普通 KCS 调用](message.md#默认配置与普通-kcs-调用)；CST 消息及完成等待继续接入。
 
 ## 数值状态
 

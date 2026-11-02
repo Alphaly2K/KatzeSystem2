@@ -256,6 +256,10 @@ pub trait Host {
         None
     }
 
+    fn message_defaults(&self) -> Result<&crate::message::MessageDefaults> {
+        Err(Error::new(0, "宿主未配置消息默认设置"))
+    }
+
     fn message_plane_display(&mut self, id: u32) -> Result<Option<u32>> {
         self.drawables()
             .map(|drawings| drawings.get(id).map(crate::graphics::Drawable::display))
@@ -454,6 +458,10 @@ impl<T: Host + ?Sized> Host for &mut T {
 
     fn fonts(&mut self) -> Option<&mut dyn crate::message::FontServices> {
         (**self).fonts()
+    }
+
+    fn message_defaults(&self) -> Result<&crate::message::MessageDefaults> {
+        (**self).message_defaults()
     }
 
     fn message_time_scale(&self) -> Option<u32> {

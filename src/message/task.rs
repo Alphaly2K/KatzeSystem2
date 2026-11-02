@@ -452,6 +452,21 @@ impl TaskObject for MessageObject {
             };
         }
         match code {
+            455 => {
+                if let Some(buffer) = buffers.data1.as_deref_mut() {
+                    let length = match self.encoding {
+                        TextEncoding::Cp932 => 0xe8,
+                        TextEncoding::Unicode => 0x12c,
+                    };
+                    if read::u32_at(buffer, 0)? == length {
+                        let bytes = host.message_defaults()?.configuration(self.encoding)?;
+                        buffer
+                            .get_mut(..bytes.len())
+                            .ok_or_else(|| Error::new(0, "消息默认配置输出缓冲区过短"))?
+                            .copy_from_slice(&bytes);
+                    }
+                }
+            }
             456 | 457 => {
                 if code == 457 && self.display.is_none() {
                     return Ok(CommandOutcome::finished(false));

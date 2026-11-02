@@ -2,6 +2,7 @@
 
 use std::ops::Range;
 
+mod defaults;
 mod display;
 mod effects;
 mod font;
@@ -14,6 +15,7 @@ mod reveal;
 mod task;
 mod timing;
 
+pub use defaults::MessageDefaults;
 pub use display::{Display, DisplayProgress, DisplaySettings};
 pub use effects::GlyphEffects;
 pub use font::{Font, GlyphMask, GlyphPaint};

@@ -102,6 +102,10 @@ impl<H: Host, S: TaskServices> Host for TaskHost<'_, H, S> {
         self.inner.fonts()
     }
 
+    fn message_defaults(&self) -> Result<&crate::message::MessageDefaults> {
+        self.inner.message_defaults()
+    }
+
     fn message_time_scale(&self) -> Option<u32> {
         self.inner.message_time_scale()
     }

@@ -51,6 +51,7 @@ pub struct HostState {
     pub surface_size: [u32; 2],
     /// 消息记录生成显示时间时使用的全局比例；None 表示尚无时间上下文。
     pub message_time_scale: Option<u32>,
+    pub message_defaults: Option<crate::message::MessageDefaults>,
     /// 外层输入宿主提供的当前逻辑画布坐标；保留画布外的值。
     pub pointer_position: [i32; 2],
     pub memory_copy_mode: MemoryCopyMode,
@@ -121,6 +122,13 @@ impl std::ops::DerefMut for CoreHost<'_> {
 }
 
 impl Host for CoreHost<'_> {
+    fn message_defaults(&self) -> Result<&crate::message::MessageDefaults> {
+        self.host
+            .message_defaults
+            .as_ref()
+            .ok_or_else(|| Error::new(0, "宿主未配置消息默认设置"))
+    }
+
     fn message_time_scale(&self) -> Option<u32> {
         self.host.message_time_scale
     }

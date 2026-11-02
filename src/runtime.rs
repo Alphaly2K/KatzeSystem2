@@ -17,6 +17,7 @@ use std::collections::BTreeMap;
 
 pub mod fes;
 mod graphics;
+mod message;
 mod object;
 mod resources;
 mod root;
@@ -1277,6 +1278,13 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         self.host.message_time_scale
     }
 
+    fn message_defaults(&self) -> Result<&crate::message::MessageDefaults> {
+        self.host
+            .message_defaults
+            .as_ref()
+            .ok_or_else(|| Error::new(0, "宿主未配置消息默认设置"))
+    }
+
     fn message_plane_display(&mut self, id: u32) -> Result<Option<u32>> {
         let drawing = &self.resources.drawing;
         if drawing.mode != 0 || !drawing.enabled {
@@ -1476,6 +1484,9 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
     }
 
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn> {
+        if matches!(index, 611..=619 | 695 | 884) {
+            return self.message_native(index, arguments, vm);
+        }
         if index == 149 {
             if arguments.len() != 8 {
                 return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
