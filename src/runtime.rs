@@ -15,6 +15,7 @@ use crate::task::{Command, CommandBuffers, Control, Lifecycle, TaskClock, TaskTr
 use crate::{Error, Result, expression, read};
 use std::collections::BTreeMap;
 
+mod audio;
 pub mod fes;
 mod graphics;
 mod message;
@@ -1484,6 +1485,9 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
     }
 
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn> {
+        if index == 400 {
+            return self.load_sound_loop_table(arguments, vm);
+        }
         if matches!(index, 611..=619 | 695 | 884) {
             return self.message_native(index, arguments, vm);
         }

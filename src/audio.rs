@@ -1,5 +1,8 @@
 use crate::{Error, Result, read};
 
+mod task;
+pub use task::{SoundFactory, SoundObject, SoundState};
+
 /// 声音任务登记的原始循环范围；计数尚未转换为播放设备的单位。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LoopPoint {
