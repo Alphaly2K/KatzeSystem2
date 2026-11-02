@@ -2,6 +2,7 @@
 
 use std::ops::Range;
 
+mod display;
 mod effects;
 mod font;
 mod layout;
@@ -12,12 +13,13 @@ mod playback;
 mod reveal;
 mod timing;
 
+pub use display::{Display, DisplayProgress, DisplaySettings};
 pub use effects::GlyphEffects;
 pub use font::{Font, GlyphMask, GlyphPaint};
 pub use layout::{Layout, LayoutEntry, LayoutSettings, VerticalAlignment};
 pub use line_breaks::BreakCharacters;
 pub use page::Page;
-pub use playback::DisplayUpdate;
+pub use playback::{DisplayUpdate, GlyphState};
 pub use reveal::{Reveal, RevealGlyph};
 pub use timing::{Schedule, TimingSettings};
 

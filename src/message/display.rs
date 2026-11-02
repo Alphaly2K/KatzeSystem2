@@ -1,0 +1,267 @@
+use super::{
+    AtomKind, GlyphEffects, GlyphMask, GlyphPaint, GlyphState, Layout, LayoutEntry, LayoutSettings,
+    Page, Reveal, RevealGlyph, Style, StyleDefaults, TextEncoding, TimingSettings,
+};
+use crate::{
+    Error, Result,
+    graphics::{Rect, Surface},
+};
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DisplaySettings {
+    pub effects: GlyphEffects,
+    pub double_coverage: bool,
+    /// 零使用普通逐字显示，非零使用水平渐显。
+    pub reveal_width: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DisplayProgress {
+    /// 本轮首次绘制或预生成的 Layout.entries 下标。
+    pub prepared: Vec<usize>,
+    /// 本轮首次完整显示的 Layout.entries 下标。
+    pub completed: Vec<usize>,
+    pub complete: bool,
+}
+
+/// 一页消息及其持久像素；逐字和渐显更新共用同一份字形状态。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Display {
+    page: Page,
+    settings: DisplaySettings,
+    surface: Surface,
+    source: Option<Surface>,
+    reveal: Option<Reveal>,
+    starts: Vec<Option<i32>>,
+    bounds: Vec<Rect>,
+    normal_size: u32,
+    character_delay: u32,
+    colors_dirty: bool,
+}
+
+impl Display {
+    pub fn new(
+        defaults: StyleDefaults,
+        encoding: TextEncoding,
+        size: [u32; 2],
+        settings: DisplaySettings,
+    ) -> Result<Self> {
+        let reveal = if settings.reveal_width == 0 {
+            None
+        } else {
+            if size.contains(&0) {
+                return Err(Error::new(0, "消息渐显需要非零尺寸的渲染面"));
+            }
+            Some(Reveal::new(settings.reveal_width)?)
+        };
+        let source = reveal.as_ref().map(|_| Surface::new(size)).transpose()?;
+        Ok(Self {
+            page: Page::new(defaults, encoding),
+            settings,
+            surface: Surface::new(size)?,
+            source,
+            reveal,
+            starts: Vec::new(),
+            bounds: Vec::new(),
+            normal_size: defaults.text_sizes[2],
+            character_delay: 0,
+            colors_dirty: false,
+        })
+    }
+
+    pub fn page(&self) -> &Page {
+        &self.page
+    }
+    pub fn settings(&self) -> &DisplaySettings {
+        &self.settings
+    }
+    pub fn surface(&self) -> &Surface {
+        &self.surface
+    }
+    pub fn source_surface(&self) -> Option<&Surface> {
+        self.source.as_ref()
+    }
+    pub fn append(&mut self, text: &str) -> Result<()> {
+        self.page.append(text)
+    }
+    pub fn invalidate_layout(&mut self) {
+        self.page.invalidate_layout();
+    }
+    pub fn set_speed(&mut self, speed: u32) {
+        self.page.set_speed(speed);
+    }
+
+    pub fn clear(&mut self) {
+        self.page.clear();
+        self.surface.clear(0);
+        if let Some(source) = &mut self.source {
+            source.clear(0);
+        }
+        self.starts.clear();
+        self.bounds.clear();
+        self.colors_dirty = false;
+    }
+
+    pub fn prepare(
+        &mut self,
+        layout: &LayoutSettings,
+        timing: &TimingSettings,
+        measure: impl FnMut(char, u32) -> Result<i32>,
+    ) -> Result<bool> {
+        let changed = self.page.prepare(layout, timing, measure)?;
+        if changed {
+            self.bounds
+                .resize(self.page.markup().atoms.len(), Rect::default());
+            self.starts = self.page.layout().reveal_starts();
+        }
+        self.character_delay = timing.character_delay;
+        Ok(changed)
+    }
+
+    pub fn advance(
+        &mut self,
+        now: u32,
+        segment_limit: u32,
+        mut glyph: impl FnMut(char, u32) -> Result<GlyphMask>,
+    ) -> Result<DisplayProgress> {
+        self.page.require_prepared()?;
+        let mut canvas = Surface::new([128; 2])?;
+        let Some(reveal) = &self.reveal else {
+            let settings = self.settings;
+            let surface = &mut self.surface;
+            let bounds = &mut self.bounds;
+            let update = self
+                .page
+                .advance_painted(now, segment_limit, |entry, style| {
+                    if let Some(rect) =
+                        draw(entry, style, surface, &mut canvas, &settings, &mut glyph)?
+                    {
+                        bounds[entry.atom.unwrap()] = rect;
+                    }
+                    Ok(())
+                })?;
+            return Ok(DisplayProgress {
+                prepared: update.newly_visible.clone(),
+                completed: update.newly_visible,
+                complete: update.complete,
+            });
+        };
+        let end = segment_end(self.page.layout(), segment_limit);
+        let mut progress = DisplayProgress {
+            prepared: Vec::new(),
+            completed: Vec::new(),
+            complete: true,
+        };
+        let source = self.source.as_mut().unwrap();
+        for index in 0..end {
+            let entry = &self.page.layout().entries[index];
+            if !entry.glyph() {
+                continue;
+            }
+            let atom = entry.atom.unwrap();
+            if self.page.playback.states[atom] != GlyphState::Hidden {
+                continue;
+            }
+            let style = self.page.markup().atoms[atom].style;
+            if let Some(rect) = draw(
+                entry,
+                style,
+                source,
+                &mut canvas,
+                &self.settings,
+                &mut glyph,
+            )? {
+                self.bounds[atom] = rect;
+            }
+            self.page.playback.states[atom] = GlyphState::Revealing;
+            self.colors_dirty = true;
+            progress.prepared.push(index);
+        }
+        if self.colors_dirty {
+            Reveal::copy_colors(&mut self.surface, source)?;
+            self.colors_dirty = false;
+        }
+        let phase = Reveal::phase(now, self.normal_size, self.character_delay);
+        for index in 0..end {
+            let entry = &self.page.layout().entries[index];
+            if !entry.glyph() {
+                continue;
+            }
+            let atom = entry.atom.unwrap();
+            match self.page.playback.states[atom] {
+                GlyphState::Hidden => progress.complete = false,
+                GlyphState::Complete => (),
+                GlyphState::Revealing => {
+                    let glyph = RevealGlyph {
+                        position: entry.position,
+                        bounds: self.bounds[atom],
+                        start: self.starts[index].unwrap(),
+                    };
+                    if reveal.apply(&mut self.surface, source, &glyph, phase)? {
+                        self.page.playback.states[atom] = GlyphState::Complete;
+                        progress.completed.push(index);
+                    } else {
+                        progress.complete = false;
+                    }
+                }
+            }
+        }
+        if end == self.page.layout().entries.len() {
+            self.page.playback.finish_round(now);
+        }
+        Ok(progress)
+    }
+}
+
+fn segment_end(layout: &Layout, limit: u32) -> usize {
+    let mut segments = 0i32;
+    for (index, entry) in layout.entries.iter().enumerate() {
+        if entry.kind == AtomKind::Character('\u{ffff}') && limit != u32::MAX {
+            segments += 1;
+            if (limit as i32) < segments {
+                return index;
+            }
+        }
+    }
+    layout.entries.len()
+}
+
+fn draw(
+    entry: &LayoutEntry,
+    style: Style,
+    target: &mut Surface,
+    canvas: &mut Surface,
+    settings: &DisplaySettings,
+    glyph: &mut impl FnMut(char, u32) -> Result<GlyphMask>,
+) -> Result<Option<Rect>> {
+    if Rect::from_xywh(entry.position[0], entry.position[1], 128, 128)
+        .intersect(target.bounds())
+        .is_none()
+    {
+        return Ok(None);
+    }
+    let AtomKind::Character(character) = entry.kind else {
+        unreachable!()
+    };
+    let mask = glyph(character, entry.size[1] as u32)?;
+    if mask.coverage().is_empty() {
+        return Ok(Some(Rect::default()));
+    }
+    canvas.clear(0);
+    let bounds = mask.paint(
+        canvas,
+        &GlyphPaint {
+            color: if entry.group.is_some_and(|g| g.ruby) {
+                style.ruby_color
+            } else {
+                style.text_color
+            },
+            shadow_color: style.shadow_color,
+            font_size: entry.size[1] as u32,
+            double_coverage: settings.double_coverage,
+            effects: settings.effects,
+        },
+    )?;
+    target.blend_from(canvas, bounds, entry.position, 255);
+    Ok(Some(bounds))
+}

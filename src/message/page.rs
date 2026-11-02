@@ -1,8 +1,8 @@
 use super::markup::ParseState;
 use super::playback::Playback;
 use super::{
-    AtomKind, DisplayUpdate, GlyphEffects, GlyphMask, GlyphPaint, Layout, LayoutSettings, Markup,
-    Schedule, StyleDefaults, TextEncoding, TimingSettings,
+    AtomKind, DisplayUpdate, GlyphEffects, GlyphMask, GlyphPaint, GlyphState, Layout, LayoutEntry,
+    LayoutSettings, Markup, Schedule, Style, StyleDefaults, TextEncoding, TimingSettings,
 };
 use crate::{Error, Result, graphics::Surface, read};
 
@@ -19,7 +19,7 @@ pub struct Page {
     layout: Layout,
     atom_times: Vec<Option<u32>>,
     schedule: Schedule,
-    playback: Playback,
+    pub(super) playback: Playback,
     dirty: bool,
 }
 
@@ -82,20 +82,44 @@ impl Page {
         self.playback.set_speed(speed);
     }
 
-    /// 查询上次准备结果中的字形可见性；控制记录为 false，越界为 None。
+    /// 查询上次准备结果中的字形是否完整显示；控制记录为 false，越界为 None。
     pub fn is_visible(&self, layout_index: usize) -> Option<bool> {
-        self.layout
-            .entries
-            .get(layout_index)
-            .map(|entry| entry.glyph() && self.playback.visible[entry.atom.unwrap()])
+        self.glyph_state(layout_index)
+            .map(|state| state == GlyphState::Complete)
+    }
+
+    /// 控制记录返回 Hidden；渐显中的字形尚未完整显示。
+    pub fn glyph_state(&self, layout_index: usize) -> Option<GlyphState> {
+        self.layout.entries.get(layout_index).map(|entry| {
+            if entry.glyph() {
+                self.playback.states[entry.atom.unwrap()]
+            } else {
+                GlyphState::Hidden
+            }
+        })
     }
 
     /// 普通逐字显示；MAX 时刻强制显示，MAX 分隔上限表示扫描全部记录。
     pub fn advance(&mut self, now: u32, segment_limit: u32) -> Result<DisplayUpdate> {
         self.require_prepared()?;
-        Ok(self
-            .playback
-            .advance(&self.layout, &self.schedule, now, segment_limit))
+        self.playback
+            .advance(&self.layout, &self.schedule, now, segment_limit, |_| Ok(()))
+    }
+
+    pub(super) fn advance_painted(
+        &mut self,
+        now: u32,
+        segment_limit: u32,
+        mut draw: impl FnMut(&LayoutEntry, Style) -> Result<()>,
+    ) -> Result<DisplayUpdate> {
+        self.require_prepared()?;
+        let layout = &self.layout;
+        let markup = &self.markup;
+        self.playback
+            .advance(layout, &self.schedule, now, segment_limit, |index| {
+                let entry = &layout.entries[index];
+                draw(entry, markup.atoms[entry.atom.unwrap()].style)
+            })
     }
 
     pub fn remaining(&self, segment_limit: u32) -> Result<u32> {
@@ -113,7 +137,7 @@ impl Page {
         self.require_prepared()?;
         let mut changed = false;
         for entry in &self.layout.entries {
-            if !entry.glyph() || !self.playback.visible[entry.atom.unwrap()] {
+            if !entry.glyph() || self.playback.states[entry.atom.unwrap()] != GlyphState::Complete {
                 continue;
             }
             let AtomKind::Character(character) = entry.kind else {
@@ -152,7 +176,7 @@ impl Page {
         let mut changed = false;
         let mut canvas = Surface::new([128; 2])?;
         for entry in &self.layout.entries {
-            if !entry.glyph() || !self.playback.visible[entry.atom.unwrap()] {
+            if !entry.glyph() || self.playback.states[entry.atom.unwrap()] != GlyphState::Complete {
                 continue;
             }
             let AtomKind::Character(character) = entry.kind else {
@@ -184,7 +208,7 @@ impl Page {
         Ok(changed)
     }
 
-    fn require_prepared(&self) -> Result<()> {
+    pub(super) fn require_prepared(&self) -> Result<()> {
         if self.dirty {
             Err(Error::new(0, "消息页需要先完成准备"))
         } else {
@@ -297,7 +321,9 @@ impl Page {
             accumulated_units,
         };
         self.state = state;
-        self.playback.visible.resize(self.markup.atoms.len(), false);
+        self.playback
+            .states
+            .resize(self.markup.atoms.len(), GlyphState::Hidden);
         self.parsed_bytes = self.source.len();
         self.dirty = false;
         Ok(true)
