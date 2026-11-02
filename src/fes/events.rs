@@ -15,7 +15,6 @@ pub(super) struct Invocation {
     depth: usize,
     object_block: Option<usize>,
     default: bool,
-    pub(super) system: bool,
 }
 
 impl Interpreter {
@@ -81,7 +80,6 @@ impl Interpreter {
             depth: self.calls.len(),
             object_block,
             default: default_block.is_some(),
-            system: false,
         });
         self.dispatch_result = None;
         self.block = block;
@@ -119,7 +117,6 @@ impl Interpreter {
             depth: self.calls.len(),
             object_block: Some(block),
             default: false,
-            system: true,
         });
         self.dispatch_result = None;
         self.block = block;
@@ -127,16 +124,30 @@ impl Interpreter {
         Ok(true)
     }
 
-    pub(crate) fn finish_system_block(&mut self) -> Result<()> {
-        if !self
+    /// 结束事件内的 wait／exit；默认事件组结束后仍执行对象自身处理器。
+    /// 保留进入分派前的主流程等待以及事件内尚未返回的调用。
+    pub fn finish_event_handler(&mut self) -> Result<()> {
+        let invocation = self
             .invocation
-            .as_ref()
-            .is_some_and(|invocation| invocation.system)
-        {
-            return Err(Error::new(0, "FES 没有正在执行的系统块"));
+            .as_mut()
+            .ok_or_else(|| Error::new(0, "FES 没有正在执行的事件"))?;
+        self.pending = None;
+        if invocation.default {
+            invocation.default = false;
+            if let Some(block) = invocation.object_block {
+                self.block = block;
+                self.pc = 0;
+                return Ok(());
+            }
         }
         self.finish_event(false);
         Ok(())
+    }
+
+    pub(crate) fn object_handler_exists(&self) -> bool {
+        self.invocation
+            .as_ref()
+            .is_some_and(|invocation| invocation.object_block.is_some())
     }
 
     pub(crate) fn take_dispatch_result(&mut self) -> Option<bool> {

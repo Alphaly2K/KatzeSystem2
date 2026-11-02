@@ -277,6 +277,51 @@ fn event_commands_keep_context_and_event_next_observes_the_initial_call_depth() 
 }
 
 #[test]
+fn event_wait_and_exit_end_one_handler_and_preserve_the_main_wait() {
+    for terminator in ["wait 5", "exit 9"] {
+        for default in [false, true] {
+            let handlers = if default {
+                format!("#DEFAULT.PUSH_L\n$0=1\n{terminator}\n$0=99\n#button.PUSH_L\n$0=$0*10+2\n")
+            } else {
+                format!("#button.PUSH_L\n$0=1\n{terminator}\n$0=99\n")
+            };
+            let source = format!("#START\nwait 77\n$1=1\n{handlers}");
+            let mut vm =
+                fes::Interpreter::new(fes::Program::from_text(source.as_bytes()).unwrap()).unwrap();
+            let mut state = State::new(8);
+            assert_eq!(
+                vm.run(&mut state, 30).unwrap(),
+                Step::Event(fes::Event::Wait(77))
+            );
+            assert!(
+                vm.dispatch_event("button", 7, "PUSH_L", default.then_some("DEFAULT"))
+                    .unwrap()
+            );
+            for _ in 0..30 {
+                match vm.run(&mut state, 1).unwrap() {
+                    Step::Yield => (),
+                    Step::Event(fes::Event::Wait(5) | fes::Event::Exit(9)) => {
+                        vm.finish_event_handler().unwrap();
+                    }
+                    other => panic!("{other:?}"),
+                }
+                if vm.event_context().is_none() {
+                    break;
+                }
+            }
+            assert!(vm.event_context().is_none());
+            assert_eq!(state.shared[0], if default { 12 } else { 1 });
+            assert_eq!(
+                vm.run(&mut state, 30).unwrap(),
+                Step::Event(fes::Event::Wait(77))
+            );
+            assert_eq!(state.shared[1], 0);
+            assert!(vm.finish_event_handler().is_err());
+        }
+    }
+}
+
+#[test]
 fn definitions_create_banks_before_initialization_and_do_not_expand_macros() {
     let source = b"#MACRO\nTARGET renamed\n#OBJECT POS\nTARGET 0,0\n#DEFINE\nIMAGE TARGET[($0+=1)]\nbutton choices[2]\nIMAGE zero[0]\nIMAGE expr[(1+2)]\nIMAGE TARGET[2]\n#START\nexit 0\n";
     let mut vm = fes::Interpreter::new(fes::Program::from_text(source).unwrap()).unwrap();

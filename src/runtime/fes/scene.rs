@@ -18,6 +18,8 @@ pub struct Scene {
     invocation: Option<Invocation>,
     input: super::input::SystemInput,
     system_block: Option<String>,
+    object_event: Option<ObjectEvent>,
+    handler_updates: Option<usize>,
     media_preparation: Option<usize>,
     media_prepared: usize,
 }
@@ -26,6 +28,12 @@ struct Invocation {
     now: u32,
     updates: Option<(usize, usize)>,
     resume_script: bool,
+}
+
+struct ObjectEvent {
+    target: Option<fes::ObjectReference>,
+    event: u32,
+    handled: bool,
 }
 
 impl Scene {
@@ -61,6 +69,8 @@ impl Scene {
             invocation: None,
             input: super::input::SystemInput::default(),
             system_block: None,
+            object_event: None,
+            handler_updates: None,
             media_preparation: None,
             media_prepared: 0,
         })
@@ -130,7 +140,10 @@ impl Scene {
     }
 
     pub fn is_pending(&self) -> bool {
-        self.invocation.is_some() || self.system_block.is_some() || self.media_preparation.is_some()
+        self.invocation.is_some()
+            || self.system_block.is_some()
+            || self.object_event.is_some()
+            || self.media_preparation.is_some()
     }
 
     /// 只处理装载期声明和属性，不进入 START 或推进下层媒体对象。
@@ -215,6 +228,18 @@ impl<F: ObjectFactory> Runtime<F> {
         self.store().dispatch_fes_system_block(owner, scene, name)
     }
 
+    /// 分派输入事件；None 表示预算耗尽，续跑必须保持目标和事件不变。
+    /// 完成值表示对象自身是否具有处理器；默认事件组单独执行时为 false。
+    pub fn dispatch_fes_event(
+        &mut self,
+        owner: u32,
+        scene: &mut Scene,
+        target: Option<&fes::ObjectReference>,
+        event: u32,
+    ) -> Result<Option<bool>> {
+        self.store().dispatch_fes_event(owner, scene, target, event)
+    }
+
     /// 推进脚本并在本轮边界更新 FES 对象；false 表示预算耗尽，续跑保留原时刻。
     pub fn update_fes_scene(&mut self, owner: u32, scene: &mut Scene, now: u32) -> Result<bool> {
         self.store().update_fes_scene(owner, scene, now)
@@ -227,7 +252,10 @@ impl<F: ObjectFactory> Store<'_, F> {
         owner: u32,
         scene: &mut Scene,
     ) -> Result<bool> {
-        if scene.invocation.is_some() || scene.system_block.is_some() {
+        if scene.invocation.is_some()
+            || scene.system_block.is_some()
+            || scene.object_event.is_some()
+        {
             return Err(Error::new(0, "FES 本轮推进尚未完成"));
         }
         if self.tree.node(owner).is_none() || scene.owner.is_some_and(|bound| bound != owner) {
@@ -322,7 +350,10 @@ impl<F: ObjectFactory> Store<'_, F> {
         if self.tree.node(owner).is_none() || scene.owner.is_some_and(|bound| bound != owner) {
             return Err(Error::new(0, "FES 系统块所属任务无效"));
         }
-        if scene.invocation.is_some() || scene.media_preparation.is_some() {
+        if scene.invocation.is_some()
+            || scene.media_preparation.is_some()
+            || scene.object_event.is_some()
+        {
             return Err(Error::new(0, "FES 本轮推进尚未完成"));
         }
         if let Some(pending) = &scene.system_block {
@@ -336,16 +367,105 @@ impl<F: ObjectFactory> Store<'_, F> {
             }
             scene.system_block = Some(name.to_owned());
         }
+        if !self.run_fes_handler(owner, scene)? {
+            return Ok(false);
+        }
+        scene.system_block = None;
+        Ok(true)
+    }
+
+    pub(in crate::runtime) fn dispatch_fes_event(
+        &mut self,
+        owner: u32,
+        scene: &mut Scene,
+        target: Option<&fes::ObjectReference>,
+        event: u32,
+    ) -> Result<Option<bool>> {
+        if event > 21 {
+            return Err(Error::new(0, "FES 输入事件编号无效"));
+        }
+        if self.tree.node(owner).is_none() || scene.owner.is_some_and(|bound| bound != owner) {
+            return Err(Error::new(0, "FES 事件所属任务无效"));
+        }
+        if scene.invocation.is_some()
+            || scene.system_block.is_some()
+            || scene.media_preparation.is_some()
+            || scene.interpreter.initialization_pending()
+        {
+            return Err(Error::new(0, "FES 本轮推进尚未完成"));
+        }
+        if let Some(pending) = &scene.object_event {
+            if pending.target.as_ref() != target || pending.event != event {
+                return Err(Error::new(0, "FES 上一次对象事件尚未完成"));
+            }
+        } else {
+            scene.owner = Some(owner);
+            let object = match target {
+                Some(target) => match scene.objects.lookup(&target.name, target.bank) {
+                    Some(handle) => Some(scene.objects.get(handle).unwrap()),
+                    None => return Ok(Some(false)),
+                },
+                None => None,
+            };
+            let default = object.and_then(|object| match &object.state {
+                super::ObjectState::Button(button) => Some(button.default_events.clone()),
+                _ => None,
+            });
+            scene.record_input_event(event);
+            let name = match event {
+                0 => "FOCUS",
+                1 => "UNFOCUS",
+                2 => "PUSH_L",
+                3 => "PUSH_R",
+                4 => "RELEASE_L",
+                5 => "RELEASE_R",
+                8 => "SCRL_P",
+                21 => "TOUCH",
+                _ => return Ok(Some(false)),
+            };
+            let Some(target) = target else {
+                return Ok(Some(false));
+            };
+            if !scene.interpreter.dispatch_event(
+                &target.name,
+                target.bank,
+                name,
+                default.as_deref().map(crate::text::ascii).transpose()?,
+            )? {
+                return Ok(Some(false));
+            }
+            scene.object_event = Some(ObjectEvent {
+                target: Some(target.clone()),
+                event,
+                handled: scene.interpreter.object_handler_exists(),
+            });
+        }
+        if !self.run_fes_handler(owner, scene)? {
+            return Ok(None);
+        }
+        Ok(Some(scene.object_event.take().unwrap().handled))
+    }
+
+    fn run_fes_handler(&mut self, owner: u32, scene: &mut Scene) -> Result<bool> {
         for _ in 0..self.budget.max(1) {
+            if let Some(cursor) = &mut scene.handler_updates {
+                if *cursor < scene.objects.update_order.len() {
+                    self.update_fes_record(owner, &mut scene.objects, *cursor)?;
+                    *cursor += 1;
+                } else {
+                    scene.handler_updates = None;
+                    scene.interpreter.resume();
+                }
+                continue;
+            }
             match scene.interpreter.run(self.numbers, 1)? {
                 Step::Yield => (),
-                Step::Event(fes::Event::Wait(_)) => scene.interpreter.finish_system_block()?,
+                Step::Event(fes::Event::Wait(_)) => scene.interpreter.finish_event_handler()?,
                 Step::Event(fes::Event::Command(line)) => {
                     let args = scene.interpreter.parameters(&line.bytes, self.numbers)?;
                     if args.first().is_some_and(|name| name == b"decode") {
-                        for index in 0..scene.objects.update_order.len() {
-                            self.update_fes_record(owner, &mut scene.objects, index)?;
-                        }
+                        scene.handler_updates = Some(0);
+                        continue;
                     } else if !scene.objects.dispatch_image_animation(
                         &mut scene.interpreter,
                         &line,
@@ -355,7 +475,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                         &line,
                         self.numbers,
                     )? {
-                        return Err(Error::new(line.offset, "FES 系统块对象命令尚未接入"));
+                        return Err(Error::new(line.offset, "FES 事件对象命令尚未接入"));
                     }
                     scene.interpreter.resume();
                 }
@@ -367,21 +487,20 @@ impl<F: ObjectFactory> Store<'_, F> {
                 }
                 Step::Event(fes::Event::Exit(code)) => {
                     if scene.queued_exits.len() >= crate::read::MAX_ITEMS {
-                        return Err(Error::new(0, "FES 系统块退出事件队列超过上限"));
+                        return Err(Error::new(0, "FES 事件退出通知队列超过上限"));
                     }
                     scene.queued_exits.push_back(code);
-                    scene.interpreter.finish_system_block()?;
+                    scene.interpreter.finish_event_handler()?;
                 }
                 Step::Event(fes::Event::Subcommand(call)) => {
-                    return Err(Error::new(call.offset, "FES 系统块运动服务尚未接入"));
+                    return Err(Error::new(call.offset, "FES 事件运动服务尚未接入"));
                 }
-                _ => return Err(Error::new(0, "FES 系统块出现未支持的执行状态")),
+                _ => return Err(Error::new(0, "FES 事件出现未支持的执行状态")),
             }
             if let Some(transferred) = scene.interpreter.take_dispatch_result() {
                 if transferred {
                     scene.deadline = None;
                 }
-                scene.system_block = None;
                 return Ok(true);
             }
         }
@@ -394,8 +513,8 @@ impl<F: ObjectFactory> Store<'_, F> {
         scene: &mut Scene,
         now: u32,
     ) -> Result<bool> {
-        if scene.system_block.is_some() {
-            return Err(Error::new(0, "FES 系统块尚未完成"));
+        if scene.system_block.is_some() || scene.object_event.is_some() {
+            return Err(Error::new(0, "FES 事件尚未完成"));
         }
         if self.tree.node(owner).is_none() {
             return Err(Error::new(0, "FES 所属任务不存在"));

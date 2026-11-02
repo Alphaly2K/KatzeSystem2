@@ -44,6 +44,92 @@ fn system(runtime: &mut Runtime<NoTasks>, scene: &mut Scene, name: &str) {
     panic!("合成系统块没有完成");
 }
 
+fn event(runtime: &mut Runtime<NoTasks>, scene: &mut Scene) -> bool {
+    let target = katze_system2::fes::ObjectReference {
+        name: "button".into(),
+        bank: 0,
+    };
+    for _ in 0..64 {
+        if let Some(handled) = runtime
+            .dispatch_fes_event(0, scene, Some(&target), 2)
+            .unwrap()
+        {
+            return handled;
+        }
+    }
+    panic!("合成对象事件没有完成");
+}
+
+#[test]
+fn object_events_preserve_waits_queue_exits_and_transfer_only_the_main_cursor() {
+    for budget in [1, 4096] {
+        for (body, expected, transferred, exit) in [
+            ("$1=1\n", 1, false, None),
+            ("$1=1\nwait 5\n$1=99\n", 1, false, None),
+            ("$1=1\nexit 9\n$1=99\n", 1, false, Some(9)),
+            ("$1=1\nnext DEST\n#DEST\n$1=99\nwait 5\n", 1, true, None),
+            ("call SUB\n$1=$1*10+2\n#SUB\n$1=3\nwait 5\n", 3, false, None),
+        ] {
+            let source =
+                format!("#DEFINE\nBASE button\n#START\nwait 77\n$7=$7+1\n#button.PUSH_L\n{body}");
+            let (mut runtime, mut scene) = setup(&source, budget);
+            update(&mut runtime, &mut scene, 100);
+            assert!(event(&mut runtime, &mut scene));
+            assert_eq!(runtime.numbers().shared[1], expected);
+            assert_eq!(scene.deadline(), if transferred { None } else { Some(177) });
+            assert_eq!(scene.exit_code(), None);
+            assert_eq!(scene.interpreter().named["_CLICK_L_"][&0], -1);
+            update(&mut runtime, &mut scene, 101);
+            assert_eq!(scene.exit_code(), exit);
+            assert_eq!(scene.interpreter().named["_CLICK_L_"][&0], 0);
+            assert_eq!(runtime.numbers().shared[7], if transferred { 0 } else { 1 });
+        }
+    }
+}
+
+#[test]
+fn failed_object_events_keep_their_cursor_and_reject_other_dispatches() {
+    let (mut runtime, mut scene) = setup(
+        "#DEFINE\nBASE button\n#START\nwait 77\n#button.PUSH_L\n$1=$1+1\nunknown operation\n",
+        1,
+    );
+    update(&mut runtime, &mut scene, 100);
+    let target = katze_system2::fes::ObjectReference {
+        name: "button".into(),
+        bank: 0,
+    };
+    assert_eq!(
+        runtime
+            .dispatch_fes_event(0, &mut scene, Some(&target), 2)
+            .unwrap(),
+        None
+    );
+    assert!(scene.is_pending());
+    assert!(runtime.dispatch_fes_event(0, &mut scene, None, 2).is_err());
+    assert!(
+        runtime
+            .dispatch_fes_event(0, &mut scene, Some(&target), 3)
+            .is_err()
+    );
+    assert!(
+        runtime
+            .dispatch_fes_system_block(0, &mut scene, "_FES_SLEEP_")
+            .is_err()
+    );
+    assert!(runtime.update_fes_scene(0, &mut scene, 101).is_err());
+    for _ in 0..2 {
+        assert!(
+            runtime
+                .dispatch_fes_event(0, &mut scene, Some(&target), 2)
+                .unwrap_err()
+                .message
+                .contains("对象命令")
+        );
+        assert_eq!(runtime.numbers().shared[1], 1);
+        assert_eq!(scene.deadline(), Some(177));
+    }
+}
+
 #[test]
 fn system_blocks_preserve_the_main_wait_and_stop_at_local_wait_or_break() {
     let cases = [

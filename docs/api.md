@@ -114,7 +114,7 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 
 对象宿主调用 FES `dispatch_event(object, bank, event, default_handler)`，提供对象名称、银行号、事件名称及可选默认事件组。当前支持 `FOCUS`、`UNFOCUS`、`PUSH_L`、`PUSH_R`、`RELEASE_L`、`RELEASE_R`、`SCRL_P` 和 `TOUCH`，返回是否存在处理器。初始化完成后，允许在 `Wait`、`Frame` 或尚无待确认操作时分派；创建、宿主命令、声明尚未完成或另一个事件正在执行时返回错误。
 
-分派后继续调用 `run`，命令通过 `Command` 或已注册绑定的 `Subcommand` 事件交给宿主，`event_context()` 提供对象与银行号，供宿主解析 `@` 对象命令；数值表达式中的 `@` 已使用银行号。事件完成时 `run` 返回 `Yield`，上下文变为 `None`；下一次 `run` 恢复主流程原等待，或执行事件交出的目标位置。两类事件中的 `next`／`call` 差异详见 [FES](fes.md)。事件中的 `wait`／`exit` 和嵌套分派当前返回错误。
+分派后继续调用 `run`，命令通过 `Command` 或已注册绑定的 `Subcommand` 事件交给宿主，`event_context()` 提供对象与银行号，供宿主解析 `@` 对象命令；数值表达式中的 `@` 已使用银行号。事件完成时 `run` 返回 `Yield`，上下文变为 `None`；下一次 `run` 恢复主流程原等待，或执行事件交出的目标位置。两类事件中的 `next`／`call` 差异详见 [FES](fes.md)。事件内收到 `Wait`／`Exit` 后，宿主调用 `finish_event_handler()` 结束当前处理器；默认组结束后仍会进入对象自身处理器。`Exit` 的通知码由宿主另行保存，主流程等待及尚未返回的调用保持。嵌套分派返回错误。
 
 `anm::Timeline::new(program)` 提供时钟调度。设置 `speed`／`origin` 后调用 `update(now, budget)`，返回 true 表示本轮完成，false 表示预算让出；续跑保留本轮时间。`interpreter.display` 为最终显示状态，`display_changed()` 为本轮是否改变，`is_finished()` 为持续时间和全部指令是否结束。`update_with_random` 接受共享随机回调。`update_frame`／`update_frame_with_random` 另处理对象的零起点和 `u32::MAX` 时间哨兵。`restart()` 重置执行位置、持续时间和显示，保留变量、最大帧 ID、速度及时间基点。`DisplayState::compose` 组合图像自身坐标、混合值和显隐，保留帧 ID。播放开关由宿主控制是否更新，恢复后不平移时间基点。原始指令入口仍可分别使用：ANM 的 Image／Wait 事件携带持续时间。宿主完成该时长后再调用 `run`；库当前不绑定刷新率或墙上时钟。零耗时跳转循环受指令预算限制。随机区间通过 `run_with_random` 从宿主读取 u32 随机数，固定区间不消耗随机数。`display` 保留当前显示属性，`max_image_id` 由图像宿主设置。
 
@@ -318,6 +318,8 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 `Scene::prepare(&mut state, budget)` 只消费装载期声明和对象属性，返回 false 后继续调用；完成时尚未进入 START，也未创建下层媒体任务。可以重复调用。使用与 Runtime 相同的 `numbers_mut()`，初始化表达式的副作用会立即保留。`Runtime::prepare_fes_scene(owner, &mut scene)` 在此基础上创建图像空包装及 BUTTON 的直属类型 6 任务，不执行 START、读取图像内容或登记输入区域；false 后继续调用，已完成的创建不重复。每条 CIMAGE／IMAGE／BUTTON 记录分配独立包装，BUTTON 另创建直属任务；后一次覆盖对象的当前包装及任务编号，记录保留各自绑定用于更新、事件反查与回收。普通 update 也会在进入 START 前完成这一准备。退出通知由任务层写入属性槽，脚本继续到等待或块末尾；后续 update 按普通规则推进。每条新通知可覆盖属性，期间的外部改写保持到下一条通知；场景本身不删除所属任务。
 
 `Runtime::dispatch_fes_system_block(owner, &mut scene, name)` 同步执行 `_FES_SLEEP_`／`_FES_WAKE_`，返回 false 后以同一名称续跑；普通推进、对象修改及另一个系统块须等到本次完成。缺失块直接完成。该入口不推进系统帧，不切换媒体显示；通常保留主流程位置和等待，`next` 按系统块的调用深度规则处理。局部 `wait` 结束本次分派；系统块 `exit` 结束本次分派并将返回码排队，到下一次普通场景推进才发布。未知命令和运动返回诊断并保留待处理事件。命令 348 在系统块后刷新对象并切换显示，`FesObject::paused()` 查询专属暂停原始值；完整契约见[暂停与唤醒](graphics.md#fes-专属暂停与唤醒)。
+
+`Runtime::dispatch_fes_event(owner, &mut scene, target, event)` 分派控制器输入事件。`target` 为可选 `ObjectReference`；事件编号为 0～21，其中 0／1／2／3／4／5／8／21 分别对应 FOCUS／UNFOCUS／PUSH_L／PUSH_R／RELEASE_L／RELEASE_R／SCRL_P／TOUCH，其余编号只更新系统输入命名值。返回 `None` 表示预算耗尽，须以相同目标和编号续跑；`Some(bool)` 表示完成，布尔值只取对象自身处理器是否存在，默认事件组单独执行时为 false。该入口执行对象命令和显式 decode，不在分派末尾自动刷新媒体，不修改任务时钟或系统帧。局部 wait 结束当前处理器，exit 另将通知排队；主等待、调用及 next 规则与解释器一致。失败时保留游标，普通更新、系统块和其他对象事件须待本次完成。
 
 `runtime::fes::Objects::new(handles)` 为一份 FES 建立独立的对象存储，并登记 `_TOPOBJ_` 银行 0 的根 BASE 对象；与 Runtime 组合时传入 `runtime.host().handle_allocator()`。FES 对象标识来自共享不透明编号源，与任务编号分别使用。`define(&definition)` 接受有效的非零银行数，返回此次新创建的全部标识；目前支持 BASE、CIMAGE、IMAGE、BUTTON、CPLANE 和 PLANE，其他类型返回诊断。名称限定为 1～31 个非零 ASCII 字节。`get`／`get_mut` 查询实际对象及 `ObjectState`，`len` 包括根及重复声明的未绑定对象。`update_order()` 按声明及银行顺序查询当前绑定，保留重复记录并跳过缺失银行；新声明占据银行空洞后，旧记录也会解析到新绑定。
 

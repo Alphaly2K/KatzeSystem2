@@ -443,14 +443,6 @@ impl Interpreter {
             let Some(command) = args.first().map(Vec::as_slice) else {
                 continue;
             };
-            if self
-                .invocation
-                .as_ref()
-                .is_some_and(|invocation| !invocation.system)
-                && matches!(command, b"wait" | b"exit")
-            {
-                return Err(Error::new(line.offset, "FES 事件内的 wait/exit 尚不支持"));
-            }
             let event = match command {
                 b"next" | b"call" => {
                     if args.len() != 2 {
