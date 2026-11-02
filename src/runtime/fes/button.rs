@@ -11,20 +11,35 @@ impl<F: ObjectFactory> Store<'_, F> {
         &mut self,
         owner: u32,
         objects: &mut Objects,
-        handle: u32,
+        index: usize,
     ) -> Result<()> {
+        let record = objects
+            .update_order
+            .get(index)
+            .ok_or_else(|| Error::new(0, "FES 媒体记录编号无效"))?;
+        if record.prepared {
+            return Ok(());
+        }
+        let Some(handle) = objects.lookup(&record.target.name, record.target.bank) else {
+            return Ok(());
+        };
         let object = objects.get(handle).unwrap();
         let button = matches!(object.state, ObjectState::Button(_));
-        if object.state.image().is_some() {
-            self.fes_image_wrapper(owner, objects, handle)?;
+        if object.state.image().is_some() && record.image.is_none() {
+            let wrapper = self.resources.images.create_empty(owner)?;
+            let object = objects.get_mut(handle).unwrap();
+            object.image = Some(wrapper);
+            object.images.push(wrapper);
+            objects.update_order[index].image = Some(wrapper);
         }
-        if button {
-            if objects.get(handle).unwrap().task_id.is_some() {
-                objects.get_mut(handle).unwrap().button_duplicate = true;
-            }
+        if button && objects.update_order[index].task_id.is_none() {
             let task = create_object(self.reborrow(), owner, kind::BUTTON, b"FE Button", b"")?;
-            objects.get_mut(handle).unwrap().task_id = Some(task);
+            let object = objects.get_mut(handle).unwrap();
+            object.task_id = Some(task);
+            object.button_tasks.push(task);
+            objects.update_order[index].task_id = Some(task);
         }
+        objects.update_order[index].prepared = true;
         Ok(())
     }
 
@@ -45,11 +60,9 @@ impl<F: ObjectFactory> Store<'_, F> {
         owner: u32,
         objects: &mut Objects,
         handle: u32,
+        image: Option<u32>,
     ) -> Result<()> {
         let object = objects.get(handle).unwrap();
-        if object.button_duplicate && !object.state.image_source().unwrap().file.is_empty() {
-            return Err(Error::new(0, "FES 重复 BUTTON 声明的独立图像包装尚未接入"));
-        }
         self.check_fes_button_binding(owner, object.task_id)?;
         let task = object
             .task_id
@@ -58,7 +71,11 @@ impl<F: ObjectFactory> Store<'_, F> {
             let flags = object.state.image().unwrap().updates.clone();
             objects.get_mut(handle).unwrap().button_update = Some(flags);
         }
-        self.update_fes_image(owner, objects, handle)?;
+        let wrapper = match image {
+            Some(image) => image,
+            None => self.fes_image_wrapper(owner, objects, handle)?,
+        };
+        self.update_fes_image(owner, objects, handle, Some(wrapper))?;
         let flags = objects.get(handle).unwrap().button_update.clone().unwrap();
         if !flags.rebuild && !flags.dirty && !flags.priority_changed {
             objects.get_mut(handle).unwrap().button_update = None;
@@ -80,7 +97,7 @@ impl<F: ObjectFactory> Store<'_, F> {
             return Err(Error::new(0, "FES 输入任务绑定失效"));
         }
         if flags.rebuild || flags.dirty {
-            let rectangle = self.fes_button_rectangle(objects, handle)?;
+            let rectangle = self.fes_button_rectangle(objects, handle, wrapper)?;
             let ObjectState::Button(button) = &objects.get(handle).unwrap().state else {
                 unreachable!()
             };
@@ -106,11 +123,8 @@ impl<F: ObjectFactory> Store<'_, F> {
                 self.button_command(owner, task, 101, [0; 3], Some(&mut bytes))?;
             }
             self.button_command(owner, task, 93, [0, enabled, 0], None)?;
-            if flags.rebuild && mask {
-                let wrapper = objects.get(handle).unwrap().image.unwrap();
-                if self.resources.images.pixel_handle(wrapper)? != 0 {
-                    self.button_command(owner, task, 98, [0, wrapper, 0], None)?;
-                }
+            if flags.rebuild && mask && self.resources.images.pixel_handle(wrapper)? != 0 {
+                self.button_command(owner, task, 98, [0, wrapper, 0], None)?;
             }
             let updates = &mut objects
                 .get_mut(handle)
@@ -137,7 +151,12 @@ impl<F: ObjectFactory> Store<'_, F> {
         Ok(())
     }
 
-    fn fes_button_rectangle(&mut self, objects: &mut Objects, handle: u32) -> Result<Rect> {
+    fn fes_button_rectangle(
+        &mut self,
+        objects: &mut Objects,
+        handle: u32,
+        wrapper: u32,
+    ) -> Result<Rect> {
         let reference = objects
             .get(handle)
             .unwrap()
@@ -158,7 +177,6 @@ impl<F: ObjectFactory> Store<'_, F> {
         }
         let state = objects.get(handle).unwrap().state.image().unwrap();
         let mut size = state.size;
-        let wrapper = objects.get(handle).unwrap().image.unwrap();
         if size.iter().any(|&axis| axis < 0) && self.resources.images.pixel_handle(wrapper)? != 0 {
             size = self
                 .resources

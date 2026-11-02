@@ -338,6 +338,19 @@ impl ImageList {
             .min_by_key(|&key| key as i32)
     }
 
+    /// 按有符号 key 查找当前像素身份；不增加引用或推进动画。
+    pub fn find_pixels(&self, pixels: u32, images: &Images) -> Result<Option<u32>> {
+        let mut found = None;
+        for (&key, entry) in &self.entries {
+            if images.pixel_handle(entry.image)? == pixels
+                && found.is_none_or(|current| (key as i32) < current as i32)
+            {
+                found = Some(key);
+            }
+        }
+        Ok(found)
+    }
+
     fn source_history(&mut self, key: u32, images: &Images) -> Result<(Option<Rect>, Rect, i32)> {
         self.check_animation_pass()?;
         let viewport = self.bounds(images)?;

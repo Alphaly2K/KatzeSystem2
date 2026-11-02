@@ -353,12 +353,16 @@ impl TaskObject for ImageListObject {
                     return Ok(CommandOutcome::RESUME);
                 }
             }
-            308 => {
+            307 | 308 => {
                 let list = self
                     .list
                     .as_ref()
                     .ok_or_else(|| Error::new(0, "图像列表尚未创建"))?;
-                let key = list.find_source_identity(a);
+                let key = if command.code == 307 {
+                    list.find_pixels(a, images(host)?)?
+                } else {
+                    list.find_source_identity(a)
+                };
                 *output = key.is_some() as u32;
                 if let Some(key) = key {
                     write(buffers.data1.as_deref_mut(), key >> 16)?;

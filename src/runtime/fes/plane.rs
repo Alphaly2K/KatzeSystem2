@@ -15,6 +15,16 @@ impl<F: ObjectFactory> Runtime<F> {
         self.store().update_fes_object(owner, objects, handle)
     }
 
+    /// 按声明记录推进媒体，使用该记录的独立来源包装。
+    pub fn update_fes_record(
+        &mut self,
+        owner: u32,
+        objects: &mut Objects,
+        index: usize,
+    ) -> Result<()> {
+        self.store().update_fes_record(owner, objects, index)
+    }
+
     /// 移出 FES 子树并请求删除下层任务，任务释放仍发生在树更新中。
     pub fn remove_fes_object(
         &mut self,
@@ -35,6 +45,34 @@ impl<F: ObjectFactory> Store<'_, F> {
         objects: &mut Objects,
         handle: u32,
     ) -> Result<()> {
+        self.update_fes_object_image(owner, objects, handle, None)
+    }
+
+    pub(super) fn update_fes_record(
+        &mut self,
+        owner: u32,
+        objects: &mut Objects,
+        index: usize,
+    ) -> Result<()> {
+        if self.tree.node(owner).is_none() {
+            return Err(Error::new(0, "FES 所属任务不存在"));
+        }
+        self.prepare_fes_object(owner, objects, index)?;
+        let record = &objects.update_order[index];
+        let Some(handle) = objects.lookup(&record.target.name, record.target.bank) else {
+            return Ok(());
+        };
+        let image = record.image;
+        self.update_fes_object_image(owner, objects, handle, image)
+    }
+
+    fn update_fes_object_image(
+        &mut self,
+        owner: u32,
+        objects: &mut Objects,
+        handle: u32,
+        image: Option<u32>,
+    ) -> Result<()> {
         if self.tree.node(owner).is_none() {
             return Err(Error::new(0, "FES 所属任务不存在"));
         }
@@ -43,13 +81,13 @@ impl<F: ObjectFactory> Store<'_, F> {
             .ok_or_else(|| Error::new(0, "FES 对象标识无效"))?;
         let canvas = matches!(object.state, ObjectState::Plane(_));
         if matches!(object.state, ObjectState::CImage(_)) {
-            return self.update_fes_cimage(owner, objects, handle);
+            return self.update_fes_cimage(owner, objects, handle, image);
         }
         if matches!(object.state, ObjectState::Image(_)) {
-            return self.update_fes_image(owner, objects, handle);
+            return self.update_fes_image(owner, objects, handle, image);
         }
         if matches!(object.state, ObjectState::Button(_)) {
-            return self.update_fes_button(owner, objects, handle);
+            return self.update_fes_button(owner, objects, handle, image);
         }
         if object.state.plane().is_none() {
             return match object.state {
@@ -215,21 +253,58 @@ impl<F: ObjectFactory> Store<'_, F> {
             } else {
                 self.check_fes_plane_binding(owner, object.task_id)?;
             }
-            if object.task_id.is_some() {
-                self.fes_command(owner, object.task_id, 3, [0; 3], None)?;
+            let mut tasks = object.button_tasks.clone();
+            if let Some(task) = object.task_id {
+                if !tasks.contains(&task) {
+                    tasks.push(task);
+                }
             }
-            if let Some(image) = object.image {
-                let slot = object
-                    .state
-                    .image()
-                    .ok_or_else(|| Error::new(0, "FES 图像来源与对象类型不匹配"))?
-                    .parent_priority;
+            for task in tasks {
+                if self.tree.node(task).is_some() {
+                    self.fes_command(owner, Some(task), 3, [0; 3], None)?;
+                }
+            }
+            for image in objects.get(id).unwrap().images.clone() {
                 if objects.image_list.is_some() {
                     let list = self.check_fes_image_list(owner, objects)?;
-                    self.fes_command(owner, Some(list), 287, [slot as u32, 0, 0], None)?;
+                    let pixels = self.resources.images.pixel_handle(image)?;
+                    let mut slot = [0; 4];
+                    let found = route_with_buffers(
+                        self.reborrow(),
+                        owner,
+                        Command {
+                            target: list,
+                            sender: owner,
+                            code: if pixels == 0 { 308 } else { 307 },
+                            data: [if pixels == 0 { image } else { pixels }, 0, 0],
+                        },
+                        &mut CommandBuffers {
+                            data0: None,
+                            data1: Some(&mut slot),
+                        },
+                    )?;
+                    if found != 0 {
+                        self.fes_command(
+                            owner,
+                            Some(list),
+                            287,
+                            [u32::from_le_bytes(slot), 0, 0],
+                            None,
+                        )?;
+                    }
                 }
                 self.resources.images.release(image)?;
-                objects.get_mut(id).unwrap().image = None;
+                let object = objects.get_mut(id).unwrap();
+                object.images.retain(|&candidate| candidate != image);
+                if object.image == Some(image) {
+                    object.image = None;
+                }
+                for record in &mut objects.update_order {
+                    if record.image == Some(image) {
+                        record.image = None;
+                        record.prepared = false;
+                    }
+                }
             }
             let raw = objects.get(id).unwrap().raw_image;
             self.resources.raw.release_image(raw)?;

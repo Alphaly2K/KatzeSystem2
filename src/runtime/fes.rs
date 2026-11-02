@@ -21,6 +21,28 @@ pub use task::{FesFactory, FesObject, Services};
 
 const TOP: &str = "_TOPOBJ_";
 
+/// 按声明及银行顺序保存的媒体绑定；名称查找仍使用当前对象表。
+#[derive(Debug)]
+pub struct MediaRecord {
+    target: ObjectReference,
+    image: Option<u32>,
+    task_id: Option<u32>,
+    prepared: bool,
+}
+
+impl MediaRecord {
+    pub fn target(&self) -> &ObjectReference {
+        &self.target
+    }
+    pub fn image_handle(&self) -> Option<u32> {
+        self.image
+    }
+    /// 装载记录创建的 BUTTON 编号，其他类型返回 None。
+    pub fn task_id(&self) -> Option<u32> {
+        self.task_id
+    }
+}
+
 /// 已接入的 FES 类型状态；下层绘图任务与资源装载由更新阶段维护。
 #[derive(Clone, Debug, PartialEq)]
 pub enum ObjectState {
@@ -117,11 +139,12 @@ pub struct Object {
     children: BTreeSet<u32>,
     task_id: Option<u32>,
     image: Option<u32>,
+    images: Vec<u32>,
+    button_tasks: Vec<u32>,
     raw_image: u32,
     image_offset: [f32; 2],
     animation: ImageAnimationRequest,
     button_update: Option<crate::fes::ImageUpdates>,
-    button_duplicate: bool,
     pub state: ObjectState,
 }
 
@@ -146,14 +169,24 @@ impl Object {
         self.children.iter().copied()
     }
 
-    /// 平面更新所创建的下层任务；尚未创建或创建失败时为 None。
+    /// 当前下层任务；重复 BUTTON 声明覆盖此编号，各记录的编号另行保留。
     pub fn task_id(&self) -> Option<u32> {
         self.task_id
     }
 
-    /// 图像更新创建的来源包装；包装在首次准备来源前没有像素。
+    /// 当前来源包装；重复声明指向最后准备的包装，尚未装填时没有像素。
     pub fn image_handle(&self) -> Option<u32> {
         self.image
+    }
+
+    /// 本对象持有的全部包装，包含重复声明记录的独立包装。
+    pub fn image_handles(&self) -> impl Iterator<Item = u32> + '_ {
+        self.images.iter().copied()
+    }
+
+    /// 装载记录所创建的全部按钮；当前编号另由 task_id 查询。
+    pub fn button_task_ids(&self) -> impl Iterator<Item = u32> + '_ {
+        self.button_tasks.iter().copied()
     }
 
     /// IMAGE 独立持有的原始图像数据；零表示没有来源，查询不增加持有。
@@ -174,7 +207,7 @@ pub struct Objects {
     objects: BTreeMap<u32, Object>,
     bindings: BTreeMap<String, BTreeMap<i32, u32>>,
     counts: BTreeMap<String, u32>,
-    update_order: Vec<ObjectReference>,
+    update_order: Vec<MediaRecord>,
     canvas_offset: [i32; 2],
     image_list: Option<u32>,
     input_task: Option<u32>,
@@ -198,11 +231,12 @@ impl Objects {
                     children: BTreeSet::new(),
                     task_id: None,
                     image: None,
+                    images: Vec::new(),
+                    button_tasks: Vec::new(),
                     raw_image: 0,
                     image_offset: [0.; 2],
                     animation: ImageAnimationRequest::default(),
                     button_update: None,
-                    button_duplicate: false,
                     state: ObjectState::Base,
                 },
             )]),
@@ -279,7 +313,11 @@ impl Objects {
     pub fn update_order(&self) -> impl Iterator<Item = u32> + '_ {
         self.update_order
             .iter()
-            .filter_map(|target| self.lookup(&target.name, target.bank))
+            .filter_map(|record| self.lookup(&record.target.name, record.target.bank))
+    }
+
+    pub fn media_records(&self) -> &[MediaRecord] {
+        &self.update_order
     }
 
     /// 创建请求中的全部银行，返回新对象的标识，包括未取得名称绑定的重复项。
@@ -314,11 +352,12 @@ impl Objects {
                     children: BTreeSet::new(),
                     task_id: None,
                     image: None,
+                    images: Vec::new(),
+                    button_tasks: Vec::new(),
                     raw_image: 0,
                     image_offset: [0.; 2],
                     animation: ImageAnimationRequest::default(),
                     button_update: None,
-                    button_duplicate: false,
                     state: initial.clone(),
                 },
             );
@@ -333,9 +372,14 @@ impl Objects {
             .entry(definition.name.clone())
             .or_insert(definition.banks);
         self.update_order
-            .extend((0..definition.banks).map(|bank| ObjectReference {
-                name: definition.name.clone(),
-                bank: bank as i32,
+            .extend((0..definition.banks).map(|bank| MediaRecord {
+                target: ObjectReference {
+                    name: definition.name.clone(),
+                    bank: bank as i32,
+                },
+                image: None,
+                task_id: None,
+                prepared: false,
             }));
         Ok(handles)
     }
@@ -470,6 +514,19 @@ impl Objects {
                 continue;
             }
             let object = self.objects.remove(&handle).unwrap();
+            for record in &mut self.update_order {
+                if record
+                    .image
+                    .is_some_and(|image| object.images.contains(&image))
+                    || record
+                        .task_id
+                        .is_some_and(|task| object.button_tasks.contains(&task))
+                {
+                    record.image = None;
+                    record.task_id = None;
+                    record.prepared = false;
+                }
+            }
             if let Some(parent) = object.parent {
                 self.objects
                     .get_mut(&parent)

@@ -9,9 +9,13 @@ impl<F: ObjectFactory> Store<'_, F> {
         owner: u32,
         objects: &mut Objects,
         handle: u32,
+        image: Option<u32>,
     ) -> Result<()> {
         let list = self.check_fes_image_list(owner, objects)?;
-        let wrapper = self.fes_image_wrapper(owner, objects, handle)?;
+        let wrapper = match image {
+            Some(image) => image,
+            None => self.fes_image_wrapper(owner, objects, handle)?,
+        };
         let state = objects.get_mut(handle).unwrap().state.image_mut().unwrap();
         let prepared = state.updates.rebuild;
         if prepared {
@@ -27,6 +31,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                 return Err(error);
             }
             let image = self.resources.images.get_mut(wrapper)?;
+            image.use_pixel_canvas();
             image.fill_rect_from_bottom(
                 Rect::from_xywh(0, 0, state.size[0], state.size[1]),
                 state.color as u32,
@@ -38,7 +43,9 @@ impl<F: ObjectFactory> Store<'_, F> {
                 objects.invalidate(handle)?;
             }
         }
-        self.register_fes_image(owner, objects, handle, list, wrapper, prepared)?;
+        // 重复声明后两个包装可能不同，CIMAGE 的显示跟随对象绑定。
+        let displayed = objects.get(handle).unwrap().image.unwrap();
+        self.register_fes_image(owner, objects, handle, list, displayed, prepared)?;
         self.update_fes_image_priority(owner, objects, handle, list)
     }
 
@@ -47,9 +54,13 @@ impl<F: ObjectFactory> Store<'_, F> {
         owner: u32,
         objects: &mut Objects,
         handle: u32,
+        image: Option<u32>,
     ) -> Result<()> {
         let list = self.check_fes_image_list(owner, objects)?;
-        let wrapper = self.fes_image_wrapper(owner, objects, handle)?;
+        let wrapper = match image {
+            Some(image) => image,
+            None => self.fes_image_wrapper(owner, objects, handle)?,
+        };
         let state = objects.get(handle).unwrap().state.image_source().unwrap();
         let prepared = state.base.updates.rebuild;
         if prepared {
@@ -140,6 +151,7 @@ impl<F: ObjectFactory> Store<'_, F> {
             None => {
                 let image = self.resources.images.create_empty(owner)?;
                 objects.get_mut(handle).unwrap().image = Some(image);
+                objects.get_mut(handle).unwrap().images.push(image);
                 Ok(image)
             }
         }

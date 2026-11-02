@@ -289,11 +289,11 @@ impl FesObject {
         }
         self.update_pointer_values(host)?;
         if self.scene.as_ref().is_some_and(|scene| {
-            scene.objects().update_order().any(|handle| {
-                let object = scene.objects().get(handle).unwrap();
-                matches!(object.state, super::ObjectState::Button(_))
-                    && object.task_id() == Some(command.data[0])
-            })
+            scene
+                .objects()
+                .media_records()
+                .iter()
+                .any(|record| record.task_id() == Some(command.data[0]))
         }) {
             return Err(Error::new(0, "FES BUTTON 对象事件尚未接入"));
         }

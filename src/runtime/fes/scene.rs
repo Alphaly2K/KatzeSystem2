@@ -24,7 +24,7 @@ pub struct Scene {
 
 struct Invocation {
     now: u32,
-    updates: Option<(Vec<u32>, usize)>,
+    updates: Option<(usize, usize)>,
     resume_script: bool,
 }
 
@@ -79,6 +79,7 @@ impl Scene {
         if self.is_pending() {
             return Err(Error::new(0, "FES 本轮推进尚未完成"));
         }
+        self.media_prepared = 0;
         Ok(&mut self.objects)
     }
 
@@ -193,7 +194,7 @@ impl Scene {
 
     fn begin_updates(&mut self, resume_script: bool) {
         let invocation = self.invocation.as_mut().unwrap();
-        invocation.updates = Some((self.objects.update_order().collect(), 0));
+        invocation.updates = Some((self.objects.update_order.len(), 0));
         invocation.resume_script = resume_script;
     }
 }
@@ -245,10 +246,8 @@ impl<F: ObjectFactory> Store<'_, F> {
         }
         let cursor = scene.media_preparation.get_or_insert(scene.media_prepared);
         for _ in 0..self.budget.max(1) {
-            if let Some(reference) = scene.objects.update_order.get(*cursor) {
-                if let Some(handle) = scene.objects.lookup(&reference.name, reference.bank) {
-                    self.prepare_fes_object(owner, &mut scene.objects, handle)?;
-                }
+            if *cursor < scene.objects.update_order.len() {
+                self.prepare_fes_object(owner, &mut scene.objects, *cursor)?;
                 *cursor += 1;
             } else {
                 scene.media_prepared = *cursor;
@@ -269,8 +268,8 @@ impl<F: ObjectFactory> Store<'_, F> {
             return Err(Error::new(0, "FES 推进尚未完成，不能切换媒体睡眠状态"));
         }
         let handles = scene.objects.update_order().collect::<Vec<_>>();
-        for &handle in &handles {
-            self.update_fes_object(owner, &mut scene.objects, handle)?;
+        for index in 0..scene.objects.update_order.len() {
+            self.update_fes_record(owner, &mut scene.objects, index)?;
         }
         for handle in handles {
             let object = scene.objects.get(handle).unwrap();
@@ -344,8 +343,8 @@ impl<F: ObjectFactory> Store<'_, F> {
                 Step::Event(fes::Event::Command(line)) => {
                     let args = scene.interpreter.parameters(&line.bytes, self.numbers)?;
                     if args.first().is_some_and(|name| name == b"decode") {
-                        for handle in scene.objects.update_order().collect::<Vec<_>>() {
-                            self.update_fes_object(owner, &mut scene.objects, handle)?;
+                        for index in 0..scene.objects.update_order.len() {
+                            self.update_fes_record(owner, &mut scene.objects, index)?;
                         }
                     } else if !scene.objects.dispatch_image_animation(
                         &mut scene.interpreter,
@@ -438,9 +437,15 @@ impl<F: ObjectFactory> Store<'_, F> {
             }
         }
         for _ in 0..self.budget {
-            if let Some((handles, cursor)) = &mut scene.invocation.as_mut().unwrap().updates {
-                if let Some(&handle) = handles.get(*cursor) {
-                    self.update_fes_object(owner, &mut scene.objects, handle)?;
+            if !scene.interpreter.initialization_pending()
+                && scene.media_prepared != scene.objects.update_order.len()
+                && !self.prepare_fes_media(owner, scene)?
+            {
+                return Ok(false);
+            }
+            if let Some((count, cursor)) = &mut scene.invocation.as_mut().unwrap().updates {
+                if *cursor < *count {
+                    self.update_fes_record(owner, &mut scene.objects, *cursor)?;
                     *cursor += 1;
                 } else {
                     if scene.invocation.as_ref().unwrap().resume_script {
@@ -452,12 +457,6 @@ impl<F: ObjectFactory> Store<'_, F> {
                     return Ok(true);
                 }
                 continue;
-            }
-            if !scene.interpreter.initialization_pending()
-                && scene.media_prepared != scene.objects.update_order.len()
-                && !self.prepare_fes_media(owner, scene)?
-            {
-                return Ok(false);
             }
             match scene.interpreter.run(self.numbers, 1)? {
                 Step::Yield => (),

@@ -336,3 +336,90 @@ fn failed_child_creation_preserves_the_list_until_reinitialization_and_retries_t
     runtime.update(0, 0).unwrap();
     assert!(runtime.images().get(replacement).is_err());
 }
+
+#[test]
+fn pixel_lookup_uses_signed_keys_and_preserves_missing_output_and_buffer_tails() {
+    let mut runtime = Runtime::new(
+        0,
+        kind::ROOT,
+        Box::new(BaseObject::new()),
+        State::new(0),
+        GraphicsFactory { fallback: Fallback },
+    );
+    runtime.host_mut().surface_size = [2, 2];
+    runtime.drawing_mut().target = Some(RenderTarget::new([2, 2]).unwrap());
+    let list = runtime.create(0, kind::IMAGE_LIST, b"list", b"").unwrap();
+    send(&mut runtime, list, 285, 2, 2);
+    let source = runtime.images_mut().create(99, [1, 1]).unwrap();
+    let pixels = runtime.images().pixel_handle(source).unwrap();
+    let mut record: Vec<_> = [
+        pixels,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1f32.to_bits(),
+        1f32.to_bits(),
+        255,
+        1,
+        0,
+        0,
+    ]
+    .into_iter()
+    .flat_map(u32::to_le_bytes)
+    .collect();
+    for slot in [7, 0x8002] {
+        runtime
+            .dispatch_command_with_buffers(
+                0,
+                command(list, 286, slot, 0),
+                &mut CommandBuffers {
+                    data0: None,
+                    data1: Some(&mut record),
+                },
+            )
+            .unwrap();
+    }
+    runtime.images_mut().release(source).unwrap();
+    for (query, expected) in [(0, None), (pixels, Some(0x8002)), (u32::MAX, None)] {
+        let mut slot = [0xa5; 8];
+        let found = runtime
+            .dispatch_command_with_buffers(
+                0,
+                command(list, 307, query, 0),
+                &mut CommandBuffers {
+                    data0: None,
+                    data1: Some(&mut slot),
+                },
+            )
+            .unwrap();
+        assert_eq!(found, u32::from(expected.is_some()));
+        assert_eq!(
+            u32::from_le_bytes(slot[..4].try_into().unwrap()),
+            expected.unwrap_or(0xa5a5a5a5)
+        );
+        assert_eq!(slot[4..], [0xa5; 4]);
+    }
+    send(&mut runtime, list, 287, 0x8002, 0);
+    let mut slot = [0; 4];
+    assert_eq!(
+        runtime
+            .dispatch_command_with_buffers(
+                0,
+                command(list, 307, pixels, 0),
+                &mut CommandBuffers {
+                    data0: None,
+                    data1: Some(&mut slot)
+                }
+            )
+            .unwrap(),
+        1
+    );
+    assert_eq!(u32::from_le_bytes(slot), 7);
+    send(&mut runtime, list, 287, 7, 0);
+    assert_eq!(send(&mut runtime, list, 307, pixels, 0), 0);
+}

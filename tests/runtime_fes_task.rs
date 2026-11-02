@@ -27,9 +27,9 @@ impl<F: ObjectFactory> ObjectFactory for ButtonFactory<F> {
     fn create(&mut self, id: u32, kind: u32, name: &[u8]) -> Result<Box<dyn TaskObject>> {
         if kind == kind::BUTTON && name == b"low button" {
             self.attempts.set(self.attempts.get() + 1);
-            if self.fail.get() {
-                return Err(Error::new(0, "合成按钮创建失败"));
-            }
+        }
+        if kind == kind::BUTTON && self.fail.get() {
+            return Err(Error::new(0, "合成按钮创建失败"));
         }
         self.fallback.create(id, kind, name)
     }
@@ -704,13 +704,15 @@ fn button_load_creates_each_declaration_before_start_and_rebinding_keeps_the_tas
             }
         }
         assert_eq!(runtime.tree().children(fes).unwrap().count(), 7);
-        assert!(
-            runtime
-                .dispatch_command(0, command(fes, 64, buttons[2], 1))
-                .unwrap_err()
-                .message
-                .contains("BUTTON 对象事件尚未接入")
-        );
+        for button in buttons {
+            assert!(
+                runtime
+                    .dispatch_command(0, command(fes, 64, button, 1))
+                    .unwrap_err()
+                    .message
+                    .contains("BUTTON 对象事件尚未接入")
+            );
+        }
         assert_eq!(runtime.numbers().shared[0], 1);
         runtime.destroy(fes).unwrap();
         assert!(
@@ -960,5 +962,46 @@ fn system_exit_notifications_wait_for_the_body_and_main_exits_continue_the_scrip
             assert_eq!(send(&mut runtime, fes, 23, 0, 0), 37);
             assert_eq!(&runtime.numbers().shared[..3], &[2, 2, 2]);
         }
+    }
+}
+
+#[test]
+fn load_retry_keeps_a_record_wrapper_created_before_a_failed_button() {
+    for budget in [1, 4096] {
+        let mut snapshots = Vec::new();
+        for fail in [false, true] {
+            let Setup {
+                mut runtime,
+                fail_button,
+                reads,
+                ..
+            } = setup(
+                budget,
+                b"#DEFINE\nBUTTON item\nBUTTON item\n#START\n$0=$0+1\nwait 99\n",
+            );
+            let fes = runtime.create(0, kind::FES, b"scene", b"").unwrap();
+            send(&mut runtime, fes, 337, 0, 0);
+            fail_button.set(fail);
+            if fail {
+                assert!(
+                    file(&mut runtime, fes, b"complete.fes")
+                        .unwrap_err()
+                        .message
+                        .contains("按钮创建失败")
+                );
+                assert_eq!(runtime.tree().children(fes).unwrap().count(), 0);
+                fail_button.set(false);
+            }
+            file(&mut runtime, fes, b"complete.fes").unwrap();
+            let children: Vec<_> = runtime.tree().children(fes).unwrap().collect();
+            assert_eq!(children.len(), 2);
+            assert_eq!(runtime.numbers().shared[0], 0);
+            assert_eq!(*reads.borrow(), [b"complete.fes".to_vec()]);
+            snapshots.push((
+                children,
+                runtime.host().handle_allocator().allocate().unwrap(),
+            ));
+        }
+        assert_eq!(snapshots[0], snapshots[1]);
     }
 }
