@@ -104,6 +104,8 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 
 `input::Scroll2Control` 保存滚动条范围、页长、行程、轨道及滑块长度和拖动状态。默认范围为 `[0, 10]`，页长为 4。修改范围或尺寸后用 `rebuild_geometry()` 重建滑块和行程，再通过 `set_position`／`update_pixel_position` 刷新位置；几何重建本身保留数值和像素位置。`position_at_pixel` 查询数值，零有效跨度返回零。页长、最小长度与整数规则见 [SCROLL2 下层范围及几何](graphics.md#scroll2-下层范围及几何)。
 
+`Scroll2Control::compose_images(frames, vertical)` 使用当前 `knob_extent` 和 `minimum_extent`，从已解码帧表生成四份独立状态图像；false 为横向，true 为纵向。调用方先设置这两个长度，方法不重建数值几何、不读取资源，也不修改来源。帧分组、偏移与缩放规则见 [SCROLL2 状态图像](graphics.md#scroll2-状态图像)。实际类型 41 任务的持有、列表登记和输入协议仍待连接。
+
 宿主完成请求后用 `resume` 确认，待确认请求重复返回，数量和属性表达式只计算一次。字符串表必须在初始化前准备好，缺失字符串可能使后续参数移动。宿主只应在具备对应实现时确认声明或属性请求。`return_value` 保存最近一次 `break` 的值；不带参数的 `break` 将它重置为 0。
 
 `Interpreter::object_reference(input, state)` 解析对象名及银行表达式。名称精确匹配；省略银行号或值为 −1 时，已知多银行对象保留 −1 表示整个数组，其他对象归一为 0。其他引用的查找和银行范围由宿主处理。KEY_* 中名称为 `0` 的引用解码为空名称和银行 0，表示解绑。对整个数组指定 PRI 时，`sequential_priority` 为真，宿主应按银行号递增优先级。

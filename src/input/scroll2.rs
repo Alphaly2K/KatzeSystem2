@@ -31,6 +31,15 @@ impl Default for Scroll2Control {
 }
 
 impl Scroll2Control {
+    /// 按当前滑块和最小长度，将每组百号帧的三段及中央图案合成为四种状态。
+    pub fn compose_images(
+        &self,
+        frames: &std::collections::BTreeMap<u32, crate::graphics::Image>,
+        vertical: bool,
+    ) -> Result<[crate::graphics::Image; 4]> {
+        super::scroll2_images::compose(frames, self.knob_extent, self.minimum_extent, vertical)
+    }
+
     /// 以页长比例重建滑块，保留有符号比较及 DWORD 乘法回绕。
     pub fn rebuild_geometry(&mut self) -> Result<()> {
         let span = self.range_span();
