@@ -1519,7 +1519,24 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         }
         if matches!(
             index,
-            78 | 79 | 80 | 82 | 83 | 84 | 88 | 92 | 100 | 101 | 104 | 105 | 848 | 849
+            78 | 79
+                | 80
+                | 82
+                | 83
+                | 84
+                | 88
+                | 92
+                | 100
+                | 101
+                | 104
+                | 105
+                | 256
+                | 258
+                | 260
+                | 262
+                | 263
+                | 848
+                | 849
         ) {
             return self.graphics_native(index, arguments, vm);
         }

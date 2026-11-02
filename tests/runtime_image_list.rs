@@ -2,7 +2,8 @@ use katze_system2::{
     Error, Result,
     expression::State,
     graphics::{GraphicsFactory, Rect, RenderTarget, Surface},
-    runtime::{BaseObject, ObjectFactory, Runtime, TaskObject, kind},
+    kcs::Program,
+    runtime::{BaseObject, KcsFactory, ObjectFactory, ProgramLoader, Runtime, TaskObject, kind},
     task::{Command, CommandBuffers},
 };
 
@@ -42,6 +43,98 @@ fn output_image<F: ObjectFactory>(runtime: &mut Runtime<F>, id: u32) -> u32 {
         .unwrap();
     assert_eq!(&buffer[4..], &[0xa5; 4]);
     u32::from_le_bytes(buffer[..4].try_into().unwrap())
+}
+
+struct Programs;
+impl ProgramLoader for Programs {
+    fn load(&mut self, _: &[u8]) -> Result<Option<Program>> {
+        fn ins(code: &mut Vec<u8>, op: u8, args: &[u32]) {
+            code.push(op);
+            for n in args {
+                code.push(3);
+                code.extend(n.to_le_bytes());
+            }
+        }
+        let mut code = Vec::new();
+        ins(&mut code, 0x25, &[0xdead_beef]);
+        for (native, args) in [
+            (256, vec![1, 5, 3]),
+            (260, vec![1, 2, (-1i32) as u32]),
+            (262, vec![1, 0x8000_0001]),
+            (263, vec![1, 7, 0]),
+            (258, vec![1, 7]),
+        ] {
+            for n in &args {
+                ins(&mut code, 0x25, &[*n]);
+            }
+            ins(&mut code, 0x2b, &[native, args.len() as u32 * 4]);
+        }
+        ins(&mut code, 0x26, &[0]);
+        ins(&mut code, 0x3b, &[]);
+        Ok(Some(Program::from_code(&code, vec![0; 4], 128)?))
+    }
+}
+
+#[test]
+fn ordinary_list_natives_initialize_the_plane_and_submit_at_the_integer_offset() {
+    for budget in [1, 4096] {
+        let mut runtime = Runtime::new(
+            0,
+            kind::ROOT,
+            Box::new(BaseObject::new()),
+            State::new(0),
+            GraphicsFactory {
+                fallback: KcsFactory::new(Programs),
+            },
+        );
+        runtime.set_budget(budget, 1 << 20);
+        runtime.host_mut().surface_size = [3, 2];
+        let mut surface = Surface::new([5, 3]).unwrap();
+        surface.clear(0xffab_cdef);
+        let drawing = runtime.drawing_mut();
+        drawing.enabled = true;
+        drawing.active = true;
+        drawing.target =
+            Some(RenderTarget::from_tiles([5, 3], [1, 1], vec![Some(surface)]).unwrap());
+        let list = runtime.create(0, kind::IMAGE_LIST, b"list", b"").unwrap();
+        assert_eq!(list, 1);
+        let script = runtime.create(0, kind::ORDINARY, b"setup", b"").unwrap();
+        runtime.update(0, 0).unwrap();
+        let vm = runtime.object(script).unwrap().interpreter().unwrap();
+        assert_eq!(vm.read(0, 4).unwrap(), 0xdead_beefu32.to_le_bytes());
+        assert!(vm.stack_bytes().is_empty());
+        let plane = runtime.tree().children(list).unwrap().next().unwrap();
+        assert_eq!(runtime.tree().node(plane).unwrap().kind, kind::PLANE);
+        assert_eq!(runtime.drawables().get(plane).unwrap().display(), 0);
+        let image = output_image(&mut runtime, list);
+        assert_eq!(
+            runtime.images().get(image).unwrap().surface().size(),
+            [5, 3]
+        );
+        let mut x = [0; 4];
+        let mut y = [0; 4];
+        runtime
+            .dispatch_command_with_buffers(
+                0,
+                command(list, 290, 0, 0),
+                &mut CommandBuffers {
+                    data0: Some(&mut x),
+                    data1: Some(&mut y),
+                },
+            )
+            .unwrap();
+        assert_eq!((i32::from_le_bytes(x), i32::from_le_bytes(y)), (2, -1));
+        assert_eq!(
+            runtime.drawing_mut().target.as_ref().unwrap().pixel(2, 0),
+            Some(0xffab_cdef)
+        );
+        runtime.update(1, 0).unwrap();
+        let target = runtime.drawing_mut().target.as_ref().unwrap();
+        assert_eq!(target.pixel(1, 0), Some(0xffab_cdef));
+        assert_eq!(target.pixel(2, 0), Some(0));
+        assert_eq!(target.pixel(4, 1), Some(0));
+        assert_eq!(target.pixel(2, 2), Some(0xffab_cdef));
+    }
 }
 
 #[test]

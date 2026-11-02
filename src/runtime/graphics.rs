@@ -14,16 +14,16 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             78 => 12,
             79 => 16,
             80 | 83 => 4,
-            82 | 88 | 92 | 105 | 848 | 849 => 8,
+            82 | 88 | 92 | 105 | 258 | 262 | 848 | 849 => 8,
             84 | 101 => 20,
-            100 => 12,
+            100 | 256 | 260 | 263 => 12,
             104 => 28,
             _ => unreachable!(),
         };
         if arguments.len() < 4 || arguments.len() > count || !arguments.len().is_multiple_of(4) {
             return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
         }
-        let route_zero = matches!(index, 104 | 105 | 848 | 849);
+        let route_zero = matches!(index, 104 | 105 | 256 | 258 | 260 | 262 | 263 | 848 | 849);
         if route_zero && arguments.len() != count {
             return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
         }
@@ -149,6 +149,20 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                         data1: Some(&mut rectangle),
                     },
                 )?;
+            }
+            256 | 260 | 263 => {
+                let code = match index {
+                    256 => 285,
+                    260 => 289,
+                    _ => 293,
+                };
+                self.command_target(target, code, [word(1), word(2), 0])?;
+            }
+            258 => {
+                self.command_target(target, 287, [word(1), 0, 0])?;
+            }
+            262 => {
+                self.command_target(target, 292, [0, word(1), 0])?;
             }
             _ => unreachable!(),
         }
