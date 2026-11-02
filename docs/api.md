@@ -357,6 +357,8 @@ Scene 消费 `noact`／`lockactive` 并按主体时点处理通知。`preferred_
 
 `Objects::start_motion(handle, program, parameters, delay)` 向对象加入分组零的运动，返回对象内的运动编号；当前支持 BASE、CIMAGE、IMAGE 和 BUTTON。目标及其后代都没有活动运动时，从图像当前属性捕获基准；有活动运动时沿用已有基准。`motion_active(handle)` 查询目标及其后代，`Object::motions()` 只读查询目标自身队列，`motion_delay()` 查询脚本为后续运动保存的原始开始偏移。`delay` 不改变已经插入的运动；`ismot` 包含尚未到开始时刻的活动条目。`update_motions(now, &mut host, budget_per_task)` 显式按先子后父的顺序推进根对象子树，并回写图像属性及后代失效标记；false 后继续调用，时间、已完成对象与当前队列均保留。续跑期间不得直接修改属性，创建、初始化、重挂、删除及加入运动会返回诊断。Scene 在等待或帧边界自动调用该入口，再按声明顺序刷新媒体；普通 decode 的中间提交先刷新媒体并继续脚本，运动每轮最终阶段执行一次。处理器只加入运动，后续普通更新才执行。失败重试保留已完成的运动阶段；运动与普通 KCS 共用随机序列和调试消息，详见[对象运动](graphics.md#fes-对象运动)。
 
+`Objects::stop_motions(handle, &mut host, budget_per_task)` 请求目标及后代结束，以零时刻更新子树，再清空目标自身队列和运动延迟。false 后继续同一目标的停止；此时普通运动更新或其他目标停止返回诊断。后代队列和延迟保留，运动脚本自行响应结束请求。Scene 的 `object stop` 逐银行调用，并支持事件对象 `@` 和银行空洞；媒体仍在后续提交边界刷新。
+
 `Runtime::remove_fes_object(owner, &mut objects, handle)` 先向下层任务发送删除标记、移除图像当前槽号并释放来源包装，再移出 FES 子树；二维绘图登记立即清理，实际任务释放发生在树更新中。删除后调用者再次 publish_bindings。更新和移除错误保留已经完成的修改；工厂创建失败清除本次重建标记并保存 None，后续尺寸请求可重新触发创建。
 
 图形事件的同步响应通过 `Host::dispatch_graphics_event(response, command, buffers, output)` 开放。运行时回调中的命令 95 改写当前平面的响应，返回错误时也保留此前修改；其余需要重入完整平面对象的命令返回诊断。移动通知使用同一份 CommandBuffers，事件接收者返回的普通 output 与平面响应分别保存。

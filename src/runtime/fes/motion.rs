@@ -3,6 +3,8 @@ use crate::kcs::{MotionHost, MotionState, MotionTask, Program};
 use crate::{Error, Result};
 
 pub(super) struct Traversal {
+    root: u32,
+    stopping: bool,
     now: u32,
     order: Vec<u32>,
     cursor: usize,
@@ -82,15 +84,57 @@ impl Objects {
         host: &mut MotionHost,
         budget_per_task: usize,
     ) -> Result<bool> {
+        self.advance_motions(self.top, now, false, host, budget_per_task)
+    }
+
+    /// 请求后代结束并以零时刻更新子树，最后清空目标自身队列和延迟。
+    pub fn stop_motions(
+        &mut self,
+        handle: u32,
+        host: &mut MotionHost,
+        budget_per_task: usize,
+    ) -> Result<bool> {
+        self.advance_motions(handle, 0, true, host, budget_per_task)
+    }
+
+    fn advance_motions(
+        &mut self,
+        root: u32,
+        now: u32,
+        stopping: bool,
+        host: &mut MotionHost,
+        budget_per_task: usize,
+    ) -> Result<bool> {
+        if self
+            .motion_update
+            .as_ref()
+            .is_some_and(|pending| pending.root != root || pending.stopping != stopping)
+        {
+            return Err(Error::new(0, "FES 另一次对象运动更新尚未完成"));
+        }
         if self.motion_update.is_none() {
             let mut order = Vec::new();
-            let mut stack = vec![self.top];
+            let mut stack = vec![root];
             while let Some(handle) = stack.pop() {
                 order.push(handle);
-                stack.extend(self.get(handle).unwrap().children());
+                stack.extend(
+                    self.get(handle)
+                        .ok_or_else(|| Error::new(0, "FES 对象标识无效"))?
+                        .children(),
+                );
             }
             order.reverse();
+            if stopping {
+                for &handle in &order {
+                    self.get_mut(handle)
+                        .unwrap()
+                        .motions
+                        .request_finish_group(None)?;
+                }
+            }
             self.motion_update = Some(Traversal {
+                root,
+                stopping,
                 now,
                 order,
                 cursor: 0,
@@ -99,6 +143,11 @@ impl Objects {
         loop {
             let traversal = self.motion_update.as_ref().unwrap();
             let Some(&handle) = traversal.order.get(traversal.cursor) else {
+                if stopping {
+                    let object = self.get_mut(root).unwrap();
+                    object.motions.clear();
+                    object.motion_delay = 0;
+                }
                 self.motion_update = None;
                 return Ok(true);
             };

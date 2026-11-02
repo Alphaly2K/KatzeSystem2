@@ -44,6 +44,20 @@ fn movement(stop: bool) -> Program {
     Program::from_code(&movement_code(stop), vec![0; 4], 64).unwrap()
 }
 
+fn finishable_movement() -> Program {
+    let mut code = movement_code(false);
+    code.pop();
+    ins(&mut code, 0x25, &[(0x13, 0x8000_0098)]);
+    let branch = code.len();
+    ins(&mut code, 0x28, &[(3, 0)]);
+    code.push(0x3b);
+    let finish = code.len() as u32;
+    code[branch + 2..branch + 6].copy_from_slice(&finish.to_le_bytes());
+    ins(&mut code, 0x2b, &[(3, 38), (3, 0)]);
+    code.push(0x3b);
+    Program::from_code(&code, vec![0; 4], 64).unwrap()
+}
+
 fn setup() -> (Objects, Vec<u32>) {
     let mut objects = Objects::new(HandleAllocator::default()).unwrap();
     let handles = objects
@@ -688,5 +702,144 @@ fn scene_motion_delay_defers_vm_execution_and_running_queries_include_unstarted_
                 );
             }
         }
+    }
+}
+
+#[test]
+fn stop_updates_delayed_descendants_once_and_only_clears_the_selected_queue() {
+    for budget in [0, 1, 4096] {
+        for obey in [false, true] {
+            let (mut objects, handles) = setup();
+            let [parent, child] = handles[..] else {
+                panic!()
+            };
+            let mut interpreter =
+                fes::Interpreter::new(fes::Program::from_text(b"#START\nwait 1000\n").unwrap())
+                    .unwrap();
+            objects.publish_bindings(&mut interpreter);
+            metadata(
+                &mut objects,
+                &mut interpreter,
+                &mut State::new(4),
+                b"item delay 3",
+            )
+            .unwrap();
+            objects
+                .start_motion(parent, movement(false), &[2.], 3)
+                .unwrap();
+            objects
+                .start_motion(
+                    child,
+                    if obey {
+                        finishable_movement()
+                    } else {
+                        movement(false)
+                    },
+                    &[3.],
+                    3,
+                )
+                .unwrap();
+            let mut host = MotionHost::default();
+            let mut complete = objects.stop_motions(parent, &mut host, budget).unwrap();
+            if budget <= 1 {
+                assert!(!complete);
+                assert!(objects.update_motions(100, &mut host, budget).is_err());
+                assert!(objects.stop_motions(child, &mut host, budget).is_err());
+            }
+            for _ in 0..64 {
+                if complete {
+                    break;
+                }
+                complete = objects.stop_motions(parent, &mut host, budget).unwrap();
+            }
+            assert!(complete);
+            assert_eq!(position(&objects, parent), 12.);
+            assert_eq!(position(&objects, child), 23.);
+            assert!(objects.get(parent).unwrap().motions().is_empty());
+            assert_eq!(objects.get(parent).unwrap().motion_delay(), 0);
+            assert_eq!(objects.get(child).unwrap().motion_delay(), 3);
+            assert_eq!(objects.motion_active(parent).unwrap(), !obey);
+            if obey {
+                assert!(objects.get(child).unwrap().motions().is_empty());
+            } else {
+                assert_eq!(counter(&objects, child, 1), 1);
+                let queue = objects.get(child).unwrap().motions();
+                let state = queue.task(1).unwrap().state().unwrap();
+                assert_eq!(queue.time_origin(1), Some(0));
+                assert_eq!(state.elapsed, u32::MAX - 2);
+                assert_eq!(state.finishing, 1);
+                while !objects.update_motions(100, &mut host, budget).unwrap() {}
+                assert_eq!(counter(&objects, child, 1), 2);
+                assert_eq!(position(&objects, child), 23.);
+            }
+        }
+    }
+}
+
+#[test]
+fn scene_stop_skips_bank_holes_and_event_stop_applies_before_media_submission() {
+    let source = b"#DEFINE\nCIMAGE obj[3]\n#OBJECT SIZE COLOR PRI POS DISP\nobj[0] 1,1 0xff112233 5 0,0 1\nobj[1] 1,1 0xff445566 6 2,0 1\nobj[2] 1,1 0xff778899 7 4,0 1\n#SUBCOMMAND\noneshot move motion p[2] : [0]\n#START\nobj delay 3\nobj move 2\nwait 1\nobj[($0+=1)-1] stop ($0+=100)\nobj stop ($0+=100)\nobj ismot 2\n$3+=1\nwait 1000\n#obj.PUSH_L\n@ move 4\n@ delay 9\n@ stop ($0+=100)\n$4+=1\ndecode\n$5+=1\n";
+    for budget in [1, 4096] {
+        let mut setup = scene_setup(source, budget);
+        update_scene(&mut setup, 100);
+        let handles: Vec<_> = (0..3)
+            .map(|bank| setup.scene.objects().lookup("obj", bank).unwrap())
+            .collect();
+        setup
+            .runtime
+            .remove_fes_object(0, setup.scene.objects_mut().unwrap(), handles[1])
+            .unwrap();
+        setup.runtime.numbers_mut().shared[2] = 91;
+        update_scene(&mut setup, 101);
+        assert_eq!(&setup.runtime.numbers().shared[..4], &[1, 0, 91, 1]);
+        for (handle, x) in [(handles[0], 2.), (handles[2], 6.)] {
+            let object = setup.scene.objects().get(handle).unwrap();
+            assert_eq!(position(setup.scene.objects(), handle), x);
+            assert_eq!(object.motion_delay(), 0);
+            assert!(object.motions().is_empty());
+        }
+        let target = fes::ObjectReference {
+            name: "obj".into(),
+            bank: 2,
+        };
+        loop {
+            if let Some(handled) = setup
+                .runtime
+                .dispatch_fes_event(0, &mut setup.scene, Some(&target), 2)
+                .unwrap()
+            {
+                assert!(handled);
+                break;
+            }
+        }
+        let object = setup.scene.objects().get(handles[2]).unwrap();
+        assert_eq!(position(setup.scene.objects(), handles[2]), 10.);
+        assert_eq!(object.motion_delay(), 0);
+        assert!(object.motions().is_empty());
+        assert_eq!(&setup.runtime.numbers().shared[4..6], &[1, 0]);
+        assert_eq!(setup.runtime.numbers().shared[0], 1);
+        update_scene(&mut setup, 102);
+        setup
+            .runtime
+            .dispatch_command(
+                0,
+                Command {
+                    target: setup.list,
+                    sender: 0,
+                    code: 298,
+                    data: [0; 3],
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            setup
+                .runtime
+                .drawing()
+                .target
+                .as_ref()
+                .unwrap()
+                .pixel(10, 0),
+            Some(0xff778899)
+        );
     }
 }

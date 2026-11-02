@@ -27,6 +27,7 @@ pub struct Scene {
     media_prepared: usize,
     motion_names: BTreeMap<Vec<u8>, Vec<u8>>,
     motion_call: Option<MotionCall>,
+    motion_stop: Option<MotionStop>,
 }
 
 struct Invocation {
@@ -48,6 +49,12 @@ struct MotionCall {
     bank: i64,
     end: i64,
     prepared: Option<(u32, Vec<f32>)>,
+}
+
+struct MotionStop {
+    target: fes::ObjectReference,
+    bank: i64,
+    end: i64,
 }
 
 enum Notification {
@@ -98,6 +105,7 @@ impl Scene {
             media_prepared: 0,
             motion_names: BTreeMap::new(),
             motion_call: None,
+            motion_stop: None,
         })
     }
 
@@ -614,6 +622,11 @@ impl<F: ObjectFactory> Store<'_, F> {
                         } else {
                             scene.interpreter.resume();
                         }
+                    } else if let Some(complete) = self.run_fes_stop(scene, &args, line.offset)? {
+                        if !complete {
+                            return Ok(false);
+                        }
+                        scene.interpreter.resume();
                     } else {
                         if !scene.objects.dispatch_image_animation(
                             &mut scene.interpreter,
@@ -737,6 +750,92 @@ impl<F: ObjectFactory> Store<'_, F> {
         result.map_err(|error: Error| Error::new(call.offset + error.offset, error.message))
     }
 
+    fn run_fes_stop(
+        &mut self,
+        scene: &mut Scene,
+        args: &[Vec<u8>],
+        offset: usize,
+    ) -> Result<Option<bool>> {
+        if args.get(1).is_none_or(|name| name != b"stop") {
+            return Ok(None);
+        }
+        if scene.motion_stop.is_none() {
+            let target = if args[0] == b"@" {
+                let context = scene
+                    .interpreter
+                    .event_context()
+                    .ok_or_else(|| Error::new(offset, "FES 当前没有事件对象"))?;
+                fes::ObjectReference {
+                    name: context.object.clone(),
+                    bank: context.bank,
+                }
+            } else {
+                scene.interpreter.object_reference(&args[0], self.numbers)?
+            };
+            if scene
+                .objects
+                .lookup(
+                    &target.name,
+                    if target.bank == -1 { 0 } else { target.bank },
+                )
+                .is_none()
+            {
+                return Err(Error::new(
+                    offset,
+                    "FES 对象目标不存在，整行表达式回退尚未接入",
+                ));
+            }
+            let (bank, end) = if target.bank == -1 {
+                (0, i64::from(scene.objects.count(&target.name)))
+            } else {
+                (i64::from(target.bank), i64::from(target.bank) + 1)
+            };
+            scene.motion_stop = Some(MotionStop { target, bank, end });
+        }
+        for _ in 0..self.budget.max(1) {
+            let pending = scene.motion_stop.as_ref().unwrap();
+            if pending.bank == pending.end {
+                scene.motion_stop = None;
+                return Ok(Some(true));
+            }
+            if let Some(handle) = scene
+                .objects
+                .lookup(&pending.target.name, pending.bank as i32)
+            {
+                if !self.advance_fes_motions(&mut scene.objects, 0, Some(handle))? {
+                    return Ok(Some(false));
+                }
+            }
+            scene.motion_stop.as_mut().unwrap().bank += 1;
+        }
+        Ok(Some(false))
+    }
+
+    fn advance_fes_motions(
+        &mut self,
+        objects: &mut Objects,
+        now: u32,
+        stop: Option<u32>,
+    ) -> Result<bool> {
+        std::mem::swap(
+            &mut self.host.random,
+            &mut self.resources.motion_host.random,
+        );
+        let result = if let Some(handle) = stop {
+            objects.stop_motions(handle, &mut self.resources.motion_host, self.budget)
+        } else {
+            objects.update_motions(now, &mut self.resources.motion_host, self.budget)
+        };
+        std::mem::swap(
+            &mut self.host.random,
+            &mut self.resources.motion_host.random,
+        );
+        self.host
+            .debug_messages
+            .append(&mut self.resources.motion_host.debug_messages);
+        result
+    }
+
     pub(in crate::runtime) fn update_fes_scene(
         &mut self,
         owner: u32,
@@ -797,23 +896,7 @@ impl<F: ObjectFactory> Store<'_, F> {
             let invocation = scene.invocation.as_ref().unwrap();
             if invocation.updates.is_some() && !invocation.resume_script && !invocation.motions_done
             {
-                std::mem::swap(
-                    &mut self.host.random,
-                    &mut self.resources.motion_host.random,
-                );
-                let result = scene.objects.update_motions(
-                    invocation.now,
-                    &mut self.resources.motion_host,
-                    self.budget,
-                );
-                std::mem::swap(
-                    &mut self.host.random,
-                    &mut self.resources.motion_host.random,
-                );
-                self.host
-                    .debug_messages
-                    .append(&mut self.resources.motion_host.debug_messages);
-                if !result? {
+                if !self.advance_fes_motions(&mut scene.objects, invocation.now, None)? {
                     return Ok(false);
                 }
                 scene.invocation.as_mut().unwrap().motions_done = true;
@@ -863,6 +946,12 @@ impl<F: ObjectFactory> Store<'_, F> {
                             {
                                 if stop {
                                     scene.publish_notifications();
+                                }
+                            } else if let Some(complete) =
+                                self.run_fes_stop(scene, &args, line.offset)?
+                            {
+                                if !complete {
+                                    return Ok(false);
                                 }
                             } else if !scene.objects.dispatch_image_animation(
                                 &mut scene.interpreter,
