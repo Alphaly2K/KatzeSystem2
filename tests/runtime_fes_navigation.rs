@@ -213,3 +213,114 @@ fn scene_preparation_loads_only_the_first_keyblock_table_once_before_start() {
     assert!(scene.prepare(&mut numbers, 1).unwrap());
     assert_eq!(&numbers.shared[..2], &[2, 0]);
 }
+
+#[test]
+fn linked_sliders_adjust_before_neighboring_grids_and_consume_range_reads_at_boundaries() {
+    use katze_system2::runtime::fes::NavigationOutcome;
+    let mut objects = Objects::new(HandleAllocator::default()).unwrap();
+    let source = add(&mut objects, "source", [0, 0, 0], [0.; 2], 1);
+    add(&mut objects, "neighbor", [1, 0, 0], [0.; 2], 1);
+    let control = objects
+        .define(&ObjectDefinition {
+            kind: "SLIDER",
+            name: "control".into(),
+            banks: 1,
+        })
+        .unwrap()[0];
+    let ObjectState::Button(button) = &mut objects.get_mut(source).unwrap().state else {
+        panic!()
+    };
+    button.set_control(Some(&target("control"))).unwrap();
+    let ObjectState::Slider(slider) = &mut objects.get_mut(control).unwrap().state else {
+        panic!()
+    };
+    slider.set_range([-1, 1]);
+    slider.enabled = 0;
+    let mut blocks = [
+        KeyBlock {
+            size: [1, 1],
+            neighbors: [1; 4],
+        },
+        KeyBlock {
+            size: [1, 1],
+            neighbors: [-1; 4],
+        },
+    ];
+    assert_eq!(
+        objects
+            .navigate_button_with_controls(&blocks, &target("source"), 3)
+            .unwrap(),
+        NavigationOutcome::Handled
+    );
+    let ObjectState::Slider(slider) = &mut objects.get_mut(control).unwrap().state else {
+        panic!()
+    };
+    assert_eq!((slider.position, slider.notification), (1, 1));
+    assert!(slider.updates.position);
+    assert!(!slider.updates.range);
+    slider.set_range([-1, 1]);
+    slider.updates.position = false;
+    assert_eq!(
+        objects
+            .navigate_button_with_controls(&blocks, &target("source"), 3)
+            .unwrap(),
+        NavigationOutcome::Target(target("neighbor"))
+    );
+    let ObjectState::Slider(slider) = &mut objects.get_mut(control).unwrap().state else {
+        panic!()
+    };
+    assert!(!slider.updates.range);
+    assert!(!slider.updates.position);
+    slider.set_range([-1, 1]);
+    assert_eq!(
+        objects
+            .navigate_button_with_controls(&blocks, &target("source"), 0)
+            .unwrap(),
+        NavigationOutcome::Target(target("neighbor"))
+    );
+    let ObjectState::Slider(slider) = &mut objects.get_mut(control).unwrap().state else {
+        panic!()
+    };
+    assert!(!slider.updates.range);
+    slider.set_range([-1, 1]);
+    add(&mut objects, "local", [0, 1, 0], [0.; 2], 1);
+    blocks[0].size = [2, 1];
+    assert_eq!(
+        objects
+            .navigate_button_with_controls(&blocks, &target("source"), 3)
+            .unwrap(),
+        NavigationOutcome::Target(target("local"))
+    );
+    let ObjectState::Slider(slider) = &mut objects.get_mut(control).unwrap().state else {
+        panic!()
+    };
+    assert!(slider.updates.range);
+    slider.set_range([i32::MIN, i32::MAX]);
+    slider.position = i32::MAX;
+    slider.vertical = -2;
+    assert_eq!(
+        objects
+            .navigate_button_with_controls(&blocks, &target("source"), 1)
+            .unwrap(),
+        NavigationOutcome::Handled
+    );
+    let ObjectState::Slider(slider) = &mut objects.get_mut(control).unwrap().state else {
+        panic!()
+    };
+    assert_eq!(slider.position, i32::MIN);
+    slider.set_range([0, 2]);
+    let ObjectState::Button(button) = &mut objects.get_mut(source).unwrap().state else {
+        panic!()
+    };
+    button.enabled = 0;
+    assert_eq!(
+        objects
+            .navigate_button_with_controls(&blocks, &target("source"), 1)
+            .unwrap(),
+        NavigationOutcome::Unhandled
+    );
+    let ObjectState::Slider(slider) = &objects.get(control).unwrap().state else {
+        panic!()
+    };
+    assert!(slider.updates.range);
+}

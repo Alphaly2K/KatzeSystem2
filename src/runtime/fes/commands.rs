@@ -10,6 +10,7 @@ enum Command {
     Enable(i32),
     Priority(i32),
     Position(fes::ImageReference),
+    Attach(Option<fes::ObjectReference>),
 }
 
 impl Objects {
@@ -37,6 +38,11 @@ impl Objects {
                 | b"pos2"
                 | b"delay"
                 | b"ismot"
+                | b"pos"
+                | b"page"
+                | b"getpos"
+                | b"load"
+                | b"attach"
         ) {
             return Ok(false);
         }
@@ -69,9 +75,26 @@ impl Objects {
         if self.count(&target.name) == 1 {
             target.bank = 0;
         }
+        if matches!(name, b"pos" | b"page" | b"getpos" | b"load") {
+            return self.dispatch_slider_value_command(
+                interpreter,
+                line.offset,
+                &args,
+                &target,
+                state,
+            );
+        }
         if name == b"getid" && target.bank == -1 {
             return Ok(true);
         }
+        let control = if name == b"attach" {
+            args.get(2)
+                .filter(|arg| !arg.is_empty())
+                .map(|arg| interpreter.object_reference(arg, state))
+                .transpose()?
+        } else {
+            None
+        };
         let mut number = |index: usize, default| {
             args.get(index).map_or(Ok(default), |bytes| {
                 interpreter
@@ -87,6 +110,7 @@ impl Objects {
             b"getid" => Command::GetId(number(2, 0)?),
             b"enable" => Command::Enable(i32::from(number(2, 0)? != 0)),
             b"pri" if args.len() > 2 => Command::Priority(number(2, 0)?),
+            b"attach" => Command::Attach(control),
             b"pos2" if args.len() > 2 => {
                 let frame = number(3, 0)?;
                 let file = &args[2];
@@ -136,6 +160,9 @@ impl Objects {
                     } else if let Some(plane) = object.state.plane_mut() {
                         dirty = plane.display != *value;
                         plane.display = *value;
+                    } else if let ObjectState::Slider(slider) = &mut object.state {
+                        slider.set_display(*value);
+                        dirty = true;
                     }
                 }
                 Command::Size(size) => {
@@ -171,6 +198,8 @@ impl Objects {
                     } else if let Some(plane) = object.state.plane_mut() {
                         plane.priority = *value;
                         dirty = true;
+                    } else if let ObjectState::Slider(slider) = &mut object.state {
+                        slider.set_priority(*value);
                     }
                 }
                 Command::Position(reference) => {
@@ -183,12 +212,88 @@ impl Objects {
                     if let ObjectState::Button(button) = &mut object.state {
                         button.image.base.updates.dirty |= button.enabled != *value;
                         button.enabled = *value;
+                    } else if let ObjectState::Slider(slider) = &mut object.state {
+                        slider.set_enabled(*value);
                     }
                 }
                 Command::GetId(_) => unreachable!(),
+                Command::Attach(control) => {
+                    if let ObjectState::Button(button) = &mut object.state {
+                        button.set_control(control.as_ref())?;
+                    }
+                }
             }
             if dirty {
                 self.invalidate(handle)?;
+            }
+        }
+        Ok(true)
+    }
+
+    fn dispatch_slider_value_command(
+        &mut self,
+        interpreter: &mut fes::Interpreter,
+        offset: usize,
+        args: &[Vec<u8>],
+        target: &fes::ObjectReference,
+        state: &mut State,
+    ) -> Result<bool> {
+        let name = args[1].as_slice();
+        if name == b"getpos" && target.bank == -1 {
+            return Ok(true);
+        }
+        let mut number = |index: usize, default| {
+            args.get(index).map_or(Ok(default), |bytes| {
+                interpreter
+                    .eval(bytes, state)
+                    .map_err(|error| Error::new(offset + error.offset, error.message))
+            })
+        };
+        let mut values = [0; 3];
+        if name != b"load" {
+            let default = if name == b"getpos" { -1 } else { 0 };
+            for (i, value) in values.iter_mut().enumerate() {
+                *value = number(i + 2, default)?;
+            }
+        }
+        let banks = if target.bank == -1 {
+            0..i64::from(self.count(&target.name))
+        } else {
+            i64::from(target.bank)..i64::from(target.bank) + 1
+        };
+        for bank in banks {
+            let Some(handle) = self.lookup(&target.name, bank as i32) else {
+                if name == b"load" {
+                    break;
+                }
+                continue;
+            };
+            if name == b"load" {
+                // load 的第三项逐个有效银行求值，第四项不读取。
+                if let Some(bytes) = args.get(3) {
+                    interpreter
+                        .eval(bytes, state)
+                        .map_err(|error| Error::new(offset + error.offset, error.message))?;
+                }
+            }
+            match &mut self.get_mut(handle).unwrap().state {
+                ObjectState::Slider(slider) => match name {
+                    b"pos" => slider.set_position(values[0], 0),
+                    b"page" => slider.set_range([values[0], values[1]]),
+                    b"getpos" => {
+                        for (index, value) in values.into_iter().zip([slider.position, 0, 0]) {
+                            if let Some(slot) = state.shared.get_mut(index as usize) {
+                                *slot = value;
+                            }
+                        }
+                    }
+                    b"load" => slider.set_file(args.get(2).map_or(b"", Vec::as_slice))?,
+                    _ => unreachable!(),
+                },
+                ObjectState::Base => {}
+                _ => {
+                    return Err(Error::new(offset, "FES 此对象类型的数值或装载命令尚未接入"));
+                }
             }
         }
         Ok(true)

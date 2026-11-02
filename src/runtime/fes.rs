@@ -2,7 +2,7 @@
 
 use crate::fes::{
     ButtonState, CImageState, CPlaneState, ImageState, ObjectDefinition, ObjectInitialization,
-    ObjectReference, PlaneState,
+    ObjectReference, PlaneState, SliderState,
 };
 use crate::{Error, HandleAllocator, Result, read};
 use std::collections::{BTreeMap, BTreeSet};
@@ -55,6 +55,7 @@ pub enum ObjectState {
     Button(Box<ButtonState>),
     CPlane(Box<CPlaneState>),
     Plane(Box<PlaneState>),
+    Slider(Box<SliderState>),
 }
 
 impl ObjectState {
@@ -66,6 +67,7 @@ impl ObjectState {
             Self::Button(_) => "BUTTON",
             Self::CPlane(_) => "CPLANE",
             Self::Plane(_) => "PLANE",
+            Self::Slider(_) => "SLIDER",
         }
     }
 
@@ -77,6 +79,7 @@ impl ObjectState {
             "BUTTON" => Self::Button(Box::default()),
             "CPLANE" => Self::CPlane(Box::default()),
             "PLANE" => Self::Plane(Box::default()),
+            "SLIDER" => Self::Slider(Box::default()),
             _ => return Err(Error::new(0, format!("FES 对象类型 {kind} 尚未接入"))),
         })
     }
@@ -485,6 +488,9 @@ impl Objects {
                 }
                 ObjectState::CPlane(state) => state.apply(&initialization.attributes, bank as u32),
                 ObjectState::Plane(state) => state.apply(&initialization.attributes, bank as u32),
+                ObjectState::Slider(state) => {
+                    state.apply(&initialization.attributes, bank as u32)?
+                }
             };
             if dirty {
                 self.invalidate(handle)?;
@@ -506,6 +512,9 @@ impl Objects {
             }
             if let Some(state) = object.state.image_mut() {
                 state.updates.invalidate();
+            }
+            if let ObjectState::Slider(state) = &mut object.state {
+                state.updates.dirty = true;
             }
             pending.extend(object.children.iter().copied());
         }

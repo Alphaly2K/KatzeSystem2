@@ -128,6 +128,15 @@ impl Scene {
         &self.keyblocks
     }
 
+    pub(super) fn navigate_button(
+        &mut self,
+        source: &fes::ObjectReference,
+        direction: usize,
+    ) -> Result<super::NavigationOutcome> {
+        self.objects
+            .navigate_button_with_controls(&self.keyblocks, source, direction)
+    }
+
     /// 同一次预算续跑期间保持对象绑定和属性稳定。
     pub fn objects_mut(&mut self) -> Result<&mut Objects> {
         if self.is_pending() {
@@ -730,7 +739,9 @@ impl<F: ObjectFactory> Store<'_, F> {
                     };
                     let object = scene.objects.get(handle).unwrap();
                     let context = match &object.state {
-                        super::ObjectState::Base => fes::SubcommandContext::default(),
+                        super::ObjectState::Base | super::ObjectState::Slider(_) => {
+                            fes::SubcommandContext::default()
+                        }
                         state => state
                             .image()
                             .ok_or_else(|| Error::new(0, "FES 此对象类型的运动属性尚未接入"))?

@@ -40,17 +40,14 @@ pub trait Services {
         cursor: &mut usize,
         budget: usize,
     ) -> Result<bool>;
-    /// 网格选择的默认实现；关联控件可返回 Handled 消费方向输入。
+    /// 先查当前网格，再尝试关联控件，最后查相邻网格。
     fn navigate_button(
         &mut self,
         scene: &mut Scene,
         source: &fes::ObjectReference,
         direction: usize,
     ) -> Result<NavigationOutcome> {
-        Ok(scene
-            .objects()
-            .navigate_button(scene.keyblocks(), source, direction)?
-            .map_or(NavigationOutcome::Unhandled, NavigationOutcome::Target))
+        scene.navigate_button(source, direction)
     }
 }
 

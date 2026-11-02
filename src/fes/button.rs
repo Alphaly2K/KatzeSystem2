@@ -14,6 +14,8 @@ pub struct ButtonState {
     /// 网格编号、横坐标、纵坐标；编号 −1 表示没有网格。
     pub keyblock: [i32; 3],
     pub system_key: i32,
+    /// 关联控件的名称／银行；独立于 KEY_* 和父子关系。
+    pub control: Option<ObjectReference>,
 }
 
 impl Default for ButtonState {
@@ -29,11 +31,22 @@ impl Default for ButtonState {
             mask_type: 0,
             keyblock: [-1, 0, 0],
             system_key: -1,
+            control: None,
         }
     }
 }
 
 impl ButtonState {
+    pub fn set_control(&mut self, control: Option<&ObjectReference>) -> Result<()> {
+        if control
+            .is_some_and(|target| target.name.len() >= 32 || target.name.as_bytes().contains(&0))
+        {
+            return Err(Error::new(0, "FES 关联控件名称超过存储上限或包含零字节"));
+        }
+        self.control = control.cloned();
+        Ok(())
+    }
+
     /// 按 IMAGE、SIZE、ENABLE、事件与导航配置的顺序应用属性。
     /// 返回本次是否需要使后代失效；ENABLE 只更新本对象的属性标记。
     pub fn apply(

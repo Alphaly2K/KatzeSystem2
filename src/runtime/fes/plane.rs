@@ -89,6 +89,9 @@ impl<F: ObjectFactory> Store<'_, F> {
         if matches!(object.state, ObjectState::Button(_)) {
             return self.update_fes_button(owner, objects, handle, image);
         }
+        if matches!(object.state, ObjectState::Slider(_)) {
+            return Err(Error::new(0, "FES SLIDER 配置装载与下层任务尚未接入"));
+        }
         if object.state.plane().is_none() {
             return match object.state {
                 ObjectState::Base => Ok(()),

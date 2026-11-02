@@ -9,6 +9,12 @@ pub enum NavigationOutcome {
     Unhandled,
 }
 
+enum Search {
+    Target(fes::ObjectReference),
+    Control(u32),
+    Unhandled,
+}
+
 impl Objects {
     pub(super) fn enabled_button(&self, target: &fes::ObjectReference) -> bool {
         self.lookup(&target.name, target.bank)
@@ -84,6 +90,73 @@ impl Objects {
         source: &fes::ObjectReference,
         direction: usize,
     ) -> Result<Option<fes::ObjectReference>> {
+        Ok(
+            match self.navigation_search(blocks, source, direction, false)? {
+                Search::Target(target) => Some(target),
+                _ => None,
+            },
+        )
+    }
+
+    /// 当前网格无目标时，先调整关联 SLIDER；未消费再查相邻网格。
+    /// 范围读取会消费其待更新请求，包括方向不匹配或数值到达边界的情况。
+    pub fn navigate_button_with_controls(
+        &mut self,
+        blocks: &[fes::KeyBlock],
+        source: &fes::ObjectReference,
+        direction: usize,
+    ) -> Result<NavigationOutcome> {
+        self.require_motion_idle()?;
+        let result = self.navigation_search(blocks, source, direction, true)?;
+        match result {
+            Search::Target(target) => Ok(NavigationOutcome::Target(target)),
+            Search::Unhandled => Ok(NavigationOutcome::Unhandled),
+            Search::Control(handle) => {
+                if self.adjust_linked_slider(handle, direction) {
+                    return Ok(NavigationOutcome::Handled);
+                }
+                Ok(self
+                    .navigate_button(blocks, source, direction)?
+                    .map_or(NavigationOutcome::Unhandled, NavigationOutcome::Target))
+            }
+        }
+    }
+
+    fn adjust_linked_slider(&mut self, handle: u32, direction: usize) -> bool {
+        let ObjectState::Button(button) = &self.get(handle).unwrap().state else {
+            unreachable!()
+        };
+        let control = button.control.as_ref().unwrap();
+        let Some(handle) = self.lookup(&control.name, control.bank) else {
+            return false;
+        };
+        let ObjectState::Slider(slider) = &mut self.get_mut(handle).unwrap().state else {
+            return false;
+        };
+        slider.updates.range = false;
+        let axis = if slider.vertical != 0 { 0 } else { 2 };
+        let delta = if direction == axis {
+            -1
+        } else if direction == axis + 1 {
+            1
+        } else {
+            return false;
+        };
+        let next = slider.position.wrapping_add(delta);
+        if next < slider.range[0] || next > slider.range[1] {
+            return false;
+        }
+        slider.set_position(next, 1);
+        true
+    }
+
+    fn navigation_search(
+        &self,
+        blocks: &[fes::KeyBlock],
+        source: &fes::ObjectReference,
+        direction: usize,
+        controls: bool,
+    ) -> Result<Search> {
         let (dx, dy) = match direction {
             0 => (0, -1),
             1 => (0, 1),
@@ -92,13 +165,13 @@ impl Objects {
             _ => return Err(Error::new(0, "FES 导航方向超出 0～3")),
         };
         let Some(handle) = self.lookup(&source.name, source.bank) else {
-            return Ok(None);
+            return Ok(Search::Unhandled);
         };
         let ObjectState::Button(button) = &self.get(handle).unwrap().state else {
-            return Ok(None);
+            return Ok(Search::Unhandled);
         };
         if button.enabled == 0 || button.keyblock[0] < 0 {
-            return Ok(None);
+            return Ok(Search::Unhandled);
         }
         let [mut block, mut x, mut y] = button.keyblock;
         x = x.wrapping_add(dx);
@@ -149,10 +222,13 @@ impl Objects {
                     }
                 }
                 if let Some(object) = found {
-                    return Ok(Some(reference(object)));
+                    return Ok(Search::Target(reference(object)));
                 }
                 x = x.wrapping_add(dx);
                 y = y.wrapping_add(dy);
+            }
+            if controls && button.control.is_some() {
+                return Ok(Search::Control(handle));
             }
             let point = self.navigation_position(origin).map(|value| value as f32);
             let mut neighbor = grid.neighbors[direction];
@@ -183,7 +259,7 @@ impl Objects {
                 neighbor = grid.neighbors[direction];
             }
             let Some(object) = nearest else {
-                return Ok(None);
+                return Ok(Search::Unhandled);
             };
             let ObjectState::Button(button) = &object.state else {
                 unreachable!()

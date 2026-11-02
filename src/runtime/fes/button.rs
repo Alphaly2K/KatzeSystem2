@@ -24,6 +24,9 @@ impl<F: ObjectFactory> Store<'_, F> {
             return Ok(());
         };
         let object = objects.get(handle).unwrap();
+        if matches!(object.state, ObjectState::Slider(_)) {
+            return Err(Error::new(0, "FES SLIDER 配置装载与下层任务尚未接入"));
+        }
         let button = matches!(object.state, ObjectState::Button(_));
         if object.state.image().is_some() && record.image.is_none() {
             let wrapper = self.resources.images.create_empty(owner)?;

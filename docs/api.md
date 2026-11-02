@@ -96,9 +96,9 @@ FES 内部执行宏声明，初始化按以下顺序交给宿主：
 
 IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的转换结果实际改变时置位；空 FILE 或转换结果相同不置位。`frame_mapping_changed` 初始为 true，写入任何 ID 列也置为 true；下次有效 IDN 在编号变化或此标记为 true 时请求装载并清除此标记。首次 IDN=0 因此也请求装载。ID 列本身只更新映射，非法 IDN 保留待应用标记。直接修改公开映射后应同时设置 `frame_mapping_changed`；实际来源装载由运行时对象更新执行。
 
-`fes::ButtonState` 组合 IMAGE 状态与输入启用、默认事件组、四向目标、TYPE、KEYBLOCK 坐标和系统键。`apply(attributes, bank, transform_name)` 返回本次是否需要递归使后代失效；SIZE 变化另请求来源重建，ENABLE 保留原始值，变化时只标记按钮自身。TYPE 与 MASK 分别保存。默认事件组和方向目标各少于 32 字节。运行时已支持 BUTTON 装载创建、图像更新、输入区域、对象事件、网格导航与系统键分派；关联控件继续接入。
+`fes::ButtonState` 组合 IMAGE 状态与输入启用、默认事件组、四向目标、TYPE、KEYBLOCK 坐标和系统键。`apply(attributes, bank, transform_name)` 返回本次是否需要递归使后代失效；SIZE 变化另请求来源重建，ENABLE 保留原始值，变化时只标记按钮自身。TYPE 与 MASK 分别保存。默认事件组和方向目标各少于 32 字节。运行时已支持 BUTTON 装载创建、图像更新、输入区域、对象事件、网格导航、系统键分派与关联 SLIDER 的方向调整；控件媒体配置继续接入。
 
-`fes::SliderState` 提供 SLIDER 的初始化属性、原始范围／数值、矩形、方向、Alpha 和独立的 `SliderUpdates` 请求。`apply(attributes, bank)` 仅应用 FILE、PL、POS2、PRI、DISP、ENABLE，返回本次是否需要使后代失效；ENABLE 变化只标记自身。`set_range`／`set_position` 保留原始值和通知参数，不执行范围限制。运动接口只传递 Alpha，详见[SLIDER 属性核心](graphics.md#fes-slider-属性核心)。配置装载、下层任务和按钮关联继续接入，`Objects::define` 当前仍诊断 SLIDER 类型。
+`fes::SliderState` 提供 SLIDER 的初始化属性、原始范围／数值、矩形、方向、Alpha 和独立的 `SliderUpdates` 请求。`apply(attributes, bank)` 仅应用 FILE、PL、POS2、PRI、DISP、ENABLE，返回本次是否需要使后代失效；ENABLE 变化只标记自身。`set_range`／`set_position` 保留原始值和通知参数，不执行范围限制。运动接口只传递 Alpha，详见[SLIDER 属性核心](graphics.md#fes-slider-属性核心)。`Objects::define` 已接入这一类型，数值命令与 BUTTON 的反向关联导航可独立使用；配置装载、下层任务和绘制继续接入，运行时媒体准备与更新返回明确诊断。
 
 宿主完成请求后用 `resume` 确认，待确认请求重复返回，数量和属性表达式只计算一次。字符串表必须在初始化前准备好，缺失字符串可能使后续参数移动。宿主只应在具备对应实现时确认声明或属性请求。`return_value` 保存最近一次 `break` 的值；不带参数的 `break` 将它重置为 0。
 
@@ -108,7 +108,7 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 
 宿主处理初始化声明时，可调用一次 `Interpreter::keyblocks(state)` 解码焦点网格。返回 `Vec<KeyBlock>`，`size` 为横向／纵向按钮排列数，`neighbors` 按上、下、左、右保存离开网格后的目标块，−1 表示没有目标。该入口只读取第一段 KEYBLOCK；数量按整数前缀读取，零或负数得到空表。未写条目的尺寸为零、方向为 −1，重复行保留未给出的方向分量，越界编号的行跳过。按钮与网格位置的绑定以及实际键盘／手柄导航由宿主负责。
 
-`Interpreter::subcommands(state)` 返回 `SubcommandTable`，包含按命令名字节索引的绑定和逐行诊断。同名命令保留第一次定义，多个 SUBCOMMAND 段按顺序处理。每个绑定保存类别、原运动资源名、参数描述符及默认文本，以及 `MappedArgument` 映射。`Interpreter::subcommand_arguments(binding, arguments, context, state)` 将去除对象名／命令名的已展开参数换算为运动参数数组。`SubcommandContext` 由宿主按目标银行提供基点、位置、速度、弧度旋转、缩放和 ARGB 颜色；求值使用当前 FES 的局部与命名数值，`@` 为当前属性的整数值。参数编号越界返回诊断。低层解释器保留该宿主边界，Runtime 的 Scene 已提供 BASE 和三类图像对象的运动装载及调度。
+`Interpreter::subcommands(state)` 返回 `SubcommandTable`，包含按命令名字节索引的绑定和逐行诊断。同名命令保留第一次定义，多个 SUBCOMMAND 段按顺序处理。每个绑定保存类别、原运动资源名、参数描述符及默认文本，以及 `MappedArgument` 映射。`Interpreter::subcommand_arguments(binding, arguments, context, state)` 将去除对象名／命令名的已展开参数换算为运动参数数组。`SubcommandContext` 由宿主按目标银行提供基点、位置、速度、弧度旋转、缩放和 ARGB 颜色；求值使用当前 FES 的局部与命名数值，`@` 为当前属性的整数值。参数编号越界返回诊断。低层解释器保留该宿主边界，Runtime 的 Scene 已提供 BASE、SLIDER 和三类图像对象的运动装载及调度；SLIDER 使用默认上下文，Alpha 仅在运动属性块中传递。
 
 `run` 自动将已注册子命令发为 `Event::Subcommand(Box<SubcommandCall>)`。调用包含源码字节位置、对象与银行、绑定及已展开输入；银行 −1 表示整个数组，事件内的 `@` 对象引用解析为触发对象与银行。宿主逐个查找目标银行，提供各自的 `SubcommandContext`，调用 `subcommand_arguments` 后创建并插入运动任务，再用 `resume` 继续 FES。Runtime 首次使用绑定时调用资源服务的 mot 类别补全，并在场景内保留名称；场景存活期间应保持类别映射稳定。成功读取的运动程序在 Runtime 中按忽略大小写的完整名称缓存，实例拥有独立 VM 数据。资源缺失时跳过创建并继续脚本，读取错误保留当前银行的换算参数。基线两类绑定均以分组 0 入队。
 
@@ -323,7 +323,7 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 
 `Scene::keyblocks()` 查询装载时解码的第一段 KEYBLOCK；在 `prepare` 完成后使用。表的数值表达式只执行一次，后续同名声明不覆盖。`Objects::navigate_button(blocks, source, direction)` 提供无副作用的基础 BUTTON 网格选择，方向 0～3 为上／下／左／右，返回可选目标名称和银行。缺失目标、非 BUTTON、零 ENABLE 或负网格号返回 None；无效方向、越界网格号或搜索超过查询上限返回诊断。选择保留基线的名称顺序、水平查找和距离规则，KEY_* 配置不参与此版本的选择，详见[焦点网格](fes.md#焦点网格)。
 
-`Services::navigate_button(scene, source, direction)` 默认调用上述基础选择，返回 `NavigationOutcome::Target(reference)` 或 `Unhandled`；专属控件服务也可返回 `Handled` 表示已消费方向输入。当前库尚未提供关联滑动控件。FesObject 负责起点命中、默认焦点回退、方向命名值、输入 139 移动请求和媒体刷新；成功导航跳过默认 95 响应，实际焦点事件由后续输入更新产生。命中、坐标和失败续跑规则见[方向输入](graphics.md#fes-方向输入与指针定位)。
+`Objects::navigate_button_with_controls(blocks, source, direction)` 在当前网格没有目标时先调整 BUTTON 关联的 SLIDER，成功返回 `NavigationOutcome::Handled`；否则继续相邻网格选择，返回 `Target(reference)` 或 `Unhandled`。`Services::navigate_button(scene, source, direction)` 默认使用这一入口。`ButtonState::set_control(Some(reference))` 保存名称／银行，None 解除关联，脚本 `attach` 使用同一状态；目标查找推迟到导航时。范围请求消费和方向规则见 [SLIDER](graphics.md#fes-slider-属性核心)。FesObject 负责起点命中、默认焦点回退、方向命名值、输入 139 移动请求和媒体刷新；成功导航跳过默认 95 响应，实际焦点事件由后续输入更新产生。命中、坐标和失败续跑规则见[方向输入](graphics.md#fes-方向输入与指针定位)。
 
 FesObject 的通用按下键槽按媒体声明顺序扫描当前启用的 SYSKEY 匹配按钮，逐个分派 PUSH_L；重复声明保留，后续记录读取处理器修改后的属性。至少一个对象自身处理器存在时跳过默认响应，DEFAULT 单独存在仍响应。释放使用保存的按下目标，不扫描 SYSKEY；扫描游标与当前处理器支持预算和错误续跑，详见[系统键分派](graphics.md#fes-系统键分派)。
 
@@ -331,7 +331,7 @@ FesObject 的通用按下键槽按媒体声明顺序扫描当前启用的 SYSKEY
 
 `Runtime::dispatch_fes_event(owner, &mut scene, target, event)` 分派控制器输入事件。`target` 为可选 `ObjectReference`；事件编号为 0～21，其中 0／1／2／3／4／5／8／21 分别对应 FOCUS／UNFOCUS／PUSH_L／PUSH_R／RELEASE_L／RELEASE_R／SCRL_P／TOUCH，其余编号只更新系统输入命名值。命中目标时，系统按下、方向释放和触碰值使用对象句柄；无目标为 −1，缺失目标跳过写入，左右点击释放仍为零。返回 `None` 表示预算耗尽，须以相同目标和编号续跑；`Some(bool)` 表示完成，布尔值只取对象自身处理器是否存在，默认事件组单独执行时为 false。该入口执行对象命令并可加入运动，不在分派末尾自动刷新媒体，不修改任务时钟或系统帧。局部 wait／decode 结束当前处理片段，decode 的媒体提交请求留到普通更新；DEFAULT 片段结束后仍可进入对象自身处理器。exit 另将通知排队；主等待、调用及 next 规则与解释器一致。失败时保留游标，普通更新、系统块和其他对象事件须待本次完成。
 
-`runtime::fes::Objects::new(handles)` 为一份 FES 建立独立的对象存储，并登记 `_TOPOBJ_` 银行 0 的根 BASE 对象；与 Runtime 组合时传入 `runtime.host().handle_allocator()`。FES 对象标识来自共享不透明编号源，与任务编号分别使用。`define(&definition)` 接受有效的非零银行数，返回此次新创建的全部标识；目前支持 BASE、CIMAGE、IMAGE、BUTTON、CPLANE 和 PLANE，其他类型返回诊断。名称限定为 1～31 个非零 ASCII 字节。`get`／`get_mut` 查询实际对象及 `ObjectState`，`len` 包括根及重复声明的未绑定对象。`update_order()` 按声明及银行顺序查询当前绑定，保留重复记录并跳过缺失银行；新声明占据银行空洞后，旧记录也会解析到新绑定。
+`runtime::fes::Objects::new(handles)` 为一份 FES 建立独立的对象存储，并登记 `_TOPOBJ_` 银行 0 的根 BASE 对象；与 Runtime 组合时传入 `runtime.host().handle_allocator()`。FES 对象标识来自共享不透明编号源，与任务编号分别使用。`define(&definition)` 接受有效的非零银行数，返回此次新创建的全部标识；目前支持 BASE、CIMAGE、IMAGE、BUTTON、CPLANE、PLANE 和 SLIDER，其他类型返回诊断。SLIDER 仅接入状态、数值命令、运动和关联导航，媒体准备仍返回诊断。名称限定为 1～31 个非零 ASCII 字节。`get`／`get_mut` 查询实际对象及 `ObjectState`，`len` 包括根及重复声明的未绑定对象。`update_order()` 按声明及银行顺序查询当前绑定，保留重复记录并跳过缺失银行；新声明占据银行空洞后，旧记录也会解析到新绑定。
 
 `lookup(name, bank)` 精确查找名称／银行，缺失返回 None；−1 在这里不展开数组。重复 DEFINE 仍创建对象，但已有银行保留原绑定，新银行取得各自的首次绑定；`count(name)` 始终保留首次登记的数组数量。创建完成后先调用 `publish_bindings(&mut interpreter)`，再确认事件；该入口同步对象命名值和解释器的数组数量，保留其他系统命名值。删除后同样需要同步。显式银行可访问超出首次数量的新绑定，省略银行号的数组展开继续使用首次数量。
 
@@ -347,7 +347,7 @@ BUTTON 先通过 `prepare_fes_scene` 或任务 338 完成下层创建，再由�
 
 FES IMAGE 的 `IDN=−1` 接收完整名称的原始来源，不受 PATHMODE 影响；`Object::raw_image_handle` 返回其非持有查询句柄，零表示没有来源。像素和原始数据独立保留，登记优先使用像素；普通装载缺帧后可退回旧原始来源。FES 持有的数据随替换、对象删除或所属任务实际回收释放，列表已经解码的帧继续存活。原始来源登记以当前更新记录的包装保存来源身份，可用 308 反查；具体几何和槽号规则见[原始来源更新](graphics.md#fes-image-原始来源更新)。
 
-`Objects::dispatch_object_command(interpreter, line, state)` 消费 `disp`／`size`／`keypos`／`setid`／`getid`／`enable`／`pri`／`pos2`／`delay`／`ismot`，返回 true 后调用者确认事件，其他命令返回 false。目标银行与数值参数使用 FES 自身的局部／命名值作用域；图形修改延后到对象更新，`getid` 即时写入共享变量编号。Scene 的普通推进和系统块自动调用；缺失目标的整行表达式回退、非 IMAGE 的编号查询返回诊断。类型、缺省值、数组停止规则和资源时点见[对象控制命令](graphics.md#fes-对象控制命令)。
+`Objects::dispatch_object_command(interpreter, line, state)` 消费 `disp`／`size`／`keypos`／`setid`／`getid`／`enable`／`pri`／`pos2`／`delay`／`ismot`／`attach`，以及 SLIDER 的 `pos`／`page`／`getpos`／`load`，返回 true 后调用者确认事件，其他命令返回 false。目标银行与数值参数使用 FES 自身的局部／命名值作用域；图形修改延后到对象更新，`getid` 即时写入共享变量编号。Scene 的普通推进和系统块自动调用；缺失目标的整行表达式回退、非 IMAGE 的编号查询返回诊断。类型、缺省值、数组停止规则和资源时点见[对象控制命令](graphics.md#fes-对象控制命令)。
 
 Scene 消费 `keyskip` 并即时更新等待取消模式，`forced_key_skip()` 查询保存的 force 标志；它与当前输入模式分别维护，完整规则见[等待取消](graphics.md#fes-等待取消与-keyskip)。
 
