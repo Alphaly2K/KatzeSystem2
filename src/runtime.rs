@@ -22,6 +22,7 @@ mod message;
 mod object;
 mod resources;
 mod root;
+mod save;
 
 use resources::Resources;
 
@@ -590,6 +591,11 @@ fn run_nested<F: ObjectFactory>(
         },
     ) = (running.get(&target), &mut execution)
     {
+        if *kind == kind::ORDINARY && command.code == 177 {
+            save::query_shared_numbers(task.deleted, buffers)?;
+            **propagate = false;
+            return Ok(());
+        }
         if *kind == kind::PLANE && matches!(command.code, 61 | 62) {
             if !task.deleted {
                 crate::graphics::query_geometry(&resources.drawables, target, command, buffers)?;
@@ -1490,6 +1496,9 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
     }
 
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn> {
+        if index == 250 {
+            return self.restore_shared_record(arguments, vm);
+        }
         if index == 400 {
             return self.load_sound_loop_table(arguments, vm);
         }

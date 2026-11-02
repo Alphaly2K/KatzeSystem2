@@ -264,6 +264,22 @@ impl TaskObject for OrdinaryObject {
             .dispatch_control(kind, command, output, &mut host, budget)
     }
 
+    fn dispatch_command_with_buffers(
+        &mut self,
+        kind: u32,
+        command: &Command,
+        buffers: &mut CommandBuffers<'_>,
+        output: &mut u32,
+        host: &mut dyn Host,
+        budget: usize,
+    ) -> Result<CommandOutcome> {
+        if command.code == 177 {
+            super::save::query_shared_numbers(self.task.control.deletion_requested != 0, buffers)?;
+            return Ok(CommandOutcome::finished(false));
+        }
+        self.dispatch_command(kind, command, output, host, budget)
+    }
+
     fn enqueue_message(&mut self, message: [u32; 4]) -> Result<()> {
         self.task.enqueue_message(message)
     }

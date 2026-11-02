@@ -14,6 +14,7 @@ pub struct Command {
 /// 命令 `data[0]`／`data[1]` 所引用的可移植缓冲区；原 DWORD 不作为宿主指针解引用。
 ///
 /// 缓冲区由调用者持有，并在同一次树分派的各个接收者之间保留修改。
+/// 普通对象的 177 在 data1 写四字节可用标记，非零选择当前运行时的共享数值区。
 #[derive(Default)]
 pub struct CommandBuffers<'a> {
     pub data0: Option<&'a mut [u8]>,

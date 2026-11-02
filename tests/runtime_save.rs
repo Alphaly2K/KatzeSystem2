@@ -250,3 +250,97 @@ fn data_natives_preserve_null_paths_and_validate_vm_spans_handles_and_services()
         "宿主未配置存档读取服务"
     );
 }
+
+struct RestorePrograms;
+impl ProgramLoader for RestorePrograms {
+    fn load(&mut self, name: &[u8]) -> Result<Option<Program>> {
+        let mut code = Vec::new();
+        let mut data = vec![0; 128];
+        data[64..71].copy_from_slice(b"1234567");
+        if name == b"restore" {
+            push(&mut code, 99);
+            native(&mut code, 238, 1);
+            store(&mut code, 0);
+            for (id, length) in [(9, 7), (10, 0)] {
+                load(&mut code, 0);
+                for value in [id, length, 64] {
+                    push(&mut code, value);
+                }
+                native(&mut code, 244, 4);
+                ins(&mut code, 0x2d, &[]);
+            }
+            for (index, (record, target, start)) in [
+                (9, 1, 2),
+                (9, 2, 0),
+                (9, 1, 4),
+                (10, 1, 1),
+                (8, 1, 0),
+                (9, 0, 0),
+                (9, 999, 0),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                load(&mut code, 0);
+                for value in [record, target, start] {
+                    push(&mut code, value);
+                }
+                native(&mut code, 250, 4);
+                store(&mut code, 4 + index as u32 * 4);
+            }
+            push(&mut code, 1);
+            native(&mut code, 67, 1);
+            load(&mut code, 0);
+            for value in [9, 1, 1] {
+                push(&mut code, value);
+            }
+            native(&mut code, 250, 4);
+            store(&mut code, 32);
+            push(&mut code, 0);
+            native(&mut code, 250, 1);
+            store(&mut code, 36);
+            for value in [0xdead_beef, 9, 999, 0] {
+                push(&mut code, value);
+            }
+            native(&mut code, 250, 4);
+            store(&mut code, 40);
+        } else {
+            assert_eq!(name, b"idle");
+        }
+        ins(&mut code, 0x3b, &[]);
+        Ok(Some(Program::from_code(&code, data, 256)?))
+    }
+}
+
+#[test]
+fn restore_queries_idle_and_running_tasks_and_copies_whole_values_with_clipping() {
+    for budget in [1, 4096] {
+        let mut numbers = State::new(4);
+        numbers.shared.copy_from_slice(&[11, 22, 33, 44]);
+        numbers.local[0] = 55;
+        numbers.strings.insert(7, b"keep".to_vec());
+        let mut rt = Runtime::new(
+            0,
+            kind::ROOT,
+            Box::new(BaseObject::new()),
+            numbers,
+            KcsFactory::new(RestorePrograms),
+        );
+        rt.set_budget(budget, 1 << 20);
+        assert_eq!(rt.create(0, kind::ORDINARY, b"idle", b"").unwrap(), 1);
+        let task = rt.create(0, kind::ORDINARY, b"restore", b"").unwrap();
+        assert_eq!(task, 2);
+        rt.update(0, 0).unwrap();
+        let vm = rt.object(task).unwrap().interpreter().unwrap();
+        let results: Vec<_> = vm
+            .read(4, 40)
+            .unwrap()
+            .chunks_exact(4)
+            .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
+            .collect();
+        assert_eq!(results, [1, 1, 1, 1, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(rt.numbers().shared, [0x3433_3231, 22, 0x3433_3231, 44]);
+        assert_eq!(rt.numbers().local[0], 55);
+        assert_eq!(rt.numbers().strings[&7], b"keep");
+    }
+}
