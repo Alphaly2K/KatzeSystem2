@@ -55,12 +55,14 @@ pub struct HostState {
     pub message_time_scale: Option<u32>,
     pub message_defaults: Option<crate::message::MessageDefaults>,
     pub system_settings: Option<crate::settings::SystemSettings>,
+    pub save_services: Option<Box<dyn crate::save::SaveServices>>,
     /// 外层输入宿主提供的当前逻辑画布坐标；保留画布外的值。
     pub pointer_position: [i32; 2],
     pub memory_copy_mode: MemoryCopyMode,
     pub random: ScriptRandom,
     integer_maps: BTreeMap<u32, BTreeMap<Vec<u8>, u32>>,
     sequence_maps: BTreeMap<u32, super::sequences::SequenceMap>,
+    pub(super) containers: BTreeMap<u32, crate::save::DataContainer>,
     handles: HandleAllocator,
 }
 
@@ -75,6 +77,13 @@ impl HostState {
 
     pub fn handle_allocator(&self) -> HandleAllocator {
         self.handles.clone()
+    }
+
+    /// 借用脚本创建或装载的数据容器，存活至 246 释放或宿主销毁。
+    pub fn data_container(&self, handle: u32) -> Result<&crate::save::DataContainer> {
+        self.containers
+            .get(&handle)
+            .ok_or_else(|| Error::new(0, "KCS 数据容器句柄无效"))
     }
 
     /// 保存任务时钟供 native 5 查询；不修改平台或其他状态。
@@ -180,6 +189,9 @@ pub(crate) fn call_native(
     arguments: &[u8],
     vm: &mut Interpreter,
 ) -> Result<NativeReturn> {
+    if matches!(index, 238 | 244 | 246..=248 | 254 | 389 | 469) {
+        return super::data::call(host, index, arguments, vm);
+    }
     if matches!(index, 359 | 360) {
         let count = if index == 359 { 4 } else { 3 };
         if arguments.len() != count * 4 {

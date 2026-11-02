@@ -1,0 +1,252 @@
+use katze_system2::{
+    Result,
+    expression::State,
+    kcs::{CoreHost, Host, Interpreter, NativeReturn, Program},
+    runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, kind},
+    save::SaveServices,
+};
+use std::{cell::RefCell, io::Write, rc::Rc};
+
+type Requests = Rc<RefCell<Vec<(u32, Vec<u8>)>>>;
+
+struct Saves(Requests);
+impl SaveServices for Saves {
+    fn read(&mut self, task: u32, name: &[u8]) -> Result<Option<Vec<u8>>> {
+        self.0.borrow_mut().push((task, name.to_vec()));
+        assert_eq!(name, b"slot-7.css");
+        let mut compressed =
+            flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
+        compressed
+            .write_all(
+                &[7u32, 6]
+                    .into_iter()
+                    .flat_map(u32::to_le_bytes)
+                    .collect::<Vec<_>>(),
+            )
+            .unwrap();
+        compressed.write_all(b"abcdEF").unwrap();
+        compressed
+            .write_all(
+                &[7u32, 4]
+                    .into_iter()
+                    .flat_map(u32::to_le_bytes)
+                    .collect::<Vec<_>>(),
+            )
+            .unwrap();
+        compressed.write_all(b"rest").unwrap();
+        let bytes = compressed.finish().unwrap();
+        let mut file = b"CSS\0".to_vec();
+        file.extend(
+            [bytes.len() as u32, 26, 0xfedc_ba98]
+                .into_iter()
+                .flat_map(u32::to_le_bytes),
+        );
+        file.extend(bytes);
+        Ok(Some(file))
+    }
+}
+
+fn ins(code: &mut Vec<u8>, opcode: u8, args: &[u32]) {
+    code.push(opcode);
+    for n in args {
+        code.push(3);
+        code.extend(n.to_le_bytes());
+    }
+}
+fn push(code: &mut Vec<u8>, n: u32) {
+    ins(code, 0x25, &[n]);
+}
+fn load(code: &mut Vec<u8>, address: u32) {
+    code.extend([0x25, 0x13]);
+    code.extend(address.to_le_bytes());
+}
+fn native(code: &mut Vec<u8>, n: u32, count: u32) {
+    ins(code, 0x2b, &[n, count * 4]);
+}
+fn store(code: &mut Vec<u8>, address: u32) {
+    ins(code, 0x26, &[address]);
+}
+
+struct Programs;
+impl ProgramLoader for Programs {
+    fn load(&mut self, name: &[u8]) -> Result<Option<Program>> {
+        let mut code = Vec::new();
+        let mut data = vec![0; 128];
+        data[48..52].copy_from_slice(&7u32.to_le_bytes());
+        data[64..81].copy_from_slice(b"slot-%d[G48].css\0");
+        if name == b"load" {
+            push(&mut code, 64);
+            native(&mut code, 247, 1);
+            store(&mut code, 0);
+            load(&mut code, 0);
+            native(&mut code, 248, 1);
+            store(&mut code, 4);
+            native(&mut code, 419, 0);
+            store(&mut code, 8);
+            load(&mut code, 0);
+            for n in [7, 88, 4] {
+                push(&mut code, n);
+            }
+            native(&mut code, 254, 4);
+            store(&mut code, 12);
+            push(&mut code, 0xfeed_face);
+            load(&mut code, 0);
+            push(&mut code, 7);
+            native(&mut code, 469, 2);
+            store(&mut code, 16);
+            load(&mut code, 0);
+            for n in [7, 96, 8] {
+                push(&mut code, n);
+            }
+            native(&mut code, 254, 4);
+            store(&mut code, 20);
+        } else {
+            assert_eq!(name, b"consume");
+            load(&mut code, 0);
+            native(&mut code, 389, 1);
+            store(&mut code, 24);
+            load(&mut code, 0);
+            native(&mut code, 248, 1);
+            store(&mut code, 28);
+            load(&mut code, 0);
+            native(&mut code, 246, 1);
+            push(&mut code, 64);
+            native(&mut code, 238, 1);
+            store(&mut code, 32);
+        }
+        ins(&mut code, 0x3b, &[]);
+        Ok(Some(Program::from_code(&code, data, 256)?))
+    }
+}
+
+#[test]
+fn runtime_loads_named_css_and_keeps_containers_until_explicit_release_across_tasks() {
+    for budget in [1, 4096] {
+        let requests = Requests::default();
+        let mut rt = Runtime::new(
+            0,
+            kind::ROOT,
+            Box::new(BaseObject::new()),
+            State::new(0),
+            KcsFactory::new(Programs),
+        );
+        rt.set_budget(budget, 1 << 20);
+        rt.set_save_services(Saves(requests.clone()));
+        let producer = rt.create(0, kind::ORDINARY, b"load", b"").unwrap();
+        rt.update(0, 0).unwrap();
+        let vm = rt.object(producer).unwrap().interpreter().unwrap();
+        let values: Vec<_> = vm
+            .read(0, 24)
+            .unwrap()
+            .chunks_exact(4)
+            .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
+            .collect();
+        let handle = values[0];
+        assert_ne!(handle, 0);
+        assert_ne!(handle, values[2]);
+        assert_eq!(
+            (values[1], values[3], values[4], values[5]),
+            (0xfedc_ba98, 4, 0xfeed_face, 4)
+        );
+        assert_eq!(vm.read(88, 4).unwrap(), b"abcd");
+        assert_eq!(vm.read(96, 4).unwrap(), b"rest");
+        assert!(rt.host().data_container(values[2]).is_err());
+        assert!(rt.images().get(handle).is_err());
+        rt.destroy(producer).unwrap();
+        rt.update(1, 0).unwrap();
+        assert_eq!(
+            rt.host().data_container(handle).unwrap().record(7).unwrap(),
+            Some(b"rest".as_slice())
+        );
+        rt.set_save_services(Saves(requests.clone()));
+        let consumer = rt.create(0, kind::ORDINARY, b"consume", b"").unwrap();
+        rt.object_mut(consumer)
+            .unwrap()
+            .interpreter_mut()
+            .unwrap()
+            .write(0, &handle.to_le_bytes())
+            .unwrap();
+        rt.update(2, 0).unwrap();
+        let vm = rt.object(consumer).unwrap().interpreter().unwrap();
+        let values: Vec<_> = vm
+            .read(24, 12)
+            .unwrap()
+            .chunks_exact(4)
+            .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
+            .collect();
+        assert_eq!(&values[..2], &[1, 0xfedc_ba98]);
+        assert!(values[2] > handle);
+        assert!(rt.host().data_container(handle).is_err());
+        assert_eq!(rt.host().data_container(values[2]).unwrap().tag(), 64);
+        assert_eq!(*requests.borrow(), [(producer, b"slot-7.css".to_vec())]);
+    }
+}
+
+#[test]
+fn data_natives_preserve_null_paths_and_validate_vm_spans_handles_and_services() {
+    let mut state = State::new(0);
+    let mut host = CoreHost::new(&mut state);
+    let mut vm =
+        Interpreter::new(Program::from_code(&[], vec![0; 32], 32).unwrap(), vec![]).unwrap();
+    fn call(
+        host: &mut impl Host,
+        vm: &mut Interpreter,
+        index: u32,
+        args: &[u32],
+    ) -> Result<NativeReturn> {
+        host.call(
+            index,
+            &args
+                .iter()
+                .flat_map(|n| n.to_le_bytes())
+                .collect::<Vec<_>>(),
+            vm,
+        )
+    }
+    for index in [244, 248, 254, 389] {
+        assert_eq!(
+            call(&mut host, &mut vm, index, &[0]).unwrap(),
+            NativeReturn::Value(0)
+        );
+    }
+    for index in [246, 469] {
+        assert_eq!(
+            call(&mut host, &mut vm, index, &[0]).unwrap(),
+            NativeReturn::Continue
+        );
+    }
+    let NativeReturn::Value(handle) = call(&mut host, &mut vm, 238, &[99]).unwrap() else {
+        panic!()
+    };
+    vm.write(0, b"zero").unwrap();
+    assert_eq!(
+        call(&mut host, &mut vm, 244, &[handle, 7, 4, 0]).unwrap(),
+        NativeReturn::Value(1)
+    );
+    assert_eq!(
+        call(&mut host, &mut vm, 244, &[handle, 8, 0, u32::MAX]).unwrap(),
+        NativeReturn::Value(0)
+    );
+    assert_eq!(
+        call(&mut host, &mut vm, 254, &[handle, 7, u32::MAX, 4]).unwrap(),
+        NativeReturn::Value(0)
+    );
+    assert_eq!(
+        call(&mut host, &mut vm, 254, &[handle, 8, u32::MAX, 4]).unwrap(),
+        NativeReturn::Value(0)
+    );
+    assert_eq!(
+        call(&mut host, &mut vm, 254, &[handle, 7, 8, 3]).unwrap(),
+        NativeReturn::Value(3)
+    );
+    assert_eq!(vm.read(8, 4).unwrap(), b"zer\0");
+    assert!(call(&mut host, &mut vm, 254, &[handle, 7, 63, 4]).is_err());
+    assert!(call(&mut host, &mut vm, 244, &[handle, 7, 4, 63]).is_err());
+    call(&mut host, &mut vm, 246, &[handle]).unwrap();
+    assert!(call(&mut host, &mut vm, 248, &[handle]).is_err());
+    vm.write(0, b"slot.css\0").unwrap();
+    assert_eq!(
+        call(&mut host, &mut vm, 247, &[0]).unwrap_err().message,
+        "宿主未配置存档读取服务"
+    );
+}

@@ -1,6 +1,7 @@
 use crate::{Error, Result, Step, read};
 use std::collections::BTreeMap;
 
+mod data;
 mod host;
 mod matrix;
 mod memory;
