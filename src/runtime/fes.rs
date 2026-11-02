@@ -2,7 +2,7 @@
 
 use crate::fes::{
     ButtonState, CImageState, CPlaneState, ImageState, ObjectDefinition, ObjectInitialization,
-    ObjectReference, PlaneState, SliderState,
+    ObjectReference, PlaneState, Scroll2State, SliderState,
 };
 use crate::{Error, HandleAllocator, Result, read};
 use std::collections::{BTreeMap, BTreeSet};
@@ -63,6 +63,7 @@ pub enum ObjectState {
     CPlane(Box<CPlaneState>),
     Plane(Box<PlaneState>),
     Slider(Box<SliderState>),
+    Scroll2(Box<Scroll2State>),
 }
 
 impl ObjectState {
@@ -75,6 +76,7 @@ impl ObjectState {
             Self::CPlane(_) => "CPLANE",
             Self::Plane(_) => "PLANE",
             Self::Slider(_) => "SLIDER",
+            Self::Scroll2(_) => "SCROLL2",
         }
     }
 
@@ -87,6 +89,7 @@ impl ObjectState {
             "CPLANE" => Self::CPlane(Box::default()),
             "PLANE" => Self::Plane(Box::default()),
             "SLIDER" => Self::Slider(Box::default()),
+            "SCROLL2" => Self::Scroll2(Box::default()),
             _ => return Err(Error::new(0, format!("FES 对象类型 {kind} 尚未接入"))),
         })
     }
@@ -141,16 +144,18 @@ impl ObjectState {
         }
     }
 
-    fn slider(&self) -> Option<&SliderState> {
+    fn control(&self) -> Option<&SliderState> {
         match self {
             Self::Slider(state) => Some(state),
+            Self::Scroll2(state) => Some(&state.control),
             _ => None,
         }
     }
 
-    fn slider_mut(&mut self) -> Option<&mut SliderState> {
+    fn control_mut(&mut self) -> Option<&mut SliderState> {
         match self {
             Self::Slider(state) => Some(state),
+            Self::Scroll2(state) => Some(&mut state.control),
             _ => None,
         }
     }
@@ -524,6 +529,9 @@ impl Objects {
                 ObjectState::Slider(state) => {
                     state.apply(&initialization.attributes, bank as u32)?
                 }
+                ObjectState::Scroll2(state) => state
+                    .control
+                    .apply(&initialization.attributes, bank as u32)?,
             };
             if dirty {
                 self.invalidate(handle)?;
@@ -546,7 +554,7 @@ impl Objects {
             if let Some(state) = object.state.image_mut() {
                 state.updates.invalidate();
             }
-            if let ObjectState::Slider(state) = &mut object.state {
+            if let Some(state) = object.state.control_mut() {
                 state.updates.dirty = true;
             }
             pending.extend(object.children.iter().copied());

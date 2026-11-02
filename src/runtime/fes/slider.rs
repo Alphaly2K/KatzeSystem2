@@ -85,9 +85,9 @@ impl<F: ObjectFactory> Store<'_, F> {
         let task = object
             .task_id
             .ok_or_else(|| Error::new(0, "FES SLIDER 尚未完成装载准备"))?;
-        if object.state.slider().unwrap().updates.file {
+        if object.state.control().unwrap().updates.file {
             let list = self.check_fes_image_list(owner, objects)?;
-            let state = objects.get(handle).unwrap().state.slider().unwrap();
+            let state = objects.get(handle).unwrap().state.control().unwrap();
             let mut offset = [0; 2];
             if let Some(plane) = objects.lookup(&state.plane.name, state.plane.bank) {
                 if matches!(objects.get(plane).unwrap().state, ObjectState::Plane(_)) {
@@ -104,7 +104,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                     .get_mut(handle)
                     .unwrap()
                     .state
-                    .slider_mut()
+                    .control_mut()
                     .unwrap()
                     .updates
                     .metadata = false;
@@ -114,7 +114,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                     .get_mut(handle)
                     .unwrap()
                     .state
-                    .slider_mut()
+                    .control_mut()
                     .unwrap()
                     .set_rectangle([
                         position[0],
@@ -123,7 +123,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                         position[1].wrapping_add(size[1]),
                     ]);
             }
-            let state = objects.get(handle).unwrap().state.slider().unwrap();
+            let state = objects.get(handle).unwrap().state.control().unwrap();
             let name = self
                 .resources
                 .services
@@ -152,11 +152,21 @@ impl<F: ObjectFactory> Store<'_, F> {
             }
             self.slider_command(owner, task, 365, [0, 0, 1], Some(&mut config))?;
             let direction = self.slider_command(owner, task, 370, [0, 0, 1], Some(&mut config))?;
-            let state = objects.get_mut(handle).unwrap().state.slider_mut().unwrap();
+            let state = objects
+                .get_mut(handle)
+                .unwrap()
+                .state
+                .control_mut()
+                .unwrap();
             state.vertical = direction as i32;
             state.updates.file = false;
         }
-        let state = objects.get_mut(handle).unwrap().state.slider_mut().unwrap();
+        let state = objects
+            .get_mut(handle)
+            .unwrap()
+            .state
+            .control_mut()
+            .unwrap();
         if state.updates.range {
             state.updates.range = false;
             let mut range = state.range.map(i32::to_le_bytes).concat();
@@ -172,30 +182,46 @@ impl<F: ObjectFactory> Store<'_, F> {
         handle: u32,
         task: u32,
     ) -> Result<()> {
-        let state = objects.get_mut(handle).unwrap().state.slider_mut().unwrap();
+        let state = objects
+            .get_mut(handle)
+            .unwrap()
+            .state
+            .control_mut()
+            .unwrap();
         if state.updates.alpha {
             state.updates.alpha = false;
             self.slider_command(owner, task, 371, [0, state.alpha, 1], None)?;
         }
-        let state = objects.get(handle).unwrap().state.slider().unwrap();
+        let state = objects.get(handle).unwrap().state.control().unwrap();
         if state.updates.dirty {
             self.slider_command(owner, task, 367, [0, state.enabled as u32, 1], None)?;
-            let display = objects.get(handle).unwrap().state.slider().unwrap().display;
+            let display = objects
+                .get(handle)
+                .unwrap()
+                .state
+                .control()
+                .unwrap()
+                .display;
             self.slider_command(owner, task, 366, [0, display as u32, 1], None)?;
             objects
                 .get_mut(handle)
                 .unwrap()
                 .state
-                .slider_mut()
+                .control_mut()
                 .unwrap()
                 .updates
                 .dirty = false;
         }
-        let state = objects.get_mut(handle).unwrap().state.slider_mut().unwrap();
+        let state = objects
+            .get_mut(handle)
+            .unwrap()
+            .state
+            .control_mut()
+            .unwrap();
         if state.updates.frames {
             state.updates.frames = false;
             for index in 0..4 {
-                let frame = objects.get(handle).unwrap().state.slider().unwrap().frames[index];
+                let frame = objects.get(handle).unwrap().state.control().unwrap().frames[index];
                 self.slider_command(owner, task, 372, [index as u32, frame, 1], None)?;
             }
             self.slider_command(owner, task, 373, [0, 0, 1], None)?;
@@ -237,7 +263,12 @@ fn integer_position(value: f32) -> i32 {
 }
 
 fn position_request(objects: &mut Objects, handle: u32) -> Option<[u32; 3]> {
-    let state = objects.get_mut(handle).unwrap().state.slider_mut().unwrap();
+    let state = objects
+        .get_mut(handle)
+        .unwrap()
+        .state
+        .control_mut()
+        .unwrap();
     state.updates.position.then(|| {
         [
             std::mem::take(&mut state.notification) as u32,
@@ -252,7 +283,7 @@ fn finish_position(objects: &mut Objects, handle: u32) {
         .get_mut(handle)
         .unwrap()
         .state
-        .slider_mut()
+        .control_mut()
         .unwrap()
         .updates
         .position = false;

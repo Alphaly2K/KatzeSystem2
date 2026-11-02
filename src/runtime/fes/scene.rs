@@ -136,7 +136,7 @@ impl Scene {
             .get_mut(handle)
             .unwrap()
             .state
-            .slider_mut()
+            .control_mut()
             .ok_or_else(|| Error::new(0, "FES 滑块通知的名称绑定类型不匹配"))?;
         state.set_position(value, 0);
         Ok(true)
@@ -810,9 +810,9 @@ impl<F: ObjectFactory> Store<'_, F> {
                     };
                     let object = scene.objects.get(handle).unwrap();
                     let context = match &object.state {
-                        super::ObjectState::Base | super::ObjectState::Slider(_) => {
-                            fes::SubcommandContext::default()
-                        }
+                        super::ObjectState::Base
+                        | super::ObjectState::Slider(_)
+                        | super::ObjectState::Scroll2(_) => fes::SubcommandContext::default(),
                         state => state
                             .image()
                             .ok_or_else(|| Error::new(0, "FES 此对象类型的运动属性尚未接入"))?

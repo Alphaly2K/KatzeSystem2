@@ -358,6 +358,18 @@ BUTTON 的 `control` 独立保存可选名称／银行，`set_control` 或脚本
 
 原入口的三十二种回调修改组合、六十四次更新确认了上述顺序，包括内层位置／范围／Alpha／显示／启用修改及一次通知。常规合成回归串联 BUTTON 关联导航、真实下层滑块、FES 脚本与像素，并分别固定主等待和待完成命令的恢复。
 
+## FES SCROLL2 属性核心
+
+`fes::Scroll2State` 保存滑动控件通用状态 `control` 和独立页长 `page`；`ObjectState::Scroll2` 支持对象身份、银行、父子、初始化、数值命令和 Alpha 运动。通用状态与 SLIDER 的默认值及属性写入规则相同。`set_page(range, page)` 原样保存两项范围及页长，并请求范围更新，不裁剪位置或页长。
+
+初始化读取 FILE、PL、POS2、PRI、DISP 和 ENABLE。POS、SIZE、COLOR 与帧列不修改该对象的数值、矩形或帧表；PARENT 仍由对象存储先处理。运动传递区仅使用 DWORD 28 的 Alpha 高字节，每次回写都请求 Alpha 更新，位置、范围和页长独立保留。
+
+脚本 `page [min] [max] [page]` 保存三项数值；`pos`、`getpos`、`load`、`settbl`、`disp`、`enable` 和 `pri` 使用滑动控件对应规则。各数值参数按原顺序求值，`page`／`pos` 跳过中途缺失银行，`load` 在空洞处结束；多银行 getpos 省略银行时不求值目的编号。运行中的 pos2、size 和 keypos 不修改 SCROLL2 属性。动态 pl 与 BUTTON 关联导航的 SCROLL2 分支继续接入。
+
+本阶段只开放属性与脚本接口。完整运行时准备遇到 SCROLL2 返回下层任务尚未接入的诊断；类型 41 任务、媒体更新及同步父级通知尚待实现。
+
+一百个原命令输入中，九十三项已支持调用的完整对象状态与求值结果一致；四项 pl 和三项缺失起始银行保留既有诊断。四百四十二个初始化输入中，三百九十三项完成对照，四十九项非数值参数按现有整数解析规则拒绝。另六十四组状态写入及运动传递区一致。常规合成脚本固定页长、原始负位置、银行空洞、查询、装载求值次数和 Alpha 运动。
+
 ## FES 对象运动
 
 每个对象独立保存运动队列，BASE 的基准保持队列默认值，CIMAGE／IMAGE／BUTTON 使用二维图像属性布局，SLIDER 只捕获及回写 Alpha。`Objects::start_motion` 接收已装载的运动 KCS 和已换算参数，按分组零追加；delay 是相对该运动起点的开始偏移，起点由队列首次更新登记。当前 CPLANE／PLANE 的运动属性尚未接入，启动时返回诊断。

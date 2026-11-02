@@ -66,7 +66,8 @@ impl Objects {
             .get(handle)
             .ok_or_else(|| Error::new(0, "FES 对象标识无效"))?;
         if object.state.image().is_none()
-            && !matches!(object.state, ObjectState::Base | ObjectState::Slider(_))
+            && !matches!(object.state, ObjectState::Base)
+            && object.state.control().is_none()
         {
             return Err(Error::new(0, "FES 此对象类型的运动属性尚未接入"));
         }
@@ -75,7 +76,7 @@ impl Objects {
         if capture {
             if let Some(image) = object.state.image() {
                 object.motions.base_properties = image.motion_properties();
-            } else if let ObjectState::Slider(slider) = &object.state {
+            } else if let Some(slider) = object.state.control() {
                 object.motions.base_properties = slider.motion_properties();
             }
         }
@@ -181,7 +182,7 @@ impl Objects {
                     if image.apply_motion_properties(object.motions.properties()) {
                         self.invalidate(handle)?;
                     }
-                } else if let ObjectState::Slider(slider) = &mut object.state {
+                } else if let Some(slider) = object.state.control_mut() {
                     slider.apply_motion_properties(object.motions.properties());
                 }
             }

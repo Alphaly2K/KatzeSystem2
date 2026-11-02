@@ -24,6 +24,9 @@ impl<F: ObjectFactory> Store<'_, F> {
             return Ok(());
         };
         let object = objects.get(handle).unwrap();
+        if matches!(object.state, ObjectState::Scroll2(_)) {
+            return Err(Error::new(0, "FES SCROLL2 下层任务尚未接入"));
+        }
         let button = matches!(object.state, ObjectState::Button(_));
         let slider = matches!(object.state, ObjectState::Slider(_));
         if object.state.image().is_some() && record.image.is_none() {

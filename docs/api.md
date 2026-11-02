@@ -336,7 +336,9 @@ FesObject 的通用按下键槽按媒体声明顺序扫描当前启用的 SYSKEY
 
 `Services::dispatch_control_event(scene, target, event, budget)` 接收滑块的同步通知，默认委托普通事件入口。运行时在媒体命令返回前完成事件脚本，并保留回调对当前场景的修改；`decode` 等待中的主流程位置及调用栈在处理器结束后恢复。该入口不会自动刷新媒体，也不开放事件处理器内部再次分派事件。公开 `Runtime::dispatch_fes_event` 继续要求当前推进已经完成。
 
-`runtime::fes::Objects::new(handles)` 为一份 FES 建立独立的对象存储，并登记 `_TOPOBJ_` 银行 0 的根 BASE 对象；与 Runtime 组合时传入 `runtime.host().handle_allocator()`。FES 对象标识来自共享不透明编号源，与任务编号分别使用。`define(&definition)` 接受有效的非零银行数，返回此次新创建的全部标识；目前支持 BASE、CIMAGE、IMAGE、BUTTON、CPLANE、PLANE 和 SLIDER，其他类型返回诊断。SLIDER 已接入状态、数值命令、settbl 帧表、运动、关联导航及媒体准备／更新，父级输入通知及媒体更新中的同步回调均执行事件脚本。名称限定为 1～31 个非零 ASCII 字节。`get`／`get_mut` 查询实际对象及 `ObjectState`，`len` 包括根及重复声明的未绑定对象。`MediaRecord::kind()` 保存声明类型，`task_id()` 查询 BUTTON／SLIDER 下层编号；`Object::slider_task_ids()` 查询全部声明创建的滑块任务。`update_order()` 按声明及银行顺序查询当前绑定，保留重复记录并跳过缺失银行；新声明占据银行空洞后，旧记录也会解析到新绑定。
+`runtime::fes::Objects::new(handles)` 为一份 FES 建立独立的对象存储，并登记 `_TOPOBJ_` 银行 0 的根 BASE 对象；与 Runtime 组合时传入 `runtime.host().handle_allocator()`。FES 对象标识来自共享不透明编号源，与任务编号分别使用。`define(&definition)` 接受有效的非零银行数，返回此次新创建的全部标识；目前支持 BASE、CIMAGE、IMAGE、BUTTON、CPLANE、PLANE、SLIDER 和 SCROLL2 的对象状态，其他类型返回诊断。SLIDER 已接入状态、数值命令、settbl 帧表、运动、关联导航及媒体准备／更新，父级输入通知及媒体更新中的同步回调均执行事件脚本。名称限定为 1～31 个非零 ASCII 字节。`get`／`get_mut` 查询实际对象及 `ObjectState`，`len` 包括根及重复声明的未绑定对象。`MediaRecord::kind()` 保存声明类型，`task_id()` 查询 BUTTON／SLIDER 下层编号；`Object::slider_task_ids()` 查询全部声明创建的滑块任务。`update_order()` 按声明及银行顺序查询当前绑定，保留重复记录并跳过缺失银行；新声明占据银行空洞后，旧记录也会解析到新绑定。
+
+`fes::Scroll2State { control, page }` 在通用滑动属性之外保存独立页长；`set_page(range, page)` 请求范围更新。`ObjectState::Scroll2` 支持初始化、数值及帧表命令和 Alpha 运动，操作示例与参数规则见 [SCROLL2](graphics.md#fes-scroll2-属性核心)。类型 41 下层任务及媒体尚未接入，完整运行时准备返回诊断。
 
 `lookup(name, bank)` 精确查找名称／银行，缺失返回 None；−1 在这里不展开数组。重复 DEFINE 仍创建对象，但已有银行保留原绑定，新银行取得各自的首次绑定；`count(name)` 始终保留首次登记的数组数量。创建完成后先调用 `publish_bindings(&mut interpreter)`，再确认事件；该入口同步对象命名值和解释器的数组数量，保留其他系统命名值。删除后同样需要同步。显式银行可访问超出首次数量的新绑定，省略银行号的数组展开继续使用首次数量。
 

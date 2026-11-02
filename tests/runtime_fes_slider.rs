@@ -14,10 +14,11 @@ fn reference(name: &str, bank: i32) -> ObjectReference {
 }
 
 fn slider(objects: &Objects, handle: u32) -> &fes::SliderState {
-    let ObjectState::Slider(slider) = &objects.get(handle).unwrap().state else {
-        panic!()
-    };
-    slider
+    match &objects.get(handle).unwrap().state {
+        ObjectState::Slider(slider) => slider,
+        ObjectState::Scroll2(scroll) => &scroll.control,
+        _ => panic!(),
+    }
 }
 
 #[test]
@@ -117,7 +118,8 @@ fn slider_commands_keep_query_and_load_evaluation_distinct_across_bank_holes() {
 }
 
 #[test]
-fn slider_motion_uses_alpha_without_invalidating_descendants_or_replacing_numeric_state() {
+fn sliding_controls_motion_uses_alpha_without_invalidating_descendants_or_replacing_numeric_state()
+{
     let mut code = Vec::new();
     for (address, value) in [(0x8000_0018u32, 0xdeadbeefu32), (0x8000_0070, 0x81345678)] {
         code.push(0x15);
@@ -129,45 +131,49 @@ fn slider_motion_uses_alpha_without_invalidating_descendants_or_replacing_numeri
     }
     code.push(0x3b);
     let program = Program::from_code(&code, vec![], 32).unwrap();
-    for budget in [1, 4096] {
-        let mut objects = Objects::new(HandleAllocator::default()).unwrap();
-        let parent = objects
-            .define(&ObjectDefinition {
-                kind: "SLIDER",
-                name: "slider".into(),
-                banks: 1,
-            })
-            .unwrap()[0];
-        let child = objects
-            .define(&ObjectDefinition {
-                kind: "SLIDER",
-                name: "child".into(),
-                banks: 1,
-            })
-            .unwrap()[0];
-        objects.set_parent(child, Some(parent)).unwrap();
-        let ObjectState::Slider(state) = &mut objects.get_mut(parent).unwrap().state else {
-            panic!()
-        };
-        state.alpha = 0x1234;
-        state.range = [-4, 8];
-        state.position = 99;
-        objects
-            .start_motion(parent, program.clone(), &[], 0)
-            .unwrap();
-        let mut host = MotionHost::default();
-        while !objects.update_motions(7, &mut host, budget).unwrap() {}
-        let state = slider(&objects, parent);
-        assert_eq!(
-            (state.alpha, state.position, state.range),
-            (0x81, 99, [-4, 8])
-        );
-        assert!(state.updates.alpha);
-        assert!(!state.updates.dirty);
-        assert!(!slider(&objects, child).updates.dirty);
-        let properties = objects.get(parent).unwrap().motions().base_properties;
-        assert_eq!(properties[28], 0x34000000);
-        assert_eq!(properties[6], 0);
+    for kind in ["SLIDER", "SCROLL2"] {
+        for budget in [1, 4096] {
+            let mut objects = Objects::new(HandleAllocator::default()).unwrap();
+            let parent = objects
+                .define(&ObjectDefinition {
+                    kind,
+                    name: "slider".into(),
+                    banks: 1,
+                })
+                .unwrap()[0];
+            let child = objects
+                .define(&ObjectDefinition {
+                    kind,
+                    name: "child".into(),
+                    banks: 1,
+                })
+                .unwrap()[0];
+            objects.set_parent(child, Some(parent)).unwrap();
+            let state = match &mut objects.get_mut(parent).unwrap().state {
+                ObjectState::Slider(state) => state,
+                ObjectState::Scroll2(state) => &mut state.control,
+                _ => panic!(),
+            };
+            state.alpha = 0x1234;
+            state.range = [-4, 8];
+            state.position = 99;
+            objects
+                .start_motion(parent, program.clone(), &[], 0)
+                .unwrap();
+            let mut host = MotionHost::default();
+            while !objects.update_motions(7, &mut host, budget).unwrap() {}
+            let state = slider(&objects, parent);
+            assert_eq!(
+                (state.alpha, state.position, state.range),
+                (0x81, 99, [-4, 8])
+            );
+            assert!(state.updates.alpha);
+            assert!(!state.updates.dirty);
+            assert!(!slider(&objects, child).updates.dirty);
+            let properties = objects.get(parent).unwrap().motions().base_properties;
+            assert_eq!(properties[28], 0x34000000);
+            assert_eq!(properties[6], 0);
+        }
     }
 }
 

@@ -78,7 +78,7 @@ impl Objects {
             target.bank = 0;
         }
         if matches!(name, b"pos" | b"page" | b"getpos" | b"load") {
-            return self.dispatch_slider_value_command(
+            return self.dispatch_control_value_command(
                 interpreter,
                 line.offset,
                 &args,
@@ -163,7 +163,7 @@ impl Objects {
                     } else if let Some(plane) = object.state.plane_mut() {
                         dirty = plane.display != *value;
                         plane.display = *value;
-                    } else if let ObjectState::Slider(slider) = &mut object.state {
+                    } else if let Some(slider) = object.state.control_mut() {
                         slider.set_display(*value);
                         dirty = true;
                     }
@@ -201,7 +201,7 @@ impl Objects {
                     } else if let Some(plane) = object.state.plane_mut() {
                         plane.priority = *value;
                         dirty = true;
-                    } else if let ObjectState::Slider(slider) = &mut object.state {
+                    } else if let Some(slider) = object.state.control_mut() {
                         slider.set_priority(*value);
                     }
                 }
@@ -215,7 +215,7 @@ impl Objects {
                     if let ObjectState::Button(button) = &mut object.state {
                         button.image.base.updates.dirty |= button.enabled != *value;
                         button.enabled = *value;
-                    } else if let ObjectState::Slider(slider) = &mut object.state {
+                    } else if let Some(slider) = object.state.control_mut() {
                         slider.set_enabled(*value);
                     }
                 }
@@ -226,7 +226,7 @@ impl Objects {
                             image.frame_table_enabled = true;
                             image.frame_mapping_changed = true;
                         }
-                    } else if let ObjectState::Slider(slider) = &mut object.state {
+                    } else if let Some(slider) = object.state.control_mut() {
                         slider.set_frame(*index, *frame as u32);
                     }
                 }
@@ -244,7 +244,7 @@ impl Objects {
         Ok(true)
     }
 
-    fn dispatch_slider_value_command(
+    fn dispatch_control_value_command(
         &mut self,
         interpreter: &mut fes::Interpreter,
         offset: usize,
@@ -290,8 +290,14 @@ impl Objects {
                         .map_err(|error| Error::new(offset + error.offset, error.message))?;
                 }
             }
-            match &mut self.get_mut(handle).unwrap().state {
-                ObjectState::Slider(slider) => match name {
+            let object = &mut self.get_mut(handle).unwrap().state;
+            if name == b"page" {
+                if let ObjectState::Scroll2(scroll) = object {
+                    scroll.page = values[2];
+                }
+            }
+            if let Some(slider) = object.control_mut() {
+                match name {
                     b"pos" => slider.set_position(values[0], 0),
                     b"page" => slider.set_range([values[0], values[1]]),
                     b"getpos" => {
@@ -303,11 +309,9 @@ impl Objects {
                     }
                     b"load" => slider.set_file(args.get(2).map_or(b"", Vec::as_slice))?,
                     _ => unreachable!(),
-                },
-                ObjectState::Base => {}
-                _ => {
-                    return Err(Error::new(offset, "FES 此对象类型的数值或装载命令尚未接入"));
                 }
+            } else if !matches!(object, ObjectState::Base) {
+                return Err(Error::new(offset, "FES 此对象类型的数值或装载命令尚未接入"));
             }
         }
         Ok(true)
