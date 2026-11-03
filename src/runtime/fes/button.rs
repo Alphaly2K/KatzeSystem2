@@ -121,6 +121,7 @@ impl<F: ObjectFactory> Store<'_, F> {
             let priority = button.image.base.priority.wrapping_add(100) as u32;
             let enabled = button.enabled as u32;
             let mask = button.mask_type != 0;
+            let locked = button.position_lock != 0;
             let mut bytes = [
                 rectangle.left,
                 rectangle.top,
@@ -133,7 +134,9 @@ impl<F: ObjectFactory> Store<'_, F> {
                 let mut registration = bytes.clone();
                 registration.extend(priority.to_le_bytes());
                 registration.extend(0u32.to_le_bytes());
-                if self.button_command(owner, task, 90, [0; 3], Some(&mut registration))? == 0 {
+                if self.button_command(owner, task, 90, [0; 3], Some(&mut registration))? == 0
+                    && !locked
+                {
                     self.button_command(owner, input, 130, [task, 0, 0], Some(&mut bytes))?;
                 }
             } else {
@@ -204,7 +207,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                 .size
                 .map(|value| value as i32);
         }
-        let mut position = objects.image_position(handle).map(integer_position);
+        let mut position = objects.button_position(handle).map(integer_position);
         if let Some(plane) = objects.lookup(&state.plane.name, state.plane.bank) {
             if matches!(objects.get(plane).unwrap().state, ObjectState::Plane(_)) {
                 let offset = objects.plane_position(plane).map(integer_position);
@@ -239,6 +242,38 @@ impl<F: ObjectFactory> Store<'_, F> {
                 data1: bytes,
             },
         )
+    }
+}
+
+impl Objects {
+    pub(super) fn lock_button_position(&mut self, handle: u32, value: i32) {
+        let capture = matches!(&self.get(handle).unwrap().state,
+            ObjectState::Button(button) if button.position_lock == 0 && value != 0);
+        let position = capture.then(|| self.image_position(handle));
+        if let ObjectState::Button(button) = &mut self.get_mut(handle).unwrap().state {
+            if let Some(position) = position {
+                button.locked_position = position;
+            }
+            button.position_lock = value;
+        }
+    }
+
+    pub(super) fn button_position(&self, handle: u32) -> [f32; 2] {
+        let object = self.get(handle).unwrap();
+        if let ObjectState::Button(button) = &object.state {
+            if button.position_lock != 0 {
+                let parent = object.parent.filter(|&parent| {
+                    matches!(
+                        self.get(parent).unwrap().state,
+                        ObjectState::CImage(_) | ObjectState::Image(_)
+                    )
+                });
+                let parent = parent.map_or([0.; 2], |parent| self.image_position(parent));
+                // 捕获值已经包含原父级位置，查询仍累加当前父级位置。
+                return std::array::from_fn(|i| button.locked_position[i] + parent[i]);
+            }
+        }
+        self.image_position(handle)
     }
 }
 

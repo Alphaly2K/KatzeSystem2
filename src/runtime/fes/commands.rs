@@ -13,6 +13,7 @@ enum Command {
     Attach(Option<fes::ObjectReference>),
     Frame(u32, i32),
     Plane(fes::ObjectReference),
+    Lock(i32),
 }
 
 impl Objects {
@@ -47,6 +48,7 @@ impl Objects {
                 | b"attach"
                 | b"settbl"
                 | b"pl"
+                | b"lock"
         ) {
             return Ok(false);
         }
@@ -129,6 +131,7 @@ impl Objects {
             b"size" => Command::Size([number(2, 0)?, number(3, 0)?]),
             b"keypos" => Command::KeyPosition(number(2, 0)?, [number(3, 0)?, number(4, 0)?]),
             b"setid" => Command::SetId(number(2, 0)?),
+            b"lock" => Command::Lock(number(2, 0)?),
             b"getid" => Command::GetId(number(2, 0)?),
             b"enable" => Command::Enable(i32::from(number(2, 0)? != 0)),
             b"pri" if args.len() > 2 => Command::Priority(number(2, 0)?),
@@ -169,7 +172,10 @@ impl Objects {
         };
         for bank in banks {
             let Some(handle) = self.lookup(&target.name, bank as i32) else {
-                if matches!(command, Command::Position(_) | Command::Enable(_)) {
+                if matches!(
+                    command,
+                    Command::Position(_) | Command::Enable(_) | Command::Lock(_)
+                ) {
                     continue;
                 }
                 break;
@@ -216,6 +222,7 @@ impl Objects {
                         )?;
                     }
                 }
+                Command::Lock(value) => self.lock_button_position(handle, *value),
                 Command::Priority(value) => {
                     if let Some(image) = object.state.image_mut() {
                         image.set_priority(*value);

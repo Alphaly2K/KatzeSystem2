@@ -14,6 +14,9 @@ pub struct ButtonState {
     /// 网格编号、横坐标、纵坐标；编号 −1 表示没有网格。
     pub keyblock: [i32; 3],
     pub system_key: i32,
+    /// 非零时使用捕获坐标作为按钮定位基准；保留原始整数。
+    pub position_lock: i32,
+    pub locked_position: [f32; 2],
     /// 关联控件的名称／银行；独立于 KEY_* 和父子关系。
     pub control: Option<ObjectReference>,
 }
@@ -31,6 +34,8 @@ impl Default for ButtonState {
             mask_type: 0,
             keyblock: [-1, 0, 0],
             system_key: -1,
+            position_lock: 0,
+            locked_position: [0.; 2],
             control: None,
         }
     }

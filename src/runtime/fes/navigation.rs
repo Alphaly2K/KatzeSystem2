@@ -296,7 +296,7 @@ impl Objects {
     }
 
     fn navigation_position(&self, handle: u32) -> [i32; 2] {
-        self.image_position(handle).map(integer_position)
+        self.button_position(handle).map(integer_position)
     }
 }
 
@@ -445,5 +445,37 @@ mod tests {
             .unwrap()
             .position = [1e20, -1e20, 0., 1.];
         assert_eq!(objects.navigation_pointer(&first_target), Some([0, 3]));
+
+        let group = add(&mut objects, "CIMAGE", "group");
+        objects.set_parent(first, Some(group)).unwrap();
+        let image = objects.get_mut(first).unwrap().state.image_mut().unwrap();
+        image.plane = fes::ObjectReference {
+            name: String::new(),
+            bank: 0,
+        };
+        image.set_key_position(1, [0; 2]);
+        objects
+            .get_mut(group)
+            .unwrap()
+            .state
+            .image_mut()
+            .unwrap()
+            .position = [10., -20.];
+        objects.lock_button_position(first, 1);
+        objects
+            .get_mut(group)
+            .unwrap()
+            .state
+            .image_mut()
+            .unwrap()
+            .position = [15., -25.];
+        assert_eq!(objects.navigation_pointer(&first_target), Some([26, -41]));
+        assert_eq!(
+            objects.navigation_hit([26, -41], &host).unwrap(),
+            Some(first_target)
+        );
+        objects.set_parent(first, Some(second)).unwrap();
+        objects.lock_button_position(first, 0);
+        assert_eq!(objects.navigation_position(first), [1, 3]);
     }
 }

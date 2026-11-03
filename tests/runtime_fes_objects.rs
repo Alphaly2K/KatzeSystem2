@@ -318,6 +318,76 @@ fn keypos_evaluates_once_skips_other_types_and_stops_at_missing_banks() {
 }
 
 #[test]
+fn button_locks_capture_once_skip_holes_and_leave_media_requests_unchanged() {
+    let mut objects = Objects::new(HandleAllocator::default()).unwrap();
+    let ids = objects.define(&definition("BUTTON", "item", 4)).unwrap();
+    let parent = objects.define(&definition("CIMAGE", "parent", 1)).unwrap()[0];
+    let ObjectState::CImage(image) = &mut objects.get_mut(parent).unwrap().state else {
+        unreachable!()
+    };
+    image.position = [10.25, -12.5];
+    image.base_point = [-1.25, 3.5];
+    objects.get_mut(ids[2]).unwrap().state = ObjectState::Image(Box::default());
+    for (i, &id) in ids.iter().enumerate() {
+        objects.set_parent(id, Some(parent)).unwrap();
+        if let ObjectState::Button(button) = &mut objects.get_mut(id).unwrap().state {
+            button.image.base.position = [2.25 + i as f32 * 3., -2.75 + i as f32];
+            button.image.base.base_point = [0.5, -1.25];
+        }
+    }
+    objects.remove(ids[1]).unwrap();
+    let mut interpreter =
+        fes::Interpreter::new(fes::Program::from_text(b"#START\nwait 99\n").unwrap()).unwrap();
+    objects.publish_bindings(&mut interpreter);
+    let mut numbers = State::new(4);
+    object_command(
+        &mut objects,
+        &mut interpreter,
+        &mut numbers,
+        b"item[($1+=1)-1] lock ($0+=1) ($0+=100)",
+    )
+    .unwrap();
+    assert_eq!(numbers.shared, [1, 1, 0, 0]);
+    let ObjectState::Button(button) = &mut objects.get_mut(ids[0]).unwrap().state else {
+        unreachable!()
+    };
+    assert_eq!(button.locked_position, [13.25, -17.5]);
+    button.image.base.position[0] = 7.25;
+    object_command(
+        &mut objects,
+        &mut interpreter,
+        &mut numbers,
+        b"item lock -3",
+    )
+    .unwrap();
+    for (id, expected) in [(ids[0], [13.25, -17.5]), (ids[3], [22.25, -14.5])] {
+        let ObjectState::Button(button) = &objects.get(id).unwrap().state else {
+            unreachable!()
+        };
+        assert_eq!(button.position_lock, -3);
+        assert_eq!(button.locked_position, expected);
+        assert_eq!(button.image.base.updates, Default::default());
+    }
+    object_command(&mut objects, &mut interpreter, &mut numbers, b"item lock").unwrap();
+    let ObjectState::Button(button) = &objects.get(ids[0]).unwrap().state else {
+        unreachable!()
+    };
+    assert_eq!(button.position_lock, 0);
+    assert_eq!(button.locked_position, [13.25, -17.5]);
+    object_command(&mut objects, &mut interpreter, &mut numbers, b"item lock 7").unwrap();
+    let ObjectState::Button(button) = &objects.get(ids[0]).unwrap().state else {
+        unreachable!()
+    };
+    assert_eq!(button.position_lock, 7);
+    assert_eq!(button.locked_position, [18.25, -17.5]);
+    assert_eq!(button.image.base.updates, Default::default());
+    let ObjectState::Image(image) = &objects.get(ids[2]).unwrap().state else {
+        unreachable!()
+    };
+    assert_eq!(image.base.updates, Default::default());
+}
+
+#[test]
 fn id_commands_query_logical_frames_and_guard_arrays_and_shared_destinations() {
     let mut objects = Objects::new(HandleAllocator::default()).unwrap();
     let single = objects.define(&definition("IMAGE", "single", 1)).unwrap()[0];

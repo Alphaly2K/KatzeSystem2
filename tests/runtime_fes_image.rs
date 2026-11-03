@@ -922,6 +922,97 @@ fn duplicate_media_records_keep_source_wrappers_distinct_and_release_all_binding
 }
 
 #[test]
+fn button_locks_keep_rebuild_regions_and_attribute_updates_use_the_captured_anchor() {
+    for budget in [1, 4096] {
+        let mut runtime = Runtime::new(
+            0,
+            kind::ROOT,
+            Box::new(RootObject::new(1, 0)),
+            State::new(0),
+            GraphicsFactory {
+                fallback: InputFactory { fallback: Reject },
+            },
+        );
+        runtime.set_budget(budget, 10000);
+        runtime.host_mut().surface_size = [8, 6];
+        runtime.drawing_mut().enabled = true;
+        runtime.drawing_mut().active = true;
+        runtime.drawing_mut().target = Some(RenderTarget::new([8, 6]).unwrap());
+        let input = runtime.create(0, kind::INPUT, b"input", b"").unwrap();
+        let list = runtime.create(0, kind::IMAGE_LIST, b"list", b"").unwrap();
+        send(&mut runtime, list, 285, 8, 6);
+        send(&mut runtime, list, 289, 0, 0);
+        let reads = Rc::new(RefCell::new(Vec::new()));
+        let mut pixels = pixel_file(0xff12_3456);
+        pixels[48..56].fill(0);
+        pixels[68..76].fill(0);
+        runtime.set_resources(PixelFiles {
+            files: BTreeMap::from([(b"sprite".to_vec(), pixels)]),
+            reads: reads.clone(),
+        });
+        let program = fes::Program::from_text(b"#DEFINE\nBUTTON item\n#OBJECT FILE IDN PRI POS SIZE DISP\nitem sprite 7 5 1,1 2,1 1\n#START\nitem lock 1\nwait 1\nitem size 3 2\nwait 1\nitem lock -3\nwait 1\nitem lock\nwait 1\nitem size 4 3\nwait 99\n").unwrap();
+        let mut scene =
+            katze_system2::runtime::fes::Scene::new(program, runtime.host().handle_allocator())
+                .unwrap();
+        let objects = scene.objects_mut().unwrap();
+        objects.set_input_task(input);
+        objects.set_image_list(list, Rect::from_xywh(0, 0, 8, 6));
+        while !runtime.prepare_fes_scene(0, &mut scene).unwrap() {}
+        let item = scene.objects().lookup("item", 0).unwrap();
+        let task = scene.objects().get(item).unwrap().task_id().unwrap();
+        for now in 100..=104 {
+            if now == 102 {
+                initialize(
+                    scene.objects_mut().unwrap(),
+                    "item",
+                    ObjectAttributes {
+                        position: [Some(4), Some(3), None],
+                        ..Default::default()
+                    },
+                );
+            }
+            while !runtime.update_fes_scene(0, &mut scene, now).unwrap() {}
+            let rectangle = runtime
+                .input_state(input)
+                .unwrap()
+                .regions()
+                .get(task)
+                .unwrap()
+                .bounds();
+            assert_eq!(
+                rectangle,
+                match now {
+                    100 | 101 => Rect::from_xywh(1, 1, 2, 1),
+                    102 | 103 => Rect::from_xywh(1, 1, 3, 2),
+                    _ => Rect::from_xywh(4, 3, 4, 3),
+                }
+            );
+            assert_eq!(
+                reads.borrow().len(),
+                if now == 100 {
+                    1
+                } else if now == 104 {
+                    3
+                } else {
+                    2
+                }
+            );
+            send(&mut runtime, list, 298, 0, 0);
+            assert_rectangle(
+                runtime.drawing().target.as_ref().unwrap(),
+                Rect::from_xywh(
+                    if now < 102 { 1 } else { 4 },
+                    if now < 102 { 1 } else { 3 },
+                    1,
+                    1,
+                ),
+                0xff12_3456,
+            );
+        }
+    }
+}
+
+#[test]
 fn fes_buttons_retry_input_after_image_loading_and_update_real_regions_and_pixels() {
     for budget in [1, 4096] {
         let mut runtime = Runtime::new(

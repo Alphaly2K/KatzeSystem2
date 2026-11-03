@@ -128,7 +128,7 @@ FES 内部执行宏声明，初始化按以下顺序交给宿主：
 
 IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的转换结果实际改变时置位；空 FILE 或转换结果相同不置位。`frame_mapping_changed` 初始为 true，写入任何 ID 列也置为 true；下次有效 IDN 在编号变化或此标记为 true 时请求装载并清除此标记。首次 IDN=0 因此也请求装载。ID 列本身只更新映射，非法 IDN 保留待应用标记。直接修改公开映射后应同时设置 `frame_mapping_changed`；实际来源装载由运行时对象更新执行。
 
-`fes::ButtonState` 组合 IMAGE 状态与输入启用、默认事件组、四向目标、TYPE、KEYBLOCK 坐标和系统键。`apply(attributes, bank, transform_name)` 返回本次是否需要递归使后代失效；SIZE 变化另请求来源重建，ENABLE 保留原始值，变化时只标记按钮自身。TYPE 与 MASK 分别保存。默认事件组和方向目标各少于 32 字节。运行时已支持 BUTTON 装载创建、图像更新、输入区域、对象事件、网格导航、系统键分派与关联 SLIDER／SCROLL2 的方向调整。
+`fes::ButtonState` 组合 IMAGE 状态与输入启用、默认事件组、四向目标、TYPE、KEYBLOCK 坐标和系统键。`apply(attributes, bank, transform_name)` 返回本次是否需要递归使后代失效；SIZE 变化另请求来源重建，ENABLE 保留原始值，变化时只标记按钮自身。TYPE 与 MASK 分别保存。默认事件组和方向目标各少于 32 字节。运行时已支持 BUTTON 装载创建、图像更新、输入区域、对象事件、网格导航、系统键分派与关联 SLIDER／SCROLL2 的方向调整。 `position_lock` 保存原始坐标锁值，`locked_position` 保存首次非零锁定时的浮点位置；通过运行时对象命令 `lock` 更新，直接修改字段时调用方负责维护捕获状态。坐标、区域重建和导航规则见[BUTTON 区域更新](graphics.md#fes-button-区域更新)。
 
 `fes::SliderState` 提供 SLIDER 的初始化属性、原始范围／数值、矩形、方向、Alpha 和独立的 `SliderUpdates` 请求。`apply(attributes, bank)` 仅应用 FILE、PL、POS2、PRI、DISP、ENABLE，返回本次是否需要使后代失效；ENABLE 变化只标记自身。`set_range`／`set_position` 保留原始值和通知参数，不执行范围限制。运动接口只传递 Alpha，详见[SLIDER 属性核心](graphics.md#fes-slider-属性核心)。运行时已连接下层任务、媒体更新和父级通知。`fes::Scroll2State` 组合此状态与独立页长，FES 媒体通过类型 41 的对应命令提交，`input::Scroll2Object` 负责状态图像、输入及生命周期。
 
@@ -410,11 +410,11 @@ FES `blend` 已连接 SOUND、CIMAGE／IMAGE／BUTTON、CPLANE／PLANE 和 SLIDE
 
 `Objects::media_records()` 按声明／银行顺序提供 `MediaRecord`，通过 `target()`、`image_handle()`、`task_id()` 查询名称引用、包装及该记录创建的 BUTTON 编号；其他类型的记录 task_id 为 None。`Runtime::update_fes_record(owner, objects, index)` 用当前名称绑定和记录包装推进；Scene 普通收尾、decode 及暂停刷新自动采用这一入口。`update_fes_object` 则使用对象的当前包装。先完成 `prepare_fes_scene` 再显式逐记录更新，可保留装载早于更新的时序；记录编号越界返回诊断。类型的不同取图规则见[媒体记录](graphics.md#fes-媒体记录与来源包装)。
 
-BUTTON 先通过 `prepare_fes_scene` 或任务 338 完成下层创建，再由对象更新复用 IMAGE 并维护实际输入区域、启用值、优先级及可选 Alpha 掩码。`Objects::set_input_task(id)` 显式绑定输入任务，`input_task()` 查询当前绑定；缺省由根命令 34 查询。输入服务错误保留尚未提交的按钮更新，后续以同一场景续跑。脚本 enable 将非零归一为一，初始化 ENABLE 保留原始值；区域与显示分别维护。对象事件通过任务 9／10／64／65 或显式场景分派接入，导航、坐标锁及拖动命令继续诊断；详细行为见[BUTTON 区域更新](graphics.md#fes-button-区域更新)。
+BUTTON 先通过 `prepare_fes_scene` 或任务 338 完成下层创建，再由对象更新复用 IMAGE 并维护实际输入区域、启用值、优先级及可选 Alpha 掩码。`Objects::set_input_task(id)` 显式绑定输入任务，`input_task()` 查询当前绑定；缺省由根命令 34 查询。输入服务错误保留尚未提交的按钮更新，后续以同一场景续跑。脚本 enable 将非零归一为一，初始化 ENABLE 保留原始值；区域与显示分别维护。对象事件通过任务 9／10／64／65 或显式场景分派接入，网格导航与坐标锁已接入，拖动命令继续诊断；详细行为见[BUTTON 区域更新](graphics.md#fes-button-区域更新)。
 
 FES IMAGE 的 `IDN=−1` 接收完整名称的原始来源，不受 PATHMODE 影响；`Object::raw_image_handle` 返回其非持有查询句柄，零表示没有来源。像素和原始数据独立保留，登记优先使用像素；普通装载缺帧后可退回旧原始来源。FES 持有的数据随替换、对象删除或所属任务实际回收释放，列表已经解码的帧继续存活。原始来源登记以当前更新记录的包装保存来源身份，可用 308 反查；具体几何和槽号规则见[原始来源更新](graphics.md#fes-image-原始来源更新)。
 
-`Objects::dispatch_object_command(interpreter, line, state)` 消费 `disp`／`size`／`keypos`／`setid`／`getid`／`enable`／`pri`／`pos2`／`delay`／`ismot`／`attach`／`settbl`／`pl`，以及 SLIDER 的 `pos`／`page`／`getpos`／`load`，返回 true 后调用者确认事件，其他命令返回 false。目标银行与数值参数使用 FES 自身的局部／命名值作用域；图形修改延后到对象更新，`getid` 即时写入共享变量编号。Scene 的普通推进和系统块自动调用；缺失目标的整行表达式回退、非 IMAGE 的编号查询返回诊断。类型、缺省值、数组停止规则和资源时点见[对象控制命令](graphics.md#fes-对象控制命令)。
+`Objects::dispatch_object_command(interpreter, line, state)` 消费 `disp`／`size`／`keypos`／`setid`／`getid`／`enable`／`pri`／`pos2`／`delay`／`ismot`／`attach`／`settbl`／`pl`／`lock`，以及 SLIDER 的 `pos`／`page`／`getpos`／`load`，返回 true 后调用者确认事件，其他命令返回 false。目标银行与数值参数使用 FES 自身的局部／命名值作用域；图形修改延后到对象更新，`getid` 即时写入共享变量编号。Scene 的普通推进和系统块自动调用；缺失目标的整行表达式回退、非 IMAGE 的编号查询返回诊断。类型、缺省值、数组停止规则和资源时点见[对象控制命令](graphics.md#fes-对象控制命令)。
 
 Scene 消费 `keyskip` 并即时更新等待取消模式，`forced_key_skip()` 查询保存的 force 标志；它与当前输入模式分别维护，完整规则见[等待取消](graphics.md#fes-等待取消与-keyskip)。
 

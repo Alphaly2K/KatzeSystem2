@@ -306,7 +306,12 @@ impl Objects {
                 break;
             };
             chain.push((image, object.image_offset));
-            next = object.parent;
+            next = object.parent.filter(|&parent| {
+                matches!(
+                    self.get(parent).unwrap().state,
+                    ObjectState::CImage(_) | ObjectState::Image(_)
+                )
+            });
         }
         chain
             .into_iter()
