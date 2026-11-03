@@ -282,9 +282,10 @@ impl Scene {
     fn control_command(
         &mut self,
         args: &[Vec<u8>],
-        offset: usize,
+        line: &fes::Line,
         numbers: &mut crate::expression::State,
     ) -> Result<Option<bool>> {
+        let offset = line.offset;
         if self.key_skip_command(args, numbers)? {
             return Ok(Some(false));
         }
@@ -298,24 +299,16 @@ impl Scene {
         if !args.get(1).is_some_and(|name| name == b"noact") {
             return Ok(None);
         }
-        let mut target = if args[0] == b"@" {
-            let context = self
-                .interpreter
-                .event_context()
-                .ok_or_else(|| Error::new(offset, "FES 当前没有事件对象"))?;
-            fes::ObjectReference {
-                name: context.object.clone(),
-                bank: context.bank,
-            }
-        } else {
-            self.interpreter.object_reference(&args[0], numbers)?
-        };
+        let mut target = self
+            .interpreter
+            .command_object_reference(&args[0], numbers)?;
         let count = self.objects.count(&target.name);
-        if count == 0 {
-            return Err(Error::new(
-                offset,
-                "FES 默认焦点目标不存在，表达式回退尚未接入",
-            ));
+        if self
+            .objects
+            .fallback_missing_target(&mut self.interpreter, &target, &line.bytes, numbers)
+            .map_err(|error| Error::new(offset + error.offset, error.message))?
+        {
+            return Ok(Some(false));
         }
         if target.bank == -1 {
             if count != 1 {
@@ -803,24 +796,20 @@ impl<F: ObjectFactory> Store<'_, F> {
                         .is_some()
                     {
                         scene.interpreter.finish_event_handler()?;
-                    } else if let Some(stop) =
-                        scene.control_command(&args, line.offset, self.numbers)?
-                    {
+                    } else if let Some(stop) = scene.control_command(&args, &line, self.numbers)? {
                         if stop {
                             scene.interpreter.finish_event_handler()?;
                         } else {
                             scene.interpreter.resume();
                         }
-                    } else if let Some(complete) =
-                        self.run_fes_property(scene, &args, line.offset)?
-                    {
+                    } else if let Some(complete) = self.run_fes_property(scene, &args, &line)? {
                         if !complete {
                             return Ok(false);
                         }
                         scene.interpreter.resume();
-                    } else if self.run_fes_draw(scene, &args, line.offset)? {
+                    } else if self.run_fes_draw(scene, &args, &line)? {
                         scene.interpreter.resume();
-                    } else if let Some(complete) = self.run_fes_stop(scene, &args, line.offset)? {
+                    } else if let Some(complete) = self.run_fes_stop(scene, &args, &line)? {
                         if !complete {
                             return Ok(false);
                         }
@@ -876,6 +865,14 @@ impl<F: ObjectFactory> Store<'_, F> {
     ) -> Result<bool> {
         let result = (|| {
             if scene.motion_call.is_none() {
+                if scene.objects.fallback_missing_target(
+                    &mut scene.interpreter,
+                    &call.target,
+                    &call.source,
+                    self.numbers,
+                )? {
+                    return Ok(true);
+                }
                 if !scene.motion_names.contains_key(&call.binding.name) {
                     let services = self
                         .resources
@@ -964,6 +961,17 @@ impl<F: ObjectFactory> Store<'_, F> {
         let Some(object) = args.first() else {
             return Ok(false);
         };
+        let target = scene
+            .interpreter
+            .command_object_reference(object, self.numbers)
+            .map_err(|error| Error::new(line.offset + error.offset, error.message))?;
+        if scene
+            .objects
+            .fallback_missing_target(&mut scene.interpreter, &target, &line.bytes, self.numbers)
+            .map_err(|error| Error::new(line.offset + error.offset, error.message))?
+        {
+            return Ok(true);
+        }
         if let Some(name) = args.get(1) {
             if fes::Interpreter::is_builtin_object_command(name)
                 || scene
@@ -973,31 +981,6 @@ impl<F: ObjectFactory> Store<'_, F> {
             {
                 return Ok(false);
             }
-        }
-        let target = if object == b"@" {
-            let context = scene
-                .interpreter
-                .event_context()
-                .ok_or_else(|| Error::new(line.offset, "FES 当前没有事件对象"))?;
-            fes::ObjectReference {
-                name: context.object.clone(),
-                bank: context.bank,
-            }
-        } else {
-            scene
-                .interpreter
-                .object_reference(object, self.numbers)
-                .map_err(|error| Error::new(line.offset + error.offset, error.message))?
-        };
-        if scene
-            .objects
-            .lookup(
-                &target.name,
-                if target.bank == -1 { 0 } else { target.bank },
-            )
-            .is_none()
-        {
-            return Ok(false);
         }
         if args.len() > 1 {
             let mut message = b"Unknown FES object command: ".to_vec();
@@ -1011,36 +994,22 @@ impl<F: ObjectFactory> Store<'_, F> {
         &mut self,
         scene: &mut Scene,
         args: &[Vec<u8>],
-        offset: usize,
+        line: &fes::Line,
     ) -> Result<Option<bool>> {
+        let offset = line.offset;
         if args.get(1).is_none_or(|name| name != b"stop") {
             return Ok(None);
         }
         if scene.motion_stop.is_none() {
-            let target = if args[0] == b"@" {
-                let context = scene
-                    .interpreter
-                    .event_context()
-                    .ok_or_else(|| Error::new(offset, "FES 当前没有事件对象"))?;
-                fes::ObjectReference {
-                    name: context.object.clone(),
-                    bank: context.bank,
-                }
-            } else {
-                scene.interpreter.object_reference(&args[0], self.numbers)?
-            };
+            let target = scene
+                .interpreter
+                .command_object_reference(&args[0], self.numbers)?;
             if scene
                 .objects
-                .lookup(
-                    &target.name,
-                    if target.bank == -1 { 0 } else { target.bank },
-                )
-                .is_none()
+                .fallback_missing_target(&mut scene.interpreter, &target, &line.bytes, self.numbers)
+                .map_err(|error| Error::new(offset + error.offset, error.message))?
             {
-                return Err(Error::new(
-                    offset,
-                    "FES 对象目标不存在，整行表达式回退尚未接入",
-                ));
+                return Ok(Some(true));
             }
             let (bank, end) = if target.bank == -1 {
                 (0, i64::from(scene.objects.count(&target.name)))
@@ -1268,22 +1237,18 @@ impl<F: ObjectFactory> Store<'_, F> {
                                 scene.interpreter.resume();
                                 continue;
                             }
-                            if let Some(stop) =
-                                scene.control_command(&args, line.offset, self.numbers)?
-                            {
+                            if let Some(stop) = scene.control_command(&args, &line, self.numbers)? {
                                 if stop {
                                     scene.publish_notifications();
                                 }
                             } else if let Some(complete) =
-                                self.run_fes_property(scene, &args, line.offset)?
+                                self.run_fes_property(scene, &args, &line)?
                             {
                                 if !complete {
                                     return Ok(false);
                                 }
-                            } else if self.run_fes_draw(scene, &args, line.offset)? {
-                            } else if let Some(complete) =
-                                self.run_fes_stop(scene, &args, line.offset)?
-                            {
+                            } else if self.run_fes_draw(scene, &args, &line)? {
+                            } else if let Some(complete) = self.run_fes_stop(scene, &args, &line)? {
                                 if !complete {
                                     return Ok(false);
                                 }

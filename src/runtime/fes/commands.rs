@@ -18,7 +18,7 @@ enum Command {
 
 impl Objects {
     /// 消费已支持的对象属性及运动状态命令；其他命令返回 false。
-    /// 属性请求在后续对象更新时生效；不执行目标缺失时的整行表达式回退。
+    /// 属性请求在后续对象更新时生效；缺失目标改为整行数值求值。
     pub fn dispatch_object_command(
         &mut self,
         interpreter: &mut fes::Interpreter,
@@ -55,28 +55,12 @@ impl Objects {
         ) {
             return Ok(false);
         }
-        let mut target = if args[0] == b"@" {
-            let context = interpreter
-                .event_context()
-                .ok_or_else(|| Error::new(line.offset, "FES 当前没有事件对象"))?;
-            fes::ObjectReference {
-                name: context.object.clone(),
-                bank: context.bank,
-            }
-        } else {
-            interpreter.object_reference(&args[0], state)?
-        };
+        let mut target = interpreter.command_object_reference(&args[0], state)?;
         if self
-            .lookup(
-                &target.name,
-                if target.bank == -1 { 0 } else { target.bank },
-            )
-            .is_none()
+            .fallback_missing_target(interpreter, &target, &line.bytes, state)
+            .map_err(|error| Error::new(line.offset + error.offset, error.message))?
         {
-            return Err(Error::new(
-                line.offset,
-                "FES 对象目标不存在，整行表达式回退尚未接入",
-            ));
+            return Ok(true);
         }
         if matches!(name, b"delay" | b"ismot") {
             return self.dispatch_motion_metadata(interpreter, line.offset, &args, &target, state);
@@ -290,6 +274,26 @@ impl Objects {
                 self.invalidate(handle)?;
             }
         }
+        Ok(true)
+    }
+
+    pub(super) fn fallback_missing_target(
+        &self,
+        interpreter: &mut fes::Interpreter,
+        target: &fes::ObjectReference,
+        bytes: &[u8],
+        state: &mut State,
+    ) -> Result<bool> {
+        if self
+            .lookup(
+                &target.name,
+                if target.bank == -1 { 0 } else { target.bank },
+            )
+            .is_some()
+        {
+            return Ok(false);
+        }
+        interpreter.eval_fallback(bytes, state)?;
         Ok(true)
     }
 

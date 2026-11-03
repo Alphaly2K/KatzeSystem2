@@ -45,6 +45,8 @@ pub struct SubcommandTable {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SubcommandCall {
     pub offset: usize,
+    /// 行级展开后的完整命令，供目标缺失时的整行求值使用。
+    pub source: Vec<u8>,
     pub target: ObjectReference,
     pub binding: Subcommand,
     pub arguments: Vec<Vec<u8>>,
@@ -105,6 +107,7 @@ impl Interpreter {
         &mut self,
         offset: usize,
         arguments: &[Vec<u8>],
+        source: &[u8],
         state: &mut State,
     ) -> Result<Option<SubcommandCall>> {
         let Some(name) = arguments.get(1) else {
@@ -121,19 +124,10 @@ impl Interpreter {
         else {
             return Ok(None);
         };
-        let target = if arguments[0] == b"@" {
-            let context = self
-                .event_context()
-                .ok_or_else(|| Error::new(0, "FES 当前没有事件对象"))?;
-            ObjectReference {
-                name: context.object.clone(),
-                bank: context.bank,
-            }
-        } else {
-            self.object_reference(&arguments[0], state)?
-        };
+        let target = self.command_object_reference(&arguments[0], state)?;
         Ok(Some(SubcommandCall {
             offset,
+            source: source.to_vec(),
             target,
             binding,
             arguments: arguments[2..].to_vec(),

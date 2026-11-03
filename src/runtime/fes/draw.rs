@@ -61,31 +61,30 @@ impl<F: ObjectFactory> Store<'_, F> {
         &mut self,
         scene: &mut Scene,
         args: &[Vec<u8>],
-        offset: usize,
+        line: &fes::Line,
     ) -> Result<bool> {
+        let offset = line.offset;
         if args.get(1).is_none_or(|name| name != b"draw") {
             return Ok(false);
         }
         if scene.draw_call.is_none() {
-            let mut target = if args[0] == b"@" {
-                let context = scene
-                    .interpreter
-                    .event_context()
-                    .ok_or_else(|| Error::new(offset, "FES 当前没有事件对象"))?;
-                fes::ObjectReference {
-                    name: context.object.clone(),
-                    bank: context.bank,
-                }
-            } else {
-                scene.interpreter.object_reference(&args[0], self.numbers)?
-            };
+            let mut target = scene
+                .interpreter
+                .command_object_reference(&args[0], self.numbers)?;
+            if scene
+                .objects
+                .fallback_missing_target(&mut scene.interpreter, &target, &line.bytes, self.numbers)
+                .map_err(|error| Error::new(offset + error.offset, error.message))?
+            {
+                return Ok(true);
+            }
             let parent = scene
                 .objects
                 .lookup(
                     &target.name,
                     if target.bank == -1 { 0 } else { target.bank },
                 )
-                .ok_or_else(|| Error::new(offset, "FES 对象目标不存在，整行表达式回退尚未接入"))?;
+                .unwrap();
             if scene.objects.count(&target.name) == 1 {
                 target.bank = 0;
             }

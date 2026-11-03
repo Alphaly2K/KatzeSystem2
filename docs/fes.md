@@ -296,7 +296,7 @@ mappedOperand = "[", integer, "]" | literal ;
 
 结构化调用保存源码位置、目标对象与银行、已注册绑定和已展开输入。事件内的 `@` 对象使用触发对象及银行，银行表达式仅在调用产生时执行一次；重复读取待处理事件保持原调用。银行 −1 由宿主按顺序遍历数组，每个银行分别提供属性并执行参数换算。注册表的诊断可通过 `registered_subcommands()` 读取，无效绑定继续保留逐行诊断。
 
-目标对象存在时，既非内置命令、也未注册为 SUBCOMMAND 的名称只记录日志并继续执行，后续参数不求值；大小写不同的名称分别匹配。只有对象名而没有命令时直接继续。Runtime 在主体、系统块和对象处理器中均保留此规则，将日志写入 `HostState::debug_messages`，前缀为 `Unknown FES object command: `，后接展开后的整行字节。已识别但尚未接入的内置命令仍返回诊断；起始目标缺失的整行表达式回退仍待接入。
+目标对象存在时，既非内置命令、也未注册为 SUBCOMMAND 的名称只记录日志并继续执行，后续参数不求值；大小写不同的名称分别匹配。只有对象名而没有命令时直接继续。Runtime 在主体、系统块和对象处理器中均保留此规则，将日志写入 `HostState::debug_messages`，前缀为 `Unknown FES object command: `，后接展开后的整行字节。已识别但尚未接入的内置命令仍返回诊断；起始目标缺失时求值展开后的原始整行，保留[连续操作数的构树及副作用](expressions.md#fes-整行回退)。
 
 `baseimg [object]` 是独立的全局背景命令。当前支持 CIMAGE、IMAGE、BUTTON 来源和 PLANE 裁剪快照；名称与银行只求一次，缺少目标时不遍历数组，缺参或空参数清除背景。它先排队，主体消费请求后在同一帧继续；系统块与对象处理器结束当前片段，下一次普通更新才消费。背景持有、列表命令和提交时点见[背景快照](graphics.md#背景快照)。
 
@@ -325,7 +325,7 @@ mappedOperand = "[", integer, "]" | literal ;
 
 ## 与宿主的边界
 
-对象内建控制 `disp`／`size`／`keypos`／`setid`／`getid`／`enable`／`pri`／`pos2`／`pos`／`getpos`／`arc`／`mcarc` 已由运行时对象存储和场景消费，普通推进和睡眠／唤醒系统块共用。签名、类型分派、数组遍历及尚未接入的表达式回退见[图形接口](graphics.md#fes-对象控制命令)。
+对象内建控制 `disp`／`size`／`keypos`／`setid`／`getid`／`enable`／`pri`／`pos2`／`pos`／`getpos`／`arc`／`mcarc` 已由运行时对象存储和场景消费，普通推进和睡眠／唤醒系统块共用。签名、类型分派、数组遍历及整行表达式回退见[图形接口](graphics.md#fes-对象控制命令)。
 
 Scene 另消费 `button noact [value]` 与 `lockactive [value]`，分别排队默认焦点和原始焦点锁。普通主体消费通知；对象／系统处理器内的 lockactive 结束当前处理器。参数与时点见[默认焦点与焦点锁](graphics.md#fes-默认焦点与焦点锁)。
 

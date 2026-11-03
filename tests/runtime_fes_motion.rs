@@ -707,11 +707,9 @@ fn motion_metadata_keeps_raw_delays_and_preserves_the_destination_at_a_bank_hole
             &mut numbers,
             b"item[99] delay ($0+=1)"
         )
-        .unwrap_err()
-        .message
-        .contains("整行表达式回退")
+        .is_ok()
     );
-    assert_eq!(numbers.shared[0], 2);
+    assert_eq!(numbers.shared[0], 3);
     assert_eq!(numbers.current, 13);
 }
 

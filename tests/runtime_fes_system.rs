@@ -115,18 +115,45 @@ fn unregistered_object_commands_log_and_continue_without_evaluating_their_argume
 }
 
 #[test]
-fn unknown_command_fallback_keeps_unsupported_builtins_and_missing_targets_as_errors() {
-    for command in ["button wipe", "absent unknown", "button[9] unknown"] {
-        let source = format!("#DEFINE\nBASE button\n#START\n{command}\n$0=99\n");
-        let (mut runtime, mut scene) = setup(&source, 4096);
-        assert!(
-            runtime
-                .update_fes_scene(0, &mut scene, 100)
-                .unwrap_err()
-                .message
-                .contains("对象命令")
-        );
-        assert_eq!(runtime.numbers().shared[0], 0);
+fn unknown_command_fallback_preserves_unsupported_builtins_on_existing_targets() {
+    let source = "#DEFINE\nBASE button\n#START\nbutton wipe\n$0=99\n";
+    let (mut runtime, mut scene) = setup(source, 4096);
+    assert!(
+        runtime
+            .update_fes_scene(0, &mut scene, 100)
+            .unwrap_err()
+            .message
+            .contains("对象命令")
+    );
+    assert_eq!(runtime.numbers().shared[0], 0);
+    assert!(runtime.host().debug_messages.is_empty());
+}
+
+#[test]
+fn missing_targets_evaluate_whole_lines_in_main_system_and_object_scopes() {
+    let source = "#DEFINE\nBASE button[2]\n#SUBCOMMAND\noneshot move motion p[0] : [0]\n#START\nbutton[($0+=2)] pos ($1+=1) ($2+=2)\nabsent stop ($2+=2)\n@ size ($1+=1) ($2+=1)\nabsent draw ($1+=1)\nabsent noact ($1+=1)\nabsent setanm ($1+=1)\nabsent anm ($1+=1)\nabsent unknown ($1+=1)\nbutton[9] wipe ($1+=1)\nabsent move ($1+=1) ($2+=1)\nabsent move \"($2+=100)\"\n@ move \"($2+=100)\"\n$3=10\nwait 77\n#_FES_SLEEP_\nbutton[($0+=2)] blend ($1+=1) ($2+=2)\n#button.PUSH_L\nmissing[(@+(\\0+=1))] size ($1+=1) ($4+=4)\n$5=\\0\n$6=@\n$7+=1\n";
+    for budget in [1, 4096] {
+        let (mut runtime, mut scene) = setup(source, budget);
+        runtime.numbers_mut().current = 17;
+        runtime.numbers_mut().local[0] = 99;
+        runtime
+            .numbers_mut()
+            .named
+            .entry("outside".into())
+            .or_default()
+            .insert(0, 31);
+        let named = runtime.numbers().named.clone();
+        update(&mut runtime, &mut scene, 100);
+        assert_eq!(runtime.numbers().shared, [2, 6, 6, 10, 0, 0, 0, 0]);
+        let deadline = scene.deadline();
+        system(&mut runtime, &mut scene, "_FES_SLEEP_");
+        assert_eq!(runtime.numbers().shared, [4, 6, 8, 10, 0, 0, 0, 0]);
+        assert!(event(&mut runtime, &mut scene));
+        assert_eq!(runtime.numbers().shared, [4, 6, 8, 10, 4, 1, 0, 1]);
+        assert_eq!(scene.deadline(), deadline);
+        assert_eq!(runtime.numbers().current, 17);
+        assert_eq!(runtime.numbers().local[0], 99);
+        assert_eq!(runtime.numbers().named, named);
         assert!(runtime.host().debug_messages.is_empty());
     }
 }
@@ -165,7 +192,7 @@ fn object_events_preserve_waits_queue_exits_and_transfer_only_the_main_cursor() 
 #[test]
 fn failed_object_events_keep_their_cursor_and_reject_other_dispatches() {
     let (mut runtime, mut scene) = setup(
-        "#DEFINE\nBASE button\n#START\nwait 77\n#button.PUSH_L\n$1=$1+1\nunknown operation\n",
+        "#DEFINE\nBASE button\n#START\nwait 77\n#button.PUSH_L\n$1=$1+1\nbutton wipe\n",
         1,
     );
     update(&mut runtime, &mut scene, 100);
@@ -292,7 +319,7 @@ fn system_next_replaces_the_main_position_and_clears_its_wait() {
 #[test]
 fn pending_or_failed_system_blocks_keep_their_cursor_and_reject_other_work() {
     let (mut runtime, mut scene) = setup(
-        "#START\nwait 77\n#_FES_SLEEP_\n$1=$1+1\nunknown operation\n",
+        "#DEFINE\nBASE button\n#START\nwait 77\n#_FES_SLEEP_\n$1=$1+1\nbutton wipe\n",
         1,
     );
     update(&mut runtime, &mut scene, 100);

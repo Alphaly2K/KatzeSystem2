@@ -332,6 +332,25 @@ impl Interpreter {
             .map(|s| text::expand(&s, &state.strings))
             .collect()
     }
+    pub(crate) fn command_object_reference(
+        &mut self,
+        bytes: &[u8],
+        state: &mut State,
+    ) -> Result<ObjectReference> {
+        if bytes != b"@" {
+            return self.object_reference(bytes, state);
+        }
+        Ok(self.event_context().map_or_else(
+            || ObjectReference {
+                name: String::new(),
+                bank: 0,
+            },
+            |context| ObjectReference {
+                name: context.object.clone(),
+                bank: context.bank,
+            },
+        ))
+    }
     pub(crate) fn eval(&mut self, bytes: &[u8], state: &mut State) -> Result<i32> {
         let current = self
             .invocation
@@ -339,12 +358,28 @@ impl Interpreter {
             .map_or(state.current, |invocation| invocation.context.bank);
         self.eval_with_current(bytes, state, current)
     }
+    pub(crate) fn eval_fallback(&mut self, bytes: &[u8], state: &mut State) -> Result<i32> {
+        let current = self
+            .invocation
+            .as_ref()
+            .map_or(state.current, |invocation| invocation.context.bank);
+        self.eval_in_scope(bytes, state, current, expression::eval_fes_fallback)
+    }
     fn eval_with_current(&mut self, bytes: &[u8], state: &mut State, value: i32) -> Result<i32> {
+        self.eval_in_scope(bytes, state, value, expression::eval)
+    }
+    fn eval_in_scope(
+        &mut self,
+        bytes: &[u8],
+        state: &mut State,
+        value: i32,
+        evaluate: fn(&str, &mut State) -> Result<i32>,
+    ) -> Result<i32> {
         let current = state.current;
         state.current = value;
         std::mem::swap(&mut self.local, &mut state.local);
         std::mem::swap(&mut self.named, &mut state.named);
-        let result = text::ascii(bytes).and_then(|s| expression::eval(s, state));
+        let result = text::ascii(bytes).and_then(|s| evaluate(s, state));
         std::mem::swap(&mut self.named, &mut state.named);
         std::mem::swap(&mut self.local, &mut state.local);
         state.current = current;
@@ -509,7 +544,7 @@ impl Interpreter {
                     Event::Wait(self.eval(&args[1], state)?)
                 }
                 _ => match self
-                    .subcommand_call(line.offset, &args, state)
+                    .subcommand_call(line.offset, &args, bytes, state)
                     .map_err(|error| Error::new(line.offset + error.offset, error.message))?
                 {
                     Some(call) => Event::Subcommand(Box::new(call)),

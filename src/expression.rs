@@ -1,6 +1,8 @@
 use crate::{Error, Result};
 use std::collections::BTreeMap;
 
+mod fallback;
+
 #[derive(Clone, Debug)]
 pub struct State {
     pub shared: Vec<i32>,
@@ -67,6 +69,8 @@ enum Node {
     Named(String, Option<Box<Node>>),
     Unary(String, Box<Node>, usize),
     Binary(String, Box<Node>, Box<Node>, usize),
+    Postfix(bool, Box<Node>, usize),
+    NoWrite(Box<Node>, Option<Box<Node>>),
 }
 
 #[derive(Clone, Debug)]
@@ -99,6 +103,10 @@ impl Expression {
 
 pub fn eval(source: &str, state: &mut State) -> Result<i32> {
     Expression::parse(source)?.evaluate(state)
+}
+
+pub(crate) fn eval_fes_fallback(source: &str, state: &mut State) -> Result<i32> {
+    Ok(evaluate(&fallback::parse(source)?, state)?.load(state))
 }
 
 /// 对应 CST 使用的数值宿主入口，移除一个末尾百分号。
@@ -172,6 +180,21 @@ fn evaluate(node: &Node, state: &mut State) -> Result<Value> {
                 // 左侧变量保留位置，右子树的副作用完成后再读其值。
                 Value::Number(binary(op, a.load(state), b, false, *at)?)
             }
+        }
+        Node::Postfix(increment, arg, at) => {
+            let Value::Reference(place) = evaluate(arg, state)? else {
+                return Err(Error::new(*at, "自增减需要变量"));
+            };
+            let value = place.get(state);
+            place.put(state, value.wrapping_add(if *increment { 1 } else { -1 }));
+            Value::Number(value)
+        }
+        Node::NoWrite(left, right) => {
+            evaluate(left, state)?;
+            if let Some(right) = right {
+                evaluate(right, state)?;
+            }
+            Value::Number(0)
         }
     })
 }

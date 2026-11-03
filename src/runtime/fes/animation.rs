@@ -43,17 +43,13 @@ impl Objects {
         if !matches!(command, b"setanm" | b"anm") {
             return Ok(false);
         }
-        let target = if args[0] == b"@" {
-            let context = interpreter
-                .event_context()
-                .ok_or_else(|| Error::new(line.offset, "FES 当前没有事件对象"))?;
-            fes::ObjectReference {
-                name: context.object.clone(),
-                bank: context.bank,
-            }
-        } else {
-            interpreter.object_reference(&args[0], state)?
-        };
+        let target = interpreter.command_object_reference(&args[0], state)?;
+        if self
+            .fallback_missing_target(interpreter, &target, &line.bytes, state)
+            .map_err(|error| Error::new(line.offset + error.offset, error.message))?
+        {
+            return Ok(true);
+        }
         let value = args.get(2).map_or(&[][..], Vec::as_slice);
         let value = &value[..value.iter().position(|&b| b == 0).unwrap_or(value.len())];
         let name = if command == b"setanm" {

@@ -308,7 +308,8 @@ fn object_commands_evaluate_once_and_keep_distinct_bank_and_type_traversal_rules
         assert!(image.updates.priority_changed());
         assert!(image.updates.needs_rebuild());
         assert_eq!(image.position_resource.as_ref().unwrap().frame, 5);
-        let before = numbers.shared.clone();
+        let mut expected = numbers.shared.clone();
+        expected[0] += 1;
         assert!(
             object_command(
                 &mut objects,
@@ -316,9 +317,9 @@ fn object_commands_evaluate_once_and_keep_distinct_bank_and_type_traversal_rules
                 &mut numbers,
                 b"missing size ($0+=1) ($0+=1)"
             )
-            .is_err()
+            .unwrap()
         );
-        assert_eq!(numbers.shared, before);
+        assert_eq!(numbers.shared, expected);
     }
 }
 
@@ -530,9 +531,9 @@ fn id_commands_query_logical_frames_and_guard_arrays_and_shared_destinations() {
 #[test]
 fn animation_commands_expand_banks_skip_other_types_and_preserve_the_play_switch() {
     let mut objects = Objects::new(HandleAllocator::default()).unwrap();
-    let handles = objects.define(&definition("IMAGE", "item", 3)).unwrap();
+    let handles = objects.define(&definition("IMAGE", "item", 4)).unwrap();
     objects.get_mut(handles[1]).unwrap().state = ObjectState::CImage(Box::default());
-    objects.remove(handles[0]).unwrap();
+    objects.remove(handles[2]).unwrap();
     let mut interpreter =
         fes::Interpreter::new(fes::Program::from_text(b"#START\nexit 0\n").unwrap()).unwrap();
     objects.publish_bindings(&mut interpreter);
@@ -556,7 +557,7 @@ fn animation_commands_expand_banks_skip_other_types_and_preserve_the_play_switch
             .is_none()
     );
     let request = objects
-        .get(handles[2])
+        .get(handles[3])
         .unwrap()
         .image_animation_request()
         .unwrap();
@@ -565,14 +566,14 @@ fn animation_commands_expand_banks_skip_other_types_and_preserve_the_play_switch
     assert!(request.is_pending());
     for (line, playing, name) in [
         (b"item anm 0".as_slice(), 1, b".anm".as_slice()),
-        (b"item[2] setanm dir.with/file", 1, b"dir.with/file.anm"),
-        (b"item[2] anm sToP", 0, b"dir.with/file.anm"),
-        (b"item[2] setanm explicit.custom", 0, b"explicit.custom"),
-        (b"item[2] setanm tail.", 0, b"tail.anm"),
+        (b"item[3] setanm dir.with/file", 1, b"dir.with/file.anm"),
+        (b"item[3] anm sToP", 0, b"dir.with/file.anm"),
+        (b"item[3] setanm explicit.custom", 0, b"explicit.custom"),
+        (b"item[3] setanm tail.", 0, b"tail.anm"),
     ] {
         assert!(dispatch(&mut objects, line).unwrap());
         let request = objects
-            .get(handles[2])
+            .get(handles[3])
             .unwrap()
             .image_animation_request()
             .unwrap();
@@ -583,13 +584,13 @@ fn animation_commands_expand_banks_skip_other_types_and_preserve_the_play_switch
     assert!(
         dispatch(
             &mut objects,
-            &[b"item[2] setanm ".as_slice(), &[b'x'; 256]].concat()
+            &[b"item[3] setanm ".as_slice(), &[b'x'; 256]].concat()
         )
         .is_err()
     );
     assert_eq!(
         objects
-            .get(handles[2])
+            .get(handles[3])
             .unwrap()
             .image_animation_request()
             .unwrap()

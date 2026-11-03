@@ -137,8 +137,9 @@ impl<F: ObjectFactory> Store<'_, F> {
         &mut self,
         scene: &mut Scene,
         args: &[Vec<u8>],
-        offset: usize,
+        line: &fes::Line,
     ) -> Result<Option<bool>> {
+        let offset = line.offset;
         let Some(name) = args.get(1) else {
             return Ok(None);
         };
@@ -147,36 +148,20 @@ impl<F: ObjectFactory> Store<'_, F> {
         }
         let result = (|| {
             if scene.property_call.is_none() {
-                let mut target = if args[0] == b"@" {
-                    let context = scene
-                        .interpreter
-                        .event_context()
-                        .ok_or_else(|| Error::new(0, "FES 当前没有事件对象"))?;
-                    fes::ObjectReference {
-                        name: context.object.clone(),
-                        bank: context.bank,
-                    }
-                } else {
-                    scene.interpreter.object_reference(&args[0], self.numbers)?
-                };
-                let count = scene.objects.count(&target.name);
-                if count == 0 {
-                    return Err(Error::new(0, "FES 对象目标不存在，整行表达式回退尚未接入"));
+                let mut target = scene
+                    .interpreter
+                    .command_object_reference(&args[0], self.numbers)?;
+                if scene.objects.fallback_missing_target(
+                    &mut scene.interpreter,
+                    &target,
+                    &line.bytes,
+                    self.numbers,
+                )? {
+                    return Ok(Some(true));
                 }
-                if name != b"blend" {
-                    if scene
-                        .objects
-                        .lookup(
-                            &target.name,
-                            if target.bank == -1 { 0 } else { target.bank },
-                        )
-                        .is_none()
-                    {
-                        return Err(Error::new(0, "FES 对象目标不存在，整行表达式回退尚未接入"));
-                    }
-                    if count == 1 {
-                        target.bank = 0;
-                    }
+                let count = scene.objects.count(&target.name);
+                if name != b"blend" && count == 1 {
+                    target.bank = 0;
                 }
                 let value = if name == b"blend" {
                     Property::Blend(

@@ -162,7 +162,7 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 
 `Interpreter::subcommands(state)` 返回 `SubcommandTable`，包含按命令名字节索引的绑定和逐行诊断。同名命令保留第一次定义，多个 SUBCOMMAND 段按顺序处理。每个绑定保存类别、原运动资源名、参数描述符及默认文本，以及 `MappedArgument` 映射。`Interpreter::subcommand_arguments(binding, arguments, context, state)` 将去除对象名／命令名的已展开参数换算为运动参数数组。`SubcommandContext` 由宿主按目标银行提供基点、位置、速度、弧度旋转、缩放和 ARGB 颜色；求值使用当前 FES 的局部与命名数值，`@` 为当前属性的整数值。参数编号越界返回诊断。低层解释器保留该宿主边界，Runtime 的 Scene 已提供 BASE、SLIDER 和三类图像对象的运动装载及调度；SLIDER 使用默认上下文，Alpha 仅在运动属性块中传递。
 
-`run` 自动将已注册子命令发为 `Event::Subcommand(Box<SubcommandCall>)`。调用包含源码字节位置、对象与银行、绑定及已展开输入；银行 −1 表示整个数组，事件内的 `@` 对象引用解析为触发对象与银行。宿主逐个查找目标银行，提供各自的 `SubcommandContext`，调用 `subcommand_arguments` 后创建并插入运动任务，再用 `resume` 继续 FES。Runtime 首次使用绑定时调用资源服务的 mot 类别补全，并在场景内保留名称；场景存活期间应保持类别映射稳定。成功读取的运动程序在 Runtime 中按忽略大小写的完整名称缓存，实例拥有独立 VM 数据。资源缺失时跳过创建并继续脚本，读取错误保留当前银行的换算参数。基线两类绑定均以分组 0 入队。
+`run` 自动将已注册子命令发为 `Event::Subcommand(Box<SubcommandCall>)`。调用包含源码字节位置、对象与银行、绑定及已展开输入；`source` 保留行级展开后的完整命令。银行 −1 表示整个数组，事件内的 `@` 对象引用解析为触发对象与银行。宿主逐个查找目标银行，提供各自的 `SubcommandContext`，调用 `subcommand_arguments` 后创建并插入运动任务，再用 `resume` 继续 FES。Runtime 首次使用绑定时调用资源服务的 mot 类别补全，并在场景内保留名称；场景存活期间应保持类别映射稳定。成功读取的运动程序在 Runtime 中按忽略大小写的完整名称缓存，实例拥有独立 VM 数据。资源缺失时跳过创建并继续脚本，读取错误保留当前银行的换算参数。基线两类绑定均以分组 0 入队。起始目标缺失时，Runtime 在资源补全与参数映射前对 source 执行整行回退。
 
 `registered_subcommands()` 在声明事件发出后返回已注册表；绑定名称与目标保留注册时的字符串展开结果。125 个原生命令优先于同名绑定，名称区分大小写；其他命令继续通过 `Command` 交给宿主。待处理调用重复返回时，不重新执行银行表达式。
 
@@ -426,7 +426,7 @@ BUTTON 先通过 `prepare_fes_scene` 或任务 338 完成下层创建，再由�
 
 FES IMAGE 的 `IDN=−1` 接收完整名称的原始来源，不受 PATHMODE 影响；`Object::raw_image_handle` 返回其非持有查询句柄，零表示没有来源。像素和原始数据独立保留，登记优先使用像素；普通装载缺帧后可退回旧原始来源。FES 持有的数据随替换、对象删除或所属任务实际回收释放，列表已经解码的帧继续存活。原始来源登记以当前更新记录的包装保存来源身份，可用 308 反查；具体几何和槽号规则见[原始来源更新](graphics.md#fes-image-原始来源更新)。
 
-`Objects::dispatch_object_command(interpreter, line, state)` 消费 `disp`／`size`／`keypos`／`setid`／`getid`／`enable`／`pri`／`pos2`／`delay`／`ismot`／`attach`／`settbl`／`pl`／`lock`、图像／平面的 `getpos`，以及滑动控件的 `pos`／`page`／`getpos`／`load`。返回 true 后调用者确认事件，其他命令返回 false。目标银行与数值参数使用 FES 自身作用域，图形请求在对象更新时提交；getid／getpos 即时写入共享变量。Scene 另接图像／平面的 pos 和默认 p 运动，在主体、系统块及对象事件中提供预算续跑与资源重试；独立 Objects 对该路径返回场景服务诊断。位置查询使用本地坐标并按 x86 规则取整，缺省轴、数组、类型和资源时点见[对象控制命令](graphics.md#fes-对象控制命令)。
+`Objects::dispatch_object_command(interpreter, line, state)` 消费 `disp`／`size`／`keypos`／`setid`／`getid`／`enable`／`pri`／`pos2`／`delay`／`ismot`／`attach`／`settbl`／`pl`／`lock`、图像／平面的 `getpos`，以及滑动控件的 `pos`／`page`／`getpos`／`load`。返回 true 后调用者确认事件，其他命令返回 false。目标银行与数值参数使用 FES 自身作用域，图形请求在对象更新时提交；getid／getpos 即时写入共享变量。起始目标缺失时，对行级展开后的原始整行数值求值，保留 FES 作用域与连续操作数规则。Scene 另接图像／平面的 pos 和默认 p 运动，在主体、系统块及对象事件中提供预算续跑与资源重试；独立 Objects 对该路径返回场景服务诊断。位置查询使用本地坐标并按 x86 规则取整，缺省轴、数组、类型和资源时点见[对象控制命令](graphics.md#fes-对象控制命令)。
 
 Scene 消费 `keyskip` 并即时更新等待取消模式，`forced_key_skip()` 查询保存的 force 标志；它与当前输入模式分别维护，完整规则见[等待取消](graphics.md#fes-等待取消与-keyskip)。
 
