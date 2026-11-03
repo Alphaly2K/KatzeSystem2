@@ -4,9 +4,12 @@ use crate::{Error, Result, read};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SoundPart {
     pub name: Vec<u8>,
+    pub file_prefix: Vec<u8>,
     pub id: i32,
     pub volume: i32,
     pub system_voice: i32,
+    pub play_enabled: i32,
+    pub mute: i32,
     pub children: Vec<SoundPart>,
 }
 
@@ -14,9 +17,12 @@ impl Default for SoundPart {
     fn default() -> Self {
         Self {
             name: Vec::new(),
+            file_prefix: Vec::new(),
             id: -1,
             volume: -1,
             system_voice: -1,
+            play_enabled: -1,
+            mute: -1,
             children: Vec::new(),
         }
     }
@@ -28,6 +34,7 @@ pub struct SoundConfig {
     pub parts: Vec<SoundPart>,
     /// 应用设置后的独立主音量；未提供时对主音量查询返回诊断。
     pub master_volume: Option<i32>,
+    pub master_mute: i32,
 }
 
 impl SoundConfig {
@@ -81,6 +88,51 @@ impl SoundConfig {
                 .master_volume
                 .ok_or_else(|| Error::new(0, "运行时未提供新声音配置的当前主音量"));
         }
+        self.group_volume(name)
+    }
+
+    /// GROUP 按分类名称查当前音量；master 在此处也是普通分类名称。
+    pub fn group_volume(&self, name: &[u8]) -> Result<i32> {
+        Ok(self.find_part(name, false)?.map_or(100, |part| part.volume))
+    }
+
+    /// 按非空文件前缀查首个分类；父级匹配时不再查找后代。
+    pub fn file_part(&self, name: &[u8]) -> Result<Option<&SoundPart>> {
+        self.find_part(name, true)
+    }
+
+    pub fn file_volume(&self, name: &[u8]) -> Result<i32> {
+        Ok(self.file_part(name)?.map_or(100, |part| part.volume))
+    }
+
+    pub fn file_play_enabled(&self, name: &[u8]) -> Result<i32> {
+        Ok(self.file_part(name)?.map_or(1, |part| part.play_enabled))
+    }
+
+    pub fn file_system_voice(&self, name: &[u8]) -> Result<i32> {
+        Ok(self.file_part(name)?.map_or(1, |part| part.system_voice))
+    }
+
+    /// 未匹配时返回一百；匹配节点的 −1 静音值转换为零。
+    pub fn file_mute(&self, name: &[u8]) -> Result<i32> {
+        Ok(self
+            .file_part(name)?
+            .map_or(100, |part| if part.mute == -1 { 0 } else { part.mute }))
+    }
+
+    pub fn master_mute(&self) -> i32 {
+        if self.master_mute == -1 {
+            0
+        } else {
+            self.master_mute
+        }
+    }
+
+    fn find_part(&self, name: &[u8], prefix: bool) -> Result<Option<&SoundPart>> {
+        let name = &name[..name
+            .iter()
+            .position(|&byte| byte == 0)
+            .unwrap_or(name.len())];
         if name.len() >= 512 {
             return Err(Error::new(0, "声音分类名称超过查询缓冲区容量"));
         }
@@ -92,12 +144,21 @@ impl SoundConfig {
             if visited > read::MAX_ITEMS {
                 return Err(Error::new(0, "声音配置节点数量超过上限"));
             }
-            if normalized_name(&part.name) == name {
-                return Ok(part.volume);
+            let key = normalized_name(if prefix {
+                &part.file_prefix
+            } else {
+                &part.name
+            });
+            if if prefix {
+                !key.is_empty() && name.starts_with(&key)
+            } else {
+                name == key
+            } {
+                return Ok(Some(part));
             }
             stack.extend(part.children.iter().rev());
         }
-        Ok(100)
+        Ok(None)
     }
 
     fn path_value(&self, path: &[i32], default: i32, value: fn(&SoundPart) -> i32) -> Result<i32> {

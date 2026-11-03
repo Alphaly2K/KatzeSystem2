@@ -14,7 +14,7 @@
 
 ## 系统语音配置选择
 
-宿主通过 `HostState::sound_config` 提供 `audio::SoundConfig`，其 `parts` 按配置声明顺序保存 `SoundPart { name, id, volume, system_voice, children }`。name 为原始字节编码的分类名称，volume 与 system_voice 是应用设置后的当前原始值，节点默认名称为空、编号、音量和开关均为 −1。`master_volume: Option<i32>` 单独保存应用设置后的主音量；默认 None，主音量查询要求宿主显式提供。宿主负责读取配置、处理子节点的缺省继承及应用用户设置；此接口尚未自动装载声音配置。
+宿主通过 `HostState::sound_config` 提供 `audio::SoundConfig`，其 `parts` 按配置声明顺序保存 `SoundPart { name, file_prefix, id, volume, play_enabled, system_voice, mute, children }`。name 与 file_prefix 分别为原始字节编码的分类名称和文件前缀，其余数值为应用设置后的当前原始值，节点默认两个名称为空，编号、音量和开关均为 −1。`master_volume: Option<i32>` 单独保存应用设置后的主音量；默认 None，主音量查询要求宿主显式提供。宿主负责读取配置、处理子节点的缺省继承及应用用户设置；此接口尚未自动装载声音配置。
 
 `SoundConfig::system_voice_candidates(paths)` 在 paths 为空时按先父后子顺序收集开关恰好为一的节点编号。显式路径则逐层查找第一个同编号节点；缺失分量使用开关一，后续分量继续在当前层查询。路径最后一次查询结果非零时，将最后一个输入编号加入候选。两种方式均保留重复编号。`system_voice_enabled(path)` 提供单条路径的原始查询结果，空路径返回一。
 
@@ -35,6 +35,16 @@ FES `getsndconfex output_index volume_id [id ...]` 依次求值输出槽和每�
 FES `getsndconfex output_index volume name` 将该结果写入共享槽，只读取一个名称参数，不计算名称中的表达式或额外参数。缺少名称或名称为空时仍求值输出槽，但不写入；配置缺失或精确 master 所需的主音量未提供时，在表达式副作用之前诊断，补配置后可续跑。该查询不读取配置启用值、不消耗随机数，三类 FES 执行入口保持同一契约。
 
 上述配置查询要求宿主已提供分类配置；缺失配置时在表达式求值前诊断，允许补齐后重试。其他 getsndconfex 查询目前返回未接入诊断。
+
+## 文件分类与播放设置
+
+`file_part(name)` 按独立的 file_prefix 查找分类，不使用分类 name。输入和配置前缀到首个零字节结束；单字节 ASCII 大小写等同，CP932 双字节保持原值。按声明顺序先检查父节点，再递归子节点；非空前缀匹配文件名开头即返回，不选择最长前缀，不拆分目录。空前缀跳过自身，继续查子节点。输入正文须短于 512 字节。
+
+`file_volume(name)`、`file_play_enabled(name)`、`file_system_voice(name)` 读取匹配节点的当前值，缺失时分别返回 100、1、1，匹配节点的 −1 保留。`file_mute(name)` 将匹配节点的 −1 转为零，其他原值保留；未匹配时返回 100。`master_mute()` 同样仅将独立 master_mute 字段的 −1 转零；字段默认零，非零查询结果用于静音。
+
+`group_volume(name)` 按分类 name 精确匹配，沿用分类名称的大小写和遍历规则，缺失返回 100；此处小写 master 也是普通分类名称，与 volume_by_name 的独立主音量入口分别处理。上述值不裁剪到百分比或布尔范围。44 组原入口查询确认独立前缀、父级优先、缺失值、主静音及两种 master 查询；常规回归使用合成分类树。
+
+`HostState::sound_settings_dirty` 保存全局声音设置刷新标记，默认零。FES 的后续媒体属性更新读取该标记，清除由外层设置宿主负责。
 
 ## FES SOUND 状态
 

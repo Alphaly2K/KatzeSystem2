@@ -7,6 +7,7 @@ fn part(id: i32, system_voice: i32, children: Vec<SoundPart>) -> SoundPart {
         volume: id.wrapping_mul(3),
         system_voice,
         children,
+        ..SoundPart::default()
     }
 }
 
@@ -85,6 +86,7 @@ fn named_volumes_search_depth_first_and_keep_master_and_multibyte_names_distinct
                 ..part(30, 0, vec![])
             },
         ],
+        ..SoundConfig::default()
     };
     for (name, expected) in [
         (b"ROOT".as_slice(), 30),
@@ -98,5 +100,68 @@ fn named_volumes_search_depth_first_and_keep_master_and_multibyte_names_distinct
     ] {
         assert_eq!(config.volume_by_name(name).unwrap(), expected);
     }
+    assert_eq!(config.group_volume(b"master").unwrap(), 90);
     assert!(SoundConfig::default().volume_by_name(b"master").is_err());
+}
+
+#[test]
+fn file_policy_uses_separate_prefixes_parent_priority_and_raw_switches() {
+    let mut config = SoundConfig {
+        parts: vec![
+            SoundPart {
+                name: b"category".to_vec(),
+                file_prefix: b"AB".to_vec(),
+                volume: 37,
+                play_enabled: 0,
+                system_voice: -1,
+                children: vec![SoundPart {
+                    file_prefix: b"abcd".to_vec(),
+                    volume: 83,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+            SoundPart {
+                file_prefix: b"ab".to_vec(),
+                volume: 99,
+                ..Default::default()
+            },
+            SoundPart {
+                children: vec![SoundPart {
+                    file_prefix: b"\x81\x61X".to_vec(),
+                    volume: -37,
+                    play_enabled: -1,
+                    system_voice: 2,
+                    mute: 2,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+        ],
+        ..Default::default()
+    };
+    for (name, expected) in [
+        (b"abcd.wav".as_slice(), [37, 0, -1, 0]),
+        (b"aB\0unused", [37, 0, -1, 0]),
+        (b"\x81\x61x-a", [-37, -1, 2, 2]),
+        (b"\x81\x41X-a", [100, 1, 1, 100]),
+        (b"category", [100, 1, 1, 100]),
+        (b"folder/abcd.wav", [100, 1, 1, 100]),
+        (b"", [100, 1, 1, 100]),
+    ] {
+        assert_eq!(
+            [
+                config.file_volume(name).unwrap(),
+                config.file_play_enabled(name).unwrap(),
+                config.file_system_voice(name).unwrap(),
+                config.file_mute(name).unwrap(),
+            ],
+            expected
+        );
+    }
+    assert!(config.file_part(&[b'a'; 512]).is_err());
+    for (value, expected) in [(-1, 0), (0, 0), (1, 1), (-3, -3)] {
+        config.master_mute = value;
+        assert_eq!(config.master_mute(), expected);
+    }
 }

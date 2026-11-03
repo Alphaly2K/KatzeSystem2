@@ -485,7 +485,9 @@ fn voice_runtime(budget: usize) -> Runtime<Reject> {
                 volume: 37,
                 system_voice: 0,
                 children: vec![],
+                ..SoundPart::default()
             }],
+            ..SoundPart::default()
         }],
         ..SoundConfig::default()
     });

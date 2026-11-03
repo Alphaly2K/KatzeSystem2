@@ -39,7 +39,9 @@ FES `fontcom add name` 调用同一字体服务的 `add_resource`，名称为已
 
 `audio::parse_loop_table(bytes)` 读取循环点表，保留待补全的字节名称及原始 64 位起点／终点。`LoopPoints::register(name, start, end)` 保存声音命令 199 的原始循环范围。首次登记追加记录；同名更新只改起点，保留原终点、名称与顺序。`find(name)` 和 `entries()` 提供只读查询，名称及范围限制见[声音接口](audio.md)。当前接口不解码音频，也不执行播放。
 
-`audio::SoundConfig { parts, master_volume }` 保存应用设置后的 `SoundPart { name, id, volume, system_voice, children }` 分类树及可选主音量。`system_voice_candidates(paths)` 提供整树展开或显式路径筛选，`system_voice_enabled(path)` 查询原始开关，`volume(path)` 查询当前音量；`volume_by_name(name)` 按名称查首个分类，精确小写 master 使用显式主音量。宿主通过 `HostState::sound_config` 及 `sound_config_enabled` 提供配置和启用字段；FES `sysvoiceex` 已连接共享数值槽与共享整数随机流，用于选择配置编号，`getsndconfex` 已提供 `volume_id`／`sysplay_id` 两种编号路径查询，以及 `volume name` 的分类名称／主音量查询。配置装载、筛选与随机消耗规则见[声音接口](audio.md#系统语音配置选择)。
+`audio::SoundConfig` 保存应用设置后的 `SoundPart` 分类树、可选主音量及主静音。节点分别保存分类名称、文件前缀、编号、音量、播放／系统语音开关、静音及有序子节点。`system_voice_candidates(paths)` 提供整树展开或显式路径筛选，`system_voice_enabled(path)` 查询原始开关，`volume(path)` 查询当前音量；`volume_by_name(name)` 按名称查首个分类，精确小写 master 使用显式主音量。宿主通过 `HostState::sound_config` 及 `sound_config_enabled` 提供配置和启用字段；FES `sysvoiceex` 已连接共享数值槽与共享整数随机流，用于选择配置编号，`getsndconfex` 已提供 `volume_id`／`sysplay_id` 两种编号路径查询，以及 `volume name` 的分类名称／主音量查询。配置装载、筛选与随机消耗规则见[声音接口](audio.md#系统语音配置选择)。
+
+`SoundConfig::file_part(name)` 按非空文件前缀、先父后子查首个匹配；`file_volume`／`file_play_enabled`／`file_system_voice`／`file_mute` 处理各字段的缺省值，`master_mute()` 查询主静音。`group_volume(name)` 单独按分类名称查询，master 在这里是普通名称。规则与缺省值见[文件分类与播放设置](audio.md#文件分类与播放设置)。`HostState::sound_settings_dirty` 保存外层管理的媒体属性刷新标记。
 
 `audio::decode_vorbis(bytes)` 返回保留采样率和声道顺序的 `audio::Pcm`，通过 `frames()`、`samples()` 查询完整采样帧和交错 i16 数据。完整逻辑流、容量和结束页规则见[PCM 与解码](audio.md#pcm-与-vorbis-解码)。
 
