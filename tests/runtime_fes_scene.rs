@@ -364,7 +364,7 @@ fn scenes_freeze_budgeted_time_and_resume_zero_waits_and_repeated_blocks_on_late
 fn unsupported_commands_preserve_the_event_and_do_not_repeat_prior_script_side_effects() {
     let mut runtime = runtime(4096);
     let mut scene = Scene::new(
-        Program::from_text(b"#START\n$0=$0+1\nsprite play\n").unwrap(),
+        Program::from_text(b"#DEFINE\nBASE sprite\n#START\n$0=$0+1\nsprite wipe\n").unwrap(),
         runtime.host().handle_allocator(),
     )
     .unwrap();
