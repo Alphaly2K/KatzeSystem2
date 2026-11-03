@@ -49,6 +49,9 @@ impl Objects {
                 | b"settbl"
                 | b"pl"
                 | b"lock"
+                | b"play"
+                | b"channel"
+                | b"stype"
         ) {
             return Ok(false);
         }
@@ -80,6 +83,15 @@ impl Objects {
         }
         if self.count(&target.name) == 1 {
             target.bank = 0;
+        }
+        if matches!(name, b"play" | b"channel" | b"stype") {
+            return self.dispatch_sound_value_command(
+                interpreter,
+                line.offset,
+                &args,
+                &target,
+                state,
+            );
         }
         if matches!(name, b"pos" | b"page" | b"getpos" | b"load") {
             return self.dispatch_control_value_command(
@@ -293,7 +305,7 @@ impl Objects {
         if name == b"getpos" && target.bank == -1 {
             return Ok(true);
         }
-        let mut number = |index: usize, default| {
+        let mut number = |index: usize, default, state: &mut State| {
             args.get(index).map_or(Ok(default), |bytes| {
                 interpreter
                     .eval(bytes, state)
@@ -304,7 +316,7 @@ impl Objects {
         if name != b"load" {
             let default = if name == b"getpos" { -1 } else { 0 };
             for (i, value) in values.iter_mut().enumerate() {
-                *value = number(i + 2, default)?;
+                *value = number(i + 2, default, state)?;
             }
         }
         let banks = if target.bank == -1 {
@@ -320,14 +332,24 @@ impl Objects {
                 continue;
             };
             if name == b"load" {
-                // load 的第三项逐个有效银行求值，第四项不读取。
-                if let Some(bytes) = args.get(3) {
-                    interpreter
-                        .eval(bytes, state)
-                        .map_err(|error| Error::new(offset + error.offset, error.message))?;
-                }
+                number(3, 0, state)?;
             }
             let object = &mut self.get_mut(handle).unwrap().state;
+            if name == b"load" {
+                if let ObjectState::Sound(sound) = object {
+                    // 通用 load 分派已经求值一次，声音分支按原顺序重新求值。
+                    let load_mode = number(3, 0, state)?;
+                    let duration = number(4, 60, state)?;
+                    sound.request_load(
+                        args.get(2).map_or(b"", Vec::as_slice),
+                        [load_mode, duration],
+                    )?;
+                    continue;
+                }
+                if matches!(object, ObjectState::CImage(_)) {
+                    continue;
+                }
+            }
             if name == b"page" {
                 if let ObjectState::Scroll2(scroll) = object {
                     scroll.page = values[2];

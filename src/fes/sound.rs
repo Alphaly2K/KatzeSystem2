@@ -11,8 +11,15 @@ pub struct SoundState {
     pub group: Vec<u8>,
     pub volume: i32,
     pub pan: i32,
+    /// load 的两个原始整数；声明 FILE 保留当前值。
+    pub load_parameters: [i32; 2],
+    /// play 的三个原始整数，不作单位换算。
+    pub play_parameters: [i32; 3],
     pub(crate) dirty: bool,
     pub(crate) load_requested: bool,
+    pub(crate) action: i32,
+    pub(crate) action_requested: bool,
+    pub(crate) play_value_changed: bool,
 }
 
 impl Default for SoundState {
@@ -25,8 +32,13 @@ impl Default for SoundState {
             group: Vec::new(),
             volume: 100,
             pan: 0,
+            load_parameters: [0; 2],
+            play_parameters: [0; 3],
             dirty: false,
             load_requested: false,
+            action: 0,
+            action_requested: false,
+            play_value_changed: false,
         }
     }
 }
@@ -38,6 +50,22 @@ impl SoundState {
 
     pub fn needs_load(&self) -> bool {
         self.load_requested
+    }
+
+    /// 查询等待声音任务消费的动作编号。
+    pub fn action_request(&self) -> Option<i32> {
+        self.action_requested.then_some(self.action)
+    }
+
+    pub fn play_value_changed(&self) -> bool {
+        self.play_value_changed
+    }
+
+    pub(crate) fn request_load(&mut self, file: &[u8], parameters: [i32; 2]) -> Result<()> {
+        self.file = name(file, 260)?.to_vec();
+        self.load_parameters = parameters;
+        self.load_requested = true;
+        Ok(())
     }
 
     /// FILE 重复写入仍请求装载；名称保留原始字节，不执行图像名称转换。

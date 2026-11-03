@@ -1,6 +1,70 @@
-use super::Scene;
+use super::{ObjectState, Objects, Scene};
 use crate::runtime::{ObjectFactory, Store};
 use crate::{Error, Result};
+
+impl Objects {
+    pub(super) fn dispatch_sound_value_command(
+        &mut self,
+        interpreter: &mut crate::fes::Interpreter,
+        offset: usize,
+        args: &[Vec<u8>],
+        target: &crate::fes::ObjectReference,
+        state: &mut crate::expression::State,
+    ) -> Result<bool> {
+        let command = args[1].as_slice();
+        if command == b"play" && target.bank == -1 {
+            return Ok(true);
+        }
+        let mut number = |index: usize, default| {
+            args.get(index).map_or(Ok(default), |bytes| {
+                interpreter
+                    .eval(bytes, state)
+                    .map_err(|error| Error::new(offset + error.offset, error.message))
+            })
+        };
+        let value = if command == b"play" { 0 } else { number(2, 0)? };
+        let banks = if target.bank == -1 {
+            0..i64::from(self.count(&target.name))
+        } else {
+            i64::from(target.bank)..i64::from(target.bank) + 1
+        };
+        for bank in banks {
+            let Some(handle) = self.lookup(&target.name, bank as i32) else {
+                break;
+            };
+            let sound = match &mut self.get_mut(handle).unwrap().state {
+                ObjectState::Sound(sound) => sound,
+                _ => continue,
+            };
+            if command == b"play" {
+                sound.action = 1;
+                sound.action_requested = true;
+                self.invalidate(handle)?;
+                let ObjectState::Sound(sound) = &mut self.get_mut(handle).unwrap().state else {
+                    unreachable!()
+                };
+                if args.get(2).is_some() {
+                    let value = number(2, 0)?;
+                    sound.play_value_changed |= sound.play_parameters[0] != value;
+                    sound.play_parameters[0] = value;
+                }
+                sound.play_parameters[1] = number(3, 1)?;
+                sound.play_parameters[2] = number(4, 0)?;
+            } else {
+                let field = if command == b"channel" {
+                    &mut sound.channel
+                } else {
+                    &mut sound.sound_type
+                };
+                if *field != value {
+                    *field = value;
+                    self.invalidate(handle)?;
+                }
+            }
+        }
+        Ok(true)
+    }
+}
 
 impl<F: ObjectFactory> Store<'_, F> {
     pub(super) fn fes_sound_command(

@@ -3,7 +3,7 @@ use katze_system2::{
     audio::{SoundConfig, SoundPart},
     expression::State,
     fes::{
-        ObjectAttributes, ObjectDefinition, ObjectInitialization, ObjectReference, Program,
+        self, ObjectAttributes, ObjectDefinition, ObjectInitialization, ObjectReference, Program,
         SoundState,
     },
     kcs::{MotionHost, Program as MotionProgram, ScriptRandom},
@@ -35,6 +35,172 @@ fn initialize(objects: &mut Objects, bank: i32, attributes: ObjectAttributes) ->
         },
         |_| panic!("声音声明不调用图像名称转换"),
     )
+}
+
+fn sound(objects: &Objects, id: u32) -> &SoundState {
+    let ObjectState::Sound(state) = &objects.get(id).unwrap().state else {
+        panic!()
+    };
+    state
+}
+
+fn object_command(
+    objects: &mut Objects,
+    interpreter: &mut fes::Interpreter,
+    numbers: &mut State,
+    bytes: &[u8],
+) -> Result<bool> {
+    objects.dispatch_object_command(
+        interpreter,
+        &fes::Line {
+            offset: 100,
+            bytes: bytes.to_vec(),
+        },
+        numbers,
+    )
+}
+
+#[test]
+fn sound_load_repeats_mode_evaluation_and_channel_updates_stop_at_missing_banks() {
+    let mut objects = Objects::new(HandleAllocator::default()).unwrap();
+    let ids = define(&mut objects, "SOUND", "sound", 3);
+    objects.get_mut(ids[1]).unwrap().state = ObjectState::CImage(Box::default());
+    let child = define(&mut objects, "CIMAGE", "child", 1)[0];
+    objects.set_parent(child, Some(ids[2])).unwrap();
+    let mut interpreter =
+        fes::Interpreter::new(Program::from_text(b"#START\nwait 9\n").unwrap()).unwrap();
+    objects.publish_bindings(&mut interpreter);
+    let mut numbers = State::new(4);
+    object_command(
+        &mut objects,
+        &mut interpreter,
+        &mut numbers,
+        b"sound load raw ($0+=1) ($0+=10) ($0+=1000)",
+    )
+    .unwrap();
+    assert_eq!(numbers.shared[0], 25);
+    assert_eq!(sound(&objects, ids[0]).load_parameters, [2, 12]);
+    assert_eq!(sound(&objects, ids[2]).load_parameters, [15, 25]);
+    assert!(sound(&objects, ids[2]).needs_load());
+    assert!(!sound(&objects, ids[2]).is_dirty());
+    initialize(
+        &mut objects,
+        0,
+        ObjectAttributes {
+            file: Some(b"declared".to_vec()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(sound(&objects, ids[0]).load_parameters, [2, 12]);
+    object_command(
+        &mut objects,
+        &mut interpreter,
+        &mut numbers,
+        b"sound channel ($1+=1) ($1+=100)",
+    )
+    .unwrap();
+    assert_eq!(numbers.shared[1], 1);
+    assert_eq!(sound(&objects, ids[0]).channel, 1);
+    assert_eq!(sound(&objects, ids[2]).channel, 1);
+    let ObjectState::CImage(state) = &objects.get(child).unwrap().state else {
+        panic!()
+    };
+    assert!(state.updates.is_dirty());
+    objects.get_mut(child).unwrap().state = ObjectState::CImage(Box::default());
+    for command in [b"sound channel 1".as_slice(), b"sound stype"] {
+        object_command(&mut objects, &mut interpreter, &mut numbers, command).unwrap();
+    }
+    let ObjectState::CImage(state) = &objects.get(child).unwrap().state else {
+        panic!()
+    };
+    assert!(!state.updates.is_dirty());
+    objects.remove(ids[1]).unwrap();
+    objects.publish_bindings(&mut interpreter);
+    object_command(
+        &mut objects,
+        &mut interpreter,
+        &mut numbers,
+        b"sound load raw ($2+=1) ($2+=10)",
+    )
+    .unwrap();
+    assert_eq!(numbers.shared[2], 12);
+    assert_eq!(sound(&objects, ids[0]).load_parameters, [2, 12]);
+    assert_eq!(sound(&objects, ids[2]).load_parameters, [15, 25]);
+}
+
+#[test]
+fn sound_play_skips_arrays_and_keeps_the_request_and_completed_arguments_after_errors() {
+    let mut objects = Objects::new(HandleAllocator::default()).unwrap();
+    let ids = define(&mut objects, "SOUND", "sound", 2);
+    let child = define(&mut objects, "CIMAGE", "child", 1)[0];
+    objects.set_parent(child, Some(ids[0])).unwrap();
+    let ObjectState::Sound(state) = &mut objects.get_mut(ids[0]).unwrap().state else {
+        panic!()
+    };
+    state.play_parameters = [7, 8, 9];
+    let mut interpreter =
+        fes::Interpreter::new(Program::from_text(b"#START\nwait 9\n").unwrap()).unwrap();
+    objects.publish_bindings(&mut interpreter);
+    let mut numbers = State::new(4);
+    object_command(
+        &mut objects,
+        &mut interpreter,
+        &mut numbers,
+        b"sound play ($0+=1) ($0+=10)",
+    )
+    .unwrap();
+    assert_eq!(numbers.shared[0], 0);
+    assert_eq!(sound(&objects, ids[0]).action_request(), None);
+    object_command(
+        &mut objects,
+        &mut interpreter,
+        &mut numbers,
+        b"sound[0] play",
+    )
+    .unwrap();
+    assert_eq!(sound(&objects, ids[0]).play_parameters, [7, 1, 0]);
+    assert_eq!(sound(&objects, ids[0]).action_request(), Some(1));
+    assert!(!sound(&objects, ids[0]).play_value_changed());
+    assert!(sound(&objects, ids[0]).is_dirty());
+    objects.get_mut(child).unwrap().state = ObjectState::CImage(Box::default());
+    numbers.shared[1] = 4;
+    assert!(
+        object_command(
+            &mut objects,
+            &mut interpreter,
+            &mut numbers,
+            b"sound[0] play ($0+=1) ($1/=0) ($2+=1)",
+        )
+        .is_err()
+    );
+    assert_eq!(numbers.shared, [1, 4, 0, 0]);
+    assert_eq!(sound(&objects, ids[0]).play_parameters, [1, 1, 0]);
+    assert!(sound(&objects, ids[0]).play_value_changed());
+    let ObjectState::CImage(state) = &objects.get(child).unwrap().state else {
+        panic!()
+    };
+    assert!(state.updates.is_dirty());
+    let mut runtime = voice_runtime(1);
+    assert!(
+        runtime
+            .update_fes_object(0, &mut objects, ids[0])
+            .unwrap_err()
+            .message
+            .contains("动作请求")
+    );
+    assert_eq!(sound(&objects, ids[0]).action_request(), Some(1));
+    let single = define(&mut objects, "SOUND", "single", 1)[0];
+    objects.publish_bindings(&mut interpreter);
+    object_command(
+        &mut objects,
+        &mut interpreter,
+        &mut numbers,
+        b"single play ($3+=1)",
+    )
+    .unwrap();
+    assert_eq!(numbers.shared[3], 1);
+    assert_eq!(sound(&objects, single).action_request(), Some(1));
 }
 
 #[test]

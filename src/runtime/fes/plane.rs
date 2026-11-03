@@ -102,6 +102,9 @@ impl<F: ObjectFactory> Store<'_, F> {
             if sound.needs_load() {
                 return Err(Error::new(0, "FES SOUND 文件请求尚未接入声音任务"));
             }
+            if sound.action_request().is_some() {
+                return Err(Error::new(0, "FES SOUND 动作请求尚未接入声音任务"));
+            }
             if sound.is_dirty() && !sound.file.is_empty() {
                 return Err(Error::new(0, "FES SOUND 播放属性更新尚未接入声音任务"));
             }
