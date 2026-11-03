@@ -26,15 +26,21 @@ impl Default for CoordinateMap {
 impl CoordinateMap {
     /// 返回换算后的点及是否位于逻辑范围内；端点排除右下边。
     pub fn to_logical(&self, point: [i32; 2]) -> ([i32; 2], bool) {
-        let inverse = 1.0 / self.device_scale;
-        let point = std::array::from_fn(|i| {
-            let shifted = point[i] as f32 - self.device_offset[i];
-            let device = truncate(shifted * inverse);
-            let configured = device.wrapping_sub(self.configuration_offset[i]);
-            truncate(configured as f32 * self.logical_scale[i])
-        });
+        let point = std::array::from_fn(|i| self.logical_axis(i, point[i]));
         let inside = (0..2).all(|i| point[i] >= 0 && point[i] < self.logical_size[i]);
         (point, inside)
+    }
+
+    pub(crate) fn logical_axis(&self, axis: usize, point: i32) -> i32 {
+        let inverse = 1.0 / self.device_scale;
+        let shifted = point as f32 - self.device_offset[axis];
+        let device = truncate(shifted * inverse);
+        let configured = device.wrapping_sub(self.configuration_offset[axis]);
+        truncate(configured as f32 * self.logical_scale[axis])
+    }
+
+    pub(crate) fn truncated_device_offset(&self) -> [i32; 2] {
+        self.device_offset.map(truncate)
     }
 
     /// 逻辑点先作范围判断，再转换为设备位置；画布外点仍完成换算。

@@ -10,6 +10,34 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         arguments: &[u8],
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
+        if index == 739 {
+            if arguments.len() != 8 {
+                return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+            }
+            let addresses = [
+                u32::from_le_bytes(arguments[..4].try_into().unwrap()),
+                u32::from_le_bytes(arguments[4..].try_into().unwrap()),
+            ];
+            let mapping = self.resources.input_coordinates;
+            // 两个输出可以重叠；每次转换都读取前一次写回后的存储。
+            for address in [addresses[1], addresses[0]] {
+                vm.write(address, &[0; 4])?;
+            }
+            if self.resources.drawing.mode == 0 && self.resources.drawing.enabled {
+                for (address, value) in addresses.iter().zip(mapping.truncated_device_offset()) {
+                    vm.write(*address, &value.to_le_bytes())?;
+                }
+            }
+            for address in addresses {
+                let value = u32::from_le_bytes(vm.read(address, 4)?.try_into().unwrap());
+                vm.write(address, &value.wrapping_mul(2).to_le_bytes())?;
+            }
+            for (axis, address) in addresses.into_iter().enumerate() {
+                let value = i32::from_le_bytes(vm.read(address, 4)?.try_into().unwrap());
+                vm.write(address, &mapping.logical_axis(axis, value).to_le_bytes())?;
+            }
+            return Ok(NativeReturn::Continue);
+        }
         let count = match index {
             78 => 12,
             79 => 16,
