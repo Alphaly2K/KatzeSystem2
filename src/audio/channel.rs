@@ -1,3 +1,4 @@
+use super::playback::Playback;
 use super::{Pcm, decode_vorbis};
 use crate::kcs::ResourceServices;
 use crate::resource::ResourceMode;
@@ -17,6 +18,8 @@ pub struct SoundChannel {
     pub(super) requested_volume: f32,
     pub(super) pcm_volume: i32,
     pub(super) pcm_pan: i32,
+    pub(super) playback: Playback,
+    pub(super) started_tick: u32,
     pub(super) parameters: [i32; 2],
     pub(super) load_options: u32,
     pub(super) linked: Option<u32>,
@@ -32,6 +35,8 @@ impl Default for SoundChannel {
             requested_volume: 0.0,
             pcm_volume: 100,
             pcm_pan: 0,
+            playback: Playback::default(),
+            started_tick: u32::MAX,
             parameters: [0; 2],
             load_options: 0,
             linked: None,
@@ -62,6 +67,27 @@ impl SoundChannel {
         self.pcm.as_ref().map(|_| self.pcm_pan)
     }
 
+    pub fn is_playing(&self) -> bool {
+        self.pcm.is_some() && self.playback.playing
+    }
+
+    /// 已由采样读取推进的位置；不使用脚本时钟推算。
+    pub fn position_frames(&self) -> usize {
+        self.playback.position
+    }
+
+    pub fn remaining_plays(&self) -> u32 {
+        self.playback.remaining
+    }
+
+    pub fn completed_passes(&self) -> u64 {
+        self.playback.completed
+    }
+
+    pub fn started_tick(&self) -> u32 {
+        self.started_tick
+    }
+
     pub fn load_parameters(&self) -> [i32; 2] {
         self.parameters
     }
@@ -74,7 +100,7 @@ impl SoundChannel {
         self.linked
     }
 
-    /// 已登记的原始循环范围；尚未换算为 PCM 采样帧。
+    /// 已登记的采样帧循环范围；整段缓冲区播放不应用该范围。
     pub fn loop_range(&self) -> [i64; 2] {
         self.loop_range
     }
@@ -88,6 +114,8 @@ impl SoundChannel {
     pub(super) fn unload(&mut self) {
         self.file.clear();
         self.pcm = None;
+        self.playback = Playback::default();
+        self.started_tick = u32::MAX;
         self.clock = ChannelClock::default();
         self.loop_range[0] = 0;
     }

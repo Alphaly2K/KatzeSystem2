@@ -302,6 +302,10 @@ pub trait Host {
         1
     }
 
+    fn system_time_ms(&self) -> u32 {
+        0
+    }
+
     /// 更新列表并按开关提交脏区或整幅图像；返回是否复制了画布像素。
     fn update_image_list(
         &mut self,
@@ -473,6 +477,10 @@ impl<T: Host + ?Sized> Host for &mut T {
 
     fn sound_stereo(&self) -> u32 {
         (**self).sound_stereo()
+    }
+
+    fn system_time_ms(&self) -> u32 {
+        (**self).system_time_ms()
     }
 
     fn fonts(&mut self) -> Option<&mut dyn crate::message::FontServices> {

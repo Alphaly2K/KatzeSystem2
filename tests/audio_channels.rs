@@ -112,6 +112,126 @@ fn audio(runtime: &Runtime<SoundFactory<Reject>>) -> &katze_system2::audio::Soun
     runtime.object(1).unwrap().audio_state().unwrap()
 }
 
+fn read_channel(
+    runtime: &mut Runtime<SoundFactory<Reject>>,
+    frames: usize,
+) -> katze_system2::audio::Pcm {
+    runtime
+        .object_mut(1)
+        .unwrap()
+        .audio_state_mut()
+        .unwrap()
+        .read_channel(5, frames)
+        .unwrap()
+}
+
+#[test]
+fn buffered_playback_consumes_pcm_and_keeps_pause_stop_repeat_and_tick_semantics() {
+    let (mut runtime, _) = setup();
+    let expected = katze_system2::audio::decode_vorbis(MONO).unwrap();
+    let set = |runtime: &mut Runtime<SoundFactory<Reject>>, code, value| {
+        let mut request = command(code, 5);
+        request.data[1] = value;
+        runtime.dispatch_command(0, request).unwrap()
+    };
+    let mut point = [0; 48];
+    point[..14].copy_from_slice(b"audio/tone.ogg");
+    point[32..40].copy_from_slice(&3i64.to_le_bytes());
+    point[40..].copy_from_slice(&99i64.to_le_bytes());
+    runtime
+        .dispatch_command_with_buffers(
+            0,
+            command(199, 0),
+            &mut CommandBuffers {
+                data1: Some(&mut point),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    load(&mut runtime, &mut record(5, 0, 17, b"audio/tone.ogg")).unwrap();
+    set(&mut runtime, 187, 47);
+    runtime.host_mut().system_time_ms = 1234;
+    set(&mut runtime, 183, 2);
+    assert_eq!(audio(&runtime).channel(5).unwrap().started_tick(), 1234);
+    assert_eq!(runtime.dispatch_command(0, command(186, 5)).unwrap(), 1);
+    assert_eq!(
+        read_channel(&mut runtime, 400).samples(),
+        &expected.samples()[..400]
+    );
+    set(&mut runtime, 184, 0);
+    runtime.update(100, 1).unwrap();
+    assert_eq!(read_channel(&mut runtime, 50).samples(), &[0; 50]);
+    assert_eq!(audio(&runtime).channel(5).unwrap().position_frames(), 400);
+    assert_eq!(runtime.dispatch_command(0, command(186, 5)).unwrap(), 0);
+    runtime.host_mut().system_time_ms = 2000;
+    set(&mut runtime, 183, 1);
+    assert_eq!(
+        read_channel(&mut runtime, 979).samples(),
+        &expected.samples()[400..]
+    );
+    assert_eq!(audio(&runtime).channel(5).unwrap().started_tick(), 1234);
+    assert_eq!(runtime.dispatch_command(0, command(186, 5)).unwrap(), 0);
+    assert_eq!(audio(&runtime).channel(5).unwrap().position_frames(), 0);
+    set(&mut runtime, 183, 2);
+    let samples = read_channel(&mut runtime, 1400);
+    assert_eq!(&samples.samples()[..1379], expected.samples());
+    assert_eq!(&samples.samples()[1379..], &expected.samples()[..21]);
+    assert_eq!(audio(&runtime).channel(5).unwrap().remaining_plays(), 1);
+    set(&mut runtime, 219, 1);
+    let samples = read_channel(&mut runtime, 1362);
+    assert_eq!(&samples.samples()[..1358], &expected.samples()[21..]);
+    assert_eq!(&samples.samples()[1358..], [0; 4]);
+    assert_eq!(audio(&runtime).channel(5).unwrap().completed_passes(), 1);
+    set(&mut runtime, 183, 0);
+    read_channel(&mut runtime, 100);
+    set(&mut runtime, 183, 1);
+    assert_eq!(
+        read_channel(&mut runtime, 100).samples(),
+        &expected.samples()[..100]
+    );
+    set(&mut runtime, 185, 0);
+    assert_eq!(audio(&runtime).channel(5).unwrap().position_frames(), 0);
+    assert_eq!(audio(&runtime).channel(5).unwrap().completed_passes(), 0);
+    assert_eq!(audio(&runtime).channel(5).unwrap().volume(), Some(47));
+    set(&mut runtime, 183, 1);
+    assert!(
+        runtime
+            .object_mut(1)
+            .unwrap()
+            .audio_state_mut()
+            .unwrap()
+            .read_channel(5, usize::MAX)
+            .is_err()
+    );
+    assert!(audio(&runtime).channel(5).unwrap().is_playing());
+    assert_eq!(audio(&runtime).channel(5).unwrap().position_frames(), 0);
+    load(&mut runtime, &mut record(5, 1, 17, b"audio/tone.ogg")).unwrap();
+    assert!(
+        runtime
+            .dispatch_command(
+                0,
+                Command {
+                    data: [5, 1, 0],
+                    ..command(183, 5)
+                }
+            )
+            .unwrap_err()
+            .message
+            .contains("淡变")
+    );
+    assert!(!audio(&runtime).channel(37).unwrap().is_playing());
+    set(&mut runtime, 185, 0);
+    assert_eq!(runtime.dispatch_command(0, command(186, 5)).unwrap(), 0);
+    set(&mut runtime, 182, 0);
+    assert_eq!(audio(&runtime).channel(5).unwrap().started_tick(), u32::MAX);
+    runtime.host_mut().system_time_ms = 15;
+    set(&mut runtime, 218, 0);
+    runtime.host_mut().system_time_ms = 16;
+    set(&mut runtime, 218, 0);
+    assert_eq!(audio(&runtime).channel(5).unwrap().started_tick(), 15);
+    assert_eq!(audio(&runtime).channel(37).unwrap().started_tick(), 15);
+}
+
 #[test]
 fn channel_properties_keep_resource_defaults_and_update_only_the_linked_target() {
     let (mut runtime, _) = setup();

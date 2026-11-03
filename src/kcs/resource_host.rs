@@ -163,6 +163,10 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
         self.inner.sound_stereo()
     }
 
+    fn system_time_ms(&self) -> u32 {
+        self.inner.system_time_ms()
+    }
+
     fn fonts(&mut self) -> Option<&mut dyn crate::message::FontServices> {
         self.inner.fonts()
     }

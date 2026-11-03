@@ -33,6 +33,10 @@ pub trait TaskObject {
         None
     }
 
+    fn audio_state_mut(&mut self) -> Option<&mut crate::audio::SoundState> {
+        None
+    }
+
     /// 支持执行中任务操作的对象提供队列视图，并在推进 VM 后消费宿主的 TaskEffects。
     fn queued_messages(&self) -> Option<&[[u32; 4]]> {
         None

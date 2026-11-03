@@ -3,6 +3,7 @@ use crate::{Error, Result, read};
 mod channel;
 mod config;
 mod pcm;
+mod playback;
 mod task;
 pub use channel::SoundChannel;
 pub use config::{SoundConfig, SoundPart};

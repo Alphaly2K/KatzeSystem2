@@ -247,7 +247,7 @@ fn sound_commands_gate_buffers_and_preserve_unwritten_return_slots() {
         .unwrap();
     assert_eq!(output, 0xdeadbeef);
     for channel in [0, 64, u32::MAX] {
-        for code in [182, 187, 190] {
+        for code in [182, 183, 184, 185, 187, 190, 218, 219] {
             let mut request = command(1, code, 17);
             request.data[0] = channel;
             sound
@@ -255,7 +255,7 @@ fn sound_commands_gate_buffers_and_preserve_unwritten_return_slots() {
                 .unwrap();
             assert_eq!(output, 0xdeadbeef);
         }
-        for code in [188, 191] {
+        for code in [186, 188, 191] {
             let mut query = command(1, code, 0);
             query.data[0] = channel;
             sound
