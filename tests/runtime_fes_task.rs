@@ -119,6 +119,10 @@ struct Files {
 }
 impl ResourceServices for Files {
     fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+        if category == b"mot" {
+            assert_eq!(name, b"d");
+            return Ok(b"draw.kcs".to_vec());
+        }
         assert_eq!(category, b"fes");
         if name == b"child" {
             return Ok(b"child.fes".to_vec());
@@ -307,6 +311,42 @@ fn setup(budget: usize, source: &[u8]) -> Setup {
         button_attempts,
         pointer,
         fail_media,
+    }
+}
+
+#[test]
+fn destroying_a_fes_during_draw_restores_the_surviving_shared_canvas() {
+    let source = b"#DEFINE\nCIMAGE sprite\nPLANE panel\n#OBJECT SIZE COLOR PRI DISP\nsprite 8,6 0xff123456 0 1\n#OBJECT SIZE DISP VRAM\npanel 8,6 0 0,0\n#START\npanel draw\nwait 1000\n";
+    for budget in [1, 4096] {
+        let Setup { mut runtime, .. } = setup(budget, source);
+        let list = runtime.create(0, kind::IMAGE_LIST, b"shared", b"").unwrap();
+        send(&mut runtime, list, 285, 8, 6);
+        send(&mut runtime, list, 289, 0, 0);
+        let fes = runtime.create(0, kind::FES, b"transition", b"").unwrap();
+        send(&mut runtime, fes, 337, 0, 0);
+        send(&mut runtime, fes, 340, 0, list);
+        file(&mut runtime, fes, b"complete.fes").unwrap();
+        send(&mut runtime, fes, 339, 0, 0);
+        runtime.update(100, 1).unwrap();
+        assert!(
+            runtime
+                .tree()
+                .children(fes)
+                .unwrap()
+                .any(|id| { runtime.tree().node(id).unwrap().kind == kind::FADE })
+        );
+        assert_eq!(
+            runtime.drawing().target.as_ref().unwrap().pixel(0, 0),
+            Some(0)
+        );
+        runtime.destroy(fes).unwrap();
+        assert!(runtime.object(fes).is_none());
+        assert!(runtime.object(list).is_some());
+        runtime.update(101, 1).unwrap();
+        assert_eq!(
+            runtime.drawing().target.as_ref().unwrap().pixel(0, 0),
+            Some(0xff123456)
+        );
     }
 }
 

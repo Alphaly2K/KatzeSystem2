@@ -1128,6 +1128,31 @@ impl TaskObject for FesObject {
         }
         self.base.request_delete(host, budget)
     }
+
+    fn prepare_release(&mut self, host: &mut dyn Host, _budget: usize) -> Result<bool> {
+        for (target, code, data) in [
+            (&mut self.list, 292, [0, 1, 0]),
+            (&mut self.input_button, 3, [0; 3]),
+        ] {
+            if let Some(id) = *target {
+                if id != 0 {
+                    // 接收者可能已随其他子树释放，未找到时仍完成清理。
+                    host.dispatch_task_command(
+                        Command {
+                            target: id,
+                            sender: self.id,
+                            code,
+                            data,
+                        },
+                        &mut CommandBuffers::default(),
+                        &mut 0,
+                    )?;
+                }
+                *target = None;
+            }
+        }
+        Ok(true)
+    }
 }
 
 /// 创建未装载的类型 34 对象，其余类型委托已有工厂。
@@ -1304,6 +1329,73 @@ pub(in crate::runtime) fn dispatch_borrowed_control_event(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct ReleaseHost {
+        commands: Vec<Command>,
+        fail: bool,
+    }
+    impl Host for ReleaseHost {
+        fn call(
+            &mut self,
+            _: u32,
+            _: &[u8],
+            _: &mut Interpreter,
+        ) -> Result<crate::kcs::NativeReturn> {
+            unreachable!()
+        }
+        fn dispatch_task_command(
+            &mut self,
+            command: Command,
+            _: &mut CommandBuffers<'_>,
+            _: &mut u32,
+        ) -> Result<bool> {
+            if command.code == 3 && self.fail {
+                return Err(Error::new(0, "合成释放路由失败"));
+            }
+            self.commands.push(command);
+            Ok(false)
+        }
+    }
+
+    #[test]
+    fn release_restores_submission_before_button_cleanup_and_keeps_failed_work_for_retry() {
+        let mut task = FesObject::new(17);
+        let mut host = ReleaseHost {
+            commands: Vec::new(),
+            fail: true,
+        };
+        task.list = Some(0);
+        task.input_button = Some(0);
+        assert!(task.prepare_release(&mut host, 1).unwrap());
+        assert!(host.commands.is_empty());
+        task.list = Some(6);
+        task.input_button = Some(11);
+        task.base.control.deletion_requested = 1;
+        assert!(task.prepare_release(&mut host, 1).is_err());
+        assert_eq!(task.list, None);
+        assert_eq!(task.input_button, Some(11));
+        host.fail = false;
+        assert!(task.prepare_release(&mut host, 1).unwrap());
+        assert!(task.prepare_release(&mut host, 1).unwrap());
+        assert_eq!(
+            host.commands,
+            [
+                Command {
+                    target: 6,
+                    sender: 17,
+                    code: 292,
+                    data: [0, 1, 0],
+                },
+                Command {
+                    target: 11,
+                    sender: 17,
+                    code: 3,
+                    data: [0; 3],
+                },
+            ]
+        );
+        assert_eq!(task.input_button, None);
+    }
 
     struct InputHost(Vec<Command>);
     impl Host for InputHost {
