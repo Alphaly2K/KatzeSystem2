@@ -309,16 +309,19 @@ fn voice_runtime(budget: usize) -> Runtime<Reject> {
     runtime.host_mut().random = ScriptRandom::seeded(0);
     runtime.host_mut().sound_config = Some(SoundConfig {
         parts: vec![SoundPart {
+            name: b"parent".to_vec(),
             id: 20,
             volume: 83,
             system_voice: 1,
             children: vec![SoundPart {
+                name: b"child".to_vec(),
                 id: 21,
                 volume: 37,
                 system_voice: 0,
                 children: vec![],
             }],
         }],
+        ..SoundConfig::default()
     });
     runtime
 }
@@ -414,6 +417,67 @@ fn sysvoiceex_disabled_mode_skips_candidates_and_missing_configuration_retries_b
         update(&mut runtime, &mut scene).unwrap();
         assert_eq!(runtime.numbers().shared[..6], [2, 10, 0, 0, 10, -1]);
         assert_eq!(runtime.host_mut().random.next_integer(), 477480905);
+    }
+}
+
+#[test]
+fn named_volume_queries_retry_missing_values_and_keep_names_and_extra_arguments_as_text() {
+    for budget in [1, 4096] {
+        let mut runtime = voice_runtime(budget);
+        let config = runtime.host_mut().sound_config.take().unwrap();
+        runtime.numbers_mut().strings.insert(0, b"PaReNt".to_vec());
+        let mut scene = Scene::new(
+            Program::from_text(b"#DEFINE\nBASE obj\n#START\ngetsndconfex ($0+=1)+3 volume $str0; ($1+=100)\ngetsndconfex 5 volume ($1+=100)\ngetsndconfex 6 volume master\nwait 77\n#_FES_SLEEP_\ngetsndconfex 6 volume CHILD ($1+=100)\n#obj.PUSH_L\ngetsndconfex 7 volume PARENT ($1+=100)\n").unwrap(),
+            runtime.host().handle_allocator(),
+        ).unwrap();
+        assert!(update(&mut runtime, &mut scene).is_err());
+        assert_eq!(runtime.numbers().shared, [0; 8]);
+        runtime.host_mut().sound_config = Some(config);
+        assert!(
+            update(&mut runtime, &mut scene)
+                .unwrap_err()
+                .message
+                .contains("主音量")
+        );
+        assert_eq!(runtime.numbers().shared, [1, 0, 0, 0, 83, 100, 0, 0]);
+        runtime
+            .host_mut()
+            .sound_config
+            .as_mut()
+            .unwrap()
+            .master_volume = Some(63);
+        update(&mut runtime, &mut scene).unwrap();
+        assert_eq!(runtime.numbers().shared, [1, 0, 0, 0, 83, 100, 63, 0]);
+        for _ in 0..256 {
+            if runtime
+                .dispatch_fes_system_block(0, &mut scene, "_FES_SLEEP_")
+                .unwrap()
+            {
+                break;
+            }
+        }
+        let target = ObjectReference {
+            name: "obj".into(),
+            bank: 0,
+        };
+        let mut done = false;
+        for _ in 0..256 {
+            if let Some(handled) = runtime
+                .dispatch_fes_event(0, &mut scene, Some(&target), 2)
+                .unwrap()
+            {
+                assert!(handled);
+                done = true;
+                break;
+            }
+        }
+        assert!(done);
+        assert_eq!(runtime.numbers().shared, [1, 0, 0, 0, 83, 100, 37, 83]);
+        assert_eq!(scene.deadline(), Some(177));
+        assert_eq!(
+            runtime.host_mut().random.next_integer(),
+            ScriptRandom::seeded(0).next_integer()
+        );
     }
 }
 

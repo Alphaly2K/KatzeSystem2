@@ -69,8 +69,26 @@ impl<F: ObjectFactory> Store<'_, F> {
             scene.interpreter.eval(output, self.numbers)?;
             return Ok(true);
         };
-        if operation != b"volume_id" && operation != b"sysplay_id" {
+        if operation != b"volume_id" && operation != b"sysplay_id" && operation != b"volume" {
             return Err(Error::new(offset, "FES 此声音配置查询尚未接入"));
+        }
+        if operation == b"volume" {
+            let Some(name) = args.get(3).filter(|name| !name.is_empty()) else {
+                scene.interpreter.eval(output, self.numbers)?;
+                return Ok(true);
+            };
+            let value = self
+                .host
+                .sound_config
+                .as_ref()
+                .ok_or_else(|| Error::new(offset, "运行时未提供新声音分类配置"))?
+                .volume_by_name(name)
+                .map_err(|error| Error::new(offset + error.offset, error.message))?;
+            let output = scene.interpreter.eval(output, self.numbers)?;
+            if let Some(slot) = self.numbers.shared.get_mut(output as usize) {
+                *slot = value;
+            }
+            return Ok(true);
         }
         if self.host.sound_config.is_none() {
             return Err(Error::new(offset, "运行时未提供新声音分类配置"));

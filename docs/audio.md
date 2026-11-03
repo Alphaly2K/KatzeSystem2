@@ -4,7 +4,7 @@
 
 ## 系统语音配置选择
 
-宿主通过 `HostState::sound_config` 提供 `audio::SoundConfig`，其 `parts` 按配置声明顺序保存 `SoundPart { id, volume, system_voice, children }`。volume 与 system_voice 是应用设置后的当前原始值，节点默认编号、音量和开关均为 −1。宿主负责读取配置、处理子节点的缺省继承及应用用户设置；此接口尚未自动装载声音配置。
+宿主通过 `HostState::sound_config` 提供 `audio::SoundConfig`，其 `parts` 按配置声明顺序保存 `SoundPart { name, id, volume, system_voice, children }`。name 为原始字节编码的分类名称，volume 与 system_voice 是应用设置后的当前原始值，节点默认名称为空、编号、音量和开关均为 −1。`master_volume: Option<i32>` 单独保存应用设置后的主音量；默认 None，主音量查询要求宿主显式提供。宿主负责读取配置、处理子节点的缺省继承及应用用户设置；此接口尚未自动装载声音配置。
 
 `SoundConfig::system_voice_candidates(paths)` 在 paths 为空时按先父后子顺序收集开关恰好为一的节点编号。显式路径则逐层查找第一个同编号节点；缺失分量使用开关一，后续分量继续在当前层查询。路径最后一次查询结果非零时，将最后一个输入编号加入候选。两种方式均保留重复编号。`system_voice_enabled(path)` 提供单条路径的原始查询结果，空路径返回一。
 
@@ -18,7 +18,13 @@ FES `sysvoiceex output_index [path ...]` 选择一个配置编号写入共享数
 
 FES `getsndconfex output_index volume_id [id ...]` 依次求值输出槽和每个独立 id 参数，将 volume 查询结果写入共享数值槽；`sysplay_id` 则写入 `system_voice_enabled` 结果。此处每个参数是一个完整整数表达式，不按逗号拆分。命令不检查 `sound_config_enabled`，也不消耗随机数；无效输出槽只跳过写入，其余求值仍执行。无输出参数时直接继续，只有输出参数时对它求值后继续。主体、系统块和对象处理器共用这一入口。
 
-两种查询要求宿主已提供分类配置；缺失配置时在表达式求值前诊断，允许补齐后重试。其他 getsndconfex 查询目前返回未接入诊断。
+## 分类名称与主音量查询
+
+`SoundConfig::volume_by_name(name)` 先按精确的小写 `master` 选择独立主音量，其他名称按先父后子及声明顺序查首个匹配分类，缺失返回 100。普通名称比较忽略单字节 ASCII 大小写，保留 CP932 双字节字符；输入到首个零字节结束，不将斜杠或逗号解释为层级分隔符。`MASTER` 等其他写法进入分类查找，可与独立主音量返回不同结果。查询返回分类自身原始音量，不乘祖先或主音量。
+
+FES `getsndconfex output_index volume name` 将该结果写入共享槽，只读取一个名称参数，不计算名称中的表达式或额外参数。缺少名称或名称为空时仍求值输出槽，但不写入；配置缺失或精确 master 所需的主音量未提供时，在表达式副作用之前诊断，补配置后可续跑。该查询不读取配置启用值、不消耗随机数，三类 FES 执行入口保持同一契约。
+
+上述配置查询要求宿主已提供分类配置；缺失配置时在表达式求值前诊断，允许补齐后重试。其他 getsndconfex 查询目前返回未接入诊断。
 
 ## FES SOUND 状态
 
