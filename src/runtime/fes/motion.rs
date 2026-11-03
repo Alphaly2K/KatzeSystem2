@@ -70,6 +70,7 @@ impl Objects {
             && !matches!(object.state, ObjectState::Draw(_))
             && object.state.control().is_none()
             && !matches!(object.state, ObjectState::Sound(_))
+            && object.state.plane().is_none()
         {
             return Err(Error::new(0, "FES 此对象类型的运动属性尚未接入"));
         }
@@ -82,6 +83,8 @@ impl Objects {
                 object.motions.base_properties = slider.motion_properties();
             } else if let ObjectState::Sound(sound) = &object.state {
                 object.motions.base_properties = sound.motion_properties();
+            } else if let Some(plane) = object.state.plane() {
+                object.motions.base_properties = plane.motion_properties();
             }
         }
         Ok(())
@@ -190,6 +193,10 @@ impl Objects {
                     slider.apply_motion_properties(object.motions.properties());
                 } else if let ObjectState::Sound(sound) = &mut object.state {
                     if sound.apply_motion_properties(object.motions.properties()) {
+                        self.invalidate(handle)?;
+                    }
+                } else if let Some(plane) = object.state.plane_mut() {
+                    if plane.apply_motion_properties(object.motions.properties()) {
                         self.invalidate(handle)?;
                     }
                 }

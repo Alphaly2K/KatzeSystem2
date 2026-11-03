@@ -44,7 +44,7 @@ FES `getsndconfex output_index volume name` 将该结果写入共享槽，只读
 
 主体中的运动在本轮正常运动阶段推进；系统块和对象事件只加入队列，到下一次普通更新才推进。预算续跑保留当前银行及资源进度。声音文件装载及实际通道音量提交仍待接入。
 
-同一命令也支持 CIMAGE／IMAGE／BUTTON 的原始透明度和 SLIDER／SCROLL2 的 Alpha 请求，参数与运动协议相同；滑动控件只设置自身 Alpha 请求，图像类型在变化时递归失效。BASE／DRAW 消费该命令但不修改属性或加入运动。CPLANE／PLANE 的运动属性尚未接入，继续返回明确诊断。
+同一命令也支持 CIMAGE／IMAGE／BUTTON 的原始透明度和 SLIDER／SCROLL2 的 Alpha 请求，参数与运动协议相同；滑动控件只设置自身 Alpha 请求，图像类型在变化时递归失效。CPLANE／PLANE 保留 RGB，把 value 的低八位写入 Alpha，始终递归失效；默认运动参数为 `[value as f32, R, G, B]`，首项仍保留未裁剪的原值。BASE／DRAW 消费该命令但不修改属性或加入运动。
 
 ## 循环点表
 

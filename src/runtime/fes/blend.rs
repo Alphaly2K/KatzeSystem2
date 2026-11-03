@@ -13,6 +13,7 @@ pub(super) struct BlendCall {
 struct PreparedBlend {
     handle: u32,
     motion_name: Option<Vec<u8>>,
+    parameters: [f32; 4],
 }
 
 impl Objects {
@@ -26,6 +27,9 @@ impl Objects {
         } else if let Some(control) = state.control_mut() {
             control.set_alpha(value as u32);
             false
+        } else if let Some(plane) = state.plane_mut() {
+            plane.color = (plane.color & 0xffffff) | ((value as u32) << 24);
+            true
         } else {
             match state {
                 ObjectState::Sound(sound) => {
@@ -34,7 +38,7 @@ impl Objects {
                     changed
                 }
                 ObjectState::Base | ObjectState::Draw(_) => return Ok(false),
-                _ => return Err(Error::new(0, "FES 平面 blend 的运动属性尚未接入")),
+                _ => return Err(Error::new(0, "FES 此对象类型的 blend 尚未接入")),
             }
         };
         if dirty {
@@ -96,9 +100,17 @@ impl<F: ObjectFactory> Store<'_, F> {
                         .lookup(&pending.target.name, pending.bank as i32)
                     {
                         if scene.objects.apply_blend(handle, pending.value)? {
+                            let mut parameters = [pending.value as f32, 255.0, 255.0, 255.0];
+                            if let Some(plane) = scene.objects.get(handle).unwrap().state.plane() {
+                                for (parameter, shift) in parameters[1..].iter_mut().zip([16, 8, 0])
+                                {
+                                    *parameter = ((plane.color() >> shift) & 255) as f32;
+                                }
+                            }
                             pending.prepared = Some(PreparedBlend {
                                 handle,
                                 motion_name: None,
+                                parameters,
                             });
                         }
                     }
@@ -120,12 +132,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                         scene.objects.insert_motion(
                             prepared.handle,
                             program,
-                            crate::kcs::MotionState::with_parameters(&[
-                                pending.value as f32,
-                                255.0,
-                                255.0,
-                                255.0,
-                            ])?,
+                            crate::kcs::MotionState::with_parameters(&prepared.parameters)?,
                             delay,
                         )?;
                     }

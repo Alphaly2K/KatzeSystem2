@@ -892,6 +892,8 @@ impl<F: ObjectFactory> Store<'_, F> {
                         | super::ObjectState::Draw(_)
                         | super::ObjectState::Slider(_)
                         | super::ObjectState::Scroll2(_) => fes::SubcommandContext::default(),
+                        super::ObjectState::CPlane(plane) => plane.subcommand_context(),
+                        super::ObjectState::Plane(plane) => plane.subcommand_context(),
                         state => state
                             .image()
                             .ok_or_else(|| Error::new(0, "FES 此对象类型的运动属性尚未接入"))?

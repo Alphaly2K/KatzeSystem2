@@ -394,7 +394,7 @@ FES `strvar index text [integer ...]` 已接入共享 `expression::State::string
 
 `fes::SoundState` 保存 SOUND 的 FILE、STYPE、CHANNEL、TYPE、GROUP 和音量／声像运动状态；`is_dirty()` 与 `needs_load()` 查询独立的属性失效及文件请求。运行时支持未指定文件的空闲更新；文件装载、非空来源属性提交和播放命令继续返回诊断。默认值、有效列、名称容量及运动规则见[声音状态](audio.md#fes-sound-状态)。
 
-FES `blend` 已连接 SOUND、CIMAGE／IMAGE／BUTTON 和 SLIDER／SCROLL2：先保存原始音量或透明度，再装载默认运动，保留数组银行、一次求值、运动基准、延迟和失败续跑。主体、系统块及对象处理器共用该入口；CPLANE／PLANE 的运动属性继续诊断。完整参数与更新时序见[FES blend](audio.md#fes-blend)。
+FES `blend` 已连接 SOUND、CIMAGE／IMAGE／BUTTON、CPLANE／PLANE 和 SLIDER／SCROLL2：先保存音量或透明度，再装载默认运动，保留数组银行、一次求值、运动基准、延迟和失败续跑。平面保存完整颜色，默认运动保留 RGB 参数。主体、系统块及对象处理器共用该入口。完整参数与更新时序见[FES blend](audio.md#fes-blend)。
 
 `fes::Scroll2State { control, page }` 在通用滑动属性之外保存独立页长；`set_page(range, page)` 请求范围更新。`ObjectState::Scroll2` 支持初始化、数值及帧表命令和 Alpha 运动，操作示例与参数规则见 [SCROLL2](graphics.md#fes-scroll2-属性核心)。FES 侧经 `ObjectFactory` 创建类型 41、名称为 `FE scroll2` 的直属任务，并完成媒体、导航、父级通知及暂停协议；`InputFactory` 已提供这一类型的 `Scroll2Object`。`Object::scroll2_task_ids()` 查询该对象全部声明创建的下层编号。
 
@@ -402,7 +402,7 @@ FES `blend` 已连接 SOUND、CIMAGE／IMAGE／BUTTON 和 SLIDER／SCROLL2：先
 
 `initialize(&initialization, transform_name)` 按银行查找实际类型，先应用 PARENT，再复用各类型的属性规则；IMAGE／BUTTON 的非空 FILE 通过闭包转换。PARENT 的精确查找无结果时解除父级。`set_parent(handle, parent)` 可显式重挂或解除 FES 父级，循环、无效标识及根重挂返回诊断。该关系独立于任务树。`remove(handle)` 移出对象及后代，按后代先于父对象的顺序返回所有权；数量表保留、绑定移除、未绑定的重复对象不自动补位。根对象随存储释放。直接调用 remove 时，调用方负责返回对象所持的媒体资源和下层任务清理；`Object::image_handles()` 与 `button_task_ids()` 遍历其全部包装和按钮，包括重复声明的绑定，`image_handle()`／`task_id()` 只查询当前绑定。对象存储不自行推进 FES 主体。初始化错误保留先前已完成的银行及属性修改。
 
-`fes::CPlaneState` 通过只读查询提供位置、基点、尺寸、优先级、颜色、显示、创建类型、EXPOS、资源／VIEWPORT 引用及更新标记。`apply(&attributes, bank)` 返回本次是否使属性失效；`Objects::initialize` 同时标记 FES 后代。尺寸重建与属性失效独立，具体列规则见 [FES](fes.md)。
+`fes::CPlaneState` 通过只读查询提供位置、基点、旋转、缩放、矩阵、尺寸、优先级、颜色、显示、创建类型、EXPOS、资源／VIEWPORT 引用及更新标记。`apply(&attributes, bank)` 返回本次是否使属性失效；`Objects::initialize` 同时标记 FES 后代。`motion_properties()`／`apply_motion_properties()` 捕获及回写平面运动，`subcommand_context()` 提供本地属性换算上下文；PLANE 的同名上下文另使用 VRAM。尺寸重建与属性失效独立，具体运动规则见[对象运动](graphics.md#fes-对象运动)。
 
 `Runtime::update_fes_object(owner, &mut objects, handle)` 显式推进一个对象。BASE 无媒体操作，CPLANE／PLANE 使用实际对象工厂和命令路由创建／更新直属二维任务，`Object::task_id()` 返回可选编号。CIMAGE 与 IMAGE 通过共享类型 15 列表更新来源与登记，`Object::image_handle()` 查询可选来源包装；IMAGE 支持按当前映射帧装载普通 HG-3 文件及多文件合成，缺失文件或帧清空像素绑定。非零 PATHMODE 使用完整直接路径，跳过类别补全；IDN=−1 的原始来源与像素独立保存，具体契约见下文。调用者按 FES 对象更新顺序推进，并将 objects 与 owner 保持同一生命周期，下层任务由此入口维护。CPLANE 在创建下层任务前读取 SIZE2，PLANE 在创建后读取；POS2 在属性更新时消费；读取共用 Runtime 的资源服务，按 image 类别补全名称，支持 HG-3 元数据。已有绑定的 VIEWPORT 更新返回命令 89 的诊断。此入口尚不执行运动和 FES 主体调度。
 
@@ -424,7 +424,7 @@ Scene 消费 `noact`／`lockactive` 并按主体时点处理通知。`preferred_
 
 `Objects::set_image_list(task, clip)` 为 CIMAGE／IMAGE 绑定已初始化的共享列表和全局裁剪；列表必须是 owner 通过树路由可达的类型 15 任务。更新按来源重建、属性登记及排序分别消费标记，支持 POS2／SIZE2、CIMAGE／IMAGE 父级位置及 PLANE 裁剪；具体时序见 [CIMAGE](graphics.md#fes-cimage-更新) 与 [IMAGE](graphics.md#fes-image-文件更新) 更新。`Objects::invalidate(handle)` 在直接显示属性修改或运动回写后标记对象及后代；直接来源修改还需请求 rebuild。
 
-`Objects::start_motion(handle, program, parameters, delay)` 向对象加入分组零的运动，返回对象内的运动编号；当前支持 BASE、CIMAGE、IMAGE、BUTTON、SLIDER、SCROLL2 和 SOUND。目标及其后代都没有活动运动时，从对象当前属性捕获基准；有活动运动时沿用已有基准。`motion_active(handle)` 查询目标及其后代，`Object::motions()` 只读查询目标自身队列，`motion_delay()` 查询脚本为后续运动保存的原始开始偏移。`delay` 不改变已经插入的运动；`ismot` 包含尚未到开始时刻的活动条目。`update_motions(now, &mut host, budget_per_task)` 显式按先子后父的顺序推进根对象子树，并回写对象属性及后代失效标记；false 后继续调用，时间、已完成对象与当前队列均保留。续跑期间不得直接修改属性，创建、初始化、重挂、删除及加入运动会返回诊断。Scene 在等待或帧边界自动调用该入口，再按声明顺序刷新媒体；普通 decode 的中间提交先刷新媒体并继续脚本，运动每轮最终阶段执行一次。处理器只加入运动，后续普通更新才执行。失败重试保留已完成的运动阶段；运动与普通 KCS 共用随机序列和调试消息，详见[对象运动](graphics.md#fes-对象运动)。
+`Objects::start_motion(handle, program, parameters, delay)` 向对象加入分组零的运动，返回对象内的运动编号；当前支持 BASE、DRAW、CIMAGE、IMAGE、BUTTON、CPLANE、PLANE、SLIDER、SCROLL2 和 SOUND。目标及其后代都没有活动运动时，从对象当前属性捕获基准；有活动运动时沿用已有基准。`motion_active(handle)` 查询目标及其后代，`Object::motions()` 只读查询目标自身队列，`motion_delay()` 查询脚本为后续运动保存的原始开始偏移。`delay` 不改变已经插入的运动；`ismot` 包含尚未到开始时刻的活动条目。`update_motions(now, &mut host, budget_per_task)` 显式按先子后父的顺序推进根对象子树，并回写对象属性及后代失效标记；false 后继续调用，时间、已完成对象与当前队列均保留。续跑期间不得直接修改属性，创建、初始化、重挂、删除及加入运动会返回诊断。Scene 在等待或帧边界自动调用该入口，再按声明顺序刷新媒体；普通 decode 的中间提交先刷新媒体并继续脚本，运动每轮最终阶段执行一次。处理器只加入运动，后续普通更新才执行。失败重试保留已完成的运动阶段；运动与普通 KCS 共用随机序列和调试消息，详见[对象运动](graphics.md#fes-对象运动)。
 
 `Objects::request_motion_finish(handle)` 仅向目标及后代请求结束，保留队列和延迟，供后续普通更新执行；已有运动续跑时返回诊断。
 

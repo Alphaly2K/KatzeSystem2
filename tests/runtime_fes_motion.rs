@@ -361,6 +361,43 @@ fn counter(objects: &Objects, handle: u32, id: u32) -> u32 {
 }
 
 #[test]
+fn plane_subcommands_read_local_base_and_vram_before_capturing_motion_priority() {
+    let source = b"#DEFINE\nCPLANE solid\nPLANE canvas\n#OBJECT POS BASE SIZE VRAM COLOR PRI DISP\nsolid 4,1,2 3,2,9 1,1 0,0 0x80123456 7 0\ncanvas 8,0,3 5,6,10 1,1 11,12 0x40345678 8 0\n#SUBCOMMAND\noneshot move motion PX[0] BX[0] BZ[0] VX[0] RZ[0] SX[0] CA[0] : [0] [1] [2] [3] [4] [5] [6]\n#START\nsolid move @ @ @ @ @ @ @\ncanvas move @ @ @ @ @ @ @\nwait 1000\n";
+    for budget in [1, 4096] {
+        let mut setup = scene_setup(source, budget);
+        update_scene(&mut setup, 100);
+        for (name, parameters, priority, vram) in [
+            ("solid", [4., 3., 9., 0., 0., 1., 128.], 7, [0.; 3]),
+            ("canvas", [8., 5., 10., 11., 0., 1., 64.], 8, [11., 12., 0.]),
+        ] {
+            let handle = setup.scene.objects().lookup(name, 0).unwrap();
+            let object = setup.scene.objects().get(handle).unwrap();
+            let task = object.motions().task(1).unwrap();
+            assert_eq!(
+                task.state().unwrap().parameters[..7],
+                parameters.map(f32::to_bits)
+            );
+            let (plane, context) = match &object.state {
+                ObjectState::CPlane(plane) => (&**plane, plane.subcommand_context()),
+                ObjectState::Plane(plane) => (&plane.base, plane.subcommand_context()),
+                _ => unreachable!(),
+            };
+            assert_eq!(plane.priority(), priority);
+            assert_eq!(plane.base_point()[2], priority as f32);
+            assert_eq!(context.velocity, vram);
+            assert_eq!(
+                plane.color(),
+                if name == "solid" {
+                    0x80123456
+                } else {
+                    0x40345678
+                }
+            );
+        }
+    }
+}
+
+#[test]
 fn subcommands_retry_mapped_arrays_once_and_handlers_wait_for_the_next_motion_round() {
     let source = b"#DEFINE\nCIMAGE obj[2]\n#OBJECT SIZE COLOR PRI POS DISP\nobj[0] 1,1 0xff112233 5 10,0 1\nobj[1] 1,1 0xff445566 6 20,0 1\n#SUBCOMMAND\noneshot move motion px[0] : [0]\ncontinue alias MOTION px[0] : [0]\n#START\nobj move ($0+=1)\nwait 1000\n#obj.PUSH_L\n@ alias ($0+=1)\ndecode\n";
     for budget in [1, 4096] {

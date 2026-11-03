@@ -220,15 +220,12 @@ impl<F: ObjectFactory> Store<'_, F> {
                 ],
             ));
         }
-        vectors.push((66, 0, [1.0; 3]));
+        vectors.push((66, 0, state.scale()[..3].try_into().unwrap()));
         for (code, source, value) in vectors {
             let mut bytes = value.map(f32::to_le_bytes).concat();
             self.fes_command(owner, task, code, [source, 0, 1], Some(&mut bytes))?;
         }
-        let mut matrix = crate::graphics::Transform::default()
-            .matrix()
-            .map(f32::to_le_bytes)
-            .concat();
+        let mut matrix = state.matrix().map(f32::to_le_bytes).concat();
         self.fes_command(owner, task, 57, [0, 0, 1], Some(&mut matrix))?;
         for (code, data) in [
             (59, [1, state.color, 1]),

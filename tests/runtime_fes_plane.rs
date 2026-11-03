@@ -65,6 +65,114 @@ fn plane(objects: &Objects, handle: u32) -> &fes::CPlaneState {
 }
 
 #[test]
+fn motion_color_scale_and_matrix_reach_plane_drawables_without_changing_priority_or_vram() {
+    for kind in ["CPLANE", "PLANE"] {
+        for budget in [1, 4096] {
+            let (mut runtime, mut objects) = setup();
+            runtime.drawing_mut().target = Some(RenderTarget::new([8, 8]).unwrap());
+            let handle = objects
+                .define(&ObjectDefinition {
+                    kind,
+                    name: "panel".into(),
+                    banks: 1,
+                })
+                .unwrap()[0];
+            let child = define(&mut objects, "child");
+            objects.set_parent(child, Some(handle)).unwrap();
+            initialize(
+                &mut objects,
+                "panel",
+                ObjectAttributes {
+                    size: Some([1, 1]),
+                    priority: Some(7),
+                    display: Some(1),
+                    base: Some([0, 0, 999]),
+                    color: Some(0xff112233u32 as i32),
+                    vram: Some([3, 4]),
+                    ..Default::default()
+                },
+            );
+            runtime.update_fes_object(0, &mut objects, handle).unwrap();
+            runtime.update_fes_object(0, &mut objects, child).unwrap();
+            assert!(!plane(&objects, child).is_dirty());
+            let mut code = Vec::new();
+            for (index, value) in [
+                (5, 123f32.to_bits()),
+                (6, 2f32.to_bits()),
+                (7, 1f32.to_bits()),
+                (21, 2f32.to_bits()),
+                (25, 2f32.to_bits()),
+                (28, 0xff445566),
+                (31, 1.25f32.to_bits()),
+            ] {
+                code.extend([0x15, 3]);
+                code.extend((0x80000000u32 + index * 4).to_le_bytes());
+                code.push(3);
+                code.extend(value.to_le_bytes());
+            }
+            code.extend([0x2d, 0x3b]);
+            objects
+                .start_motion(
+                    handle,
+                    katze_system2::kcs::Program::from_code(&code, vec![], 64).unwrap(),
+                    &[],
+                    0,
+                )
+                .unwrap();
+            let mut host = katze_system2::kcs::MotionHost::default();
+            while !objects.update_motions(100, &mut host, budget).unwrap() {}
+            assert!(plane(&objects, child).is_dirty());
+            let state = match &objects.get(handle).unwrap().state {
+                ObjectState::CPlane(state) => &**state,
+                ObjectState::Plane(state) => {
+                    assert_eq!(state.vram(), [3., 4., 0., 0.]);
+                    &state.base
+                }
+                _ => unreachable!(),
+            };
+            assert_eq!(state.priority(), 7);
+            assert_eq!(state.base_point(), [0., 0., 123., 0.]);
+            assert_eq!(state.rotation(), [0., 0., 1.25, 1.]);
+            assert_eq!(state.color(), 0xff445566);
+            runtime.update_fes_object(0, &mut objects, handle).unwrap();
+            let task = objects.get(handle).unwrap().task_id().unwrap();
+            let drawable = runtime.drawables().get(task).unwrap();
+            assert_eq!(drawable.transform().position(), [2., 1., 0.]);
+            assert_eq!(drawable.transform().base_point(), [0., 0., 7.]);
+            assert_eq!(drawable.transform().scale(), [2., 1., 1.]);
+            let mut matrix = *Transform::default().matrix();
+            matrix[12] = 2.;
+            assert_eq!(drawable.transform().matrix_override(), Some(&matrix));
+            assert_eq!(drawable.color(), (0xff445566, 1));
+            if kind == "CPLANE" {
+                *runtime.drawing_mut() = DrawingContext {
+                    enabled: true,
+                    active: true,
+                    target: Some(RenderTarget::new([8, 4]).unwrap()),
+                    ..Default::default()
+                };
+                runtime
+                    .render_triangles(&Projection::default(), *Transform::default().matrix())
+                    .unwrap();
+                let target = runtime.drawing().target.as_ref().unwrap();
+                for y in 0..4 {
+                    for x in 0..8 {
+                        assert_eq!(
+                            target.pixel(x, y),
+                            Some(if (4..6).contains(&x) && y == 1 {
+                                0xff445566
+                            } else {
+                                0
+                            })
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn fes_events_create_real_planes_and_parent_changes_reach_pixels_and_deletion() {
     let source = b"#DEFINE\nCPLANE group\nCPLANE panel[2]\n#OBJECT POS BASE\ngroup 1,2 9,9,9\n#OBJECT PARENT POS BASE SIZE COLOR PRI DISP\npanel group 2,1 1,1,900 2,2 0xff123456 10 1\n#START\nexit 0\n";
     for budget in [1, 100] {

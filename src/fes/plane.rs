@@ -1,10 +1,13 @@
-use super::{ImageReference, ObjectAttributes, ObjectReference};
+use super::{ImageReference, ObjectAttributes, ObjectReference, SubcommandContext};
 
 /// CPLANE 的属性与待更新标记；下层任务由运行时维护。
 #[derive(Clone, Debug, PartialEq)]
 pub struct CPlaneState {
     pub(crate) position: [f32; 4],
     pub(crate) base_point: [f32; 4],
+    rotation: [f32; 4],
+    scale: [f32; 4],
+    matrix: [f32; 16],
     pub(crate) size: [i32; 2],
     pub(crate) priority: i32,
     pub(crate) display: i32,
@@ -24,6 +27,9 @@ impl Default for CPlaneState {
         Self {
             position: [0.0, 0.0, 0.0, 1.0],
             base_point: [0.0, 0.0, 0.0, 1.0],
+            rotation: [0.0, 0.0, 0.0, 1.0],
+            scale: [1.0; 4],
+            matrix: *crate::graphics::Transform::default().matrix(),
             size: [800, 600],
             priority: 5000,
             display: 0,
@@ -50,6 +56,65 @@ impl CPlaneState {
 
     pub fn base_point(&self) -> [f32; 4] {
         self.base_point
+    }
+
+    pub fn rotation(&self) -> [f32; 4] {
+        self.rotation
+    }
+
+    pub fn scale(&self) -> [f32; 4] {
+        self.scale
+    }
+
+    pub fn matrix(&self) -> &[f32; 16] {
+        &self.matrix
+    }
+
+    pub fn subcommand_context(&self) -> SubcommandContext {
+        SubcommandContext {
+            base: self.base_point[..3].try_into().unwrap(),
+            position: self.position[..3].try_into().unwrap(),
+            velocity: [0.0; 3],
+            rotation: self.rotation[..3].try_into().unwrap(),
+            scale: self.scale[..3].try_into().unwrap(),
+            color: self.color,
+        }
+    }
+
+    pub fn motion_properties(&self) -> [u32; 36] {
+        let mut properties = [0; 36];
+        for i in 0..3 {
+            properties[3 + i] = self.base_point[i].to_bits();
+            properties[6 + i] = self.position[i].to_bits();
+            properties[25 + i] = self.scale[i].to_bits();
+            properties[29 + i] = self.rotation[i].to_bits();
+        }
+        properties[5] = (self.priority as f32).to_bits();
+        properties[9..25].copy_from_slice(&self.matrix.map(f32::to_bits));
+        properties[28] = self.color;
+        properties[35] = self.display as u32;
+        properties
+    }
+
+    /// 写回基点 Z 并保留独立优先级；总返回 true，供宿主递归标记后代失效。
+    pub fn apply_motion_properties(&mut self, properties: &[u32; 36]) -> bool {
+        let value = |i| f32::from_bits(properties[i]);
+        for (current, start) in [
+            (&mut self.base_point, 3),
+            (&mut self.position, 6),
+            (&mut self.scale, 25),
+        ] {
+            let next = [value(start), value(start + 1), value(start + 2), 0.0];
+            if *current != next {
+                *current = next;
+            }
+        }
+        self.matrix = std::array::from_fn(|i| value(i + 9));
+        self.rotation[..3].copy_from_slice(&[value(29), value(30), value(31)]);
+        self.color = properties[28];
+        self.display = properties[35] as i32;
+        self.dirty = true;
+        true
     }
 
     pub fn size(&self) -> [i32; 2] {
@@ -193,6 +258,13 @@ impl Default for PlaneState {
 impl PlaneState {
     pub fn vram(&self) -> [f32; 4] {
         self.vram
+    }
+
+    pub fn subcommand_context(&self) -> SubcommandContext {
+        SubcommandContext {
+            velocity: self.vram[..3].try_into().unwrap(),
+            ..self.base.subcommand_context()
+        }
     }
 
     /// 返回本次是否使属性失效；VRAM 独立于屏幕位置和尺寸重建。

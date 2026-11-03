@@ -125,6 +125,65 @@ fn value(state: &ObjectState) -> u32 {
 }
 
 #[test]
+fn plane_blend_keeps_rgb_and_raw_alpha_parameters_across_resource_retry() {
+    for kind in ["CPLANE", "PLANE"] {
+        for budget in [1, 4096] {
+            let source = format!(
+                "#DEFINE\n{kind} panel\nCPLANE child\n#OBJECT COLOR\npanel 0xab123456\n#START\nwait 99\n#_FES_SLEEP_\npanel blend ($0-=1) ($1+=100)\n"
+            );
+            let files = Files {
+                motion: Some(motion()),
+                ..Default::default()
+            };
+            files.fail.set(true);
+            let (mut runtime, mut scene) = setup(source.as_bytes(), budget, files.clone());
+            while !scene.prepare(runtime.numbers_mut(), budget).unwrap() {}
+            let handle = scene.objects().lookup("panel", 0).unwrap();
+            let child = scene.objects().lookup("child", 0).unwrap();
+            scene
+                .objects_mut()
+                .unwrap()
+                .set_parent(child, Some(handle))
+                .unwrap();
+            let mut failed = false;
+            for _ in 0..256 {
+                match runtime.dispatch_fes_system_block(0, &mut scene, "_FES_SLEEP_") {
+                    Err(_) => {
+                        failed = true;
+                        break;
+                    }
+                    Ok(false) => (),
+                    Ok(true) => panic!("合成读取没有失败"),
+                }
+            }
+            assert!(failed);
+            assert_eq!(runtime.numbers().shared[..2], [-1, 0]);
+            files.fail.set(false);
+            system(&mut runtime, &mut scene);
+            assert_eq!(runtime.numbers().shared[..2], [-1, 0]);
+            assert_eq!((files.resolves.get(), files.reads.get()), (1, 2));
+            let object = scene.objects().get(handle).unwrap();
+            let color = match &object.state {
+                ObjectState::CPlane(plane) => plane.color(),
+                ObjectState::Plane(plane) => plane.base.color(),
+                _ => unreachable!(),
+            };
+            assert_eq!(color, 0xff123456);
+            let queue = object.motions();
+            assert_eq!(queue.base_properties[28], color);
+            assert_eq!(
+                queue.task(1).unwrap().state().unwrap().parameters[..4],
+                [-1f32, 18., 52., 86.].map(f32::to_bits)
+            );
+            let ObjectState::CPlane(child) = &scene.objects().get(child).unwrap().state else {
+                unreachable!()
+            };
+            assert!(child.is_dirty());
+        }
+    }
+}
+
+#[test]
 fn sound_blend_retries_once_then_runs_default_motion_at_the_normal_update_boundary() {
     let source = b"#DEFINE\nSOUND sound[3]\nBASE ignored\n#START\nsound[1] blend ($0+=257)\nignored blend ($1+=7)\nwait 99\n#_FES_SLEEP_\nsound blend ($0+=3)\n#sound.PUSH_L\n@ blend ($0+=1)\n";
     for budget in [1, 4096] {
