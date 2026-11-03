@@ -1,0 +1,127 @@
+use super::{Pcm, decode_vorbis};
+use crate::kcs::ResourceServices;
+use crate::resource::ResourceMode;
+use crate::{Error, Result};
+
+#[derive(Clone, Copy, Default)]
+pub(super) struct ChannelClock {
+    pub previous: u32,
+    pub elapsed: u32,
+}
+
+/// 一个物理声音通道持有的资源及装载参数；PCM 保留源格式。
+pub struct SoundChannel {
+    pub(super) clock: ChannelClock,
+    pub(super) file: Vec<u8>,
+    pub(super) pcm: Option<Pcm>,
+    pub(super) parameters: [i32; 2],
+    pub(super) load_options: u32,
+    pub(super) linked: Option<u32>,
+    pub(super) loop_range: [i64; 2],
+}
+
+impl Default for SoundChannel {
+    fn default() -> Self {
+        Self {
+            clock: ChannelClock::default(),
+            file: Vec::new(),
+            pcm: None,
+            parameters: [0; 2],
+            load_options: 0,
+            linked: None,
+            loop_range: [0, -1],
+        }
+    }
+}
+
+impl SoundChannel {
+    pub fn file(&self) -> &[u8] {
+        &self.file
+    }
+
+    pub fn pcm(&self) -> Option<&Pcm> {
+        self.pcm.as_ref()
+    }
+
+    pub fn load_parameters(&self) -> [i32; 2] {
+        self.parameters
+    }
+
+    pub fn load_options(&self) -> u32 {
+        self.load_options
+    }
+
+    pub fn linked_channel(&self) -> Option<u32> {
+        self.linked
+    }
+
+    /// 已登记的原始循环范围；尚未换算为 PCM 采样帧。
+    pub fn loop_range(&self) -> [i64; 2] {
+        self.loop_range
+    }
+
+    pub(super) fn duration_ms(&self) -> u32 {
+        self.pcm.as_ref().map_or(0, |pcm| {
+            ((pcm.frames() as f64 / f64::from(pcm.sample_rate())) * 1000.0) as u64 as u32
+        })
+    }
+
+    pub(super) fn unload(&mut self) {
+        self.file.clear();
+        self.pcm = None;
+        self.clock = ChannelClock::default();
+        self.loop_range[0] = 0;
+    }
+}
+
+pub(super) fn load_pcm(services: &mut dyn ResourceServices, file: &[u8]) -> Result<Option<Pcm>> {
+    services
+        .read(file, ResourceMode::LooseFirst)?
+        .filter(|bytes| !bytes.is_empty())
+        .map(|bytes| decode_vorbis(&bytes))
+        .transpose()
+}
+
+pub(super) fn check_metadata(services: &mut dyn ResourceServices, file: &[u8]) -> Result<()> {
+    let basename = file
+        .rsplit(|byte| matches!(byte, b'/' | b'\\'))
+        .next()
+        .unwrap();
+    let stem = without_extension(basename);
+    for (category, extension) in [
+        (b"tag".as_slice(), None),
+        (b"sound".as_slice(), Some(b"plv".as_slice())),
+        (b"sound".as_slice(), Some(b"lpb".as_slice())),
+        (b"sound".as_slice(), Some(b"lv".as_slice())),
+    ] {
+        let mut name = services.resolve(category, stem)?;
+        name.truncate(
+            name.iter()
+                .position(|&byte| byte == 0)
+                .unwrap_or(name.len()),
+        );
+        if let Some(extension) = extension {
+            name.truncate(without_extension(&name).len());
+            name.push(b'.');
+            name.extend(extension);
+        }
+        if name.len() >= 1024 {
+            return Err(Error::new(0, "声音附加资源名称超过缓冲区容量"));
+        }
+        if services
+            .read(&name, ResourceMode::LooseFirst)?
+            .is_some_and(|bytes| !bytes.is_empty())
+        {
+            return Err(Error::new(0, "声音附加资源内容尚未接入"));
+        }
+    }
+    Ok(())
+}
+
+fn without_extension(name: &[u8]) -> &[u8] {
+    let dot = name
+        .iter()
+        .rposition(|byte| matches!(byte, b'.' | b'/' | b'\\'))
+        .filter(|&position| name[position] == b'.');
+    &name[..dot.unwrap_or(name.len())]
+}

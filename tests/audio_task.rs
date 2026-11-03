@@ -246,9 +246,31 @@ fn sound_commands_gate_buffers_and_preserve_unwritten_return_slots() {
         .dispatch_command(kind::SOUND, &command(1, 199, 0), &mut output, &mut host, 1)
         .unwrap();
     assert_eq!(output, 0xdeadbeef);
+    for channel in [0, 64, u32::MAX] {
+        let mut release = command(1, 182, 0);
+        release.data[0] = channel;
+        sound
+            .dispatch_command(kind::SOUND, &release, &mut output, &mut host, 1)
+            .unwrap();
+        assert_eq!(output, 0xdeadbeef);
+    }
+    let mut guarded_load = command(1, 180, 0);
+    guarded_load.data[0] = 64;
+    sound
+        .dispatch_command(kind::SOUND, &guarded_load, &mut output, &mut host, 1)
+        .unwrap();
+    assert_eq!(output, 0xdeadbeef);
+    guarded_load.data[0] = 0;
     assert!(
         sound
-            .dispatch_command(kind::SOUND, &command(1, 180, 0), &mut output, &mut host, 1)
+            .dispatch_command(kind::SOUND, &guarded_load, &mut output, &mut host, 1)
+            .unwrap_err()
+            .message
+            .contains("记录缓冲区")
+    );
+    assert!(
+        sound
+            .dispatch_command(kind::SOUND, &command(1, 181, 0), &mut output, &mut host, 1)
             .unwrap_err()
             .message
             .contains("声音对象命令")

@@ -1,8 +1,10 @@
 use crate::{Error, Result, read};
 
+mod channel;
 mod config;
 mod pcm;
 mod task;
+pub use channel::SoundChannel;
 pub use config::{SoundConfig, SoundPart};
 pub use pcm::{Pcm, decode_vorbis};
 pub use task::{SoundFactory, SoundObject, SoundState};

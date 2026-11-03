@@ -1,26 +1,20 @@
-use super::LoopPoints;
+use super::{LoopPoints, SoundChannel, channel};
 use crate::kcs::{Host, Interpreter};
 use crate::runtime::{BaseObject, ObjectFactory, TaskObject, kind};
 use crate::task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock};
 use crate::{Error, Result, read};
 
-#[derive(Clone, Copy, Default)]
-struct ChannelClock {
-    previous: u32,
-    elapsed: u32,
-}
-
-/// 循环范围和六十四个空闲通道的原始累计时刻。
+/// 循环范围、六十四个物理通道及其原始累计时刻。
 pub struct SoundState {
     loops: LoopPoints,
-    channels: [ChannelClock; 64],
+    channels: [SoundChannel; 64],
 }
 
 impl Default for SoundState {
     fn default() -> Self {
         Self {
             loops: LoopPoints::default(),
-            channels: [ChannelClock::default(); 64],
+            channels: std::array::from_fn(|_| SoundChannel::default()),
         }
     }
 }
@@ -31,14 +25,18 @@ impl SoundState {
     }
 
     pub fn channel_time(&self, channel: u32) -> Result<u32> {
+        Ok(self.channel(channel)?.clock.elapsed)
+    }
+
+    pub fn channel(&self, channel: u32) -> Result<&SoundChannel> {
         self.channels
             .get(channel as usize)
-            .map(|clock| clock.elapsed)
             .ok_or_else(|| Error::new(0, "声音通道编号超出范围"))
     }
 
     fn update_idle(&mut self, now: u32) {
-        for clock in &mut self.channels {
+        for channel in &mut self.channels {
+            let clock = &mut channel.clock;
             let previous = if clock.previous == u32::MAX {
                 now.wrapping_sub(1)
             } else {
@@ -48,9 +46,68 @@ impl SoundState {
             clock.elapsed = clock.elapsed.wrapping_add(now.wrapping_sub(previous));
         }
     }
+
+    fn unload(&mut self, channel: u32) {
+        if let Some(sound) = self.channels.get_mut(channel as usize) {
+            let linked = sound.linked;
+            sound.unload();
+            if let Some(sound) = linked.and_then(|index| self.channels.get_mut(index as usize)) {
+                sound.unload();
+            }
+        }
+    }
+
+    fn duration_ms(&self, channel: u32) -> u32 {
+        self.channels.get(channel as usize).map_or(0, |sound| {
+            self.channels[sound.linked.unwrap_or(channel) as usize].duration_ms()
+        })
+    }
+
+    fn load(&mut self, record: &[u8], host: &mut dyn Host, output: &mut u32) -> Result<()> {
+        let record = read::range(record, 0, 0x120)?;
+        let logical = u32::from_le_bytes(record[..4].try_into().unwrap());
+        let options = u32::from_le_bytes(record[0x114..0x118].try_into().unwrap());
+        let mode = i32::from_le_bytes(record[0x118..0x11c].try_into().unwrap());
+        let duration = i32::from_le_bytes(record[0x11c..0x120].try_into().unwrap());
+        let physical = logical
+            .checked_add(if mode == 0 { 0 } else { 32 })
+            .filter(|&index| index < 64)
+            .ok_or_else(|| Error::new(0, "声音装载通道或备用通道超出范围"))?;
+        let name = &record[12..272];
+        let length = name
+            .iter()
+            .position(|&byte| byte == 0)
+            .ok_or_else(|| Error::new(12, "声音装载名称缺少零结尾"))?;
+        let name = &name[..length];
+        let services = host
+            .resource_services()
+            .ok_or_else(|| Error::new(0, "宿主未提供声音资源服务"))?;
+        let sound = &mut self.channels[physical as usize];
+        sound.file.clear();
+        sound.pcm = None;
+        sound.pcm = channel::load_pcm(services, name)?;
+        if sound.pcm.is_some() {
+            sound.file.extend_from_slice(name);
+        }
+        *output = u32::from(sound.pcm.is_some());
+        sound.clock.elapsed = 0;
+        sound.loop_range = [0, -1];
+        if u32::from_le_bytes(record[0x110..0x114].try_into().unwrap()) != 0 {
+            if let Some(point) = self.loops.find(name) {
+                sound.loop_range = [point.start, point.end];
+            }
+        }
+        sound.parameters = [mode, duration];
+        sound.load_options = options;
+        sound.linked = None;
+        if mode != 0 {
+            self.channels[logical as usize].linked = Some(physical);
+        }
+        channel::check_metadata(services, name)
+    }
 }
 
-/// 类型 13 的声音任务，接收循环范围登记并维护空闲通道时刻。
+/// 类型 13 的声音任务，持有通道 PCM、装载参数及循环范围。
 pub struct SoundObject {
     base: BaseObject,
     audio: SoundState,
@@ -136,6 +193,27 @@ impl TaskObject for SoundObject {
         if !self.enabled {
             *output = 0;
             return Ok(CommandOutcome::finished(false));
+        }
+        match command.code {
+            180 => {
+                if command.data[0] < 64 {
+                    let bytes = buffers
+                        .data1
+                        .as_deref()
+                        .ok_or_else(|| Error::new(0, "声音装载缺少记录缓冲区"))?;
+                    self.audio.load(bytes, host, output)?;
+                }
+                return Ok(CommandOutcome::finished(false));
+            }
+            182 => {
+                self.audio.unload(command.data[0]);
+                return Ok(CommandOutcome::finished(false));
+            }
+            201 => {
+                *output = self.audio.duration_ms(command.data[0]);
+                return Ok(CommandOutcome::finished(false));
+            }
+            _ => {}
         }
         if command.code == 199 {
             if let Some(bytes) = buffers.data1.as_deref() {
