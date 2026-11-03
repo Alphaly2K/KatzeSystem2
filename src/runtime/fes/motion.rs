@@ -67,6 +67,7 @@ impl Objects {
             .ok_or_else(|| Error::new(0, "FES 对象标识无效"))?;
         if object.state.image().is_none()
             && !matches!(object.state, ObjectState::Base)
+            && !matches!(object.state, ObjectState::Draw(_))
             && object.state.control().is_none()
             && !matches!(object.state, ObjectState::Sound(_))
         {

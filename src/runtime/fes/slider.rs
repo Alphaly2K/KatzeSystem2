@@ -96,15 +96,20 @@ impl<F: ObjectFactory> Store<'_, F> {
         }
         self.prepare_fes_object(owner, &mut scene.objects, index)?;
         let record = &scene.objects.update_order[index];
-        let Some(handle) = scene
-            .objects
-            .lookup(&record.target.name, record.target.bank)
-        else {
+        let draw = record.kind == "DRAW";
+        let Some(handle) = scene.objects.media_handle(record) else {
+            if draw {
+                scene.objects.publish_bindings(&mut scene.interpreter);
+            }
             return Ok(());
         };
         let image = record.image;
         if scene.objects.get(handle).unwrap().state.control().is_none() {
-            return self.update_fes_object_image(owner, &mut scene.objects, handle, image);
+            self.update_fes_object_image(owner, &mut scene.objects, handle, image)?;
+            if draw {
+                scene.objects.publish_bindings(&mut scene.interpreter);
+            }
+            return Ok(());
         }
         let (task, protocol) =
             self.prepare_fes_control_update(owner, &mut scene.objects, handle)?;

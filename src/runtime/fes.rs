@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 mod animation;
 mod button;
 mod commands;
+mod draw;
 mod fonts;
 mod image;
 mod input;
@@ -21,6 +22,7 @@ mod scene;
 mod slider;
 mod task;
 pub use animation::ImageAnimationRequest;
+pub use draw::DrawState;
 pub use navigation::NavigationOutcome;
 pub use scene::Scene;
 pub(super) use task::dispatch_borrowed_control_event;
@@ -31,6 +33,7 @@ const TOP: &str = "_TOPOBJ_";
 /// 按声明及银行顺序保存的媒体绑定；名称查找仍使用当前对象表。
 #[derive(Debug)]
 pub struct MediaRecord {
+    object: u32,
     kind: &'static str,
     target: ObjectReference,
     image: Option<u32>,
@@ -49,7 +52,7 @@ impl MediaRecord {
     pub fn image_handle(&self) -> Option<u32> {
         self.image
     }
-    /// 装载记录创建的 BUTTON、SLIDER 或 SCROLL2 编号，其他类型返回 None。
+    /// 装载记录创建的 BUTTON、SLIDER、SCROLL2 或 DRAW 编号。
     pub fn task_id(&self) -> Option<u32> {
         self.task_id
     }
@@ -67,6 +70,7 @@ pub enum ObjectState {
     Slider(Box<SliderState>),
     Scroll2(Box<Scroll2State>),
     Sound(Box<SoundState>),
+    Draw(Box<DrawState>),
 }
 
 impl ObjectState {
@@ -81,6 +85,7 @@ impl ObjectState {
             Self::Slider(_) => "SLIDER",
             Self::Scroll2(_) => "SCROLL2",
             Self::Sound(_) => "SOUND",
+            Self::Draw(_) => "DRAW",
         }
     }
 
@@ -95,6 +100,7 @@ impl ObjectState {
             "SLIDER" => Self::Slider(Box::default()),
             "SCROLL2" => Self::Scroll2(Box::default()),
             "SOUND" => Self::Sound(Box::default()),
+            "DRAW" => Self::Draw(Box::default()),
             _ => return Err(Error::new(0, format!("FES 对象类型 {kind} 尚未接入"))),
         })
     }
@@ -279,6 +285,7 @@ pub struct Objects {
     input_task: Option<u32>,
     image_clip: crate::graphics::Rect,
     motion_update: Option<motion::Traversal>,
+    draw_restore: Option<u32>,
 }
 
 impl Objects {
@@ -317,6 +324,7 @@ impl Objects {
             input_task: None,
             image_clip: crate::graphics::Rect::default(),
             motion_update: None,
+            draw_restore: None,
         })
     }
 
@@ -383,7 +391,12 @@ impl Objects {
     pub fn update_order(&self) -> impl Iterator<Item = u32> + '_ {
         self.update_order
             .iter()
-            .filter_map(|record| self.lookup(&record.target.name, record.target.bank))
+            .filter_map(|record| self.media_handle(record))
+    }
+
+    fn media_handle(&self, record: &MediaRecord) -> Option<u32> {
+        let handle = self.lookup(&record.target.name, record.target.bank)?;
+        (record.kind != "DRAW" || handle == record.object).then_some(handle)
     }
 
     pub fn media_records(&self) -> &[MediaRecord] {
@@ -446,6 +459,7 @@ impl Objects {
             .or_insert(definition.banks);
         self.update_order
             .extend((0..definition.banks).map(|bank| MediaRecord {
+                object: handles[bank as usize],
                 kind: definition.kind,
                 target: ObjectReference {
                     name: definition.name.clone(),
@@ -529,7 +543,7 @@ impl Objects {
                 self.set_parent(handle, self.lookup(&parent.name, parent.bank))?;
             }
             let dirty = match &mut self.objects.get_mut(&handle).unwrap().state {
-                ObjectState::Base => false,
+                ObjectState::Base | ObjectState::Draw(_) => false,
                 ObjectState::CImage(state) => state.apply(&initialization.attributes, bank as u32),
                 ObjectState::Image(state) => {
                     state.apply(&initialization.attributes, bank as u32, &mut transform_name)?

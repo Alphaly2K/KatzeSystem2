@@ -12,7 +12,7 @@ use scripts::{ChildScripts, ScriptDisposition, ScriptRequest};
 
 /// 一份预先装载的 FES 执行状态；调用方绑定共享列表并在所属任务的主体时点推进。
 pub struct Scene {
-    interpreter: fes::Interpreter,
+    pub(super) interpreter: fes::Interpreter,
     pub(super) objects: Objects,
     owner: Option<u32>,
     frame_origin: u32,
@@ -36,6 +36,7 @@ pub struct Scene {
     motion_names: BTreeMap<Vec<u8>, Vec<u8>>,
     motion_call: Option<MotionCall>,
     motion_stop: Option<MotionStop>,
+    pub(super) draw_call: Option<super::draw::DrawCall>,
 }
 
 struct Invocation {
@@ -120,6 +121,7 @@ impl Scene {
             motion_names: BTreeMap::new(),
             motion_call: None,
             motion_stop: None,
+            draw_call: None,
         })
     }
 
@@ -762,6 +764,8 @@ impl<F: ObjectFactory> Store<'_, F> {
                         } else {
                             scene.interpreter.resume();
                         }
+                    } else if self.run_fes_draw(scene, &args, line.offset)? {
+                        scene.interpreter.resume();
                     } else if let Some(complete) = self.run_fes_stop(scene, &args, line.offset)? {
                         if !complete {
                             return Ok(false);
@@ -853,6 +857,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                     let object = scene.objects.get(handle).unwrap();
                     let context = match &object.state {
                         super::ObjectState::Base
+                        | super::ObjectState::Draw(_)
                         | super::ObjectState::Slider(_)
                         | super::ObjectState::Scroll2(_) => fes::SubcommandContext::default(),
                         state => state
@@ -995,6 +1000,15 @@ impl<F: ObjectFactory> Store<'_, F> {
         }
         scene.owner = Some(owner);
         if scene.invocation.is_none() {
+            let old_count = scene.objects.update_order.len();
+            let objects = &scene.objects.objects;
+            scene
+                .objects
+                .update_order
+                .retain(|record| record.kind != "DRAW" || objects.contains_key(&record.object));
+            scene.media_prepared = scene
+                .media_prepared
+                .saturating_sub(old_count - scene.objects.update_order.len());
             if scene.frame_origin == 0 {
                 scene.frame_origin = now.wrapping_sub(1);
             }
@@ -1136,6 +1150,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                                 if stop {
                                     scene.publish_notifications();
                                 }
+                            } else if self.run_fes_draw(scene, &args, line.offset)? {
                             } else if let Some(complete) =
                                 self.run_fes_stop(scene, &args, line.offset)?
                             {

@@ -13,6 +13,7 @@ impl<F: ObjectFactory> Store<'_, F> {
         objects: &mut Objects,
         index: usize,
     ) -> Result<()> {
+        self.restore_fes_draw_submission(owner, objects)?;
         let record = objects
             .update_order
             .get(index)
@@ -20,9 +21,18 @@ impl<F: ObjectFactory> Store<'_, F> {
         if record.prepared {
             return Ok(());
         }
-        let Some(handle) = objects.lookup(&record.target.name, record.target.bank) else {
+        let Some(handle) = objects.media_handle(record) else {
             return Ok(());
         };
+        if matches!(objects.get(handle).unwrap().state, ObjectState::Draw(_)) {
+            self.prepare_fes_draw(owner, objects, handle)?;
+            let object = objects.get(handle).unwrap();
+            let (task, image) = (object.task_id, object.image);
+            objects.update_order[index].task_id = task;
+            objects.update_order[index].image = image;
+            objects.update_order[index].prepared = true;
+            return Ok(());
+        }
         let object = objects.get(handle).unwrap();
         let button = matches!(object.state, ObjectState::Button(_));
         let control = ControlKind::of(&object.state);

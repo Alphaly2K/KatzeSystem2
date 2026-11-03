@@ -59,7 +59,7 @@ impl<F: ObjectFactory> Store<'_, F> {
         }
         self.prepare_fes_object(owner, objects, index)?;
         let record = &objects.update_order[index];
-        let Some(handle) = objects.lookup(&record.target.name, record.target.bank) else {
+        let Some(handle) = objects.media_handle(record) else {
             return Ok(());
         };
         let image = record.image;
@@ -76,10 +76,14 @@ impl<F: ObjectFactory> Store<'_, F> {
         if self.tree.node(owner).is_none() {
             return Err(Error::new(0, "FES 所属任务不存在"));
         }
+        self.restore_fes_draw_submission(owner, objects)?;
         let object = objects
             .get(handle)
             .ok_or_else(|| Error::new(0, "FES 对象标识无效"))?;
         let canvas = matches!(object.state, ObjectState::Plane(_));
+        if matches!(object.state, ObjectState::Draw(_)) {
+            return self.update_fes_draw(owner, objects, handle);
+        }
         if matches!(object.state, ObjectState::CImage(_)) {
             return self.update_fes_cimage(owner, objects, handle, image);
         }
@@ -263,7 +267,9 @@ impl<F: ObjectFactory> Store<'_, F> {
                 .get(id)
                 .ok_or_else(|| Error::new(0, "FES 对象标识无效"))?;
             pending.extend(object.children());
-            if matches!(object.state, ObjectState::Button(_)) {
+            if matches!(object.state, ObjectState::Draw(_)) {
+                self.check_fes_draw_binding(owner, object.task_id)?;
+            } else if matches!(object.state, ObjectState::Button(_)) {
                 self.check_fes_button_binding(owner, object.task_id)?;
             } else if let Some(protocol) = super::slider::ControlKind::of(&object.state) {
                 self.check_fes_control_binding(owner, object.task_id, protocol)?;
@@ -432,7 +438,7 @@ impl Objects {
     }
 }
 
-fn integer_position(value: f32) -> i32 {
+pub(super) fn integer_position(value: f32) -> i32 {
     if (-2147483648.0..2147483648.0).contains(&value) {
         value as i32
     } else {
