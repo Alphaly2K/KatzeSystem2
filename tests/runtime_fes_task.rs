@@ -65,7 +65,16 @@ impl ObjectFactory for Factory {
             }
             let mut code = Vec::new();
             ins(&mut code, 0x25, &[0xdead_beef]);
-            for (native, args) in [(449, vec![3, 4]), (447, vec![3, 64]), (448, vec![3])] {
+            for (native, args) in [
+                (449, vec![3, 4]),
+                (447, vec![3, 64]),
+                (645, vec![3, 2, 17]),
+                (645, vec![3, 511, 0x8000_0001]),
+                (645, vec![3, 512, 0x1234_5678]),
+                (645, vec![0, 2, 99]),
+                (645, vec![u32::MAX, 2, 99]),
+                (448, vec![3]),
+            ] {
                 for value in &args {
                     ins(&mut code, 0x25, &[*value]);
                 }
@@ -74,6 +83,12 @@ impl ObjectFactory for Factory {
             for (target, address) in [(3, 4), (0, 8), (u32::MAX, 12)] {
                 ins(&mut code, 0x25, &[target]);
                 ins(&mut code, 0x2b, &[452, 4]);
+                ins(&mut code, 0x26, &[address]);
+            }
+            for (index, address) in [(2, 16), (511, 20), (512, 24), (u32::MAX, 28)] {
+                ins(&mut code, 0x25, &[3]);
+                ins(&mut code, 0x25, &[index]);
+                ins(&mut code, 0x2b, &[646, 8]);
                 ins(&mut code, 0x26, &[address]);
             }
             ins(&mut code, 0x26, &[0]);
@@ -429,7 +444,7 @@ fn fes_tasks_load_without_starting_then_drive_pixels_and_keep_exit_properties() 
 
 #[test]
 fn ordinary_natives_bind_load_and_start_fes_with_shared_values_and_pixels() {
-    let source = b"#DEFINE\nCIMAGE sprite\nPLANE view\n#OBJECT SIZE COLOR PRI POS DISP\nsprite 2,2 0xff123456 5 1,1 1\n#OBJECT POS SIZE VRAM PRI DISP\nview 0,0 8,6 0,0 500 1\n#START\n$0=$0+1\nexit 37\nwait 20\n";
+    let source = b"#DEFINE\nCIMAGE sprite\nPLANE view\n#OBJECT SIZE COLOR PRI POS DISP\nsprite 2,2 0xff123456 5 1,1 1\n#OBJECT POS SIZE VRAM PRI DISP\nview 0,0 8,6 0,0 500 1\n#START\n$0=$0+1\n$1=\\2\nexit 37\nwait 20\n";
     for budget in [1, 4096] {
         for empty_name in [false, true] {
             let Setup {
@@ -454,10 +469,14 @@ fn ordinary_natives_bind_load_and_start_fes_with_shared_values_and_pixels() {
             }
             runtime.update(0, 1).unwrap();
             assert_eq!(runtime.numbers().shared[0], 1);
+            assert_eq!(runtime.numbers().shared[1], 17);
             assert_eq!(*reads.borrow(), [b"complete.fes".to_vec()]);
             let vm = runtime.object(caller).unwrap().interpreter().unwrap();
             assert_eq!(vm.read(0, 4).unwrap(), 0xdead_beefu32.to_le_bytes());
             for (address, expected) in [(4, 37u32), (8, u32::MAX), (12, u32::MAX)] {
+                assert_eq!(vm.read(address, 4).unwrap(), expected.to_le_bytes());
+            }
+            for (address, expected) in [(16, 17u32), (20, 0x8000_0001), (24, 0), (28, 0)] {
                 assert_eq!(vm.read(address, 4).unwrap(), expected.to_le_bytes());
             }
             assert!(vm.stack_bytes().is_empty());

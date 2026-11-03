@@ -1641,7 +1641,7 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         if matches!(index, 611..=619 | 695 | 884) {
             return self.message_native(index, arguments, vm);
         }
-        if matches!(index, 447..=449) {
+        if matches!(index, 447..=449 | 645 | 646) {
             return self.fes_native(index, arguments, vm);
         }
         if index == 149 {

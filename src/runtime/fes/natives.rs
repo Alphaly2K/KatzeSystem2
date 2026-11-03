@@ -10,7 +10,11 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         arguments: &[u8],
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
-        let length = if index == 448 { 4 } else { 8 };
+        let length = match index {
+            448 => 4,
+            645 => 12,
+            _ => 8,
+        };
         if arguments.len() != length {
             return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
         }
@@ -47,6 +51,34 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             }
             449 => {
                 self.command_target(target, 340, [0, read::u32_at(arguments, 4)?, 0])?;
+            }
+            645 => {
+                self.command_target(
+                    target,
+                    346,
+                    [read::u32_at(arguments, 4)?, read::u32_at(arguments, 8)?, 0],
+                )?;
+            }
+            646 => {
+                let supported = self
+                    .tree
+                    .find_reachable(self.host.task_id, target)
+                    .is_some_and(|node| node.kind == crate::runtime::kind::FES);
+                let active = self
+                    .objects
+                    .get(&target)
+                    .is_some_and(|object| object.control().deletion_requested == 0);
+                if !supported || !active {
+                    return Err(Error::new(
+                        vm.pc,
+                        "FES 参数查询目标不可达、已删除或类型未接入",
+                    ));
+                }
+                return Ok(NativeReturn::Value(self.command_target(
+                    target,
+                    347,
+                    [read::u32_at(arguments, 4)?, 0, 0],
+                )?));
             }
             _ => unreachable!(),
         }
