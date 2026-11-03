@@ -19,6 +19,9 @@ impl ObjectFactory for ReceiverFactory {
             (0x25, &[32][..]),
             (0x2b, &[71, 4][..]),
             (0x26, &[0][..]),
+            (0x2f, &[32][..]),
+            (0x25, &[0][..]),
+            (0x2b, &[108, 8][..]),
             (0x29, &[0][..]),
         ] {
             code.push(opcode);
@@ -67,15 +70,6 @@ fn button_selection_press_and_release_reach_a_waiting_ordinary_vm() -> Result<()
             &mut CommandBuffers {
                 data0: None,
                 data1: Some(&mut region),
-            },
-        )?;
-        runtime.dispatch_command(
-            0,
-            Command {
-                target: button,
-                sender: receiver,
-                code: 95,
-                data: [0; 3],
             },
         )?;
         runtime.update_input_selection(input, Some([5, 5]))?;

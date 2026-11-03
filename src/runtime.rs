@@ -1106,7 +1106,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         let count = match index {
             66 => 12,
             67 | 75 | 109 | 452 => 4,
-            110 => 8,
+            108 | 110 => 8,
             69 | 70 | 72 | 73 => 16,
             76 => 0,
             _ => unreachable!(),
@@ -1221,8 +1221,8 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             109 => Ok(NativeReturn::Value(
                 self.command_target(args[0], 96, [0; 3])?,
             )),
-            110 => {
-                self.command_target(args[0], 97, [0, args[1], 0])?;
+            108 | 110 => {
+                self.command_target(args[0], if index == 108 { 95 } else { 97 }, [0, args[1], 0])?;
                 Ok(NativeReturn::Continue)
             }
             72 | 73 => {
@@ -1576,7 +1576,7 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         }
         if matches!(
             index,
-            66 | 67 | 69 | 70 | 72 | 73 | 75 | 76 | 109 | 110 | 452
+            66 | 67 | 69 | 70 | 72 | 73 | 75 | 76 | 108..=110 | 452
         ) {
             return self.task_native(index, arguments, vm);
         }

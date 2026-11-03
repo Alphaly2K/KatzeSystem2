@@ -293,7 +293,7 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 
 ### 任务消息与跨任务存储
 
-`kcs::TaskHost::new(&mut inner, &mut services)` 包装现有 `Host`，接入普通表 66／67／69／70／72／73／109／110，其他 native 委托给 inner。包装时当前编号为零，直接使用 VM 时通过 `Host::set_task_id` 设置；`OrdinaryTask` 会自动同步编号、时钟和创建上下文，包装层继续委托给 inner。
+`kcs::TaskHost::new(&mut inner, &mut services)` 包装现有 `Host`，接入普通表 66／67／69／70／72／73／108／109／110，其他 native 委托给 inner。包装时当前编号为零，直接使用 VM 时通过 `Host::set_task_id` 设置；`OrdinaryTask` 会自动同步编号、时钟和创建上下文，包装层继续委托给 inner。
 
 `TaskServices` 要求宿主提供三个方法：`dispatch_message(target, &mut message)` 完成同步分派并保留消息回写，`enqueue_message(target, message)` 复制入队，`interpreter(target)` 返回目标任务的 VM。前两项返回任务命令处理器输出的 DWORD，而非消息正文；普通任务未等待时同步结果为零，排队结果为 1。同步回调必须在返回前完成本次分派的全部预算续跑，投递本身不修改目标的 running 或时钟。任务查找、沿树路由、对象类型差异及数值绑定切换由服务处理；缺失或不支持的目标应返回诊断。
 
@@ -303,7 +303,7 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 
 67 调用 `request_delete(sender, target)`，返回状态 2。服务应分派删除命令 3，让目标执行相应删除通知并标记待删除，在任务更新阶段完成实际销毁和索引清理。该方法默认返回未实现诊断。
 
-`dispatch_command(command, &mut output)` 从 `command.sender` 同步路由，返回目标是否可达，目标处理器通过 output 写回结果。可直接组合 `TaskTree::dispatch` 与对象处理器；处理器消费命令时，路由仍返回 true。缺省服务返回未实现诊断。109 接受目标编号，发送命令 96，data 全零；以状态 1 返回可达目标的 output，未找到返回零。110 接受目标编号和值，发送命令 97，data 为 `[0, value, 0]`；忽略路由返回值和 output，以状态 2 继续。服务错误仍向调用者传播，两项均不向子任务传播。
+`dispatch_command(command, &mut output)` 从 `command.sender` 同步路由，返回目标是否可达，目标处理器通过 output 写回结果。可直接组合 `TaskTree::dispatch` 与对象处理器；处理器消费命令时，路由仍返回 true。缺省服务返回未实现诊断。109 接受目标编号，发送命令 96，data 全零；以状态 1 返回可达目标的 output，未找到返回零。108／110 接受目标编号和值，分别发送命令 95／97，data 为 `[0, value, 0]`；忽略路由返回值和 output，以状态 2 继续。108 用于按钮响应回写，保留原始响应值。服务错误仍向调用者传播，三项均不向子任务传播。
 
 69／70 均接受目标编号、消息类型和两个数据项，消息首项自动填入发送者编号。69 同步调用服务，执行中的自身任务直接返回零；70 调用排队服务，包括向自身排队。两者都把服务输出按状态 1 返回。
 
@@ -477,7 +477,7 @@ Scene 消费 `noact`／`lockactive` 并按主体时点处理通知。`preferred_
 
 普通对象执行期间仍接受 67 删除请求及 70 排队消息；69 同步发送给执行中的普通 VM 时返回零。删除请求保留后续指令，实际析构继续发生在树更新；消息处理阶段追加的消息在同一轮继续消费，无消息恢复阶段追加的消息留到下一轮。`TaskObject::queued_messages()` 提供可选队列视图，支持执行中任务操作的自定义对象应提供该视图并消费 `Host::take_task_effects`；`OrdinaryObject` 已完成这些操作。给已有删除标记的对象排队时，原 native 的返回槽未初始化，运行时返回诊断且不入队。
 
-执行中的对象暂时从对象存储取出；输入同步回调通过 `Host::dispatch_input_command` 开放同一 CommandState 处理嵌套命令，其他需要直接借用执行中对象的命令或 VM 访问继续返回诊断。嵌套执行前保存宿主的任务编号、时刻和起点，返回后恢复，外层脚本继续读取自己的任务状态。对象命令经 `TaskTree::dispatch` 路由，目标改写、可达性判断和 `data[2]` 传播沿用树契约；`dispatch_command(origin, command)` 的 `origin` 只用于路由，`command.sender` 保持调用者给出的值，natives 109／110 以当前任务为发送者。未识别的基类编号不修改状态并允许传播，基类命令和已有删除标记的对象消费当前分支；普通任务对未支持编号继续返回诊断。
+执行中的对象暂时从对象存储取出；输入同步回调通过 `Host::dispatch_input_command` 开放同一 CommandState 处理嵌套命令，其他需要直接借用执行中对象的命令或 VM 访问继续返回诊断。嵌套执行前保存宿主的任务编号、时刻和起点，返回后恢复，外层脚本继续读取自己的任务状态。对象命令经 `TaskTree::dispatch` 路由，目标改写、可达性判断和 `data[2]` 传播沿用树契约；`dispatch_command(origin, command)` 的 `origin` 只用于路由，`command.sender` 保持调用者给出的值，natives 108／109／110 以当前任务为发送者。未识别的基类编号不修改状态并允许传播，基类命令和已有删除标记的对象消费当前分支；普通任务对已知但尚未实现的专属编号继续返回诊断。
 
 `Runtime::dispatch_command_with_buffers(origin, command, &mut buffers)` 按相同树规则分派显式字节缓冲区。`task::CommandBuffers` 的 data0／data1 是可选可变借用，对应原 data[0]／data[1] 所引用的数据；不解释 DWORD 为进程指针或 VM 地址。各接收者共享缓冲区中的修改。对象通过 `TaskObject::dispatch_command_with_buffers` 接收，缺省委托标量入口，所需长度由具体命令检查。`Host::next_task_child(previous)` 查询当前对象在有符号编号游标之后的直属子级，None 从首项开始，`dispatch_task_command(command, buffers, output)` 保留传入返回槽并返回是否找到目标，用于对象内部传播；宿主未提供服务时返回诊断。
 
@@ -485,7 +485,7 @@ Scene 消费 `noact`／`lockactive` 并按主体时点处理通知。`preferred_
 
 主体、命令和消息在返回前完成预算续跑。`DEFAULT_BUDGET` 为单次推进预算，零预算按一处理；连续耗尽预算时，`DEFAULT_LIMIT` 按续跑累计额度触发同步执行诊断。与库的其他执行错误一样，出现该错误后应丢弃解释器状态。不结束的普通指令循环因此会返回诊断。
 
-当前运行时接入普通表任务 native 66／67／69／70／72／73／75／76／109／110／452 和已核实的普通表接口；110 接受目标编号和值两个 DWORD。`KcsFactory.external_bytes` 超过库的 64 MiB 上限时在分配前返回诊断。629 仍由 `SystemHost` 单独包装，尚未并入；367 尚未实现。普通 KCS 对象当前在工厂返回前装载程序；原 FES 的 `execkcs` 路径先构造，再通过 161／172 装载并启动，运行时尚待接入这一协议。
+当前运行时接入普通表任务 native 66／67／69／70／72／73／75／76／108／109／110／452 和已核实的普通表接口；108／110 接受目标编号和值两个 DWORD。`KcsFactory.external_bytes` 超过库的 64 MiB 上限时在分配前返回诊断。629 仍由 `SystemHost` 单独包装，尚未并入；367 尚未实现。普通 KCS 对象当前在工厂返回前装载程序；原 FES 的 `execkcs` 路径先构造，再通过 161／172 装载并启动，运行时尚待接入这一协议。
 
 ## 约束与验证
 

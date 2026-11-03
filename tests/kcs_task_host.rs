@@ -242,6 +242,18 @@ fn object_commands_preserve_packets_and_distinguish_missing_routes_from_outputs(
         host.call(110, &update, &mut vm).unwrap(),
         NativeReturn::Continue
     );
+    assert_eq!(
+        host.call(108, &update, &mut vm).unwrap(),
+        NativeReturn::Continue
+    );
+    let missing = [999u32, u32::MAX]
+        .into_iter()
+        .flat_map(u32::to_le_bytes)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        host.call(108, &missing, &mut vm).unwrap(),
+        NativeReturn::Continue
+    );
     host.services.tree.unregister(42).unwrap();
     assert_eq!(
         host.call(109, &42u32.to_le_bytes(), &mut vm).unwrap(),
@@ -269,6 +281,12 @@ fn object_commands_preserve_packets_and_distinguish_missing_routes_from_outputs(
             },
             Command {
                 target: 7,
+                sender: 7,
+                code: 95,
+                data: [0, u32::MAX, 0]
+            },
+            Command {
+                target: 7,
                 sender: 42,
                 code: 96,
                 data: [0; 3]
@@ -276,6 +294,7 @@ fn object_commands_preserve_packets_and_distinguish_missing_routes_from_outputs(
         ]
     );
     assert!(host.call(109, &[], &mut vm).is_err());
+    assert!(host.call(108, &update[..4], &mut vm).is_err());
     assert!(host.call(110, &update[..4], &mut vm).is_err());
 }
 

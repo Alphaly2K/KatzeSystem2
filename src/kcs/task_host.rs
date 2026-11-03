@@ -212,7 +212,7 @@ impl<H: Host, S: TaskServices> Host for TaskHost<'_, H, S> {
         let count = match index {
             66 => 3,
             67 | 109 => 1,
-            110 => 2,
+            108 | 110 => 2,
             69 | 70 | 72 | 73 => 4,
             _ => return self.inner.call(index, arguments, vm),
         };
@@ -244,14 +244,18 @@ impl<H: Host, S: TaskServices> Host for TaskHost<'_, H, S> {
             return Ok(NativeReturn::Continue);
         }
         match index {
-            109 | 110 => {
+            108..=110 => {
                 let mut output = 0;
                 let found = self.services.dispatch_command(
                     Command {
                         target: args[0],
                         sender: self.task_id,
-                        code: if index == 109 { 96 } else { 97 },
-                        data: [0, if index == 110 { args[1] } else { 0 }, 0],
+                        code: match index {
+                            108 => 95,
+                            109 => 96,
+                            _ => 97,
+                        },
+                        data: [0, if index == 109 { 0 } else { args[1] }, 0],
                     },
                     &mut output,
                 )?;
