@@ -233,6 +233,7 @@ pub struct FesObject {
     pressed: Option<fes::ObjectReference>,
     input_event: Option<InputEvent>,
     control_event: Option<ControlEvent>,
+    parameters: Option<Vec<i32>>,
 }
 
 #[derive(Default)]
@@ -295,6 +296,7 @@ impl FesObject {
             pressed: None,
             input_event: None,
             control_event: None,
+            parameters: Some(vec![0; 512]),
         }
     }
 
@@ -979,11 +981,15 @@ impl TaskObject for FesObject {
                         .handle_allocator()
                         .ok_or_else(|| Error::new(0, "宿主未提供 FES 共享编号源"))?;
                     let mut scene = Scene::new(fes::Program::parse(&bytes)?, handles)?;
+                    scene
+                        .parameter_values_mut()
+                        .copy_from_slice(self.parameters.as_ref().unwrap());
                     scene.set_system_value("_EXITCODE_", -1);
                     scene.set_system_value("_SAVEOBJ_", 0);
                     scene.set_system_value("_FRAME_", 0);
                     self.name = file.to_vec();
                     self.scene = Some(scene);
+                    self.parameters = None;
                     self.bind()?;
                     self.pending = Some(*command);
                 }
@@ -1068,7 +1074,28 @@ impl TaskObject for FesObject {
                 self.effects(host);
                 return Ok(CommandOutcome::finished(true));
             }
-            19 | 177 | 178 | 341..=347 | 349..=358 => {
+            346 | 347 => {
+                if !self.initialized {
+                    return Err(Error::new(0, "FES 参数访问需要已初始化对象"));
+                }
+                let index = command.data[0] as usize;
+                if command.code == 346 {
+                    let values = match &mut self.scene {
+                        Some(scene) => scene.parameter_values_mut(),
+                        None => self.parameters.as_mut().unwrap().as_mut_slice(),
+                    };
+                    if let Some(value) = values.get_mut(index) {
+                        *value = b as i32;
+                    }
+                } else {
+                    let values = match &self.scene {
+                        Some(scene) => scene.parameter_values(),
+                        None => self.parameters.as_ref().unwrap().as_slice(),
+                    };
+                    *output = values.get(index).copied().unwrap_or(0) as u32;
+                }
+            }
+            19 | 177 | 178 | 341..=345 | 349..=358 => {
                 return Err(Error::new(0, "FES 专属命令尚未接入"));
             }
             _ => {

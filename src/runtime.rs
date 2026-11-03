@@ -292,8 +292,7 @@ impl<F: ObjectFactory> Runtime<F> {
 
     /// 创建对象、登记父子关系并传递原始创建上下文；对应命令 66 的三步顺序。
     ///
-    /// 普通 KCS 程序在工厂返回前装载。基线中装载发生在构造还是首次更新尚未核实，
-    /// 需要其他时点时由调用者提供相应的工厂实现。
+    /// 普通 KCS 程序在工厂返回前装载；FES 的 execkcs 所需构造后装载协议尚未接入。
     pub fn create(&mut self, parent: u32, kind: u32, name: &[u8], context: &[u8]) -> Result<u32> {
         create_object(self.store(), parent, kind, name, context)
     }
@@ -1105,7 +1104,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
     ) -> Result<NativeReturn> {
         let count = match index {
             66 => 12,
-            67 | 75 | 109 => 4,
+            67 | 75 | 109 | 452 => 4,
             110 => 8,
             69 | 70 | 72 | 73 => 16,
             76 => 0,
@@ -1119,6 +1118,23 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             *arg = u32::from_le_bytes(bytes.try_into().unwrap());
         }
         match index {
+            452 => {
+                let sender = self.host.task_id;
+                let mut output = u32::MAX;
+                route_command(
+                    self.store(),
+                    sender,
+                    Command {
+                        target: args[0],
+                        sender,
+                        code: 23,
+                        data: [0; 3],
+                    },
+                    &mut CommandBuffers::default(),
+                    &mut output,
+                )?;
+                Ok(NativeReturn::Value(output))
+            }
             75 | 76 => crate::kcs::hierarchy_query(
                 self.tree,
                 self.host.task_id,
@@ -1543,7 +1559,10 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         ) {
             return self.graphics_native(index, arguments, vm);
         }
-        if matches!(index, 66 | 67 | 69 | 70 | 72 | 73 | 75 | 76 | 109 | 110) {
+        if matches!(
+            index,
+            66 | 67 | 69 | 70 | 72 | 73 | 75 | 76 | 109 | 110 | 452
+        ) {
             return self.task_native(index, arguments, vm);
         }
         if matches!(

@@ -304,6 +304,12 @@ impl Interpreter {
     pub fn resume(&mut self) {
         self.pending = None;
     }
+    pub(crate) fn local_values(&self) -> &[i32] {
+        &self.local
+    }
+    pub(crate) fn local_values_mut(&mut self) -> &mut [i32] {
+        &mut self.local
+    }
     pub(crate) fn initialization_pending(&self) -> bool {
         self.pre_declarations.is_some()
             || !self.definitions.is_empty()

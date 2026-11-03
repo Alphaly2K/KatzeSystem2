@@ -71,6 +71,11 @@ impl ObjectFactory for Factory {
                 }
                 ins(&mut code, 0x2b, &[native, args.len() as u32 * 4]);
             }
+            for (target, address) in [(3, 4), (0, 8), (u32::MAX, 12)] {
+                ins(&mut code, 0x25, &[target]);
+                ins(&mut code, 0x2b, &[452, 4]);
+                ins(&mut code, 0x26, &[address]);
+            }
             ins(&mut code, 0x26, &[0]);
             ins(&mut code, 0x3b, &[]);
             let mut data = vec![0; 128];
@@ -115,6 +120,9 @@ struct Files {
 impl ResourceServices for Files {
     fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
         assert_eq!(category, b"fes");
+        if name == b"child" {
+            return Ok(b"child.fes".to_vec());
+        }
         assert!(name == b"complete_7" || name.is_empty());
         Ok(b"complete.fes\0ignored".to_vec())
     }
@@ -381,7 +389,7 @@ fn fes_tasks_load_without_starting_then_drive_pixels_and_keep_exit_properties() 
 
 #[test]
 fn ordinary_natives_bind_load_and_start_fes_with_shared_values_and_pixels() {
-    let source = b"#DEFINE\nCIMAGE sprite\nPLANE view\n#OBJECT SIZE COLOR PRI POS DISP\nsprite 2,2 0xff123456 5 1,1 1\n#OBJECT POS SIZE VRAM PRI DISP\nview 0,0 8,6 0,0 500 1\n#START\n$0=$0+1\nwait 20\n";
+    let source = b"#DEFINE\nCIMAGE sprite\nPLANE view\n#OBJECT SIZE COLOR PRI POS DISP\nsprite 2,2 0xff123456 5 1,1 1\n#OBJECT POS SIZE VRAM PRI DISP\nview 0,0 8,6 0,0 500 1\n#START\n$0=$0+1\nexit 37\nwait 20\n";
     for budget in [1, 4096] {
         for empty_name in [false, true] {
             let Setup {
@@ -409,6 +417,9 @@ fn ordinary_natives_bind_load_and_start_fes_with_shared_values_and_pixels() {
             assert_eq!(*reads.borrow(), [b"complete.fes".to_vec()]);
             let vm = runtime.object(caller).unwrap().interpreter().unwrap();
             assert_eq!(vm.read(0, 4).unwrap(), 0xdead_beefu32.to_le_bytes());
+            for (address, expected) in [(4, 37u32), (8, u32::MAX), (12, u32::MAX)] {
+                assert_eq!(vm.read(address, 4).unwrap(), expected.to_le_bytes());
+            }
             assert!(vm.stack_bytes().is_empty());
             runtime.update(1, 1).unwrap();
             let mut output = RenderTarget::new([8, 6]).unwrap();
@@ -423,6 +434,178 @@ fn ordinary_natives_bind_load_and_start_fes_with_shared_values_and_pixels() {
             assert_eq!(output.pixel(1, 1), Some(0xff123456));
             assert_eq!(runtime.numbers().shared[0], 1);
         }
+    }
+}
+
+fn parent_scene(setup: &mut Setup, source: &[u8], child: &[u8]) -> (u32, u32) {
+    setup.runtime.set_resources(Files {
+        files: BTreeMap::from([
+            (b"complete.fes".to_vec(), packed(source)),
+            (b"child.fes".to_vec(), packed(child)),
+        ]),
+        reads: setup.reads.clone(),
+        fail_media: setup.fail_media.clone(),
+    });
+    let fes = setup.runtime.create(0, kind::FES, b"parent", b"").unwrap();
+    send(&mut setup.runtime, fes, 337, 0, 0);
+    setup
+        .runtime
+        .object_mut(fes)
+        .unwrap()
+        .set_creation_context(b"parent context")
+        .unwrap();
+    let list = setup
+        .runtime
+        .create(fes, kind::IMAGE_LIST, b"list", b"")
+        .unwrap();
+    send(&mut setup.runtime, list, 285, 8, 6);
+    send(&mut setup.runtime, list, 289, 1, 0);
+    send(&mut setup.runtime, fes, 340, 0, list);
+    file(&mut setup.runtime, fes, b"complete.fes").unwrap();
+    (fes, list)
+}
+
+fn child_scenes(runtime: &TestRuntime, parent: u32) -> Vec<u32> {
+    runtime
+        .tree()
+        .children(parent)
+        .unwrap()
+        .filter(|&id| runtime.tree().node(id).unwrap().kind == kind::FES)
+        .collect()
+}
+
+#[test]
+fn child_fes_retries_loading_without_recreating_or_reevaluating_and_shares_pixels_and_exit_code() {
+    let parent = b"#START\nexecfes child ($0+=1) 9 2 3 4 5 6 7 8 9 10 11 12 13 14 15 ($7+=100)\n$1+=1\nwait 1\n$2=_EXITCODE_\nendfes\n$3+=1\nwait 100\n";
+    let child = b"#DEFINE\nCIMAGE sprite\nPLANE view\n#OBJECT SIZE COLOR PRI POS DISP\nsprite 2,2 0xff123456 5 1,1 1\n#OBJECT POS SIZE VRAM PRI DISP\nview 0,0 8,6 0,0 500 1\n#START\n$4+=1\n$5=\\0+\\1+\\15\nexit 37\nwait 100\n";
+    for budget in [1, 4096] {
+        let mut setup = setup(budget, parent);
+        let (fes, list) = parent_scene(&mut setup, parent, child);
+        setup.fail_media.set(true);
+        assert!(
+            setup
+                .runtime
+                .dispatch_command(0, command(fes, 339, 0, 0))
+                .is_err()
+        );
+        assert_eq!(setup.runtime.numbers().shared[..6], [1, 0, 0, 0, 0, 0]);
+        let children = child_scenes(&setup.runtime, fes);
+        assert_eq!(children.len(), 1);
+        let child = children[0];
+        assert_eq!(
+            setup.runtime.object(child).unwrap().creation_context(),
+            Some(b"parent context".as_slice())
+        );
+        for (index, expected) in [(0, 1), (1, 9), (15, 15), (511, 0), (512, 0), (u32::MAX, 0)] {
+            assert_eq!(send(&mut setup.runtime, child, 347, index, 0), expected);
+        }
+        setup.fail_media.set(false);
+        send(&mut setup.runtime, fes, 339, 0, 0);
+        assert_eq!(child_scenes(&setup.runtime, fes), children);
+        assert_eq!(setup.runtime.numbers().shared[..6], [1, 1, 0, 0, 1, 25]);
+        assert_eq!(setup.runtime.numbers().shared[7], 0);
+        assert_eq!(send(&mut setup.runtime, child, 347, 0, 0), 1);
+        send(&mut setup.runtime, child, 346, 511, 0x8000_0001);
+        send(&mut setup.runtime, child, 346, 512, 0x1234_5678);
+        assert_eq!(send(&mut setup.runtime, child, 347, 511, 0), 0x8000_0001);
+        assert_eq!(send(&mut setup.runtime, child, 347, 512, 0), 0);
+        assert_eq!(send(&mut setup.runtime, child, 23, 0, 0), 37);
+        setup.runtime.update(1, 1).unwrap();
+        let mut output = RenderTarget::new([8, 6]).unwrap();
+        setup
+            .runtime
+            .render_frame(
+                &mut output,
+                &Projection::default(),
+                *Transform::default().matrix(),
+                TextureFilter::Point,
+            )
+            .unwrap();
+        assert_eq!(output.pixel(1, 1), Some(0xff123456));
+        assert_eq!(setup.runtime.numbers().shared[..4], [1, 1, 37, 0]);
+        assert_eq!(
+            setup
+                .runtime
+                .object(child)
+                .unwrap()
+                .control()
+                .deletion_requested,
+            1
+        );
+        assert!(setup.runtime.object(list).is_some());
+        setup.runtime.update(2, 1).unwrap();
+        assert!(setup.runtime.object(child).is_none());
+        assert_eq!(setup.runtime.numbers().shared[3], 1);
+        assert!(setup.runtime.object(list).is_some());
+        assert_eq!(
+            *setup.reads.borrow(),
+            [
+                b"complete.fes".to_vec(),
+                b"child.fes".to_vec(),
+                b"child.fes".to_vec()
+            ]
+        );
+    }
+}
+
+#[test]
+fn child_script_ends_yield_without_a_child_and_handler_requests_wait_through_pause() {
+    let parent = b"#START\nendfes ignored ($7+=100)\n$0+=1\nendkcs\n$0+=10\nexecfes child 4\nexecfes child ($6+=1)\nwait 100\n#_FES_SLEEP_\nendfes\n$1+=1\n#_FES_WAKE_\nexecfes child ($6+=10)\n$1+=100\n";
+    let child = b"#START\n$4+=1\nwait 1000\n";
+    for budget in [1, 4096] {
+        let mut setup = setup(budget, parent);
+        let (fes, _) = parent_scene(&mut setup, parent, child);
+        send(&mut setup.runtime, fes, 339, 0, 0);
+        assert_eq!(setup.runtime.numbers().shared[0], 0);
+        setup.runtime.update(1, 1).unwrap();
+        assert_eq!(setup.runtime.numbers().shared[0], 1);
+        setup.runtime.update(2, 1).unwrap();
+        assert_eq!(setup.runtime.numbers().shared[0], 11);
+        assert_eq!(setup.runtime.numbers().shared[4], 1);
+        assert_eq!(setup.runtime.numbers().shared[6..8], [1, 0]);
+        let children = child_scenes(&setup.runtime, fes);
+        assert_eq!(children.len(), 1);
+        let child = children[0];
+        send(&mut setup.runtime, fes, 348, 0, 1);
+        assert_eq!(setup.runtime.numbers().shared[1], 0);
+        assert_eq!(
+            setup
+                .runtime
+                .object(child)
+                .unwrap()
+                .control()
+                .deletion_requested,
+            0
+        );
+        setup.runtime.update(3, 1).unwrap();
+        assert_eq!(
+            setup
+                .runtime
+                .object(child)
+                .unwrap()
+                .control()
+                .deletion_requested,
+            0
+        );
+        send(&mut setup.runtime, fes, 348, 0, 0);
+        setup.runtime.update(4, 1).unwrap();
+        assert_eq!(
+            setup
+                .runtime
+                .object(child)
+                .unwrap()
+                .control()
+                .deletion_requested,
+            1
+        );
+        assert_eq!(setup.runtime.numbers().shared[1], 0);
+        assert_eq!(setup.runtime.numbers().shared[4], 2);
+        assert_eq!(setup.runtime.numbers().shared[6], 11);
+        let next = child_scenes(&setup.runtime, fes);
+        assert_eq!(next.len(), 2);
+        setup.runtime.update(5, 1).unwrap();
+        assert!(setup.runtime.object(child).is_none());
+        assert_eq!(child_scenes(&setup.runtime, fes).len(), 1);
     }
 }
 

@@ -271,8 +271,8 @@ impl<F: ObjectFactory> Store<'_, F> {
             .ok_or_else(|| Error::new(0, "FES 尚未绑定共享图像列表"))?;
         if !self
             .tree
-            .node(list)
-            .is_some_and(|node| node.parent == Some(owner) && node.kind == kind::IMAGE_LIST)
+            .find_reachable(owner, list)
+            .is_some_and(|node| node.kind == kind::IMAGE_LIST)
         {
             return Err(Error::new(0, "FES 共享图像列表任务绑定失效"));
         }

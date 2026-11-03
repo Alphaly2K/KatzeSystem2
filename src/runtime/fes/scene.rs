@@ -5,7 +5,10 @@ use crate::{
 };
 use std::collections::{BTreeMap, VecDeque};
 
+mod scripts;
 mod wait;
+
+use scripts::{ChildScripts, ScriptDisposition, ScriptRequest};
 
 /// 一份预先装载的 FES 执行状态；调用方绑定共享列表并在所属任务的主体时点推进。
 pub struct Scene {
@@ -19,6 +22,7 @@ pub struct Scene {
     exit_code: Option<i32>,
     exit_request: Option<i32>,
     notifications: VecDeque<Notification>,
+    scripts: ChildScripts,
     preferred_focus: Option<fes::ObjectReference>,
     focus_lock: i32,
     invocation: Option<Invocation>,
@@ -40,6 +44,8 @@ struct Invocation {
     resume_script: bool,
     motions_done: bool,
     media_passes: usize,
+    flush_scripts: bool,
+    notifications_done: bool,
 }
 
 struct ObjectEvent {
@@ -65,6 +71,7 @@ enum Notification {
     Exit(i32),
     PreferredFocus(fes::ObjectReference),
     FocusLock(i32),
+    Script(ScriptRequest),
 }
 
 impl Scene {
@@ -99,6 +106,7 @@ impl Scene {
             exit_code: None,
             exit_request: None,
             notifications: VecDeque::new(),
+            scripts: ChildScripts::default(),
             preferred_focus: None,
             focus_lock: 0,
             invocation: None,
@@ -117,6 +125,19 @@ impl Scene {
 
     pub fn interpreter(&self) -> &fes::Interpreter {
         &self.interpreter
+    }
+
+    pub(super) fn parameter_values(&self) -> &[i32] {
+        self.interpreter.local_values()
+    }
+
+    pub(super) fn parameter_values_mut(&mut self) -> &mut [i32] {
+        self.interpreter.local_values_mut()
+    }
+
+    /// 当前由 execfes 启动的直属子任务；完成通知不自动清除此编号。
+    pub fn child_fes(&self) -> Option<u32> {
+        self.scripts.fes
     }
 
     pub fn objects(&self) -> &Objects {
@@ -219,11 +240,20 @@ impl Scene {
     }
 
     fn publish_notifications(&mut self) {
+        if self.scripts.active.is_some()
+            || matches!(self.notifications.front(), Some(Notification::Script(_)))
+        {
+            return;
+        }
         while let Some(notification) = self.notifications.pop_front() {
             match notification {
                 Notification::Exit(code) => self.publish_exit(code),
                 Notification::PreferredFocus(target) => self.preferred_focus = Some(target),
                 Notification::FocusLock(value) => self.focus_lock = value,
+                Notification::Script(request) => {
+                    self.notifications.push_front(Notification::Script(request));
+                    break;
+                }
             }
         }
     }
@@ -385,6 +415,7 @@ impl Scene {
         invocation.updates = Some((self.objects.update_order.len(), 0));
         invocation.resume_script = resume_script;
         invocation.media_passes = 1 + std::mem::take(&mut self.deferred_decodes);
+        invocation.notifications_done = false;
     }
 }
 
@@ -702,11 +733,17 @@ impl<F: ObjectFactory> Store<'_, F> {
                 Step::Event(fes::Event::Wait(_)) => scene.interpreter.finish_event_handler()?,
                 Step::Event(fes::Event::Command(line)) => {
                     let args = scene.interpreter.parameters(&line.bytes, self.numbers)?;
-                    if self.fes_font_command(&args, line.offset)? {
+                    if let Some(disposition) =
+                        scene.script_command(&args, line.offset, self.numbers)?
+                    {
+                        if matches!(disposition, ScriptDisposition::Continue) {
+                            scene.interpreter.resume();
+                        } else {
+                            scene.interpreter.finish_event_handler()?;
+                        }
+                    } else if self.fes_font_command(&args, line.offset)? {
                         scene.interpreter.resume();
-                        continue;
-                    }
-                    if args.first().is_some_and(|name| name == b"decode") {
+                    } else if args.first().is_some_and(|name| name == b"decode") {
                         if scene.deferred_decodes == crate::read::MAX_ITEMS {
                             return Err(Error::new(line.offset, "FES 提交请求数量超过上限"));
                         }
@@ -974,6 +1011,8 @@ impl<F: ObjectFactory> Store<'_, F> {
                 resume_script: false,
                 motions_done: false,
                 media_passes: 0,
+                flush_scripts: false,
+                notifications_done: false,
             });
             if waiting {
                 scene.publish_notifications();
@@ -984,6 +1023,12 @@ impl<F: ObjectFactory> Store<'_, F> {
             }
         }
         for _ in 0..self.budget {
+            if scene.invocation.as_ref().unwrap().flush_scripts {
+                if !self.process_fes_script_requests(owner, scene)? {
+                    return Ok(false);
+                }
+                scene.invocation.as_mut().unwrap().flush_scripts = false;
+            }
             if !scene.interpreter.initialization_pending()
                 && scene.media_prepared != scene.objects.update_order.len()
                 && !self.prepare_fes_media(owner, scene)?
@@ -999,6 +1044,15 @@ impl<F: ObjectFactory> Store<'_, F> {
                 scene.invocation.as_mut().unwrap().motions_done = true;
             }
             if let Some((count, cursor)) = scene.invocation.as_ref().unwrap().updates {
+                if !scene.invocation.as_ref().unwrap().notifications_done {
+                    if !self.process_fes_script_requests(owner, scene)? {
+                        return Ok(false);
+                    }
+                    if !scene.invocation.as_ref().unwrap().resume_script {
+                        self.poll_fes_child_status(owner, scene)?;
+                    }
+                    scene.invocation.as_mut().unwrap().notifications_done = true;
+                }
                 if cursor < count {
                     self.update_fes_scene_record(owner, scene, cursor)?;
                     scene
@@ -1040,6 +1094,23 @@ impl<F: ObjectFactory> Store<'_, F> {
                     match event {
                         fes::Event::Command(line) => {
                             let args = scene.interpreter.parameters(&line.bytes, self.numbers)?;
+                            if let Some(disposition) =
+                                scene.script_command(&args, line.offset, self.numbers)?
+                            {
+                                scene.interpreter.resume();
+                                match disposition {
+                                    ScriptDisposition::Continue => (),
+                                    ScriptDisposition::Flush => {
+                                        scene.invocation.as_mut().unwrap().flush_scripts = true
+                                    }
+                                    ScriptDisposition::NextTick => {
+                                        scene.deadline = Some(now.wrapping_add(1));
+                                        scene.finish_input();
+                                        scene.begin_updates(false);
+                                    }
+                                }
+                                continue;
+                            }
                             if self.fes_font_command(&args, line.offset)? {
                                 scene.interpreter.resume();
                                 continue;
@@ -1101,8 +1172,8 @@ impl<F: ObjectFactory> Store<'_, F> {
                             scene.begin_updates(false);
                         }
                         fes::Event::Exit(code) => {
-                            scene.publish_notifications();
-                            scene.publish_exit(code);
+                            scene.notify(Notification::Exit(code))?;
+                            scene.invocation.as_mut().unwrap().flush_scripts = true;
                         }
                         fes::Event::CreateObject(_)
                         | fes::Event::InitializeObject(_)
