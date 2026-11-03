@@ -49,7 +49,7 @@ impl SoundState {
             .filter(|count| *count <= read::MAX_BYTES / 2)
             .ok_or_else(|| Error::new(0, "声音采样输出超过容量上限"))?;
         let mut output = vec![0; count];
-        sound.playback.read(pcm, &mut output);
+        sound.playback.read(pcm, &mut output)?;
         Pcm::new(pcm.sample_rate(), pcm.channels(), output)
     }
 
@@ -111,7 +111,9 @@ impl SoundState {
                 return Err(Error::new(0, "声音淡变播放尚未接入"));
             }
             if let Some(pcm) = &sound.pcm {
-                sound.playback.start(pcm, count)?;
+                sound
+                    .playback
+                    .start(pcm, count, playback_range(sound, count))?;
                 let volume = sound.requested_volume;
                 sound.pcm_volume = if (-2147483648.0..2147483648.0).contains(&volume) {
                     volume as i32
@@ -126,20 +128,25 @@ impl SoundState {
         Ok(())
     }
 
-    fn control_pair(&mut self, channel: u32, command: u32, tick: u32) {
+    fn control_pair(&mut self, channel: u32, command: u32, tick: u32) -> Result<()> {
         let Some(sound) = self.channels.get(channel as usize) else {
-            return;
+            return Ok(());
         };
         let linked = sound.linked;
         for index in [Some(channel), linked].into_iter().flatten() {
             let sound = &mut self.channels[index as usize];
             match command {
                 184 => sound.playback.pause(),
-                185 => sound.playback.stop(),
+                185 => {
+                    if let Some(pcm) = &sound.pcm {
+                        sound.playback.stop(pcm)?;
+                    }
+                }
                 218 if sound.started_tick == u32::MAX => sound.started_tick = tick,
                 _ => (),
             }
         }
+        Ok(())
     }
 
     fn is_playing(&self, channel: u32) -> bool {
@@ -154,8 +161,10 @@ impl SoundState {
     fn change_count(&mut self, channel: u32, count: u32) -> Result<()> {
         if let Some(index) = self.property_channel(channel) {
             let sound = &mut self.channels[index];
-            if let Some(pcm) = &sound.pcm {
-                sound.playback.change_count(pcm, count)?;
+            if sound.pcm.is_some() {
+                sound
+                    .playback
+                    .change_count(count, playback_range(sound, count));
             }
         }
         Ok(())
@@ -184,11 +193,13 @@ impl SoundState {
         sound.file.clear();
         sound.pcm = None;
         sound.playback = Playback::default();
-        sound.pcm = channel::load_pcm(services, name)?;
-        if sound.pcm.is_some() {
+        if let Some(pcm) = channel::load_pcm(services, name)? {
+            let playback = Playback::new(&pcm)?;
             sound.file.extend_from_slice(name);
             sound.pcm_volume = 100;
             sound.pcm_pan = 0;
+            sound.pcm = Some(pcm);
+            sound.playback = playback;
         }
         *output = u32::from(sound.pcm.is_some());
         sound.clock.elapsed = 0;
@@ -206,6 +217,14 @@ impl SoundState {
             self.channels[logical as usize].linked = Some(physical);
         }
         channel::check_metadata(services, name)
+    }
+}
+
+fn playback_range(sound: &SoundChannel, count: u32) -> [i64; 2] {
+    if count == 1 {
+        [0, -1]
+    } else {
+        sound.loop_range
     }
 }
 
@@ -321,7 +340,7 @@ impl TaskObject for SoundObject {
             }
             184 | 185 | 218 => {
                 self.audio
-                    .control_pair(command.data[0], command.code, host.system_time_ms());
+                    .control_pair(command.data[0], command.code, host.system_time_ms())?;
                 return Ok(CommandOutcome::finished(false));
             }
             186 => {

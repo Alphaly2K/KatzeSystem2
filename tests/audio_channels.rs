@@ -11,6 +11,7 @@ use std::{cell::RefCell, rc::Rc};
 
 const MONO: &[u8] = include_bytes!("fixtures/audio/mono-44100.ogg");
 const STEREO: &[u8] = include_bytes!("fixtures/audio/stereo-48000.ogg");
+const LONG_MONO: &[u8] = include_bytes!("fixtures/audio/mono-8000-long.ogg");
 
 #[derive(Debug, PartialEq)]
 enum Event {
@@ -46,6 +47,7 @@ impl ResourceServices for Resources {
         Ok(match name {
             b"audio/tone.ogg" => Some(MONO.to_vec()),
             b"audio/stereo.ogg" => Some(STEREO.to_vec()),
+            b"audio/long.ogg" => Some(LONG_MONO.to_vec()),
             b"audio/corrupt.ogg" => Some(vec![1, 2, 3]),
             b"tag/tone.tag" if source.metadata => Some(vec![1]),
             _ => None,
@@ -123,6 +125,60 @@ fn read_channel(
         .unwrap()
         .read_channel(5, frames)
         .unwrap()
+}
+
+#[test]
+fn streaming_task_count_changes_preserve_samples_prefetched_with_the_registered_loop() {
+    let expected = katze_system2::audio::decode_vorbis(LONG_MONO).unwrap();
+    assert_eq!(expected.frames(), 40_000);
+    let (mut runtime, _) = setup();
+    let mut point = [0; 48];
+    point[..14].copy_from_slice(b"audio/long.ogg");
+    point[32..40].copy_from_slice(&1000i64.to_le_bytes());
+    point[40..].copy_from_slice(&35_000i64.to_le_bytes());
+    runtime
+        .dispatch_command_with_buffers(
+            0,
+            command(199, 0),
+            &mut CommandBuffers {
+                data1: Some(&mut point),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    load(&mut runtime, &mut record(5, 0, 0, b"audio/long.ogg")).unwrap();
+    let mut play = command(183, 5);
+    play.data[1] = 2;
+    runtime.dispatch_command(0, play).unwrap();
+    assert_eq!(
+        read_channel(&mut runtime, 4000).samples(),
+        &expected.samples()[..4000]
+    );
+    assert_eq!(audio(&runtime).channel(5).unwrap().remaining_plays(), 1);
+    let mut count = command(219, 5);
+    count.data[1] = 1;
+    runtime.dispatch_command(0, count).unwrap();
+    assert_eq!(
+        read_channel(&mut runtime, 28_000).samples(),
+        &expected.samples()[4000..32_000]
+    );
+    let prefetched = read_channel(&mut runtime, 4000);
+    assert_eq!(
+        &prefetched.samples()[..3000],
+        &expected.samples()[32_000..35_000]
+    );
+    assert_eq!(
+        &prefetched.samples()[3000..],
+        &expected.samples()[1000..2000]
+    );
+    assert_eq!(audio(&runtime).channel(5).unwrap().completed_passes(), 0);
+    runtime.dispatch_command(0, command(185, 5)).unwrap();
+    play.data[1] = 1;
+    runtime.dispatch_command(0, play).unwrap();
+    assert_eq!(
+        read_channel(&mut runtime, 4000).samples(),
+        &expected.samples()[..4000]
+    );
 }
 
 #[test]

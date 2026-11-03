@@ -71,7 +71,7 @@ impl SoundChannel {
         self.pcm.is_some() && self.playback.playing
     }
 
-    /// 已由采样读取推进的位置；不使用脚本时钟推算。
+    /// 由采样读取推进的位置；流式来源返回环形缓冲区内的采样帧位置。
     pub fn position_frames(&self) -> usize {
         self.playback.position
     }
@@ -80,6 +80,7 @@ impl SoundChannel {
         self.playback.remaining
     }
 
+    /// 整段来源已消费的遍数；基线流式来源保持零。
     pub fn completed_passes(&self) -> u64 {
         self.playback.completed
     }

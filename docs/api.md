@@ -10,7 +10,7 @@
 |`cst`|容器、类型化记录、预处理、条件、场景调用／返回、直接编号字符串、选项收集和宿主事件|其他内建命令、消息缓存、画面／音频及特殊等待|
 |`cstl`|FF 编码、UTF-8 表、姓名／正文片段及选项索引|语言切换、正文回退及历史刷新策略|
 |`message`|正文标记、颜色／字号、禁则／分组／注音布局、逐字时间与页状态、显式字形、轮廓／阴影及持久普通／渐显显示、消息任务、默认配置、普通文字调用及画布提交|设备字体适配、其余文字命令及宿主等待|
-|`audio`|声音任务、循环点、Vorbis 解码、通道装载／属性及整段缓冲区播放|流式预取、淡变、混音、设备及其他声音命令|
+|`audio`|声音任务、循环点、Vorbis 解码、通道装载／属性及整段／流式缓冲区播放|淡变、混音、设备及其他声音命令|
 |`settings`|四块全局配置、基线初值、XML 字段覆盖、音量换算及普通 359／360 的 VM 读写|配置自动装载及媒体服务应用|
 |`save`|CSS 加载、编号记录、容量／标签、普通容器 native、250 共享值恢复、任务目录读取及修改时间服务、FES 最新槽号查询|文件写入、其他数值分组与对象恢复、嵌套容器及平台目录发现|
 |`fes`|容器、混合编码字节保留、注释、重复块、条件、调用、数值赋值、帧等待／重启、宏、对象创建与初始化请求、CIMAGE／IMAGE／CPLANE／PLANE 状态应用、事件分派、声明、子命令绑定／换算／调用事件|其他类型的对象属性、对象操作、其他事件入口、运动资源装载及子任务协议|
@@ -45,13 +45,13 @@ FES `fontcom add name` 调用同一字体服务的 `add_resource`，名称为已
 
 `audio::decode_vorbis(bytes)` 返回保留采样率和声道顺序的 `audio::Pcm`，通过 `frames()`、`samples()` 查询完整采样帧和交错 i16 数据。完整逻辑流、容量和结束页规则见[PCM 与解码](audio.md#pcm-与-vorbis-解码)。
 
-FES SOUND 文件请求通过 `Objects::set_sound_task` 的绑定发送 180／182／201／206／210，新配置下属性刷新依次发送 187 音量与 190 声像；未绑定的独立对象更新向根 35 查询。`fes::SoundState::channel_result()` 查询最近装载后的原始结果。场景媒体更新按文件播放／系统语音开关发送播放、停止及首次毫秒命令，同步执行对象自身 PLAY 处理器；`started_tick()` 查询对象首次毫秒。仅持有 Objects 的更新在需要回调时要求所属场景。缓冲区、请求消费及失败契约见[声音媒体提交](audio.md#文件请求的媒体提交)与[播放动作](audio.md#播放动作与-play-处理器)；分组通道、流式播放、淡变和设备继续接入。
+FES SOUND 文件请求通过 `Objects::set_sound_task` 的绑定发送 180／182／201／206／210，新配置下属性刷新依次发送 187 音量与 190 声像；未绑定的独立对象更新向根 35 查询。`fes::SoundState::channel_result()` 查询最近装载后的原始结果。场景媒体更新按文件播放／系统语音开关发送播放、停止及首次毫秒命令，同步执行对象自身 PLAY 处理器；`started_tick()` 查询对象首次毫秒。仅持有 Objects 的更新在需要回调时要求所属场景。缓冲区、请求消费及失败契约见[声音媒体提交](audio.md#文件请求的媒体提交)与[播放动作](audio.md#播放动作与-play-处理器)；分组通道、淡变和设备继续接入。
 
 `audio::SoundFactory { enabled, fallback }` 创建类型 13 声音任务。`SoundObject::audio()` 及 `TaskObject::audio_state()` 查询 `SoundState`，其中 `loop_points()` 为循环范围，`channel_time(0..64)` 为原始空闲通道累计时刻，`channel(0..64)` 借用物理通道的 PCM、名称、装载参数和关联。180 装载单个 Ogg Vorbis 来源，非零 mode 使用加 32 的备用通道；182 释放关联资源，187／188 设置及查询资源音量，190／191 设置及查询资源声像，201 查询时长毫秒。运行时普通 400 使用资源服务按 sound 类别补全／读取表，经根 35 查询目标并逐条发送 199；没有返回值。资源提供者负责声音分类配置，未接入的播放命令返回诊断。禁用、删除、缓冲区、附加资源和部分失败契约见[声音任务](audio.md#声音任务)及[普通装载](audio.md#普通-kcs-装载)。
 
 `SoundChannel::requested_volume()` 查询任务保存的 f32 音量目标，`volume()`／`pan()` 返回物理通道已装载资源的原始属性，空资源为 None。`Host::sound_stereo()` 默认一，`HostState::sound_stereo` 可覆盖；此开关只门控声像应用，查询保持。命令的关联选择、范围和返回槽约束见[声音任务](audio.md#声音任务)。
 
-声音任务 183 开始短资源的整段缓冲区播放，184 暂停、185 停止、186 查询播放开关，218 登记首次系统毫秒，219 修改播放次数。`SoundState::read_channel(channel, frames)` 按源格式读取物理通道 PCM 并推进播放位置；`TaskObject::audio_state_mut()` 提供可变存储。`SoundChannel::is_playing`／`position_frames`／`remaining_plays`／`completed_passes`／`started_tick` 提供相应查询，`Host::system_time_ms()` 读取共享毫秒时刻。关联、次数、输入范围、结束与未接入路径见[整段缓冲区播放](audio.md#整段缓冲区播放与采样推进)。流式预取、淡变、混音及设备输出继续接入。
+声音任务 183 开始整段或流式缓冲区播放，184 暂停、185 停止、186 查询播放开关，218 登记首次系统毫秒，219 修改播放次数。`SoundState::read_channel(channel, frames)` 按源格式读取物理通道 PCM 并推进播放位置；`TaskObject::audio_state_mut()` 提供可变存储。`SoundChannel::is_playing`／`position_frames`／`remaining_plays`／`completed_passes`／`started_tick` 提供相应查询，`Host::system_time_ms()` 读取共享毫秒时刻。关联、次数、输入范围、结束与未接入路径见[整段缓冲区播放](audio.md#整段缓冲区播放与采样推进)及[流式预取与循环](audio.md#流式预取与循环)。流式位置为环形缓冲内的采样帧位置，次数在预取时扣减。淡变、混音及设备输出继续接入。
 
 普通 938 直接返回 `HostState::sound_config_enabled`，不读取参数或归一化结果。该字段默认零，表示新声音分类配置的启用状态，由配置宿主同步提供，独立于声音任务的设备门控。
 
