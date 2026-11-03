@@ -187,7 +187,7 @@ fn sound_play_skips_arrays_and_keeps_the_request_and_completed_arguments_after_e
             .update_fes_object(0, &mut objects, ids[0])
             .unwrap_err()
             .message
-            .contains("动作请求")
+            .contains("声音任务绑定失效")
     );
     assert_eq!(sound(&objects, ids[0]).action_request(), Some(1));
     let single = define(&mut objects, "SOUND", "single", 1)[0];
@@ -217,6 +217,8 @@ fn sound_attributes_keep_raw_names_bank_values_and_distinct_update_requests() {
             group: Some(b"voice\0tail".to_vec()),
             blend: Some(87),
             position: [Some(99); 3],
+            enabled: Some(0),
+            default_events: Some(b"alias".to_vec()),
             ..Default::default()
         },
     )
@@ -231,8 +233,21 @@ fn sound_attributes_keep_raw_names_bank_values_and_distinct_update_requests() {
         );
         assert_eq!(state.group, b"voice");
         assert_eq!((state.volume, state.pan), (100, 0));
+        assert_eq!(state.enabled, 1);
+        assert!(state.event_alias.is_empty());
         assert!(!state.is_dirty());
         assert!(!state.needs_load());
+    }
+    let mut interpreter =
+        fes::Interpreter::new(Program::from_text(b"#START\nwait 9\n").unwrap()).unwrap();
+    objects.publish_bindings(&mut interpreter);
+    let mut numbers = State::new(0);
+    for bytes in [b"sound enable 0".as_slice(), b"sound enable -3"] {
+        object_command(&mut objects, &mut interpreter, &mut numbers, bytes).unwrap();
+        for &id in &sounds {
+            assert_eq!(sound(&objects, id).enabled, 1);
+            assert!(!sound(&objects, id).is_dirty());
+        }
     }
     initialize(
         &mut objects,

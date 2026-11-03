@@ -126,6 +126,69 @@ fn read_channel(
 }
 
 #[test]
+fn fes_play_starts_the_real_channel_and_reports_completion_after_sample_consumption() {
+    use katze_system2::{
+        audio::{SoundConfig, SoundPart},
+        fes::Program,
+        runtime::fes::{ObjectState, Scene},
+    };
+    for budget in [1, 4096] {
+        let (mut runtime, _) = setup();
+        runtime.numbers_mut().shared.resize(1, 0);
+        runtime.set_budget(budget, 10_000);
+        load(&mut runtime, &mut record(5, 0, 0, b"audio/tone.ogg")).unwrap();
+        runtime.host_mut().sound_config_enabled = 1;
+        runtime.host_mut().system_time_ms = 321;
+        runtime.host_mut().sound_config = Some(SoundConfig {
+            master_volume: Some(100),
+            parts: vec![SoundPart {
+                file_prefix: b"audio/".to_vec(),
+                volume: 65,
+                play_enabled: 1,
+                mute: 0,
+                ..Default::default()
+            }],
+            ..Default::default()
+        });
+        let mut scene = Scene::new(
+            Program::from_text(b"#DEFINE\nSOUND music\n#OBJECT CHANNEL\nmusic 5\n#START\nmusic play 1\nwait 99\n#music.PLAY\n$0+=1\n").unwrap(),
+            runtime.host().handle_allocator(),
+        ).unwrap();
+        assert!(scene.prepare(runtime.numbers_mut(), 4096).unwrap());
+        let objects = scene.objects_mut().unwrap();
+        objects.set_sound_task(1);
+        let id = objects.lookup("music", 0).unwrap();
+        let ObjectState::Sound(sound) = &mut objects.get_mut(id).unwrap().state else {
+            panic!()
+        };
+        sound.file = b"audio/tone.ogg".to_vec();
+        let mut done = false;
+        for _ in 0..128 {
+            if runtime.update_fes_scene(0, &mut scene, 10).unwrap() {
+                done = true;
+                break;
+            }
+        }
+        assert!(done);
+        assert_eq!(runtime.numbers().shared[0], 1);
+        assert_eq!(runtime.dispatch_command(0, command(186, 5)).unwrap(), 1);
+        assert_eq!(audio(&runtime).channel(5).unwrap().volume(), Some(65));
+        assert_eq!(audio(&runtime).channel(5).unwrap().started_tick(), 321);
+        let expected = katze_system2::audio::decode_vorbis(MONO).unwrap();
+        let output = read_channel(&mut runtime, expected.frames() + 2);
+        assert_eq!(&output.samples()[..expected.frames()], expected.samples());
+        assert_eq!(&output.samples()[expected.frames()..], [0, 0]);
+        assert_eq!(runtime.dispatch_command(0, command(186, 5)).unwrap(), 0);
+        assert_eq!(runtime.numbers().shared[0], 1);
+        let ObjectState::Sound(sound) = &scene.objects().get(id).unwrap().state else {
+            panic!()
+        };
+        assert_eq!(sound.started_tick(), 321);
+        assert_eq!(sound.action_request(), None);
+    }
+}
+
+#[test]
 fn buffered_playback_consumes_pcm_and_keeps_pause_stop_repeat_and_tick_semantics() {
     let (mut runtime, _) = setup();
     let expected = katze_system2::audio::decode_vorbis(MONO).unwrap();

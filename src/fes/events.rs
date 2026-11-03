@@ -61,8 +61,12 @@ impl Interpreter {
                 | "RELEASE_R"
                 | "SCRL_P"
                 | "TOUCH"
+                | "PLAY"
         ) {
             return Err(Error::new(0, "未支持的 FES 对象事件"));
+        }
+        if event == "PLAY" && default_handler.is_some_and(|name| !name.is_empty()) {
+            return Err(Error::new(0, "FES SOUND 非空媒体别名尚未接入"));
         }
         if self.invocation.is_some()
             || !self.definitions.is_empty()

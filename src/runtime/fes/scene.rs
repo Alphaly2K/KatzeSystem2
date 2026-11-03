@@ -764,7 +764,7 @@ impl<F: ObjectFactory> Store<'_, F> {
         Ok(Some(scene.object_event.take().unwrap().handled))
     }
 
-    fn run_fes_handler(&mut self, scene: &mut Scene) -> Result<bool> {
+    pub(super) fn run_fes_handler(&mut self, scene: &mut Scene) -> Result<bool> {
         for _ in 0..self.budget.max(1) {
             match scene.interpreter.run(self.numbers, 1)? {
                 Step::Yield => (),

@@ -24,6 +24,7 @@ enum Event {
 struct Trace {
     events: Vec<Event>,
     fail: Option<u32>,
+    playing: u32,
 }
 
 #[derive(Clone)]
@@ -118,6 +119,7 @@ impl TaskObject for Receiver {
             210 => 23,
             206 => 31,
             201 => 513,
+            186 => trace.playing,
             _ => 0,
         };
         Ok(CommandOutcome::finished(false))
@@ -191,6 +193,147 @@ fn record(channel: u32, group: u32) -> Vec<u8> {
     bytes[12..22].copy_from_slice(b"audio/tone");
     bytes[0x110..0x114].copy_from_slice(&1u32.to_le_bytes());
     bytes
+}
+
+#[test]
+fn play_policy_stops_the_prior_channel_before_properties_and_runs_the_own_handler() {
+    use katze_system2::{fes::Program, runtime::fes::Scene};
+    for budget in [1, 4096] {
+        for (handler, expected, transferred, repeat) in [
+            ("", 2, false, false),
+            ("wait 3\n$0=999\n", 2, false, false),
+            ("call SUB\n$0=$0*10+5\n", 245, false, false),
+            ("next DEST\n$0=999\n", 2, true, false),
+            ("@ play 9\n", 2, false, true),
+        ] {
+            let (mut runtime, _, _, trace) = setup();
+            runtime.numbers_mut().shared.resize(4, 0);
+            runtime.set_budget(budget, 10_000);
+            runtime.host_mut().system_time_ms = 12345;
+            runtime.host_mut().sound_config_enabled = 1;
+            runtime.host_mut().sound_config = Some(SoundConfig {
+                master_volume: Some(47),
+                parts: vec![SoundPart {
+                    file_prefix: b"tone".to_vec(),
+                    volume: 65,
+                    play_enabled: 0,
+                    system_voice: 1,
+                    mute: 0,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            });
+            trace.borrow_mut().playing = 1;
+            let source = format!(
+                "#DEFINE\nSOUND sound\n#OBJECT CHANNEL STYPE ENABLE DEFAULT\nsound 5 1 0 alias\n#START\nsound play 0\nwait 99\n$3+=1\n#sound.PLAY\n$0=$0*10+2\n{handler}#SUB\n$0=$0*10+4\n#DEST\n$0=$0*10+3\nwait 99\n"
+            );
+            let mut scene = Scene::new(
+                Program::from_text(source.as_bytes()).unwrap(),
+                runtime.host().handle_allocator(),
+            )
+            .unwrap();
+            assert!(scene.prepare(runtime.numbers_mut(), 4096).unwrap());
+            let objects = scene.objects_mut().unwrap();
+            objects.set_sound_task(1);
+            let id = objects.lookup("sound", 0).unwrap();
+            let ObjectState::Sound(sound) = &mut objects.get_mut(id).unwrap().state else {
+                panic!()
+            };
+            sound.file = b"tone".to_vec();
+            let mut done = false;
+            for _ in 0..128 {
+                if runtime.update_fes_scene(0, &mut scene, 10).unwrap() {
+                    done = true;
+                    break;
+                }
+            }
+            assert!(done);
+            assert_eq!(runtime.numbers().shared, [expected, 0, 0, 0]);
+            let mut expected_events = vec![
+                Event::Command(186, [5, 0, 0], vec![]),
+                Event::Command(185, [5, 0, 0], vec![]),
+                Event::Command(187, [5, 30, 0], vec![]),
+                Event::Command(190, [5, 0, 0], vec![]),
+                Event::Command(183, [5, 0, 0], vec![]),
+            ];
+            if repeat {
+                expected_events.push(Event::Command(219, [5, 9, 0], vec![]));
+            }
+            assert_eq!(trace.borrow().events, expected_events);
+            let sound = state(scene.objects(), id);
+            assert_eq!(sound.started_tick(), 12345);
+            assert_eq!(sound.action_request(), None);
+            assert!(!sound.play_value_changed());
+            assert_eq!(sound.is_dirty(), repeat);
+            assert_eq!(scene.deadline(), if transferred { None } else { Some(109) });
+            assert!(scene.interpreter().event_context().is_none());
+            if transferred {
+                done = false;
+                for _ in 0..128 {
+                    if runtime.update_fes_scene(0, &mut scene, 10).unwrap() {
+                        done = true;
+                        break;
+                    }
+                }
+                assert!(done);
+                assert_eq!(runtime.numbers().shared[0], 23);
+                assert_eq!(runtime.numbers().shared[3], 0);
+            }
+        }
+    }
+}
+
+#[test]
+fn play_handler_retry_preserves_completed_playback_and_script_instructions() {
+    use katze_system2::{fes::Program, runtime::fes::Scene};
+    for budget in [1, 4096] {
+        let (mut runtime, _, _, trace) = setup();
+        runtime.numbers_mut().shared.resize(4, 0);
+        runtime.numbers_mut().shared[1] = 5;
+        runtime.set_budget(budget, 10_000);
+        runtime.host_mut().sound_config_enabled = 1;
+        runtime.host_mut().sound_config = Some(SoundConfig {
+            master_volume: Some(100),
+            ..Default::default()
+        });
+        let mut scene = Scene::new(
+            Program::from_text(b"#DEFINE\nSOUND sound\n#OBJECT CHANNEL\nsound 5\n#START\nsound play 1\nwait 99\n#sound.PLAY\n$0+=1\n@ channel ($1/=$3)\n$2+=1\n").unwrap(),
+            runtime.host().handle_allocator(),
+        ).unwrap();
+        assert!(scene.prepare(runtime.numbers_mut(), 4096).unwrap());
+        scene.objects_mut().unwrap().set_sound_task(1);
+        let id = scene.objects().lookup("sound", 0).unwrap();
+        let mut failed = false;
+        for _ in 0..128 {
+            match runtime.update_fes_scene(0, &mut scene, 10) {
+                Err(_) => {
+                    failed = true;
+                    break;
+                }
+                Ok(false) => (),
+                Ok(true) => panic!("处理器应在除零处返回诊断"),
+            }
+        }
+        assert!(failed);
+        assert_eq!(runtime.numbers().shared[0], 1);
+        assert_eq!(state(scene.objects(), id).action_request(), Some(1));
+        runtime.numbers_mut().shared[3] = 1;
+        let mut done = false;
+        for _ in 0..128 {
+            if runtime.update_fes_scene(0, &mut scene, 10).unwrap() {
+                done = true;
+                break;
+            }
+        }
+        assert!(done);
+        assert_eq!(runtime.numbers().shared, [1, 5, 1, 1]);
+        assert_eq!(
+            trace.borrow().events,
+            [Event::Command(183, [5, 1, 0], vec![])]
+        );
+        assert_eq!(state(scene.objects(), id).action_request(), None);
+        assert!(scene.interpreter().event_context().is_none());
+    }
 }
 
 #[test]

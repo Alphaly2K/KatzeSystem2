@@ -11,6 +11,8 @@ pub struct SoundState {
     pub group: Vec<u8>,
     pub volume: i32,
     pub pan: i32,
+    pub enabled: i32,
+    pub event_alias: Vec<u8>,
     /// load 的两个原始整数；声明 FILE 保留当前值。
     pub load_parameters: [i32; 2],
     /// play 的三个原始整数，不作单位换算。
@@ -22,6 +24,9 @@ pub struct SoundState {
     pub(crate) play_value_changed: bool,
     pub(crate) channel_result: u32,
     pub(crate) media_refresh: bool,
+    pub(crate) started_tick: u32,
+    // false 等待进入处理器，true 保留已进入处理器的续跑位置。
+    pub(crate) play_handler: Option<bool>,
 }
 
 impl Default for SoundState {
@@ -34,6 +39,8 @@ impl Default for SoundState {
             group: Vec::new(),
             volume: 100,
             pan: 0,
+            enabled: 1,
+            event_alias: Vec::new(),
             load_parameters: [0; 2],
             play_parameters: [0; 3],
             dirty: false,
@@ -43,6 +50,8 @@ impl Default for SoundState {
             play_value_changed: false,
             channel_result: 0,
             media_refresh: false,
+            started_tick: u32::MAX,
+            play_handler: None,
         }
     }
 }
@@ -68,6 +77,10 @@ impl SoundState {
     /// 最近一次装载后由声音任务命令 201 返回的原始值。
     pub fn channel_result(&self) -> u32 {
         self.channel_result
+    }
+
+    pub fn started_tick(&self) -> u32 {
+        self.started_tick
     }
 
     pub(crate) fn request_load(&mut self, file: &[u8], parameters: [i32; 2]) -> Result<()> {

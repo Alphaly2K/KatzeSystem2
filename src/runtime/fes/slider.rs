@@ -104,6 +104,12 @@ impl<F: ObjectFactory> Store<'_, F> {
             return Ok(());
         };
         let image = record.image;
+        if matches!(
+            scene.objects.get(handle).unwrap().state,
+            ObjectState::Sound(_)
+        ) {
+            return self.update_fes_scene_sound(owner, scene, handle);
+        }
         if scene.objects.get(handle).unwrap().state.control().is_none() {
             self.update_fes_object_image(owner, &mut scene.objects, handle, image)?;
             if draw {
