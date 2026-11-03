@@ -50,6 +50,7 @@ pub struct HostState {
     /// 新声音分类配置的启用字段；与声音管理器或设备是否存在分别保存。
     pub sound_config_enabled: u32,
     pub sound_config: Option<crate::audio::SoundConfig>,
+    pub sound_groups: Option<crate::audio::SoundGroups>,
     pub sound_settings_dirty: u32,
     /// SOUND/stereo 覆盖值；缺省使用配置构造值一。
     pub sound_stereo: Option<u32>,
@@ -72,6 +73,16 @@ pub struct HostState {
 }
 
 impl HostState {
+    pub fn sound_group_id(&self, name: &[u8]) -> Result<u32> {
+        if self.sound_config_enabled == 0 {
+            return Ok(crate::audio::SoundGroups::legacy_id(name));
+        }
+        self.sound_groups
+            .as_ref()
+            .map(|groups| groups.id(name))
+            .ok_or_else(|| Error::new(0, "宿主未提供新声音组配置"))
+    }
+
     /// 创建空宿主状态，并与外部资源存储共用句柄编号源。
     pub fn with_handles(handles: HandleAllocator) -> Self {
         Self {
@@ -152,6 +163,10 @@ impl Host for CoreHost<'_> {
 
     fn sound_stereo(&self) -> u32 {
         self.host.sound_stereo.unwrap_or(1)
+    }
+
+    fn sound_group_id(&self, name: &[u8]) -> Result<u32> {
+        self.host.sound_group_id(name)
     }
 
     fn system_time_ms(&self) -> u32 {

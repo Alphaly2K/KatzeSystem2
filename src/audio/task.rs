@@ -1,13 +1,15 @@
-use super::{LoopPoints, Pcm, SoundChannel, channel, playback::Playback};
+use super::{LoopPoints, Pcm, SoundChannel, SoundGroups, channel, playback::Playback};
 use crate::kcs::{Host, Interpreter};
 use crate::runtime::{BaseObject, ObjectFactory, TaskObject, kind};
 use crate::task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock};
 use crate::{Error, Result, read};
+use std::collections::BTreeMap;
 
 /// 循环范围、六十四个物理通道及其原始累计时刻。
 pub struct SoundState {
     loops: LoopPoints,
     channels: [SoundChannel; 64],
+    groups: Option<BTreeMap<u32, [i32; 2]>>,
 }
 
 impl Default for SoundState {
@@ -15,11 +17,58 @@ impl Default for SoundState {
         Self {
             loops: LoopPoints::default(),
             channels: std::array::from_fn(|_| SoundChannel::default()),
+            groups: None,
         }
     }
 }
 
 impl SoundState {
+    /// 捕获组范围；同一编号保留首次配置，之后的全局标签变化不修改此快照。
+    pub fn set_groups(&mut self, groups: &SoundGroups) -> Result<()> {
+        if groups.entries.len() > read::MAX_ITEMS {
+            return Err(Error::new(0, "声音组数量超过上限"));
+        }
+        let mut ranges = BTreeMap::new();
+        for group in &groups.entries {
+            ranges.entry(group.id).or_insert(group.range);
+        }
+        self.groups = Some(ranges);
+        Ok(())
+    }
+
+    pub fn group_range(&self, id: u32) -> Option<[i32; 2]> {
+        self.groups.as_ref()?.get(&id).copied()
+    }
+
+    fn select_channel(&mut self, range: [i32; 2]) -> Result<u32> {
+        let [first, last] = range.map(|value| value.clamp(0, 64) as u32);
+        for index in first..=last {
+            if !self.channel(index)?.is_playing() {
+                return Ok(index);
+            }
+        }
+        let mut selected = first;
+        'priority: for flag in 0..2 {
+            for index in first..=last {
+                if self.channel(index)?.allocation_flags[flag] != 0 {
+                    selected = index;
+                    break 'priority;
+                }
+            }
+        }
+        let sound = self
+            .channels
+            .get_mut(selected as usize)
+            .ok_or_else(|| Error::new(0, "声音组选择超出物理通道容量"))?;
+        sound.file.clear();
+        sound.pcm = None;
+        sound.playback = Playback::default();
+        sound.clock.elapsed = 0;
+        sound.loop_range[0] = 0;
+        sound.allocation_flags = [0; 2];
+        Ok(selected)
+    }
+
     pub fn loop_points(&self) -> &LoopPoints {
         &self.loops
     }
@@ -66,14 +115,24 @@ impl SoundState {
         }
     }
 
-    fn unload(&mut self, channel: u32) {
-        if let Some(sound) = self.channels.get_mut(channel as usize) {
-            let linked = sound.linked;
-            sound.unload();
-            if let Some(sound) = linked.and_then(|index| self.channels.get_mut(index as usize)) {
+    fn unload(&mut self, channel: u32) -> Result<()> {
+        let Some(sound) = self.channels.get(channel as usize) else {
+            return Ok(());
+        };
+        let linked = sound.linked;
+        for index in [Some(channel), linked].into_iter().flatten() {
+            let sound = &mut self.channels[index as usize];
+            if sound.grouped {
+                if sound.is_playing() && sound.allocation_flags[0] == 0 {
+                    return Err(Error::new(0, "声音分组延迟释放尚未接入"));
+                }
+                sound.started_tick = u32::MAX;
+                sound.clock.previous = 0;
+            } else {
                 sound.unload();
             }
         }
+        Ok(())
     }
 
     fn duration_ms(&self, channel: u32) -> u32 {
@@ -170,9 +229,28 @@ impl SoundState {
         Ok(())
     }
 
-    fn load(&mut self, record: &[u8], host: &mut dyn Host, output: &mut u32) -> Result<()> {
+    fn load(
+        &mut self,
+        record: &[u8],
+        host: &mut dyn Host,
+        output: &mut u32,
+        grouped: bool,
+    ) -> Result<()> {
+        let logical = if grouped {
+            let groups = self
+                .groups
+                .as_ref()
+                .ok_or_else(|| Error::new(0, "声音任务尚未配置组范围"))?;
+            let id = u32::from_le_bytes(read::range(record, 4, 4)?.try_into().unwrap());
+            *output = u32::MAX;
+            let Some(range) = groups.get(&id).copied() else {
+                return Ok(());
+            };
+            self.select_channel(range)?
+        } else {
+            u32::from_le_bytes(read::range(record, 0, 4)?.try_into().unwrap())
+        };
         let record = read::range(record, 0, 0x120)?;
-        let logical = u32::from_le_bytes(record[..4].try_into().unwrap());
         let options = u32::from_le_bytes(record[0x114..0x118].try_into().unwrap());
         let mode = i32::from_le_bytes(record[0x118..0x11c].try_into().unwrap());
         let duration = i32::from_le_bytes(record[0x11c..0x120].try_into().unwrap());
@@ -201,8 +279,15 @@ impl SoundState {
             sound.pcm = Some(pcm);
             sound.playback = playback;
         }
-        *output = u32::from(sound.pcm.is_some());
-        sound.clock.elapsed = 0;
+        if grouped && sound.pcm.is_none() {
+            return Ok(());
+        }
+        *output = if grouped {
+            physical
+        } else {
+            u32::from(sound.pcm.is_some())
+        };
+        sound.clock = channel::ChannelClock::default();
         sound.loop_range = [0, -1];
         if u32::from_le_bytes(record[0x110..0x114].try_into().unwrap()) != 0 {
             if let Some(point) = self.loops.find(name) {
@@ -213,7 +298,11 @@ impl SoundState {
         sound.load_options = options;
         sound.started_tick = u32::MAX;
         sound.linked = None;
-        if mode != 0 {
+        sound.grouped = grouped;
+        sound.allocation_flags = [0; 2];
+        if mode != 0 && grouped {
+            sound.linked = Some(physical);
+        } else if mode != 0 {
             self.channels[logical as usize].linked = Some(physical);
         }
         channel::check_metadata(services, name)
@@ -325,12 +414,32 @@ impl TaskObject for SoundObject {
                         .data1
                         .as_deref()
                         .ok_or_else(|| Error::new(0, "声音装载缺少记录缓冲区"))?;
-                    self.audio.load(bytes, host, output)?;
+                    self.audio.load(bytes, host, output, false)?;
                 }
                 return Ok(CommandOutcome::finished(false));
             }
+            206 => {
+                let bytes = buffers
+                    .data1
+                    .as_deref()
+                    .ok_or_else(|| Error::new(0, "声音分组装载缺少记录缓冲区"))?;
+                self.audio.load(bytes, host, output, true)?;
+                return Ok(CommandOutcome::finished(false));
+            }
+            210 => {
+                let name = buffers
+                    .data1
+                    .as_deref()
+                    .ok_or_else(|| Error::new(0, "声音组查询缺少名称缓冲区"))?;
+                let end = name
+                    .iter()
+                    .position(|&byte| byte == 0)
+                    .ok_or_else(|| Error::new(0, "声音组名称缺少零结尾"))?;
+                *output = host.sound_group_id(&name[..end])?;
+                return Ok(CommandOutcome::finished(false));
+            }
             182 => {
-                self.audio.unload(command.data[0]);
+                self.audio.unload(command.data[0])?;
                 return Ok(CommandOutcome::finished(false));
             }
             183 => {

@@ -334,35 +334,40 @@ fn sound_commands_gate_buffers_and_preserve_unwritten_return_slots() {
             .is_err()
     );
     sound.state().0.deletion_requested = -1;
-    sound
-        .dispatch_command_with_buffers(
-            kind::SOUND,
-            &command(1, 199, 0),
-            &mut CommandBuffers {
-                data1: Some(&mut short),
-                ..Default::default()
-            },
-            &mut output,
-            &mut host,
-            1,
-        )
-        .unwrap();
-    assert_eq!(output, 0xdeadbeef);
+    for code in [199, 206, 210] {
+        sound
+            .dispatch_command_with_buffers(
+                kind::SOUND,
+                &command(1, code, 0),
+                &mut CommandBuffers {
+                    data1: Some(&mut short),
+                    ..Default::default()
+                },
+                &mut output,
+                &mut host,
+                1,
+            )
+            .unwrap();
+        assert_eq!(output, 0xdeadbeef);
+    }
     let mut disabled = SoundObject::new(false);
-    disabled
-        .dispatch_command_with_buffers(
-            kind::SOUND,
-            &command(1, 199, 0),
-            &mut CommandBuffers {
-                data1: Some(&mut short),
-                ..Default::default()
-            },
-            &mut output,
-            &mut host,
-            1,
-        )
-        .unwrap();
-    assert_eq!(output, 0);
+    for code in [199, 206, 210] {
+        output = 0xdeadbeef;
+        disabled
+            .dispatch_command_with_buffers(
+                kind::SOUND,
+                &command(1, code, 0),
+                &mut CommandBuffers {
+                    data1: Some(&mut short),
+                    ..Default::default()
+                },
+                &mut output,
+                &mut host,
+                1,
+            )
+            .unwrap();
+        assert_eq!(output, 0);
+    }
     assert!(disabled.audio().loop_points().entries().is_empty());
     output = 0xdeadbeef;
     disabled

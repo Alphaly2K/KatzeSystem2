@@ -1,6 +1,6 @@
 use katze_system2::{
     Error, Result,
-    audio::SoundFactory,
+    audio::{SoundFactory, SoundGroup, SoundGroups},
     expression::State,
     kcs::ResourceServices,
     resource::ResourceMode,
@@ -63,6 +63,12 @@ impl ObjectFactory for Reject {
 }
 
 fn setup() -> (Runtime<SoundFactory<Reject>>, Rc<RefCell<Source>>) {
+    setup_with_groups(None)
+}
+
+fn setup_with_groups(
+    groups: Option<SoundGroups>,
+) -> (Runtime<SoundFactory<Reject>>, Rc<RefCell<Source>>) {
     let source = Rc::new(RefCell::new(Source::default()));
     let mut runtime = Runtime::new(
         0,
@@ -75,6 +81,7 @@ fn setup() -> (Runtime<SoundFactory<Reject>>, Rc<RefCell<Source>>) {
         },
     );
     runtime.set_resources(Resources(source.clone()));
+    runtime.host_mut().sound_groups = groups;
     assert_eq!(runtime.create(0, kind::SOUND, b"sound", b"").unwrap(), 1);
     (runtime, source)
 }
@@ -125,6 +132,222 @@ fn read_channel(
         .unwrap()
         .read_channel(5, frames)
         .unwrap()
+}
+
+#[test]
+fn group_names_follow_live_configuration_while_channel_ranges_keep_the_creation_snapshot() {
+    let groups = SoundGroups {
+        entries: vec![
+            SoundGroup {
+                id: 7,
+                label: b"se".to_vec(),
+                range: [4, 5],
+            },
+            SoundGroup {
+                id: 7,
+                label: b"alias".to_vec(),
+                range: [10, 11],
+            },
+            SoundGroup {
+                id: 3,
+                label: b"SE".to_vec(),
+                range: [12, 15],
+            },
+            SoundGroup {
+                id: 19,
+                label: b"embedded\0suffix".to_vec(),
+                range: [20, 20],
+            },
+            SoundGroup {
+                id: 23,
+                label: vec![0x82, 0xa0],
+                range: [21, 21],
+            },
+        ],
+    };
+    let (mut runtime, source) = setup_with_groups(Some(groups));
+    assert_eq!(audio(&runtime).group_range(7), Some([4, 5]));
+    let query = |runtime: &mut Runtime<SoundFactory<Reject>>, name: &[u8]| {
+        let mut name = [name, b"\0"].concat();
+        runtime.dispatch_command_with_buffers(
+            0,
+            command(210, 0),
+            &mut CommandBuffers {
+                data1: Some(&mut name),
+                ..Default::default()
+            },
+        )
+    };
+    assert_eq!(query(&mut runtime, b"Se").unwrap(), 1);
+    assert_eq!(query(&mut runtime, b"SYSVOICE").unwrap(), 3);
+    assert_eq!(query(&mut runtime, b"missing").unwrap(), 5);
+    runtime.host_mut().sound_config_enabled = 1;
+    for (name, expected) in [
+        (b"se".as_slice(), 7),
+        (b"se\0unused", 7),
+        (b"SE", 3),
+        (b"Se", 0),
+        (b"alias", 7),
+        (b"embedded", 0),
+        (b"\x82\xa0", 23),
+    ] {
+        assert_eq!(query(&mut runtime, name).unwrap(), expected);
+    }
+    let groups = runtime.host_mut().sound_groups.as_mut().unwrap();
+    groups.entries[0].label = b"changed".to_vec();
+    groups.entries[0].range = [8, 9];
+    assert_eq!(query(&mut runtime, b"changed").unwrap(), 7);
+    assert_eq!(audio(&runtime).group_range(7), Some([4, 5]));
+    assert_eq!(runtime.create(0, kind::SOUND, b"later", b"").unwrap(), 2);
+    assert_eq!(
+        runtime
+            .object(2)
+            .unwrap()
+            .audio_state()
+            .unwrap()
+            .group_range(7),
+        Some([8, 9])
+    );
+    runtime.host_mut().sound_groups = None;
+    assert!(query(&mut runtime, b"se").is_err());
+    assert!(source.borrow().events.is_empty());
+}
+
+#[test]
+fn grouped_loads_allocate_physical_channels_recycle_busy_sources_and_preserve_failed_load_state() {
+    let groups = SoundGroups {
+        entries: [
+            (7, [4, 5]),
+            (7, [10, 11]),
+            (9, [6, 6]),
+            (11, [7, 6]),
+            (13, [64, 64]),
+        ]
+        .into_iter()
+        .map(|(id, range)| SoundGroup {
+            id,
+            range,
+            label: vec![],
+        })
+        .collect(),
+    };
+    let (mut runtime, source) = setup_with_groups(Some(groups));
+    let load_group =
+        |runtime: &mut Runtime<SoundFactory<Reject>>, group: u32, mode, name: &[u8]| {
+            let mut bytes = record(55, mode, 17, name);
+            bytes[4..8].copy_from_slice(&group.to_le_bytes());
+            runtime.dispatch_command_with_buffers(
+                0,
+                command(206, 0),
+                &mut CommandBuffers {
+                    data1: Some(&mut bytes),
+                    ..Default::default()
+                },
+            )
+        };
+    let play = |runtime: &mut Runtime<SoundFactory<Reject>>, channel| {
+        let mut request = command(183, channel);
+        request.data[1] = 1;
+        runtime.dispatch_command(0, request).unwrap();
+    };
+    let mut point = [0; 48];
+    point[..14].copy_from_slice(b"audio/tone.ogg");
+    point[32..40].copy_from_slice(&3i64.to_le_bytes());
+    point[40..].copy_from_slice(&99i64.to_le_bytes());
+    runtime
+        .dispatch_command_with_buffers(
+            0,
+            command(199, 0),
+            &mut CommandBuffers {
+                data1: Some(&mut point),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    runtime.update(10, 1).unwrap();
+    assert_eq!(
+        load_group(&mut runtime, 7, 0, b"audio/tone.ogg").unwrap(),
+        4
+    );
+    play(&mut runtime, 4);
+    assert_eq!(
+        load_group(&mut runtime, 7, 0, b"audio/stereo.ogg").unwrap(),
+        5
+    );
+    play(&mut runtime, 5);
+    assert_eq!(
+        load_group(&mut runtime, 7, 0, b"audio/tone.ogg").unwrap(),
+        4
+    );
+    assert!(!audio(&runtime).channel(4).unwrap().is_playing());
+    assert!(audio(&runtime).channel(5).unwrap().is_playing());
+    assert!(audio(&runtime).channel(4).unwrap().is_grouped());
+    assert_eq!(audio(&runtime).channel(4).unwrap().loop_range(), [3, 99]);
+    assert!(audio(&runtime).channel(10).unwrap().pcm().is_none());
+    runtime.host_mut().system_time_ms = 321;
+    runtime.dispatch_command(0, command(218, 4)).unwrap();
+    runtime.update(20, 1).unwrap();
+    source.borrow_mut().events.clear();
+    assert_eq!(
+        load_group(&mut runtime, 7, 0, b"audio/missing.ogg").unwrap(),
+        u32::MAX
+    );
+    let channel = audio(&runtime).channel(4).unwrap();
+    assert!(channel.pcm().is_none());
+    assert!(channel.is_grouped());
+    assert_eq!(channel.started_tick(), 321);
+    assert_eq!(channel.load_parameters(), [0, 17]);
+    assert_eq!(channel.loop_range(), [3, 99]);
+    assert_eq!(audio(&runtime).channel_time(4).unwrap(), 20);
+    assert_eq!(
+        source.borrow().events,
+        [Event::Read(b"audio/missing.ogg".to_vec())]
+    );
+    let mut unknown = [0; 8];
+    unknown[4..].copy_from_slice(&999u32.to_le_bytes());
+    assert_eq!(
+        runtime
+            .dispatch_command_with_buffers(
+                0,
+                command(206, 0),
+                &mut CommandBuffers {
+                    data1: Some(&mut unknown),
+                    ..Default::default()
+                }
+            )
+            .unwrap(),
+        u32::MAX
+    );
+    assert_eq!(source.borrow().events.len(), 1);
+    assert_eq!(
+        load_group(&mut runtime, 9, -3, b"audio/tone.ogg").unwrap(),
+        38
+    );
+    assert_eq!(
+        audio(&runtime).channel(38).unwrap().linked_channel(),
+        Some(38)
+    );
+    assert_eq!(audio(&runtime).channel(6).unwrap().linked_channel(), None);
+    assert!(audio(&runtime).channel(38).unwrap().is_grouped());
+    runtime.dispatch_command(0, command(182, 38)).unwrap();
+    assert!(audio(&runtime).channel(38).unwrap().pcm().is_some());
+    assert_eq!(
+        audio(&runtime).channel(38).unwrap().started_tick(),
+        u32::MAX
+    );
+    assert!(
+        runtime
+            .dispatch_command(0, command(182, 5))
+            .unwrap_err()
+            .message
+            .contains("分组延迟释放")
+    );
+    assert!(audio(&runtime).channel(5).unwrap().is_playing());
+    assert_eq!(
+        load_group(&mut runtime, 11, 0, b"audio/tone.ogg").unwrap(),
+        7
+    );
+    assert!(load_group(&mut runtime, 13, 0, b"audio/tone.ogg").is_err());
 }
 
 #[test]

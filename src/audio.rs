@@ -2,11 +2,13 @@ use crate::{Error, Result, read};
 
 mod channel;
 mod config;
+mod groups;
 mod pcm;
 mod playback;
 mod task;
 pub use channel::SoundChannel;
 pub use config::{SoundConfig, SoundPart};
+pub use groups::{SoundGroup, SoundGroups};
 pub use pcm::{Pcm, decode_vorbis};
 pub use task::{SoundFactory, SoundObject, SoundState};
 

@@ -24,6 +24,8 @@ pub struct SoundChannel {
     pub(super) load_options: u32,
     pub(super) linked: Option<u32>,
     pub(super) loop_range: [i64; 2],
+    pub(super) grouped: bool,
+    pub(super) allocation_flags: [u32; 2],
 }
 
 impl Default for SoundChannel {
@@ -41,6 +43,8 @@ impl Default for SoundChannel {
             load_options: 0,
             linked: None,
             loop_range: [0, -1],
+            grouped: false,
+            allocation_flags: [0; 2],
         }
     }
 }
@@ -99,6 +103,10 @@ impl SoundChannel {
 
     pub fn linked_channel(&self) -> Option<u32> {
         self.linked
+    }
+
+    pub fn is_grouped(&self) -> bool {
+        self.grouped
     }
 
     /// 已登记的采样帧循环范围；整段缓冲区播放不应用该范围。

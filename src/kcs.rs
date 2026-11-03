@@ -302,6 +302,10 @@ pub trait Host {
         1
     }
 
+    fn sound_group_id(&self, name: &[u8]) -> Result<u32> {
+        Ok(crate::audio::SoundGroups::legacy_id(name))
+    }
+
     fn system_time_ms(&self) -> u32 {
         0
     }
@@ -477,6 +481,10 @@ impl<T: Host + ?Sized> Host for &mut T {
 
     fn sound_stereo(&self) -> u32 {
         (**self).sound_stereo()
+    }
+
+    fn sound_group_id(&self, name: &[u8]) -> Result<u32> {
+        (**self).sound_group_id(name)
     }
 
     fn system_time_ms(&self) -> u32 {

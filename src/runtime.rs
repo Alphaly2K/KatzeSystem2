@@ -463,6 +463,7 @@ fn create_object<F: ObjectFactory>(
         objects,
         factory,
         resources,
+        host,
         ..
     } = store;
     if tree.node(parent).is_none() {
@@ -471,6 +472,9 @@ fn create_object<F: ObjectFactory>(
     let id = tree.next_id();
     let mut object = factory.create(id, kind, name)?;
     object.set_creation_context(context)?;
+    if let (Some(audio), Some(groups)) = (object.audio_state_mut(), host.sound_groups.as_ref()) {
+        audio.set_groups(groups)?;
+    }
     if let (Some(state), Some(device)) = (object.input_state_mut(), resources.input_device.as_mut())
     {
         state.initialize_pointer(device.pointer()?.position);
@@ -1309,6 +1313,10 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
 
     fn sound_stereo(&self) -> u32 {
         self.host.sound_stereo.unwrap_or(1)
+    }
+
+    fn sound_group_id(&self, name: &[u8]) -> Result<u32> {
+        self.host.sound_group_id(name)
     }
 
     fn system_time_ms(&self) -> u32 {

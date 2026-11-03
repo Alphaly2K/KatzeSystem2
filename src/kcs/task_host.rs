@@ -106,6 +106,10 @@ impl<H: Host, S: TaskServices> Host for TaskHost<'_, H, S> {
         self.inner.sound_stereo()
     }
 
+    fn sound_group_id(&self, name: &[u8]) -> Result<u32> {
+        self.inner.sound_group_id(name)
+    }
+
     fn system_time_ms(&self) -> u32 {
         self.inner.system_time_ms()
     }
