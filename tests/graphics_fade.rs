@@ -129,25 +129,29 @@ fn fade_task_routes_real_images_through_canvas_and_copies_final_alpha_on_complet
         assert_eq!(rt.dispatch_command(0, command(id, 265)).unwrap(), 1);
         assert!(rt.update(18, 1).unwrap());
         let canvas = rt.drawing().target.as_ref().unwrap();
-        assert_eq!(canvas.pixel(1, 1), Some(0x7fabcdef));
-        assert_eq!(canvas.pixel(2, 1), Some(0x7f405060));
+        assert_eq!(canvas.pixel(1, 1), Some(0xff5d6e7f));
+        assert_eq!(canvas.pixel(2, 1), Some(0x00000099));
+        assert_eq!(canvas.pixel(1, 2), Some(0x7fabcdef));
+        assert_eq!(canvas.pixel(2, 2), Some(0x7f405060));
         assert_eq!(canvas.pixel(0, 0), Some(0));
         assert!(rt.update(19, 1).unwrap());
         assert_eq!(rt.dispatch_command(0, command(id, 265)).unwrap(), 0);
         let canvas = rt.drawing().target.as_ref().unwrap();
-        assert_eq!(canvas.pixel(1, 1), Some(0xffabcdef));
-        assert_eq!(canvas.pixel(2, 1), Some(0x00405060));
+        assert_eq!(canvas.pixel(1, 1), Some(0xffaabbcc));
+        assert_eq!(canvas.pixel(2, 1), Some(0x00000099));
+        assert_eq!(canvas.pixel(1, 2), Some(0xffabcdef));
+        assert_eq!(canvas.pixel(2, 2), Some(0x00405060));
 
         rt.images_mut().get_mut(target).unwrap().pixels_mut()[..4]
             .copy_from_slice(&0xff102030u32.to_le_bytes());
         rt.dispatch_command(0, command(id, 267)).unwrap();
         assert_eq!(
-            rt.drawing().target.as_ref().unwrap().pixel(1, 1),
+            rt.drawing().target.as_ref().unwrap().pixel(1, 2),
             Some(0xffabcdef)
         );
         rt.dispatch_command(0, command(id, 264)).unwrap();
         assert_eq!(
-            rt.drawing().target.as_ref().unwrap().pixel(1, 1),
+            rt.drawing().target.as_ref().unwrap().pixel(1, 2),
             Some(0xff102030)
         );
         rt.host_mut().system_settings.as_mut().unwrap().effects[..4]
@@ -161,7 +165,7 @@ fn fade_task_routes_real_images_through_canvas_and_copies_final_alpha_on_complet
         rt.dispatch_command(0, command(id, 267)).unwrap();
         assert_eq!(rt.dispatch_command(0, command(id, 265)).unwrap(), 0);
         assert_eq!(
-            rt.drawing().target.as_ref().unwrap().pixel(1, 1),
+            rt.drawing().target.as_ref().unwrap().pixel(1, 2),
             Some(0xff304050)
         );
     }

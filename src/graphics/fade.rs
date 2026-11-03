@@ -1,4 +1,4 @@
-use super::{Images, Rect, Surface};
+use super::{Images, Surface};
 use crate::kcs::{Host, Interpreter};
 use crate::runtime::{BaseObject, TaskObject};
 use crate::task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock};
@@ -130,13 +130,17 @@ impl FadeObject {
 
     fn finish(&mut self, host: &mut dyn Host) -> Result<()> {
         let p = self.parameters;
-        let source = host.image(p.target)?.surface().clone();
-        let top = source.size()[1] as i32 - p.target_at[1] - p.size[1];
-        host.submit_message(
-            &source,
-            Rect::from_xywh(p.target_at[0], top, p.size[0], p.size[1]),
-            p.at,
-        )?;
+        let source = host.image(p.target)?.surface();
+        let frame = self
+            .frame
+            .as_mut()
+            .ok_or_else(|| Error::new(0, "淡入淡出尚未准备工作图像"))?;
+        for y in 0..p.size[1] {
+            let from = row(source, p.target_at, y, p.size[0] as u32)?;
+            let offset = y as usize * frame.stride();
+            frame.pixels[offset..offset + from.len()].copy_from_slice(from);
+        }
+        host.submit_message(frame, frame.bounds(), p.at)?;
         self.active = false;
         Ok(())
     }
@@ -157,7 +161,8 @@ impl FadeObject {
         for y in 0..p.size[1] {
             let from = row(source, p.source_at, y, p.size[0] as u32)?;
             let to = row(target, p.target_at, y, p.size[0] as u32)?;
-            let offset = (p.size[1] - y - 1) as usize * frame.stride();
+            // 画布复制依次消费原图像的物理行；提交面已按顶部起算，不再反转。
+            let offset = y as usize * frame.stride();
             for ((out, &from), &to) in frame.pixels[offset..offset + from.len()]
                 .iter_mut()
                 .zip(from)
