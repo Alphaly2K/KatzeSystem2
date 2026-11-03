@@ -1,11 +1,12 @@
 use katze_system2::{
     Error, HandleAllocator, Result,
+    audio::{SoundConfig, SoundPart},
     expression::State,
     fes::{
         ObjectAttributes, ObjectDefinition, ObjectInitialization, ObjectReference, Program,
         SoundState,
     },
-    kcs::{MotionHost, Program as MotionProgram},
+    kcs::{MotionHost, Program as MotionProgram, ScriptRandom},
     runtime::{
         BaseObject, ObjectFactory, Runtime, TaskObject,
         fes::{ObjectState, Objects, Scene},
@@ -283,5 +284,133 @@ fn silent_sound_declarations_allow_scene_updates_and_load_errors_keep_requests_f
             };
             assert!(sound.needs_load());
         }
+    }
+}
+
+fn update(runtime: &mut Runtime<Reject>, scene: &mut Scene) -> Result<()> {
+    for _ in 0..256 {
+        if runtime.update_fes_scene(0, scene, 100)? {
+            return Ok(());
+        }
+    }
+    panic!("合成声音场景没有完成更新");
+}
+
+fn voice_runtime(budget: usize) -> Runtime<Reject> {
+    let mut runtime = Runtime::new(
+        0,
+        kind::ROOT,
+        Box::new(BaseObject::new()),
+        State::new(8),
+        Reject,
+    );
+    runtime.set_budget(budget, 10000);
+    runtime.host_mut().sound_config_enabled = 1;
+    runtime.host_mut().random = ScriptRandom::seeded(0);
+    runtime.host_mut().sound_config = Some(SoundConfig {
+        parts: vec![SoundPart {
+            id: 20,
+            system_voice: 1,
+            children: vec![SoundPart {
+                id: 21,
+                system_voice: 0,
+                children: vec![],
+            }],
+        }],
+    });
+    runtime
+}
+
+#[test]
+fn sysvoiceex_shares_random_stream_and_runs_in_main_system_and_object_handlers() {
+    let source = b"#DEFINE\nBASE obj[2]\n#START\nsysvoiceex\nsysvoiceex 4 ($0+=20),($1+=21)\nsysvoiceex 5 10 20 20\nsysvoiceex -1 999\nwait 100\n#_FES_SLEEP_\nsysvoiceex 6 20,\n#obj.PUSH_L\nsysvoiceex 7 @\n";
+    for budget in [1, 4096] {
+        let mut runtime = voice_runtime(budget);
+        let mut scene = Scene::new(
+            Program::from_text(source).unwrap(),
+            runtime.host().handle_allocator(),
+        )
+        .unwrap();
+        update(&mut runtime, &mut scene).unwrap();
+        assert_eq!(runtime.numbers().shared[..6], [20, 21, 0, 0, -1, 20]);
+        let deadline = scene.deadline();
+        let mut done = false;
+        for _ in 0..256 {
+            if runtime
+                .dispatch_fes_system_block(0, &mut scene, "_FES_SLEEP_")
+                .unwrap()
+            {
+                done = true;
+                break;
+            }
+        }
+        assert!(done);
+        done = false;
+        for _ in 0..256 {
+            if let Some(handled) = runtime
+                .dispatch_fes_event(
+                    0,
+                    &mut scene,
+                    Some(&ObjectReference {
+                        name: "obj".into(),
+                        bank: 1,
+                    }),
+                    2,
+                )
+                .unwrap()
+            {
+                assert!(handled);
+                done = true;
+                break;
+            }
+        }
+        assert!(done);
+        assert_eq!(runtime.numbers().shared[6..], [0, 1]);
+        assert_eq!(scene.deadline(), deadline);
+        let mut expected = ScriptRandom::seeded(0);
+        for _ in 0..4 {
+            expected.next_integer();
+        }
+        assert_eq!(
+            runtime.host_mut().random.next_integer(),
+            expected.next_integer()
+        );
+    }
+}
+
+#[test]
+fn sysvoiceex_disabled_mode_skips_candidates_and_missing_configuration_retries_before_side_effects()
+{
+    for budget in [1, 4096] {
+        let mut runtime = voice_runtime(budget);
+        runtime.host_mut().sound_config = None;
+        let mut scene = Scene::new(
+            Program::from_text(b"#START\nsysvoiceex ($0+=1)+3 ($1+=10)\nwait 99\n").unwrap(),
+            runtime.host().handle_allocator(),
+        )
+        .unwrap();
+        assert!(update(&mut runtime, &mut scene).is_err());
+        assert_eq!(runtime.numbers().shared, [0; 8]);
+        runtime.host_mut().sound_config = Some(SoundConfig::default());
+        update(&mut runtime, &mut scene).unwrap();
+        assert_eq!(runtime.numbers().shared[..5], [1, 10, 0, 0, 10]);
+        let mut expected = ScriptRandom::seeded(0);
+        expected.next_integer();
+        assert_eq!(
+            runtime.host_mut().random.next_integer(),
+            expected.next_integer()
+        );
+
+        runtime.host_mut().sound_config_enabled = 0;
+        runtime.host_mut().sound_config = None;
+        runtime.host_mut().random = ScriptRandom::seeded(0);
+        let mut scene = Scene::new(
+            Program::from_text(b"#START\nsysvoiceex ($0+=1)+3 ($1+=10)\nwait 99\n").unwrap(),
+            runtime.host().handle_allocator(),
+        )
+        .unwrap();
+        update(&mut runtime, &mut scene).unwrap();
+        assert_eq!(runtime.numbers().shared[..6], [2, 10, 0, 0, 10, -1]);
+        assert_eq!(runtime.host_mut().random.next_integer(), 477480905);
     }
 }

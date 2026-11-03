@@ -1,0 +1,47 @@
+use katze_system2::audio::{SoundConfig, SoundPart};
+
+fn part(id: i32, system_voice: i32, children: Vec<SoundPart>) -> SoundPart {
+    SoundPart {
+        id,
+        system_voice,
+        children,
+    }
+}
+
+#[test]
+fn voice_selection_keeps_tree_order_path_fallback_and_duplicate_weights() {
+    let config = SoundConfig {
+        parts: vec![
+            part(10, 1, vec![part(11, 0, vec![part(111, 1, vec![])])]),
+            part(
+                20,
+                2,
+                vec![
+                    part(21, 0, vec![]),
+                    part(22, -1, vec![part(221, 1, vec![])]),
+                ],
+            ),
+            part(10, 0, vec![]),
+        ],
+    };
+    assert_eq!(config.system_voice_candidates(&[]).unwrap(), [10, 111, 221]);
+    assert_eq!(config.system_voice_enabled(&[20, 21]).unwrap(), 0);
+    assert_eq!(config.system_voice_enabled(&[999, 10, 11]).unwrap(), 0);
+    assert_eq!(config.system_voice_enabled(&[20, 999, 22]).unwrap(), -1);
+    assert_eq!(config.system_voice_enabled(&[10, 11, 999]).unwrap(), 1);
+    assert_eq!(
+        config
+            .system_voice_candidates(&[
+                vec![20],
+                vec![20, 21],
+                vec![20, 22],
+                vec![999],
+                vec![20, 999],
+                vec![20, 22, 221],
+                vec![10],
+                vec![10],
+            ])
+            .unwrap(),
+        [20, 22, 999, 999, 221, 10, 10]
+    );
+}

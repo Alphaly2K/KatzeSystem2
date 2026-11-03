@@ -743,7 +743,9 @@ impl<F: ObjectFactory> Store<'_, F> {
                         } else {
                             scene.interpreter.finish_event_handler()?;
                         }
-                    } else if self.fes_font_command(&args, line.offset)? {
+                    } else if self.fes_font_command(&args, line.offset)?
+                        || self.fes_sound_command(scene, &args, line.offset)?
+                    {
                         scene.interpreter.resume();
                     } else if args.first().is_some_and(|name| name == b"decode") {
                         if scene.deferred_decodes == crate::read::MAX_ITEMS {
@@ -1125,7 +1127,9 @@ impl<F: ObjectFactory> Store<'_, F> {
                                 }
                                 continue;
                             }
-                            if self.fes_font_command(&args, line.offset)? {
+                            if self.fes_font_command(&args, line.offset)?
+                                || self.fes_sound_command(scene, &args, line.offset)?
+                            {
                                 scene.interpreter.resume();
                                 continue;
                             }

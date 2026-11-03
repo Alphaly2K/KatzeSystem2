@@ -20,6 +20,7 @@ mod navigation;
 mod plane;
 mod scene;
 mod slider;
+mod sound;
 mod task;
 pub use animation::ImageAnimationRequest;
 pub use draw::DrawState;
