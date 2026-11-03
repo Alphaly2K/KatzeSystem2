@@ -99,21 +99,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                 }
                 record[12..12 + name.len()].copy_from_slice(name);
             }
-            let task = match objects.sound_task {
-                Some(task) => task,
-                None => {
-                    let task = self.sound_command(owner, 0, 35, [0; 3], None)?;
-                    objects.sound_task = Some(task);
-                    task
-                }
-            };
-            if !self
-                .tree
-                .node(task)
-                .is_some_and(|node| node.kind == kind::SOUND)
-            {
-                return Err(Error::new(0, "FES 声音任务绑定失效"));
-            }
+            let task = self.fes_sound_task(owner, objects)?;
             if !has_file {
                 self.sound_command(owner, task, 182, [channel, 0, 0], None)?;
             } else {
@@ -156,18 +142,74 @@ impl<F: ObjectFactory> Store<'_, F> {
             sound.load_requested = false;
             sound.media_refresh = true;
         }
-        let ObjectState::Sound(sound) = &mut objects.get_mut(handle).unwrap().state else {
+        let ObjectState::Sound(sound) = &objects.get(handle).unwrap().state else {
             unreachable!()
         };
         if sound.action_request().is_some() {
             return Err(Error::new(0, "FES SOUND 动作请求尚未接入声音任务"));
         }
-        if (sound.is_dirty() || sound.media_refresh) && !sound.file.is_empty() {
-            return Err(Error::new(0, "FES SOUND 播放属性更新尚未接入声音任务"));
+        if (sound.is_dirty() || sound.media_refresh || self.host.sound_settings_dirty != 0)
+            && !sound.file.is_empty()
+        {
+            let channel = sound.channel as u32;
+            let pan = sound.pan as u32;
+            let volume = self.fes_sound_volume(sound)? as u32;
+            let task = self.fes_sound_task(owner, objects)?;
+            self.sound_command(owner, task, 187, [channel, volume, 0], None)?;
+            self.sound_command(owner, task, 190, [channel, pan, 0], None)?;
         }
+        let ObjectState::Sound(sound) = &mut objects.get_mut(handle).unwrap().state else {
+            unreachable!()
+        };
         sound.media_refresh = false;
         sound.dirty = false;
         Ok(())
+    }
+
+    fn fes_sound_volume(&self, sound: &crate::fes::SoundState) -> Result<i32> {
+        if self.host.sound_config_enabled == 0 {
+            return Err(Error::new(0, "FES SOUND 旧声音配置的播放属性更新尚未接入"));
+        }
+        let config = self
+            .host
+            .sound_config
+            .as_ref()
+            .ok_or_else(|| Error::new(0, "运行时未提供新声音分类配置"))?;
+        let mut volume = config
+            .master_volume
+            .ok_or_else(|| Error::new(0, "运行时未提供新声音配置的当前主音量"))?;
+        if config.master_mute() != 0 {
+            return Ok(0);
+        }
+        if sound.object_type == 0 {
+            if !sound.group.is_empty() {
+                volume = volume.wrapping_mul(config.group_volume(&sound.group)?) / 100;
+            }
+            volume = volume.wrapping_mul(config.file_volume(&sound.file)?) / 100;
+            if config.file_mute(&sound.file)? != 0 {
+                volume = 0;
+            }
+        }
+        Ok(volume.wrapping_mul(sound.volume) / 100)
+    }
+
+    fn fes_sound_task(&mut self, owner: u32, objects: &mut Objects) -> Result<u32> {
+        let task = match objects.sound_task {
+            Some(task) => task,
+            None => {
+                let task = self.sound_command(owner, 0, 35, [0; 3], None)?;
+                objects.sound_task = Some(task);
+                task
+            }
+        };
+        if !self
+            .tree
+            .node(task)
+            .is_some_and(|node| node.kind == kind::SOUND)
+        {
+            return Err(Error::new(0, "FES 声音任务绑定失效"));
+        }
+        Ok(task)
     }
 
     fn sound_command(

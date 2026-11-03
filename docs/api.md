@@ -45,7 +45,7 @@ FES `fontcom add name` 调用同一字体服务的 `add_resource`，名称为已
 
 `audio::decode_vorbis(bytes)` 返回保留采样率和声道顺序的 `audio::Pcm`，通过 `frames()`、`samples()` 查询完整采样帧和交错 i16 数据。完整逻辑流、容量和结束页规则见[PCM 与解码](audio.md#pcm-与-vorbis-解码)。
 
-FES SOUND 文件请求通过 `Objects::set_sound_task` 的绑定发送 180／182／201／206／210；未绑定的独立对象更新向根 35 查询。`fes::SoundState::channel_result()` 查询最近装载后的原始结果。缓冲区、请求消费及失败契约见[声音媒体提交](audio.md#文件请求的媒体提交)；分组通道与实际播放仍在接入。
+FES SOUND 文件请求通过 `Objects::set_sound_task` 的绑定发送 180／182／201／206／210，新配置下属性刷新依次发送 187 音量与 190 声像；未绑定的独立对象更新向根 35 查询。`fes::SoundState::channel_result()` 查询最近装载后的原始结果。缓冲区、请求消费及失败契约见[声音媒体提交](audio.md#文件请求的媒体提交)；分组通道与实际播放仍在接入。
 
 `audio::SoundFactory { enabled, fallback }` 创建类型 13 声音任务。`SoundObject::audio()` 及 `TaskObject::audio_state()` 查询 `SoundState`，其中 `loop_points()` 为循环范围，`channel_time(0..64)` 为原始空闲通道累计时刻，`channel(0..64)` 借用物理通道的 PCM、名称、装载参数和关联。180 装载单个 Ogg Vorbis 来源，非零 mode 使用加 32 的备用通道；182 释放关联资源，201 查询时长毫秒。运行时普通 400 使用资源服务按 sound 类别补全／读取表，经根 35 查询目标并逐条发送 199；没有返回值。资源提供者负责声音分类配置，未接入的播放命令返回诊断。禁用、删除、缓冲区、附加资源和部分失败契约见[声音任务](audio.md#声音任务)及[普通装载](audio.md#普通-kcs-装载)。
 
@@ -400,7 +400,7 @@ FES `strvar index text [integer ...]` 已接入共享 `expression::State::string
 
 `graphics::FadeObject` 由 `GraphicsFactory` 按类型 27 创建，接收 281 准备、263 启动、264／267 停止、265 播放状态查询及 266 来源替换。图像句柄由调用者持有，任务将过渡像素提交到 Runtime 的画布；`Host::effect_speed()` 缺省返回零，Runtime 从全局效果配置读取。参数记录、坐标、透明 RGB、时间和返回槽规则见[画布淡入淡出任务](graphics.md#画布淡入淡出任务)。FES `draw` 已连接临时 DRAW、来源截图、共享列表提交开关及完成清理；`runtime::fes::DrawState` 提供持续时间和媒体阶段查询。
 
-`fes::SoundState` 保存 SOUND 的声明／运动属性及装载、动作请求，`load_parameters`、`play_parameters` 保留原始参数，`action_request()` 查询待消费动作。空闲 SOUND 可参与场景媒体顺序；文件和动作请求、非空来源属性提交仍诊断，声音任务分配及实际播放继续接入。初始化及对象 load／play／channel／stype 的求值与银行规则见[声音文档](audio.md#fes-sound-对象命令)。
+`fes::SoundState` 保存 SOUND 的声明／运动属性及装载、动作请求，`load_parameters`、`play_parameters` 保留原始参数，`action_request()` 查询待消费动作。空闲 SOUND 可参与场景媒体顺序；文件请求、新声音配置下的音量／声像提交已路由到声音任务，动作请求与旧配置属性提交仍诊断。真实分组通道及播放继续接入。初始化及对象 load／play／channel／stype 的求值与银行规则见[声音文档](audio.md#fes-sound-对象命令)。
 
 FES `blend` 已连接 SOUND、CIMAGE／IMAGE／BUTTON、CPLANE／PLANE 和 SLIDER／SCROLL2：先保存音量或透明度，再装载默认运动，保留数组银行、一次求值、运动基准、延迟和失败续跑。平面保存完整颜色，默认运动保留 RGB 参数。主体、系统块及对象处理器共用该入口。完整参数与更新时序见[FES blend](audio.md#fes-blend)。
 

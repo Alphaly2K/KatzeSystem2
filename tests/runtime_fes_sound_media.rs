@@ -1,5 +1,6 @@
 use katze_system2::{
     Error, Result,
+    audio::{SoundConfig, SoundPart},
     expression::State,
     fes::{ObjectAttributes, ObjectDefinition, ObjectInitialization, ObjectReference},
     kcs::{Host, Interpreter, ResourceServices},
@@ -195,6 +196,18 @@ fn record(channel: u32, group: u32) -> Vec<u8> {
 #[test]
 fn sound_load_routes_complete_records_and_consumes_only_finished_load_requests() {
     let (mut runtime, mut objects, id, trace) = setup();
+    runtime.host_mut().sound_config_enabled = 1;
+    runtime.host_mut().sound_config = Some(SoundConfig {
+        master_volume: Some(47),
+        parts: vec![SoundPart {
+            file_prefix: b"tone".to_vec(),
+            volume: 65,
+            mute: 0,
+            ..Default::default()
+        }],
+        ..Default::default()
+    });
+    trace.borrow_mut().fail = Some(190);
     apply(
         &mut objects,
         ObjectAttributes {
@@ -208,7 +221,7 @@ fn sound_load_routes_complete_records_and_consumes_only_finished_load_requests()
             .update_fes_object(0, &mut objects, id)
             .unwrap_err()
             .message
-            .contains("播放属性")
+            .contains("合成声音装载失败")
     );
     assert_eq!(objects.sound_task(), Some(1));
     assert_eq!(state(&objects, id).channel, 5);
@@ -221,10 +234,21 @@ fn sound_load_routes_complete_records_and_consumes_only_finished_load_requests()
             Event::Command(182, [5, 0, 0], vec![]),
             Event::Command(180, [0; 3], record(5, 0)),
             Event::Command(201, [5, 0, 0], vec![]),
+            Event::Command(187, [5, 30, 0], vec![]),
+            Event::Command(190, [5, 0, 0], vec![]),
         ]
     );
     trace.borrow_mut().events.clear();
-    runtime.update_fes_object(0, &mut objects, id).unwrap_err();
+    runtime.update_fes_object(0, &mut objects, id).unwrap();
+    assert_eq!(
+        trace.borrow().events,
+        [
+            Event::Command(187, [5, 30, 0], vec![]),
+            Event::Command(190, [5, 0, 0], vec![]),
+        ]
+    );
+    trace.borrow_mut().events.clear();
+    runtime.update_fes_object(0, &mut objects, id).unwrap();
     assert!(trace.borrow().events.is_empty());
     apply(
         &mut objects,
@@ -241,6 +265,98 @@ fn sound_load_routes_complete_records_and_consumes_only_finished_load_requests()
     assert!(!state(&objects, id).needs_load());
     assert!(!state(&objects, id).is_dirty());
     assert_eq!(state(&objects, id).channel_result(), 513);
+}
+
+#[test]
+fn sound_properties_combine_config_in_order_and_keep_the_global_refresh_flag() {
+    let (mut runtime, mut objects, id, trace) = setup();
+    runtime.host_mut().sound_config_enabled = 1;
+    let ObjectState::Sound(sound) = &mut objects.get_mut(id).unwrap().state else {
+        unreachable!()
+    };
+    sound.file = b"tone".to_vec();
+    sound.volume = 131;
+    sound.pan = -43;
+    sound
+        .apply(&ObjectAttributes {
+            channel: Some(5),
+            ..Default::default()
+        })
+        .unwrap();
+    assert!(runtime.update_fes_object(0, &mut objects, id).is_err());
+    assert!(state(&objects, id).is_dirty());
+    assert!(trace.borrow().events.is_empty());
+    runtime.host_mut().sound_config = Some(SoundConfig {
+        master_volume: Some(47),
+        parts: vec![
+            SoundPart {
+                file_prefix: b"tone".to_vec(),
+                volume: 65,
+                mute: -1,
+                ..Default::default()
+            },
+            SoundPart {
+                name: b"group".to_vec(),
+                volume: 37,
+                ..Default::default()
+            },
+            SoundPart {
+                name: b"master".to_vec(),
+                volume: 83,
+                ..Default::default()
+            },
+        ],
+        ..Default::default()
+    });
+    runtime.host_mut().sound_settings_dirty = 2;
+    for (file, group, object_type, master, mute, expected) in [
+        (b"tone".as_slice(), b"group".as_slice(), 0, 47, 0, 14),
+        (b"tone", b"master", 0, 47, -1, 32),
+        (b"missing", b"group", 0, 47, 0, 0),
+        (b"missing", b"group", 1, 47, 0, 61),
+        (b"tone", b"group", -1, -47, 0, -61),
+        (b"tone", b"group", 0, 47, 2, 0),
+        (b"tone", b"group", 0, i32::MAX, 0, 18_285_822),
+    ] {
+        let config = runtime.host_mut().sound_config.as_mut().unwrap();
+        config.master_volume = Some(master);
+        config.master_mute = mute;
+        let ObjectState::Sound(sound) = &mut objects.get_mut(id).unwrap().state else {
+            unreachable!()
+        };
+        sound.file = file.to_vec();
+        sound.group = group.to_vec();
+        sound.object_type = object_type;
+        trace.borrow_mut().events.clear();
+        runtime.update_fes_object(0, &mut objects, id).unwrap();
+        assert_eq!(
+            trace.borrow().events,
+            [
+                Event::Command(187, [5, expected as u32, 0], vec![]),
+                Event::Command(190, [5, (-43i32) as u32, 0], vec![]),
+            ]
+        );
+        assert!(!state(&objects, id).is_dirty());
+        assert_eq!(runtime.host().sound_settings_dirty, 2);
+    }
+    runtime.host_mut().sound_settings_dirty = 0;
+    trace.borrow_mut().events.clear();
+    runtime.update_fes_object(0, &mut objects, id).unwrap();
+    assert!(trace.borrow().events.is_empty());
+    let ObjectState::Sound(sound) = &mut objects.get_mut(id).unwrap().state else {
+        unreachable!()
+    };
+    sound.file.clear();
+    sound
+        .apply(&ObjectAttributes {
+            channel: Some(-1),
+            ..Default::default()
+        })
+        .unwrap();
+    runtime.host_mut().sound_config = None;
+    runtime.update_fes_object(0, &mut objects, id).unwrap();
+    assert!(!state(&objects, id).is_dirty());
+    assert!(trace.borrow().events.is_empty());
 }
 
 #[test]
