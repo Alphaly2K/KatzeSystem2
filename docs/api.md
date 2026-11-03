@@ -388,6 +388,8 @@ FES `dbgstr text` 与 `debug expression` 在主体、系统块及对象处理器
 
 `fes::SoundState` 保存 SOUND 的 FILE、STYPE、CHANNEL、TYPE、GROUP 和音量／声像运动状态；`is_dirty()` 与 `needs_load()` 查询独立的属性失效及文件请求。运行时支持未指定文件的空闲更新；文件装载、非空来源属性提交和播放命令继续返回诊断。默认值、有效列、名称容量及运动规则见[声音状态](audio.md#fes-sound-状态)。
 
+FES `blend` 已连接 SOUND、CIMAGE／IMAGE／BUTTON 和 SLIDER／SCROLL2：先保存原始音量或透明度，再装载默认运动，保留数组银行、一次求值、运动基准、延迟和失败续跑。主体、系统块及对象处理器共用该入口；CPLANE／PLANE 的运动属性继续诊断。完整参数与更新时序见[FES blend](audio.md#fes-blend)。
+
 `fes::Scroll2State { control, page }` 在通用滑动属性之外保存独立页长；`set_page(range, page)` 请求范围更新。`ObjectState::Scroll2` 支持初始化、数值及帧表命令和 Alpha 运动，操作示例与参数规则见 [SCROLL2](graphics.md#fes-scroll2-属性核心)。FES 侧经 `ObjectFactory` 创建类型 41、名称为 `FE scroll2` 的直属任务，并完成媒体、导航、父级通知及暂停协议；`InputFactory` 已提供这一类型的 `Scroll2Object`。`Object::scroll2_task_ids()` 查询该对象全部声明创建的下层编号。
 
 `lookup(name, bank)` 精确查找名称／银行，缺失返回 None；−1 在这里不展开数组。重复 DEFINE 仍创建对象，但已有银行保留原绑定，新银行取得各自的首次绑定；`count(name)` 始终保留首次登记的数组数量。创建完成后先调用 `publish_bindings(&mut interpreter)`，再确认事件；该入口同步对象命名值和解释器的数组数量，保留其他系统命名值。删除后同样需要同步。显式银行可访问超出首次数量的新绑定，省略银行号的数组展开继续使用首次数量。

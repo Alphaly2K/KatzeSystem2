@@ -37,6 +37,7 @@ pub struct Scene {
     motion_call: Option<MotionCall>,
     motion_stop: Option<MotionStop>,
     pub(super) draw_call: Option<super::draw::DrawCall>,
+    pub(super) blend_call: Option<super::blend::BlendCall>,
 }
 
 struct Invocation {
@@ -122,6 +123,7 @@ impl Scene {
             motion_call: None,
             motion_stop: None,
             draw_call: None,
+            blend_call: None,
         })
     }
 
@@ -785,6 +787,11 @@ impl<F: ObjectFactory> Store<'_, F> {
                         } else {
                             scene.interpreter.resume();
                         }
+                    } else if let Some(complete) = self.run_fes_blend(scene, &args, line.offset)? {
+                        if !complete {
+                            return Ok(false);
+                        }
+                        scene.interpreter.resume();
                     } else if self.run_fes_draw(scene, &args, line.offset)? {
                         scene.interpreter.resume();
                     } else if let Some(complete) = self.run_fes_stop(scene, &args, line.offset)? {
@@ -1173,6 +1180,12 @@ impl<F: ObjectFactory> Store<'_, F> {
                             {
                                 if stop {
                                     scene.publish_notifications();
+                                }
+                            } else if let Some(complete) =
+                                self.run_fes_blend(scene, &args, line.offset)?
+                            {
+                                if !complete {
+                                    return Ok(false);
                                 }
                             } else if self.run_fes_draw(scene, &args, line.offset)? {
                             } else if let Some(complete) =
