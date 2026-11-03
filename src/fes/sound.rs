@@ -20,6 +20,8 @@ pub struct SoundState {
     pub(crate) action: i32,
     pub(crate) action_requested: bool,
     pub(crate) play_value_changed: bool,
+    pub(crate) channel_result: u32,
+    pub(crate) media_refresh: bool,
 }
 
 impl Default for SoundState {
@@ -39,6 +41,8 @@ impl Default for SoundState {
             action: 0,
             action_requested: false,
             play_value_changed: false,
+            channel_result: 0,
+            media_refresh: false,
         }
     }
 }
@@ -59,6 +63,11 @@ impl SoundState {
 
     pub fn play_value_changed(&self) -> bool {
         self.play_value_changed
+    }
+
+    /// 最近一次装载后由声音任务命令 201 返回的原始值。
+    pub fn channel_result(&self) -> u32 {
+        self.channel_result
     }
 
     pub(crate) fn request_load(&mut self, file: &[u8], parameters: [i32; 2]) -> Result<()> {

@@ -788,6 +788,7 @@ impl FesObject {
             }
             objects.set_canvas_offset(self.offset);
             objects.set_input_task(self.input);
+            objects.set_sound_task(self.sound);
         }
         Ok(())
     }

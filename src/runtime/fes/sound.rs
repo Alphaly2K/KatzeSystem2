@@ -1,5 +1,6 @@
 use super::{ObjectState, Objects, Scene};
-use crate::runtime::{ObjectFactory, Store};
+use crate::runtime::{ObjectFactory, Store, kind, route_with_buffers};
+use crate::task::{Command, CommandBuffers};
 use crate::{Error, Result};
 
 impl Objects {
@@ -67,6 +68,132 @@ impl Objects {
 }
 
 impl<F: ObjectFactory> Store<'_, F> {
+    pub(super) fn update_fes_sound(
+        &mut self,
+        owner: u32,
+        objects: &mut Objects,
+        handle: u32,
+    ) -> Result<()> {
+        let ObjectState::Sound(sound) = &objects.get(handle).unwrap().state else {
+            unreachable!()
+        };
+        if sound.needs_load() {
+            let channel = sound.channel as u32;
+            let parameters = sound.load_parameters;
+            let group = sound.group.clone();
+            let mut record = [0; 0x124];
+            let has_file = !sound.file.is_empty();
+            if has_file {
+                let name = self
+                    .resources
+                    .services
+                    .as_mut()
+                    .ok_or_else(|| Error::new(0, "运行时未配置 FES 声音资源服务"))?
+                    .resolve(b"sound", &sound.file)?;
+                let name = &name[..name
+                    .iter()
+                    .position(|&byte| byte == 0)
+                    .unwrap_or(name.len())];
+                if name.len() >= 260 {
+                    return Err(Error::new(0, "FES 声音补全名称超过存储上限"));
+                }
+                record[12..12 + name.len()].copy_from_slice(name);
+            }
+            let task = match objects.sound_task {
+                Some(task) => task,
+                None => {
+                    let task = self.sound_command(owner, 0, 35, [0; 3], None)?;
+                    objects.sound_task = Some(task);
+                    task
+                }
+            };
+            if !self
+                .tree
+                .node(task)
+                .is_some_and(|node| node.kind == kind::SOUND)
+            {
+                return Err(Error::new(0, "FES 声音任务绑定失效"));
+            }
+            if !has_file {
+                self.sound_command(owner, task, 182, [channel, 0, 0], None)?;
+            } else {
+                if channel != u32::MAX && parameters[0] == 0 {
+                    self.sound_command(owner, task, 182, [channel, 0, 0], None)?;
+                }
+                record[..4].copy_from_slice(&channel.to_le_bytes());
+                record[0x110..0x114].copy_from_slice(&1u32.to_le_bytes());
+                record[0x118..0x11c].copy_from_slice(&parameters[0].to_le_bytes());
+                record[0x11c..0x120].copy_from_slice(&parameters[1].to_le_bytes());
+                let channel = if group.is_empty() {
+                    self.sound_command(owner, task, 180, [0; 3], Some(&mut record))?;
+                    channel
+                } else {
+                    let mut group = group;
+                    group.push(0);
+                    let group = self.sound_command(owner, task, 210, [0; 3], Some(&mut group))?;
+                    record[4..8].copy_from_slice(&group.to_le_bytes());
+                    let channel =
+                        self.sound_command(owner, task, 206, [0; 3], Some(&mut record))?;
+                    let ObjectState::Sound(sound) = &mut objects.get_mut(handle).unwrap().state
+                    else {
+                        unreachable!()
+                    };
+                    if sound.channel != channel as i32 {
+                        sound.channel = channel as i32;
+                        objects.invalidate(handle)?;
+                    }
+                    channel
+                };
+                let result = self.sound_command(owner, task, 201, [channel, 0, 0], None)?;
+                let ObjectState::Sound(sound) = &mut objects.get_mut(handle).unwrap().state else {
+                    unreachable!()
+                };
+                sound.channel_result = result;
+            }
+            let ObjectState::Sound(sound) = &mut objects.get_mut(handle).unwrap().state else {
+                unreachable!()
+            };
+            sound.load_requested = false;
+            sound.media_refresh = true;
+        }
+        let ObjectState::Sound(sound) = &mut objects.get_mut(handle).unwrap().state else {
+            unreachable!()
+        };
+        if sound.action_request().is_some() {
+            return Err(Error::new(0, "FES SOUND 动作请求尚未接入声音任务"));
+        }
+        if (sound.is_dirty() || sound.media_refresh) && !sound.file.is_empty() {
+            return Err(Error::new(0, "FES SOUND 播放属性更新尚未接入声音任务"));
+        }
+        sound.media_refresh = false;
+        sound.dirty = false;
+        Ok(())
+    }
+
+    fn sound_command(
+        &mut self,
+        owner: u32,
+        task: u32,
+        code: u32,
+        data: [u32; 3],
+        bytes: Option<&mut [u8]>,
+    ) -> Result<u32> {
+        route_with_buffers(
+            self.reborrow(),
+            owner,
+            Command {
+                target: task,
+                sender: owner,
+                code,
+                data,
+            },
+            &mut CommandBuffers {
+                data0: None,
+                data1: bytes,
+            },
+        )
+    }
+
     pub(super) fn fes_sound_command(
         &mut self,
         scene: &mut Scene,

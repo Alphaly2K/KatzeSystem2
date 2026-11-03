@@ -286,6 +286,7 @@ pub struct Objects {
     canvas_offset: [i32; 2],
     image_list: Option<u32>,
     input_task: Option<u32>,
+    sound_task: Option<u32>,
     image_clip: crate::graphics::Rect,
     motion_update: Option<motion::Traversal>,
     draw_restore: Option<u32>,
@@ -326,6 +327,7 @@ impl Objects {
             canvas_offset: [0; 2],
             image_list: None,
             input_task: None,
+            sound_task: None,
             image_clip: crate::graphics::Rect::default(),
             motion_update: None,
             draw_restore: None,
@@ -363,6 +365,14 @@ impl Objects {
 
     pub fn input_task(&self) -> Option<u32> {
         self.input_task
+    }
+
+    pub fn set_sound_task(&mut self, task: u32) {
+        self.sound_task = Some(task);
+    }
+
+    pub fn sound_task(&self) -> Option<u32> {
+        self.sound_task
     }
 
     /// 包含根对象及重复声明产生的未绑定对象。

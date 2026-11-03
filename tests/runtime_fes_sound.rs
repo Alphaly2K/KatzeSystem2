@@ -443,7 +443,7 @@ fn silent_sound_declarations_allow_scene_updates_and_load_errors_keep_requests_f
                     .update_fes_object(0, scene.objects_mut().unwrap(), id)
                     .unwrap_err()
                     .message
-                    .contains("文件请求")
+                    .contains("声音资源")
             );
             let ObjectState::Sound(sound) = &scene.objects().get(id).unwrap().state else {
                 panic!()
