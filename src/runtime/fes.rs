@@ -19,6 +19,7 @@ mod motion;
 mod natives;
 mod navigation;
 mod plane;
+mod preload;
 mod scene;
 mod slider;
 mod sound;
@@ -288,6 +289,7 @@ pub struct Objects {
     image_clip: crate::graphics::Rect,
     motion_update: Option<motion::Traversal>,
     draw_restore: Option<u32>,
+    preloaded_images: preload::Cache,
 }
 
 impl Objects {
@@ -327,6 +329,7 @@ impl Objects {
             image_clip: crate::graphics::Rect::default(),
             motion_update: None,
             draw_restore: None,
+            preloaded_images: std::rc::Rc::default(),
         })
     }
 

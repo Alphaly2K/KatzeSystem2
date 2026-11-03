@@ -77,6 +77,24 @@ impl ResourceState {
         if bytes.is_empty() {
             return Ok(0);
         }
+        self.insert_image(bytes, owner, offset)
+    }
+
+    pub(crate) fn load_fes_image(
+        &mut self,
+        name: &[u8],
+        services: &mut dyn ResourceServices,
+        owner: u32,
+        offset: usize,
+    ) -> Result<u32> {
+        let name = services.resolve(b"image", name)?;
+        let Some(bytes) = services.read(&name, ResourceMode::LooseFirst)? else {
+            return Ok(0);
+        };
+        self.insert_image(bytes, Some(owner), offset)
+    }
+
+    fn insert_image(&mut self, bytes: Vec<u8>, owner: Option<u32>, offset: usize) -> Result<u32> {
         if bytes.len() > read::MAX_BYTES {
             return Err(Error::new(offset, "KCS 图像资源超过读取上限"));
         }

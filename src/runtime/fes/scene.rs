@@ -40,6 +40,7 @@ pub struct Scene {
     motion_stop: Option<MotionStop>,
     pub(super) draw_call: Option<super::draw::DrawCall>,
     pub(super) blend_call: Option<super::blend::BlendCall>,
+    pub(super) preload: super::preload::Preload,
 }
 
 struct Invocation {
@@ -80,6 +81,7 @@ enum Notification {
 
 impl Scene {
     pub fn new(program: fes::Program, handles: HandleAllocator) -> Result<Self> {
+        let preload = super::preload::Preload::new(&program);
         let mut interpreter = fes::Interpreter::new(program)?;
         let objects = Objects::new(handles)?;
         objects.publish_bindings(&mut interpreter);
@@ -126,6 +128,7 @@ impl Scene {
             motion_stop: None,
             draw_call: None,
             blend_call: None,
+            preload,
         })
     }
 
@@ -344,6 +347,7 @@ impl Scene {
             || self.system_block.is_some()
             || self.object_event.is_some()
             || self.media_preparation.is_some()
+            || self.preload.is_pending()
     }
 
     /// 只处理装载期声明和属性，不进入 START 或推进下层媒体对象。
@@ -389,7 +393,7 @@ impl Scene {
                 if let Some(declaration) = declarations.iter().find(|declaration| {
                     !matches!(
                         declaration.header.split(u8::is_ascii_whitespace).next(),
-                        Some(b"SUBCOMMAND" | b"KEYBLOCK")
+                        Some(b"SUBCOMMAND" | b"KEYBLOCK" | b"PRELOAD")
                     )
                 }) {
                     return Err(Error::new(
@@ -512,7 +516,13 @@ impl<F: ObjectFactory> Store<'_, F> {
             return Err(Error::new(0, "FES 装载所属任务无效"));
         }
         scene.owner = Some(owner);
-        if scene.media_preparation.is_none() && !scene.prepare(self.numbers, self.budget)? {
+        if scene.media_preparation.is_none()
+            && !scene.preload.is_pending()
+            && !scene.prepare(self.numbers, self.budget)?
+        {
+            return Ok(false);
+        }
+        if !self.preload_fes_images(scene)? {
             return Ok(false);
         }
         self.prepare_fes_media(owner, scene)
@@ -1130,8 +1140,9 @@ impl<F: ObjectFactory> Store<'_, F> {
                 scene.invocation.as_mut().unwrap().flush_scripts = false;
             }
             if !scene.interpreter.initialization_pending()
-                && scene.media_prepared != scene.objects.update_order.len()
-                && !self.prepare_fes_media(owner, scene)?
+                && (!self.preload_fes_images(scene)?
+                    || (scene.media_prepared != scene.objects.update_order.len()
+                        && !self.prepare_fes_media(owner, scene)?))
             {
                 return Ok(false);
             }

@@ -136,6 +136,7 @@ impl<F: ObjectFactory> Store<'_, F> {
         objects: &mut Objects,
         handle: u32,
     ) -> Result<(u32, ControlKind)> {
+        let cache = objects.preloaded_images.clone();
         let object = objects.get(handle).unwrap();
         let protocol = ControlKind::of(&object.state).unwrap();
         self.check_fes_control_binding(owner, object.task_id, protocol)?;
@@ -165,8 +166,8 @@ impl<F: ObjectFactory> Store<'_, F> {
                     .unwrap()
                     .updates
                     .metadata = false;
-                let position = self.fes_image_geometry(&reference, false)?;
-                let size = self.fes_image_geometry(&reference, true)?;
+                let position = self.fes_image_geometry(&cache, &reference, false)?;
+                let size = self.fes_image_geometry(&cache, &reference, true)?;
                 objects
                     .get_mut(handle)
                     .unwrap()

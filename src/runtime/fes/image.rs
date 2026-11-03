@@ -11,6 +11,7 @@ impl<F: ObjectFactory> Store<'_, F> {
         handle: u32,
         image: Option<u32>,
     ) -> Result<()> {
+        let cache = objects.preloaded_images.clone();
         let list = self.check_fes_image_list(owner, objects)?;
         let wrapper = match image {
             Some(image) => image,
@@ -20,7 +21,7 @@ impl<F: ObjectFactory> Store<'_, F> {
         let prepared = state.updates.rebuild;
         if prepared {
             if let Some(resource) = &state.size_resource {
-                state.set_size(self.fes_image_geometry(resource, true)?);
+                state.set_size(self.fes_image_geometry(&cache, resource, true)?);
             }
             if let Err(error) = self
                 .resources
@@ -56,6 +57,7 @@ impl<F: ObjectFactory> Store<'_, F> {
         handle: u32,
         image: Option<u32>,
     ) -> Result<()> {
+        let cache = objects.preloaded_images.clone();
         let list = self.check_fes_image_list(owner, objects)?;
         let wrapper = match image {
             Some(image) => image,
@@ -79,9 +81,10 @@ impl<F: ObjectFactory> Store<'_, F> {
                         .services
                         .as_deref_mut()
                         .ok_or_else(|| Error::new(0, "运行时未配置 FES 图像资源服务"))?;
+                    let mut services = super::preload::ImageServices::new(&cache, services);
                     self.resources
                         .raw
-                        .load_image(name, services, Some(owner), 0)?
+                        .load_fes_image(name, &mut services, owner, 0)?
                 };
                 let object = objects.get_mut(handle).unwrap();
                 self.resources.raw.release_image(object.raw_image)?;
@@ -98,13 +101,25 @@ impl<F: ObjectFactory> Store<'_, F> {
                     .services
                     .as_mut()
                     .ok_or_else(|| Error::new(0, "运行时未配置 FES 图像资源服务"))?;
-                self.resources.images.load_fes(
-                    wrapper,
-                    name,
-                    state.selected_frame(),
-                    direct,
-                    services.as_mut(),
-                )?
+                if direct {
+                    self.resources.images.load_fes(
+                        wrapper,
+                        name,
+                        state.selected_frame(),
+                        true,
+                        services.as_mut(),
+                    )?
+                } else {
+                    let mut services =
+                        super::preload::ImageServices::new(&cache, services.as_mut());
+                    self.resources.images.load_fes(
+                        wrapper,
+                        name,
+                        state.selected_frame(),
+                        false,
+                        &mut services,
+                    )?
+                }
             };
             if loaded {
                 let image = self.resources.images.get_mut(wrapper)?;
@@ -166,6 +181,7 @@ impl<F: ObjectFactory> Store<'_, F> {
         wrapper: u32,
         prepared: bool,
     ) -> Result<()> {
+        let cache = objects.preloaded_images.clone();
         let file = objects.get(handle).unwrap().state.image_source().is_some();
         let state = objects.get_mut(handle).unwrap().state.image_mut().unwrap();
         if state.updates.dirty || prepared {
@@ -182,7 +198,7 @@ impl<F: ObjectFactory> Store<'_, F> {
             let state = objects.get_mut(handle).unwrap().state.image_mut().unwrap();
             if let Some(reference) = state.position_resource.take() {
                 let position = self
-                    .fes_image_geometry(&reference, false)?
+                    .fes_image_geometry(&cache, &reference, false)?
                     .map(|v| v as f32);
                 if state.position != position {
                     state.position = position;

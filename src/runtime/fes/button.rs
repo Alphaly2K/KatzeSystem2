@@ -174,6 +174,7 @@ impl<F: ObjectFactory> Store<'_, F> {
         handle: u32,
         wrapper: u32,
     ) -> Result<Rect> {
+        let cache = objects.preloaded_images.clone();
         let reference = objects
             .get(handle)
             .unwrap()
@@ -183,7 +184,7 @@ impl<F: ObjectFactory> Store<'_, F> {
             .size_resource
             .clone();
         if let Some(reference) = reference {
-            let size = self.fes_image_geometry(&reference, true)?;
+            let size = self.fes_image_geometry(&cache, &reference, true)?;
             objects
                 .get_mut(handle)
                 .unwrap()

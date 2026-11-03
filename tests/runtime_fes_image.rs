@@ -502,6 +502,241 @@ fn pixel_file(color: u32) -> Vec<u8> {
     bytes
 }
 
+#[derive(Default)]
+struct PreloadSource {
+    files: BTreeMap<Vec<u8>, Vec<u8>>,
+    reads: Vec<Vec<u8>>,
+    resolves: Vec<Vec<u8>>,
+    fail: Option<Vec<u8>>,
+    changing: Option<Vec<u8>>,
+}
+
+struct PreloadFiles(Rc<RefCell<PreloadSource>>);
+
+impl ResourceServices for PreloadFiles {
+    fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+        assert_eq!(category, b"image");
+        self.0.borrow_mut().resolves.push(name.to_vec());
+        Ok(name.to_vec())
+    }
+
+    fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
+        assert_eq!(mode, ResourceMode::LooseFirst);
+        let mut source = self.0.borrow_mut();
+        source.reads.push(name.to_vec());
+        if source.fail.as_deref() == Some(name) {
+            return Err(Error::new(0, "合成预加载读取失败"));
+        }
+        let bytes = source.files.get(name).cloned();
+        if source.changing.as_deref() == Some(name) {
+            source.files.get_mut(name).unwrap()[0] += 1;
+        }
+        Ok(bytes)
+    }
+}
+
+#[test]
+fn preloads_keep_first_bytes_retry_reads_and_isolate_scene_caches_without_evaluating_names() {
+    let script = b"#PRELOAD\nA\nA\nB\nmissing\nempty\n\"two words\"\n($1+=1)\na\n#DEFINE\nBASE item\n#OBJECT POS\nitem ($0+=1),0\n#START\n$2+=1\nwait 99\n";
+    for budget in [1, 4096] {
+        let (mut runtime, _, _) = setup();
+        runtime.numbers_mut().shared.resize(4, 0);
+        runtime.set_budget(budget, 10000);
+        let source = Rc::new(RefCell::new(PreloadSource {
+            files: BTreeMap::from([
+                (b"A".to_vec(), vec![7]),
+                (b"B".to_vec(), vec![11]),
+                (b"empty".to_vec(), vec![]),
+                (b"a".to_vec(), vec![19]),
+            ]),
+            fail: Some(b"B".to_vec()),
+            changing: Some(b"A".to_vec()),
+            ..Default::default()
+        }));
+        runtime.set_resources(PreloadFiles(source.clone()));
+        let mut scene = katze_system2::runtime::fes::Scene::new(
+            fes::Program::from_text(script).unwrap(),
+            runtime.host().handle_allocator(),
+        )
+        .unwrap();
+        let mut failed = false;
+        for _ in 0..128 {
+            match runtime.prepare_fes_scene(0, &mut scene) {
+                Err(error) => {
+                    assert!(error.message.contains("预加载读取失败"));
+                    failed = true;
+                    break;
+                }
+                Ok(false) => (),
+                Ok(true) => panic!("合成资源没有触发失败"),
+            }
+        }
+        assert!(failed);
+        assert_eq!(runtime.numbers().shared, [1, 0, 0, 0]);
+        assert_eq!(scene.objects().preloaded_image(b"A"), Some([7].as_slice()));
+        assert!(scene.objects_mut().is_err());
+        source.borrow_mut().fail = None;
+        while !runtime.prepare_fes_scene(0, &mut scene).unwrap() {}
+        assert_eq!(runtime.numbers().shared, [1, 0, 0, 0]);
+        assert_eq!(
+            source
+                .borrow()
+                .reads
+                .iter()
+                .filter(|name| *name == b"B")
+                .count(),
+            2
+        );
+        assert_eq!(
+            source
+                .borrow()
+                .resolves
+                .iter()
+                .filter(|name| *name == b"B")
+                .count(),
+            1
+        );
+        assert!(
+            source
+                .borrow()
+                .reads
+                .iter()
+                .any(|name| name == b"\"two words\"")
+        );
+        assert!(source.borrow().reads.iter().any(|name| name == b"($1+=1)"));
+        assert_eq!(
+            scene.objects().preloaded_image(b"empty"),
+            Some([].as_slice())
+        );
+        assert_eq!(scene.objects().preloaded_image(b"missing"), None);
+        assert_eq!(scene.objects().preloaded_image(b"a"), Some([19].as_slice()));
+        assert_eq!(
+            scene.objects().preloaded_image(b"A\0ignored"),
+            Some([7].as_slice())
+        );
+        let mut other = katze_system2::runtime::fes::Scene::new(
+            fes::Program::from_text(b"#PRELOAD\nA\n#START\nwait 99\n").unwrap(),
+            runtime.host().handle_allocator(),
+        )
+        .unwrap();
+        while !runtime.prepare_fes_scene(0, &mut other).unwrap() {}
+        assert_eq!(other.objects().preloaded_image(b"A"), Some([9].as_slice()));
+        assert_eq!(scene.objects().preloaded_image(b"A"), Some([7].as_slice()));
+    }
+}
+
+#[test]
+fn preloaded_empty_raw_images_keep_a_handle_when_frame_registration_fails() {
+    let (mut runtime, _, list) = setup();
+    let source = Rc::new(RefCell::new(PreloadSource {
+        files: BTreeMap::from([(b"empty".to_vec(), vec![])]),
+        ..Default::default()
+    }));
+    runtime.set_resources(PreloadFiles(source.clone()));
+    let mut scene = katze_system2::runtime::fes::Scene::new(
+        fes::Program::from_text(b"#PRELOAD\nempty\n#DEFINE\nIMAGE raw\n#OBJECT FILE IDN PRI\nraw empty -1 5\n#START\nwait 99\n").unwrap(),
+        runtime.host().handle_allocator(),
+    )
+    .unwrap();
+    scene
+        .objects_mut()
+        .unwrap()
+        .set_image_list(list, Rect::from_xywh(0, 0, 8, 6));
+    while !runtime.prepare_fes_scene(0, &mut scene).unwrap() {}
+    source.borrow_mut().files.clear();
+    assert!(runtime.update_fes_scene(0, &mut scene, 100).is_err());
+    let raw = scene.objects().lookup("raw", 0).unwrap();
+    let handle = scene.objects().get(raw).unwrap().raw_image_handle();
+    assert_ne!(handle, 0);
+    assert_eq!(runtime.image_data(handle).unwrap(), []);
+    assert_eq!(source.borrow().reads, [b"empty".to_vec()]);
+}
+
+#[test]
+fn preloaded_images_feed_decoding_raw_sources_and_metadata_while_direct_paths_read_fresh_bytes() {
+    for budget in [1, 4096] {
+        let (mut runtime, _, list) = setup();
+        runtime.set_budget(budget, 10000);
+        let original = pixel_file(0xff123456);
+        let source = Rc::new(RefCell::new(PreloadSource {
+            files: BTreeMap::from([
+                (b"texture".to_vec(), original.clone()),
+                (b"metadata".to_vec(), original.clone()),
+            ]),
+            ..Default::default()
+        }));
+        runtime.set_resources(PreloadFiles(source.clone()));
+        let script = b"#PRELOAD\ntexture\nmetadata\n#DEFINE\nIMAGE cached\nIMAGE raw\nIMAGE direct\nCPLANE panel\n#OBJECT FILE IDN PRI DISP\ncached texture 7 1 0\nraw texture -1 2 0\ndirect texture 7 3 0\n#OBJECT PATHMODE\ndirect 1\n#OBJECT SIZE2\npanel metadata:7\n#START\nwait 99\n";
+        let mut scene = katze_system2::runtime::fes::Scene::new(
+            fes::Program::from_text(script).unwrap(),
+            runtime.host().handle_allocator(),
+        )
+        .unwrap();
+        scene
+            .objects_mut()
+            .unwrap()
+            .set_image_list(list, Rect::from_xywh(0, 0, 8, 6));
+        while !runtime.prepare_fes_scene(0, &mut scene).unwrap() {}
+        let cached = scene.objects().lookup("cached", 0).unwrap();
+        let wrapper = scene.objects().get(cached).unwrap().image_handle().unwrap();
+        assert_eq!(runtime.images().pixel_handle(wrapper).unwrap(), 0);
+        source
+            .borrow_mut()
+            .files
+            .insert(b"texture".to_vec(), pixel_file(0xff789abc));
+        let mut changed = original.clone();
+        changed[36..40].copy_from_slice(&3u32.to_le_bytes());
+        source
+            .borrow_mut()
+            .files
+            .insert(b"metadata".to_vec(), changed);
+        while !runtime.update_fes_scene(0, &mut scene, 100).unwrap() {}
+        assert_eq!(
+            runtime.images().get(wrapper).unwrap().surface().pixel(0, 0),
+            Some(0xff123456)
+        );
+        let direct = scene.objects().lookup("direct", 0).unwrap();
+        let direct = scene.objects().get(direct).unwrap().image_handle().unwrap();
+        assert_eq!(
+            runtime.images().get(direct).unwrap().surface().pixel(0, 0),
+            Some(0xff789abc)
+        );
+        let raw = scene.objects().lookup("raw", 0).unwrap();
+        let raw = scene.objects().get(raw).unwrap().raw_image_handle();
+        assert_eq!(runtime.image_data(raw).unwrap(), original);
+        let panel = scene.objects().lookup("panel", 0).unwrap();
+        let ObjectState::CPlane(panel) = &scene.objects().get(panel).unwrap().state else {
+            unreachable!()
+        };
+        assert_eq!(panel.size(), [1, 1]);
+        assert_eq!(
+            source.borrow().reads,
+            [
+                b"texture".to_vec(),
+                b"metadata".to_vec(),
+                b"texture".to_vec()
+            ]
+        );
+        source.borrow_mut().files.clear();
+        initialize(
+            scene.objects_mut().unwrap(),
+            "cached",
+            ObjectAttributes {
+                file: Some(b"texture".to_vec()),
+                ..Default::default()
+            },
+        );
+        runtime
+            .update_fes_object(0, scene.objects_mut().unwrap(), cached)
+            .unwrap();
+        assert_eq!(
+            runtime.images().get(wrapper).unwrap().surface().pixel(0, 0),
+            Some(0xff123456)
+        );
+        assert_eq!(source.borrow().reads.len(), 3);
+    }
+}
+
 #[test]
 fn duplicate_media_records_keep_source_wrappers_distinct_and_release_all_bindings() {
     for kind_name in ["CIMAGE", "IMAGE", "BUTTON"] {

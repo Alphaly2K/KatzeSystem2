@@ -1,5 +1,6 @@
 use super::{ObjectState, Objects};
 use crate::fes::ImageReference;
+use crate::kcs::ResourceServices;
 use crate::runtime::{ObjectFactory, Runtime, Store, create_object, kind, route_with_buffers};
 use crate::task::{Command, CommandBuffers};
 use crate::{Error, Result};
@@ -73,6 +74,7 @@ impl<F: ObjectFactory> Store<'_, F> {
         handle: u32,
         image: Option<u32>,
     ) -> Result<()> {
+        let cache = objects.preloaded_images.clone();
         if self.tree.node(owner).is_none() {
             return Err(Error::new(0, "FES 所属任务不存在"));
         }
@@ -121,7 +123,7 @@ impl<F: ObjectFactory> Store<'_, F> {
         if state.rebuild {
             if !canvas {
                 if let Some(resource) = &state.size_resource {
-                    state.size = self.fes_image_geometry(resource, true)?;
+                    state.size = self.fes_image_geometry(&cache, resource, true)?;
                 }
             }
             if let Some(old) = task {
@@ -139,7 +141,7 @@ impl<F: ObjectFactory> Store<'_, F> {
             self.fes_command(owner, task, 84, [0, state.creation_type, 0], None)?;
             if canvas {
                 if let Some(resource) = &state.size_resource {
-                    state.size = self.fes_image_geometry(resource, true)?;
+                    state.size = self.fes_image_geometry(&cache, resource, true)?;
                 }
             }
             let mut rectangle = [0; 32];
@@ -192,7 +194,7 @@ impl<F: ObjectFactory> Store<'_, F> {
             return Ok(());
         }
         if let Some(resource) = state.position_resource.take() {
-            let offset = self.fes_image_geometry(&resource, false)?;
+            let offset = self.fes_image_geometry(&cache, &resource, false)?;
             let next = [offset[0] as f32, offset[1] as f32];
             if state.position[..2] != next {
                 state.position[..2].copy_from_slice(&next);
@@ -375,6 +377,7 @@ impl<F: ObjectFactory> Store<'_, F> {
 
     pub(super) fn fes_image_geometry(
         &mut self,
+        cache: &super::preload::Cache,
         reference: &ImageReference,
         size: bool,
     ) -> Result<[i32; 2]> {
@@ -386,6 +389,7 @@ impl<F: ObjectFactory> Store<'_, F> {
             .services
             .as_mut()
             .ok_or_else(|| Error::new(0, "运行时未配置 FES 图像元数据服务"))?;
+        let mut services = super::preload::ImageServices::new(cache, services.as_mut());
         let name = services.resolve(b"image", &reference.name)?;
         let Some(data) = services.read(&name, crate::resource::ResourceMode::LooseFirst)? else {
             return Ok([0; 2]);
