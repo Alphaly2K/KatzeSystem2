@@ -102,6 +102,10 @@ impl<H: Host, S: TaskServices> Host for TaskHost<'_, H, S> {
         self.inner.effect_speed()
     }
 
+    fn sound_stereo(&self) -> u32 {
+        self.inner.sound_stereo()
+    }
+
     fn fonts(&mut self) -> Option<&mut dyn crate::message::FontServices> {
         self.inner.fonts()
     }

@@ -113,6 +113,107 @@ fn audio(runtime: &Runtime<SoundFactory<Reject>>) -> &katze_system2::audio::Soun
 }
 
 #[test]
+fn channel_properties_keep_resource_defaults_and_update_only_the_linked_target() {
+    let (mut runtime, _) = setup();
+    let set = |runtime: &mut Runtime<SoundFactory<Reject>>, code, channel, value: i32| {
+        let mut request = command(code, channel);
+        request.data[1] = value as u32;
+        runtime.dispatch_command(0, request).unwrap()
+    };
+    set(&mut runtime, 187, 5, 47);
+    assert_eq!(audio(&runtime).channel(5).unwrap().requested_volume(), 47.0);
+    assert_eq!(runtime.dispatch_command(0, command(188, 5)).unwrap(), 0);
+    load(&mut runtime, &mut record(5, 0, 17, b"audio/tone.ogg")).unwrap();
+    assert_eq!(runtime.dispatch_command(0, command(188, 5)).unwrap(), 100);
+    assert_eq!(audio(&runtime).channel(5).unwrap().requested_volume(), 47.0);
+    set(&mut runtime, 187, 5, i32::MAX);
+    set(&mut runtime, 190, 5, -131);
+    assert_eq!(
+        runtime.dispatch_command(0, command(188, 5)).unwrap(),
+        i32::MAX as u32
+    );
+    assert_eq!(
+        runtime.dispatch_command(0, command(191, 5)).unwrap(),
+        (-100i32) as u32
+    );
+    assert_eq!(
+        audio(&runtime).channel(5).unwrap().requested_volume(),
+        2_147_483_648.0
+    );
+    runtime.host_mut().sound_stereo = Some(0);
+    set(&mut runtime, 190, 5, 83);
+    assert_eq!(
+        runtime.dispatch_command(0, command(191, 5)).unwrap(),
+        (-100i32) as u32
+    );
+    runtime.host_mut().sound_stereo = Some(u32::MAX);
+    load(&mut runtime, &mut record(5, 1, 70, b"audio/stereo.ogg")).unwrap();
+    set(&mut runtime, 187, 5, -17);
+    set(&mut runtime, 190, 5, 131);
+    for (code, expected) in [(188, (-17i32) as u32), (191, 100)] {
+        for channel in [5, 37] {
+            assert_eq!(
+                runtime.dispatch_command(0, command(code, channel)).unwrap(),
+                expected
+            );
+        }
+    }
+    assert_eq!(audio(&runtime).channel(5).unwrap().volume(), Some(i32::MAX));
+    assert_eq!(audio(&runtime).channel(5).unwrap().pan(), Some(-100));
+    runtime.dispatch_command(0, command(182, 5)).unwrap();
+    set(&mut runtime, 187, 5, 16_777_217);
+    assert_eq!(
+        audio(&runtime).channel(37).unwrap().requested_volume(),
+        16_777_216.0
+    );
+    assert_eq!(audio(&runtime).channel(37).unwrap().volume(), None);
+    assert_eq!(runtime.dispatch_command(0, command(188, 5)).unwrap(), 0);
+
+    load(&mut runtime, &mut record(5, 0, 17, b"audio/tone.ogg")).unwrap();
+    let mut objects =
+        katze_system2::runtime::fes::Objects::new(runtime.host().handle_allocator()).unwrap();
+    let id = objects
+        .define(&katze_system2::fes::ObjectDefinition {
+            kind: "SOUND",
+            name: "music".into(),
+            banks: 1,
+        })
+        .unwrap()[0];
+    let katze_system2::runtime::fes::ObjectState::Sound(sound) =
+        &mut objects.get_mut(id).unwrap().state
+    else {
+        unreachable!()
+    };
+    sound.file = b"audio/tone.ogg".to_vec();
+    sound.volume = 47;
+    sound.pan = -43;
+    sound
+        .apply(&katze_system2::fes::ObjectAttributes {
+            channel: Some(5),
+            ..Default::default()
+        })
+        .unwrap();
+    objects.set_sound_task(1);
+    runtime.host_mut().sound_config_enabled = 1;
+    runtime.host_mut().sound_config = Some(katze_system2::audio::SoundConfig {
+        master_volume: Some(100),
+        parts: vec![katze_system2::audio::SoundPart {
+            file_prefix: b"audio/".to_vec(),
+            volume: 65,
+            mute: 0,
+            ..Default::default()
+        }],
+        ..Default::default()
+    });
+    runtime.update_fes_object(0, &mut objects, id).unwrap();
+    assert_eq!(runtime.dispatch_command(0, command(188, 5)).unwrap(), 30);
+    assert_eq!(
+        runtime.dispatch_command(0, command(191, 5)).unwrap(),
+        (-43i32) as u32
+    );
+}
+
+#[test]
 fn vorbis_channels_keep_both_sources_during_replacement_and_release_the_linked_pair() {
     let (mut runtime, source) = setup();
     let mut loop_record = [0; 48];

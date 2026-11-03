@@ -14,6 +14,9 @@ pub struct SoundChannel {
     pub(super) clock: ChannelClock,
     pub(super) file: Vec<u8>,
     pub(super) pcm: Option<Pcm>,
+    pub(super) requested_volume: f32,
+    pub(super) pcm_volume: i32,
+    pub(super) pcm_pan: i32,
     pub(super) parameters: [i32; 2],
     pub(super) load_options: u32,
     pub(super) linked: Option<u32>,
@@ -26,6 +29,9 @@ impl Default for SoundChannel {
             clock: ChannelClock::default(),
             file: Vec::new(),
             pcm: None,
+            requested_volume: 0.0,
+            pcm_volume: 100,
+            pcm_pan: 0,
             parameters: [0; 2],
             load_options: 0,
             linked: None,
@@ -41,6 +47,19 @@ impl SoundChannel {
 
     pub fn pcm(&self) -> Option<&Pcm> {
         self.pcm.as_ref()
+    }
+
+    /// 任务保存的音量目标；资源尚未装载时也可设置。
+    pub fn requested_volume(&self) -> f32 {
+        self.requested_volume
+    }
+
+    pub fn volume(&self) -> Option<i32> {
+        self.pcm.as_ref().map(|_| self.pcm_volume)
+    }
+
+    pub fn pan(&self) -> Option<i32> {
+        self.pcm.as_ref().map(|_| self.pcm_pan)
     }
 
     pub fn load_parameters(&self) -> [i32; 2] {

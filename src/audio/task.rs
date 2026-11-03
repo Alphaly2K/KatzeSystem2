@@ -63,6 +63,28 @@ impl SoundState {
         })
     }
 
+    fn property_channel(&self, channel: u32) -> Option<usize> {
+        self.channels
+            .get(channel as usize)
+            .map(|sound| sound.linked.unwrap_or(channel) as usize)
+    }
+
+    fn set_volume(&mut self, channel: u32, volume: i32) {
+        if let Some(index) = self.property_channel(channel) {
+            let sound = &mut self.channels[index];
+            sound.requested_volume = volume as f32;
+            if sound.pcm.is_some() {
+                sound.pcm_volume = volume;
+            }
+        }
+    }
+
+    fn set_pan(&mut self, channel: u32, pan: i32) {
+        if let Some(index) = self.property_channel(channel) {
+            self.channels[index].pcm_pan = pan.clamp(-100, 100);
+        }
+    }
+
     fn load(&mut self, record: &[u8], host: &mut dyn Host, output: &mut u32) -> Result<()> {
         let record = read::range(record, 0, 0x120)?;
         let logical = u32::from_le_bytes(record[..4].try_into().unwrap());
@@ -88,6 +110,8 @@ impl SoundState {
         sound.pcm = channel::load_pcm(services, name)?;
         if sound.pcm.is_some() {
             sound.file.extend_from_slice(name);
+            sound.pcm_volume = 100;
+            sound.pcm_pan = 0;
         }
         *output = u32::from(sound.pcm.is_some());
         sound.clock.elapsed = 0;
@@ -207,6 +231,32 @@ impl TaskObject for SoundObject {
             }
             182 => {
                 self.audio.unload(command.data[0]);
+                return Ok(CommandOutcome::finished(false));
+            }
+            187 => {
+                self.audio
+                    .set_volume(command.data[0], command.data[1] as i32);
+                return Ok(CommandOutcome::finished(false));
+            }
+            190 => {
+                if host.sound_stereo() != 0 {
+                    self.audio.set_pan(command.data[0], command.data[1] as i32);
+                }
+                return Ok(CommandOutcome::finished(false));
+            }
+            188 | 191 => {
+                *output = self
+                    .audio
+                    .property_channel(command.data[0])
+                    .and_then(|index| {
+                        let sound = &self.audio.channels[index];
+                        if command.code == 188 {
+                            sound.volume()
+                        } else {
+                            sound.pan()
+                        }
+                    })
+                    .unwrap_or(0) as u32;
                 return Ok(CommandOutcome::finished(false));
             }
             201 => {

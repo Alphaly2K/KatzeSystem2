@@ -297,6 +297,11 @@ pub trait Host {
         0
     }
 
+    /// SOUND/stereo 的原始开关；缺省使用配置构造值一。
+    fn sound_stereo(&self) -> u32 {
+        1
+    }
+
     /// 更新列表并按开关提交脏区或整幅图像；返回是否复制了画布像素。
     fn update_image_list(
         &mut self,
@@ -464,6 +469,10 @@ impl<T: Host + ?Sized> Host for &mut T {
 
     fn effect_speed(&self) -> u32 {
         (**self).effect_speed()
+    }
+
+    fn sound_stereo(&self) -> u32 {
+        (**self).sound_stereo()
     }
 
     fn fonts(&mut self) -> Option<&mut dyn crate::message::FontServices> {

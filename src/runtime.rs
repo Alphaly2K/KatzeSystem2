@@ -1307,6 +1307,10 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         self.host.message_time_scale
     }
 
+    fn sound_stereo(&self) -> u32 {
+        self.host.sound_stereo.unwrap_or(1)
+    }
+
     fn effect_speed(&self) -> u32 {
         self.host.system_settings.as_ref().map_or(0, |settings| {
             u32::from_le_bytes(settings.effects[..4].try_into().unwrap())

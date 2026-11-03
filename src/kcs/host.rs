@@ -51,6 +51,8 @@ pub struct HostState {
     pub sound_config_enabled: u32,
     pub sound_config: Option<crate::audio::SoundConfig>,
     pub sound_settings_dirty: u32,
+    /// SOUND/stereo 覆盖值；缺省使用配置构造值一。
+    pub sound_stereo: Option<u32>,
     pub sequence_name_mode: u32,
     pub surface_size: [u32; 2],
     /// 消息记录生成显示时间时使用的全局比例；None 表示尚无时间上下文。
@@ -145,6 +147,10 @@ impl Host for CoreHost<'_> {
 
     fn message_time_scale(&self) -> Option<u32> {
         self.host.message_time_scale
+    }
+
+    fn sound_stereo(&self) -> u32 {
+        self.host.sound_stereo.unwrap_or(1)
     }
 
     fn effect_speed(&self) -> u32 {
