@@ -6,6 +6,7 @@ use crate::{
 use std::collections::{BTreeMap, VecDeque};
 
 mod scripts;
+mod strings;
 mod wait;
 
 use scripts::{ChildScripts, ScriptDisposition, ScriptRequest};
@@ -763,7 +764,8 @@ impl<F: ObjectFactory> Store<'_, F> {
                         } else {
                             scene.interpreter.finish_event_handler()?;
                         }
-                    } else if self.fes_debug_command(scene, &args)?
+                    } else if scene.string_command(&args, line.offset, self.numbers)?
+                        || self.fes_debug_command(scene, &args)?
                         || self.fes_font_command(&args, line.offset)?
                         || self.fes_sound_command(scene, &args, line.offset)?
                     {
@@ -1153,7 +1155,8 @@ impl<F: ObjectFactory> Store<'_, F> {
                                 }
                                 continue;
                             }
-                            if self.fes_debug_command(scene, &args)?
+                            if scene.string_command(&args, line.offset, self.numbers)?
+                                || self.fes_debug_command(scene, &args)?
                                 || self.fes_font_command(&args, line.offset)?
                                 || self.fes_sound_command(scene, &args, line.offset)?
                             {
