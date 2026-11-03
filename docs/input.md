@@ -1,8 +1,8 @@
 # 输入区域与事件接口
 
-适配基线为 Windows CatSystem2 **2.6.1.90**。`input::Regions` 提供区域登记、属性命令、指针选择、滚轮和移动通知，`Events` 提供按键事件分派，`Keys` 提供设备扫描顺序、更新计数和重复触发。`InputObject` 和 `InputFactory` 已连接运行时的显式事件、对象命令、平滑定位与同步设备更新；配置绑定和平台采集继续实现。
+适配基线为 Windows CatSystem2 **2.6.1.90**。`input::Regions` 提供区域登记、属性命令、指针选择、滚轮和移动通知，`Events` 提供按键事件分派，`Keys` 提供扫描顺序、更新计数和重复触发，`DeviceKeys` 将物理按钮映射到逻辑键槽。`InputObject` 和 `InputFactory` 已连接运行时的显式事件、对象命令、平滑定位与同步设备更新；平台采集继续实现。
 
-命令 145 使用第一数据项选择键槽，依次查询设备组 0、1、2、3，并将原始掩码按位合并到返回槽。查询不请求首次重复状态，不受单键扫描开关或已保存计数影响，也不主动轮询设备；第二及第三数据项不改变查询。删除对象保留返回槽且跳过设备访问。槽号限于 0～79，越界返回诊断；设备查询失败保留已经完成的返回槽写入。
+命令 145 使用第一数据项选择键槽，依次查询绑定组 0、1、2、3，并将原始掩码按位合并到返回槽。查询不请求首次重复状态，不受单键扫描开关或已保存计数影响，也不主动轮询设备；第二及第三数据项不改变查询。删除对象保留返回槽且跳过设备访问。槽号限于 0～79，越界返回诊断；设备查询失败保留已经完成的返回槽写入。
 
 ## 登记与顺序
 
@@ -110,6 +110,20 @@ device_units_per_logical 初值为一，与 logical_scale 分别保存，调用�
 
 `set_suppressed(value)` 非零时拒绝事件，保留捕获和全局状态。其他合法事件先保存掩码到 `raw_state()`，包括 Repeat 的释放；`state()` 提供输入命令 137 的查询映射，仅将原值十六映射为二。InputObject 已将该状态绑定到命令及设备更新。
 
+## 物理按钮映射
+
+`DeviceKeys::from_xml(bytes)` 读取 `KEYCUSTOMIZE/key00`～`key79`。非空 name 启用对应槽，缺失或空 name 禁用；缺失数值取零。keyboard1～4、mouse1～4、joypad1～4、touch1～4 为四个绑定，rep_keyboard1～4 等为对应重复字段。XML 中的代码和重复值均截取低八位。`DeviceKeys::new([DeviceBinding; 80])` 接受显式配置，repeat 在这个接口保留完整 u32。`Default` 创建全部禁用的配置。
+
+`DeviceBinding` 的 codes 和 repeat 第一维按 `ButtonSource` 的 Keyboard、Mouse、Joypad、Touch 排列，第二维为第一至第四个绑定。扫描中的四组对应绑定编号，事件来源由掩码表示。`bindings()` 只读查询配置；`set_binding(key, binding)` 替换单槽，并清空该槽的按键掩码、重复元数据及强制查询计数。
+
+`button(source, code, pressed)` 接收平台按钮事件。code 截取低八位，pressed 非零视为按下。来源掩码分别为 1、2、4、16；Keyboard、Joypad 各自匹配对应来源的代码，Mouse 和 Touch 均匹配两类代码，同组同时匹配时优先取 Mouse 的重复值。掩码始终使用事件实际来源。同一事件按绑定组再按键槽更新，debug_mode 为零只更新前 32 槽，非零更新全部 80 槽；跳过的高槽保留旧状态且仍可查询。
+
+按下同时写本轮状态和持有状态，释放只清持有状态；一轮中按下后释放仍能产生一次按下。任一匹配事件都会改写该键槽唯一的 repeat 元数据，包括释放，四组共享最新值。`sample(key, group, repeat_requested)` 返回本轮 `KeySample`；repeat_requested 为 false 时只把返回的 repeat 设零，查询仍执行。
+
+`force(key, queries)` 设置强制按下的查询次数。计数非零时 sample 返回掩码一并递减计数，四组及额外查询共用同一计数，单位为查询次数。`commit()` 用持有态替换本轮状态，消费短按脉冲；`clear_pressed()` 仅清两份掩码，保留配置、repeat 及强制计数。键槽限于 0～79，组限于 0～3，越界返回诊断。
+
+平台 `InputDevice` 可在 poll 中调用 button，在 key 中调用 sample，在 commit 中调用同名方法。窗口事件采集、物理代码换算、配置自动装载及真实设备尚未接入。
+
 ## 设备按键扫描
 
 `Keys::default()` 创建四组、每组八十键的零状态，八十个键开关均为一。`scan(services)` 按组 0～3、每组键 0～79 的顺序调用 `KeyServices::sample`，取得 `KeySample { mask, repeat }`。键开关为零时四组都跳过查询和状态更新，已有状态冻结。命令 151 以 `data[0]` 选择键槽、`data[1]` 设置原始开关；152 将全部开关恢复为一，均保留结果槽。非法键槽返回诊断。
@@ -120,7 +134,7 @@ device_units_per_logical 初值为一，与 logical_scale 分别保存，调用�
 
 `KeyServices::dispatch(keys, transition)` 同步接收按下、释放或重复，返回 true 表示消费。消费立即结束本轮剩余扫描，`scan` 返回 true；否则继续，完整扫描结束返回 false。首次重复之前，正计数的已有消费标记也会中断下一轮扫描，即使本轮没有新事件。进入重复阶段后，未达到间隔阈值的轮次允许继续扫描。释放消费结束后，下一轮零计数不会继续阻挡后续键。
 
-`KeyTransition` 保留来源 group，事件掩码将设备原值十六映射为二，`Keys` 中仍保存十六。`Events::dispatch_transition(sender, regions, transition, point, route)` 将它转换为消息 4 和 `[key, pressed, 0]`；group 不写入消息。按下或释放先解除分派抑制，重复保留抑制。point 由输入宿主提供当前逻辑坐标。
+`KeyTransition` 保留绑定组 group，事件掩码将设备原值十六映射为二，`Keys` 中仍保存十六。`Events::dispatch_transition(sender, regions, transition, point, route)` 将它转换为消息 4 和 `[key, pressed, 0]`；group 不写入消息。按下或释放先解除分派抑制，重复保留抑制。point 由输入宿主提供当前逻辑坐标。
 
 查询和分派交错执行，设备可在后续查询时提供新状态；分派回调也可通过 Keys 命令改变本轮后续键开关。错误原样返回，已发生的状态更新保留。Keys 单独负责扫描，InputState 的设备更新再组合轮询前后处理、滚轮、移动阈值和自动光标。
 
@@ -161,7 +175,7 @@ device_units_per_logical 初值为一，与 logical_scale 分别保存，调用�
 
 自动光标显示／隐藏先更新 cursor_shown，再调用 show_cursor；需通知时广播消息 22，sender 为输入任务、target 为根编号零、data 为 `[0, visible, 0]`。回调可查询 149 或调用 150，修改即时影响后续判断；消费某个接收者不终止广播。手动命令 150 自身不广播，也不改变自动状态。
 
-move_remaining 为正时，帧首取样后进入下文的平滑定位分支，再继续按键、滚轮、拖动和收尾。配置绑定及平台采集尚未提供。未绑定设备时，InputObject 主体返回缺少设备的诊断，显式事件入口仍可调用。
+move_remaining 为正时，帧首取样后进入下文的平滑定位分支，再继续按键、滚轮、拖动和收尾。DeviceKeys 提供配置绑定，平台采集尚未提供。未绑定设备时，InputObject 主体返回缺少设备的诊断，显式事件入口仍可调用。
 
 ## 平滑定位
 

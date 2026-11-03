@@ -16,7 +16,7 @@ pub struct KeyState {
     pub consumed: bool,
 }
 
-/// group 只标识设备来源；转换为对象消息时不写入数据项。
+/// group 标识第一至第四个绑定；转换为对象消息时不写入数据项。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct KeyTransition {
     pub group: u32,
@@ -61,7 +61,7 @@ impl Default for Keys {
 }
 
 impl Keys {
-    /// 第一维为键槽，第二维为设备组。
+    /// 第一维为键槽，第二维为绑定组。
     pub fn records(&self) -> &[[KeyState; 4]; 80] {
         &self.records
     }

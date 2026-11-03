@@ -28,6 +28,8 @@ mod coordinates;
 pub use coordinates::CoordinateMap;
 mod device;
 pub use device::{InputDevice, PointerSample, PointerState};
+mod bindings;
+pub use bindings::{ButtonSource, DeviceBinding, DeviceKeys};
 mod update;
 
 /// 输入区域的十五 DWORD 记录；可移植位掩码以存在标记代替指针槽。

@@ -11,7 +11,7 @@ pub struct PointerSample {
 pub trait InputDevice {
     fn poll(&mut self) -> Result<()>;
     fn pointer(&mut self) -> Result<PointerSample>;
-    /// repeat 表示本次是否需要首次重复开关，掩码查询仍会执行。
+    /// group 为绑定组 0～3；repeat 表示是否需要首次重复开关，掩码查询仍会执行。
     fn key(&mut self, key: u32, group: u32, repeat: bool) -> Result<KeySample>;
     fn take_wheel(&mut self) -> Result<u32>;
     fn is_foreground(&mut self) -> Result<bool>;
