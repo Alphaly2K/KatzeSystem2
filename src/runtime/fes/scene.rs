@@ -6,6 +6,7 @@ use crate::{
 use std::collections::{BTreeMap, VecDeque};
 
 mod background;
+mod save;
 mod scripts;
 mod strings;
 mod wait;
@@ -41,6 +42,7 @@ pub struct Scene {
     pub(super) draw_call: Option<super::draw::DrawCall>,
     pub(super) blend_call: Option<super::blend::BlendCall>,
     pub(super) preload: super::preload::Preload,
+    save_query: Option<save::SaveQuery>,
 }
 
 struct Invocation {
@@ -129,6 +131,7 @@ impl Scene {
             draw_call: None,
             blend_call: None,
             preload,
+            save_query: None,
         })
     }
 
@@ -348,6 +351,7 @@ impl Scene {
             || self.object_event.is_some()
             || self.media_preparation.is_some()
             || self.preload.is_pending()
+            || self.save_query.is_some()
     }
 
     /// 只处理装载期声明和属性，不进入 START 或推进下层媒体对象。
@@ -780,6 +784,13 @@ impl<F: ObjectFactory> Store<'_, F> {
                         || self.fes_font_command(&args, line.offset)?
                         || self.fes_sound_command(scene, &args, line.offset)?
                     {
+                        scene.interpreter.resume();
+                    } else if let Some(complete) =
+                        self.fes_save_command(scene, &args, line.offset)?
+                    {
+                        if !complete {
+                            return Ok(false);
+                        }
                         scene.interpreter.resume();
                     } else if args.first().is_some_and(|name| name == b"decode") {
                         if scene.deferred_decodes == crate::read::MAX_ITEMS {
@@ -1227,6 +1238,15 @@ impl<F: ObjectFactory> Store<'_, F> {
                                 || self.fes_font_command(&args, line.offset)?
                                 || self.fes_sound_command(scene, &args, line.offset)?
                             {
+                                scene.interpreter.resume();
+                                continue;
+                            }
+                            if let Some(complete) =
+                                self.fes_save_command(scene, &args, line.offset)?
+                            {
+                                if !complete {
+                                    return Ok(false);
+                                }
                                 scene.interpreter.resume();
                                 continue;
                             }

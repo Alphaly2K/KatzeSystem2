@@ -4,10 +4,16 @@ use crate::{Error, Result, read};
 
 const BLOCK: usize = 0x80000;
 
-/// 接收已展开的 CP932 文件名，并按任务的存档目录读取原始 CSS 文件。
-/// `None` 表示文件不存在或无法打开；未配置服务时宿主返回诊断。
+/// 按任务的存档目录读取 CSS 文件及查询文件修改时间，名称使用 CP932 字节。
+/// `None` 表示文件不存在或无法打开；未接入所需服务时返回诊断。
 pub trait SaveServices {
     fn read(&mut self, task_id: u32, name: &[u8]) -> Result<Option<Vec<u8>>>;
+
+    /// 查询同一目录下文件的最后修改时间，使用自 1601-01-01 UTC 起的 100 ns 计数。
+    /// None 表示文件无法打开；未接入元数据查询时返回诊断。
+    fn modified_time(&mut self, _task_id: u32, _name: &[u8]) -> Result<Option<u64>> {
+        Err(Error::new(0, "存档修改时间查询服务尚未接入"))
+    }
 }
 
 /// 连续的编号／长度／正文记录，保留重复编号、声明用量和逻辑容量。

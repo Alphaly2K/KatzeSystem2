@@ -173,7 +173,7 @@ impl<F: ObjectFactory> Runtime<F> {
         self.resources.services = Some(Box::new(services));
     }
 
-    /// 配置按任务存档目录读取 CSS 文件的服务；已有数据容器继续保留。
+    /// 配置按任务存档目录读取 CSS 文件及查询修改时间的服务；已有容器继续保留。
     pub fn set_save_services(&mut self, services: impl crate::save::SaveServices + 'static) {
         self.host.save_services = Some(Box::new(services));
     }
