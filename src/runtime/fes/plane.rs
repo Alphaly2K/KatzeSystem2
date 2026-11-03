@@ -79,6 +79,7 @@ impl<F: ObjectFactory> Store<'_, F> {
             return Err(Error::new(0, "FES 所属任务不存在"));
         }
         self.restore_fes_draw_submission(owner, objects)?;
+        objects.refresh_image_names(&self.host.languages)?;
         let object = objects
             .get(handle)
             .ok_or_else(|| Error::new(0, "FES 对象标识无效"))?;

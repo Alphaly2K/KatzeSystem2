@@ -300,10 +300,7 @@ impl ImageState {
     ) -> Result<bool> {
         if let Some(file) = &attributes.file {
             self.requested_file = file.clone();
-            if !file.is_empty() {
-                let next = transform_name(file)?;
-                self.base.updates.rebuild |= replace(&mut self.file, next);
-            }
+            self.refresh_file(&mut transform_name)?;
         }
         let dirty = self.base.apply_visual(attributes, bank);
         match attributes.image_number {
@@ -328,6 +325,18 @@ impl ImageState {
             self.path_mode = path_mode;
         }
         Ok(dirty)
+    }
+
+    /// 按当前语言重新计算来源；空请求保留旧文件，变化时请求重建。
+    pub fn refresh_file(
+        &mut self,
+        mut transform_name: impl FnMut(&[u8]) -> Result<Vec<u8>>,
+    ) -> Result<()> {
+        if self.requested_file.first().is_some_and(|&byte| byte != 0) {
+            let next = transform_name(&self.requested_file)?;
+            self.base.updates.rebuild |= replace(&mut self.file, next);
+        }
+        Ok(())
     }
 
     pub fn selected_frame(&self) -> i32 {

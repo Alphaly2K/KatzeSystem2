@@ -59,6 +59,7 @@ pub struct HostState {
     pub message_time_scale: Option<u32>,
     pub message_defaults: Option<crate::message::MessageDefaults>,
     pub system_settings: Option<crate::settings::SystemSettings>,
+    pub languages: crate::language::LanguageState,
     pub save_services: Option<Box<dyn crate::save::SaveServices>>,
     /// 外层输入宿主提供的当前逻辑画布坐标；保留画布外的值。
     pub pointer_position: [i32; 2],
@@ -207,6 +208,18 @@ pub(crate) fn call_native(
     arguments: &[u8],
     vm: &mut Interpreter,
 ) -> Result<NativeReturn> {
+    if index == 1062 {
+        if arguments.len() != 8 {
+            return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+        }
+        let mode = u32::from_le_bytes(arguments[..4].try_into().unwrap());
+        let address = u32::from_le_bytes(arguments[4..].try_into().unwrap());
+        if mode <= 1 {
+            let bytes = host.languages.expand(vm.read_string(address)?, mode)?;
+            write_string(vm, address, &bytes, 1)?;
+        }
+        return Ok(NativeReturn::Continue);
+    }
     if matches!(index, 238 | 244 | 246..=248 | 254 | 389 | 469) {
         return super::data::call(host, index, arguments, vm);
     }

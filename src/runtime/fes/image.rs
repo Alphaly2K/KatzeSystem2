@@ -3,6 +3,23 @@ use crate::graphics::Rect;
 use crate::runtime::{ObjectFactory, Store, kind};
 use crate::{Error, Result};
 
+impl Objects {
+    pub(super) fn refresh_image_names(
+        &mut self,
+        languages: &crate::language::LanguageState,
+    ) -> Result<()> {
+        if &self.languages != languages {
+            for object in self.objects.values_mut() {
+                if let Some(state) = object.state.image_source_mut() {
+                    state.refresh_file(|name| languages.expand_image(name))?;
+                }
+            }
+            self.languages = languages.clone();
+        }
+        Ok(())
+    }
+}
+
 impl<F: ObjectFactory> Store<'_, F> {
     pub(super) fn update_fes_cimage(
         &mut self,

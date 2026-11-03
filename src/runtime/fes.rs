@@ -291,6 +291,7 @@ pub struct Objects {
     motion_update: Option<motion::Traversal>,
     draw_restore: Option<u32>,
     preloaded_images: preload::Cache,
+    languages: crate::language::LanguageState,
 }
 
 impl Objects {
@@ -332,6 +333,7 @@ impl Objects {
             motion_update: None,
             draw_restore: None,
             preloaded_images: std::rc::Rc::default(),
+            languages: crate::language::LanguageState::default(),
         })
     }
 

@@ -363,7 +363,9 @@ impl Scene {
             }
             match self.interpreter.run(numbers, 1)? {
                 Step::Yield => (),
-                Step::Event(event) if self.apply_initialization(&event, numbers)? => {
+                Step::Event(event)
+                    if self.apply_initialization(&event, numbers, |name| Ok(name.to_vec()))? =>
+                {
                     self.interpreter.resume();
                 }
                 _ => return Err(Error::new(0, "FES 装载期出现执行事件")),
@@ -376,6 +378,7 @@ impl Scene {
         &mut self,
         event: &fes::Event,
         numbers: &mut crate::expression::State,
+        transform_name: impl FnMut(&[u8]) -> Result<Vec<u8>>,
     ) -> Result<bool> {
         match event {
             fes::Event::CreateObject(definition) => {
@@ -383,8 +386,7 @@ impl Scene {
                 self.objects.publish_bindings(&mut self.interpreter);
             }
             fes::Event::InitializeObject(initialization) => {
-                self.objects
-                    .initialize(initialization, |name| Ok(name.to_vec()))?;
+                self.objects.initialize(initialization, transform_name)?;
             }
             fes::Event::Declarations(declarations) => {
                 if let Some(declaration) = declarations.iter().find(|declaration| {
@@ -831,9 +833,9 @@ impl<F: ObjectFactory> Store<'_, F> {
                     }
                 }
                 Step::Event(fes::Event::InitializeObject(initialization)) => {
-                    scene
-                        .objects
-                        .initialize(&initialization, |name| Ok(name.to_vec()))?;
+                    scene.objects.initialize(&initialization, |name| {
+                        self.host.languages.expand_image(name)
+                    })?;
                     scene.interpreter.resume();
                 }
                 Step::Event(fes::Event::Exit(code)) => {
@@ -1181,7 +1183,9 @@ impl<F: ObjectFactory> Store<'_, F> {
                 }
                 Step::Event(event) => {
                     let now = scene.invocation.as_ref().unwrap().now;
-                    if scene.apply_initialization(&event, self.numbers)? {
+                    if scene.apply_initialization(&event, self.numbers, |name| {
+                        self.host.languages.expand_image(name)
+                    })? {
                         scene.interpreter.resume();
                         continue;
                     }

@@ -11,6 +11,7 @@ mod handles;
 pub mod hg3;
 pub mod input;
 pub mod kcs;
+pub mod language;
 pub mod message;
 mod read;
 pub mod resource;

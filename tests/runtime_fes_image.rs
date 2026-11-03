@@ -1176,6 +1176,76 @@ fn fes_buttons_retry_input_after_image_loading_and_update_real_regions_and_pixel
 }
 
 #[test]
+fn language_changes_reload_image_pixels_without_losing_requested_names_or_empty_file_state() {
+    let (mut runtime, mut objects, _) = setup();
+    runtime.host_mut().languages = katze_system2::language::LanguageState {
+        prefixes: vec![b"aa".to_vec(), b"bb".to_vec()],
+        message_index: 1,
+        ..Default::default()
+    };
+    let reads = Rc::new(RefCell::new(Vec::new()));
+    runtime.set_resources(PixelFiles {
+        files: BTreeMap::from([
+            (b"sprite_aa_bb".to_vec(), pixel_file(0xff12_3456)),
+            (b"sprite_bb_bb".to_vec(), pixel_file(0xffab_cdef)),
+        ]),
+        reads: reads.clone(),
+    });
+    let sprite = define(&mut objects, "IMAGE", "sprite");
+    initialize(
+        &mut objects,
+        "sprite",
+        ObjectAttributes {
+            file: Some(b"sprite_%LANG%_%LANG_M%".to_vec()),
+            image_number: Some(7),
+            priority: Some(5),
+            display: Some(1),
+            ..Default::default()
+        },
+    );
+    runtime.update_fes_object(0, &mut objects, sprite).unwrap();
+    let wrapper = objects.get(sprite).unwrap().image_handle().unwrap();
+    let first_pixels = runtime.images().pixel_handle(wrapper).unwrap();
+    assert_eq!(
+        runtime.images().get(wrapper).unwrap().surface().pixel(0, 0),
+        Some(0xff12_3456)
+    );
+    runtime.update_fes_object(0, &mut objects, sprite).unwrap();
+    assert_eq!(
+        runtime.images().pixel_handle(wrapper).unwrap(),
+        first_pixels
+    );
+    assert_eq!(reads.borrow().as_slice(), [b"sprite_aa_bb".to_vec()]);
+    runtime.host_mut().languages.primary_index = 1;
+    runtime.update_fes_object(0, &mut objects, sprite).unwrap();
+    assert_eq!(objects.get(sprite).unwrap().image_handle(), Some(wrapper));
+    assert_eq!(
+        runtime.images().get(wrapper).unwrap().surface().pixel(0, 0),
+        Some(0xffab_cdef)
+    );
+    let ObjectState::Image(state) = &objects.get(sprite).unwrap().state else {
+        unreachable!()
+    };
+    assert_eq!(state.requested_file, b"sprite_%LANG%_%LANG_M%");
+    assert_eq!(state.file, b"sprite_bb_bb");
+    initialize(
+        &mut objects,
+        "sprite",
+        ObjectAttributes {
+            file: Some(Vec::new()),
+            ..Default::default()
+        },
+    );
+    runtime.host_mut().languages.primary_index = 0;
+    runtime.update_fes_object(0, &mut objects, sprite).unwrap();
+    assert_eq!(
+        runtime.images().get(wrapper).unwrap().surface().pixel(0, 0),
+        Some(0xffab_cdef)
+    );
+    assert_eq!(reads.borrow().len(), 2);
+}
+
+#[test]
 fn image_reload_preserves_wrapper_and_old_shares_while_updating_the_final_frame() {
     let (mut runtime, mut objects, list) = setup();
     let reads = Rc::new(RefCell::new(Vec::new()));
