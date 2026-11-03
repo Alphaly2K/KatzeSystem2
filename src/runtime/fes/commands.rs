@@ -335,6 +335,27 @@ impl Objects {
                 number(3, 0, state)?;
             }
             let object = &mut self.get_mut(handle).unwrap().state;
+            if name == b"getpos" {
+                let position = if let Some(image) = object.image() {
+                    let [x, y] = image.position.map(super::plane::integer_position);
+                    [x, y, 0]
+                } else if let Some(plane) = object.plane() {
+                    std::array::from_fn(|i| super::plane::integer_position(plane.position[i]))
+                } else if let Some(control) = object.control() {
+                    [control.position, 0, 0]
+                } else {
+                    continue;
+                };
+                for (index, value) in values.into_iter().zip(position) {
+                    if let Some(slot) = state.shared.get_mut(index as usize) {
+                        *slot = value;
+                    }
+                }
+                continue;
+            }
+            if name == b"pos" && (object.image().is_some() || object.plane().is_some()) {
+                return Err(Error::new(offset, "FES 图形 pos 需要场景运动资源服务"));
+            }
             if name == b"load" {
                 if let ObjectState::Sound(sound) = object {
                     // 通用 load 分派已经求值一次，声音分支按原顺序重新求值。
@@ -359,17 +380,10 @@ impl Objects {
                 match name {
                     b"pos" => slider.set_position(values[0], 0),
                     b"page" => slider.set_range([values[0], values[1]]),
-                    b"getpos" => {
-                        for (index, value) in values.into_iter().zip([slider.position, 0, 0]) {
-                            if let Some(slot) = state.shared.get_mut(index as usize) {
-                                *slot = value;
-                            }
-                        }
-                    }
                     b"load" => slider.set_file(args.get(2).map_or(b"", Vec::as_slice))?,
                     _ => unreachable!(),
                 }
-            } else if !matches!(object, ObjectState::Base) {
+            } else if !matches!(object, ObjectState::Base) && name != b"pos" {
                 return Err(Error::new(offset, "FES 此对象类型的数值或装载命令尚未接入"));
             }
         }

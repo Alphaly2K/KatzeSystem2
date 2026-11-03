@@ -64,6 +64,103 @@ fn plane(objects: &Objects, handle: u32) -> &fes::CPlaneState {
     state
 }
 
+struct MissingMotion;
+impl ResourceServices for MissingMotion {
+    fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+        assert_eq!((category, name), (b"mot".as_slice(), b"p".as_slice()));
+        Ok(b"motions/p.kcs".to_vec())
+    }
+    fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
+        assert_eq!(
+            (name, mode),
+            (b"motions/p.kcs".as_slice(), ResourceMode::LooseFirst)
+        );
+        Ok(None)
+    }
+}
+
+#[test]
+fn scene_position_commands_move_descendant_pixels_without_rebuilding_the_source() {
+    let source = b"#DEFINE\nCPLANE group\nCPLANE panel\n#OBJECT DISP SIZE\ngroup 1 0,0\n#OBJECT PARENT SIZE COLOR DISP PRI\npanel group 1,1 0xff123456 1 0\n#START\ngroup pos 2 1\npanel pos 1 0\nwait 99\n#_FES_SLEEP_\ngroup pos 4\n";
+    for budget in [1, 4096] {
+        let (mut runtime, _) = setup();
+        runtime.set_budget(budget, 10000);
+        runtime.set_resources(MissingMotion);
+        *runtime.drawing_mut() = DrawingContext {
+            enabled: true,
+            active: true,
+            target: Some(RenderTarget::new([8, 4]).unwrap()),
+            ..Default::default()
+        };
+        let mut scene = katze_system2::runtime::fes::Scene::new(
+            fes::Program::from_text(source).unwrap(),
+            runtime.host().handle_allocator(),
+        )
+        .unwrap();
+        let mut complete = false;
+        for _ in 0..256 {
+            if runtime.update_fes_scene(0, &mut scene, 100).unwrap() {
+                complete = true;
+                break;
+            }
+        }
+        assert!(complete);
+        let group = scene.objects().lookup("group", 0).unwrap();
+        let panel = scene.objects().lookup("panel", 0).unwrap();
+        let mut task = None;
+        for step in 0..2 {
+            if step == 1 {
+                let mut complete = false;
+                for _ in 0..256 {
+                    if runtime
+                        .dispatch_fes_system_block(0, &mut scene, "_FES_SLEEP_")
+                        .unwrap()
+                    {
+                        complete = true;
+                        break;
+                    }
+                }
+                assert!(complete);
+                assert!(plane(scene.objects(), panel).is_dirty());
+            }
+            let objects = scene.objects_mut().unwrap();
+            runtime.update_fes_object(0, objects, group).unwrap();
+            runtime.update_fes_object(0, objects, panel).unwrap();
+            let current = objects.get(panel).unwrap().task_id().unwrap();
+            if let Some(previous) = task {
+                assert_eq!(current, previous);
+            }
+            task = Some(current);
+            assert_eq!(
+                runtime
+                    .drawables()
+                    .get(current)
+                    .unwrap()
+                    .transform()
+                    .position(),
+                [3. + step as f32 * 2., 1., 0.]
+            );
+            runtime.drawing_mut().target = Some(RenderTarget::new([8, 4]).unwrap());
+            runtime
+                .render_triangles(&Projection::default(), *Transform::default().matrix())
+                .unwrap();
+            let target = runtime.drawing().target.as_ref().unwrap();
+            for y in 0..4 {
+                for x in 0..8 {
+                    assert_eq!(
+                        target.pixel(x, y),
+                        Some(if x == 3 + step * 2 && y == 1 {
+                            0xff123456
+                        } else {
+                            0
+                        })
+                    );
+                }
+            }
+        }
+    }
+}
+
 #[test]
 fn motion_color_scale_and_matrix_reach_plane_drawables_without_changing_priority_or_vram() {
     for kind in ["CPLANE", "PLANE"] {

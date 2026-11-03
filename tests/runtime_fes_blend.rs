@@ -49,6 +49,10 @@ fn motion() -> Vec<u8> {
     code.push(3);
     code.extend(0x23000000u32.to_le_bytes());
     code.push(0x3b);
+    encoded_motion(&code)
+}
+
+fn encoded_motion(code: &[u8]) -> Vec<u8> {
     let length = code.len() as u32;
     let mut bytes = b"KCS\0".to_vec();
     for word in [
@@ -68,9 +72,91 @@ fn motion() -> Vec<u8> {
         bytes.extend(word.to_le_bytes());
     }
     let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
-    encoder.write_all(&code).unwrap();
+    encoder.write_all(code).unwrap();
     bytes.extend(encoder.finish().unwrap());
     bytes
+}
+
+#[test]
+fn position_keeps_optional_axes_and_arguments_across_motion_retry_and_all_script_entries() {
+    let source = b"#DEFINE\nCPLANE panel\n#START\npanel pos ($0+=1)\npanel getpos 1 2 3\nwait 99\n#_FES_SLEEP_\npanel pos 9\npanel getpos 4 5 6\n#panel.PUSH_L\n@ pos 11 12 13\n@ getpos 4 5 6\n";
+    for budget in [1, 4096] {
+        let mut code = Vec::new();
+        for axis in 0..3 {
+            code.extend([0x15, 3]);
+            code.extend((0x80000018u32 + axis * 4).to_le_bytes());
+            code.push(0x14);
+            code.extend((0x8000009cu32 + axis * 4).to_le_bytes());
+        }
+        code.extend([0x2d, 0x3b]);
+        let files = Files {
+            motion: Some(encoded_motion(&code)),
+            ..Default::default()
+        };
+        files.fail.set(true);
+        let (mut runtime, mut scene) = setup(source, budget, files.clone());
+        while !scene.prepare(runtime.numbers_mut(), budget).unwrap() {}
+        scene
+            .objects_mut()
+            .unwrap()
+            .initialize(
+                &katze_system2::fes::ObjectInitialization {
+                    target: ObjectReference {
+                        name: "panel".into(),
+                        bank: 0,
+                    },
+                    attributes: katze_system2::fes::ObjectAttributes {
+                        position: [Some(0), Some(7), Some(3)],
+                        ..Default::default()
+                    },
+                },
+                |_| unreachable!(),
+            )
+            .unwrap();
+        assert!(update(&mut runtime, &mut scene, 100).is_err());
+        assert_eq!(runtime.numbers().shared[0], 1);
+        let target = scene.objects().lookup("panel", 0).unwrap();
+        let ObjectState::CPlane(panel) = &scene.objects().get(target).unwrap().state else {
+            unreachable!()
+        };
+        assert_eq!(panel.position(), [1., 7., 3., 1.]);
+        assert!(scene.objects().get(target).unwrap().motions().is_empty());
+        files.fail.set(false);
+        update(&mut runtime, &mut scene, 100).unwrap();
+        assert_eq!(runtime.numbers().shared[..4], [1, 1, 7, 3]);
+        assert_eq!((files.resolves.get(), files.reads.get()), (1, 2));
+        let deadline = scene.deadline();
+        system(&mut runtime, &mut scene);
+        assert_eq!(runtime.numbers().shared[4..7], [9, 7, 3]);
+        let task = scene
+            .objects()
+            .get(target)
+            .unwrap()
+            .motions()
+            .task(2)
+            .unwrap();
+        assert_eq!(
+            task.state().unwrap().parameters[..3],
+            [9f32, 7., 3.].map(f32::to_bits)
+        );
+        let reference = ObjectReference {
+            name: "panel".into(),
+            bank: 0,
+        };
+        let mut handled = None;
+        for _ in 0..256 {
+            handled = runtime
+                .dispatch_fes_event(0, &mut scene, Some(&reference), 2)
+                .unwrap();
+            if handled.is_some() {
+                break;
+            }
+        }
+        assert_eq!(handled, Some(true));
+        assert_eq!(runtime.numbers().shared[4..7], [11, 12, 13]);
+        assert_eq!(scene.deadline(), deadline);
+        assert_eq!((files.resolves.get(), files.reads.get()), (3, 2));
+    }
 }
 
 fn setup(source: &[u8], budget: usize, files: Files) -> (Runtime<Reject>, Scene) {

@@ -31,6 +31,75 @@ fn object_command(
 }
 
 #[test]
+fn getpos_reads_local_coordinates_truncates_nonfinite_values_and_skips_array_arguments() {
+    let mut objects = Objects::new(HandleAllocator::default()).unwrap();
+    let ids = objects.define(&definition("CIMAGE", "item", 3)).unwrap();
+    let ObjectState::CImage(image) = &mut objects.get_mut(ids[0]).unwrap().state else {
+        unreachable!()
+    };
+    image.position = [8.75, -9.75];
+    objects.get_mut(ids[1]).unwrap().state = ObjectState::CPlane(Box::default());
+    let ObjectState::CPlane(plane) = &mut objects.get_mut(ids[1]).unwrap().state else {
+        unreachable!()
+    };
+    let mut properties = plane.motion_properties();
+    properties[6] = f32::INFINITY.to_bits();
+    properties[7] = f32::NAN.to_bits();
+    properties[8] = (-3.75f32).to_bits();
+    plane.apply_motion_properties(&properties);
+    objects.get_mut(ids[2]).unwrap().state = ObjectState::Sound(Box::default());
+    let mut interpreter =
+        fes::Interpreter::new(fes::Program::from_text(b"#START\nwait 9\n").unwrap()).unwrap();
+    objects.publish_bindings(&mut interpreter);
+    let mut numbers = State::new(4);
+    assert!(
+        object_command(
+            &mut objects,
+            &mut interpreter,
+            &mut numbers,
+            b"item getpos ($0+=1) ($0+=1)"
+        )
+        .unwrap()
+    );
+    assert_eq!(numbers.shared, [0; 4]);
+    assert!(
+        object_command(
+            &mut objects,
+            &mut interpreter,
+            &mut numbers,
+            b"item[0] getpos 0 1 2 ($3+=1)"
+        )
+        .unwrap()
+    );
+    assert_eq!(numbers.shared, [8, -9, 0, 0]);
+    assert!(
+        object_command(
+            &mut objects,
+            &mut interpreter,
+            &mut numbers,
+            b"item[1] getpos 0 1 2"
+        )
+        .unwrap()
+    );
+    assert_eq!(numbers.shared, [i32::MIN, i32::MIN, -3, 0]);
+    assert!(
+        object_command(
+            &mut objects,
+            &mut interpreter,
+            &mut numbers,
+            b"item[2] getpos ($3+=1)"
+        )
+        .unwrap()
+    );
+    assert_eq!(numbers.shared, [i32::MIN, i32::MIN, -3, 1]);
+    let ObjectState::CImage(image) = &objects.get(ids[0]).unwrap().state else {
+        unreachable!()
+    };
+    assert_eq!(image.position, [8.75, -9.75]);
+    assert!(!image.updates.is_dirty());
+}
+
+#[test]
 fn plane_links_evaluate_once_stop_at_holes_or_controls_and_only_invalidate_changed_references() {
     for hole in [false, true] {
         let mut objects = Objects::new(HandleAllocator::default()).unwrap();

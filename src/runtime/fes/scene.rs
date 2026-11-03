@@ -40,7 +40,7 @@ pub struct Scene {
     motion_call: Option<MotionCall>,
     motion_stop: Option<MotionStop>,
     pub(super) draw_call: Option<super::draw::DrawCall>,
-    pub(super) blend_call: Option<super::blend::BlendCall>,
+    pub(super) property_call: Option<super::properties::PropertyCall>,
     pub(super) preload: super::preload::Preload,
     save_query: Option<save::SaveQuery>,
 }
@@ -129,7 +129,7 @@ impl Scene {
             motion_call: None,
             motion_stop: None,
             draw_call: None,
-            blend_call: None,
+            property_call: None,
             preload,
             save_query: None,
         })
@@ -811,7 +811,9 @@ impl<F: ObjectFactory> Store<'_, F> {
                         } else {
                             scene.interpreter.resume();
                         }
-                    } else if let Some(complete) = self.run_fes_blend(scene, &args, line.offset)? {
+                    } else if let Some(complete) =
+                        self.run_fes_property(scene, &args, line.offset)?
+                    {
                         if !complete {
                             return Ok(false);
                         }
@@ -1272,7 +1274,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                                     scene.publish_notifications();
                                 }
                             } else if let Some(complete) =
-                                self.run_fes_blend(scene, &args, line.offset)?
+                                self.run_fes_property(scene, &args, line.offset)?
                             {
                                 if !complete {
                                     return Ok(false);
