@@ -953,7 +953,7 @@ fn drawings(host: &mut dyn Host) -> Result<&mut Drawables> {
         .ok_or_else(|| Error::new(0, "宿主未提供绘图对象服务"))
 }
 
-/// 创建二维平面和图像列表，其余类型委托已有工厂。
+/// 创建二维平面、图像列表和画布淡入淡出任务，其余类型委托已有工厂。
 pub struct GraphicsFactory<F> {
     pub fallback: F,
 }
@@ -963,6 +963,7 @@ impl<F: ObjectFactory> ObjectFactory for GraphicsFactory<F> {
         match object_kind {
             kind::PLANE => Ok(Box::new(PlaneObject::new(id))),
             kind::IMAGE_LIST => Ok(Box::new(super::ImageListObject::new(id))),
+            kind::FADE => Ok(Box::new(super::FadeObject::new())),
             _ => self.fallback.create(id, object_kind, name),
         }
     }

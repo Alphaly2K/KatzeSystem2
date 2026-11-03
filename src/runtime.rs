@@ -39,6 +39,7 @@ pub mod kind {
     pub const ORDINARY: u32 = 12;
     pub const SOUND: u32 = 13;
     pub const IMAGE_LIST: u32 = 15;
+    pub const FADE: u32 = 27;
     pub const FES: u32 = 34;
     pub const SCROLL2: u32 = 41;
     pub const SLIDER: u32 = 42;
@@ -1304,6 +1305,12 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
 
     fn message_time_scale(&self) -> Option<u32> {
         self.host.message_time_scale
+    }
+
+    fn effect_speed(&self) -> u32 {
+        self.host.system_settings.as_ref().map_or(0, |settings| {
+            u32::from_le_bytes(settings.effects[..4].try_into().unwrap())
+        })
     }
 
     fn message_defaults(&self) -> Result<&crate::message::MessageDefaults> {

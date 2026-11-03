@@ -64,6 +64,10 @@ impl<H: Host, S: SystemServices> Host for SystemHost<'_, H, S> {
         self.inner.images_mut()
     }
 
+    fn effect_speed(&self) -> u32 {
+        self.inner.effect_speed()
+    }
+
     fn fonts(&mut self) -> Option<&mut dyn crate::message::FontServices> {
         self.inner.fonts()
     }

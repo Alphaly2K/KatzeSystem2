@@ -145,6 +145,12 @@ impl Host for CoreHost<'_> {
         self.host.message_time_scale
     }
 
+    fn effect_speed(&self) -> u32 {
+        self.host.system_settings.as_ref().map_or(0, |settings| {
+            u32::from_le_bytes(settings.effects[..4].try_into().unwrap())
+        })
+    }
+
     fn surface_size(&self) -> [u32; 2] {
         self.host.surface_size
     }

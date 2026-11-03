@@ -267,7 +267,7 @@ pub trait Host {
             .ok_or_else(|| Error::new(0, "宿主未提供绘图对象服务"))
     }
 
-    /// 将顶端起始的消息原始像素复制到画布，返回是否触及目标。
+    /// 将顶端起始的原始像素复制到画布，返回是否触及目标。
     fn submit_message(
         &mut self,
         _surface: &crate::graphics::Surface,
@@ -290,6 +290,11 @@ pub trait Host {
     /// 图像对象的可变存储；使用者持有期间必须沿用同一存储。
     fn images_mut(&mut self) -> Option<&mut crate::graphics::Images> {
         None
+    }
+
+    /// 全局画面效果速度，缺省使用配置构造值零。
+    fn effect_speed(&self) -> u32 {
+        0
     }
 
     /// 更新列表并按开关提交脏区或整幅图像；返回是否复制了画布像素。
@@ -455,6 +460,10 @@ impl<T: Host + ?Sized> Host for &mut T {
 
     fn images_mut(&mut self) -> Option<&mut crate::graphics::Images> {
         (**self).images_mut()
+    }
+
+    fn effect_speed(&self) -> u32 {
+        (**self).effect_speed()
     }
 
     fn fonts(&mut self) -> Option<&mut dyn crate::message::FontServices> {
