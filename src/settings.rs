@@ -1,4 +1,4 @@
-/// 普通 359／360 使用的全局配置块，按基线字节布局保存。
+/// 全局配置及普通脚本可查询的变量范围。
 ///
 /// 配置覆盖和脚本写回只修改数据，不触发设备或消息对象更新。
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -7,6 +7,10 @@ pub struct SystemSettings {
     pub message: [u8; 0x48],
     pub effects: [u8; 0x20],
     pub window: [u8; 0x0c],
+    /// 八项局部变量范围，每项依次为起始编号、数量，保留原始 DWORD。
+    pub local_flag_ranges: [[u32; 2]; 8],
+    /// 八项全局变量范围，格式同 `local_flag_ranges`。
+    pub global_flag_ranges: [[u32; 2]; 8],
 }
 
 impl Default for SystemSettings {
@@ -16,7 +20,11 @@ impl Default for SystemSettings {
             message: [0; 0x48],
             effects: [0; 0x20],
             window: [0; 0x0c],
+            local_flag_ranges: [[u32::MAX; 2]; 8],
+            global_flag_ranges: [[u32::MAX; 2]; 8],
         };
+        settings.local_flag_ranges[0] = [0, 512];
+        settings.global_flag_ranges[0] = [512, 512];
         put(&mut settings.sound, 0x10, 1);
         for channel in 0..48 {
             let offset = 20 + channel * 116;
@@ -63,6 +71,25 @@ impl Default for SystemSettings {
 }
 
 impl SystemSettings {
+    /// 覆盖启动 XML 的 `GAME/flag/localN`、`globalN` 范围；缺失字段保留。
+    pub fn apply_startup_xml(&mut self, input: &[u8]) -> crate::Result<()> {
+        let xml = crate::resource::XmlDocument::parse(input)?;
+        for (name, ranges) in [
+            ("local", &mut self.local_flag_ranges),
+            ("global", &mut self.global_flag_ranges),
+        ] {
+            for (index, range) in ranges.iter_mut().enumerate() {
+                for (field, value) in ["start", "count"].into_iter().zip(range) {
+                    *value = xml.integer(
+                        format!("GAME/flag/{name}{index}/{field}").as_bytes(),
+                        *value,
+                    )?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// 按用户设置 XML 覆盖已存在的配置；缺失字段保留，非法整数前缀取零。
     pub fn apply_xml(&mut self, input: &[u8]) -> crate::Result<()> {
         let xml = crate::resource::XmlDocument::parse(input)?;

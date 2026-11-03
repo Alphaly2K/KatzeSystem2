@@ -12,6 +12,7 @@ fn settings() -> SystemSettings {
         message: [0x22; 0x48],
         effects: [0x33; 0x20],
         window: [0x44; 0x0c],
+        ..SystemSettings::default()
     }
 }
 
@@ -72,6 +73,37 @@ fn defaults_and_xml_overlays_keep_missing_values_raw_flags_and_volume_update_ord
         .unwrap();
     assert_eq!(state, snapshot);
     assert!(state.apply_xml(b"<document>").is_err());
+    assert_eq!(state, snapshot);
+
+    assert_eq!(state.local_flag_ranges[0], [0, 512]);
+    assert_eq!(state.global_flag_ranges[0], [512, 512]);
+    assert_eq!(state.local_flag_ranges[1..], [[u32::MAX; 2]; 7]);
+    assert_eq!(state.global_flag_ranges[1..], [[u32::MAX; 2]; 7]);
+    state
+        .apply_startup_xml(
+            br#"<?xml version="1.0" encoding="UTF-8"?><document>
+        <GAME><flag>
+            <local0><start>9</start></local0>
+            <global7><start>0x80000000</start><count>-2tail</count></global7>
+            <local8><start>4</start></local8>
+        </flag></GAME></document>"#,
+        )
+        .unwrap();
+    assert_eq!(state.local_flag_ranges[0], [9, 512]);
+    assert_eq!(state.local_flag_ranges[1..], [[u32::MAX; 2]; 7]);
+    assert_eq!(state.global_flag_ranges[7], [0x80000000, (-2i32) as u32]);
+    assert_eq!(state.sound, snapshot.sound);
+    assert_eq!(state.message, snapshot.message);
+    state
+        .apply_startup_xml(
+            br#"<?xml version="1.0" encoding="UTF-8"?><document>
+        <GAME><flag><local0><count>invalid</count></local0></flag></GAME>
+        </document>"#,
+        )
+        .unwrap();
+    assert_eq!(state.local_flag_ranges[0], [9, 0]);
+    let snapshot = state.clone();
+    assert!(state.apply_startup_xml(b"<document>").is_err());
     assert_eq!(state, snapshot);
 }
 

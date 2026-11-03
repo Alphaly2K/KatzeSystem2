@@ -322,7 +322,7 @@ pub(crate) fn call_native(
         8 | 13..=16 | 19..=24 | 149 | 211 | 276 | 277 | 422 | 423 | 518 => 2,
         50..=58 | 60 | 62..=64 => 1,
         59 | 61 => 2,
-        38 | 44 | 45 => 4,
+        38 | 44 | 45 | 790 => 4,
         35..=37 | 41 | 42 | 517 | 519 => 3,
         5 | 76 | 789 => 0,
         _ => return Err(Error::new(vm.pc, format!("未支持的 KCS native {index}"))),
@@ -711,6 +711,32 @@ pub(crate) fn call_native(
             }
         }
         789 => NativeReturn::Value(host.configured_shared_slots),
+        790 => {
+            if args[1] >= 8 {
+                return Ok(NativeReturn::Value(0));
+            }
+            let settings = host
+                .system_settings
+                .as_ref()
+                .ok_or_else(|| Error::new(vm.pc, "宿主未配置全局设置"))?;
+            let ranges = if args[0] == 0 {
+                &settings.local_flag_ranges
+            } else {
+                &settings.global_flag_ranges
+            };
+            vm.write(args[2], &ranges[args[1] as usize][0].to_le_bytes())?;
+            // 起点输出可以覆盖已退栈的索引参数；两处输出地址已在写入前确定。
+            let index = if let Some(base) = vm.native_arguments {
+                u32::from_le_bytes(vm.read((base + 4) as u32, 4)?.try_into().unwrap())
+            } else {
+                args[1]
+            };
+            let range = ranges
+                .get(index as usize)
+                .ok_or_else(|| Error::new(vm.pc, "KCS 变量范围索引越界"))?;
+            vm.write(args[3], &range[1].to_le_bytes())?;
+            NativeReturn::Value(1)
+        }
         _ => unreachable!(),
     })
 }

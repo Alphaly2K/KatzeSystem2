@@ -675,6 +675,7 @@ pub struct Interpreter {
     debug_variable_floors: Vec<usize>,
     messages: messages::MessageState,
     execution_mode: u32,
+    native_arguments: Option<usize>,
 }
 
 impl Interpreter {
@@ -707,6 +708,7 @@ impl Interpreter {
             debug_variable_floors: Vec::new(),
             messages: messages::MessageState::default(),
             execution_mode: 1,
+            native_arguments: None,
         })
     }
     pub fn debug(&self) -> &DebugState {
@@ -948,7 +950,10 @@ impl Interpreter {
                     let old_sp = self.sp;
                     self.sp -= bytes;
                     let arguments = self.memory[self.sp..old_sp].to_vec();
-                    let result = host.call(index, &arguments, self)?;
+                    let previous = self.native_arguments.replace(self.sp);
+                    let result = host.call(index, &arguments, self);
+                    self.native_arguments = previous;
+                    let result = result?;
                     let status = match result {
                         NativeReturn::Yield => 0,
                         NativeReturn::Value(_) => 1,
