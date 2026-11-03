@@ -16,6 +16,7 @@ mod plane;
 mod resources;
 mod scroll2;
 mod slider;
+mod sound;
 mod subcommands;
 pub use attributes::{ObjectAttributes, ObjectInitialization, ObjectReference};
 pub use button::ButtonState;
@@ -28,6 +29,7 @@ pub use plane::{CPlaneState, PlaneState};
 pub use resources::ImageReference;
 pub use scroll2::Scroll2State;
 pub use slider::{SliderState, SliderUpdates};
+pub use sound::SoundState;
 use std::collections::{BTreeMap, VecDeque};
 pub use subcommands::{
     MappedArgument, Subcommand, SubcommandCall, SubcommandContext, SubcommandMode,

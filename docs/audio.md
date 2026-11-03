@@ -2,6 +2,16 @@
 
 适用基线：CatSystem2 2.6.1.90。当前提供声音任务、循环点表读取、普通 400 装载及循环范围登记；音频解码、播放实例、混音和设备继续接入。
 
+## FES SOUND 状态
+
+`fes::SoundState` 保存 SOUND 的声明和运动属性，`runtime::fes::ObjectState::Sound` 将它纳入对象存储、银行、父子失效和媒体顺序。默认文件与组名为空，CHANNEL 为 −1，STYPE、TYPE 与声像为零，音量为 100；初始不请求装载或属性更新。
+
+`apply(attributes)` 仅应用 FILE、STYPE、CHANNEL、TYPE、GROUP。FILE 保存到首个零字节的原始名称，不调用图像名称转换；每次写入均设置独立的装载请求，包括空名称和相同名称。STYPE 与 CHANNEL 保留原始 i32，发生变化时使本对象失效，返回 true 供对象存储递归标记后代。TYPE 与 GROUP 仅修改保存值，不触发失效。BLEND、POS 等其他列不用于声音初始化。FILE 正文须短于 260 字节，GROUP 正文须短于 32 字节；超长返回诊断，保留此前已完成的属性修改。
+
+`motion_properties()` 返回 36 项运动记录，仅 X 分量保存声像的 f32、Alpha 字节保存音量低八位。`apply_motion_properties()` 从这两项回写整数，其他项忽略；声像向零截断，非有限值或超出 i32 范围时为 i32::MIN。变化使本对象失效，`Objects::update_motions` 同时标记后代。公开的 `Objects::start_motion` 已接入此类型；SOUND 的 FES 子命令参数映射尚未接入。
+
+`is_dirty()` 与 `needs_load()` 分别查询属性失效和文件请求。运行时支持未指定文件的空闲 SOUND 更新，不创建图形或输入任务；属性失效在这一空闲更新后清除。文件请求和非空来源的属性提交当前返回明确诊断，并保留请求供后续重试。对象播放命令、声音任务通道分配及完成状态尚未连接。
+
 ## 循环点表
 
 `audio::parse_loop_table(bytes)` 接受原始字节，返回按行排列的 `LoopPoint`。名称仍需由调用者按声音资源类别补全；读取阶段不判断范围是否可以登记。文件在第一个零字节结束，CR、LF 和 CRLF 均分行，空行跳过，每行前三项分别为名称、起点和终点；缺省起点为零、终点为 -1，额外词项忽略。

@@ -92,6 +92,17 @@ impl<F: ObjectFactory> Store<'_, F> {
         if object.state.control().is_some() {
             return self.update_fes_control(owner, objects, handle);
         }
+        if let ObjectState::Sound(sound) = &mut objects.get_mut(handle).unwrap().state {
+            if sound.needs_load() {
+                return Err(Error::new(0, "FES SOUND 文件请求尚未接入声音任务"));
+            }
+            if sound.is_dirty() && !sound.file.is_empty() {
+                return Err(Error::new(0, "FES SOUND 播放属性更新尚未接入声音任务"));
+            }
+            sound.dirty = false;
+            return Ok(());
+        }
+        let object = objects.get(handle).unwrap();
         if object.state.plane().is_none() {
             return match object.state {
                 ObjectState::Base => Ok(()),

@@ -68,6 +68,7 @@ impl Objects {
         if object.state.image().is_none()
             && !matches!(object.state, ObjectState::Base)
             && object.state.control().is_none()
+            && !matches!(object.state, ObjectState::Sound(_))
         {
             return Err(Error::new(0, "FES 此对象类型的运动属性尚未接入"));
         }
@@ -78,6 +79,8 @@ impl Objects {
                 object.motions.base_properties = image.motion_properties();
             } else if let Some(slider) = object.state.control() {
                 object.motions.base_properties = slider.motion_properties();
+            } else if let ObjectState::Sound(sound) = &object.state {
+                object.motions.base_properties = sound.motion_properties();
             }
         }
         Ok(())
@@ -184,6 +187,10 @@ impl Objects {
                     }
                 } else if let Some(slider) = object.state.control_mut() {
                     slider.apply_motion_properties(object.motions.properties());
+                } else if let ObjectState::Sound(sound) = &mut object.state {
+                    if sound.apply_motion_properties(object.motions.properties()) {
+                        self.invalidate(handle)?;
+                    }
                 }
             }
             self.motion_update.as_mut().unwrap().cursor += 1;

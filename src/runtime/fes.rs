@@ -2,7 +2,7 @@
 
 use crate::fes::{
     ButtonState, CImageState, CPlaneState, ImageState, ObjectDefinition, ObjectInitialization,
-    ObjectReference, PlaneState, Scroll2State, SliderState,
+    ObjectReference, PlaneState, Scroll2State, SliderState, SoundState,
 };
 use crate::{Error, HandleAllocator, Result, read};
 use std::collections::{BTreeMap, BTreeSet};
@@ -66,6 +66,7 @@ pub enum ObjectState {
     Plane(Box<PlaneState>),
     Slider(Box<SliderState>),
     Scroll2(Box<Scroll2State>),
+    Sound(Box<SoundState>),
 }
 
 impl ObjectState {
@@ -79,6 +80,7 @@ impl ObjectState {
             Self::Plane(_) => "PLANE",
             Self::Slider(_) => "SLIDER",
             Self::Scroll2(_) => "SCROLL2",
+            Self::Sound(_) => "SOUND",
         }
     }
 
@@ -92,6 +94,7 @@ impl ObjectState {
             "PLANE" => Self::Plane(Box::default()),
             "SLIDER" => Self::Slider(Box::default()),
             "SCROLL2" => Self::Scroll2(Box::default()),
+            "SOUND" => Self::Sound(Box::default()),
             _ => return Err(Error::new(0, format!("FES 对象类型 {kind} 尚未接入"))),
         })
     }
@@ -542,6 +545,16 @@ impl Objects {
                 ObjectState::Scroll2(state) => state
                     .control
                     .apply(&initialization.attributes, bank as u32)?,
+                ObjectState::Sound(state) => {
+                    let before = [state.sound_type, state.channel];
+                    let result = state.apply(&initialization.attributes);
+                    let changed = before != [state.sound_type, state.channel];
+                    if changed {
+                        self.invalidate(handle)?;
+                    }
+                    result?;
+                    false
+                }
             };
             if dirty {
                 self.invalidate(handle)?;
@@ -566,6 +579,9 @@ impl Objects {
             }
             if let Some(state) = object.state.control_mut() {
                 state.updates.dirty = true;
+            }
+            if let ObjectState::Sound(state) = &mut object.state {
+                state.dirty = true;
             }
             pending.extend(object.children.iter().copied());
         }

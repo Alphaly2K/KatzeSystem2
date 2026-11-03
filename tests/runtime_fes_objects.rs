@@ -506,7 +506,7 @@ fn definitions_keep_first_bindings_and_count_while_owning_duplicate_objects() {
     assert!(objects.get(foreign).is_none());
     let next = handles.allocate().unwrap();
     for invalid in [
-        definition("SOUND", "unsupported", 1),
+        definition("UNKNOWN", "unsupported", 1),
         definition("IMAGE", "", 1),
         definition("IMAGE", &"a".repeat(32), 1),
         definition("IMAGE", "zero", 0),
