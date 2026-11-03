@@ -90,6 +90,48 @@ fn debug_output_uses_expanded_first_parameter_once_in_each_execution_context() {
 }
 
 #[test]
+fn unregistered_object_commands_log_and_continue_without_evaluating_their_arguments() {
+    for budget in [1, 4096] {
+        let (mut runtime, mut scene) = setup(
+            "#DEFINE\nBASE button[2]\n#START\nbutton[($0+=1)-1] unknown ($0+=100) 1/0\nbutton DISP ($0+=100)\nbutton\n$1+=1\nwait 77\n#_FES_SLEEP_\nbutton other ($0+=100)\n$2+=1\n#button.PUSH_L\n@ unknown ($0+=100)\n$3+=1\n",
+            budget,
+        );
+        update(&mut runtime, &mut scene, 100);
+        assert_eq!(scene.deadline(), Some(177));
+        system(&mut runtime, &mut scene, "_FES_SLEEP_");
+        assert!(event(&mut runtime, &mut scene));
+        assert_eq!(&runtime.numbers().shared[..4], &[1, 1, 1, 1]);
+        assert_eq!(scene.deadline(), Some(177));
+        assert_eq!(
+            runtime.host().debug_messages,
+            [
+                b"Unknown FES object command: button[($0+=1)-1] unknown ($0+=100) 1/0".to_vec(),
+                b"Unknown FES object command: button DISP ($0+=100)".to_vec(),
+                b"Unknown FES object command: button other ($0+=100)".to_vec(),
+                b"Unknown FES object command: @ unknown ($0+=100)".to_vec(),
+            ]
+        );
+    }
+}
+
+#[test]
+fn unknown_command_fallback_keeps_unsupported_builtins_and_missing_targets_as_errors() {
+    for command in ["button wipe", "absent unknown", "button[9] unknown"] {
+        let source = format!("#DEFINE\nBASE button\n#START\n{command}\n$0=99\n");
+        let (mut runtime, mut scene) = setup(&source, 4096);
+        assert!(
+            runtime
+                .update_fes_scene(0, &mut scene, 100)
+                .unwrap_err()
+                .message
+                .contains("对象命令")
+        );
+        assert_eq!(runtime.numbers().shared[0], 0);
+        assert!(runtime.host().debug_messages.is_empty());
+    }
+}
+
+#[test]
 fn object_events_preserve_waits_queue_exits_and_transfer_only_the_main_cursor() {
     for budget in [1, 4096] {
         for (body, expected, transferred, exit) in [

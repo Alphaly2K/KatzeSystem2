@@ -810,7 +810,8 @@ impl<F: ObjectFactory> Store<'_, F> {
                             &mut scene.interpreter,
                             &line,
                             self.numbers,
-                        )? {
+                        )? && !self.fes_unknown_object_command(scene, &args, &line)?
+                        {
                             return Err(Error::new(line.offset, "FES 事件对象命令尚未接入"));
                         }
                         scene.interpreter.resume();
@@ -925,6 +926,58 @@ impl<F: ObjectFactory> Store<'_, F> {
             Ok(false)
         })();
         result.map_err(|error: Error| Error::new(call.offset + error.offset, error.message))
+    }
+
+    fn fes_unknown_object_command(
+        &mut self,
+        scene: &mut Scene,
+        args: &[Vec<u8>],
+        line: &fes::Line,
+    ) -> Result<bool> {
+        let Some(object) = args.first() else {
+            return Ok(false);
+        };
+        if let Some(name) = args.get(1) {
+            if fes::Interpreter::is_builtin_object_command(name)
+                || scene
+                    .interpreter
+                    .registered_subcommands()
+                    .is_some_and(|table| table.bindings.contains_key(name))
+            {
+                return Ok(false);
+            }
+        }
+        let target = if object == b"@" {
+            let context = scene
+                .interpreter
+                .event_context()
+                .ok_or_else(|| Error::new(line.offset, "FES 当前没有事件对象"))?;
+            fes::ObjectReference {
+                name: context.object.clone(),
+                bank: context.bank,
+            }
+        } else {
+            scene
+                .interpreter
+                .object_reference(object, self.numbers)
+                .map_err(|error| Error::new(line.offset + error.offset, error.message))?
+        };
+        if scene
+            .objects
+            .lookup(
+                &target.name,
+                if target.bank == -1 { 0 } else { target.bank },
+            )
+            .is_none()
+        {
+            return Ok(false);
+        }
+        if args.len() > 1 {
+            let mut message = b"Unknown FES object command: ".to_vec();
+            message.extend_from_slice(&line.bytes);
+            self.host.debug_messages.push(message);
+        }
+        Ok(true)
     }
 
     fn run_fes_stop(
@@ -1205,7 +1258,8 @@ impl<F: ObjectFactory> Store<'_, F> {
                                 &mut scene.interpreter,
                                 &line,
                                 self.numbers,
-                            )? {
+                            )? && !self.fes_unknown_object_command(scene, &args, &line)?
+                            {
                                 return Err(Error::new(line.offset, "FES 对象命令尚未接入"));
                             }
                         }

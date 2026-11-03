@@ -89,6 +89,13 @@ impl Default for SubcommandContext {
 }
 
 impl Interpreter {
+    pub(crate) fn is_builtin_object_command(name: &[u8]) -> bool {
+        OBJECT_COMMANDS
+            .as_bytes()
+            .split(|&b| b == b' ')
+            .any(|builtin| builtin == name)
+    }
+
     /// 声明事件发出后可读取注册表；默认文本仍在每次调用时解释。
     pub fn registered_subcommands(&self) -> Option<&SubcommandTable> {
         self.registered_subcommands.as_ref()
@@ -103,11 +110,7 @@ impl Interpreter {
         let Some(name) = arguments.get(1) else {
             return Ok(None);
         };
-        if OBJECT_COMMANDS
-            .as_bytes()
-            .split(|&b| b == b' ')
-            .any(|builtin| builtin == name)
-        {
+        if Self::is_builtin_object_command(name) {
             return Ok(None);
         }
         let Some(binding) = self

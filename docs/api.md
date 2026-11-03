@@ -374,9 +374,11 @@ Scene 已处理 `execfes`、`endfes` 及 `endkcs` 的结束时序。`execfes` �
 
 FesObject 的通用按下键槽按媒体声明顺序扫描当前启用的 SYSKEY 匹配按钮，逐个分派 PUSH_L；重复声明保留，后续记录读取处理器修改后的属性。至少一个对象自身处理器存在时跳过默认响应，DEFAULT 单独存在仍响应。释放使用保存的按下目标，不扫描 SYSKEY；扫描游标与当前处理器支持预算和错误续跑，详见[系统键分派](graphics.md#fes-系统键分派)。
 
-`Runtime::dispatch_fes_system_block(owner, &mut scene, name)` 同步执行 `_FES_SLEEP_`／`_FES_WAKE_`，返回 false 后以同一名称续跑；普通推进、对象修改及另一个系统块须等到本次完成。缺失块直接完成。该入口不推进系统帧，不切换媒体显示；通常保留主流程位置和等待，`next` 按系统块的调用深度规则处理。局部 `wait` 结束本次分派；系统块 `exit` 结束本次分派并将返回码排队，到下一次普通场景推进才发布。系统块也可启动已支持类型的运动；decode 结束当前处理片段并把媒体提交请求留到普通更新。未知命令和其他类型的运动返回诊断并保留待处理事件。命令 348 在系统块后刷新对象并切换相应类型的显示与输入启用；SLIDER 使用 367／366、SCROLL2 使用 375／379 关闭并恢复当前属性，`FesObject::paused()` 查询专属暂停原始值；完整契约见[暂停与唤醒](graphics.md#fes-专属暂停与唤醒)。
+`Runtime::dispatch_fes_system_block(owner, &mut scene, name)` 同步执行 `_FES_SLEEP_`／`_FES_WAKE_`，返回 false 后以同一名称续跑；普通推进、对象修改及另一个系统块须等到本次完成。缺失块直接完成。该入口不推进系统帧，不切换媒体显示；通常保留主流程位置和等待，`next` 按系统块的调用深度规则处理。局部 `wait` 结束本次分派；系统块 `exit` 结束本次分派并将返回码排队，到下一次普通场景推进才发布。系统块也可启动已支持类型的运动；decode 结束当前处理片段并把媒体提交请求留到普通更新。尚未接入的内置命令和其他类型的运动返回诊断并保留待处理事件。命令 348 在系统块后刷新对象并切换相应类型的显示与输入启用；SLIDER 使用 367／366、SCROLL2 使用 375／379 关闭并恢复当前属性，`FesObject::paused()` 查询专属暂停原始值；完整契约见[暂停与唤醒](graphics.md#fes-专属暂停与唤醒)。
 
 FES `dbgstr text` 与 `debug expression` 在主体、系统块及对象处理器中向 `HostState::debug_messages` 追加原始编码消息，分别使用 `dbgstr = ` 前缀和 `debug = ` 加有符号十进制结果。只读取第一个参数，缺参时跳过；参数已完成 FES 字符串展开，文本中的百分号不作为格式符再次解释。debug 沿用当前 FES 表达式上下文及副作用。
+
+对存在的目标对象调用未注册名称时，Runtime 追加 `Unknown FES object command: ` 和展开后的整行字节后继续，后续参数不求值；只有目标名时直接继续。名称按大小写匹配，内置名称与注册绑定均不进入此回退；尚未实现的内置命令继续诊断。
 
 FES `strvar index text [integer ...]` 已接入共享 `expression::State::strings`，支持原始字节、最多四个整数格式参数及省略文本时清空；`strvar get index source` 按编号复制，get 忽略 ASCII 大小写。主体、系统块和对象事件共用当前表达式上下文与字符串表。格式、容量、缺参及首零规则见[运行时字符串写入](fes.md#运行时字符串写入)。
 
