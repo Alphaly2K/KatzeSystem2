@@ -13,6 +13,32 @@ pub trait ResourceServices {
     fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>>;
 }
 
+pub(crate) fn load_sequence_file(
+    arguments: &[u8],
+    vm: &Interpreter,
+    services: Option<&mut dyn ResourceServices>,
+) -> Result<Option<(u32, Vec<u8>)>> {
+    let handle = read::u32_at(arguments, 0)?;
+    if arguments.len() != 8 && !(handle == 0 && arguments.len() == 4) {
+        return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+    }
+    if handle == 0 {
+        return Ok(None);
+    }
+    let mut name = strings::format(vm, read::u32_at(arguments, 4)?, 0)?;
+    name.truncate(
+        name.iter()
+            .position(|&byte| byte == 0)
+            .unwrap_or(name.len()),
+    );
+    let services = services.ok_or_else(|| Error::new(vm.pc, "运行时未配置资源服务"))?;
+    let name = services.resolve(b"config", &name)?;
+    Ok(services
+        .read(&name, ResourceMode::LooseFirst)?
+        .filter(|bytes| !bytes.is_empty())
+        .map(|bytes| (handle, bytes)))
+}
+
 /// 为已有宿主提供普通表的图像原始数据、XML 资源及句柄生命周期。
 pub struct ResourceHost<'a, H, S> {
     pub inner: &'a mut H,
@@ -123,6 +149,9 @@ impl ResourceState {
 }
 
 impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
+    fn load_sequence_data(&mut self, handle: u32, bytes: Vec<u8>) -> Result<()> {
+        self.inner.load_sequence_data(handle, bytes)
+    }
     fn set_task_shared_numbers(&mut self, available: bool) {
         self.inner.set_task_shared_numbers(available);
     }
@@ -260,6 +289,12 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
     }
 
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn> {
+        if index == 458 {
+            if let Some((handle, bytes)) = load_sequence_file(arguments, vm, Some(self.services))? {
+                self.inner.load_sequence_data(handle, bytes)?;
+            }
+            return Ok(NativeReturn::Continue);
+        }
         if !matches!(index, 365 | 366 | 368 | 590..=593) {
             return self.inner.call(index, arguments, vm);
         }

@@ -60,6 +60,10 @@ impl<'a, H: Host, S: TaskServices> TaskHost<'a, H, S> {
 }
 
 impl<H: Host, S: TaskServices> Host for TaskHost<'_, H, S> {
+    fn load_sequence_data(&mut self, handle: u32, bytes: Vec<u8>) -> Result<()> {
+        self.inner.load_sequence_data(handle, bytes)
+    }
+
     fn set_task_shared_numbers(&mut self, available: bool) {
         self.inner.set_task_shared_numbers(available);
     }

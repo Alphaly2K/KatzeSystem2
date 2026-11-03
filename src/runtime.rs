@@ -1339,6 +1339,9 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
 }
 
 impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
+    fn load_sequence_data(&mut self, handle: u32, bytes: Vec<u8>) -> Result<()> {
+        self.host.load_sequence_data(handle, bytes)
+    }
     fn set_task_shared_numbers(&mut self, available: bool) {
         if let Some(task) = self.running.get_mut(&self.host.task_id) {
             task.shared_numbers = Some(available);
@@ -1616,6 +1619,19 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
     }
 
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn> {
+        if index == 458 {
+            if let Some((handle, bytes)) = crate::kcs::load_sequence_file(
+                arguments,
+                vm,
+                self.resources
+                    .services
+                    .as_mut()
+                    .map(|services| services.as_mut() as _),
+            )? {
+                self.host.load_sequence_data(handle, bytes)?;
+            }
+            return Ok(NativeReturn::Continue);
+        }
         if index == 250 {
             return self.restore_shared_record(arguments, vm);
         }

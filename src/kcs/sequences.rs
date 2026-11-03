@@ -1,6 +1,32 @@
 use crate::{Error, Result, read};
 use std::collections::BTreeMap;
 
+/// 序列集合装载的文件数据；已识别的 CGL 头被移除，正文保持原始字节。
+pub struct SequenceData {
+    bytes: Vec<u8>,
+    stride: u32,
+}
+
+impl Default for SequenceData {
+    fn default() -> Self {
+        Self {
+            bytes: Vec::new(),
+            stride: 256,
+        }
+    }
+}
+
+impl SequenceData {
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    /// 每条序列字符串记录的字节跨度。
+    pub fn record_stride(&self) -> u32 {
+        self.stride
+    }
+}
+
 #[derive(Default)]
 struct Node {
     children: BTreeMap<i8, Node>,
@@ -10,6 +36,7 @@ struct Node {
 pub(super) struct SequenceMap {
     names: BTreeMap<Vec<u8>, Node>,
     nodes: usize,
+    pub(super) data: SequenceData,
 }
 
 fn parse(source: &[u8]) -> Result<Option<(Vec<u8>, Vec<i8>)>> {
@@ -34,6 +61,25 @@ fn parse(source: &[u8]) -> Result<Option<(Vec<u8>, Vec<i8>)>> {
 }
 
 impl SequenceMap {
+    pub fn load(&mut self, mut bytes: Vec<u8>) -> Result<()> {
+        if bytes.len() > read::MAX_BYTES {
+            return Err(Error::new(0, "KCS 序列文件超过读取上限"));
+        }
+        let stride = if bytes.len() > 4 && bytes.starts_with(b"CGL\0") {
+            bytes.drain(..4);
+            256
+        } else {
+            64
+        };
+        self.data = SequenceData { bytes, stride };
+        Ok(())
+    }
+
+    pub fn clear(&mut self) {
+        self.names.clear();
+        self.nodes = 0;
+    }
+
     pub fn register(&mut self, source: &[u8], name_mode: u32) -> Result<()> {
         let Some((name, values)) = parse(source)? else {
             return Ok(());

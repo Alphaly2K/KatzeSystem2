@@ -73,6 +73,21 @@ pub struct HostState {
 }
 
 impl HostState {
+    /// 458 装载的文件数据；集合清空保留数据，420 释放时失效。
+    pub fn sequence_data(&self, handle: u32) -> Result<&super::SequenceData> {
+        self.sequence_maps
+            .get(&handle)
+            .map(|map| &map.data)
+            .ok_or_else(|| Error::new(0, "KCS 序列对象句柄无效"))
+    }
+
+    pub(crate) fn load_sequence_data(&mut self, handle: u32, bytes: Vec<u8>) -> Result<()> {
+        self.sequence_maps
+            .get_mut(&handle)
+            .ok_or_else(|| Error::new(0, "KCS 序列对象句柄无效"))?
+            .load(bytes)
+    }
+
     pub fn sound_group_id(&self, name: &[u8]) -> Result<u32> {
         if self.sound_config_enabled == 0 {
             return Ok(crate::audio::SoundGroups::legacy_id(name));
@@ -150,6 +165,9 @@ impl std::ops::DerefMut for CoreHost<'_> {
 }
 
 impl Host for CoreHost<'_> {
+    fn load_sequence_data(&mut self, handle: u32, bytes: Vec<u8>) -> Result<()> {
+        self.host.load_sequence_data(handle, bytes)
+    }
     fn message_defaults(&self) -> Result<&crate::message::MessageDefaults> {
         self.host
             .message_defaults
@@ -352,7 +370,7 @@ pub(crate) fn call_native(
                 .get_mut(&args[0])
                 .ok_or_else(|| Error::new(vm.pc, "KCS 序列对象句柄无效"))?;
             if index == 421 {
-                *map = Default::default();
+                map.clear();
                 NativeReturn::Continue
             } else {
                 let source = strings::format(vm, args[1], 0)?;

@@ -31,7 +31,9 @@ pub use particle::{ParticleHost, ParticleSource, ParticleTask, ParticleVertex};
 pub use queue::MotionQueue;
 pub use random::ScriptRandom;
 pub(crate) use resource_host::ResourceState;
+pub(crate) use resource_host::load_sequence_file;
 pub use resource_host::{ResourceHost, ResourceServices};
+pub use sequences::SequenceData;
 pub(crate) use strings::format as format_string;
 pub use system_host::{SystemHost, SystemServices};
 pub use task_host::{TaskHost, TaskServices};
@@ -226,6 +228,10 @@ pub struct TaskEffects {
 }
 
 pub trait Host {
+    /// 将已经读取的文件绑定到存活的序列集合，保留已有名称树。
+    fn load_sequence_data(&mut self, _handle: u32, _bytes: Vec<u8>) -> Result<()> {
+        Err(Error::new(0, "宿主未提供序列文件存储"))
+    }
     fn load_kcs_program(&mut self, _name: &[u8]) -> Result<Option<Program>> {
         Err(Error::new(0, "宿主未提供 KCS 程序装载"))
     }
@@ -441,6 +447,9 @@ pub trait Host {
 }
 
 impl<T: Host + ?Sized> Host for &mut T {
+    fn load_sequence_data(&mut self, handle: u32, bytes: Vec<u8>) -> Result<()> {
+        (**self).load_sequence_data(handle, bytes)
+    }
     fn set_task_shared_numbers(&mut self, available: bool) {
         (**self).set_task_shared_numbers(available);
     }
