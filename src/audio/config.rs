@@ -4,6 +4,7 @@ use crate::{Error, Result, read};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SoundPart {
     pub id: i32,
+    pub volume: i32,
     pub system_voice: i32,
     pub children: Vec<SoundPart>,
 }
@@ -12,6 +13,7 @@ impl Default for SoundPart {
     fn default() -> Self {
         Self {
             id: -1,
+            volume: -1,
             system_voice: -1,
             children: Vec::new(),
         }
@@ -56,18 +58,27 @@ impl SoundConfig {
 
     /// 查询显式编号路径。缺失分量使用一，后续分量仍在当前分类中继续查询。
     pub fn system_voice_enabled(&self, path: &[i32]) -> Result<i32> {
+        self.path_value(path, 1, |part| part.system_voice)
+    }
+
+    /// 查询最后一个分类的当前音量；空路径及缺失分量使用一百。
+    pub fn volume(&self, path: &[i32]) -> Result<i32> {
+        self.path_value(path, 100, |part| part.volume)
+    }
+
+    fn path_value(&self, path: &[i32], default: i32, value: fn(&SoundPart) -> i32) -> Result<i32> {
         if path.len() > read::MAX_ITEMS {
             return Err(Error::new(0, "声音配置路径超过上限"));
         }
         let mut parts = self.parts.as_slice();
-        let mut enabled = 1;
+        let mut result = default;
         for &id in path {
-            enabled = 1;
+            result = default;
             if let Some(part) = parts.iter().find(|part| part.id == id) {
-                enabled = part.system_voice;
+                result = value(part);
                 parts = &part.children;
             }
         }
-        Ok(enabled)
+        Ok(result)
     }
 }

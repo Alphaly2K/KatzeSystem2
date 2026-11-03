@@ -310,9 +310,11 @@ fn voice_runtime(budget: usize) -> Runtime<Reject> {
     runtime.host_mut().sound_config = Some(SoundConfig {
         parts: vec![SoundPart {
             id: 20,
+            volume: 83,
             system_voice: 1,
             children: vec![SoundPart {
                 id: 21,
+                volume: 37,
                 system_voice: 0,
                 children: vec![],
             }],
@@ -411,6 +413,60 @@ fn sysvoiceex_disabled_mode_skips_candidates_and_missing_configuration_retries_b
         .unwrap();
         update(&mut runtime, &mut scene).unwrap();
         assert_eq!(runtime.numbers().shared[..6], [2, 10, 0, 0, 10, -1]);
+        assert_eq!(runtime.host_mut().random.next_integer(), 477480905);
+    }
+}
+
+#[test]
+fn sound_config_id_queries_use_separate_path_arguments_and_keep_the_random_stream() {
+    let source = b"#DEFINE\nBASE obj\n#START\ngetsndconfex\ngetsndconfex ($0+=1)+3\ngetsndconfex ($0+=1)+3 volume_id ($1+=20) ($2+=21)\ngetsndconfex -1 volume_id ($3+=20)\nwait 99\n#_FES_SLEEP_\ngetsndconfex 6 volume_id 20 999\n#obj.PUSH_L\ngetsndconfex 7 sysplay_id 20 21\n";
+    for budget in [1, 4096] {
+        let mut runtime = voice_runtime(budget);
+        runtime.host_mut().sound_config_enabled = 0;
+        let config = runtime.host_mut().sound_config.take().unwrap();
+        let mut scene = Scene::new(
+            Program::from_text(source).unwrap(),
+            runtime.host().handle_allocator(),
+        )
+        .unwrap();
+        assert!(update(&mut runtime, &mut scene).is_err());
+        assert_eq!(runtime.numbers().shared[0], 1);
+        assert_eq!(runtime.numbers().shared[1..], [0; 7]);
+        runtime.host_mut().sound_config = Some(config);
+        update(&mut runtime, &mut scene).unwrap();
+        assert_eq!(runtime.numbers().shared[..6], [2, 20, 21, 20, 0, 37]);
+        let mut done = false;
+        for _ in 0..256 {
+            if runtime
+                .dispatch_fes_system_block(0, &mut scene, "_FES_SLEEP_")
+                .unwrap()
+            {
+                done = true;
+                break;
+            }
+        }
+        assert!(done);
+        done = false;
+        for _ in 0..256 {
+            if let Some(handled) = runtime
+                .dispatch_fes_event(
+                    0,
+                    &mut scene,
+                    Some(&ObjectReference {
+                        name: "obj".into(),
+                        bank: 0,
+                    }),
+                    2,
+                )
+                .unwrap()
+            {
+                assert!(handled);
+                done = true;
+                break;
+            }
+        }
+        assert!(done);
+        assert_eq!(runtime.numbers().shared[6..], [100, 0]);
         assert_eq!(runtime.host_mut().random.next_integer(), 477480905);
     }
 }

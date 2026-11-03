@@ -4,13 +4,21 @@
 
 ## 系统语音配置选择
 
-宿主通过 `HostState::sound_config` 提供 `audio::SoundConfig`，其 `parts` 按配置声明顺序保存 `SoundPart { id, system_voice, children }`。`system_voice` 是应用设置后的当前原始开关，节点默认编号和开关均为 −1。宿主负责读取配置、处理子节点的缺省继承及应用用户设置；此接口尚未自动装载声音配置。
+宿主通过 `HostState::sound_config` 提供 `audio::SoundConfig`，其 `parts` 按配置声明顺序保存 `SoundPart { id, volume, system_voice, children }`。volume 与 system_voice 是应用设置后的当前原始值，节点默认编号、音量和开关均为 −1。宿主负责读取配置、处理子节点的缺省继承及应用用户设置；此接口尚未自动装载声音配置。
 
 `SoundConfig::system_voice_candidates(paths)` 在 paths 为空时按先父后子顺序收集开关恰好为一的节点编号。显式路径则逐层查找第一个同编号节点；缺失分量使用开关一，后续分量继续在当前层查询。路径最后一次查询结果非零时，将最后一个输入编号加入候选。两种方式均保留重复编号。`system_voice_enabled(path)` 提供单条路径的原始查询结果，空路径返回一。
 
 FES `sysvoiceex output_index [path ...]` 选择一个配置编号写入共享数值槽，不执行音频播放。output_index 先求值；全局 `sound_config_enabled` 为零时写入 −1，不求值其余参数或消耗随机数。启用时，每个 path 按逗号拆成整数表达式，逐分量求值，空分量为零；无显式路径时使用整树候选。空候选写入 −1，不消耗随机数；非空候选使用共享整数随机流的下一值取余，即使只有一个候选也消耗一次。无效输出槽跳过写入，表达式与随机副作用仍保留。没有 output_index 时直接继续。
 
 该命令可用于普通主体、系统块和对象事件处理器。宿主在启用状态下未提供配置时，运行时在表达式求值前返回诊断，补齐配置后可重试；已提供的空配置树是有效配置。表达式沿用现有 FES 求值器，不支持的语法返回诊断。
+
+## 分类编号路径查询
+
+`SoundConfig::volume(path)` 查询路径最后一个分类的当前原始音量；空路径或最后分量缺失时返回 100。匹配、缺失分量后继续当前层和重复编号的规则与 `system_voice_enabled` 相同。查询返回单个分类的值，不计算祖先或主音量的乘积，不裁剪到百分比范围。
+
+FES `getsndconfex output_index volume_id [id ...]` 依次求值输出槽和每个独立 id 参数，将 volume 查询结果写入共享数值槽；`sysplay_id` 则写入 `system_voice_enabled` 结果。此处每个参数是一个完整整数表达式，不按逗号拆分。命令不检查 `sound_config_enabled`，也不消耗随机数；无效输出槽只跳过写入，其余求值仍执行。无输出参数时直接继续，只有输出参数时对它求值后继续。主体、系统块和对象处理器共用这一入口。
+
+两种查询要求宿主已提供分类配置；缺失配置时在表达式求值前诊断，允许补齐后重试。其他 getsndconfex 查询目前返回未接入诊断。
 
 ## FES SOUND 状态
 

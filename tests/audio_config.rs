@@ -3,6 +3,7 @@ use katze_system2::audio::{SoundConfig, SoundPart};
 fn part(id: i32, system_voice: i32, children: Vec<SoundPart>) -> SoundPart {
     SoundPart {
         id,
+        volume: id.wrapping_mul(3),
         system_voice,
         children,
     }
@@ -29,6 +30,11 @@ fn voice_selection_keeps_tree_order_path_fallback_and_duplicate_weights() {
     assert_eq!(config.system_voice_enabled(&[999, 10, 11]).unwrap(), 0);
     assert_eq!(config.system_voice_enabled(&[20, 999, 22]).unwrap(), -1);
     assert_eq!(config.system_voice_enabled(&[10, 11, 999]).unwrap(), 1);
+    assert_eq!(config.volume(&[20, 21]).unwrap(), 63);
+    assert_eq!(config.volume(&[999, 10, 11]).unwrap(), 33);
+    assert_eq!(config.volume(&[20, 999, 22]).unwrap(), 66);
+    assert_eq!(config.volume(&[20, 21, 999]).unwrap(), 100);
+    assert_eq!(config.volume(&[]).unwrap(), 100);
     assert_eq!(
         config
             .system_voice_candidates(&[

@@ -39,7 +39,7 @@ FES `fontcom add name` 调用同一字体服务的 `add_resource`，名称为已
 
 `audio::parse_loop_table(bytes)` 读取循环点表，保留待补全的字节名称及原始 64 位起点／终点。`LoopPoints::register(name, start, end)` 保存声音命令 199 的原始循环范围。首次登记追加记录；同名更新只改起点，保留原终点、名称与顺序。`find(name)` 和 `entries()` 提供只读查询，名称及范围限制见[声音接口](audio.md)。当前接口不解码音频，也不执行播放。
 
-`audio::SoundConfig { parts }` 保存应用设置后的 `SoundPart { id, system_voice, children }` 分类树。`system_voice_candidates(paths)` 提供整树展开或显式路径筛选，`system_voice_enabled(path)` 查询原始开关。宿主通过 `HostState::sound_config` 及 `sound_config_enabled` 提供配置和启用字段；FES `sysvoiceex` 已连接共享数值槽与共享整数随机流，用于选择配置编号。配置装载、筛选与随机消耗规则见[系统语音配置选择](audio.md#系统语音配置选择)。
+`audio::SoundConfig { parts }` 保存应用设置后的 `SoundPart { id, volume, system_voice, children }` 分类树。`system_voice_candidates(paths)` 提供整树展开或显式路径筛选，`system_voice_enabled(path)` 查询原始开关，`volume(path)` 查询当前音量。宿主通过 `HostState::sound_config` 及 `sound_config_enabled` 提供配置和启用字段；FES `sysvoiceex` 已连接共享数值槽与共享整数随机流，用于选择配置编号，`getsndconfex` 已提供 `volume_id`／`sysplay_id` 两种编号路径查询。配置装载、筛选与随机消耗规则见[声音接口](audio.md#系统语音配置选择)。
 
 `audio::SoundFactory { enabled, fallback }` 创建类型 13 声音任务。`SoundObject::audio()` 及 `TaskObject::audio_state()` 查询 `SoundState`，其中 `loop_points()` 为循环范围，`channel_time(0..64)` 为原始空闲通道累计时刻。运行时普通 400 使用资源服务按 sound 类别补全／读取表，经根 35 查询目标并逐条发送 199；没有返回值。资源提供者负责声音分类配置，未接入的播放命令返回诊断。禁用、删除、缓冲区和部分失败契约见[声音任务](audio.md#声音任务)及[普通装载](audio.md#普通-kcs-装载)。
 
