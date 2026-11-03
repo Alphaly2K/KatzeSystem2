@@ -325,7 +325,7 @@ mappedOperand = "[", integer, "]" | literal ;
 
 ## 与宿主的边界
 
-对象内建控制 `disp`／`size`／`keypos`／`setid`／`getid`／`enable`／`pri`／`pos2`／`pos`／`getpos` 已由运行时对象存储和场景消费，普通推进和睡眠／唤醒系统块共用。签名、类型分派、数组遍历及尚未接入的表达式回退见[图形接口](graphics.md#fes-对象控制命令)。
+对象内建控制 `disp`／`size`／`keypos`／`setid`／`getid`／`enable`／`pri`／`pos2`／`pos`／`getpos`／`arc`／`mcarc` 已由运行时对象存储和场景消费，普通推进和睡眠／唤醒系统块共用。签名、类型分派、数组遍历及尚未接入的表达式回退见[图形接口](graphics.md#fes-对象控制命令)。
 
 Scene 另消费 `button noact [value]` 与 `lockactive [value]`，分别排队默认焦点和原始焦点锁。普通主体消费通知；对象／系统处理器内的 lockactive 结束当前处理器。参数与时点见[默认焦点与焦点锁](graphics.md#fes-默认焦点与焦点锁)。
 

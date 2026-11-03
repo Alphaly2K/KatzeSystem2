@@ -57,7 +57,7 @@ impl Objects {
     ) -> Result<u32> {
         let state = MotionState::with_parameters(parameters)?;
         self.capture_motion_base(handle)?;
-        self.insert_motion(handle, program, state, delay)
+        self.insert_motion(handle, program, state, delay, 0)
     }
 
     pub(super) fn capture_motion_base(&mut self, handle: u32) -> Result<()> {
@@ -96,11 +96,12 @@ impl Objects {
         program: Program,
         state: MotionState,
         delay: u32,
+        group: i32,
     ) -> Result<u32> {
         self.get_mut(handle)
             .unwrap()
             .motions
-            .insert(MotionTask::new(program, state, delay)?, 0)
+            .insert(MotionTask::new(program, state, delay)?, group)
     }
 
     /// 先子后父推进根对象子树；false 后以同一宿主续跑，期间不修改对象树。

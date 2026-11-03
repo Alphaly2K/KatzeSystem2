@@ -13,6 +13,16 @@ pub(super) struct PropertyCall {
 enum Property {
     Blend(i32),
     Position([Option<i32>; 3]),
+    Arc { parameters: [f32; 6], group: i32 },
+}
+
+impl Property {
+    fn motion(&self) -> (&'static [u8], i32) {
+        match self {
+            Self::Arc { group, .. } => (b"m", *group),
+            _ => (b"p", 0),
+        }
+    }
 }
 
 struct PreparedProperty {
@@ -71,6 +81,10 @@ impl Objects {
     fn apply_property(&mut self, handle: u32, property: &Property) -> Result<Option<Vec<f32>>> {
         match property {
             Property::Position(values) => self.apply_position(handle, *values),
+            Property::Arc { parameters, .. } => {
+                self.capture_motion_base(handle)?;
+                Ok(Some(parameters.to_vec()))
+            }
             Property::Blend(value) => {
                 if !self.apply_blend(handle, *value)? {
                     return Ok(None);
@@ -128,7 +142,7 @@ impl<F: ObjectFactory> Store<'_, F> {
         let Some(name) = args.get(1) else {
             return Ok(None);
         };
-        if !matches!(name.as_slice(), b"blend" | b"pos") {
+        if !matches!(name.as_slice(), b"blend" | b"pos" | b"arc" | b"mcarc") {
             return Ok(None);
         }
         let result = (|| {
@@ -149,7 +163,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                 if count == 0 {
                     return Err(Error::new(0, "FES 对象目标不存在，整行表达式回退尚未接入"));
                 }
-                if name == b"pos" {
+                if name != b"blend" {
                     if scene
                         .objects
                         .lookup(
@@ -169,12 +183,28 @@ impl<F: ObjectFactory> Store<'_, F> {
                         args.get(2)
                             .map_or(Ok(255), |input| scene.interpreter.eval(input, self.numbers))?,
                     )
-                } else {
+                } else if name == b"pos" {
                     let mut values = [None; 3];
                     for (value, input) in values.iter_mut().zip(args.iter().skip(2)) {
                         *value = Some(scene.interpreter.eval(input, self.numbers)?);
                     }
                     Property::Position(values)
+                } else {
+                    let mut values = [30, 0, 0, 0, 0];
+                    for (value, input) in values.iter_mut().zip(args.iter().skip(2)) {
+                        *value = scene.interpreter.eval(input, self.numbers)?;
+                    }
+                    Property::Arc {
+                        parameters: [
+                            values[0].max(0) as f32,
+                            (values[1] as f32 * std::f32::consts::PI) / 180.0,
+                            (values[2] as f32 * std::f32::consts::PI) / 180.0,
+                            values[3] as f32,
+                            values[4] as f32,
+                            0.0,
+                        ],
+                        group: i32::from(name == b"mcarc"),
+                    }
                 };
                 let (bank, end) = if target.bank == -1 {
                     (0, i64::from(count))
@@ -192,10 +222,14 @@ impl<F: ObjectFactory> Store<'_, F> {
             for _ in 0..self.budget.max(1) {
                 let pending = scene.property_call.as_mut().unwrap();
                 if pending.prepared.is_none() {
-                    if let Some(handle) = scene
+                    let handle = scene
                         .objects
-                        .lookup(&pending.target.name, pending.bank as i32)
-                    {
+                        .lookup(&pending.target.name, pending.bank as i32);
+                    if handle.is_none() && matches!(pending.value, Property::Arc { .. }) {
+                        scene.property_call = None;
+                        return Ok(Some(true));
+                    }
+                    if let Some(handle) = handle {
                         if let Some(parameters) =
                             scene.objects.apply_property(handle, &pending.value)?
                         {
@@ -214,7 +248,8 @@ impl<F: ObjectFactory> Store<'_, F> {
                             .services
                             .as_deref_mut()
                             .ok_or_else(|| Error::new(0, "运行时未配置 FES 运动资源服务"))?;
-                        prepared.motion_name = Some(services.resolve(b"mot", b"p")?);
+                        prepared.motion_name =
+                            Some(services.resolve(b"mot", pending.value.motion().0)?);
                     }
                     if let Some(program) = self
                         .resources
@@ -226,6 +261,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                             program,
                             crate::kcs::MotionState::with_parameters(&prepared.parameters)?,
                             delay,
+                            pending.value.motion().1,
                         )?;
                     }
                 }

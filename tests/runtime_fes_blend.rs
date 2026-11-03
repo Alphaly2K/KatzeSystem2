@@ -23,17 +23,30 @@ impl ObjectFactory for Reject {
 struct Files {
     motion: Option<Vec<u8>>,
     fail: Rc<Cell<bool>>,
+    arc: bool,
+    fail_resolve_on: usize,
     resolves: Rc<Cell<usize>>,
     reads: Rc<Cell<usize>>,
 }
 impl ResourceServices for Files {
     fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
-        assert_eq!((category, name), (b"mot".as_slice(), b"p".as_slice()));
+        let expected = if self.arc { b"m" } else { b"p" };
+        assert_eq!((category, name), (b"mot".as_slice(), expected.as_slice()));
         self.resolves.set(self.resolves.get() + 1);
-        Ok(b"motions/p.kcs".to_vec())
+        if self.resolves.get() == self.fail_resolve_on {
+            return Err(Error::new(0, "合成运动补全暂时失败"));
+        }
+        Ok([b"motions/", expected.as_slice(), b".kcs"].concat())
     }
     fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
-        assert_eq!(name, b"motions/p.kcs");
+        assert_eq!(
+            name,
+            if self.arc {
+                b"motions/m.kcs"
+            } else {
+                b"motions/p.kcs"
+            }
+        );
         assert_eq!(mode, ResourceMode::LooseFirst);
         self.reads.set(self.reads.get() + 1);
         if self.fail.get() {
@@ -75,6 +88,143 @@ fn encoded_motion(code: &[u8]) -> Vec<u8> {
     encoder.write_all(code).unwrap();
     bytes.extend(encoder.finish().unwrap());
     bytes
+}
+
+#[test]
+fn arc_keeps_completed_banks_and_arguments_across_retry_and_all_script_entries() {
+    let source = b"#DEFINE\nCPLANE panel[3]\n#START\npanel mcarc ($0+=1) ($0+=2) ($0+=3) ($0+=4) ($0+=5) ($0+=100)\nwait 99\n#_FES_SLEEP_\npanel arc 0 90 -180 17 -19\n#panel.PUSH_L\n@ mcarc -1 360 -360\n";
+    for budget in [1, 4096] {
+        let files = Files {
+            motion: Some(encoded_motion(&[0x3b])),
+            arc: true,
+            fail_resolve_on: 2,
+            ..Default::default()
+        };
+        let (mut runtime, mut scene) = setup(source, budget, files.clone());
+        while !scene.prepare(runtime.numbers_mut(), budget).unwrap() {}
+        let handles: Vec<_> = (0..3)
+            .map(|bank| scene.objects().lookup("panel", bank).unwrap())
+            .collect();
+        assert!(update(&mut runtime, &mut scene, 100).is_err());
+        assert_eq!(runtime.numbers().shared[0], 15);
+        for (bank, handle) in handles.iter().enumerate() {
+            let motions = scene.objects().get(*handle).unwrap().motions();
+            assert_eq!(motions.len(), usize::from(bank == 0));
+            if bank == 0 {
+                assert_eq!(motions.group(1), Some(1));
+            }
+        }
+        update(&mut runtime, &mut scene, 100).unwrap();
+        assert_eq!(runtime.numbers().shared[0], 15);
+        assert_eq!((files.resolves.get(), files.reads.get()), (4, 1));
+        for handle in &handles {
+            let motions = scene.objects().get(*handle).unwrap().motions();
+            assert_eq!(motions.len(), 1);
+            assert_eq!(motions.group(1), Some(1));
+            let parameters = motions.task(1).unwrap().state().unwrap().parameters;
+            assert_eq!(
+                [parameters[0], parameters[3], parameters[4], parameters[5]],
+                [1., 10., 15., 0.].map(f32::to_bits)
+            );
+            assert!((f32::from_bits(parameters[1]) - 3f32.to_radians()).abs() < 1e-7);
+            assert!((f32::from_bits(parameters[2]) - 6f32.to_radians()).abs() < 1e-7);
+        }
+        let deadline = scene.deadline();
+        system(&mut runtime, &mut scene);
+        for handle in &handles {
+            let motions = scene.objects().get(*handle).unwrap().motions();
+            assert_eq!(motions.group(2), Some(0));
+            assert_eq!(
+                motions.task(2).unwrap().state().unwrap().parameters[..6],
+                [
+                    0.,
+                    std::f32::consts::FRAC_PI_2,
+                    -std::f32::consts::PI,
+                    17.,
+                    -19.,
+                    0.
+                ]
+                .map(f32::to_bits)
+            );
+        }
+        let reference = ObjectReference {
+            name: "panel".into(),
+            bank: 2,
+        };
+        let mut handled = None;
+        for _ in 0..256 {
+            handled = runtime
+                .dispatch_fes_event(0, &mut scene, Some(&reference), 2)
+                .unwrap();
+            if handled.is_some() {
+                break;
+            }
+        }
+        assert_eq!(handled, Some(true));
+        assert_eq!(scene.deadline(), deadline);
+        for (bank, handle) in handles.iter().enumerate() {
+            let motions = scene.objects().get(*handle).unwrap().motions();
+            assert_eq!(motions.len(), if bank == 2 { 3 } else { 2 });
+            if bank == 2 {
+                assert_eq!(motions.group(3), Some(1));
+                assert_eq!(
+                    motions.task(3).unwrap().state().unwrap().parameters[..6],
+                    [
+                        0.,
+                        std::f32::consts::TAU,
+                        -std::f32::consts::TAU,
+                        0.,
+                        0.,
+                        0.
+                    ]
+                    .map(f32::to_bits)
+                );
+            }
+        }
+        assert_eq!((files.resolves.get(), files.reads.get()), (8, 1));
+    }
+}
+
+#[test]
+fn arc_stops_at_bank_holes_and_keeps_defaults_for_empty_arguments() {
+    for budget in [1, 4096] {
+        let files = Files {
+            motion: Some(encoded_motion(&[0x3b])),
+            arc: true,
+            ..Default::default()
+        };
+        let source = b"#DEFINE\nSLIDER item[3]\nBASE other\n#START\nwait 99\n#_FES_SLEEP_\nitem arc \"\" ($0+=1)\nother mcarc -1 2147483647 -2147483648 17 -19 ($1+=1)\n";
+        let (mut runtime, mut scene) = setup(source, budget, files.clone());
+        while !scene.prepare(runtime.numbers_mut(), budget).unwrap() {}
+        let handles: Vec<_> = (0..3)
+            .map(|bank| scene.objects().lookup("item", bank).unwrap())
+            .collect();
+        scene.objects_mut().unwrap().remove(handles[1]).unwrap();
+        system(&mut runtime, &mut scene);
+        assert_eq!(runtime.numbers().shared[..2], [0, 0]);
+        let motions = scene.objects().get(handles[0]).unwrap().motions();
+        assert_eq!(motions.group(1), Some(0));
+        assert_eq!(
+            motions.task(1).unwrap().state().unwrap().parameters[..6],
+            [30., 0., 0., 0., 0., 0.].map(f32::to_bits)
+        );
+        assert!(
+            scene
+                .objects()
+                .get(handles[2])
+                .unwrap()
+                .motions()
+                .is_empty()
+        );
+        let other = scene.objects().lookup("other", 0).unwrap();
+        let motions = scene.objects().get(other).unwrap().motions();
+        assert_eq!(motions.group(1), Some(1));
+        assert_eq!(
+            motions.task(1).unwrap().state().unwrap().parameters[..6],
+            [0., 37480660., -37480660., 17., -19., 0.].map(f32::to_bits)
+        );
+        assert_eq!((files.resolves.get(), files.reads.get()), (2, 1));
+    }
 }
 
 #[test]
