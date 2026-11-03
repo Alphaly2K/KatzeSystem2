@@ -41,7 +41,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         let count = match index {
             78 => 12,
             79 => 16,
-            80 | 83 => 4,
+            80 | 83 | 342 => 4,
             82 | 88 | 92 | 105 | 258 | 262 | 848 | 849 => 8,
             84 | 101 => 20,
             100 | 256 | 260 | 263 => 12,
@@ -51,7 +51,10 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         if arguments.len() < 4 || arguments.len() > count || !arguments.len().is_multiple_of(4) {
             return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
         }
-        let route_zero = matches!(index, 104 | 105 | 256 | 258 | 260 | 262 | 263 | 848 | 849);
+        let route_zero = matches!(
+            index,
+            104 | 105 | 256 | 258 | 260 | 262 | 263 | 342 | 848 | 849
+        );
         if route_zero && arguments.len() != count {
             return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
         }
@@ -191,6 +194,9 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             }
             262 => {
                 self.command_target(target, 292, [0, word(1), 0])?;
+            }
+            342 => {
+                self.command_target(target, 298, [0; 3])?;
             }
             _ => unreachable!(),
         }

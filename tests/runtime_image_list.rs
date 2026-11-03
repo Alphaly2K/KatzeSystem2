@@ -133,7 +133,7 @@ fn background_copies_bottom_origin_crops_and_survives_source_release_clear_and_r
 
 struct Programs;
 impl ProgramLoader for Programs {
-    fn load(&mut self, _: &[u8]) -> Result<Option<Program>> {
+    fn load(&mut self, name: &[u8]) -> Result<Option<Program>> {
         fn ins(code: &mut Vec<u8>, op: u8, args: &[u32]) {
             code.push(op);
             for n in args {
@@ -155,6 +155,12 @@ impl ProgramLoader for Programs {
             }
             ins(&mut code, 0x2b, &[native, args.len() as u32 * 4]);
         }
+        if name == b"flush" {
+            for target in [1, 0, 999] {
+                ins(&mut code, 0x25, &[target]);
+                ins(&mut code, 0x2b, &[342, 4]);
+            }
+        }
         ins(&mut code, 0x26, &[0]);
         ins(&mut code, 0x3b, &[]);
         Ok(Some(Program::from_code(&code, vec![0; 4], 128)?))
@@ -163,7 +169,7 @@ impl ProgramLoader for Programs {
 
 #[test]
 fn ordinary_list_natives_initialize_the_plane_and_submit_at_the_integer_offset() {
-    for budget in [1, 4096] {
+    for (budget, force) in [(1, false), (1, true), (4096, false), (4096, true)] {
         let mut runtime = Runtime::new(
             0,
             kind::ROOT,
@@ -184,7 +190,14 @@ fn ordinary_list_natives_initialize_the_plane_and_submit_at_the_integer_offset()
             Some(RenderTarget::from_tiles([5, 3], [1, 1], vec![Some(surface)]).unwrap());
         let list = runtime.create(0, kind::IMAGE_LIST, b"list", b"").unwrap();
         assert_eq!(list, 1);
-        let script = runtime.create(0, kind::ORDINARY, b"setup", b"").unwrap();
+        let script = runtime
+            .create(
+                0,
+                kind::ORDINARY,
+                if force { b"flush" } else { b"setup" },
+                b"",
+            )
+            .unwrap();
         runtime.update(0, 0).unwrap();
         let vm = runtime.object(script).unwrap().interpreter().unwrap();
         assert_eq!(vm.read(0, 4).unwrap(), 0xdead_beefu32.to_le_bytes());
@@ -212,7 +225,7 @@ fn ordinary_list_natives_initialize_the_plane_and_submit_at_the_integer_offset()
         assert_eq!((i32::from_le_bytes(x), i32::from_le_bytes(y)), (2, -1));
         assert_eq!(
             runtime.drawing_mut().target.as_ref().unwrap().pixel(2, 0),
-            Some(0xffab_cdef)
+            Some(if force { 0 } else { 0xffab_cdef })
         );
         runtime.update(1, 0).unwrap();
         let target = runtime.drawing_mut().target.as_ref().unwrap();

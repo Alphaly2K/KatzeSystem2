@@ -1674,6 +1674,7 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
                 | 260
                 | 262
                 | 263
+                | 342
                 | 739
                 | 848
                 | 849
