@@ -10,6 +10,7 @@ enum UpdatePhase {
 enum CommandPhase {
     Message(usize),
     Delete([u32; 4]),
+    Notification(Command, [u32; 4], usize),
 }
 
 /// 已装载的普通 KCS 任务；子任务树与对象命令由外层宿主管理。
@@ -159,7 +160,7 @@ impl OrdinaryTask {
         Ok(())
     }
 
-    /// 分派基类控制及 162／163；完成后消费当前分支，未知编号返回诊断。
+    /// 分派基类、输入通知及运行控制；尚未实现的专属编号返回诊断。
     pub fn dispatch_control(
         &mut self,
         kind: u32,
@@ -175,11 +176,27 @@ impl OrdinaryTask {
                 CommandOutcome::RESUME
             });
         }
+        if matches!(command.code, 4 | 9 | 10 | 18 | 22 | 30 | 31 | 64 | 65 | 452) {
+            return self.dispatch_notification(command, output, host, budget);
+        }
         self.require_idle()?;
         if self.control.deletion_requested != 0 {
             return Ok(CommandOutcome::finished(false));
         }
         match command.code {
+            20 | 21 => {
+                self.enqueue_message([
+                    command.sender,
+                    if command.code == 20 {
+                        0xffff_0012
+                    } else {
+                        0xffff_0013
+                    },
+                    0,
+                    0,
+                ])?;
+                *output = 1;
+            }
             162 => self.start_execution(command.data[0], command.data[1])?,
             163 => self.stop_execution()?,
             // 25／26 在目标 VM 中读写原始创建上下文，正文最多 31 字节；零指针跳过。
@@ -198,7 +215,13 @@ impl OrdinaryTask {
                     self.set_creation_context(Some(&context))?;
                 }
             }
-            13 | 17 | 23 | 24 | 29 => {
+            6 | 19 | 161 | 164..=179 | 336 => {
+                return Err(Error::new(
+                    self.interpreter.pc,
+                    format!("未支持的普通任务控制命令 {}", command.code),
+                ));
+            }
+            _ => {
                 let propagate = self.control.dispatch(
                     kind,
                     &mut self.clock,
@@ -208,8 +231,73 @@ impl OrdinaryTask {
                 )?;
                 return Ok(CommandOutcome::finished(propagate));
             }
-            _ => return Err(Error::new(self.interpreter.pc, "未支持的普通任务控制命令")),
         }
+        Ok(CommandOutcome::finished(false))
+    }
+
+    fn dispatch_notification(
+        &mut self,
+        command: &Command,
+        output: &mut u32,
+        host: &mut impl Host,
+        budget: usize,
+    ) -> Result<CommandOutcome> {
+        let (mut message, entry_pc) = match self.command_phase {
+            Some(CommandPhase::Notification(saved, message, pc)) if saved == *command => {
+                (message, pc)
+            }
+            _ => {
+                self.require_idle()?;
+                if self.control.deletion_requested != 0 {
+                    return Ok(CommandOutcome::finished(false));
+                }
+                if matches!(command.code, 9 | 10 | 30 | 31 | 65) {
+                    *output = 1;
+                }
+                let kind = match command.code {
+                    4 => 1,
+                    9 => 3,
+                    10 => 4,
+                    18 => 0x16,
+                    22 => 0x14,
+                    30 => 0x18,
+                    31 => 0x19,
+                    64 => 5,
+                    65 => 0x17,
+                    452 => 0x15,
+                    _ => unreachable!(),
+                };
+                let (sender, first, second) = match command.code {
+                    18 => (u32::MAX, 0, 0),
+                    22 | 452 => (command.sender, 0, command.data[1]),
+                    _ => (command.sender, command.data[0], command.data[1]),
+                };
+                (
+                    [sender, 0xffff_0000 | kind, first, second],
+                    self.interpreter.pc,
+                )
+            }
+        };
+        self.command_phase = Some(CommandPhase::Notification(*command, message, entry_pc));
+        self.synchronize(host);
+        self.apply_effects(host)?;
+        let result = self
+            .interpreter
+            .dispatch_message(&mut message, host, budget);
+        self.command_phase = Some(CommandPhase::Notification(*command, message, entry_pc));
+        let step = result?;
+        self.apply_effects(host)?;
+        if matches!(step, Some(Step::Yield)) {
+            return Ok(CommandOutcome::RESUME);
+        }
+        if matches!(command.code, 9 | 10) {
+            *output = 0;
+        } else if command.code == 22 {
+            *output =
+                step.as_ref()
+                    .is_some_and(|step| self.active_result(step, entry_pc)) as u32;
+        }
+        self.command_phase = None;
         Ok(CommandOutcome::finished(false))
     }
 

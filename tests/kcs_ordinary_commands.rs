@@ -27,6 +27,124 @@ fn receiver(ending: &[u8]) -> OrdinaryTask {
 }
 
 #[test]
+fn control_notifications_translate_messages_without_changing_the_task_clock() {
+    let cases = [
+        (4, [7, 0xffff_0001, 12, 34], 99),
+        (9, [7, 0xffff_0003, 12, 34], 0),
+        (10, [7, 0xffff_0004, 12, 34], 0),
+        (18, [u32::MAX, 0xffff_0016, 0, 0], 99),
+        (22, [7, 0xffff_0014, 0, 34], 0),
+        (30, [7, 0xffff_0018, 12, 34], 1),
+        (31, [7, 0xffff_0019, 12, 34], 1),
+        (64, [7, 0xffff_0005, 12, 34], 99),
+        (65, [7, 0xffff_0017, 12, 34], 1),
+        (452, [7, 0xffff_0015, 0, 34], 99),
+    ];
+    for (code, mut message, expected) in cases {
+        for ending in [&[0x3b][..], &[][..]] {
+            for budget in [1, 100] {
+                let mut state = State::new(8);
+                let mut host = CoreHost::new(&mut state);
+                let mut task = receiver(ending);
+                task.task_id = 42;
+                assert!(task.update(100, 3, &mut host, 100).unwrap());
+                task.running = 0;
+                let clock = task.clock.clone();
+                let command = Command {
+                    target: 42,
+                    sender: 7,
+                    code,
+                    data: [12, 34, 1],
+                };
+                let mut output = 99;
+                let mut done = false;
+                for _ in 0..30 {
+                    let result = task
+                        .dispatch_control(12, &command, &mut output, &mut host, budget)
+                        .unwrap();
+                    assert!(!result.propagate);
+                    if result.done {
+                        done = true;
+                        break;
+                    }
+                    assert_eq!(
+                        output,
+                        if matches!(code, 9 | 10 | 30 | 31 | 65) {
+                            1
+                        } else {
+                            99
+                        }
+                    );
+                    let mut other = command;
+                    other.data[0] += 1;
+                    assert!(
+                        task.dispatch_control(12, &other, &mut output, &mut host, 1)
+                            .is_err()
+                    );
+                    assert!(task.enqueue_message([0; 4]).is_err());
+                }
+                assert!(done && !task.is_pending());
+                let expected = if code == 22 && ending.is_empty() {
+                    1
+                } else {
+                    expected
+                };
+                assert_eq!(output, expected);
+                message[1] += 1;
+                let bytes = message
+                    .into_iter()
+                    .flat_map(u32::to_le_bytes)
+                    .collect::<Vec<_>>();
+                assert_eq!(task.interpreter.read(32, 16).unwrap(), bytes);
+                message[1] -= 1;
+                assert_eq!(task.clock, clock);
+                assert_eq!((task.running, task.accumulated_increment), (0, 3));
+                task.control.deletion_requested = -1;
+                assert!(
+                    task.dispatch_control(12, &command, &mut output, &mut host, 1)
+                        .unwrap()
+                        .done
+                );
+                assert_eq!(output, expected);
+            }
+        }
+    }
+
+    for (code, kind) in [(20, 0xffff_0012), (21, 0xffff_0013)] {
+        let mut state = State::new(8);
+        let mut host = CoreHost::new(&mut state);
+        let mut task = receiver(&[0x3b]);
+        task.update(100, 1, &mut host, 100).unwrap();
+        task.running = 0;
+        let command = Command {
+            target: 42,
+            sender: 7,
+            code,
+            data: [12, 34, 1],
+        };
+        let mut output = 99;
+        assert!(
+            !task
+                .dispatch_control(12, &command, &mut output, &mut host, 1)
+                .unwrap()
+                .propagate
+        );
+        assert_eq!(output, 1);
+        assert_eq!(task.queued_messages(), [[7, kind, 0, 0]]);
+        task.update(110, 1, &mut host, 100).unwrap();
+        assert_eq!(task.queued_messages().len(), 1);
+        task.running = 1;
+        task.update(120, 1, &mut host, 100).unwrap();
+        assert!(task.queued_messages().is_empty());
+        let bytes = [7u32, kind + 1, 0, 0]
+            .into_iter()
+            .flat_map(u32::to_le_bytes)
+            .collect::<Vec<_>>();
+        assert_eq!(task.interpreter.read(32, 16).unwrap(), bytes);
+    }
+}
+
+#[test]
 fn synchronous_delivery_keeps_task_state_and_defers_output_until_completion() {
     for (ending, expected) in [(&[][..], 1), (&[0x3b][..], 0)] {
         let mut state = State::new(8);

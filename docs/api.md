@@ -214,7 +214,7 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 
 `OrdinaryTask::start_execution(source, mode)` 对应普通命令 162：将 running 设为 1；source 等于当前 task_id 时使用传入 mode，否则使用 1。source 对应命令第一数据项。`stop_execution()` 对应 163，将 running 和 VM 执行模式均设为零。两方法在已有删除标记时跳过，预算续跑期间返回诊断。VM 暂停仍允许时钟、累计增量和排队消息处理，末尾普通恢复完成后保留 running 为 1。
 
-`OrdinaryTask::dispatch_control(kind, command, output, host, budget)` 接收 3／13／17／23／24／25／26／29／162／163。25 把创建上下文正文和一个结尾零写到第二数据项指向的地址，26 从该地址读取零结尾正文；零指针跳过。kind 来自任务树节点；返回 `task::CommandOutcome`：`done` 为 false 表示删除通知仍需预算续跑，`propagate` 表示是否允许按 `data[2]` 继续传播。已处理的普通命令和已有删除标记的对象返回 `propagate = false`，其他编号返回诊断。
+`OrdinaryTask::dispatch_control(kind, command, output, host, budget)` 接收基类控制、25／26、162／163，以及 4／9／10／18／20／21／22／30／31／64／65／452 的消息通知。25 把创建上下文正文和一个结尾零写到第二数据项指向的地址，26 从该地址读取零结尾正文；零指针跳过。kind 来自任务树节点；返回 `task::CommandOutcome`：`done` 为 false 表示通知仍需以同一命令及 output 续跑，`propagate` 表示是否允许按 `data[2]` 继续传播。已处理的普通命令和已有删除标记的对象返回 `propagate = false`；其他编号交给基类，尚未实现的已知专属编号返回诊断。同步通知不受 running 限制，20／21 复制入队；消息映射、返回槽和预算规则见 [KCS 普通任务](kcs.md#普通任务与跨任务宿主)。
 
 `set_creation_context(Some(bytes))` 对应命令 26，保存首个零之前的原始字节，正文最多 31 字节；`copy_creation_context(Some(buffer))` 对应 25，写入正文及一个结尾零，保留输出其余字节。两方法的 None 均跳过，删除后的任务也跳过；预算续跑期间返回诊断。输入或输出容量不足时保留原状态，直接使用公开上下文字段时由调用者保持正文容量约束。
 
