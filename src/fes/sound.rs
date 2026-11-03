@@ -1,4 +1,4 @@
-use super::ObjectAttributes;
+use super::{ObjectAttributes, SubcommandContext};
 use crate::{Error, Result};
 
 /// SOUND 的声明属性及运动状态；文件请求由媒体更新阶段消费。
@@ -113,6 +113,13 @@ impl SoundState {
             self.group = name(group, 32)?.to_vec();
         }
         Ok(dirty)
+    }
+
+    pub fn subcommand_context(&self) -> SubcommandContext {
+        SubcommandContext {
+            color: (self.volume as u32) << 24,
+            ..Default::default()
+        }
     }
 
     pub fn motion_properties(&self) -> [u32; 36] {

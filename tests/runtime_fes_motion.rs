@@ -1,5 +1,6 @@
 use katze_system2::{
     Error, HandleAllocator, Result,
+    audio::{SoundConfig, SoundFactory},
     expression::State,
     fes::{self, ObjectDefinition},
     graphics::{GraphicsFactory, RenderTarget},
@@ -240,7 +241,7 @@ impl ResourceServices for Files {
 }
 
 struct SceneSetup {
-    runtime: Runtime<GraphicsFactory<Reject>>,
+    runtime: Runtime<SoundFactory<GraphicsFactory<Reject>>>,
     scene: Scene,
     list: u32,
     fail_motion: Rc<Cell<bool>>,
@@ -282,7 +283,10 @@ fn scene_setup(source: &[u8], budget: usize) -> SceneSetup {
         kind::ROOT,
         Box::new(BaseObject::new()),
         State::new(8),
-        GraphicsFactory { fallback: Reject },
+        SoundFactory {
+            enabled: true,
+            fallback: GraphicsFactory { fallback: Reject },
+        },
     );
     runtime.set_budget(budget, 10000);
     runtime.set_resources(Files {
@@ -392,6 +396,66 @@ fn plane_subcommands_read_local_base_and_vram_before_capturing_motion_priority()
                 } else {
                     0x40345678
                 }
+            );
+        }
+    }
+}
+
+#[test]
+fn sound_subcommands_keep_zero_vectors_and_wrapped_volume_before_real_media_updates() {
+    let source = b"#DEFINE\nSOUND tone[2]\n#OBJECT CHANNEL\ntone[0] 5\ntone[1] 6\n#SUBCOMMAND\noneshot probe motion CA[0] PX[0] SX[0] : [0] [1] [2] CA\n#START\ntone probe @ @ @\nwait 1000\n";
+    for budget in [1, 4096] {
+        let mut setup = scene_setup(source, budget);
+        let sound_task = setup.runtime.create(0, kind::SOUND, b"sound", b"").unwrap();
+        setup.runtime.host_mut().sound_config_enabled = 1;
+        setup.runtime.host_mut().sound_config = Some(SoundConfig {
+            master_volume: Some(100),
+            ..Default::default()
+        });
+        assert!(
+            setup
+                .scene
+                .prepare(setup.runtime.numbers_mut(), 4096)
+                .unwrap()
+        );
+        let objects = setup.scene.objects_mut().unwrap();
+        objects.set_sound_task(sound_task);
+        for (bank, volume, pan) in [(0, 329, -37), (1, -1, 51)] {
+            let handle = objects.lookup("tone", bank).unwrap();
+            let ObjectState::Sound(sound) = &mut objects.get_mut(handle).unwrap().state else {
+                panic!()
+            };
+            sound.volume = volume;
+            sound.pan = pan;
+            sound.object_type = 2;
+            sound.file = b"tone.ogg".to_vec();
+        }
+        update_scene(&mut setup, 100);
+        for (bank, volume, pan) in [(0, 73, 36), (1, 255, 306)] {
+            let handle = setup.scene.objects().lookup("tone", bank).unwrap();
+            let object = setup.scene.objects().get(handle).unwrap();
+            let task = object.motions().task(1).unwrap();
+            assert_eq!(
+                task.state().unwrap().parameters[..4],
+                [volume as f32, 0., 1., volume as f32].map(f32::to_bits)
+            );
+            let ObjectState::Sound(sound) = &object.state else {
+                panic!()
+            };
+            assert_eq!((sound.volume, sound.pan), (volume, pan));
+        }
+        for (channel, volume) in [(5, 73.), (6, 255.)] {
+            assert_eq!(
+                setup
+                    .runtime
+                    .object(sound_task)
+                    .unwrap()
+                    .audio_state()
+                    .unwrap()
+                    .channel(channel)
+                    .unwrap()
+                    .requested_volume(),
+                volume
             );
         }
     }
