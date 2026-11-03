@@ -380,6 +380,8 @@ FES `dbgstr text` 与 `debug expression` 在主体、系统块及对象处理器
 
 对存在的目标对象调用未注册名称时，Runtime 追加 `Unknown FES object command: ` 和展开后的整行字节后继续，后续参数不求值；只有目标名时直接继续。名称按大小写匹配，内置名称与注册绑定均不进入此回退；尚未实现的内置命令继续诊断。
 
+Scene 已连接全局 `baseimg [object]` 的图像背景与 PLANE 截图请求，消费时向共享列表发送 302；主体先处理背景再继续脚本，系统块与对象处理器的请求在后续普通更新消费。失败与预算续跑保留来源和查询阶段。列表持有独立背景像素，清除显示后仍保存快照；详见[背景快照](graphics.md#背景快照)。
+
 FES `strvar index text [integer ...]` 已接入共享 `expression::State::strings`，支持原始字节、最多四个整数格式参数及省略文本时清空；`strvar get index source` 按编号复制，get 忽略 ASCII 大小写。主体、系统块和对象事件共用当前表达式上下文与字符串表。格式、容量、缺参及首零规则见[运行时字符串写入](fes.md#运行时字符串写入)。
 
 `Runtime::dispatch_fes_event(owner, &mut scene, target, event)` 分派控制器输入事件。`target` 为可选 `ObjectReference`；事件编号为 0～21，其中 0／1／2／3／4／5／8／21 分别对应 FOCUS／UNFOCUS／PUSH_L／PUSH_R／RELEASE_L／RELEASE_R／SCRL_P／TOUCH，其余编号只更新系统输入命名值。命中目标时，系统按下、方向释放和触碰值使用对象句柄；无目标为 −1，缺失目标跳过写入，左右点击释放仍为零。返回 `None` 表示预算耗尽，须以相同目标和编号续跑；`Some(bool)` 表示完成，布尔值只取对象自身处理器是否存在，默认事件组单独执行时为 false。该入口执行对象命令并可加入运动，不在分派末尾自动刷新媒体，不修改任务时钟或系统帧。局部 wait／decode 结束当前处理片段，decode 的媒体提交请求留到普通更新；DEFAULT 片段结束后仍可进入对象自身处理器。exit 另将通知排队；主等待、调用及 next 规则与解释器一致。失败时保留游标，普通更新、系统块和其他对象事件须待本次完成。

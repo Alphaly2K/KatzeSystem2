@@ -14,6 +14,8 @@ pub struct ImageListObject {
     submit: u32,
     force: u32,
     enabled: u32,
+    background: Option<u32>,
+    background_active: bool,
 }
 
 impl ImageListObject {
@@ -28,6 +30,8 @@ impl ImageListObject {
             submit: 1,
             force: 0,
             enabled: 1,
+            background: None,
+            background_active: false,
         }
     }
 
@@ -37,6 +41,52 @@ impl ImageListObject {
 
     pub fn plane(&self) -> Option<u32> {
         self.plane
+    }
+
+    /// 背景快照包装；清除背景后继续保留，随所属任务回收。
+    pub fn background_image(&self) -> Option<u32> {
+        self.background
+    }
+
+    pub fn background_active(&self) -> bool {
+        self.background_active
+    }
+
+    fn register_background(&mut self, host: &mut dyn Host) -> Result<()> {
+        let image = self.background.unwrap();
+        self.list
+            .as_mut()
+            .ok_or_else(|| Error::new(0, "图像列表尚未创建"))?
+            .set(0, image, ImageListProperties::default(), images(host)?)
+    }
+
+    fn set_background(
+        &mut self,
+        source: u32,
+        rectangle: Option<Rect>,
+        host: &mut dyn Host,
+    ) -> Result<()> {
+        self.list
+            .as_mut()
+            .ok_or_else(|| Error::new(0, "图像列表尚未创建"))?
+            .remove(0, images(host)?)?;
+        if source != 0 {
+            let snapshot = match self.background {
+                Some(image) => image,
+                None => {
+                    let image = images(host)?.create_empty(self.id)?;
+                    self.background = Some(image);
+                    image
+                }
+            };
+            images(host)?.copy_snapshot(snapshot, source, rectangle)?;
+            self.register_background(host)?;
+        }
+        if let Some(plane) = self.plane {
+            self.send(plane, 47, [0, u32::from(source != 0), 1], None, host)?;
+        }
+        self.background_active = source != 0;
+        Ok(())
     }
 
     fn initialize(&mut self, size: [u32; 2], host: &mut dyn Host) -> Result<()> {
@@ -283,6 +333,29 @@ impl TaskObject for ImageListObject {
                 if let Some(list) = &mut self.list {
                     list.clear(images(host)?)?;
                 }
+                if self.background_active {
+                    self.register_background(host)?;
+                }
+            }
+            302 => {
+                let rectangle = if b != 0 {
+                    buffers
+                        .data0
+                        .as_deref()
+                        .map(|buffer| {
+                            let [left, top, right, bottom] = words::<4>(Some(buffer))?;
+                            Ok(Rect {
+                                left: left as i32,
+                                top: top as i32,
+                                right: right as i32,
+                                bottom: bottom as i32,
+                            })
+                        })
+                        .transpose()?
+                } else {
+                    None
+                };
+                self.set_background(b, rectangle, host)?;
             }
             298 => {
                 self.enabled = 1;

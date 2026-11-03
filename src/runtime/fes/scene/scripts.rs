@@ -11,6 +11,11 @@ pub(super) struct ChildScripts {
 }
 
 pub(super) enum ScriptRequest {
+    SetBackground {
+        source: Option<BackgroundSource>,
+        image: u32,
+        phase: usize,
+    },
     StartFes {
         name: Vec<u8>,
         parameters: [u32; 16],
@@ -20,6 +25,11 @@ pub(super) enum ScriptRequest {
     },
     EndFes,
     EndKcs,
+}
+
+pub(super) enum BackgroundSource {
+    Image(u32),
+    Plane(u32),
 }
 
 pub(super) enum ScriptDisposition {
@@ -36,6 +46,35 @@ impl Scene {
         numbers: &mut crate::expression::State,
     ) -> Result<Option<ScriptDisposition>> {
         match args.first().map(Vec::as_slice) {
+            Some(b"baseimg") => {
+                let source = match args.get(1).filter(|name| !name.is_empty()) {
+                    None => None,
+                    Some(name) => {
+                        let target = self.interpreter.object_reference(name, numbers)?;
+                        let Some(handle) = self.objects.lookup(&target.name, target.bank) else {
+                            return Ok(Some(ScriptDisposition::Continue));
+                        };
+                        let object = self.objects.get(handle).unwrap();
+                        match &object.state {
+                            super::super::ObjectState::CImage(_)
+                            | super::super::ObjectState::Image(_)
+                            | super::super::ObjectState::Button(_) => {
+                                Some(BackgroundSource::Image(object.image.unwrap_or(0)))
+                            }
+                            super::super::ObjectState::Plane(_) => {
+                                Some(BackgroundSource::Plane(handle))
+                            }
+                            _ => return Ok(Some(ScriptDisposition::Flush)),
+                        }
+                    }
+                };
+                self.notify(Notification::Script(ScriptRequest::SetBackground {
+                    source,
+                    image: 0,
+                    phase: 0,
+                }))?;
+                Ok(Some(ScriptDisposition::Flush))
+            }
             Some(b"endfes" | b"endkcs") => {
                 self.notify(Notification::Script(if args[0] == b"endfes" {
                     ScriptRequest::EndFes
@@ -114,6 +153,11 @@ impl<F: ObjectFactory> Store<'_, F> {
         request: &mut ScriptRequest,
     ) -> Result<bool> {
         match request {
+            ScriptRequest::SetBackground {
+                source,
+                image,
+                phase,
+            } => self.advance_fes_background(owner, &scene.objects, source, image, phase),
             ScriptRequest::EndFes | ScriptRequest::EndKcs => {
                 let slot = if matches!(request, ScriptRequest::EndFes) {
                     &mut scene.scripts.fes

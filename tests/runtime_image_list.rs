@@ -45,6 +45,92 @@ fn output_image<F: ObjectFactory>(runtime: &mut Runtime<F>, id: u32) -> u32 {
     u32::from_le_bytes(buffer[..4].try_into().unwrap())
 }
 
+#[test]
+fn background_copies_bottom_origin_crops_and_survives_source_release_clear_and_reinitialization() {
+    let mut runtime = Runtime::new(
+        0,
+        kind::ROOT,
+        Box::new(BaseObject::new()),
+        State::new(0),
+        GraphicsFactory { fallback: Fallback },
+    );
+    runtime.host_mut().surface_size = [8, 6];
+    runtime.drawing_mut().target = Some(RenderTarget::new([8, 6]).unwrap());
+    let list = runtime.create(0, kind::IMAGE_LIST, b"list", b"").unwrap();
+    send(&mut runtime, list, 285, 8, 6);
+    let plane = runtime.tree().children(list).unwrap().next().unwrap();
+    let source = runtime.images_mut().create(99, [4, 3]).unwrap();
+    for (index, pixel) in runtime
+        .images_mut()
+        .get_mut(source)
+        .unwrap()
+        .pixels_mut()
+        .chunks_exact_mut(4)
+        .enumerate()
+    {
+        pixel.copy_from_slice(&(0xff00_0001 + index as u32).to_le_bytes());
+    }
+    let mut rectangle = [1i32, 1, 3, 3].map(i32::to_le_bytes).concat();
+    runtime
+        .dispatch_command_with_buffers(
+            0,
+            command(list, 302, 0, source),
+            &mut CommandBuffers {
+                data0: Some(&mut rectangle),
+                data1: None,
+            },
+        )
+        .unwrap();
+    assert_eq!(runtime.drawables().get(plane).unwrap().display(), 1);
+    let output = output_image(&mut runtime, list);
+    runtime
+        .images_mut()
+        .get_mut(source)
+        .unwrap()
+        .pixels_mut()
+        .fill(0);
+    runtime.images_mut().release(source).unwrap();
+    for reinitialize in [false, true] {
+        if reinitialize {
+            send(&mut runtime, list, 285, 8, 6);
+            assert!(runtime.images().get(output).is_err());
+            assert_eq!(send(&mut runtime, list, 294, 0, 0), 0);
+        }
+        let output = output_image(&mut runtime, list);
+        send(&mut runtime, list, 297, 0, 0);
+        assert_eq!(send(&mut runtime, list, 294, 0, 0), 1);
+        assert!(
+            runtime
+                .images()
+                .get(output)
+                .unwrap()
+                .surface()
+                .pixels()
+                .iter()
+                .all(|&byte| byte == 0)
+        );
+        send(&mut runtime, list, 296, 0, 0);
+        let surface = runtime.images().get(output).unwrap().surface();
+        for (x, y, color) in [(0, 4, 2), (1, 4, 3), (0, 5, 6), (1, 5, 7)] {
+            assert_eq!(surface.pixel(x, y), Some(0xff00_0000 | color));
+        }
+    }
+    runtime
+        .dispatch_command_with_buffers(
+            0,
+            command(list, 302, 1, 0),
+            &mut CommandBuffers {
+                data0: Some(&mut []),
+                data1: None,
+            },
+        )
+        .unwrap();
+    assert_eq!(runtime.drawables().get(plane).unwrap().display(), 0);
+    assert_eq!(send(&mut runtime, list, 294, 0, 0), 0);
+    send(&mut runtime, list, 297, 0, 0);
+    assert_eq!(send(&mut runtime, list, 294, 0, 0), 0);
+}
+
 struct Programs;
 impl ProgramLoader for Programs {
     fn load(&mut self, _: &[u8]) -> Result<Option<Program>> {

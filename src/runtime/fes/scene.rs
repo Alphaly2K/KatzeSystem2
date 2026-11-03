@@ -5,6 +5,7 @@ use crate::{
 };
 use std::collections::{BTreeMap, VecDeque};
 
+mod background;
 mod scripts;
 mod strings;
 mod wait;

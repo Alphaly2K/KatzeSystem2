@@ -335,6 +335,55 @@ impl Images {
         Ok(())
     }
 
+    pub(crate) fn copy_snapshot(
+        &mut self,
+        target: u32,
+        source: u32,
+        rectangle: Option<Rect>,
+    ) -> Result<bool> {
+        let pixels = self.pixel_handle(source)?;
+        let data = self
+            .data
+            .get(&pixels)
+            .ok_or_else(|| Error::new(0, "截图来源没有像素"))?;
+        let alpha = data.has_alpha;
+        let mut snapshot = if let Some(rect) = rectangle {
+            let source = &data.image;
+            let [width, height] = source.info.size.map(|value| value as i32);
+            if rect.left > width || rect.top > height {
+                return Ok(false);
+            }
+            if rect.left < 0 || rect.top < 0 || rect.right < rect.left || rect.bottom < rect.top {
+                return Err(Error::new(0, "截图裁剪范围无效"));
+            }
+            let size = [
+                rect.right.min(width) - rect.left,
+                rect.bottom.min(height) - rect.top,
+            ];
+            let mut snapshot = Image::new(size.map(|value| value as u32))?;
+            snapshot.id = source.id;
+            snapshot.info.reserved = source.info.reserved;
+            snapshot.use_pixel_canvas();
+            snapshot.surface.copy_from(
+                &source.surface,
+                Rect::from_xywh(rect.left, height - rect.top - size[1], size[0], size[1]),
+                [0; 2],
+            );
+            snapshot
+        } else {
+            data.image.clone()
+        };
+        self.recreate(target, snapshot.info.size)?;
+        if rectangle.is_some() {
+            snapshot.info.base = self.get(target)?.info.base;
+        }
+        let pixels = self.pixel_handle(target)?;
+        let data = self.data.get_mut(&pixels).unwrap();
+        data.image = snapshot;
+        data.has_alpha = alpha;
+        Ok(true)
+    }
+
     /// 接收已格式展开的名称列表，仅 ASCII 空格分隔，不解释引号。
     pub fn load<S: ResourceServices + ?Sized>(
         &mut self,
