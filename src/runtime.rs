@@ -1687,7 +1687,7 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         }
         if matches!(
             index,
-            111 | 112 | 114 | 115 | 117 | 365 | 366 | 368 | 590..=593
+            111 | 112 | 114 | 115 | 117 | 365 | 366 | 368 | 590..=597
         ) {
             return self.resources.call(self.host.task_id, index, arguments, vm);
         }

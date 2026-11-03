@@ -39,7 +39,7 @@ pub(crate) fn load_sequence_file(
         .map(|bytes| (handle, bytes)))
 }
 
-/// 为已有宿主提供普通表的图像原始数据、XML 资源及句柄生命周期。
+/// 为已有宿主提供图像原始数据、XML、三整数分组表及句柄生命周期。
 pub struct ResourceHost<'a, H, S> {
     pub inner: &'a mut H,
     pub services: &'a mut S,
@@ -50,6 +50,7 @@ pub struct ResourceHost<'a, H, S> {
 pub(crate) struct ResourceState {
     xml: BTreeMap<u32, XmlDocument>,
     images: BTreeMap<u32, ImageData>,
+    triples: BTreeMap<u32, super::triples::TripleTable>,
     handles: HandleAllocator,
 }
 
@@ -141,7 +142,7 @@ impl ResourceState {
     }
 
     fn allocate_handle(&mut self, offset: usize) -> Result<u32> {
-        if self.xml.len() + self.images.len() >= read::MAX_ITEMS {
+        if self.xml.len() + self.images.len() + self.triples.len() >= read::MAX_ITEMS {
             return Err(Error::new(offset, "KCS 资源对象数量超过上限"));
         }
         self.handles.allocate_at(offset)
@@ -295,7 +296,7 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
             }
             return Ok(NativeReturn::Continue);
         }
-        if !matches!(index, 365 | 366 | 368 | 590..=593) {
+        if !matches!(index, 365 | 366 | 368 | 590..=597) {
             return self.inner.call(index, arguments, vm);
         }
         self.state.call(index, arguments, vm, Some(self.services))
@@ -311,17 +312,58 @@ impl ResourceState {
         services: Option<&mut dyn ResourceServices>,
     ) -> Result<NativeReturn> {
         let count = match index {
-            365 | 366 | 590 | 591 => 1,
+            365 | 366 | 590 | 591 | 594 | 595 => 1,
             368 | 592 | 593 => 3,
+            596 | 597 => 5,
             _ => unreachable!(),
         };
-        if arguments.len() != count * 4 {
+        let null_triple_query = matches!(index, 596 | 597) && arguments == [0; 4];
+        if arguments.len() != count * 4 && !null_triple_query {
             return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
         }
         let args: Vec<_> = arguments
             .chunks_exact(4)
             .map(|bytes| u32::from_le_bytes(bytes.try_into().unwrap()))
             .collect();
+        if index == 594 {
+            let mut name = strings::format(vm, args[0], 0)?;
+            name.truncate(
+                name.iter()
+                    .position(|&byte| byte == 0)
+                    .unwrap_or(name.len()),
+            );
+            let services = services.ok_or_else(|| Error::new(vm.pc, "运行时未配置资源服务"))?;
+            let Some(bytes) = services.read(&name, ResourceMode::LooseFirst)? else {
+                return Ok(NativeReturn::Value(0));
+            };
+            let table = super::triples::TripleTable::parse(&bytes)?;
+            let handle = self.allocate_handle(vm.pc)?;
+            self.triples.insert(handle, table);
+            return Ok(NativeReturn::Value(handle));
+        }
+        if index == 595 {
+            if args[0] != 0 && self.triples.remove(&args[0]).is_none() {
+                return Err(Error::new(vm.pc, "KCS 三整数分组表句柄无效"));
+            }
+            return Ok(NativeReturn::Continue);
+        }
+        if matches!(index, 596 | 597) {
+            if args[0] == 0 {
+                return Ok(NativeReturn::Value(0));
+            }
+            let table = self
+                .triples
+                .get(&args[0])
+                .ok_or_else(|| Error::new(vm.pc, "KCS 三整数分组表句柄无效"))?;
+            let name = strings::format(vm, args[1], 0)?;
+            let Some(values) = table.query(&name, index == 597)? else {
+                return Ok(NativeReturn::Value(0));
+            };
+            for (address, value) in args[2..].iter().zip(values) {
+                vm.write(*address, &value.to_le_bytes())?;
+            }
+            return Ok(NativeReturn::Value(1));
+        }
         if index == 365 {
             let name = strings::format(vm, args[0], 0)?;
             let services = services.ok_or_else(|| Error::new(vm.pc, "运行时未配置资源服务"))?;
