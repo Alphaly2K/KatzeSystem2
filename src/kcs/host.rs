@@ -241,6 +241,11 @@ pub(crate) fn call_native(
     arguments: &[u8],
     vm: &mut Interpreter,
 ) -> Result<NativeReturn> {
+    let index = match index {
+        885 | 894 => 515,
+        886 | 895 => 516,
+        _ => index,
+    };
     if index == 1062 {
         if arguments.len() != 8 {
             return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
@@ -325,12 +330,12 @@ pub(crate) fn call_native(
     }
     let count = match index {
         1 | 6 | 17 | 18 | 25 | 26 | 40 | 47 | 48 | 71 | 209 | 210 | 212 | 213 | 278 | 319 | 75
-        | 393 | 420 | 421 | 516 => 1,
-        8 | 13..=16 | 19..=24 | 149 | 211 | 276 | 277 | 422 | 423 | 518 => 2,
+        | 393 | 420 | 421 | 516 | 898 | 899 => 1,
+        8 | 13..=16 | 19..=24 | 149 | 211 | 276 | 277 | 422 | 423 | 518 | 897 => 2,
         50..=58 | 60 | 62..=64 => 1,
         59 | 61 => 2,
         38 | 44 | 45 | 790 => 4,
-        35..=37 | 41 | 42 | 517 | 519 => 3,
+        35..=37 | 41 | 42 | 517 | 519 | 896 | 902 => 3,
         5 | 76 | 789 => 0,
         _ => return Err(Error::new(vm.pc, format!("未支持的 KCS native {index}"))),
     };
@@ -715,6 +720,56 @@ pub(crate) fn call_native(
                 }
                 entries.entry(key.to_vec()).or_insert(args[2]);
                 NativeReturn::Continue
+            }
+        }
+        896..=899 | 902 => {
+            if (index == 902 && vm.read(args[2], 1).is_err()) || args[0] == 0 {
+                return Ok(if matches!(index, 897 | 899 | 902) {
+                    NativeReturn::Value(0)
+                } else {
+                    NativeReturn::Continue
+                });
+            }
+            let entries = host
+                .integer_maps
+                .get_mut(&args[0])
+                .ok_or_else(|| Error::new(vm.pc, "无效的 KCS 整数字典句柄"))?;
+            match index {
+                896 | 897 => {
+                    let key = strings::format(vm, args[1], 0)?;
+                    let key = key.split(|&byte| byte == 0).next().unwrap();
+                    if index == 897 {
+                        NativeReturn::Value(entries.get(key).copied().unwrap_or(0))
+                    } else {
+                        if entries.len() >= read::MAX_ITEMS && !entries.contains_key(key) {
+                            return Err(Error::new(vm.pc, "KCS 整数字典条目超过上限"));
+                        }
+                        entries.insert(key.to_vec(), args[2]);
+                        NativeReturn::Continue
+                    }
+                }
+                898 => {
+                    entries.clear();
+                    NativeReturn::Continue
+                }
+                899 => {
+                    let size = entries.keys().try_fold(4u32, |size, key| {
+                        let length = u32::try_from(key.len()).ok()?.checked_add(4)? & !3;
+                        size.checked_add(length)?.checked_add(4)
+                    });
+                    NativeReturn::Value(
+                        size.ok_or_else(|| Error::new(vm.pc, "KCS 字典序列化大小溢出"))?,
+                    )
+                }
+                902 => {
+                    if let Some(key) = entries.keys().nth(args[1] as usize) {
+                        write_string(vm, args[2], key, 1)?;
+                        NativeReturn::Value(1)
+                    } else {
+                        NativeReturn::Value(0)
+                    }
+                }
+                _ => unreachable!(),
             }
         }
         789 => NativeReturn::Value(host.configured_shared_slots),
