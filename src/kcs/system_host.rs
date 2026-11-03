@@ -32,6 +32,14 @@ impl<'a, H: Host, S: SystemServices> SystemHost<'a, H, S> {
 }
 
 impl<H: Host, S: SystemServices> Host for SystemHost<'_, H, S> {
+    fn set_task_shared_numbers(&mut self, available: bool) {
+        self.inner.set_task_shared_numbers(available);
+    }
+
+    fn load_kcs_program(&mut self, name: &[u8]) -> Result<Option<super::Program>> {
+        self.inner.load_kcs_program(name)
+    }
+
     fn fes_services(&mut self) -> Option<&mut dyn crate::runtime::fes::Services> {
         self.inner.fes_services()
     }

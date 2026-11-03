@@ -46,14 +46,18 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
     }
 }
 
-pub(super) fn query_shared_numbers(deleted: bool, buffers: &mut CommandBuffers<'_>) -> Result<()> {
+pub(super) fn query_shared_numbers_available(
+    available: bool,
+    deleted: bool,
+    buffers: &mut CommandBuffers<'_>,
+) -> Result<()> {
     if !deleted {
         let target = buffers
             .data1
             .as_deref_mut()
             .and_then(|b| b.get_mut(..4))
             .ok_or_else(|| Error::new(0, "数值区查询缺少可用标记缓冲区"))?;
-        target.copy_from_slice(&1u32.to_le_bytes());
+        target.copy_from_slice(&u32::from(available).to_le_bytes());
     }
     Ok(())
 }

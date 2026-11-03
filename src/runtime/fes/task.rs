@@ -838,6 +838,9 @@ impl FesObject {
 }
 
 impl TaskObject for FesObject {
+    fn shared_numbers_available(&self) -> Option<bool> {
+        Some(self.initialized)
+    }
     fn accepts_deferred_delete(&self) -> bool {
         true
     }
@@ -1096,7 +1099,12 @@ impl TaskObject for FesObject {
                     *output = values.get(index).copied().unwrap_or(0) as u32;
                 }
             }
-            19 | 177 | 178 | 341..=345 | 349..=358 => {
+            177 => super::super::save::query_shared_numbers_available(
+                self.initialized,
+                false,
+                buffers,
+            )?,
+            19 | 178 | 341..=345 | 349..=358 => {
                 return Err(Error::new(0, "FES 专属命令尚未接入"));
             }
             _ => {
@@ -1161,6 +1169,14 @@ pub struct FesFactory<F> {
 }
 
 impl<F: ObjectFactory> ObjectFactory for FesFactory<F> {
+    fn create_unloaded_ordinary(&mut self, id: u32) -> Result<Box<dyn TaskObject>> {
+        self.fallback.create_unloaded_ordinary(id)
+    }
+
+    fn load_kcs_program(&mut self, name: &[u8]) -> Result<Option<crate::kcs::Program>> {
+        self.fallback.load_kcs_program(name)
+    }
+
     fn create(&mut self, id: u32, object_kind: u32, name: &[u8]) -> Result<Box<dyn TaskObject>> {
         if object_kind == kind::FES {
             Ok(Box::new(FesObject::new(id)))

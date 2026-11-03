@@ -212,6 +212,8 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 
 `kcs::OrdinaryTask::new(program, external)` 创建已装载且 running 为 1 的任务；`clock`、`control`、`creation_context`、`interpreter`、`task_id` 和 `running` 可由外层管理，任务编号默认零，创建上下文默认空。`enqueue_message([u32; 4])` 复制入队，`queued_messages()` 查询当前队列。`update(now, increment, host, budget_per_call)` 更新时钟、按顺序分派全部消息并进行一次无消息恢复，返回 true 表示本轮完成；false 时继续调用同一方法，本轮时刻和累计增量保持不变。预算分别交给每次 VM 推进，`is_pending()` 查询续跑状态，续跑期间禁止入队、切换执行入口或直接操作 VM／控制字段。running 为零时只更新时钟并保留队列；时钟 paused 非零仍推进活动脚本。`accumulated_increment` 仅在活动的新一轮累加外层提供的 increment，按 u32 回绕。程序在执行中到达隐式代码末尾时保留 running 为 1，下一轮进入才停止；显式停止指令当轮停止。
 
+`OrdinaryTask::initialize(host, budget)` 提供装载后的单次普通恢复，不更新时间、不消费队列、不累计 increment；false 表示预算续跑。`OrdinaryObject.task` 为 `Option<OrdinaryTask>`，无 VM 时为 None；已有调用方需先借用该选项或通过 `TaskObject::interpreter` 查询。
+
 `OrdinaryTask::update_body(increment, host, budget_per_call)` 执行消息队列及 VM 主体，省略时钟更新。树调度器先更新该任务的 `clock`，再推进子任务，最后调用本方法；子任务期间可以改变父任务控制字段或入队。主体预算续跑期间继续调用本方法，禁止再次更新时钟或重复运行子任务。原有 `update` 继续提供单任务的时钟与主体组合。
 
 `OrdinaryTask::start_execution(source, mode)` 对应普通命令 162：将 running 设为 1；source 等于当前 task_id 时使用传入 mode，否则使用 1。source 对应命令第一数据项。`stop_execution()` 对应 163，将 running 和 VM 执行模式均设为零。两方法在已有删除标记时跳过，预算续跑期间返回诊断。VM 暂停仍允许时钟、累计增量和排队消息处理，末尾普通恢复完成后保留 running 为 1。
@@ -371,7 +373,7 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 
 `CanvasLayout::new(tile_size, grid, step)` 与 `triangulate(source)` 将已变换的源几何切成逐块画布三角形，保留原顺序、颜色及局部 UV。步长、整数裁剪门控和资源上限见[画布几何切割](graphics.md#画布几何切割)。`Drawable::from_canvas_source` 与平面命令 41 保留源和包装两套变换；源变化后通过 `prepare_canvas` 更新，帧提交自动准备可见对象。直接查询与属性选择契约见[画布纹理包装](graphics.md#画布纹理包装)。
 
-对象实现 `runtime::TaskObject`：基类控制与时钟、可选 VM、创建上下文、主体、对象命令、排队与同步消息、删除通知和释放。默认空操作的 `begin_update()` 在时钟和子任务更新前执行，用于按钮的每轮响应重置。除对象命令外，返回 `false` 的方法表示本次预算耗尽，续跑由运行时完成；对象命令返回 `task::CommandOutcome`，完成状态与传播状态分开表达。库提供 `BaseObject`（只有控制与时钟）与 `OrdinaryObject`（包裹 `OrdinaryTask`）。`ObjectFactory::create` 按类型编号创建对象；`KcsFactory` 经 `ProgramLoader` 按名称装载普通 KCS，`external_bytes` 指定 VM 外部区容量。`graphics::GraphicsFactory { fallback }` 创建类型 2 的 `PlaneObject`，其他类型委托 fallback；基础平面提供基类控制、几何及查询、显示与输入绑定、事件响应、内部子任务传播及绘图登记清理，运动等缺失入口返回诊断，详见[二维任务对象](graphics.md#基础二维任务对象)。`input::InputFactory { fallback }` 创建类型 11 的 InputObject、类型 6 的 ButtonObject、类型 42 的 SliderObject 和类型 41 的 Scroll2Object，提供设备输入、矩形按钮及滑动控件事件；命令与约束见[输入接口](input.md)。文字类型由 `message::MessageFactory` 提供，声音类型由 `audio::SoundFactory` 提供；`kind` 保存基线类型编号。
+对象实现 `runtime::TaskObject`：基类控制与时钟、可选 VM、创建上下文、主体、对象命令、排队与同步消息、删除通知和释放。默认空操作的 `begin_update()` 在时钟和子任务更新前执行，用于按钮的每轮响应重置。除对象命令外，返回 `false` 的方法表示本次预算耗尽，续跑由运行时完成；对象命令返回 `task::CommandOutcome`，完成状态与传播状态分开表达。库提供 `BaseObject`（只有控制与时钟）与 `OrdinaryObject`（可选的 `OrdinaryTask` 及未装载状态）。`ObjectFactory::create` 按类型编号创建对象；`KcsFactory` 经 `ProgramLoader` 按名称装载普通 KCS，`external_bytes` 指定 VM 外部区容量。`graphics::GraphicsFactory { fallback }` 创建类型 2 的 `PlaneObject`，其他类型委托 fallback；基础平面提供基类控制、几何及查询、显示与输入绑定、事件响应、内部子任务传播及绘图登记清理，运动等缺失入口返回诊断，详见[二维任务对象](graphics.md#基础二维任务对象)。`input::InputFactory { fallback }` 创建类型 11 的 InputObject、类型 6 的 ButtonObject、类型 42 的 SliderObject 和类型 41 的 Scroll2Object，提供设备输入、矩形按钮及滑动控件事件；命令与约束见[输入接口](input.md)。文字类型由 `message::MessageFactory` 提供，声音类型由 `audio::SoundFactory` 提供；`kind` 保存基线类型编号。
 
 `runtime::fes::FesFactory { fallback }` 创建未装载的类型 34 任务。运行时依次使用 337 初始化、338 通过文件名缓冲区装载、340 绑定可达共享列表、339 立即启动；338 与 340 可以交换先后。此后由 `Runtime::update` 自动推进。337 的第二数据项用零表示运行时隐式共享状态，338 和 25／26 的字节数据通过 `CommandBuffers.data1` 提供。346／347 以第一数据项选择本 FES 的局部数值槽，346 以第二项写入，347 返回当前值；支持初始化后、装载前的参数准备，编号越界时忽略写入或返回零。命令、预算、错误及当前支持范围见[图形文档的 FES 任务对象](graphics.md#fes-任务对象)。TaskObject 的 `creation_context()` 为上下文继承提供只读视图，`accepts_deferred_delete()` 为消费 TaskEffects 的对象开放嵌套删除请求；两者默认不提供。
 
@@ -381,7 +383,7 @@ FES 的 `prepare_release` 在子任务释放后，先向非零的共享列表发
 
 普通 452 接收目标编号并发送全零数据的命令 23，以状态一返回原始任务属性。目标缺失或未写入时返回 `0xffffffff`，零目标仍进入路由；同步分派遵守运行时对执行中对象的访问约束。
 
-Scene 已处理 `execfes`、`endfes` 及 `endkcs` 的结束时序。`execfes` 使用同一资源服务补全名称，继承创建上下文和共享列表，传递最多十六个数值参数，立即启动直属子任务后在同一时刻继续父脚本；预算和资源错误续跑保留创建进度及参数。`endfes` 在正常主体中请求子任务删除，普通主体等到下一时刻再继续；事件处理器中的结束或创建请求留待正常主体消费。`Scene::child_fes()` 查询保存的子任务编号，退出码不会自动回收子任务，后续状态通过 `_EXITCODE_` 提供；完整协议见[图形文档](graphics.md#fes-任务对象)。非空 `execkcs` 仍返回装载协议诊断。
+Scene 已处理 `execfes`、`endfes` 及 `endkcs` 的结束时序。`execfes` 使用同一资源服务补全名称，继承创建上下文和共享列表，传递最多十六个数值参数，立即启动直属子任务后在同一时刻继续父脚本；预算和资源错误续跑保留创建进度及参数。`endfes` 在正常主体中请求子任务删除，普通主体等到下一时刻再继续；事件处理器中的结束或创建请求留待正常主体消费。`Scene::child_fes()` 查询保存的子任务编号，退出码不会自动回收子任务，后续状态通过 `_EXITCODE_` 提供；完整协议见[图形文档](graphics.md#fes-任务对象)。`execkcs` 构造普通子任务后补全 KCS 名称，依序执行 161 的装载及初始化、172 的空外部区绑定，再保存编号并继续父脚本。`Scene::child_kcs()` 查询保存编号，额外词项不求值。
 
 `RootObject::new(input_task, sound_task)` 保存输入与声音任务编号，命令 34／35 原样返回相应值；任务删除后不会自动选择替代编号。该对象作为 Runtime 的显式根参数使用，子任务由调用者创建，自动启动链仍待接入。根对象遵循专属命令消费规则，其余未实现的专属入口返回诊断。
 
@@ -487,7 +489,7 @@ Scene 消费 `noact`／`lockactive` 并按主体时点处理通知。`preferred_
 
 主体、命令和消息在返回前完成预算续跑。`DEFAULT_BUDGET` 为单次推进预算，零预算按一处理；连续耗尽预算时，`DEFAULT_LIMIT` 按续跑累计额度触发同步执行诊断。与库的其他执行错误一样，出现该错误后应丢弃解释器状态。不结束的普通指令循环因此会返回诊断。
 
-当前运行时接入普通表任务 native 66／67／69／70／72／73／75／76／108／109／110／452 和已核实的普通表接口；108／110 接受目标编号和值两个 DWORD。`KcsFactory.external_bytes` 超过库的 64 MiB 上限时在分配前返回诊断。629 仍由 `SystemHost` 单独包装，尚未并入；367 尚未实现。普通 KCS 对象当前在工厂返回前装载程序；原 FES 的 `execkcs` 路径先构造，再通过 161／172 装载并启动，运行时尚待接入这一协议。
+当前运行时接入普通表任务 native 66／67／69／70／72／73／75／76／108／109／110／452 和已核实的普通表接口；108／110 接受目标编号和值两个 DWORD。`KcsFactory.external_bytes` 超过库的 64 MiB 上限时在分配前返回诊断。629 仍由 `SystemHost` 单独包装，尚未并入；367 尚未实现。`Runtime::create` 配合 `KcsFactory` 保留按名称预先装载的便利入口；`Runtime::create_unloaded_ordinary(parent, context)` 构造无 VM 的普通对象。工厂包装需转发 `create_unloaded_ordinary` 和 `load_kcs_program`，宿主包装需转发程序装载及共享数值绑定状态。命令 161 从 `CommandBuffers.data1` 读取完整名称；首参非零时立即初始化，零时只装载。缺失程序会移除旧 VM，保留任务编号、控制、时钟和队列，随后仍继承父级数值区及上下文；程序读取服务错误保留装载阶段，沿用同一命令重试。172 绑定外部区，已接入零长度绑定，非零长度仍返回诊断。
 
 ## 约束与验证
 

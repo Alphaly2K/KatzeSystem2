@@ -152,6 +152,10 @@ impl Scene {
         self.scripts.fes
     }
 
+    pub fn child_kcs(&self) -> Option<u32> {
+        self.scripts.kcs
+    }
+
     pub fn objects(&self) -> &Objects {
         &self.objects
     }

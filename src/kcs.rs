@@ -226,6 +226,10 @@ pub struct TaskEffects {
 }
 
 pub trait Host {
+    fn load_kcs_program(&mut self, _name: &[u8]) -> Result<Option<Program>> {
+        Err(Error::new(0, "宿主未提供 KCS 程序装载"))
+    }
+
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn>;
 
     /// 外层资源宿主共用的编号源；不创建句柄的宿主可以不提供。
@@ -238,6 +242,8 @@ pub trait Host {
     fn set_task_id(&mut self, _id: u32) {}
 
     fn set_task_context(&mut self, _context: &[u8]) {}
+
+    fn set_task_shared_numbers(&mut self, _available: bool) {}
 
     /// FES 任务使用同一运行时的共享状态、对象更新和立即启动服务。
     fn fes_services(&mut self) -> Option<&mut dyn crate::runtime::fes::Services> {
@@ -435,6 +441,13 @@ pub trait Host {
 }
 
 impl<T: Host + ?Sized> Host for &mut T {
+    fn set_task_shared_numbers(&mut self, available: bool) {
+        (**self).set_task_shared_numbers(available);
+    }
+    fn load_kcs_program(&mut self, name: &[u8]) -> Result<Option<Program>> {
+        (**self).load_kcs_program(name)
+    }
+
     fn fes_services(&mut self) -> Option<&mut dyn crate::runtime::fes::Services> {
         (**self).fes_services()
     }
@@ -699,6 +712,13 @@ impl Interpreter {
     }
     pub fn stack_bytes(&self) -> &[u8] {
         &self.memory[self.stack_start..self.sp]
+    }
+    /// 替换自有外部区并返回旧存储；程序、栈和消息等待状态保持。
+    pub fn replace_external(&mut self, external: Vec<u8>) -> Result<Vec<u8>> {
+        if external.len() > read::MAX_BYTES {
+            return Err(Error::new(self.pc, "外部存储超过上限"));
+        }
+        Ok(std::mem::replace(&mut self.external, external))
     }
     /// 从入口重新执行，保留程序数据、外部区及调试元数据。
     pub fn reset_execution(&mut self) {

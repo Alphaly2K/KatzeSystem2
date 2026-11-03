@@ -20,13 +20,15 @@ pub mod fes;
 mod graphics;
 mod message;
 mod object;
+mod ordinary;
 mod resources;
 mod root;
 mod save;
 
 use resources::Resources;
 
-pub use object::{BaseObject, OrdinaryObject, TaskObject};
+pub use object::{BaseObject, TaskObject};
+pub use ordinary::OrdinaryObject;
 pub use root::RootObject;
 
 /// 基线工厂中的对象类型编号。数值来自静态构造与类型追踪，具体工厂仍需逐类接入。
@@ -56,6 +58,15 @@ pub const DEFAULT_LIMIT: usize = 1 << 20;
 pub trait ObjectFactory {
     /// `id` 为已选定的任务编号，`name` 为命令 66 展开后的名称字节。
     fn create(&mut self, id: u32, kind: u32, name: &[u8]) -> Result<Box<dyn TaskObject>>;
+
+    /// 构造尚无 VM 的普通任务；后续通过命令 161 装载。
+    fn create_unloaded_ordinary(&mut self, _id: u32) -> Result<Box<dyn TaskObject>> {
+        Err(Error::new(0, "对象工厂未提供未装载普通任务"))
+    }
+
+    fn load_kcs_program(&mut self, _name: &[u8]) -> Result<Option<Program>> {
+        Err(Error::new(0, "对象工厂未提供 KCS 程序装载"))
+    }
 }
 
 /// 按名称提供已解析的 KCS 程序。
@@ -80,6 +91,20 @@ impl<L: ProgramLoader> KcsFactory<L> {
 }
 
 impl<L: ProgramLoader> ObjectFactory for KcsFactory<L> {
+    fn create_unloaded_ordinary(&mut self, id: u32) -> Result<Box<dyn TaskObject>> {
+        if self.external_bytes > read::MAX_BYTES {
+            return Err(Error::new(0, "普通任务外部存储超过上限"));
+        }
+        Ok(Box::new(OrdinaryObject::unloaded(
+            id,
+            vec![0; self.external_bytes],
+        )?))
+    }
+
+    fn load_kcs_program(&mut self, name: &[u8]) -> Result<Option<Program>> {
+        self.programs.load(name)
+    }
+
     fn create(&mut self, id: u32, kind: u32, name: &[u8]) -> Result<Box<dyn TaskObject>> {
         if kind != kind::ORDINARY {
             return Err(Error::new(0, format!("对象类型 {kind} 需要对应子系统工厂")));
@@ -293,9 +318,14 @@ impl<F: ObjectFactory> Runtime<F> {
 
     /// 创建对象、登记父子关系并传递原始创建上下文；对应命令 66 的三步顺序。
     ///
-    /// 普通 KCS 程序在工厂返回前装载；FES 的 execkcs 所需构造后装载协议尚未接入。
+    /// KcsFactory 的此入口按名称预先装载；构造后装载使用 create_unloaded_ordinary。
     pub fn create(&mut self, parent: u32, kind: u32, name: &[u8], context: &[u8]) -> Result<u32> {
         create_object(self.store(), parent, kind, name, context)
+    }
+
+    /// 构造没有 VM 的普通任务，供命令 161 在登记后装载。
+    pub fn create_unloaded_ordinary(&mut self, parent: u32, context: &[u8]) -> Result<u32> {
+        create_unloaded_ordinary(self.store(), parent, context)
     }
 
     /// 由外层调度器按 `origin` 路由任务命令；目标不可达时返回零。
@@ -458,6 +488,25 @@ fn create_object<F: ObjectFactory>(
     name: &[u8],
     context: &[u8],
 ) -> Result<u32> {
+    create_object_impl(store, parent, kind, name, context, false)
+}
+
+fn create_unloaded_ordinary<F: ObjectFactory>(
+    store: Store<'_, F>,
+    parent: u32,
+    context: &[u8],
+) -> Result<u32> {
+    create_object_impl(store, parent, kind::ORDINARY, &[], context, true)
+}
+
+fn create_object_impl<F: ObjectFactory>(
+    store: Store<'_, F>,
+    parent: u32,
+    kind: u32,
+    name: &[u8],
+    context: &[u8],
+    unloaded: bool,
+) -> Result<u32> {
     let Store {
         tree,
         objects,
@@ -470,7 +519,11 @@ fn create_object<F: ObjectFactory>(
         return Err(Error::new(0, "任务父级不存在"));
     }
     let id = tree.next_id();
-    let mut object = factory.create(id, kind, name)?;
+    let mut object = if unloaded {
+        factory.create_unloaded_ordinary(id)?
+    } else {
+        factory.create(id, kind, name)?
+    };
     object.set_creation_context(context)?;
     if let (Some(audio), Some(groups)) = (object.audio_state_mut(), host.sound_groups.as_ref()) {
         audio.set_groups(groups)?;
@@ -516,6 +569,7 @@ struct RunningTask {
     deferred_delete: bool,
     clock: TaskClock,
     context: Option<Vec<u8>>,
+    shared_numbers: Option<bool>,
     remaining_messages: Option<usize>,
     effects: TaskEffects,
 }
@@ -595,8 +649,23 @@ fn run_nested<F: ObjectFactory>(
         },
     ) = (running.get(&target), &mut execution)
     {
-        if *kind == kind::ORDINARY && command.code == 177 {
-            save::query_shared_numbers(task.deleted, buffers)?;
+        if let (177, Some(available)) = (command.code, task.shared_numbers) {
+            save::query_shared_numbers_available(available, task.deleted, buffers)?;
+            **propagate = false;
+            return Ok(());
+        }
+        if let (25, Some(context)) = (command.code, &task.context) {
+            if !task.deleted && command.data[1] != 0 {
+                let destination = buffers
+                    .data1
+                    .as_deref_mut()
+                    .ok_or_else(|| Error::new(0, "执行中任务上下文输出缓冲区缺失"))?;
+                if destination.len() <= context.len() {
+                    return Err(Error::new(0, "任务创建上下文输出容量不足"));
+                }
+                destination[..context.len()].copy_from_slice(context);
+                destination[context.len()] = 0;
+            }
             **propagate = false;
             return Ok(());
         }
@@ -837,6 +906,7 @@ fn run_nested<F: ObjectFactory>(
             deferred_delete: object.accepts_deferred_delete(),
             clock: object.clock().clone(),
             context: object.creation_context().map(<[u8]>::to_vec),
+            shared_numbers: object.shared_numbers_available(),
             remaining_messages: object
                 .queued_messages()
                 .map(|messages| read::MAX_ITEMS.saturating_sub(messages.len())),
@@ -1269,6 +1339,17 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
 }
 
 impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
+    fn set_task_shared_numbers(&mut self, available: bool) {
+        if let Some(task) = self.running.get_mut(&self.host.task_id) {
+            task.shared_numbers = Some(available);
+        }
+    }
+    fn load_kcs_program(&mut self, name: &[u8]) -> Result<Option<Program>> {
+        self.resources.images.release_owner(self.host.task_id);
+        self.resources.raw.release_owner(self.host.task_id);
+        self.factory.load_kcs_program(name)
+    }
+
     fn fes_services(&mut self) -> Option<&mut dyn fes::Services> {
         Some(self)
     }

@@ -1,4 +1,4 @@
-use crate::kcs::{Host, Interpreter, OrdinaryTask};
+use crate::kcs::{Host, Interpreter};
 use crate::task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock};
 use crate::{Error, Result};
 
@@ -18,6 +18,11 @@ pub trait TaskObject {
 
     /// 支持命令 25 的原始创建上下文；没有上下文存储的对象返回 None。
     fn creation_context(&self) -> Option<&[u8]> {
+        None
+    }
+
+    /// 命令 177 所查询的共享数值区是否已经绑定。
+    fn shared_numbers_available(&self) -> Option<bool> {
         None
     }
 
@@ -203,112 +208,5 @@ impl TaskObject for BaseObject {
     fn request_delete(&mut self, _host: &mut dyn Host, _budget: usize) -> Result<bool> {
         self.control.deletion_requested = 1;
         Ok(true)
-    }
-}
-
-/// 已装载程序、时钟和消息队列的普通 KCS 对象。
-pub struct OrdinaryObject {
-    pub task: OrdinaryTask,
-}
-
-impl OrdinaryObject {
-    pub fn new(task: OrdinaryTask) -> Self {
-        Self { task }
-    }
-}
-
-impl TaskObject for OrdinaryObject {
-    fn creation_context(&self) -> Option<&[u8]> {
-        Some(&self.task.creation_context)
-    }
-
-    fn queued_messages(&self) -> Option<&[[u32; 4]]> {
-        Some(self.task.queued_messages())
-    }
-
-    fn control(&self) -> &Control {
-        &self.task.control
-    }
-
-    fn clock(&self) -> &TaskClock {
-        &self.task.clock
-    }
-
-    fn state(&mut self) -> (&mut Control, &mut TaskClock) {
-        (&mut self.task.control, &mut self.task.clock)
-    }
-
-    fn interpreter(&self) -> Option<&Interpreter> {
-        Some(&self.task.interpreter)
-    }
-
-    fn interpreter_mut(&mut self) -> Option<&mut Interpreter> {
-        Some(&mut self.task.interpreter)
-    }
-
-    fn set_creation_context(&mut self, context: &[u8]) -> Result<()> {
-        self.task.set_creation_context(Some(context))
-    }
-
-    fn update_body(&mut self, host: &mut dyn Host, increment: u32, budget: usize) -> Result<bool> {
-        let mut host = host;
-        self.task.update_body(increment, &mut host, budget)
-    }
-
-    fn dispatch_command(
-        &mut self,
-        kind: u32,
-        command: &Command,
-        output: &mut u32,
-        host: &mut dyn Host,
-        budget: usize,
-    ) -> Result<CommandOutcome> {
-        let mut host = host;
-        self.task
-            .dispatch_control(kind, command, output, &mut host, budget)
-    }
-
-    fn dispatch_command_with_buffers(
-        &mut self,
-        kind: u32,
-        command: &Command,
-        buffers: &mut CommandBuffers<'_>,
-        output: &mut u32,
-        host: &mut dyn Host,
-        budget: usize,
-    ) -> Result<CommandOutcome> {
-        if command.code == 177 {
-            super::save::query_shared_numbers(self.task.control.deletion_requested != 0, buffers)?;
-            return Ok(CommandOutcome::finished(false));
-        }
-        self.dispatch_command(kind, command, output, host, budget)
-    }
-
-    fn enqueue_message(&mut self, message: [u32; 4]) -> Result<()> {
-        self.task.enqueue_message(message)
-    }
-
-    fn dispatch_message(
-        &mut self,
-        message: &mut [u32; 4],
-        output: &mut u32,
-        host: &mut dyn Host,
-        budget: usize,
-    ) -> Result<bool> {
-        let mut host = host;
-        self.task
-            .dispatch_message(message, output, &mut host, budget)
-    }
-
-    fn request_delete(&mut self, host: &mut dyn Host, budget: usize) -> Result<bool> {
-        let mut host = host;
-        self.task.request_delete(&mut host, budget)
-    }
-
-    fn release(&mut self) -> Result<()> {
-        if self.task.is_pending() {
-            return Err(Error::new(self.task.interpreter.pc, "普通任务执行尚未完成"));
-        }
-        Ok(())
     }
 }

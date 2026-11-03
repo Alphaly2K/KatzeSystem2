@@ -127,6 +127,14 @@ pub struct InputFactory<F> {
 }
 
 impl<F: ObjectFactory> ObjectFactory for InputFactory<F> {
+    fn create_unloaded_ordinary(&mut self, id: u32) -> Result<Box<dyn TaskObject>> {
+        self.fallback.create_unloaded_ordinary(id)
+    }
+
+    fn load_kcs_program(&mut self, name: &[u8]) -> Result<Option<crate::kcs::Program>> {
+        self.fallback.load_kcs_program(name)
+    }
+
     fn create(&mut self, id: u32, object_kind: u32, name: &[u8]) -> Result<Box<dyn TaskObject>> {
         match object_kind {
             kind::INPUT => Ok(Box::new(InputObject::new(id))),

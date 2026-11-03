@@ -8,6 +8,7 @@ enum UpdatePhase {
 }
 
 enum CommandPhase {
+    Initialize(usize),
     Message(usize),
     Delete([u32; 4]),
     Notification(Command, [u32; 4], usize),
@@ -58,6 +59,29 @@ impl OrdinaryTask {
 
     pub fn is_pending(&self) -> bool {
         self.phase.is_some() || self.command_phase.is_some()
+    }
+
+    /// 装载后立即推进一次 VM；不更新时间、不消费排队消息，也不累计 increment。
+    pub fn initialize(&mut self, host: &mut impl Host, budget: usize) -> Result<bool> {
+        let entry_pc = match self.command_phase {
+            Some(CommandPhase::Initialize(pc)) => pc,
+            _ => {
+                self.require_idle()?;
+                let pc = self.interpreter.pc;
+                self.command_phase = Some(CommandPhase::Initialize(pc));
+                pc
+            }
+        };
+        self.synchronize(host);
+        self.apply_effects(host)?;
+        let step = self.interpreter.resume(host, budget)?;
+        self.apply_effects(host)?;
+        if matches!(step, Step::Yield) {
+            return Ok(false);
+        }
+        self.running = self.active_result(&step, entry_pc) as i32;
+        self.command_phase = None;
+        Ok(true)
     }
 
     fn require_idle(&self) -> Result<()> {
