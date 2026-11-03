@@ -456,6 +456,24 @@ impl<F: ObjectFactory> Runtime<F> {
 }
 
 impl<F: ObjectFactory> Store<'_, F> {
+    fn fes_debug_command(&mut self, scene: &mut Scene, args: &[Vec<u8>]) -> Result<bool> {
+        let Some(name) = args.first() else {
+            return Ok(false);
+        };
+        if name != b"dbgstr" && name != b"debug" {
+            return Ok(false);
+        }
+        if let Some(value) = args.get(1) {
+            let message = if name == b"debug" {
+                format!("debug = {}", scene.interpreter.eval(value, self.numbers)?).into_bytes()
+            } else {
+                [b"dbgstr = ".as_slice(), value].concat()
+            };
+            self.host.debug_messages.push(message);
+        }
+        Ok(true)
+    }
+
     pub(in crate::runtime) fn refresh_fes_media(
         &mut self,
         owner: u32,
@@ -743,7 +761,8 @@ impl<F: ObjectFactory> Store<'_, F> {
                         } else {
                             scene.interpreter.finish_event_handler()?;
                         }
-                    } else if self.fes_font_command(&args, line.offset)?
+                    } else if self.fes_debug_command(scene, &args)?
+                        || self.fes_font_command(&args, line.offset)?
                         || self.fes_sound_command(scene, &args, line.offset)?
                     {
                         scene.interpreter.resume();
@@ -1127,7 +1146,8 @@ impl<F: ObjectFactory> Store<'_, F> {
                                 }
                                 continue;
                             }
-                            if self.fes_font_command(&args, line.offset)?
+                            if self.fes_debug_command(scene, &args)?
+                                || self.fes_font_command(&args, line.offset)?
                                 || self.fes_sound_command(scene, &args, line.offset)?
                             {
                                 scene.interpreter.resume();

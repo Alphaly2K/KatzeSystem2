@@ -61,6 +61,35 @@ fn event(runtime: &mut Runtime<NoTasks>, scene: &mut Scene) -> bool {
 }
 
 #[test]
+fn debug_output_uses_expanded_first_parameter_once_in_each_execution_context() {
+    for budget in [1, 4096] {
+        let (mut runtime, mut scene) = setup(
+            "#DEFINE\nBASE button\n#START\ndbgstr\ndebug\ndbgstr \"$str0;\" ignored\ndebug ($0-=1) ignored\nwait 77\n#_FES_SLEEP_\ndbgstr sleeping\n#button.PUSH_L\ndbgstr pushed\n",
+            budget,
+        );
+        runtime
+            .numbers_mut()
+            .strings
+            .insert(0, b"text %s \x82\xa0".to_vec());
+        update(&mut runtime, &mut scene, 100);
+        let deadline = scene.deadline();
+        system(&mut runtime, &mut scene, "_FES_SLEEP_");
+        assert!(event(&mut runtime, &mut scene));
+        assert_eq!(
+            runtime.host().debug_messages,
+            [
+                b"dbgstr = text %s \x82\xa0".to_vec(),
+                b"debug = -1".to_vec(),
+                b"dbgstr = sleeping".to_vec(),
+                b"dbgstr = pushed".to_vec()
+            ]
+        );
+        assert_eq!(runtime.numbers().shared[0], -1);
+        assert_eq!(scene.deadline(), deadline);
+    }
+}
+
+#[test]
 fn object_events_preserve_waits_queue_exits_and_transfer_only_the_main_cursor() {
     for budget in [1, 4096] {
         for (body, expected, transferred, exit) in [

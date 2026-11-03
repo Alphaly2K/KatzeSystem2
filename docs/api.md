@@ -376,6 +376,8 @@ FesObject 的通用按下键槽按媒体声明顺序扫描当前启用的 SYSKEY
 
 `Runtime::dispatch_fes_system_block(owner, &mut scene, name)` 同步执行 `_FES_SLEEP_`／`_FES_WAKE_`，返回 false 后以同一名称续跑；普通推进、对象修改及另一个系统块须等到本次完成。缺失块直接完成。该入口不推进系统帧，不切换媒体显示；通常保留主流程位置和等待，`next` 按系统块的调用深度规则处理。局部 `wait` 结束本次分派；系统块 `exit` 结束本次分派并将返回码排队，到下一次普通场景推进才发布。系统块也可启动已支持类型的运动；decode 结束当前处理片段并把媒体提交请求留到普通更新。未知命令和其他类型的运动返回诊断并保留待处理事件。命令 348 在系统块后刷新对象并切换相应类型的显示与输入启用；SLIDER 使用 367／366、SCROLL2 使用 375／379 关闭并恢复当前属性，`FesObject::paused()` 查询专属暂停原始值；完整契约见[暂停与唤醒](graphics.md#fes-专属暂停与唤醒)。
 
+FES `dbgstr text` 与 `debug expression` 在主体、系统块及对象处理器中向 `HostState::debug_messages` 追加原始编码消息，分别使用 `dbgstr = ` 前缀和 `debug = ` 加有符号十进制结果。只读取第一个参数，缺参时跳过；参数已完成 FES 字符串展开，文本中的百分号不作为格式符再次解释。debug 沿用当前 FES 表达式上下文及副作用。
+
 `Runtime::dispatch_fes_event(owner, &mut scene, target, event)` 分派控制器输入事件。`target` 为可选 `ObjectReference`；事件编号为 0～21，其中 0／1／2／3／4／5／8／21 分别对应 FOCUS／UNFOCUS／PUSH_L／PUSH_R／RELEASE_L／RELEASE_R／SCRL_P／TOUCH，其余编号只更新系统输入命名值。命中目标时，系统按下、方向释放和触碰值使用对象句柄；无目标为 −1，缺失目标跳过写入，左右点击释放仍为零。返回 `None` 表示预算耗尽，须以相同目标和编号续跑；`Some(bool)` 表示完成，布尔值只取对象自身处理器是否存在，默认事件组单独执行时为 false。该入口执行对象命令并可加入运动，不在分派末尾自动刷新媒体，不修改任务时钟或系统帧。局部 wait／decode 结束当前处理片段，decode 的媒体提交请求留到普通更新；DEFAULT 片段结束后仍可进入对象自身处理器。exit 另将通知排队；主等待、调用及 next 规则与解释器一致。失败时保留游标，普通更新、系统块和其他对象事件须待本次完成。
 
 `Services::dispatch_control_event(scene, target, event, budget)` 接收滑动控件的同步通知，默认委托普通事件入口。运行时在媒体命令返回前完成事件脚本，并保留回调对当前场景的修改；`decode` 等待中的主流程位置及调用栈在处理器结束后恢复。该入口不会自动刷新媒体，也不开放事件处理器内部再次分派事件。公开 `Runtime::dispatch_fes_event` 继续要求当前推进已经完成。
