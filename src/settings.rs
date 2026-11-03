@@ -11,6 +11,8 @@ pub struct SystemSettings {
     pub local_flag_ranges: [[u32; 2]; 8],
     /// 八项全局变量范围，格式同 `local_flag_ranges`。
     pub global_flag_ranges: [[u32; 2]; 8],
+    /// `GAME/autoselect` 的原始 DWORD。
+    pub auto_select: u32,
 }
 
 impl Default for SystemSettings {
@@ -22,6 +24,7 @@ impl Default for SystemSettings {
             window: [0; 0x0c],
             local_flag_ranges: [[u32::MAX; 2]; 8],
             global_flag_ranges: [[u32::MAX; 2]; 8],
+            auto_select: 0,
         };
         settings.local_flag_ranges[0] = [0, 512];
         settings.global_flag_ranges[0] = [512, 512];
@@ -71,9 +74,10 @@ impl Default for SystemSettings {
 }
 
 impl SystemSettings {
-    /// 覆盖启动 XML 的 `GAME/flag/localN`、`globalN` 范围；缺失字段保留。
+    /// 覆盖启动 XML 的变量范围及 `GAME/autoselect`；缺失字段保留。
     pub fn apply_startup_xml(&mut self, input: &[u8]) -> crate::Result<()> {
         let xml = crate::resource::XmlDocument::parse(input)?;
+        self.auto_select = xml.integer(b"GAME/autoselect", self.auto_select)?;
         for (name, ranges) in [
             ("local", &mut self.local_flag_ranges),
             ("global", &mut self.global_flag_ranges),
@@ -93,6 +97,7 @@ impl SystemSettings {
     /// 按用户设置 XML 覆盖已存在的配置；缺失字段保留，非法整数前缀取零。
     pub fn apply_xml(&mut self, input: &[u8]) -> crate::Result<()> {
         let xml = crate::resource::XmlDocument::parse(input)?;
+        self.auto_select = xml.integer(b"GAME/autoselect", self.auto_select)?;
         apply_words(
             &mut self.sound,
             &[

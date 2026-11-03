@@ -295,6 +295,13 @@ pub(crate) fn call_native(
     if index == 938 {
         return Ok(NativeReturn::Value(host.sound_config_enabled));
     }
+    if index == 999 {
+        let settings = host
+            .system_settings
+            .as_ref()
+            .ok_or_else(|| Error::new(vm.pc, "宿主未配置全局设置"))?;
+        return Ok(NativeReturn::Value(settings.auto_select));
+    }
     if index == 65 {
         return Ok(NativeReturn::YieldVoid);
     }

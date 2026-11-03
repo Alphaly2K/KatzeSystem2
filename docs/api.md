@@ -58,7 +58,7 @@ FES SOUND 文件请求通过 `Objects::set_sound_task` 的绑定发送 180／182
 
 普通 938 直接返回 `HostState::sound_config_enabled`，不读取参数或归一化结果。该字段默认零，表示新声音分类配置的启用状态，由配置宿主同步提供，独立于声音任务的设备门控。
 
-`settings::SystemSettings` 保存 sound／message／effects／window 四块基线配置，以及两组各八项的局部／全局变量范围。`Default` 提供构造初值，`apply_xml(bytes)` 覆盖已有用户设置字段，`apply_startup_xml(bytes)` 覆盖 `GAME/flag` 中的范围；两者保留缺失值。`refresh_sound_volumes()` 显式重算四路有效音量。准备后设置 `CoreHost::system_settings` 或 `Runtime::host_mut().system_settings`。普通 359 依序复制四块到 VM，360 从 VM 写回前三块；两者不压值。359／360 的地址零有效，起点在区外的地址跳过，合法起点的容量不足继续诊断。790 按组和项索引查询变量范围，依序写入起始编号及数量，返回是否找到。自动装载和媒体应用尚待接入，具体大小、XML 范围与部分失败契约见[全局设置](settings.md)。
+`settings::SystemSettings` 保存 sound／message／effects／window 四块基线配置，以及两组各八项的局部／全局变量范围和 `auto_select`。`Default` 提供构造初值，`apply_xml(bytes)` 覆盖已有用户设置字段，`apply_startup_xml(bytes)` 覆盖 `GAME/flag` 中的范围；两者均覆盖 `GAME/autoselect` 并保留缺失值，应按启动、游戏默认、用户设置的顺序应用。`refresh_sound_volumes()` 显式重算四路有效音量。准备后设置 `CoreHost::system_settings` 或 `Runtime::host_mut().system_settings`。普通 359 依序复制四块到 VM，360 从 VM 写回前三块；两者不压值。359／360 的地址零有效，起点在区外的地址跳过，合法起点的容量不足继续诊断。790 按组和项索引查询变量范围，依序写入起始编号及数量，返回是否找到。999 忽略参数并返回 `auto_select` 的原始 DWORD。自动装载和媒体应用尚待接入，具体大小、XML 范围与部分失败契约见[全局设置](settings.md)。
 
 `language::LanguageState` 保存 CP932 字节前缀表、默认编号和两套选择，通过 `CoreHost::languages` 或 `Runtime::host_mut().languages` 提供。`expand(input, mode)` 按 mode 零替换 `%LANG%`、一替换 `%LANG_M%`；其他值保留输入。选择越界时使用默认编号，默认也越界时保留标记。替换区分大小写、覆盖全部匹配，输入及前缀在首零结束。前缀最多 255 字节，有效替换的输出最多 2047 字节，超限返回诊断。普通 1062 接受 mode 和 VM 字符串地址，原地写回并保留返回槽；无效 mode 不访问地址。宿主负责把配置中的 Unicode 前缀转为 CP932，自动装载及平台语言选择尚未接入。
 
@@ -200,7 +200,7 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 
 执行器以字节地址管理程序数据、栈和最高位标记的外部存储；全部访问均检查范围。`Program::instructions` 提供只读的解码指令。`Interpreter::debug()` 提供当前调试位置、作用域地址和变量索引。通用树更新／销毁已由 `TaskTree` 与 `Lifecycle` 提供，完整对象工厂和游戏主循环尚未整合。
 
-`kcs::CoreHost::new(&mut state)` 在调用者已初始化的 `expression::State` 上提供普通任务表 native 0～6、8、13～26、33～38、40～42、44、45、47、48、50～65、68、71、75／76、149、209～213、276～278、319、393、419～423、465、515～519、789／790。共享数值区、字符串表和当前参数值可与 CST／FES 复用；209 保留已经存在的状态。789 返回 `configured_shared_slots`，初值为传入状态的槽数，可根据独立配置设置。50～64 提供普通表标量数学，62／63 保留分步角度换算，65 让出本轮且不压值。319 执行先加 0.5 的取整；5 返回 `task_time − task_origin` 的 u32 回绕差，两字段由任务宿主提供，初值为零。其他编号返回明确错误，自定义宿主可按编号委托给 `CoreHost`，其余接口自行实现。运动和粒子程序的编号属于其他函数表，调用者必须提供相应宿主。持久字段保存在 `kcs::HostState`，`CoreHost` 通过 `Deref` 暴露同一组字段；`HostState` 也可独立持有，在多次 native 调用之间保留集合句柄、随机序列和请求队列。`&mut H` 同样实现 `Host`，动态宿主可以直接传给要求具体宿主的入口。
+`kcs::CoreHost::new(&mut state)` 在调用者已初始化的 `expression::State` 上提供普通任务表 native 0～6、8、13～26、33～38、40～42、44、45、47、48、50～65、68、71、75／76、149、209～213、276～278、319、393、419～423、465、515～519、789／790、999。共享数值区、字符串表和当前参数值可与 CST／FES 复用；209 保留已经存在的状态。789 返回 `configured_shared_slots`，初值为传入状态的槽数，可根据独立配置设置。50～64 提供普通表标量数学，62／63 保留分步角度换算，65 让出本轮且不压值。319 执行先加 0.5 的取整；5 返回 `task_time − task_origin` 的 u32 回绕差，两字段由任务宿主提供，初值为零。其他编号返回明确错误，自定义宿主可按编号委托给 `CoreHost`，其余接口自行实现。运动和粒子程序的编号属于其他函数表，调用者必须提供相应宿主。持久字段保存在 `kcs::HostState`，`CoreHost` 通过 `Deref` 暴露同一组字段；`HostState` 也可独立持有，在多次 native 调用之间保留集合句柄、随机序列和请求队列。`&mut H` 同样实现 `Host`，动态宿主可以直接传给要求具体宿主的入口。
 
 `kcs::TaskClock::update(now)` 接受外层调度器提供的整数时刻。`paused` 非零时平移起点并保留当前时刻，清除 `one_tick_pending`；未暂停时更新当前时刻，有单步标记时还将“与上次更新的差值减一”加到起点，并立即清除标记。零时间差同样消耗标记，全部差值与起点运算按 u32 回绕。`elapsed()` 查询当前差值，`CoreHost::set_task_clock(&clock)` 将其同步到 native 5。子任务遍历与等待调度由外层负责。
 

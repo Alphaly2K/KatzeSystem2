@@ -12,6 +12,7 @@ fn settings() -> SystemSettings {
         message: [0x22; 0x48],
         effects: [0x33; 0x20],
         window: [0x44; 0x0c],
+        auto_select: 0x80000007,
         ..SystemSettings::default()
     }
 }
@@ -29,6 +30,11 @@ fn defaults_and_xml_overlays_keep_missing_values_raw_flags_and_volume_update_ord
         u32::from_le_bytes(block[offset..offset + 4].try_into().unwrap())
     }
     let mut state = SystemSettings::default();
+    assert_eq!(state.auto_select, 0);
+    state
+        .apply_startup_xml(br#"<?xml version="1.0" encoding="UTF-8"?><document><GAME><autoselect>0x80000000</autoselect></GAME></document>"#)
+        .unwrap();
+    assert_eq!(state.auto_select, 0x80000000);
     assert_eq!(word(&state.message, 12), 15);
     assert_eq!(word(&state.message, 16), 5);
     assert_eq!(word(&state.message, 44), u32::MAX);
@@ -46,7 +52,7 @@ fn defaults_and_xml_overlays_keep_missing_values_raw_flags_and_volume_update_ord
                 </VOICE>
                 <MESSAGE><speed>9</speed><CHAR>0x22tail</CHAR><char>99</char></MESSAGE>
                 <MESSAGE><speed>3</speed></MESSAGE>
-                <GAME><wndcolor>0x80112233</wndcolor><enabledrag>-1</enabledrag></GAME>
+                <GAME><wndcolor>0x80112233</wndcolor><enabledrag>-1</enabledrag><autoselect>-7</autoselect></GAME>
                 <EFFECT><auto_cds>11</auto_cds><skipmot></skipmot></EFFECT>
             </document>"#,
         )
@@ -62,6 +68,7 @@ fn defaults_and_xml_overlays_keep_missing_values_raw_flags_and_volume_update_ord
     assert_eq!(word(&state.effects, 28), 0);
     assert_eq!(word(&state.window, 0), 0x80112233);
     assert_eq!(word(&state.window, 4), u32::MAX);
+    assert_eq!(state.auto_select, (-7i32) as u32);
     state.refresh_sound_volumes();
     assert_eq!(word(&state.sound, 0), 655);
     assert_eq!(word(&state.sound, 4), 65536);
@@ -94,14 +101,16 @@ fn defaults_and_xml_overlays_keep_missing_values_raw_flags_and_volume_update_ord
     assert_eq!(state.global_flag_ranges[7], [0x80000000, (-2i32) as u32]);
     assert_eq!(state.sound, snapshot.sound);
     assert_eq!(state.message, snapshot.message);
+    assert_eq!(state.auto_select, snapshot.auto_select);
     state
         .apply_startup_xml(
             br#"<?xml version="1.0" encoding="UTF-8"?><document>
-        <GAME><flag><local0><count>invalid</count></local0></flag></GAME>
+        <GAME><flag><local0><count>invalid</count></local0></flag><autoselect>4294967295</autoselect></GAME>
         </document>"#,
         )
         .unwrap();
     assert_eq!(state.local_flag_ranges[0], [9, 0]);
+    assert_eq!(state.auto_select, u32::MAX);
     let snapshot = state.clone();
     assert!(state.apply_startup_xml(b"<document>").is_err());
     assert_eq!(state, snapshot);
@@ -122,7 +131,14 @@ fn settings_reads_keep_zero_addresses_overlap_order_and_partial_failures() {
         NativeReturn::Continue
     );
     assert!(host.call(359, &arguments(&[0; 4]), &mut vm).is_err());
+    assert!(host.call(999, &[], &mut vm).is_err());
     host.system_settings = Some(settings());
+    for arguments in [&[][..], &[0xff; 3][..], &[0xff; 16][..]] {
+        assert_eq!(
+            host.call(999, arguments, &mut vm).unwrap(),
+            NativeReturn::Value(0x80000007)
+        );
+    }
     host.call(359, &arguments(&[0, 8, 16, 24]), &mut vm)
         .unwrap();
     let mut expected = vec![0x11; 0x15fc];
@@ -179,6 +195,8 @@ impl ProgramLoader for Source {
         }
         ins(&mut code, 0x2b, &[359, 16]);
         ins(&mut code, 0x26, &[6300]);
+        ins(&mut code, 0x2b, &[999, 0]);
+        ins(&mut code, 0x26, &[6304]);
         ins(&mut code, 0x3b, &[]);
         let mut data = vec![0; 6400];
         data[..0x15fc].fill(0x31);
@@ -212,6 +230,7 @@ fn ordinary_settings_writeback_and_external_reads_share_runtime_state() {
         let vm = rt.object(task).unwrap().interpreter().unwrap();
         assert!(vm.stack_bytes().is_empty());
         assert_eq!(vm.read(6300, 4).unwrap(), 0xdeadbeefu32.to_le_bytes());
+        assert_eq!(vm.read(6304, 4).unwrap(), 0x80000007u32.to_le_bytes());
         let mut expected = [0; 512];
         expected[..0x48].fill(0x52);
         expected[0x80..0xa0].fill(0x73);
