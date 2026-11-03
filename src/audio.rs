@@ -1,8 +1,10 @@
 use crate::{Error, Result, read};
 
 mod config;
+mod pcm;
 mod task;
 pub use config::{SoundConfig, SoundPart};
+pub use pcm::{Pcm, decode_vorbis};
 pub use task::{SoundFactory, SoundObject, SoundState};
 
 /// 声音任务登记的原始循环范围；计数尚未转换为播放设备的单位。

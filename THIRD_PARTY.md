@@ -1,6 +1,6 @@
 # 第三方依赖
 
-项目自身采用 LGPL-2.1。当前依赖及其传递依赖选择以下许可证，均可与本项目许可证一同使用。分发时须保留对应版权及许可声明；`encoding_rs` 还包含 WHATWG 的 BSD-3-Clause 声明，二进制分发材料也须保留该声明。
+项目自身采用 LGPL-2.1。当前依赖及其传递依赖选择以下许可证，均可与本项目许可证一同使用。分发时须保留对应版权及许可声明；`encoding_rs` 包含 WHATWG 的 BSD-3-Clause 声明，`ogg` 采用 BSD-3-Clause，二进制分发材料也须保留这些声明。
 
 |包|版本|采用的许可|声明|
 |:--|:--|:--|:--|
@@ -14,6 +14,9 @@
 |roxmltree|0.20.0|MIT|[许可](licenses/roxmltree-0.20.0/LICENSE-MIT)|
 |fontdue|0.9.3|MIT|[许可](licenses/fontdue-0.9.3/LICENSE-MIT)|
 |ttf-parser|0.21.1|MIT|[许可](licenses/ttf-parser-0.21.1/LICENSE-MIT)|
+|lewton|0.10.2|MIT|[许可](licenses/lewton-0.10.2/LICENSE)|
+|ogg|0.8.0|BSD-3-Clause|[许可](licenses/ogg-0.8.0/LICENSE)|
+|tinyvec|1.13.3|MIT|[许可](licenses/tinyvec-1.13.3/LICENSE-MIT.md)|
 |blowfish|0.9.1|MIT|[许可](licenses/blowfish-0.9.1/LICENSE-MIT)|
 |cipher|0.4.4|MIT|[许可](licenses/cipher-0.4.4/LICENSE-MIT)|
 |inout|0.1.4|MIT|[许可](licenses/inout-0.1.4/LICENSE-MIT)|

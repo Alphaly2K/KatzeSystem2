@@ -11,4 +11,5 @@ blowfish = "0.9.1"
 encoding_rs = "0.8.35"
 flate2 = { version = "1.1.9", default-features = false, features = ["rust_backend"] }
 fontdue = { version = "=0.9.3", default-features = false, features = ["std"] }
+lewton = { version = "=0.10.2", default-features = false, features = ["ogg"] }
 roxmltree = "0.20.0"
