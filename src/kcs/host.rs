@@ -290,6 +290,12 @@ pub(crate) fn call_native(
     if matches!(index, 0 | 2 | 3) {
         return Ok(NativeReturn::Continue);
     }
+    if matches!(
+        index,
+        171 | 174..=179 | 181 | 183 | 186 | 236 | 432 | 551 | 554 | 555 | 575 | 580 | 909 | 925
+    ) {
+        return Ok(NativeReturn::Value(0));
+    }
     if index == 4 {
         return Ok(NativeReturn::Value(host.system_time_ms));
     }
