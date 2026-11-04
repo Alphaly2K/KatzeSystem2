@@ -254,6 +254,23 @@ pub(crate) fn call_native(
         886 | 895 => 516,
         _ => index,
     };
+    if index == 1036 {
+        if arguments.len() != 8 {
+            return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+        }
+        let addresses = [read::u32_at(arguments, 0)?, read::u32_at(arguments, 4)?];
+        for address in addresses {
+            vm.read(address, 1)?;
+        }
+        for (mode, address) in addresses.into_iter().enumerate() {
+            let prefix = host.languages.prefix(mode as u32).unwrap_or_default();
+            if prefix.len() >= 4096 {
+                return Err(Error::new(vm.pc, "语言前缀超过转换缓冲区上限"));
+            }
+            write_string(vm, address, prefix, 1)?;
+        }
+        return Ok(NativeReturn::Continue);
+    }
     if index == 1062 {
         if arguments.len() != 8 {
             return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
