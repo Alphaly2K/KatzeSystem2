@@ -65,6 +65,8 @@ pub struct HostState {
     /// 外层输入宿主提供的当前逻辑画布坐标；保留画布外的值。
     pub pointer_position: [i32; 2],
     pub memory_copy_mode: MemoryCopyMode,
+    /// 普通矩阵接口在地址解析失败时使用的共享矩阵，初值为零。
+    pub implicit_matrix: [u32; 16],
     pub random: ScriptRandom,
     integer_maps: BTreeMap<u32, BTreeMap<Vec<u8>, u32>>,
     sequence_maps: BTreeMap<u32, super::sequences::SequenceMap>,
@@ -335,8 +337,8 @@ pub(crate) fn call_native(
         return Ok(NativeReturn::Value(handle));
     }
     let count = match index {
-        1 | 6 | 17 | 18 | 25 | 26 | 40 | 47 | 48 | 71 | 209 | 210 | 212 | 213 | 278 | 319 | 75
-        | 393 | 420 | 421 | 516 | 898 | 899 => 1,
+        1 | 6 | 17 | 18 | 25 | 26 | 40 | 47 | 48 | 71 | 207 | 209 | 210 | 212 | 213 | 278 | 319
+        | 75 | 393 | 420 | 421 | 516 | 898 | 899 => 1,
         8 | 13..=16 | 19..=24 | 149 | 211 | 276 | 277 | 422 | 423 | 518 | 897 => 2,
         50..=58 | 60 | 62..=64 => 1,
         59 | 61 => 2,
@@ -353,6 +355,19 @@ pub(crate) fn call_native(
         .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
         .collect();
     Ok(match index {
+        207 => {
+            let identity = std::array::from_fn(|i| if i % 5 == 0 { 1f32.to_bits() } else { 0 });
+            if vm.read(args[0], 1).is_ok() {
+                let bytes: Vec<_> = identity
+                    .iter()
+                    .flat_map(|value| value.to_le_bytes())
+                    .collect();
+                vm.write(args[0], &bytes)?;
+            } else {
+                host.implicit_matrix = identity;
+            }
+            NativeReturn::Continue
+        }
         1 => {
             host.debug_messages.push(strings::format(vm, args[0], 0)?);
             NativeReturn::Continue

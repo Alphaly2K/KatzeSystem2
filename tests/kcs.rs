@@ -229,6 +229,44 @@ fn core_host_shares_numeric_state_and_checks_native_contracts() {
 }
 
 #[test]
+fn ordinary_identity_keeps_zero_addresses_and_shared_fallback_distinct() {
+    let identity = [
+        1f32, 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.,
+    ]
+    .map(f32::to_bits);
+    let bytes: Vec<_> = identity
+        .iter()
+        .flat_map(|value| value.to_le_bytes())
+        .collect();
+    let mut state = katze_system2::expression::State::new(0);
+    let mut host = kcs::CoreHost::new(&mut state);
+    assert_eq!(host.implicit_matrix, [0; 16]);
+    for address in [0u32, 0x8000_0001, u32::MAX] {
+        let mut vm = kcs::Interpreter::new(
+            kcs::Program::from_code(&[], vec![0xa5; 80], 0).unwrap(),
+            vec![0xb6; 80],
+        )
+        .unwrap();
+        assert_eq!(
+            kcs::Host::call(&mut host, 207, &address.to_le_bytes(), &mut vm).unwrap(),
+            kcs::NativeReturn::Continue
+        );
+        let mut memory = vec![0xa5; 80];
+        let mut external = vec![0xb6; 80];
+        match address {
+            0 => memory[..64].copy_from_slice(&bytes),
+            0x8000_0001 => external[1..65].copy_from_slice(&bytes),
+            _ => assert_eq!(host.implicit_matrix, identity),
+        }
+        if address != u32::MAX {
+            assert_eq!(host.implicit_matrix, [0; 16]);
+        }
+        assert_eq!(vm.read(0, 80).unwrap(), memory);
+        assert_eq!(vm.read(0x8000_0000, 80).unwrap(), external);
+    }
+}
+
+#[test]
 fn return_to_code_end_finishes_without_a_stop_marker() {
     let mut code = Vec::new();
     ins(&mut code, 0x2c, &[(3, 0), (3, 0)]);
