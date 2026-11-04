@@ -61,6 +61,7 @@ fn creation_order_and_object_cleanup_keep_completed_tasks_until_every_task_stops
     let mut host = MotionHost::default();
     queue.base_properties[0] = 1.0f32.to_bits();
     let first = queue.insert(task(2.0, 0.5, 3, 0), 0).unwrap();
+    queue.external_value = 0x8000_1234;
     let second = queue.insert(task(1.0, -1.25, 7, 0), 1).unwrap();
     for now in 0..=5 {
         assert!(queue.update_object(now, &mut host, 100).unwrap());
@@ -72,11 +73,32 @@ fn creation_order_and_object_cleanup_keep_completed_tasks_until_every_task_stops
     assert!(queue.any_running(Some(1)).unwrap());
     assert_eq!(counter(&queue, first), 6);
     assert_eq!(counter(&queue, second), 6);
+    for (id, expected) in [(first, 0u32), (second, 0x8000_1234)] {
+        assert_eq!(
+            queue
+                .task(id)
+                .unwrap()
+                .interpreter
+                .read(0x8000_04a4, 4)
+                .unwrap(),
+            expected.to_le_bytes()
+        );
+    }
     assert!(queue.update_object(8, &mut host, 100).unwrap());
     assert!(queue.is_empty());
     assert!(queue.was_updated());
     assert_eq!(queue.properties()[0], 1.25f32.to_bits());
-    assert_eq!(queue.insert(task(1.0, -1.25, 7, 0), 1).unwrap(), 3);
+    let third = queue.insert(task(1.0, -1.25, 7, 0), 1).unwrap();
+    assert_eq!(third, 3);
+    assert_eq!(
+        queue
+            .task(third)
+            .unwrap()
+            .interpreter
+            .read(0x8000_04a4, 4)
+            .unwrap(),
+        0x8000_1234u32.to_le_bytes()
+    );
     queue.insert(task(2.0, 0.5, 3, 0), 0).unwrap();
     assert!(queue.update_object(10, &mut host, 100).unwrap());
     assert_eq!(queue.properties()[0], 0.0f32.to_bits());

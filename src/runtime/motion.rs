@@ -44,7 +44,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             .ok_or_else(|| Error::new(vm.pc, "运动控制器句柄无效"))?;
         let count = match index {
             295 | 296 | 303 | 311 | 314 => 1,
-            297 | 298 | 308..=310 | 312 | 313 => 2,
+            297 | 298 | 308..=310 | 312 | 313 | 586 => 2,
             305 | 307 => 3,
             306 => 4,
             299..=302 => 10,
@@ -146,6 +146,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                 return Ok(NativeReturn::Value(queue.was_updated() as u32));
             }
             308 => queue.speed = f32::from_bits(args[1]),
+            586 => queue.external_value = args[1],
             309 => {
                 return Ok(NativeReturn::Value(match queue.task(args[1]) {
                     Some(task) => task.state()?.running as u32,

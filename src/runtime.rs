@@ -1622,7 +1622,7 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
     }
 
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn> {
-        if matches!(index, 294..=303 | 305..=314) {
+        if matches!(index, 294..=303 | 305..=314 | 586) {
             return self.motion_native(index, arguments, vm);
         }
         if index == 458 {

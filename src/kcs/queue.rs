@@ -28,6 +28,8 @@ struct Batch {
 pub struct MotionQueue {
     pub base_properties: [u32; 36],
     pub speed: f32,
+    /// 仅在加入新运动时写入其外部区 0x4a4 的原始 DWORD。
+    pub external_value: u32,
     entries: BTreeMap<u32, Entry>,
     next_id: u32,
     properties: [u32; 36],
@@ -56,6 +58,7 @@ impl Default for MotionQueue {
         Self {
             base_properties: properties,
             speed: 1.0,
+            external_value: 0,
             entries: BTreeMap::new(),
             next_id: 1,
             properties,
@@ -121,7 +124,7 @@ impl MotionQueue {
         self.entries.get(&id).map(|entry| entry.origin)
     }
 
-    pub fn insert(&mut self, task: MotionTask, group: i32) -> Result<u32> {
+    pub fn insert(&mut self, mut task: MotionTask, group: i32) -> Result<u32> {
         self.require_idle()?;
         if self.entries.len() == read::MAX_ITEMS {
             return Err(Error::new(0, "运动队列超过上限"));
@@ -130,6 +133,8 @@ impl MotionQueue {
         self.next_id = id
             .checked_add(1)
             .ok_or_else(|| Error::new(0, "运动任务编号耗尽"))?;
+        task.interpreter
+            .write(0x8000_04a4, &self.external_value.to_le_bytes())?;
         self.entries.insert(
             id,
             Entry {

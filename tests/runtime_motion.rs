@@ -47,6 +47,8 @@ fn ordinary_motion_properties_preserve_groups_save_direction_and_handle_lifetime
     ins(&mut code, 0x25, &[(3, 0xdead_beef)]);
     call(&mut code, 294, &[(3, u32::MAX)]);
     store(&mut code, 1900);
+    call(&mut code, 586, &[(0x13, 1900), (3, 0x8000_1234)]);
+    call(&mut code, 586, &[(3, 0)]);
     call(&mut code, 112, &[(3, 0), (3, 0)]);
     store(&mut code, 1904);
 
