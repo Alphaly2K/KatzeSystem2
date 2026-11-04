@@ -24,29 +24,41 @@ struct Files {
     motion: Option<Vec<u8>>,
     fail: Rc<Cell<bool>>,
     arc: bool,
+    position: bool,
     fail_resolve_on: usize,
     resolves: Rc<Cell<usize>>,
     reads: Rc<Cell<usize>>,
 }
 impl ResourceServices for Files {
     fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
-        let expected = if self.arc { b"m" } else { b"p" };
-        assert_eq!((category, name), (b"mot".as_slice(), expected.as_slice()));
+        let expected: &[u8] = if self.arc {
+            assert!(matches!(name, b"motArc" | b"mcArc"));
+            name
+        } else if self.position {
+            b"pPos"
+        } else {
+            b"pColor"
+        };
+        assert_eq!((category, name), (b"mot".as_slice(), expected));
         self.resolves.set(self.resolves.get() + 1);
         if self.resolves.get() == self.fail_resolve_on {
             return Err(Error::new(0, "合成运动补全暂时失败"));
         }
-        Ok([b"motions/", expected.as_slice(), b".kcs"].concat())
+        Ok([b"motions/", expected, b".kcs"].concat())
     }
     fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
-        assert_eq!(
-            name,
-            if self.arc {
-                b"motions/m.kcs"
-            } else {
-                b"motions/p.kcs"
-            }
-        );
+        if self.arc {
+            assert!(matches!(name, b"motions/motArc.kcs" | b"motions/mcArc.kcs"));
+        } else {
+            assert_eq!(
+                name,
+                if self.position {
+                    b"motions/pPos.kcs".as_slice()
+                } else {
+                    b"motions/pColor.kcs"
+                }
+            );
+        }
         assert_eq!(mode, ResourceMode::LooseFirst);
         self.reads.set(self.reads.get() + 1);
         if self.fail.get() {
@@ -181,7 +193,7 @@ fn arc_keeps_completed_banks_and_arguments_across_retry_and_all_script_entries()
                 );
             }
         }
-        assert_eq!((files.resolves.get(), files.reads.get()), (8, 1));
+        assert_eq!((files.resolves.get(), files.reads.get()), (8, 2));
     }
 }
 
@@ -223,7 +235,7 @@ fn arc_stops_at_bank_holes_and_keeps_defaults_for_empty_arguments() {
             motions.task(1).unwrap().state().unwrap().parameters[..6],
             [0., 37480660., -37480660., 17., -19., 0.].map(f32::to_bits)
         );
-        assert_eq!((files.resolves.get(), files.reads.get()), (2, 1));
+        assert_eq!((files.resolves.get(), files.reads.get()), (2, 2));
     }
 }
 
@@ -241,6 +253,7 @@ fn position_keeps_optional_axes_and_arguments_across_motion_retry_and_all_script
         code.extend([0x2d, 0x3b]);
         let files = Files {
             motion: Some(encoded_motion(&code)),
+            position: true,
             ..Default::default()
         };
         files.fail.set(true);

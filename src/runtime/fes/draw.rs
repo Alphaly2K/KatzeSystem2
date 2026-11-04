@@ -121,7 +121,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                 .services
                 .as_deref_mut()
                 .ok_or_else(|| Error::new(offset, "运行时未配置 FES 运动资源服务"))?;
-            pending.motion_name = Some(services.resolve(b"mot", b"d")?);
+            pending.motion_name = Some(services.resolve(b"mot", b"dummy")?);
         }
         if let Some(program) = self
             .resources

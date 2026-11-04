@@ -67,13 +67,13 @@ fn plane(objects: &Objects, handle: u32) -> &fes::CPlaneState {
 struct MissingMotion;
 impl ResourceServices for MissingMotion {
     fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
-        assert_eq!((category, name), (b"mot".as_slice(), b"p".as_slice()));
-        Ok(b"motions/p.kcs".to_vec())
+        assert_eq!((category, name), (b"mot".as_slice(), b"pPos".as_slice()));
+        Ok(b"motions/pPos.kcs".to_vec())
     }
     fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
         assert_eq!(
             (name, mode),
-            (b"motions/p.kcs".as_slice(), ResourceMode::LooseFirst)
+            (b"motions/pPos.kcs".as_slice(), ResourceMode::LooseFirst)
         );
         Ok(None)
     }

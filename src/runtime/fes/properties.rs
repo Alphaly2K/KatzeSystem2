@@ -19,8 +19,10 @@ enum Property {
 impl Property {
     fn motion(&self) -> (&'static [u8], i32) {
         match self {
-            Self::Arc { group, .. } => (b"m", *group),
-            _ => (b"p", 0),
+            Self::Arc { group: 0, .. } => (b"motArc", 0),
+            Self::Arc { group, .. } => (b"mcArc", *group),
+            Self::Position(_) => (b"pPos", 0),
+            Self::Blend(_) => (b"pColor", 0),
         }
     }
 }

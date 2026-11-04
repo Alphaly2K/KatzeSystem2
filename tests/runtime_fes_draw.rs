@@ -46,7 +46,7 @@ struct Files {
 }
 impl ResourceServices for Files {
     fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
-        assert_eq!((category, name), (b"mot".as_slice(), b"d".as_slice()));
+        assert_eq!((category, name), (b"mot".as_slice(), b"dummy".as_slice()));
         self.resolves.set(self.resolves.get() + 1);
         Ok(b"draw.kcs".to_vec())
     }

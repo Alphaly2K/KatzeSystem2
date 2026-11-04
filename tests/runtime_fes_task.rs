@@ -142,7 +142,7 @@ struct Files {
 impl ResourceServices for Files {
     fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
         if category == b"mot" {
-            assert_eq!(name, b"d");
+            assert_eq!(name, b"dummy");
             return Ok(b"draw.kcs".to_vec());
         }
         assert_eq!(category, b"fes");
