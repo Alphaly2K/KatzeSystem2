@@ -839,8 +839,23 @@ impl TaskObject for PlaneObject {
                 self.refresh_input_rect(host)?;
                 self.forward(58, command, buffers, output, host)?;
             }
+            591 => {
+                let mut camera = 0;
+                self.send_command(
+                    command.data[1],
+                    589,
+                    [0; 3],
+                    &mut CommandBuffers::default(),
+                    &mut camera,
+                    host,
+                )?;
+                drawings(host)?.set_camera(id, camera);
+            }
+            592 => {
+                drawings(host)?.set_camera(id, 0);
+            }
             60 | 71 | 85 | 86 => {}
-            41..=99 | 591 | 592 => {
+            41..=99 => {
                 return Err(Error::new(
                     0,
                     format!("二维对象命令 {} 尚未接入", command.code),
@@ -953,7 +968,7 @@ fn drawings(host: &mut dyn Host) -> Result<&mut Drawables> {
         .ok_or_else(|| Error::new(0, "宿主未提供绘图对象服务"))
 }
 
-/// 创建二维平面、图像列表和画布淡入淡出任务，其余类型委托已有工厂。
+/// 创建二维平面、相机、图像列表和画布淡入淡出任务，其余类型委托已有工厂。
 pub struct GraphicsFactory<F> {
     pub fallback: F,
 }
@@ -972,6 +987,7 @@ impl<F: ObjectFactory> ObjectFactory for GraphicsFactory<F> {
             kind::PLANE => Ok(Box::new(PlaneObject::new(id))),
             kind::IMAGE_LIST => Ok(Box::new(super::ImageListObject::new(id))),
             kind::FADE => Ok(Box::new(super::FadeObject::new())),
+            kind::CAMERA_2D => Ok(Box::new(super::Camera2DObject::new())),
             _ => self.fallback.create(id, object_kind, name),
         }
     }

@@ -23,6 +23,7 @@ pub struct Drawable {
     pub(super) color_enabled: u32,
     pub(super) display: u32,
     pub(super) blend_mode: u32,
+    pub(super) camera_id: u32,
 }
 
 impl Default for Drawable {
@@ -37,6 +38,7 @@ impl Default for Drawable {
             color_enabled: 0,
             display: 0,
             blend_mode: 0,
+            camera_id: 0,
         }
     }
 }
@@ -145,6 +147,10 @@ impl Drawable {
         self.blend_mode
     }
 
+    pub fn camera_id(&self) -> u32 {
+        self.camera_id
+    }
+
     /// 取一个三角形并应用对象及父级矩阵；颜色覆盖在变换路径上生效。
     pub fn transformed_triangle(&self, index: usize, parent: [f32; 16]) -> Option<[Vertex; 3]> {
         Some(self.triangles.get(index)?.map(|vertex| {
@@ -190,6 +196,8 @@ pub struct Drawables {
     pub(super) entries: BTreeMap<u32, Drawable>,
     pub(super) order: Vec<u32>,
     order_dirty: bool,
+    pub(super) cameras: BTreeMap<u32, super::Camera2D>,
+    pub(super) next_camera: u32,
 }
 
 impl Drawables {
@@ -209,6 +217,15 @@ impl Drawables {
 
     pub fn get(&self, id: u32) -> Option<&Drawable> {
         self.entries.get(&id)
+    }
+
+    pub fn set_camera(&mut self, id: u32, camera: u32) -> bool {
+        if let Some(drawable) = self.entries.get_mut(&id) {
+            drawable.camera_id = camera;
+            true
+        } else {
+            false
+        }
     }
 
     pub fn remove(&mut self, id: u32) -> bool {

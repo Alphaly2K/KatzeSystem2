@@ -317,6 +317,11 @@ impl Drawables {
             }
             let position = drawable.transform().position();
             let origin = [position[0], position[1]];
+            let mut selected = projection.clone();
+            if let Some(camera) = self.cameras.get(&drawable.camera_id()) {
+                camera.apply_projection(&mut selected);
+            }
+            let projection = &selected;
             if drawable.canvas_triangles().is_some() {
                 let canvas =
                     canvas.ok_or_else(|| Error::new(0, "纹理图元需要独立画布输入与帧输出"))?;

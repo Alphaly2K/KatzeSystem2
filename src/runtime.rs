@@ -48,6 +48,7 @@ pub mod kind {
     pub const SLIDER: u32 = 42;
     pub const STRING_PLANE: u32 = 48;
     pub const STRING_PLANE_UTF8: u32 = 63;
+    pub const CAMERA_2D: u32 = 65;
 }
 
 /// 默认的单次推进预算；预算耗尽时同步入口继续推进到完成。
@@ -533,6 +534,7 @@ fn create_object_impl<F: ObjectFactory>(
     {
         state.initialize_pointer(device.pointer()?.position);
     }
+    object.register_graphics(&mut resources.drawables)?;
     tree.insert(parent, id, kind)?;
     objects.insert(id, object);
     Ok(id)

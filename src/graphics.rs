@@ -23,6 +23,8 @@ pub(crate) use plane::query_geometry;
 pub use plane::{GraphicsFactory, PlaneObject};
 mod projection;
 pub use projection::{ProjectedVertex, Projection};
+mod camera;
+pub use camera::{Camera2D, Camera2DObject};
 mod raster;
 pub use raster::TextureFilter;
 

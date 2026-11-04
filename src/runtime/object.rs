@@ -58,6 +58,11 @@ pub trait TaskObject {
     /// 接收创建命令 26 传递的原始上下文；对象类型不支持时返回诊断。
     fn set_creation_context(&mut self, context: &[u8]) -> Result<()>;
 
+    /// 创建上下文验证后登记对象直接持有的绘图资源。
+    fn register_graphics(&mut self, _drawables: &mut crate::graphics::Drawables) -> Result<()> {
+        Ok(())
+    }
+
     /// 执行对象主体；在返回前完成所有预算续跑由调用者负责。
     fn update_body(&mut self, host: &mut dyn Host, increment: u32, budget: usize) -> Result<bool>;
 
