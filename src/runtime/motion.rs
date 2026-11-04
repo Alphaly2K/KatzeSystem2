@@ -14,13 +14,99 @@ const GROUPS: [(usize, usize); 9] = [
     (35, 1),
 ];
 
+/// 独立运动快照；更新时重新捕获原控制器，释放不影响控制器。
+pub struct MotionSnapshot {
+    controller: u32,
+    storage: Vec<u8>,
+    size: usize,
+}
+
+impl MotionSnapshot {
+    pub fn controller(&self) -> u32 {
+        self.controller
+    }
+
+    /// 当前快照的有效字节，不包括上次较大快照遗留的缓冲区尾部。
+    pub fn bytes(&self) -> &[u8] {
+        &self.storage[..self.size]
+    }
+
+    /// 已分配字节数；重新捕获只增长容量。
+    pub fn capacity(&self) -> usize {
+        self.storage.len()
+    }
+}
+
 impl<F: ObjectFactory> ObjectHost<'_, F> {
+    fn motion_snapshot_native(
+        &mut self,
+        index: u32,
+        arguments: &[u8],
+        vm: &Interpreter,
+    ) -> Result<NativeReturn> {
+        let handle = read::u32_at(arguments, 0)?;
+        if index == 317 {
+            if handle != 0 && self.resources.motion_snapshots.remove(&handle).is_none() {
+                return Err(Error::new(vm.pc, "运动快照句柄无效"));
+            }
+            return Ok(NativeReturn::Continue);
+        }
+        if handle == 0 {
+            return Ok(NativeReturn::Value(0));
+        }
+        let controller = if index == 315 {
+            handle
+        } else {
+            self.resources
+                .motion_snapshots
+                .get(&handle)
+                .ok_or_else(|| Error::new(vm.pc, "运动快照句柄无效"))?
+                .controller
+        };
+        let queue = self
+            .resources
+            .motion_controllers
+            .get(&controller)
+            .ok_or_else(|| Error::new(vm.pc, "运动控制器句柄无效"))?;
+        let now = if queue.is_empty() {
+            0
+        } else {
+            read::u32_at(arguments, 4)?
+        };
+        let bytes = queue.snapshot(now)?;
+        let size = bytes.len();
+        if index == 315 {
+            if self.resources.motion_snapshots.len() == read::MAX_ITEMS {
+                return Err(Error::new(vm.pc, "运动快照数量超过上限"));
+            }
+            let snapshot = MotionSnapshot {
+                controller,
+                storage: bytes,
+                size,
+            };
+            let handle = self.host.handle_allocator().allocate()?;
+            self.resources.motion_snapshots.insert(handle, snapshot);
+            Ok(NativeReturn::Value(handle))
+        } else {
+            let snapshot = self.resources.motion_snapshots.get_mut(&handle).unwrap();
+            if size > snapshot.storage.len() {
+                snapshot.storage.resize(size, 0);
+            }
+            snapshot.storage[..size].copy_from_slice(&bytes);
+            snapshot.size = size;
+            Ok(NativeReturn::Value(1))
+        }
+    }
+
     pub(super) fn motion_native(
         &mut self,
         index: u32,
         arguments: &[u8],
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
+        if matches!(index, 315..=317) {
+            return self.motion_snapshot_native(index, arguments, vm);
+        }
         if index == 294 {
             let handle = self.host.handle_allocator().allocate()?;
             self.resources

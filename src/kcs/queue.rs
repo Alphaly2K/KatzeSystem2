@@ -89,6 +89,53 @@ impl MotionQueue {
         &self.properties
     }
 
+    /// 捕获运动名称、分组、参数、相对时刻、控制值和登记的保存数据。
+    pub fn snapshot(&self, now: u32) -> Result<Vec<u8>> {
+        self.require_idle()?;
+        let mut bytes = vec![0; 8];
+        for entry in self.entries.values() {
+            let task = &entry.task;
+            let name = &task.snapshot_name[..task
+                .snapshot_name
+                .iter()
+                .position(|&unit| unit == 0)
+                .unwrap_or(task.snapshot_name.len())];
+            if name.len() >= 32 {
+                return Err(Error::new(0, "运动快照名称超过缓冲区上限"));
+            }
+            let data = match task.snapshot_data {
+                Some((address, length)) if address != 0 => {
+                    task.interpreter.read(address, length)?
+                }
+                _ => &[],
+            };
+            let size = 0x454usize
+                .checked_add(data.len())
+                .ok_or_else(|| Error::new(0, "运动快照尺寸溢出"))?;
+            let start = bytes.len();
+            let end = start
+                .checked_add(size)
+                .filter(|&end| end <= read::MAX_BYTES)
+                .ok_or_else(|| Error::new(0, "运动快照超过存储上限"))?;
+            bytes.resize(end, 0);
+            let record = &mut bytes[start..];
+            record[..4].copy_from_slice(&(size as u32).to_le_bytes());
+            for (i, unit) in name.iter().enumerate() {
+                record[4 + i * 2..6 + i * 2].copy_from_slice(&unit.to_le_bytes());
+            }
+            record[0x44..0x48].copy_from_slice(&(entry.group as u32).to_le_bytes());
+            record[0x48..0x448].copy_from_slice(task.interpreter.read(0x8000_009c, 1024)?);
+            record[0x448..0x44c].copy_from_slice(&(data.len() as u32).to_le_bytes());
+            record[0x44c..0x450].copy_from_slice(&now.wrapping_sub(task.base_time).to_le_bytes());
+            record[0x450..0x454].copy_from_slice(&task.snapshot_flags.to_le_bytes());
+            record[0x454..].copy_from_slice(data);
+        }
+        let size = bytes.len() as u32;
+        bytes[..4].copy_from_slice(&size.to_le_bytes());
+        bytes[4..8].copy_from_slice(&(self.entries.len() as u32).to_le_bytes());
+        Ok(bytes)
+    }
+
     pub fn set_properties(&mut self, properties: [u32; 36]) -> Result<()> {
         self.require_idle()?;
         self.properties = properties;

@@ -74,6 +74,12 @@ enum Invocation {
 pub struct MotionTask {
     pub interpreter: Interpreter,
     pub base_time: u32,
+    /// 装载方提供的 UTF-16 运动名称；快照保留首个零之前的内容。
+    pub snapshot_name: Vec<u16>,
+    /// 快照中的原始控制 DWORD，与 running／finishing 分别保存。
+    pub snapshot_flags: u32,
+    /// 登记的保存数据地址及字节数；地址零表示没有保存数据。
+    pub snapshot_data: Option<(u32, usize)>,
     invocation: Option<Invocation>,
 }
 
@@ -82,6 +88,9 @@ impl MotionTask {
         Ok(Self {
             interpreter: Interpreter::new(program, state.external_data())?,
             base_time,
+            snapshot_name: Vec::new(),
+            snapshot_flags: 0,
+            snapshot_data: None,
             invocation: None,
         })
     }

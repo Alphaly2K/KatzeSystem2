@@ -22,6 +22,7 @@ pub use cst::CstContext;
 mod graphics;
 mod message;
 mod motion;
+pub use motion::MotionSnapshot;
 mod object;
 mod ordinary;
 mod resources;
@@ -269,6 +270,18 @@ impl<F: ObjectFactory> Runtime<F> {
 
     pub fn cst_context(&self, handle: u32) -> Option<&CstContext> {
         self.resources.cst_contexts.get(&handle)
+    }
+
+    pub fn motion_snapshot(&self, handle: u32) -> Option<&MotionSnapshot> {
+        self.resources.motion_snapshots.get(&handle)
+    }
+
+    pub fn motion_controller(&self, handle: u32) -> Option<&crate::kcs::MotionQueue> {
+        self.resources.motion_controllers.get(&handle)
+    }
+
+    pub fn motion_controller_mut(&mut self, handle: u32) -> Option<&mut crate::kcs::MotionQueue> {
+        self.resources.motion_controllers.get_mut(&handle)
     }
 
     /// 修改共享宿主状态；整体替换时须沿用原状态的 `handle_allocator()`。
@@ -1647,7 +1660,7 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         if matches!(index, 323 | 324 | 328..=332) {
             return self.cst_native(index, arguments, vm);
         }
-        if matches!(index, 294..=303 | 305..=314 | 586) {
+        if matches!(index, 294..=303 | 305..=317 | 586) {
             return self.motion_native(index, arguments, vm);
         }
         if index == 458 {
