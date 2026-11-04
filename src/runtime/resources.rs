@@ -19,6 +19,7 @@ pub(super) struct Resources {
     pub motion_host: crate::kcs::MotionHost,
     pub motion_controllers: std::collections::BTreeMap<u32, crate::kcs::MotionQueue>,
     pub motion_programs: std::collections::BTreeMap<String, crate::kcs::Program>,
+    pub cst_contexts: std::collections::BTreeMap<u32, super::CstContext>,
 }
 
 impl Resources {
