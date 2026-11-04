@@ -20,6 +20,7 @@ pub(super) struct Resources {
     pub motion_controllers: std::collections::BTreeMap<u32, crate::kcs::MotionQueue>,
     pub motion_snapshots: std::collections::BTreeMap<u32, super::MotionSnapshot>,
     pub motion_programs: std::collections::BTreeMap<String, crate::kcs::Program>,
+    pub backlogs: std::collections::BTreeMap<u32, crate::backlog::Backlog>,
     pub cst_contexts: std::collections::BTreeMap<u32, super::CstContext>,
 }
 

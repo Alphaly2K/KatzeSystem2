@@ -122,6 +122,15 @@ impl HostState {
             .ok_or_else(|| Error::new(0, "KCS 数据容器句柄无效"))
     }
 
+    pub(crate) fn data_container_mut(
+        &mut self,
+        handle: u32,
+    ) -> Result<&mut crate::save::DataContainer> {
+        self.containers
+            .get_mut(&handle)
+            .ok_or_else(|| Error::new(0, "KCS 数据容器句柄无效"))
+    }
+
     /// 保存任务时钟供 native 5 查询；不修改平台或其他状态。
     pub fn set_task_clock(&mut self, clock: &TaskClock) {
         self.task_origin = clock.origin;

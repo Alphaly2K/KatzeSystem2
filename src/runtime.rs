@@ -16,6 +16,7 @@ use crate::{Error, Result, expression, read};
 use std::collections::BTreeMap;
 
 mod audio;
+mod backlog;
 mod cst;
 pub mod fes;
 pub use cst::CstContext;
@@ -266,6 +267,11 @@ impl<F: ObjectFactory> Runtime<F> {
 
     pub fn host(&self) -> &HostState {
         &self.host
+    }
+
+    /// 借用独立回看记录；释放任务不会回收日志句柄。
+    pub fn backlog(&self, handle: u32) -> Option<&crate::backlog::Backlog> {
+        self.resources.backlogs.get(&handle)
     }
 
     pub fn cst_context(&self, handle: u32) -> Option<&CstContext> {
@@ -1659,6 +1665,9 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
     }
 
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn> {
+        if matches!(index, 696..=698 | 700 | 785 | 850 | 851 | 876 | 977) {
+            return self.backlog_native(index, arguments, vm);
+        }
         if index == 143 {
             return self.ordinary_load_native(arguments, vm);
         }

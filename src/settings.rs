@@ -17,6 +17,7 @@ pub struct SystemSettings {
     pub fullscreen: u32,
     /// 启动 `SCREEN/mw_pos`、用户 `FULL_SCREEN/mw_pos` 的原始 DWORD。
     pub fullscreen_mw_pos: u32,
+    pub backlog: crate::backlog::Settings,
     pub texture_size: [u32; 2],
     pub texture_grid: [u32; 2],
     /// 八组面块区域：起始列、起始行、列数、行数；首项全一表示停用。
@@ -37,6 +38,7 @@ impl Default for SystemSettings {
             auto_select: 0,
             fullscreen: 0,
             fullscreen_mw_pos: 0,
+            backlog: crate::backlog::Settings::default(),
             texture_size: [256; 2],
             texture_grid: [0; 2],
             texture_areas: [[u32::MAX; 4]; 8],
@@ -96,6 +98,7 @@ impl SystemSettings {
         let xml = crate::resource::XmlDocument::parse(input)?;
         self.auto_select = xml.integer(b"GAME/autoselect", self.auto_select)?;
         self.fullscreen_mw_pos = xml.integer(b"SCREEN/mw_pos", self.fullscreen_mw_pos)?;
+        self.backlog.apply(&xml)?;
         for (name, values) in [
             ("size", &mut self.texture_size),
             ("vt", &mut self.texture_grid),

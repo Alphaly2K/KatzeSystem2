@@ -2,6 +2,7 @@
 
 pub mod anm;
 pub mod audio;
+pub mod backlog;
 pub mod cst;
 pub mod cstl;
 pub mod expression;
