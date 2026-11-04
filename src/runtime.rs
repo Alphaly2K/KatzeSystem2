@@ -1644,7 +1644,7 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
                 self.host.unicode_text != 0,
             );
         }
-        if matches!(index, 323 | 324) {
+        if matches!(index, 323 | 324 | 328..=332) {
             return self.cst_native(index, arguments, vm);
         }
         if matches!(index, 294..=303 | 305..=314 | 586) {
