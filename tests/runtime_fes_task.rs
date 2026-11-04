@@ -870,6 +870,84 @@ fn immediate_child_updates_can_delete_the_running_fes_owner_before_start() {
 }
 
 #[test]
+fn empty_fes_contexts_start_preserve_failed_properties_and_load_later_without_resetting_time() {
+    for budget in [1, 4096] {
+        for name in [
+            None,
+            Some(b"".as_slice()),
+            Some(b"missing.fes"),
+            Some(b"empty.fes"),
+            Some(b"nul.fes"),
+            Some(b"other.fes"),
+            Some(b"start.fes"),
+            Some(b"normal.fes"),
+        ] {
+            let Setup {
+                mut runtime,
+                reads,
+                fail_media,
+                button_attempts,
+                ..
+            } = setup(budget, b"#START\n$0=\\0\n$1=_FRAME_\nexit 37\n");
+            runtime.set_resources(Files {
+                files: BTreeMap::from([
+                    (
+                        b"complete.fes".to_vec(),
+                        packed(b"#START\n$0=\\0\n$1=_FRAME_\nexit 37\n"),
+                    ),
+                    (b"empty.fes".to_vec(), Vec::new()),
+                    (b"nul.fes".to_vec(), vec![0]),
+                    (b"other.fes".to_vec(), packed(b"#UNUSED\nexit 23\n")),
+                    (b"start.fes".to_vec(), packed(b"#START\n")),
+                    (b"normal.fes".to_vec(), packed(b"#START\nexit 37\n")),
+                ]),
+                reads,
+                fail_media,
+            });
+            runtime.update(100, 1).unwrap();
+            let fes = runtime.create(0, kind::FES, b"empty", b"").unwrap();
+            assert!(
+                runtime
+                    .dispatch_command(0, command(fes, 339, 0, 0))
+                    .is_err()
+            );
+            send(&mut runtime, fes, 337, 0, 0);
+            if let Some(name) = name {
+                file(&mut runtime, fes, name).unwrap();
+            }
+            send(&mut runtime, fes, 346, 0, 17);
+            send(&mut runtime, fes, 346, 511, 0x8000_0001);
+            let missing = matches!(name, Some(b"" | b"missing.fes"));
+            let normal = name == Some(b"normal.fes".as_slice());
+            let expected = if normal {
+                37
+            } else if missing {
+                (-2i32) as u32
+            } else {
+                u32::MAX
+            };
+            send(&mut runtime, fes, 339, 0, 0);
+            assert_eq!(send(&mut runtime, fes, 23, 0, 0), expected);
+            runtime.update(500, 1).unwrap();
+            assert_eq!(send(&mut runtime, fes, 23, 0, 0), expected);
+            assert_eq!(send(&mut runtime, fes, 347, 511, 0), 0x8000_0001);
+            assert_eq!(button_attempts.get(), 1);
+            if name.is_none() || missing {
+                file(&mut runtime, fes, b"complete.fes").unwrap();
+                assert_eq!(send(&mut runtime, fes, 23, 0, 0), expected);
+                send(&mut runtime, fes, 339, 0, 0);
+                assert_eq!(runtime.numbers().shared[0], 0);
+                runtime.update(700, 1).unwrap();
+                assert_eq!(runtime.numbers().shared[..2], [17, 601]);
+                assert_eq!(send(&mut runtime, fes, 23, 0, 0), 37);
+                assert_eq!(send(&mut runtime, fes, 347, 511, 0), 0x8000_0001);
+                assert_eq!(button_attempts.get(), 1);
+            }
+        }
+    }
+}
+
+#[test]
 fn first_update_creates_one_button_before_loading_or_starting_the_scene() {
     for depth in [1, 3, 5] {
         let Setup {

@@ -139,6 +139,22 @@ impl Scene {
         &self.interpreter
     }
 
+    pub(super) fn load_program(&mut self, program: fes::Program) -> Result<()> {
+        if self.is_pending() {
+            return Err(Error::new(0, "FES 本轮推进尚未完成"));
+        }
+        let preload = super::preload::Preload::new(&program);
+        let mut interpreter = fes::Interpreter::new(program)?;
+        interpreter
+            .local_values_mut()
+            .copy_from_slice(self.interpreter.local_values());
+        interpreter.named = std::mem::take(&mut self.interpreter.named);
+        self.objects.publish_bindings(&mut interpreter);
+        self.interpreter = interpreter;
+        self.preload = preload;
+        Ok(())
+    }
+
     pub(super) fn parameter_values(&self) -> &[i32] {
         self.interpreter.local_values()
     }

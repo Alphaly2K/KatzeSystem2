@@ -235,12 +235,20 @@ pub struct Interpreter {
 }
 
 impl Interpreter {
-    pub fn new(program: Program) -> Result<Self> {
+    pub fn new(mut program: Program) -> Result<Self> {
         let block = program
             .blocks
             .iter()
             .position(|b| b.name == "START")
-            .ok_or_else(|| Error::new(0, "FES 缺少 START 块"))?;
+            .unwrap_or_else(|| {
+                program.blocks.push(Block {
+                    name: "START".to_owned(),
+                    lines: Vec::new(),
+                    false_jump: Vec::new(),
+                    end_jump: Vec::new(),
+                });
+                program.blocks.len() - 1
+            });
         let declarations: Vec<_> = program
             .declarations
             .iter()

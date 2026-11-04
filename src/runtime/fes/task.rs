@@ -213,6 +213,7 @@ pub struct FesObject {
     id: u32,
     base: BaseObject,
     initialized: bool,
+    loaded: bool,
     started: bool,
     scene: Option<Scene>,
     pending: Option<Command>,
@@ -233,7 +234,6 @@ pub struct FesObject {
     pressed: Option<fes::ObjectReference>,
     input_event: Option<InputEvent>,
     control_event: Option<ControlEvent>,
-    parameters: Option<Vec<i32>>,
 }
 
 #[derive(Default)]
@@ -276,6 +276,7 @@ impl FesObject {
             id,
             base: BaseObject::new(),
             initialized: false,
+            loaded: false,
             started: false,
             scene: None,
             pending: None,
@@ -296,7 +297,6 @@ impl FesObject {
             pressed: None,
             input_event: None,
             control_event: None,
-            parameters: Some(vec![0; 512]),
         }
     }
 
@@ -959,12 +959,24 @@ impl TaskObject for FesObject {
                 self.input = self.send(host, 0, 34, [0; 3], &mut CommandBuffers::default())?;
                 let inherited = services(host)?.inherited_context()?;
                 self.set_creation_context(&inherited)?;
+                let handles = host
+                    .handle_allocator()
+                    .ok_or_else(|| Error::new(0, "宿主未提供 FES 共享编号源"))?;
+                let mut scene = Scene::new(fes::Program::from_text(b"")?, handles)?;
+                scene.set_system_value("_EXITCODE_", -1);
+                scene.set_system_value("_SAVEOBJ_", 0);
+                scene.set_system_value("_FRAME_", 0);
+                self.scene = Some(scene);
                 self.initialized = true;
+                self.bind()?;
             }
             338 => {
                 if self.pending.is_none() {
-                    if !self.initialized || self.scene.is_some() {
-                        return Err(Error::new(0, "FES 装载需要已初始化且尚未装载的对象"));
+                    if !self.initialized {
+                        return Err(Error::new(0, "FES 装载需要已初始化对象"));
+                    }
+                    if self.loaded {
+                        return Err(Error::new(0, "FES 重复装载尚未接入"));
                     }
                     let file = name(
                         buffers
@@ -981,19 +993,14 @@ impl TaskObject for FesObject {
                         self.base.control.property = (-2i32) as u32;
                         return Ok(CommandOutcome::finished(false));
                     };
-                    let handles = host
-                        .handle_allocator()
-                        .ok_or_else(|| Error::new(0, "宿主未提供 FES 共享编号源"))?;
-                    let mut scene = Scene::new(fes::Program::parse(&bytes)?, handles)?;
-                    scene
-                        .parameter_values_mut()
-                        .copy_from_slice(self.parameters.as_ref().unwrap());
-                    scene.set_system_value("_EXITCODE_", -1);
-                    scene.set_system_value("_SAVEOBJ_", 0);
-                    scene.set_system_value("_FRAME_", 0);
+                    let program = if bytes.starts_with(b"FES\0") {
+                        fes::Program::parse(&bytes)?
+                    } else {
+                        fes::Program::from_text(bytes.split(|&byte| byte == 0).next().unwrap())?
+                    };
+                    self.scene.as_mut().unwrap().load_program(program)?;
                     self.name = file.to_vec();
-                    self.scene = Some(scene);
-                    self.parameters = None;
+                    self.loaded = true;
                     self.bind()?;
                     self.pending = Some(*command);
                 }
@@ -1003,8 +1010,8 @@ impl TaskObject for FesObject {
                 self.pending = None;
             }
             339 => {
-                if self.scene.is_none() {
-                    return Err(Error::new(0, "FES 启动前必须装载脚本"));
+                if !self.initialized {
+                    return Err(Error::new(0, "FES 启动需要已初始化对象"));
                 }
                 if self.pending.is_none() {
                     self.started = true;
@@ -1084,18 +1091,12 @@ impl TaskObject for FesObject {
                 }
                 let index = command.data[0] as usize;
                 if command.code == 346 {
-                    let values = match &mut self.scene {
-                        Some(scene) => scene.parameter_values_mut(),
-                        None => self.parameters.as_mut().unwrap().as_mut_slice(),
-                    };
+                    let values = self.scene.as_mut().unwrap().parameter_values_mut();
                     if let Some(value) = values.get_mut(index) {
                         *value = b as i32;
                     }
                 } else {
-                    let values = match &self.scene {
-                        Some(scene) => scene.parameter_values(),
-                        None => self.parameters.as_ref().unwrap().as_slice(),
-                    };
+                    let values = self.scene.as_ref().unwrap().parameter_values();
                     *output = values.get(index).copied().unwrap_or(0) as u32;
                 }
             }
