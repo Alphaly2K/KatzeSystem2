@@ -66,6 +66,7 @@ impl<F: ObjectFactory> Store<'_, F> {
             &mut CommandBuffers {
                 data0: rectangle.as_deref_mut(),
                 data1: None,
+                external: None,
             },
         )?;
         Ok(true)

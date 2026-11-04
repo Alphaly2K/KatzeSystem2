@@ -38,6 +38,7 @@ fn output_image<F: ObjectFactory>(runtime: &mut Runtime<F>, id: u32) -> u32 {
             &mut CommandBuffers {
                 data0: None,
                 data1: Some(&mut buffer),
+                external: None,
             },
         )
         .unwrap();
@@ -78,6 +79,7 @@ fn background_copies_bottom_origin_crops_and_survives_source_release_clear_and_r
             &mut CommandBuffers {
                 data0: Some(&mut rectangle),
                 data1: None,
+                external: None,
             },
         )
         .unwrap();
@@ -122,6 +124,7 @@ fn background_copies_bottom_origin_crops_and_survives_source_release_clear_and_r
             &mut CommandBuffers {
                 data0: Some(&mut []),
                 data1: None,
+                external: None,
             },
         )
         .unwrap();
@@ -219,6 +222,7 @@ fn ordinary_list_natives_initialize_the_plane_and_submit_at_the_integer_offset()
                 &mut CommandBuffers {
                     data0: Some(&mut x),
                     data1: Some(&mut y),
+                    external: None,
                 },
             )
             .unwrap();
@@ -275,6 +279,7 @@ fn image_list_tasks_create_one_plane_update_shared_pixels_and_release_their_wrap
             &mut CommandBuffers {
                 data0: Some(&mut width),
                 data1: Some(&mut height),
+                external: None,
             },
         )
         .unwrap();
@@ -317,7 +322,8 @@ fn image_list_tasks_create_one_plane_update_shared_pixels_and_release_their_wrap
                 command(id, 286, 7, 0),
                 &mut CommandBuffers {
                     data0: None,
-                    data1: Some(&mut properties)
+                    data1: Some(&mut properties),
+                    external: None,
                 },
             )
             .is_err()
@@ -331,6 +337,7 @@ fn image_list_tasks_create_one_plane_update_shared_pixels_and_release_their_wrap
             &mut CommandBuffers {
                 data0: None,
                 data1: Some(&mut properties),
+                external: None,
             },
         )
         .unwrap();
@@ -345,6 +352,7 @@ fn image_list_tasks_create_one_plane_update_shared_pixels_and_release_their_wrap
                     &mut CommandBuffers {
                         data0: None,
                         data1: Some(&mut priority),
+                        external: None,
                     },
                 )
                 .unwrap(),
@@ -374,6 +382,7 @@ fn image_list_tasks_create_one_plane_update_shared_pixels_and_release_their_wrap
             &mut CommandBuffers {
                 data0: None,
                 data1: Some(&mut clip),
+                external: None,
             },
         )
         .unwrap();
@@ -394,6 +403,7 @@ fn image_list_tasks_create_one_plane_update_shared_pixels_and_release_their_wrap
             &mut CommandBuffers {
                 data0: None,
                 data1: Some(&mut properties),
+                external: None,
             },
         )
         .unwrap();
@@ -406,6 +416,7 @@ fn image_list_tasks_create_one_plane_update_shared_pixels_and_release_their_wrap
             &mut CommandBuffers {
                 data0: None,
                 data1: Some(&mut short),
+                external: None,
             },
         )
         .unwrap();
@@ -476,6 +487,7 @@ fn image_list_tasks_create_one_plane_update_shared_pixels_and_release_their_wrap
             &mut CommandBuffers {
                 data0: Some(&mut x),
                 data1: Some(&mut y),
+                external: None,
             },
         )
         .unwrap();
@@ -572,6 +584,7 @@ fn pixel_lookup_uses_signed_keys_and_preserves_missing_output_and_buffer_tails()
                 &mut CommandBuffers {
                     data0: None,
                     data1: Some(&mut record),
+                    external: None,
                 },
             )
             .unwrap();
@@ -586,6 +599,7 @@ fn pixel_lookup_uses_signed_keys_and_preserves_missing_output_and_buffer_tails()
                 &mut CommandBuffers {
                     data0: None,
                     data1: Some(&mut slot),
+                    external: None,
                 },
             )
             .unwrap();
@@ -605,7 +619,8 @@ fn pixel_lookup_uses_signed_keys_and_preserves_missing_output_and_buffer_tails()
                 command(list, 307, pixels, 0),
                 &mut CommandBuffers {
                     data0: None,
-                    data1: Some(&mut slot)
+                    data1: Some(&mut slot),
+                    external: None,
                 }
             )
             .unwrap(),

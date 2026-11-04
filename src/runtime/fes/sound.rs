@@ -398,6 +398,7 @@ impl<F: ObjectFactory> Store<'_, F> {
             &mut CommandBuffers {
                 data0: None,
                 data1: bytes,
+                external: None,
             },
         )
     }

@@ -356,3 +356,146 @@ fn fes_child_load_retries_on_the_same_object_then_returns_status_and_destroys_no
         assert_eq!(runtime.numbers().shared[2], 1);
     }
 }
+
+#[test]
+fn native_load_initializes_before_binding_and_nested_messages_share_the_live_external_data() {
+    use katze_system2::kcs::SharedMemory;
+    use katze_system2::runtime::BaseObject;
+
+    let assign = |code: &mut Vec<u8>, address, value| {
+        ins(code, 0x15, &[address, value]);
+        code.push(0x2d);
+    };
+    let call = |code: &mut Vec<u8>, index, arguments: &[u32]| {
+        for &value in arguments {
+            ins(code, 0x25, &[value]);
+        }
+        ins(code, 0x2b, &[index, arguments.len() as u32 * 4]);
+    };
+    let mut caller = vec![];
+    ins(&mut caller, 0x25, &[0xdead_beef]);
+    call(&mut caller, 143, &[1, 128, 1]);
+    ins(&mut caller, 0x2f, &[0x8000_0000]);
+    ins(&mut caller, 0x26, &[0]);
+    assign(&mut caller, 0x8000_0000, 0x1122_3344);
+    call(&mut caller, 69, &[1, 99, 0, 0]);
+    ins(&mut caller, 0x26, &[8]);
+    ins(&mut caller, 0x2f, &[0x8000_0000]);
+    ins(&mut caller, 0x26, &[4]);
+    call(&mut caller, 65, &[]);
+    caller.push(0x3b);
+    let mut data = vec![0; 256];
+    data[128..134].copy_from_slice(b"child\0");
+    let caller = Program::from_code(&caller, data, 128).unwrap();
+    let mut child = vec![];
+    assign(&mut child, 0x8000_0000, 0xaabb_ccdd);
+    call(&mut child, 71, &[32]);
+    ins(&mut child, 0x26, &[0]);
+    ins(&mut child, 0x2f, &[0x8000_0000]);
+    ins(&mut child, 0x26, &[4]);
+    assign(&mut child, 0x8000_0000, 0x5566_7788);
+    call(&mut child, 71, &[32]);
+    child.push(0x3b);
+    let child = Program::from_code(&child, vec![0; 64], 128).unwrap();
+
+    struct SharedLoader {
+        caller: Program,
+        child: Program,
+    }
+    impl ProgramLoader for SharedLoader {
+        fn load(&mut self, name: &[u8]) -> Result<Option<Program>> {
+            Ok(match name {
+                b"caller" => Some(self.caller.clone()),
+                b"child.kcs" => Some(self.child.clone()),
+                _ => None,
+            })
+        }
+    }
+    struct Names;
+    impl ResourceServices for Names {
+        fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+            assert_eq!(category, b"kcs");
+            assert_eq!(name, b"child");
+            Ok(b"child.kcs".to_vec())
+        }
+        fn read(&mut self, _: &[u8], _: ResourceMode) -> Result<Option<Vec<u8>>> {
+            panic!("the program loader owns program reads")
+        }
+    }
+    let word = |vm: &katze_system2::kcs::Interpreter, address| {
+        u32::from_le_bytes(vm.read(address, 4).unwrap().try_into().unwrap())
+    };
+    for budget in [1, 4096] {
+        let mut factory = KcsFactory::new(SharedLoader {
+            caller: caller.clone(),
+            child: child.clone(),
+        });
+        factory.external_bytes = 16;
+        let mut runtime = Runtime::new(
+            0,
+            kind::ROOT,
+            Box::new(BaseObject::new()),
+            State::new(8),
+            factory,
+        );
+        runtime.set_budget(budget, 10000);
+        runtime.set_resources(Names);
+        let target = runtime.create_unloaded_ordinary(0, b"target").unwrap();
+        let source = runtime.create(0, kind::ORDINARY, b"caller", b"").unwrap();
+        assert_eq!((target, source), (1, 2));
+        let old = runtime.object(target).unwrap().external_storage().unwrap();
+        let mut bytes = vec![0; 16];
+        bytes[..4].copy_from_slice(&0x0102_0304u32.to_le_bytes());
+        runtime
+            .dispatch_command_with_buffers(
+                0,
+                command(source, 172, [16, 0, 0]),
+                &mut CommandBuffers {
+                    external: Some(SharedMemory::new(bytes).unwrap()),
+                    ..CommandBuffers::default()
+                },
+            )
+            .unwrap();
+        runtime.update(0, 1).unwrap();
+        assert_eq!(&*old.read(0, 4).unwrap(), &0xaabb_ccddu32.to_le_bytes());
+        let source_vm = runtime.object(source).unwrap().interpreter().unwrap();
+        assert_eq!(word(source_vm, 0), 0);
+        assert_eq!(word(source_vm, 0x8000_0000), 0x0102_0304);
+        assert_eq!(source_vm.stack_bytes(), 0xdead_beefu32.to_le_bytes());
+        let target_vm = runtime.object(target).unwrap().interpreter().unwrap();
+        assert_eq!(word(target_vm, 0x8000_0000), 0x0102_0304);
+        assert!(target_vm.is_waiting_for_message());
+        runtime
+            .dispatch_command(0, command(target, 163, [0; 3]))
+            .unwrap();
+        runtime.update(1, 1).unwrap();
+        let source_vm = runtime.object(source).unwrap().interpreter().unwrap();
+        assert_eq!(
+            [word(source_vm, 0), word(source_vm, 4), word(source_vm, 8)],
+            [0x0102_0304, 0x5566_7788, 1]
+        );
+        assert_eq!(source_vm.stack_bytes(), 0xdead_beefu32.to_le_bytes());
+        assert_eq!(
+            word(runtime.object(target).unwrap().interpreter().unwrap(), 4),
+            0x1122_3344
+        );
+        runtime.destroy(source).unwrap();
+        assert_eq!(
+            word(
+                runtime.object(target).unwrap().interpreter().unwrap(),
+                0x8000_0000
+            ),
+            0x5566_7788
+        );
+        load(&mut runtime, target, 0, b"missing.kcs").unwrap();
+        assert!(runtime.object(target).unwrap().interpreter().is_none());
+        load(&mut runtime, target, 0, b"child.kcs").unwrap();
+        assert_eq!(
+            word(
+                runtime.object(target).unwrap().interpreter().unwrap(),
+                0x8000_0000
+            ),
+            0x5566_7788
+        );
+    }
+}

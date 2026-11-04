@@ -74,6 +74,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                             Some(&mut context)
                         },
                         data1: Some(&mut name),
+                        external: None,
                     },
                 )?;
             }

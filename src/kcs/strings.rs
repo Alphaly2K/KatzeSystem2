@@ -169,7 +169,7 @@ pub(crate) fn format(vm: &Interpreter, address: u32, depth: usize) -> Result<Vec
                 let text = if conversion == b's' {
                     format(vm, value_address, depth + 1)?
                 } else {
-                    let n = read::u32_at(vm.read(value_address, 4)?, 0)?;
+                    let n = read::u32_at(&vm.read(value_address, 4)?, 0)?;
                     match conversion {
                         b'd' | b'i' => (n as i32).to_string().into_bytes(),
                         b'u' => n.to_string().into_bytes(),
@@ -248,7 +248,7 @@ pub(super) fn append_raw(vm: &mut Interpreter, target: u32, source: u32) -> Resu
     while offset < length {
         let width = if length - offset >= 4 { 4 } else { 1 };
         let mut bytes = [0; 4];
-        bytes[..width].copy_from_slice(vm.read(source.wrapping_add(offset as u32), width)?);
+        bytes[..width].copy_from_slice(&vm.read(source.wrapping_add(offset as u32), width)?);
         vm.write(end.wrapping_add(offset as u32), &bytes[..width])?;
         offset += width;
     }
@@ -293,7 +293,11 @@ fn pad(spec: &str, mut value: Vec<u8>) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-pub(super) fn multi(vm: &Interpreter, mut address: u32, index: i32) -> Result<&[u8]> {
+pub(super) fn multi(
+    vm: &Interpreter,
+    mut address: u32,
+    index: i32,
+) -> Result<super::MemoryRead<'_>> {
     for _ in 0..index {
         let word = vm.read_string(address)?;
         if word.is_empty() {
@@ -312,7 +316,7 @@ pub(super) fn join(vm: &Interpreter, mut address: u32, first: i32, last: i32) ->
             break;
         }
         if index >= first {
-            output.extend(word);
+            output.extend_from_slice(&word);
             output.push(b' ');
             if output.len() > read::MAX_BYTES {
                 return Err(Error::new(vm.pc, "KCS 词项拼接超过上限"));

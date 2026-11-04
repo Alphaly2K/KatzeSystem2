@@ -75,6 +75,7 @@ impl Fixture {
             &mut CommandBuffers {
                 data0: None,
                 data1: Some(&mut buffer),
+                external: None,
             },
             &mut output,
             self,
@@ -536,7 +537,8 @@ fn setup() -> TestSetup {
                 packet(3, 2, 90, [0; 3]),
                 &mut CommandBuffers {
                     data0: None,
-                    data1: Some(&mut buffer)
+                    data1: Some(&mut buffer),
+                    external: None,
                 }
             )
             .unwrap(),
@@ -587,7 +589,8 @@ fn real_input_callbacks_share_response_buffers_and_deletion_cleanup() {
                 packet(3, 2, 6, [0; 3]),
                 &mut CommandBuffers {
                     data0: Some(&mut a),
-                    data1: Some(&mut b)
+                    data1: Some(&mut b),
+                    external: None,
                 }
             )
             .is_err()
@@ -646,6 +649,7 @@ fn ordinary_rectangle_registration_reaches_button_and_input_with_wrapped_endpoin
                 &mut CommandBuffers {
                     data0: None,
                     data1: Some(&mut arguments),
+                    external: None,
                 },
             )
             .unwrap();
@@ -666,6 +670,7 @@ fn ordinary_rectangle_registration_reaches_button_and_input_with_wrapped_endpoin
                 &mut CommandBuffers {
                     data0: None,
                     data1: Some(&mut arguments),
+                    external: None,
                 },
             )
             .unwrap();
@@ -684,6 +689,7 @@ fn ordinary_rectangle_registration_reaches_button_and_input_with_wrapped_endpoin
                 &mut CommandBuffers {
                     data0: None,
                     data1: Some(&mut arguments),
+                    external: None,
                 },
             )
             .unwrap();
@@ -702,6 +708,7 @@ fn ordinary_rectangle_registration_reaches_button_and_input_with_wrapped_endpoin
                 &mut CommandBuffers {
                     data0: None,
                     data1: Some(&mut arguments),
+                    external: None,
                 },
             )
             .unwrap();
@@ -721,6 +728,7 @@ fn ordinary_rectangle_registration_reaches_button_and_input_with_wrapped_endpoin
                 &mut CommandBuffers {
                     data0: None,
                     data1: Some(&mut arguments),
+                    external: None,
                 },
             )
             .unwrap();
@@ -741,7 +749,8 @@ fn ordinary_rectangle_registration_reaches_button_and_input_with_wrapped_endpoin
                     packet(2, 0, 800, [0; 3]),
                     &mut CommandBuffers {
                         data0: None,
-                        data1: Some(&mut arguments)
+                        data1: Some(&mut arguments),
+                        external: None,
                     },
                 )
                 .is_err()

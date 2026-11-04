@@ -61,7 +61,7 @@ impl Interpreter {
         self.messages.delivering = false;
         let step = result?;
         // 恢复后可能再次等待，原入口从最新的接收地址回写第二项。
-        message[1] = read::u32_at(self.read(self.messages.address.unwrap() + 4, 4)?, 0)?;
+        message[1] = read::u32_at(&self.read(self.messages.address.unwrap() + 4, 4)?, 0)?;
         Ok(Some(step))
     }
 }

@@ -68,6 +68,7 @@ fn disabled_state_keeps_the_two_hide_calls_and_the_state_written_between_them() 
                 &mut CommandBuffers {
                     data0: Some(&mut slots),
                     data1: None,
+                    external: None,
                 },
                 &mut output,
                 &mut services,

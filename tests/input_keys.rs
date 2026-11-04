@@ -205,6 +205,7 @@ fn scan_transitions_route_message_four_and_clear_suppression_only_for_changes() 
         &mut CommandBuffers {
             data0: None,
             data1: Some(&mut bytes),
+            external: None,
         },
         &mut 0,
     )?;

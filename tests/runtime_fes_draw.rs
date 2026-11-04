@@ -138,6 +138,7 @@ impl Harness {
                 &mut CommandBuffers {
                     data0: None,
                     data1: Some(&mut source),
+                    external: None,
                 },
             )
             .unwrap();

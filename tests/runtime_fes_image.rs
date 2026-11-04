@@ -52,6 +52,7 @@ fn source_slot(runtime: &mut TestRuntime, list: u32, identity: u32) -> Option<u3
             &mut CommandBuffers {
                 data0: None,
                 data1: Some(&mut bytes),
+                external: None,
             },
         )
         .unwrap();
@@ -1822,6 +1823,7 @@ fn list_animation_commands_share_random_and_automatic_updates_use_the_body_time(
                 &mut CommandBuffers {
                     data0: None,
                     data1: Some(name),
+                    external: None,
                 },
             )
         };

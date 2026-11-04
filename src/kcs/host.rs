@@ -261,7 +261,7 @@ pub(crate) fn call_native(
         let mode = u32::from_le_bytes(arguments[..4].try_into().unwrap());
         let address = u32::from_le_bytes(arguments[4..].try_into().unwrap());
         if mode <= 1 {
-            let bytes = host.languages.expand(vm.read_string(address)?, mode)?;
+            let bytes = host.languages.expand(&vm.read_string(address)?, mode)?;
             write_string(vm, address, &bytes, 1)?;
         }
         return Ok(NativeReturn::Continue);
@@ -291,7 +291,7 @@ pub(crate) fn call_native(
             if count == 4 {
                 vm.write(address, block)?;
             } else {
-                block.copy_from_slice(vm.read(address, block.len())?);
+                block.copy_from_slice(&vm.read(address, block.len())?);
             }
         }
         return Ok(NativeReturn::Continue);
@@ -587,6 +587,7 @@ pub(crate) fn call_native(
                 }
                 length += width;
             }
+            drop(source);
             vm.write(args[0].wrapping_add(length as u32), &[0, 0])?;
             NativeReturn::Value(length as u32)
         }
@@ -599,10 +600,13 @@ pub(crate) fn call_native(
                 }
                 length += strings::character_width(&source[length..]);
             }
+            drop(source);
             vm.write(args[0].wrapping_add(length as u32), &[0, 0])?;
             NativeReturn::Value(length as u32)
         }
-        40 => NativeReturn::Value((strings::character_width(vm.read_string(args[0])?) == 2) as u32),
+        40 => {
+            NativeReturn::Value((strings::character_width(&vm.read_string(args[0])?) == 2) as u32)
+        }
         47 | 48 => {
             let source = if index == 48 {
                 strings::format(vm, args[0], 0)?
@@ -637,11 +641,13 @@ pub(crate) fn call_native(
                 .unwrap_or(source.len())
                 .min(args[3].wrapping_sub(2) as usize);
             let value = source[..length].to_vec();
+            drop(source);
+            drop(separators);
             write_string(vm, args[0], &value, 2)?;
             NativeReturn::Value(length as u32)
         }
         41 => {
-            let value = strings::split(vm.read_string(args[1])?, vm.read_string(args[2])?);
+            let value = strings::split(&vm.read_string(args[1])?, &vm.read_string(args[2])?);
             vm.write(args[0], &value)?;
             NativeReturn::Continue
         }
@@ -676,7 +682,8 @@ pub(crate) fn call_native(
             NativeReturn::Continue
         }
         213 => {
-            let source = text::ascii(vm.read_string(args[0])?)?;
+            let bytes = vm.read_string(args[0])?;
+            let source = text::ascii(&bytes)?;
             NativeReturn::Value(expression::eval_parameter(source, state)? as u32)
         }
         276 => {
@@ -691,7 +698,7 @@ pub(crate) fn call_native(
             NativeReturn::Value(string.is_some() as u32)
         }
         278 => {
-            let string = text::expand(vm.read_string(args[0])?, &state.strings)?;
+            let string = text::expand(&vm.read_string(args[0])?, &state.strings)?;
             write_string(vm, args[0], &string, 2)?;
             NativeReturn::Continue
         }
@@ -717,12 +724,13 @@ pub(crate) fn call_native(
                     return Err(Error::new(vm.pc, "KCS 字符串替换超过上限"));
                 }
             }
+            drop(source);
             write_string(vm, args[0], &output, 1)?;
             NativeReturn::Continue
         }
         519 => {
             vm.write(args[0], &[0])?;
-            let words = text::arguments(vm.read_string(args[1])?)?;
+            let words = text::arguments(&vm.read_string(args[1])?)?;
             let word = words.get(args[2] as usize);
             if let Some(word) = word {
                 write_string(vm, args[0], word, 2)?;
@@ -749,9 +757,9 @@ pub(crate) fn call_native(
                 .ok_or_else(|| Error::new(vm.pc, "无效的 KCS 整数字典句柄"))?;
             let key = vm.read_string(args[1])?;
             if index == 518 {
-                NativeReturn::Value(entries.get(key).copied().unwrap_or(u32::MAX))
+                NativeReturn::Value(entries.get(key.as_ref()).copied().unwrap_or(u32::MAX))
             } else {
-                if entries.len() >= read::MAX_ITEMS && !entries.contains_key(key) {
+                if entries.len() >= read::MAX_ITEMS && !entries.contains_key(key.as_ref()) {
                     return Err(Error::new(vm.pc, "KCS 整数字典条目超过上限"));
                 }
                 entries.entry(key.to_vec()).or_insert(args[2]);

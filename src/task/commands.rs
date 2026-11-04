@@ -19,6 +19,8 @@ pub struct Command {
 pub struct CommandBuffers<'a> {
     pub data0: Option<&'a mut [u8]>,
     pub data1: Option<&'a mut [u8]>,
+    /// 172 的外部区指针所引用的共享视图；长度由第一数据项指定。
+    pub external: Option<crate::memory::SharedMemory>,
 }
 
 /// 一次对象命令分派的结果。

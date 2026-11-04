@@ -359,6 +359,7 @@ impl MessageObject {
             &mut CommandBuffers {
                 data0: None,
                 data1: buffer,
+                external: None,
             },
             &mut 0,
             host,

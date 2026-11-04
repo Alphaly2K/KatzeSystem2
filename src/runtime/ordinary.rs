@@ -1,5 +1,5 @@
-use super::{BaseObject, TaskObject};
-use crate::kcs::{Host, Interpreter, OrdinaryTask};
+use super::{BaseObject, ObjectFactory, ObjectHost, TaskObject};
+use crate::kcs::{Host, Interpreter, NativeReturn, OrdinaryTask, SharedMemory, format_string};
 use crate::task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock};
 use crate::{Error, Result, read};
 
@@ -10,13 +10,67 @@ struct Unloaded {
     running: i32,
     accumulated_increment: u32,
     messages: Vec<[u32; 4]>,
-    external: Vec<u8>,
 }
 
 struct Loading {
     command: Command,
     name: Vec<u8>,
     phase: u8,
+}
+
+impl<F: ObjectFactory> ObjectHost<'_, F> {
+    pub(super) fn ordinary_load_native(
+        &mut self,
+        arguments: &[u8],
+        vm: &mut Interpreter,
+    ) -> Result<NativeReturn> {
+        if arguments.len() != 12 {
+            return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+        }
+        let target = read::u32_at(arguments, 0)?;
+        let name = format_string(vm, read::u32_at(arguments, 4)?, 0)?;
+        let name = &name[..name.iter().position(|&b| b == 0).unwrap_or(name.len())];
+        if name.len() >= 260 {
+            return Err(Error::new(vm.pc, "普通脚本名称超过格式缓冲区上限"));
+        }
+        let services = self
+            .resources
+            .services
+            .as_mut()
+            .ok_or_else(|| Error::new(vm.pc, "运行时未配置 KCS 资源服务"))?;
+        let mut name = services.resolve(b"kcs", name)?;
+        name.truncate(name.iter().position(|&b| b == 0).unwrap_or(name.len()));
+        name.push(0);
+        let initialize = read::u32_at(arguments, 8)?;
+        self.command_target_with_buffers(
+            target,
+            161,
+            [initialize, 0, 0],
+            &mut CommandBuffers {
+                data1: Some(&mut name),
+                ..CommandBuffers::default()
+            },
+        )?;
+        let external = self
+            .running
+            .get(&self.host.task_id)
+            .and_then(|task| task.external.clone())
+            .ok_or_else(|| Error::new(vm.pc, "调用任务未提供外部存储描述"))?;
+        self.command_target_with_buffers(
+            target,
+            172,
+            [external.len() as u32, 0, 0],
+            &mut CommandBuffers {
+                external: Some(external),
+                ..CommandBuffers::default()
+            },
+        )?;
+        Ok(if initialize == 0 {
+            NativeReturn::Continue
+        } else {
+            NativeReturn::YieldVoid
+        })
+    }
 }
 
 /// 普通 KCS 对象；构造后可通过命令 161 装载，VM 缺失时仍保留任务状态。
@@ -26,16 +80,19 @@ pub struct OrdinaryObject {
     unloaded: Unloaded,
     shared_numbers: bool,
     loading: Option<Loading>,
+    external: SharedMemory,
 }
 
 impl OrdinaryObject {
     pub fn new(task: OrdinaryTask) -> Self {
+        let external = task.interpreter.external_storage();
         Self {
             id: task.task_id,
             task: Some(task),
             unloaded: Unloaded::default(),
             shared_numbers: true,
             loading: None,
+            external,
         }
     }
 
@@ -46,12 +103,10 @@ impl OrdinaryObject {
         Ok(Self {
             id,
             task: None,
-            unloaded: Unloaded {
-                external,
-                ..Unloaded::default()
-            },
+            unloaded: Unloaded::default(),
             shared_numbers: false,
             loading: None,
+            external: SharedMemory::new(external)?,
         })
     }
 
@@ -90,7 +145,7 @@ impl OrdinaryObject {
         }
     }
 
-    fn unload(&mut self) -> Result<()> {
+    fn unload(&mut self) {
         if let Some(mut task) = self.task.take() {
             self.unloaded = Unloaded {
                 base: BaseObject {
@@ -101,10 +156,8 @@ impl OrdinaryObject {
                 running: task.running,
                 accumulated_increment: task.accumulated_increment,
                 messages: task.queued_messages().to_vec(),
-                external: task.interpreter.replace_external(Vec::new())?,
             };
         }
-        Ok(())
     }
 
     fn load(
@@ -132,7 +185,7 @@ impl OrdinaryObject {
                     .read_string(command.data[1])?
                     .to_vec(),
             };
-            self.unload()?;
+            self.unload();
             self.loading = Some(Loading {
                 command: *command,
                 name,
@@ -145,10 +198,8 @@ impl OrdinaryObject {
                     if let Some(program) =
                         host.load_kcs_program(&self.loading.as_ref().unwrap().name)?
                     {
-                        let mut task = OrdinaryTask::new(
-                            program,
-                            std::mem::take(&mut self.unloaded.external),
-                        )?;
+                        let mut task = OrdinaryTask::new(program, Vec::new())?;
+                        task.interpreter.bind_external(self.external.clone());
                         task.task_id = self.id;
                         task.control = self.unloaded.base.control.clone();
                         task.clock = self.unloaded.base.clock.clone();
@@ -249,6 +300,10 @@ impl TaskObject for OrdinaryObject {
         self.task.as_mut().map(|task| &mut task.interpreter)
     }
 
+    fn external_storage(&self) -> Option<SharedMemory> {
+        Some(self.external.clone())
+    }
+
     fn creation_context(&self) -> Option<&[u8]> {
         Some(self.context())
     }
@@ -326,10 +381,17 @@ impl TaskObject for OrdinaryObject {
             172 => {
                 self.require_idle()?;
                 if let Some(task) = &mut self.task {
-                    if command.data[0] != 0 {
-                        return Err(Error::new(0, "普通任务非空外部存储绑定尚未接入"));
-                    }
-                    task.interpreter.replace_external(Vec::new())?;
+                    let external = if command.data[0] == 0 {
+                        SharedMemory::default()
+                    } else {
+                        buffers
+                            .external
+                            .as_ref()
+                            .ok_or_else(|| Error::new(0, "普通任务外部存储绑定缺少共享视图"))?
+                            .slice(0, command.data[0] as usize)?
+                    };
+                    task.interpreter.bind_external(external.clone());
+                    self.external = external;
                 }
             }
             25 if buffers.data1.is_some() => {

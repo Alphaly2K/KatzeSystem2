@@ -24,6 +24,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             &mut CommandBuffers {
                 data0: None,
                 data1: Some(&mut available),
+                external: None,
             },
         )?;
         if available == [0; 4] {

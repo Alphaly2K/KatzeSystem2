@@ -168,6 +168,7 @@ fn buffer(e: &mut Engine, id: u32, code: u32, data: &mut [u8]) {
         &mut katze_system2::task::CommandBuffers {
             data0: None,
             data1: Some(data),
+            external: None,
         },
     )
     .unwrap();

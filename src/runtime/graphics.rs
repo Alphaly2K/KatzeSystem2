@@ -98,6 +98,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     &mut CommandBuffers {
                         data0: None,
                         data1: Some(&mut rectangle),
+                        external: None,
                     },
                 )?;
             }
@@ -125,6 +126,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     &mut CommandBuffers {
                         data0: None,
                         data1: Some(&mut name),
+                        external: None,
                     },
                 )?;
             }
@@ -138,6 +140,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     &mut CommandBuffers {
                         data0: None,
                         data1: Some(&mut vector),
+                        external: None,
                     },
                 )?;
             }
@@ -154,6 +157,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                         &mut CommandBuffers {
                             data0: None,
                             data1: Some(&mut vector),
+                            external: None,
                         },
                     )?;
                 }
@@ -192,6 +196,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     &mut CommandBuffers {
                         data0: None,
                         data1: Some(&mut rectangle),
+                        external: None,
                     },
                 )?;
             }

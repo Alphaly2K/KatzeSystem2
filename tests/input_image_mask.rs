@@ -87,6 +87,7 @@ fn send(
         &mut CommandBuffers {
             data0: None,
             data1: buffer,
+            external: None,
         },
         &mut output,
         host,

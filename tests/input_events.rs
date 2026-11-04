@@ -53,6 +53,7 @@ fn register(regions: &mut Regions, id: u32, priority: i32, mask: u32, rect: [i32
             &mut CommandBuffers {
                 data0: None,
                 data1: Some(&mut bytes),
+                external: None,
             },
             &mut 0,
         )

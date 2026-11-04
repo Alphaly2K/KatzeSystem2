@@ -148,6 +148,7 @@ impl TaskObject for Receiver {
                 &mut CommandBuffers {
                     data0: None,
                     data1: Some(&mut shown),
+                    external: None,
                 },
                 &mut 0,
             )?;
@@ -157,7 +158,7 @@ impl TaskObject for Receiver {
             let mut vm = Interpreter::new(Program::from_code(&[], vec![0; 8], 16)?, vec![])?;
             let arguments: Vec<_> = [0u32, 4].into_iter().flat_map(u32::to_le_bytes).collect();
             assert_eq!(host.call(149, &arguments, &mut vm)?, NativeReturn::Continue);
-            points.extend_from_slice(vm.read(0, 8)?);
+            points.extend_from_slice(&vm.read(0, 8)?);
         }
         self.records.borrow_mut().push(Record {
             packet: *packet,
@@ -181,6 +182,7 @@ impl TaskObject for Receiver {
                     &mut CommandBuffers {
                         data0: None,
                         data1: Some(&mut bytes),
+                        external: None,
                     },
                     &mut 0,
                 )?;
@@ -287,6 +289,7 @@ fn register(runtime: &mut TestRuntime, id: u32, priority: u32, bounds: [i32; 4])
             &mut CommandBuffers {
                 data0: None,
                 data1: Some(&mut bytes),
+                external: None,
             },
         )
         .unwrap();
@@ -686,6 +689,7 @@ fn device_update_preserves_query_times_and_continues_after_key_consumption() -> 
         &mut CommandBuffers {
             data0: Some(&mut x),
             data1: Some(&mut y),
+            external: None,
         },
     )?;
     assert_eq!(integers(&x[..4]), [7]);
@@ -793,6 +797,7 @@ fn wheel_ignores_event_masks_and_snapshot_commands_preserve_buffer_tails() -> Re
         &mut CommandBuffers {
             data0: None,
             data1: Some(&mut history),
+            external: None,
         },
     )?;
     assert_eq!(

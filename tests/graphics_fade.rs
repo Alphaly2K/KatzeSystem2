@@ -87,6 +87,7 @@ fn prepare(rt: &mut Runtime<GraphicsFactory<Reject>>, id: u32, bytes: &mut [u8])
         &mut CommandBuffers {
             data0: None,
             data1: Some(bytes),
+            external: None,
         },
     )
     .unwrap();
@@ -218,6 +219,7 @@ fn absent_sources_do_not_require_media_services_and_commands_keep_the_return_slo
         &mut CommandBuffers {
             data0: None,
             data1: Some(&mut bytes),
+            external: None,
         },
         &mut output,
         &mut host,

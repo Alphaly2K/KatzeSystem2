@@ -53,6 +53,7 @@ impl Regions {
                 &mut CommandBuffers {
                     data0: Some(&mut previous),
                     data1: Some(&mut current),
+                    external: None,
                 },
             )?;
             index = self.current(index, instance)?.0 + 1;

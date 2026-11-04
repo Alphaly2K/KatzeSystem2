@@ -82,7 +82,7 @@ pub(super) fn call(
         if vm.read(args[3], 1).is_err() {
             return Ok(NativeReturn::Value(0));
         }
-        container.append(args[1], vm.read(args[3], args[2] as usize)?)?;
+        container.append(args[1], &vm.read(args[3], args[2] as usize)?)?;
         return Ok(NativeReturn::Value(1));
     }
     let Some(data) = container.record(args[1])? else {

@@ -135,6 +135,7 @@ fn dispatch(
         &mut CommandBuffers {
             data0: None,
             data1: bytes,
+            external: None,
         },
         &mut output,
         host,
@@ -318,6 +319,7 @@ fn ordinary_image_copy_and_color_commands_reach_an_independent_frame() {
                     &mut CommandBuffers {
                         data0: None,
                         data1: Some(&mut data),
+                        external: None,
                     },
                 )
                 .unwrap();

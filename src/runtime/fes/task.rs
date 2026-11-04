@@ -364,6 +364,7 @@ impl FesObject {
             &mut CommandBuffers {
                 data0: Some(&mut x),
                 data1: Some(&mut y),
+                external: None,
             },
         )?;
         Ok([i32::from_le_bytes(x), i32::from_le_bytes(y)])
@@ -773,6 +774,7 @@ impl FesObject {
             &mut CommandBuffers {
                 data0: None,
                 data1: Some(&mut rectangle),
+                external: None,
             },
         )?;
         self.send(host, button, 93, [0, 1, 1], &mut CommandBuffers::default())?;
@@ -1062,6 +1064,7 @@ impl TaskObject for FesObject {
                     &mut CommandBuffers {
                         data0: None,
                         data1: Some(&mut image),
+                        external: None,
                     },
                 )?;
                 let info = host.image(u32::from_le_bytes(image))?.info();
@@ -1081,6 +1084,7 @@ impl TaskObject for FesObject {
                     &mut CommandBuffers {
                         data0: Some(&mut x),
                         data1: Some(&mut y),
+                        external: None,
                     },
                 )?;
                 self.offset = [i32::from_le_bytes(x), i32::from_le_bytes(y)];
@@ -1319,6 +1323,7 @@ fn update_pointer_values(
             &mut CommandBuffers {
                 data0: Some(&mut x),
                 data1: Some(&mut y),
+                external: None,
             },
         )?;
         [i32::from_le_bytes(x), i32::from_le_bytes(y)]

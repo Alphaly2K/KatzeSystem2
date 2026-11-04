@@ -186,6 +186,7 @@ impl ButtonObject {
             &mut CommandBuffers {
                 data0: None,
                 data1: Some(&mut bytes),
+                external: None,
             },
         )?;
         Ok(())
@@ -208,6 +209,7 @@ impl ButtonObject {
                 &mut CommandBuffers {
                     data0: None,
                     data1: Some(bytes),
+                    external: None,
                 },
             )?;
         }
@@ -424,6 +426,7 @@ impl TaskObject for ButtonObject {
                     &mut CommandBuffers {
                         data0: None,
                         data1: Some(&mut region),
+                        external: None,
                     },
                 )?;
                 self.target = command.sender;

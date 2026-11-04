@@ -254,6 +254,7 @@ fn file(runtime: &mut TestRuntime, target: u32, name: &[u8]) -> Result<u32> {
         &mut CommandBuffers {
             data0: None,
             data1: Some(&mut name),
+            external: None,
         },
     )
 }
@@ -560,6 +561,7 @@ fn named_blocks_refresh_media_respect_pause_and_keep_main_wait_and_exit_notifica
                         &mut CommandBuffers {
                             data0: Some(&mut context),
                             data1: Some(&mut name),
+                            external: None,
                         },
                     )
                     .unwrap();
@@ -822,6 +824,7 @@ impl TaskObject for Driver {
             let mut buffers = CommandBuffers {
                 data0: None,
                 data1: if code == 338 { Some(&mut file) } else { None },
+                external: None,
             };
             assert!(host.dispatch_task_command(
                 Command {

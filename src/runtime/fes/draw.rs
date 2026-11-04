@@ -178,6 +178,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                 &mut CommandBuffers {
                     data0: Some(&mut x),
                     data1: Some(&mut y),
+                    external: None,
                 },
             )?;
             let offset = [i32::from_le_bytes(x), i32::from_le_bytes(y)];

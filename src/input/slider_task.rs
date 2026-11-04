@@ -100,7 +100,11 @@ impl SliderObject {
                 code,
                 data,
             },
-            &mut CommandBuffers { data0, data1 },
+            &mut CommandBuffers {
+                data0,
+                data1,
+                external: None,
+            },
             &mut output,
         )?;
         Ok(output)

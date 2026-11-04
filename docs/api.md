@@ -349,7 +349,11 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 
 1 的调试文字保存在 `debug_messages`，调用者可读取并用 `std::mem::take` 取走；库保留字节编码。26 读取展开后的数值前缀，返回 f32 原始位模式；它与要求完整表达式的 213 使用不同契约。
 
-`Interpreter::read_string` 有界读取零结尾字节串，`read`／`write` 用于任意字节。文本 native 保留原始编码，数值表达式需要 ASCII。字符串写入检查可用空间，参数字节数必须与接口契约一致。13／14 复制原始／格式展开文本，15／16 追加，18 读取展开后长度；这些写入保留双零结尾。24 以字符数量截断并返回字节数，40 检查基线双字节，47／48 读取原始／展开后字符数；25 的格式整数读取使用引擎前缀规则。19～22 的原始／展开比较具有不同参数顺序和字节符号规则，见 [KCS 宿主契约](kcs.md)。native 278 原地展开字符串；519 将给定参数写入目标，序号包括命令名且从零开始。
+`Interpreter::read_string` 有界读取零结尾字节串，`read`／`write` 用于任意字节。
+
+`read`／`read_string` 返回实现 `Deref<Target = [u8]>` 的 `memory::MemoryRead` 视图；传给切片参数时显式借用 `&view`，需要独立副本时用 `to_vec()`。共享区的读取视图存活时，其他 VM 对同一存储的写入返回借用冲突诊断；在推进可能写入的任务前结束该读取视图。
+
+文本 native 保留原始编码，数值表达式需要 ASCII。字符串写入检查可用空间，参数字节数必须与接口契约一致。13／14 复制原始／格式展开文本，15／16 追加，18 读取展开后长度；这些写入保留双零结尾。24 以字符数量截断并返回字节数，40 检查基线双字节，47／48 读取原始／展开后字符数；25 的格式整数读取使用引擎前缀规则。19～22 的原始／展开比较具有不同参数顺序和字节符号规则，见 [KCS 宿主契约](kcs.md)。native 278 原地展开字符串；519 将给定参数写入目标，序号包括命令名且从零开始。
 
 ### 任务运行时
 
@@ -511,13 +515,17 @@ Scene 消费 `noact`／`lockactive` 并按主体时点处理通知。`preferred_
 
 执行中的对象暂时从对象存储取出；输入同步回调通过 `Host::dispatch_input_command` 开放同一 CommandState 处理嵌套命令，其他需要直接借用执行中对象的命令或 VM 访问继续返回诊断。嵌套执行前保存宿主的任务编号、时刻和起点，返回后恢复，外层脚本继续读取自己的任务状态。对象命令经 `TaskTree::dispatch` 路由，目标改写、可达性判断和 `data[2]` 传播沿用树契约；`dispatch_command(origin, command)` 的 `origin` 只用于路由，`command.sender` 保持调用者给出的值，natives 108／109／110 以当前任务为发送者。未识别的基类编号不修改状态并允许传播，基类命令和已有删除标记的对象消费当前分支；普通任务对已知但尚未实现的专属编号继续返回诊断。
 
-`Runtime::dispatch_command_with_buffers(origin, command, &mut buffers)` 按相同树规则分派显式字节缓冲区。`task::CommandBuffers` 的 data0／data1 是可选可变借用，对应原 data[0]／data[1] 所引用的数据；不解释 DWORD 为进程指针或 VM 地址。各接收者共享缓冲区中的修改。对象通过 `TaskObject::dispatch_command_with_buffers` 接收，缺省委托标量入口，所需长度由具体命令检查。`Host::next_task_child(previous)` 查询当前对象在有符号编号游标之后的直属子级，None 从首项开始，`dispatch_task_command(command, buffers, output)` 保留传入返回槽并返回是否找到目标，用于对象内部传播；宿主未提供服务时返回诊断。
+`Runtime::dispatch_command_with_buffers(origin, command, &mut buffers)` 按相同树规则分派显式字节缓冲区。`task::CommandBuffers` 的 data0／data1 是可选可变借用，对应原 data[0]／data[1] 所引用的数据；external 为可选的共享字节视图，用于 172 的持久绑定；不解释 DWORD 为进程指针或 VM 地址。各接收者共享缓冲区中的修改。对象通过 `TaskObject::dispatch_command_with_buffers` 接收，缺省委托标量入口，所需长度由具体命令检查。`Host::next_task_child(previous)` 查询当前对象在有符号编号游标之后的直属子级，None 从首项开始，`dispatch_task_command(command, buffers, output)` 保留传入返回槽并返回是否找到目标，用于对象内部传播；宿主未提供服务时返回诊断。
 
 普通 78／79／80／82／83／84／100／101 已在运行时连接基础图元及属性命令，均以状态 2 保留栈原值；零目标只需一个 DWORD，非零缺失目标继续执行。完整参数及对象命令见[基础图元](graphics.md#普通脚本的基础图元)及 [KX2 几何](graphics.md#kx2-几何资源)。对象通过 `Host::resource_services()` 访问与 native 共用的同步资源服务，通过 `Host::canvas_layout()` 查询画布布局；未提供所需服务时返回诊断。
 
 主体、命令和消息在返回前完成预算续跑。`DEFAULT_BUDGET` 为单次推进预算，零预算按一处理；连续耗尽预算时，`DEFAULT_LIMIT` 按续跑累计额度触发同步执行诊断。与库的其他执行错误一样，出现该错误后应丢弃解释器状态。不结束的普通指令循环因此会返回诊断。
 
-当前运行时接入普通表任务 native 66／67／69／70／72／73／75／76／108／109／110／452 和已核实的普通表接口；108／110 接受目标编号和值两个 DWORD。`KcsFactory.external_bytes` 超过库的 64 MiB 上限时在分配前返回诊断。629 仍由 `SystemHost` 单独包装，尚未并入；367 尚未实现。`Runtime::create` 配合 `KcsFactory` 保留按名称预先装载的便利入口；`Runtime::create_unloaded_ordinary(parent, context)` 构造无 VM 的普通对象。工厂包装需转发 `create_unloaded_ordinary` 和 `load_kcs_program`，宿主包装需转发程序装载及共享数值绑定状态。命令 161 从 `CommandBuffers.data1` 读取完整名称；首参非零时立即初始化，零时只装载。缺失程序会移除旧 VM，保留任务编号、控制、时钟和队列，随后仍继承父级数值区及上下文；程序读取服务错误保留装载阶段，沿用同一命令重试。172 绑定外部区，已接入零长度绑定，非零长度仍返回诊断。
+当前运行时接入普通表任务 native 66／67／69／70／72／73／75／76／108／109／110／143／452 和已核实的普通表接口；108／110 接受目标编号和值两个 DWORD。`KcsFactory.external_bytes` 超过库的 64 MiB 上限时在分配前返回诊断。629 仍由 `SystemHost` 单独包装，尚未并入；367 尚未实现。`Runtime::create` 配合 `KcsFactory` 保留按名称预先装载的便利入口；`Runtime::create_unloaded_ordinary(parent, context)` 构造无 VM 的普通对象。工厂包装需转发 `create_unloaded_ordinary` 和 `load_kcs_program`，宿主包装需转发程序装载及共享数值绑定状态。命令 161 从 `CommandBuffers.data1` 读取完整名称；首参非零时立即初始化，零时只装载。缺失程序会移除旧 VM，保留任务编号、控制、时钟和队列，随后仍继承父级数值区及上下文；程序读取服务错误保留装载阶段，沿用同一命令重试。172 仅在 VM 存在时更新对象保存的外部区及 VM 绑定，不执行脚本；长度零清空，非零长度从 `CommandBuffers.external` 的起点取对应长度的共享视图，缓冲区缺失或长度不足返回诊断。装载失败后对象仍保留该描述，后续重载继续共享同一份字节。
+
+普通 143 接收目标、名称格式地址及初始化 DWORD。通过资源服务的 `kcs` 类别补全名称后，依序发送 161 和 172，后者绑定调用对象保存的外部区。目标零仍路由；初始化零以状态二继续，非零以状态四让出，均保持 native 返回槽。`TaskObject::external_storage()` 提供该对象描述，默认从 VM 查询；普通对象独立保存，直接重绑其 VM 不会修改对象保存的描述。
+
+`memory::SharedMemory::new(bytes)` 接管字节，`clone()`／`slice(offset, length)` 共享存储，切片按相对范围检查边界；`read` 返回只读借用，`write` 立即对所有视图可见。视图持有字节区，不依赖最初对象的生命周期。`Interpreter::external_storage()` 返回当前绑定的共享视图，`bind_external(view)` 替换并返回旧绑定；`replace_external(Vec)` 则替换为独立存储并返回旧视图内容，其他绑定继续持有旧区。普通区、栈和等待状态保持。72／73 在不同 VM 共享同一外部区时继续保留复制模式的块顺序和重叠反馈。
 
 ## 约束与验证
 

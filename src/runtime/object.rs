@@ -16,6 +16,11 @@ pub trait TaskObject {
     fn interpreter(&self) -> Option<&Interpreter>;
     fn interpreter_mut(&mut self) -> Option<&mut Interpreter>;
 
+    /// 对象保存的外部区描述；普通装载转发使用此视图。
+    fn external_storage(&self) -> Option<crate::memory::SharedMemory> {
+        self.interpreter().map(Interpreter::external_storage)
+    }
+
     /// 支持命令 25 的原始创建上下文；没有上下文存储的对象返回 None。
     fn creation_context(&self) -> Option<&[u8]> {
         None

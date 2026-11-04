@@ -114,7 +114,7 @@ pub(super) fn call(
             .bytes
             .get_mut(range)
             .ok_or_else(|| Error::new(vm.pc, "记录栈容量不足"))?
-            .copy_from_slice(vm.read(address, stack.stride as usize)?);
+            .copy_from_slice(&vm.read(address, stack.stride as usize)?);
         stack.count = stack.count.wrapping_add(1);
     } else {
         if stack.count as i32 <= 0 || vm.read(address, 1).is_err() {

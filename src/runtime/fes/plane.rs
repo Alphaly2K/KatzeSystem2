@@ -297,6 +297,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                         &mut CommandBuffers {
                             data0: None,
                             data1: Some(&mut slot),
+                            external: None,
                         },
                     )?;
                     if found != 0 {
@@ -363,6 +364,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                 &mut CommandBuffers {
                     data0: None,
                     data1: bytes,
+                    external: None,
                 },
             )?;
         }

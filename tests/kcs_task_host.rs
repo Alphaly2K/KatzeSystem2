@@ -333,6 +333,40 @@ fn task_memory_reads_and_writes_other_vms_and_preserves_self_overlap() {
             .is_err()
     );
     assert!(host.call(70, &[], &mut vm).is_err());
+    for mode in [
+        MemoryCopyMode::Mmx,
+        MemoryCopyMode::Dword,
+        MemoryCopyMode::Crt,
+    ] {
+        for index in [72, 73] {
+            let shared = katze_system2::kcs::SharedMemory::new((0..32).collect()).unwrap();
+            vm.bind_external(shared.clone());
+            host.services.target.bind_external(shared);
+            host.memory_copy_mode = mode;
+            let packet = if index == 72 {
+                args([42, 0x8000_0000, 16, 0x8000_0004])
+            } else {
+                args([42, 0x8000_0004, 16, 0x8000_0000])
+            };
+            host.call(index, &packet, &mut vm).unwrap();
+            let expected = match mode {
+                MemoryCopyMode::Mmx => [
+                    0, 1, 2, 3, 0, 1, 2, 3, 4, 5, 6, 7, 4, 5, 6, 7, 12, 13, 14, 15,
+                ],
+                MemoryCopyMode::Dword => {
+                    [0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3]
+                }
+                MemoryCopyMode::Crt => [
+                    0, 1, 2, 3, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+                ],
+            };
+            assert_eq!(vm.read(0x8000_0000, 20).unwrap(), expected);
+            assert_eq!(
+                host.services.target.read(0x8000_0000, 20).unwrap(),
+                expected
+            );
+        }
+    }
 }
 
 #[test]

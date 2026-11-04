@@ -12,6 +12,7 @@ pub mod hg3;
 pub mod input;
 pub mod kcs;
 pub mod language;
+pub mod memory;
 pub mod message;
 mod read;
 pub mod resource;

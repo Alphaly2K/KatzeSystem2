@@ -1,3 +1,4 @@
+pub use crate::memory::{MemoryRead, SharedMemory};
 use crate::{Error, Result, Step, read};
 use std::collections::BTreeMap;
 
@@ -27,6 +28,7 @@ pub(crate) use host::{call_native, hierarchy_query};
 pub(crate) use matrix::{multiply as multiply_matrix, transform as transform_vector};
 pub use memory::MemoryCopyMode;
 pub(crate) use memory::copy as copy_memory;
+pub(crate) use memory::copy_between as copy_memory_between;
 pub use motion::{MotionHost, MotionState, MotionTask};
 pub(crate) use numeric::float as float_operation;
 pub use ordinary::OrdinaryTask;
@@ -675,7 +677,7 @@ pub struct Interpreter {
     boundaries: BTreeMap<usize, usize>,
     pub pc: usize,
     memory: Vec<u8>,
-    external: Vec<u8>,
+    external: SharedMemory,
     sp: usize,
     frame_top: usize,
     frame_base: usize,
@@ -708,7 +710,7 @@ impl Interpreter {
             boundaries,
             pc: 0,
             memory,
-            external,
+            external: SharedMemory::new(external)?,
             sp: stack_start,
             frame_top: stack_start,
             frame_base: stack_start,
@@ -735,12 +737,21 @@ impl Interpreter {
     pub fn stack_bytes(&self) -> &[u8] {
         &self.memory[self.stack_start..self.sp]
     }
-    /// 替换自有外部区并返回旧存储；程序、栈和消息等待状态保持。
+    /// 替换为独立外部区并返回旧内容；其他绑定继续持有旧存储。
     pub fn replace_external(&mut self, external: Vec<u8>) -> Result<Vec<u8>> {
         if external.len() > read::MAX_BYTES {
             return Err(Error::new(self.pc, "外部存储超过上限"));
         }
-        Ok(std::mem::replace(&mut self.external, external))
+        let external = SharedMemory::new(external)?;
+        self.bind_external(external).into_vec()
+    }
+
+    pub fn external_storage(&self) -> SharedMemory {
+        self.external.clone()
+    }
+
+    pub fn bind_external(&mut self, external: SharedMemory) -> SharedMemory {
+        std::mem::replace(&mut self.external, external)
     }
     /// 从入口重新执行，保留程序数据、外部区及调试元数据。
     pub fn reset_execution(&mut self) {
@@ -752,29 +763,41 @@ impl Interpreter {
         self.frame_floors.push(self.stack_start);
         self.debug_variable_floors.clear();
     }
-    pub fn read(&self, address: u32, length: usize) -> Result<&[u8]> {
-        let storage = if address & 0x8000_0000 != 0 {
-            &self.external
+    pub fn read(&self, address: u32, length: usize) -> Result<MemoryRead<'_>> {
+        let offset = (address & 0x7fff_ffff) as usize;
+        if address & 0x8000_0000 != 0 {
+            Ok(MemoryRead::Shared(self.external.read(offset, length)?))
         } else {
-            &self.memory
-        };
-        read::range(storage, (address & 0x7fff_ffff) as usize, length)
+            Ok(MemoryRead::Local(read::range(
+                &self.memory,
+                offset,
+                length,
+            )?))
+        }
     }
-    pub fn read_string(&self, address: u32) -> Result<&[u8]> {
-        let storage = if address & 0x8000_0000 != 0 {
-            &self.external
+    pub fn read_string(&self, address: u32) -> Result<MemoryRead<'_>> {
+        let offset = (address & 0x7fff_ffff) as usize;
+        if address & 0x8000_0000 != 0 {
+            let bytes = self.external.read(0, self.external.len())?;
+            let length = read::zstr(&bytes, offset)?.len();
+            Ok(MemoryRead::Shared(std::cell::Ref::map(bytes, |bytes| {
+                &bytes[offset..offset + length]
+            })))
         } else {
-            &self.memory
-        };
-        read::zstr(storage, (address & 0x7fff_ffff) as usize)
+            Ok(MemoryRead::Local(read::zstr(&self.memory, offset)?))
+        }
     }
     pub fn write(&mut self, address: u32, bytes: &[u8]) -> Result<()> {
         let p = (address & 0x7fff_ffff) as usize;
-        let storage = if address & 0x8000_0000 != 0 {
-            &mut self.external
-        } else {
-            &mut self.memory
-        };
+        if address & 0x8000_0000 != 0 {
+            if p.checked_add(bytes.len())
+                .is_none_or(|end| end > self.external.len())
+            {
+                return Err(Error::new(self.pc, "KCS 写入越界"));
+            }
+            return self.external.write(p, bytes);
+        }
+        let storage = &mut self.memory;
         let end = p
             .checked_add(bytes.len())
             .filter(|&n| n <= storage.len())
@@ -883,7 +906,7 @@ impl Interpreter {
                 }
                 0x16..=0x19 => {
                     let target = self.raw(a[0])?;
-                    let old = read::u32_at(self.read(target, 4)?, 0)?;
+                    let old = read::u32_at(&self.read(target, 4)?, 0)?;
                     let width = width(a[0].flags & 0x7f)?;
                     let subtract = matches!(ins.opcode, 0x17 | 0x19);
                     let result = if a[0].flags & 15 == 4 {
@@ -895,14 +918,14 @@ impl Interpreter {
                     let result = if ins.opcode >= 0x18 {
                         old
                     } else {
-                        read::u32_at(self.read(target, 4)?, 0)?
+                        read::u32_at(&self.read(target, 4)?, 0)?
                     };
                     self.push(result)?;
                 }
                 0x1b..=0x24 => {
                     let target = self.raw(a[0])?;
                     let right = self.value(a[1])?;
-                    let left = read::u32_at(self.read(target, 4)?, 0)?;
+                    let left = read::u32_at(&self.read(target, 4)?, 0)?;
                     let n = numeric::binary(
                         ins.opcode, left, right, a[0].flags, a[1].flags, ins.offset,
                     )?;
@@ -912,7 +935,7 @@ impl Interpreter {
                 0x25 => {
                     if a[0].flags & 0x10 != 0 {
                         let address = self.raw(a[0])?;
-                        let n = read::u32_at(self.read(address, 4)?, 0)?;
+                        let n = read::u32_at(&self.read(address, 4)?, 0)?;
                         self.push(n)?;
                     } else if a[0].flags & 0x40 == 0 {
                         self.push(a[0].payload)?;
@@ -1101,7 +1124,8 @@ impl Interpreter {
                 0x41 => {
                     let line = self.value(a[0])?;
                     let source = self.value(a[1])?;
-                    self.debug.source = self.read_string(source)?.to_vec();
+                    let source = self.read_string(source)?.to_vec();
+                    self.debug.source = source;
                     self.debug.line = line;
                 }
                 0x42 => {

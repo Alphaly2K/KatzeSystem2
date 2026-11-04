@@ -244,6 +244,7 @@ impl PlaneObject {
             &mut CommandBuffers {
                 data0: Some(&mut width),
                 data1: Some(&mut height),
+                external: None,
             },
             &mut 0,
             host,

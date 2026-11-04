@@ -592,6 +592,7 @@ struct RunningTask {
     clock: TaskClock,
     context: Option<Vec<u8>>,
     shared_numbers: Option<bool>,
+    external: Option<crate::memory::SharedMemory>,
     remaining_messages: Option<usize>,
     effects: TaskEffects,
 }
@@ -929,6 +930,7 @@ fn run_nested<F: ObjectFactory>(
             clock: object.clock().clone(),
             context: object.creation_context().map(<[u8]>::to_vec),
             shared_numbers: object.shared_numbers_available(),
+            external: object.external_storage(),
             remaining_messages: object
                 .queued_messages()
                 .map(|messages| read::MAX_ITEMS.saturating_sub(messages.len())),
@@ -1346,11 +1348,23 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                         .and_then(|object| object.interpreter_mut())
                         .ok_or_else(|| Error::new(vm.pc, "任务对象不存在、正在执行或没有 VM"))?;
                     if index == 72 {
-                        let bytes = other.read(args[1], count)?;
-                        vm.write(args[3], bytes)?;
+                        crate::kcs::copy_memory_between(
+                            vm,
+                            args[3],
+                            other,
+                            args[1],
+                            count,
+                            self.host.memory_copy_mode,
+                        )?;
                     } else {
-                        let bytes = vm.read(args[3], count)?;
-                        other.write(args[1], bytes)?;
+                        crate::kcs::copy_memory_between(
+                            other,
+                            args[1],
+                            vm,
+                            args[3],
+                            count,
+                            self.host.memory_copy_mode,
+                        )?;
                     }
                 }
                 Ok(NativeReturn::Continue)
@@ -1645,6 +1659,9 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
     }
 
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn> {
+        if index == 143 {
+            return self.ordinary_load_native(arguments, vm);
+        }
         if matches!(index, 633..=638) {
             return self.resources.raw.name_table_call(
                 index,

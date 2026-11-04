@@ -519,6 +519,7 @@ fn graphics_event_response_survives_errors_and_forwards_motion_buffers() {
                 &mut CommandBuffers {
                     data0: Some(&mut previous),
                     data1: Some(&mut current),
+                    external: None,
                 }
             )
             .unwrap(),

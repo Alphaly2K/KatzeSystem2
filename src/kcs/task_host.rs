@@ -309,11 +309,23 @@ impl<H: Host, S: TaskServices> Host for TaskHost<'_, H, S> {
                 } else {
                     let other = self.services.interpreter(args[0])?;
                     if index == 72 {
-                        let bytes = other.read(args[1], count)?;
-                        vm.write(args[3], bytes)?;
+                        memory::copy_between(
+                            vm,
+                            args[3],
+                            other,
+                            args[1],
+                            count,
+                            self.memory_copy_mode,
+                        )?;
                     } else {
-                        let bytes = vm.read(args[3], count)?;
-                        other.write(args[1], bytes)?;
+                        memory::copy_between(
+                            other,
+                            args[1],
+                            vm,
+                            args[3],
+                            count,
+                            self.memory_copy_mode,
+                        )?;
                     }
                 }
                 Ok(NativeReturn::Continue)

@@ -34,6 +34,7 @@ fn write(runtime: &mut Engine, target: u32, code: u32, words: &[u32]) {
             &mut CommandBuffers {
                 data0: None,
                 data1: Some(&mut bytes),
+                external: None,
             },
         )
         .unwrap();

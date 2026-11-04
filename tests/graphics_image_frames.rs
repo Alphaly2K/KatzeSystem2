@@ -304,6 +304,7 @@ fn runtime_second_source_decodes_raw_handles_and_keeps_pixels_after_native_close
                 &mut CommandBuffers {
                     data0: None,
                     data1: Some(&mut record),
+                    external: None,
                 },
             )
             .unwrap();
@@ -315,6 +316,7 @@ fn runtime_second_source_decodes_raw_handles_and_keeps_pixels_after_native_close
                 &mut CommandBuffers {
                     data0: None,
                     data1: Some(&mut slot),
+                    external: None,
                 },
             )
             .unwrap();
@@ -334,6 +336,7 @@ fn runtime_second_source_decodes_raw_handles_and_keeps_pixels_after_native_close
                 &mut CommandBuffers {
                     data0: None,
                     data1: Some(&mut output),
+                    external: None,
                 },
             )
             .unwrap();
@@ -361,7 +364,8 @@ fn runtime_second_source_decodes_raw_handles_and_keeps_pixels_after_native_close
                     command(286, [5, 0, 0]),
                     &mut CommandBuffers {
                         data0: None,
-                        data1: Some(&mut record)
+                        data1: Some(&mut record),
+                        external: None,
                     },
                 )
                 .is_err()

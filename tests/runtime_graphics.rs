@@ -135,6 +135,7 @@ fn buffered<F: ObjectFactory>(
         &mut CommandBuffers {
             data0: None,
             data1: Some(data),
+            external: None,
         },
     )
 }
@@ -383,6 +384,7 @@ fn buffered_geometry_keeps_endpoints_queries_and_replacement_state() {
                 &mut CommandBuffers {
                     data0: Some(&mut a),
                     data1: Some(&mut b),
+                    external: None,
                 },
             )
             .unwrap();
@@ -430,6 +432,7 @@ fn buffered_geometry_keeps_endpoints_queries_and_replacement_state() {
             &mut CommandBuffers {
                 data0: Some(&mut a),
                 data1: Some(&mut b),
+                external: None,
             },
         )
         .unwrap();
@@ -596,6 +599,7 @@ fn property_commands_forward_with_shared_buffers_and_return_slots_through_nested
                 &mut CommandBuffers {
                     data0: None,
                     data1: Some(&mut data),
+                    external: None,
                 },
             )
             .unwrap();
@@ -621,6 +625,7 @@ fn property_commands_forward_with_shared_buffers_and_return_slots_through_nested
             &mut CommandBuffers {
                 data0: None,
                 data1: Some(&mut data),
+                external: None,
             },
         )
         .unwrap();

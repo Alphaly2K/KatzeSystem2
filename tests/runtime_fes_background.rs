@@ -80,6 +80,7 @@ fn image(runtime: &mut TestRuntime, list: u32) -> u32 {
             &mut CommandBuffers {
                 data0: None,
                 data1: Some(&mut bytes),
+                external: None,
             },
         )
         .unwrap();

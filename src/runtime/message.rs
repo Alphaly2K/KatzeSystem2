@@ -22,7 +22,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         match index {
             611..=613 => {
                 let address = read::u32_at(arguments, 4)?;
-                let length = if read::u32_at(vm.read(address, 4)?, 0)? == 0xe8 {
+                let length = if read::u32_at(&vm.read(address, 4)?, 0)? == 0xe8 {
                     0xe8
                 } else {
                     4

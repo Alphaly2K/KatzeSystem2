@@ -70,6 +70,7 @@ fn button_selection_press_and_release_reach_a_waiting_ordinary_vm() -> Result<()
             &mut CommandBuffers {
                 data0: None,
                 data1: Some(&mut region),
+                external: None,
             },
         )?;
         runtime.update_input_selection(input, Some([5, 5]))?;

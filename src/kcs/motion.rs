@@ -56,11 +56,11 @@ impl MotionState {
     pub fn read(vm: &Interpreter) -> Result<Self> {
         let bytes = vm.read(EXTERNAL, EXTERNAL_SIZE)?;
         Ok(Self {
-            properties: std::array::from_fn(|i| read::u32_at(bytes, i * 4).unwrap()),
-            elapsed: read::u32_at(bytes, 144)?,
-            running: read::u32_at(bytes, 148)? as i32,
-            finishing: read::u32_at(bytes, 152)? as i32,
-            parameters: std::array::from_fn(|i| read::u32_at(bytes, 156 + i * 4).unwrap()),
+            properties: std::array::from_fn(|i| read::u32_at(&bytes, i * 4).unwrap()),
+            elapsed: read::u32_at(&bytes, 144)?,
+            running: read::u32_at(&bytes, 148)? as i32,
+            finishing: read::u32_at(&bytes, 152)? as i32,
+            parameters: std::array::from_fn(|i| read::u32_at(&bytes, 156 + i * 4).unwrap()),
         })
     }
 }

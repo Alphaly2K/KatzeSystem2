@@ -107,7 +107,7 @@ impl MotionQueue {
                 Some((address, length)) if address != 0 => {
                     task.interpreter.read(address, length)?
                 }
-                _ => &[],
+                _ => super::MemoryRead::Local(&[]),
             };
             let size = 0x454usize
                 .checked_add(data.len())
@@ -124,11 +124,11 @@ impl MotionQueue {
                 record[4 + i * 2..6 + i * 2].copy_from_slice(&unit.to_le_bytes());
             }
             record[0x44..0x48].copy_from_slice(&(entry.group as u32).to_le_bytes());
-            record[0x48..0x448].copy_from_slice(task.interpreter.read(0x8000_009c, 1024)?);
+            record[0x48..0x448].copy_from_slice(&task.interpreter.read(0x8000_009c, 1024)?);
             record[0x448..0x44c].copy_from_slice(&(data.len() as u32).to_le_bytes());
             record[0x44c..0x450].copy_from_slice(&now.wrapping_sub(task.base_time).to_le_bytes());
             record[0x450..0x454].copy_from_slice(&task.snapshot_flags.to_le_bytes());
-            record[0x454..].copy_from_slice(data);
+            record[0x454..].copy_from_slice(&data);
         }
         let size = bytes.len() as u32;
         bytes[..4].copy_from_slice(&size.to_le_bytes());
