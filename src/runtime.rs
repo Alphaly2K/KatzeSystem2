@@ -278,6 +278,10 @@ impl<F: ObjectFactory> Runtime<F> {
         self.resources.cst_contexts.get(&handle)
     }
 
+    pub fn cst_context_mut(&mut self, handle: u32) -> Option<&mut CstContext> {
+        self.resources.cst_contexts.get_mut(&handle)
+    }
+
     pub fn motion_snapshot(&self, handle: u32) -> Option<&MotionSnapshot> {
         self.resources.motion_snapshots.get(&handle)
     }
@@ -1683,7 +1687,7 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
                 self.host.unicode_text != 0,
             );
         }
-        if matches!(index, 323 | 324 | 326 | 328..=332) {
+        if matches!(index, 323..=332 | 1033 | 1037 | 1038) {
             return self.cst_native(index, arguments, vm);
         }
         if matches!(index, 294..=303 | 305..=317 | 586) {

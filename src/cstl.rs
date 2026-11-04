@@ -14,6 +14,14 @@ pub struct Table {
 
 impl Table {
     pub fn parse(data: &[u8]) -> Result<Self> {
+        let (table, used) = Self::parse_prefix(data)?;
+        if used != data.len() {
+            return Err(Error::new(used, "CSTL 存在尾部数据"));
+        }
+        Ok(table)
+    }
+
+    pub(crate) fn parse_prefix(data: &[u8]) -> Result<(Self, usize)> {
         if data.len() > read::MAX_BYTES || data.get(..4) != Some(b"CSTL") {
             return Err(Error::new(0, "无效 CSTL 容器"));
         }
@@ -53,13 +61,13 @@ impl Table {
             }
             messages.push(row);
         }
-        if p != data.len() {
-            return Err(Error::new(p, "CSTL 存在尾部数据"));
-        }
-        Ok(Self {
-            languages,
-            messages,
-        })
+        Ok((
+            Self {
+                languages,
+                messages,
+            },
+            p,
+        ))
     }
 
     pub fn message(&self, language: &str, index: usize) -> Option<&Message> {

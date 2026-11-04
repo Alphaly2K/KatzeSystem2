@@ -39,7 +39,7 @@ impl Script {
         let n = read::u32_at(&bytes, 4)? as usize;
         let o = read::sized(read::u32_at(&bytes, 8)?, 8)?;
         let s = read::sized(read::u32_at(&bytes, 12)?, 12)?;
-        if n == 0 || n > payload / 8 || o < n * 8 || s < o || s > payload || (s - o) % 4 != 0 {
+        if n > payload / 8 || o < n * 8 || s < o || s > payload || (s - o) % 4 != 0 {
             return Err(Error::new(4, "CST 表范围无效"));
         }
         let count = (s - o) / 4;
