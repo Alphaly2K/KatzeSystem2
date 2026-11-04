@@ -113,7 +113,11 @@ impl Interpreter {
         Ok(true)
     }
 
-    pub(crate) fn dispatch_system_block(&mut self, name: &str) -> Result<bool> {
+    pub(crate) fn dispatch_system_block(
+        &mut self,
+        name: &str,
+        target: Option<&super::ObjectReference>,
+    ) -> Result<bool> {
         if self.invocation.is_some() || self.initialization_pending() {
             return Err(Error::new(0, "FES 无法在当前状态分派系统块"));
         }
@@ -124,18 +128,22 @@ impl Interpreter {
         {
             return Err(Error::new(0, "FES 需要先完成当前宿主操作"));
         }
+        let full_name = target.map_or_else(
+            || name.to_owned(),
+            |target| format!("{}.{}", target.name, name),
+        );
         let Some(block) = self
             .program
             .blocks
             .iter()
-            .position(|block| block.name == name)
+            .position(|block| block.name == full_name)
         else {
             return Ok(false);
         };
         self.invocation = Some(Invocation {
             context: EventContext {
-                object: String::new(),
-                bank: 0,
+                object: target.map_or_else(String::new, |target| target.name.clone()),
+                bank: target.map_or(0, |target| target.bank),
                 event: name.to_owned(),
             },
             main: (self.block, self.pc),

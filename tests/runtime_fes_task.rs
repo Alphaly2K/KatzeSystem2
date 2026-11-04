@@ -74,6 +74,11 @@ impl ObjectFactory for Factory {
                 (645, vec![0, 2, 99]),
                 (645, vec![u32::MAX, 2, 99]),
                 (448, vec![3]),
+                (630, vec![3, 112, 144, 0x8000_0001]),
+                (630, vec![3, 112, 0, u32::MAX]),
+                (630, vec![3, 0, 0, 9]),
+                (630, vec![0, 0, 0, 9]),
+                (630, vec![u32::MAX, 0, 0, 9]),
             ] {
                 for value in &args {
                     ins(&mut code, 0x25, &[*value]);
@@ -93,10 +98,12 @@ impl ObjectFactory for Factory {
             }
             ins(&mut code, 0x26, &[0]);
             ins(&mut code, 0x3b, &[]);
-            let mut data = vec![0; 128];
+            let mut data = vec![0; 160];
             data[32..36].copy_from_slice(&7u32.to_le_bytes());
             let format = b"complete_%d[G32]\0";
             data[64..64 + format.len()].copy_from_slice(format);
+            data[112..125].copy_from_slice(b"BLOCK%d[G32]\0");
+            data[144..151].copy_from_slice(b"sprite\0");
             let mut task = katze_system2::kcs::OrdinaryTask::new(
                 Program::from_code(&code, data, 128)?,
                 Vec::new(),
@@ -444,7 +451,7 @@ fn fes_tasks_load_without_starting_then_drive_pixels_and_keep_exit_properties() 
 
 #[test]
 fn ordinary_natives_bind_load_and_start_fes_with_shared_values_and_pixels() {
-    let source = b"#DEFINE\nCIMAGE sprite\nPLANE view\n#OBJECT SIZE COLOR PRI POS DISP\nsprite 2,2 0xff123456 5 1,1 1\n#OBJECT POS SIZE VRAM PRI DISP\nview 0,0 8,6 0,0 500 1\n#START\n$0=$0+1\n$1=\\2\nexit 37\nwait 20\n";
+    let source = b"#DEFINE\nCIMAGE sprite\nPLANE view\n#OBJECT SIZE COLOR PRI POS DISP\nsprite 2,2 0xff123456 5 1,1 1\n#OBJECT POS SIZE VRAM PRI DISP\nview 0,0 8,6 0,0 500 1\n#START\n$0=$0+1\n$1=\\2\nexit 37\nwait 20\n#BLOCK7\n$2+=1\n$3=@\n#sprite.BLOCK7\n$4=@\n";
     for budget in [1, 4096] {
         for empty_name in [false, true] {
             let Setup {
@@ -470,6 +477,10 @@ fn ordinary_natives_bind_load_and_start_fes_with_shared_values_and_pixels() {
             runtime.update(0, 1).unwrap();
             assert_eq!(runtime.numbers().shared[0], 1);
             assert_eq!(runtime.numbers().shared[1], 17);
+            assert_eq!(
+                runtime.numbers().shared[2..5],
+                [1, 0, 0x8000_0001u32 as i32]
+            );
             assert_eq!(*reads.borrow(), [b"complete.fes".to_vec()]);
             let vm = runtime.object(caller).unwrap().interpreter().unwrap();
             assert_eq!(vm.read(0, 4).unwrap(), 0xdead_beefu32.to_le_bytes());
@@ -522,6 +533,91 @@ fn parent_scene(setup: &mut Setup, source: &[u8], child: &[u8]) -> (u32, u32) {
     send(&mut setup.runtime, fes, 340, 0, list);
     file(&mut setup.runtime, fes, b"complete.fes").unwrap();
     (fes, list)
+}
+
+#[test]
+fn named_blocks_refresh_media_respect_pause_and_keep_main_wait_and_exit_notifications() {
+    let source = b"#DEFINE\nCIMAGE sprite\nPLANE view\n#OBJECT SIZE COLOR PRI POS DISP\nsprite 2,2 0xff123456 5 1,1 1\n#OBJECT POS SIZE VRAM PRI DISP\nview 0,0 8,6 0,0 500 1\n#START\n$0+=1\nwait 100\n$1+=1\n#sprite.MOVE\n$2=@\n@ disp 0\ndecode\n$3=999\n#sprite.SHOW\n@ disp 1\n#sprite.WAIT\n$4+=1\nwait 5\n$4=999\n#sprite.EXIT\nexit 9\n";
+    for budget in [1, 4096] {
+        for paused in [false, true] {
+            let mut setup = setup(budget, source);
+            let (fes, list) = parent_scene(&mut setup, source, b"#START\n");
+            let runtime = &mut setup.runtime;
+            send(runtime, fes, 339, 0, 0);
+            runtime.update(10, 1).unwrap();
+            if paused {
+                send(runtime, fes, 348, 0, 1);
+            }
+            let block = |runtime: &mut TestRuntime, text: &[u8]| {
+                let mut name = text.to_vec();
+                name.push(0);
+                let mut context = [0; 36];
+                context[..7].copy_from_slice(b"sprite\0");
+                runtime
+                    .dispatch_command_with_buffers(
+                        0,
+                        command(fes, 343, 0, 0),
+                        &mut CommandBuffers {
+                            data0: Some(&mut context),
+                            data1: Some(&mut name),
+                        },
+                    )
+                    .unwrap();
+            };
+            block(runtime, b"MOVE");
+            send(runtime, list, 298, 0, 0);
+            let mut output = RenderTarget::new([8, 6]).unwrap();
+            runtime
+                .render_frame(
+                    &mut output,
+                    &Projection::default(),
+                    *Transform::default().matrix(),
+                    TextureFilter::Point,
+                )
+                .unwrap();
+            assert_eq!(output.pixel(1, 1), Some(0));
+            block(runtime, b"SHOW");
+            block(runtime, b"WAIT");
+            block(runtime, b"WAIT");
+            block(runtime, b"");
+            block(runtime, b"missing");
+            assert_eq!(runtime.numbers().shared[..5], [1, 0, 0, 0, 2]);
+            send(runtime, list, 298, 0, 0);
+            runtime
+                .render_frame(
+                    &mut output,
+                    &Projection::default(),
+                    *Transform::default().matrix(),
+                    TextureFilter::Point,
+                )
+                .unwrap();
+            assert_eq!(
+                output.pixel(1, 1),
+                Some(if paused { 0 } else { 0xff123456 })
+            );
+            block(runtime, b"EXIT");
+            assert_eq!(send(runtime, fes, 23, 0, 0), u32::MAX);
+            if paused {
+                runtime.update(11, 1).unwrap();
+                assert_eq!(send(runtime, fes, 23, 0, 0), u32::MAX);
+                send(runtime, fes, 348, 0, 0);
+            }
+            runtime.update(12, 1).unwrap();
+            assert_eq!(send(runtime, fes, 23, 0, 0), 9);
+            assert_eq!(runtime.numbers().shared[..5], [1, 0, 0, 0, 2]);
+            runtime
+                .render_frame(
+                    &mut output,
+                    &Projection::default(),
+                    *Transform::default().matrix(),
+                    TextureFilter::Point,
+                )
+                .unwrap();
+            assert_eq!(output.pixel(1, 1), Some(0xff123456));
+            runtime.update(100, 1).unwrap();
+            assert_eq!(runtime.numbers().shared[1], 1);
+        }
+    }
 }
 
 fn child_scenes(runtime: &TestRuntime, parent: u32) -> Vec<u32> {

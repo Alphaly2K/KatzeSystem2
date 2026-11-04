@@ -23,6 +23,16 @@ pub trait Services {
         name: &str,
         budget: usize,
     ) -> Result<bool>;
+    /// 同步分派命名块并更新对象；refresh 为 false 时保留媒体提交请求。
+    fn dispatch_block(
+        &mut self,
+        scene: &mut Scene,
+        target: Option<&fes::ObjectReference>,
+        name: &str,
+        now: u32,
+        refresh: bool,
+        budget: usize,
+    ) -> Result<bool>;
     /// 刷新当前媒体属性后隐藏或恢复显示，唤醒时强制提交共享列表。
     fn set_media_sleep(&mut self, scene: &mut Scene, sleeping: bool) -> Result<()>;
     /// 推进输入事件；None 表示预算耗尽，完成值表示对象自身处理器存在。
@@ -91,6 +101,21 @@ impl<F: ObjectFactory> Services for ObjectHost<'_, F> {
     fn set_media_sleep(&mut self, scene: &mut Scene, sleeping: bool) -> Result<()> {
         let owner = self.host.task_id;
         self.store().set_fes_media_sleep(owner, scene, sleeping)
+    }
+
+    fn dispatch_block(
+        &mut self,
+        scene: &mut Scene,
+        target: Option<&fes::ObjectReference>,
+        name: &str,
+        now: u32,
+        refresh: bool,
+        budget: usize,
+    ) -> Result<bool> {
+        let owner = self.host.task_id;
+        let mut store = self.store();
+        store.budget = budget.max(1);
+        store.dispatch_fes_block(owner, scene, target, name, Some((now, refresh)))
     }
 
     fn dispatch_event(
@@ -1061,6 +1086,47 @@ impl TaskObject for FesObject {
                 self.offset = [i32::from_le_bytes(x), i32::from_le_bytes(y)];
                 self.bind()?;
             }
+            343 => {
+                if !self.initialized {
+                    return Err(Error::new(0, "FES 块分派需要已初始化对象"));
+                }
+                if buffers.data0.is_none() && command.data[0] != 0 {
+                    return Err(Error::new(0, "FES 块对象上下文缓冲区缺失"));
+                }
+                let block = crate::text::cp932(name(
+                    buffers
+                        .data1
+                        .as_deref()
+                        .ok_or_else(|| Error::new(0, "FES 块名缓冲区缺失"))?,
+                    64,
+                )?)?;
+                let target = buffers
+                    .data0
+                    .as_deref()
+                    .map(|bytes| {
+                        if bytes.len() < 36 {
+                            return Err(Error::new(0, "FES 块对象上下文容量不足"));
+                        }
+                        Ok(fes::ObjectReference {
+                            name: crate::text::cp932(name(&bytes[..32], 32)?)?,
+                            bank: crate::read::u32_at(bytes, 32)? as i32,
+                        })
+                    })
+                    .transpose()?;
+                self.pending = Some(*command);
+                if !services(host)?.dispatch_block(
+                    self.scene.as_mut().unwrap(),
+                    target.as_ref(),
+                    &block,
+                    self.base.clock.elapsed(),
+                    self.paused == 0,
+                    budget,
+                )? {
+                    return Ok(CommandOutcome::RESUME);
+                }
+                self.pending = None;
+                self.effects(host);
+            }
             348 => {
                 if self.pending.is_none() {
                     if self.paused == b {
@@ -1105,7 +1171,7 @@ impl TaskObject for FesObject {
                 false,
                 buffers,
             )?,
-            19 | 178 | 341..=345 | 349..=358 => {
+            19 | 178 | 341 | 342 | 344 | 345 | 349..=358 => {
                 return Err(Error::new(0, "FES 专属命令尚未接入"));
             }
             _ => {

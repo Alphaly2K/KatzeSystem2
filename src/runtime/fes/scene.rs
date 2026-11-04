@@ -30,7 +30,7 @@ pub struct Scene {
     focus_lock: i32,
     invocation: Option<Invocation>,
     input: super::input::SystemInput,
-    system_block: Option<String>,
+    system_block: Option<SystemBlock>,
     object_event: Option<ObjectEvent>,
     deferred_decodes: usize,
     keyblocks: Vec<fes::KeyBlock>,
@@ -59,6 +59,15 @@ struct ObjectEvent {
     target: Option<fes::ObjectReference>,
     event: u32,
     handled: bool,
+}
+
+struct SystemBlock {
+    name: String,
+    target: Option<fes::ObjectReference>,
+    update: Option<(u32, bool)>,
+    script_done: bool,
+    motions_done: bool,
+    media_cursor: usize,
 }
 
 struct MotionCall {
@@ -650,28 +659,79 @@ impl<F: ObjectFactory> Store<'_, F> {
         if !matches!(name, "_FES_SLEEP_" | "_FES_WAKE_") {
             return Err(Error::new(0, "FES 系统块名称尚未接入"));
         }
+        self.dispatch_fes_block(owner, scene, None, name, None)
+    }
+
+    pub(in crate::runtime) fn dispatch_fes_block(
+        &mut self,
+        owner: u32,
+        scene: &mut Scene,
+        target: Option<&fes::ObjectReference>,
+        name: &str,
+        update: Option<(u32, bool)>,
+    ) -> Result<bool> {
         if self.tree.node(owner).is_none() || scene.owner.is_some_and(|bound| bound != owner) {
             return Err(Error::new(0, "FES 系统块所属任务无效"));
         }
         if scene.invocation.is_some()
             || scene.media_preparation.is_some()
-            || scene.object_event.is_some()
+            || (scene.object_event.is_some()
+                && scene
+                    .system_block
+                    .as_ref()
+                    .is_none_or(|pending| !pending.script_done || !pending.motions_done))
         {
             return Err(Error::new(0, "FES 本轮推进尚未完成"));
         }
         if let Some(pending) = &scene.system_block {
-            if pending != name {
+            if pending.name != name || pending.target.as_ref() != target || pending.update != update
+            {
                 return Err(Error::new(0, "FES 上一次系统块尚未完成"));
             }
         } else {
             scene.owner = Some(owner);
-            if !scene.interpreter.dispatch_system_block(name)? {
-                return Ok(true);
-            }
-            scene.system_block = Some(name.to_owned());
+            let exists = scene.interpreter.dispatch_system_block(name, target)?;
+            scene.system_block = Some(SystemBlock {
+                name: name.to_owned(),
+                target: target.cloned(),
+                update,
+                script_done: !exists,
+                motions_done: false,
+                media_cursor: 0,
+            });
         }
-        if !self.run_fes_handler(scene)? {
-            return Ok(false);
+        if !scene.system_block.as_ref().unwrap().script_done {
+            if !self.run_fes_handler(scene)? {
+                return Ok(false);
+            }
+            scene.system_block.as_mut().unwrap().script_done = true;
+        }
+        if let Some((now, refresh)) = update {
+            if !scene.system_block.as_ref().unwrap().motions_done {
+                if !self.advance_fes_motions(&mut scene.objects, now, None)? {
+                    return Ok(false);
+                }
+                scene.system_block.as_mut().unwrap().motions_done = true;
+            }
+            if refresh {
+                for _ in 0..self.budget.max(1) {
+                    let cursor = scene.system_block.as_ref().unwrap().media_cursor;
+                    if cursor == scene.objects.update_order.len() {
+                        break;
+                    }
+                    // 块已结束；媒体刷新可以同步回调控件事件。
+                    let pending = scene.system_block.take().unwrap();
+                    let result = self.update_fes_scene_record(owner, scene, cursor);
+                    scene.system_block = Some(pending);
+                    result?;
+                    scene.system_block.as_mut().unwrap().media_cursor += 1;
+                }
+                if scene.system_block.as_ref().unwrap().media_cursor
+                    != scene.objects.update_order.len()
+                {
+                    return Ok(false);
+                }
+            }
         }
         scene.system_block = None;
         Ok(true)

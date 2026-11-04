@@ -12,6 +12,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
     ) -> Result<NativeReturn> {
         let length = match index {
             448 => 4,
+            630 => 16,
             645 => 12,
             _ => 8,
         };
@@ -51,6 +52,30 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             }
             449 => {
                 self.command_target(target, 340, [0, read::u32_at(arguments, 4)?, 0])?;
+            }
+            630 => {
+                let mut name = format_string(vm, read::u32_at(arguments, 4)?, 0)?;
+                name.push(0);
+                let prefix = format_string(vm, read::u32_at(arguments, 8)?, 0)?;
+                let mut context = [0; 36];
+                if prefix.len() >= 32 {
+                    return Err(Error::new(vm.pc, "FES 块对象前缀超过容量"));
+                }
+                context[..prefix.len()].copy_from_slice(&prefix);
+                context[32..].copy_from_slice(&read::u32_at(arguments, 12)?.to_le_bytes());
+                self.command_target_with_buffers(
+                    target,
+                    343,
+                    [0; 3],
+                    &mut CommandBuffers {
+                        data0: if prefix.is_empty() {
+                            None
+                        } else {
+                            Some(&mut context)
+                        },
+                        data1: Some(&mut name),
+                    },
+                )?;
             }
             645 => {
                 self.command_target(
