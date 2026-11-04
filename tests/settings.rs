@@ -34,6 +34,10 @@ fn defaults_and_xml_overlays_keep_missing_values_raw_flags_and_volume_update_ord
     let mut state = SystemSettings::default();
     assert_eq!(state.auto_select, 0);
     assert_eq!((state.fullscreen, state.fullscreen_mw_pos), (0, 0));
+    assert_eq!(state.texture_size, [256; 2]);
+    assert_eq!(state.texture_grid, [0; 2]);
+    assert_eq!(state.texture_areas, [[u32::MAX; 4]; 8]);
+    assert_eq!((state.texture_32bit_row, state.texture_16bit_row), (0, 0));
     state
         .apply_startup_xml(br#"<?xml version="1.0" encoding="UTF-8"?><document><GAME><autoselect>0x80000000</autoselect></GAME><SCREEN><mw_pos>17</mw_pos></SCREEN><WINDOW><fullscreen>1</fullscreen></WINDOW></document>"#)
         .unwrap();
@@ -97,6 +101,12 @@ fn defaults_and_xml_overlays_keep_missing_values_raw_flags_and_volume_update_ord
     assert_eq!(state.global_flag_ranges[0], [512, 512]);
     assert_eq!(state.local_flag_ranges[1..], [[u32::MAX; 2]; 7]);
     assert_eq!(state.global_flag_ranges[1..], [[u32::MAX; 2]; 7]);
+    state.apply_startup_xml(br#"<?xml version="1.0" encoding="UTF-8"?><document><TEXTURE><size><x>128</x></size><vt><x>4</x><y>7</y></vt><area07><sx>2</sx><sy>3</sy><dx>2</dx><dy>4</dy></area07><bpp32y>1</bpp32y><bpp16y>3</bpp16y></TEXTURE></document>"#).unwrap();
+    assert_eq!(state.texture_size, [128, 256]);
+    assert_eq!(state.texture_grid, [4, 7]);
+    assert_eq!(state.texture_areas[7], [2, 3, 2, 4]);
+    assert_eq!(state.texture_areas[..7], [[u32::MAX; 4]; 7]);
+    assert_eq!((state.texture_32bit_row, state.texture_16bit_row), (1, 3));
     state
         .apply_startup_xml(
             br#"<?xml version="1.0" encoding="UTF-8"?><document>

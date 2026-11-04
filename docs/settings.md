@@ -13,6 +13,10 @@
 |`auto_select`|4|`GAME/autoselect` 的原始配置值，默认零|
 |`fullscreen`|4|`WINDOW/fullscreen` 原始开关，默认零|
 |`fullscreen_mw_pos`|4|启动 `SCREEN/mw_pos`、用户 `FULL_SCREEN/mw_pos` 共用原始值，默认零|
+|`texture_size`|8|`TEXTURE/size/x`、`y`，默认每轴 256|
+|`texture_grid`|8|`TEXTURE/vt/x`、`y`，默认每轴零|
+|`texture_areas`|128|`TEXTURE/area00`～`area07` 的 `sx`、`sy`、`dx`、`dy`，默认全部为 `u32::MAX`|
+|`texture_32bit_row`／`texture_16bit_row`|各 4|`TEXTURE/bpp32y`／`bpp16y`，默认零|
 
 块内字节按原布局保存，包括尚未开放类型化字段的部分。配置写回不自动触发设备、文字对象或绘图状态更新；这些应用入口继续独立接入。
 
@@ -25,6 +29,8 @@
 `refresh_sound_volumes()` 将主音量分别乘以四类音量，先作 u32 回绕，再按无符号数除以一百，写入声音块前四个 DWORD；静音字段保持独立。XML 覆盖和普通 360 写回均不隐式调用此方法。启动宿主在加载游戏默认设置、覆盖用户设置后显式调用，再开始任务执行。此处的 48 份旧配置与声音任务的 64 个运行通道分别保存。
 
 `apply_startup_xml(bytes)` 读取 `GAME/autoselect`、`SCREEN/mw_pos` 以及 `GAME/flag/local0`～`local7`、`global0`～`global7` 的 `start`、`count`。四块用户设置保持原值。默认局部首项为 `[0, 512]`，全局首项为 `[512, 512]`，其余十四项均为 `[u32::MAX, u32::MAX]`。缺失字段保留，整数解析沿用原始 DWORD 规则；超出八项的节点不读取，XML 解析失败时保留整份配置。两组值表示变量编号范围，并非画面坐标。
+
+启动覆盖同时读取上表的 TEXTURE 字段，保留原始 DWORD 和缺失值。区域单位为面块，依次为起始列、起始行、列数、行数；普通 542 使用八组区域及 `texture_16bit_row` 补建当前画布。`texture_32bit_row` 独立保存，542 使用当前画布的其余行作为 32 位区域。配置覆盖不创建或调整已有画布，宿主按尺寸和网格创建存储后显式准备面块。
 
 ## 普通调用
 

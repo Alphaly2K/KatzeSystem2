@@ -17,6 +17,12 @@ pub struct SystemSettings {
     pub fullscreen: u32,
     /// 启动 `SCREEN/mw_pos`、用户 `FULL_SCREEN/mw_pos` 的原始 DWORD。
     pub fullscreen_mw_pos: u32,
+    pub texture_size: [u32; 2],
+    pub texture_grid: [u32; 2],
+    /// 八组面块区域：起始列、起始行、列数、行数；首项全一表示停用。
+    pub texture_areas: [[u32; 4]; 8],
+    pub texture_32bit_row: u32,
+    pub texture_16bit_row: u32,
 }
 
 impl Default for SystemSettings {
@@ -31,6 +37,11 @@ impl Default for SystemSettings {
             auto_select: 0,
             fullscreen: 0,
             fullscreen_mw_pos: 0,
+            texture_size: [256; 2],
+            texture_grid: [0; 2],
+            texture_areas: [[u32::MAX; 4]; 8],
+            texture_32bit_row: 0,
+            texture_16bit_row: 0,
         };
         settings.local_flag_ranges[0] = [0, 512];
         settings.global_flag_ranges[0] = [512, 512];
@@ -80,11 +91,27 @@ impl Default for SystemSettings {
 }
 
 impl SystemSettings {
-    /// 覆盖启动 XML 的变量范围、自动选择及全屏布局配置；缺失字段保留。
+    /// 覆盖启动 XML 的变量范围、自动选择、全屏及纹理布局配置；缺失字段保留。
     pub fn apply_startup_xml(&mut self, input: &[u8]) -> crate::Result<()> {
         let xml = crate::resource::XmlDocument::parse(input)?;
         self.auto_select = xml.integer(b"GAME/autoselect", self.auto_select)?;
         self.fullscreen_mw_pos = xml.integer(b"SCREEN/mw_pos", self.fullscreen_mw_pos)?;
+        for (name, values) in [
+            ("size", &mut self.texture_size),
+            ("vt", &mut self.texture_grid),
+        ] {
+            for (axis, value) in ["x", "y"].into_iter().zip(values) {
+                *value = xml.integer(format!("TEXTURE/{name}/{axis}").as_bytes(), *value)?;
+            }
+        }
+        for (index, area) in self.texture_areas.iter_mut().enumerate() {
+            for (name, value) in ["sx", "sy", "dx", "dy"].into_iter().zip(area) {
+                *value =
+                    xml.integer(format!("TEXTURE/area{index:02}/{name}").as_bytes(), *value)?;
+            }
+        }
+        self.texture_32bit_row = xml.integer(b"TEXTURE/bpp32y", self.texture_32bit_row)?;
+        self.texture_16bit_row = xml.integer(b"TEXTURE/bpp16y", self.texture_16bit_row)?;
         for (name, ranges) in [
             ("local", &mut self.local_flag_ranges),
             ("global", &mut self.global_flag_ranges),

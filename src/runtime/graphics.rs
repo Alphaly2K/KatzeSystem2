@@ -10,6 +10,20 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         arguments: &[u8],
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
+        if index == 542 {
+            let drawing = &mut self.resources.drawing;
+            if drawing.mode == 0 && drawing.enabled {
+                if let Some(target) = drawing.target.as_mut() {
+                    let settings = self
+                        .host
+                        .system_settings
+                        .as_ref()
+                        .ok_or_else(|| Error::new(vm.pc, "宿主未配置画布面块区域"))?;
+                    target.prepare_tiles(&settings.texture_areas, settings.texture_16bit_row)?;
+                }
+            }
+            return Ok(NativeReturn::Continue);
+        }
         if index == 739 {
             if arguments.len() != 8 {
                 return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));

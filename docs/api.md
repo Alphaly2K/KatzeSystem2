@@ -373,6 +373,8 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 
 普通 739 接受两个 VM 输出地址，由 Runtime 使用共享 `input_coordinates()` 和当前 drawing 的 mode／enabled 查询设备偏移经过截断、回绕加倍及逻辑转换的结果。active 与目标存在性不参与该查询；地址零有效，同址或部分重叠保持逐次读写的顺序，返回状态二且不压值。换算及异常浮点规则见[输入坐标](input.md#坐标转换)。
 
+`SystemSettings::apply_startup_xml` 另读取纹理尺寸、虚拟网格、八组区域和两处分界行，字段见[全局设置](settings.md)。`RenderTarget::from_tiles` 可建立全空的稀疏网格，`prepare_tiles(areas, split_row)` 补建缺失面块，`tile_bit_depth(index)` 查询 16／32 位格式。普通 542 按共享设置执行同一准备，忽略参数及 active，只受模式、enabled 和目标存在性门控，以状态二保留返回槽；已有像素和标记不变。容量、区域及位深转换见[当前绘图目标](graphics.md#当前绘图目标)。
+
 `graphics::Transform` 提供基点、平移、缩放、弧度旋转及显式矩阵的查询／设置和 dirty 消费。`transform_point` 返回本对象变换后的四维顶点，`transform_point_with_parent` 再应用父级矩阵；两者保留原 W，不执行 W 除法。默认基点为 `[0, 0, 5000]`，基点 Z 不参与该顶点变换。比较规则与矩阵组合契约见[绘图变换](graphics.md#绘图变换)。
 
 `graphics::Projection` 将对象／父级变换后的三角形转换为 `ProjectedVertex`，保留独立 RHW、颜色、平面／透视分支和两级坐标变换。`Drawable::projected_triangle` 提供组合入口；调用者显式给出投影原点与开关，实际摄像及坐标组配置尚未自动装载。参数契约见[绘图投影](graphics.md#绘图投影)。

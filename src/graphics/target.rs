@@ -9,7 +9,10 @@ pub struct RenderTarget {
     size: [u32; 2],
     tiles: Vec<Option<Surface>>,
     dirty: Vec<bool>,
+    bit_depths: Vec<u32>,
 }
+
+const MAX_CANVAS_BYTES: usize = 128 * 1024 * 1024;
 
 impl RenderTarget {
     /// 创建一块零初始化的完整渲染面。
@@ -31,7 +34,10 @@ impl RenderTarget {
             return Err(Error::new(0, "渲染目标尺寸溢出"));
         };
         let size = [width, height];
-        pixel_length(size)?;
+        if size.iter().any(|&value| value > i32::MAX as u32) {
+            return Err(Error::new(0, "画布尺寸超出坐标范围"));
+        }
+        pixel_length(tile_size)?;
         let count = (grid[0] as usize)
             .checked_mul(grid[1] as usize)
             .filter(|&n| n <= read::MAX_ITEMS)
@@ -39,12 +45,26 @@ impl RenderTarget {
         if tiles.len() != count || tiles.iter().flatten().any(|tile| tile.size() != tile_size) {
             return Err(Error::new(0, "渲染面块布局与尺寸不符"));
         }
+        if tiles
+            .iter()
+            .flatten()
+            .map(|s| s.pixels.len())
+            .sum::<usize>()
+            > MAX_CANVAS_BYTES
+        {
+            return Err(Error::new(0, "画布像素存储超过上限"));
+        }
+        let bit_depths = tiles
+            .iter()
+            .map(|tile| if tile.is_some() { 32 } else { 0 })
+            .collect();
         Ok(Self {
             tile_size,
             grid,
             size,
             tiles,
             dirty: vec![false; count],
+            bit_depths,
         })
     }
 
@@ -66,6 +86,64 @@ impl RenderTarget {
 
     pub fn dirty_tiles(&self) -> &[bool] {
         &self.dirty
+    }
+
+    pub fn tile_bit_depth(&self, index: usize) -> Option<u32> {
+        self.tiles.get(index)?.as_ref()?;
+        Some(self.bit_depths[index])
+    }
+
+    /// 按区域补建缺失面块，先处理 16 位行，再处理其余 32 位行。
+    /// 保留已有面块、像素及脏标记；区域按有符号回绕端点解释。
+    pub fn prepare_tiles(&mut self, areas: &[[u32; 4]], split_row: u32) -> Result<usize> {
+        let bytes = pixel_length(self.tile_size)?;
+        let mut used = self
+            .tiles
+            .iter()
+            .flatten()
+            .map(|s| s.pixels.len())
+            .sum::<usize>();
+        let mut created = 0;
+        let mut visits = 0;
+        for use_16 in [true, false] {
+            for &[x, y, width, height] in areas {
+                if x == u32::MAX {
+                    continue;
+                }
+                let right = x.wrapping_add(width) as i32;
+                let bottom = y.wrapping_add(height) as i32;
+                if right <= x as i32 || bottom <= y as i32 {
+                    continue;
+                }
+                for row in y as i32..bottom {
+                    for column in x as i32..right {
+                        visits += 1;
+                        if visits > read::MAX_ITEMS {
+                            return Err(Error::new(0, "画布面块准备工作量超过上限"));
+                        }
+                        let index = (row as u32)
+                            .wrapping_mul(self.grid[0])
+                            .wrapping_add(column as u32)
+                            as usize;
+                        let tile = self
+                            .tiles
+                            .get_mut(index)
+                            .ok_or_else(|| Error::new(0, "画布区域指向网格外面块"))?;
+                        if tile.is_some() || (row >= split_row as i32) != use_16 {
+                            continue;
+                        }
+                        used = used
+                            .checked_add(bytes)
+                            .filter(|&n| n <= MAX_CANVAS_BYTES)
+                            .ok_or_else(|| Error::new(0, "画布像素存储超过上限"))?;
+                        *tile = Some(Surface::new(self.tile_size)?);
+                        self.bit_depths[index] = if use_16 { 16 } else { 32 };
+                        created += 1;
+                    }
+                }
+            }
+        }
+        Ok(created)
     }
 
     /// 呈现宿主消费更新后清除标记，不改变像素。
@@ -104,6 +182,9 @@ impl RenderTarget {
                 if let Some(surface) = &mut self.tiles[index] {
                     let origin = [column * self.tile_size[0], row * self.tile_size[1]];
                     if draw(surface, origin) {
+                        if self.bit_depths[index] == 16 {
+                            quantize_16(&mut surface.pixels);
+                        }
                         self.dirty[index] = true;
                         touched = true;
                     }
@@ -249,11 +330,20 @@ impl RenderTarget {
                         + (clipped.left - x) as usize * 4;
                     surface.pixels[dest..dest + width]
                         .copy_from_slice(&input.pixels[from..from + width]);
+                    if self.bit_depths[index] == 16 {
+                        quantize_16(&mut surface.pixels[dest..dest + width]);
+                    }
                 }
                 touched = true;
             }
         }
         touched
+    }
+}
+
+fn quantize_16(bytes: &mut [u8]) {
+    for channel in bytes {
+        *channel = (*channel >> 4) * 17;
     }
 }
 
