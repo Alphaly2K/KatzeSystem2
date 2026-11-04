@@ -86,6 +86,29 @@ impl MotionQueue {
         &self.properties
     }
 
+    pub fn set_properties(&mut self, properties: [u32; 36]) -> Result<()> {
+        self.require_idle()?;
+        self.properties = properties;
+        Ok(())
+    }
+
+    /// 替换指定任务的参数，余下参数清零；不改变执行状态。
+    pub fn set_parameters(&mut self, id: u32, parameters: &[u32]) -> Result<bool> {
+        self.require_idle()?;
+        if parameters.len() > 256 {
+            return Err(Error::new(0, "运动参数超过上限"));
+        }
+        let Some(entry) = self.entries.get_mut(&id) else {
+            return Ok(false);
+        };
+        let mut bytes = [0; 1024];
+        for (target, value) in bytes.chunks_exact_mut(4).zip(parameters) {
+            target.copy_from_slice(&value.to_le_bytes());
+        }
+        entry.task.interpreter.write(0x8000_009c, &bytes)?;
+        Ok(true)
+    }
+
     pub fn task(&self, id: u32) -> Option<&MotionTask> {
         self.entries.get(&id).map(|entry| &entry.task)
     }

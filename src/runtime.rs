@@ -19,6 +19,7 @@ mod audio;
 pub mod fes;
 mod graphics;
 mod message;
+mod motion;
 mod object;
 mod ordinary;
 mod resources;
@@ -1619,6 +1620,9 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
     }
 
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn> {
+        if matches!(index, 294..=303 | 305..=314) {
+            return self.motion_native(index, arguments, vm);
+        }
         if index == 458 {
             if let Some((handle, bytes)) = crate::kcs::load_sequence_file(
                 arguments,
