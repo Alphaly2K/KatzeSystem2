@@ -47,6 +47,8 @@ pub struct HostState {
     pub task_id: u32,
     pub system_time_ms: u32,
     pub debug_mode: u32,
+    /// 非零时将名称表的 CP932 主姓名转换为 UTF-8；附加文本保持字节编码。
+    pub unicode_text: u32,
     /// 新声音分类配置的启用字段；与声音管理器或设备是否存在分别保存。
     pub sound_config_enabled: u32,
     pub sound_config: Option<crate::audio::SoundConfig>,
@@ -168,6 +170,9 @@ impl std::ops::DerefMut for CoreHost<'_> {
 }
 
 impl Host for CoreHost<'_> {
+    fn unicode_text(&self) -> bool {
+        self.host.unicode_text != 0
+    }
     fn load_sequence_data(&mut self, handle: u32, bytes: Vec<u8>) -> Result<()> {
         self.host.load_sequence_data(handle, bytes)
     }

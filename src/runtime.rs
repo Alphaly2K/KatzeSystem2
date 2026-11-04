@@ -1404,6 +1404,10 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         self.host.message_time_scale
     }
 
+    fn unicode_text(&self) -> bool {
+        self.host.unicode_text != 0
+    }
+
     fn sound_stereo(&self) -> u32 {
         self.host.sound_stereo.unwrap_or(1)
     }
@@ -1628,6 +1632,18 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
     }
 
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn> {
+        if matches!(index, 633..=638) {
+            return self.resources.raw.name_table_call(
+                index,
+                arguments,
+                vm,
+                self.resources
+                    .services
+                    .as_mut()
+                    .map(|services| services.as_mut() as _),
+                self.host.unicode_text != 0,
+            );
+        }
         if matches!(index, 323 | 324) {
             return self.cst_native(index, arguments, vm);
         }

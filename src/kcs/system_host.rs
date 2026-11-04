@@ -80,6 +80,10 @@ impl<H: Host, S: SystemServices> Host for SystemHost<'_, H, S> {
         self.inner.effect_speed()
     }
 
+    fn unicode_text(&self) -> bool {
+        self.inner.unicode_text()
+    }
+
     fn sound_stereo(&self) -> u32 {
         self.inner.sound_stereo()
     }

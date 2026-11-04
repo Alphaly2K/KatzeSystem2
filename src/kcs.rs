@@ -7,6 +7,7 @@ mod matrix;
 mod memory;
 mod messages;
 mod motion;
+mod name_table;
 mod numeric;
 mod ordinary;
 mod particle;
@@ -230,6 +231,10 @@ pub struct TaskEffects {
 }
 
 pub trait Host {
+    /// 名称表装载时使用的全局 Unicode 模式；默认保留 CP932 主姓名。
+    fn unicode_text(&self) -> bool {
+        false
+    }
     /// 将已经读取的文件绑定到存活的序列集合，保留已有名称树。
     fn load_sequence_data(&mut self, _handle: u32, _bytes: Vec<u8>) -> Result<()> {
         Err(Error::new(0, "宿主未提供序列文件存储"))
@@ -501,6 +506,10 @@ impl<T: Host + ?Sized> Host for &mut T {
 
     fn effect_speed(&self) -> u32 {
         (**self).effect_speed()
+    }
+
+    fn unicode_text(&self) -> bool {
+        (**self).unicode_text()
     }
 
     fn sound_stereo(&self) -> u32 {

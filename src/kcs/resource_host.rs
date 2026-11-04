@@ -39,7 +39,7 @@ pub(crate) fn load_sequence_file(
         .map(|bytes| (handle, bytes)))
 }
 
-/// 为已有宿主提供图像原始数据、XML、三整数分组表及句柄生命周期。
+/// 为已有宿主提供图像原始数据、XML、三整数分组表、名称表及句柄生命周期。
 pub struct ResourceHost<'a, H, S> {
     pub inner: &'a mut H,
     pub services: &'a mut S,
@@ -51,6 +51,7 @@ pub(crate) struct ResourceState {
     xml: BTreeMap<u32, XmlDocument>,
     images: BTreeMap<u32, ImageData>,
     triples: BTreeMap<u32, super::triples::TripleTable>,
+    pub(super) name_tables: BTreeMap<u32, super::name_table::NameTable>,
     handles: HandleAllocator,
 }
 
@@ -141,8 +142,10 @@ impl ResourceState {
         self.images.retain(|_, image| image.owner != Some(owner));
     }
 
-    fn allocate_handle(&mut self, offset: usize) -> Result<u32> {
-        if self.xml.len() + self.images.len() + self.triples.len() >= read::MAX_ITEMS {
+    pub(super) fn allocate_handle(&mut self, offset: usize) -> Result<u32> {
+        if self.xml.len() + self.images.len() + self.triples.len() + self.name_tables.len()
+            >= read::MAX_ITEMS
+        {
             return Err(Error::new(offset, "KCS 资源对象数量超过上限"));
         }
         self.handles.allocate_at(offset)
@@ -195,6 +198,10 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
 
     fn effect_speed(&self) -> u32 {
         self.inner.effect_speed()
+    }
+
+    fn unicode_text(&self) -> bool {
+        self.inner.unicode_text()
     }
 
     fn sound_stereo(&self) -> u32 {
@@ -290,6 +297,15 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
     }
 
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn> {
+        if matches!(index, 633..=638) {
+            return self.state.name_table_call(
+                index,
+                arguments,
+                vm,
+                Some(self.services),
+                self.inner.unicode_text(),
+            );
+        }
         if index == 458 {
             if let Some((handle, bytes)) = load_sequence_file(arguments, vm, Some(self.services))? {
                 self.inner.load_sequence_data(handle, bytes)?;
