@@ -84,6 +84,24 @@ impl Script {
     pub fn inputs(&self) -> &[std::ops::Range<usize>] {
         &self.inputs
     }
+
+    /// 查询输入段内的记录类型；负输入段查询段数，负记录查询该段记录数。
+    /// 非负索引越界时返回 u32::MAX。
+    pub fn record_kind(&self, input: i32, record: i32) -> u32 {
+        if input < 0 {
+            return self.inputs.len() as u32;
+        }
+        let Some(range) = self.inputs.get(input as usize) else {
+            return u32::MAX;
+        };
+        if record < 0 {
+            return range.len() as u32;
+        }
+        if record as usize >= range.len() {
+            return u32::MAX;
+        }
+        self.records[range.start + record as usize].kind as u32
+    }
 }
 
 #[derive(Clone)]

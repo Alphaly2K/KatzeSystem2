@@ -92,6 +92,16 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             .get_mut(&handle)
             .ok_or_else(|| Error::new(vm.pc, "CST 上下文句柄无效"))?;
         match index {
+            326 => {
+                let input = read::u32_at(arguments, 4)? as i32;
+                let record = read::u32_at(arguments, 8)? as i32;
+                Ok(NativeReturn::Value(
+                    context
+                        .script
+                        .as_ref()
+                        .map_or(u32::MAX, |script| script.record_kind(input, record)),
+                ))
+            }
             330 | 331 => {
                 if index == 330 {
                     context.registrations.clear();

@@ -182,6 +182,24 @@ fn cst_calls_strings_and_tail_commands_resume_once() {
         (0x30, b"#9=$100"),
         (0x30, b"draw (1 + 2) 7"),
     ]);
+    for (input, record, expected) in [
+        (-1, i32::MAX, 2),
+        (i32::MIN, i32::MIN, 2),
+        (0, -1, 5),
+        (1, i32::MIN, 2),
+        (0, 3, 0x20),
+        (0, 4, 2),
+        (1, 0, 0x30),
+        (0, 5, u32::MAX),
+        (2, -1, u32::MAX),
+        (i32::MAX, 0, u32::MAX),
+    ] {
+        assert_eq!(main.script.record_kind(input, record), expected);
+    }
+    let empty = scene(&[]);
+    assert_eq!(empty.script.record_kind(-1, 0), 1);
+    assert_eq!(empty.script.record_kind(0, -1), 0);
+    assert_eq!(empty.script.record_kind(0, 0), u32::MAX);
     let mut source = Scenes(BTreeMap::from([(
         "child".into(),
         scene(&[(0x30, b"#4+=2"), (0x30, b"return")]),

@@ -34,6 +34,10 @@ fn contexts_capture_languages_and_keep_shared_handles_until_explicit_release() {
     instruction(&mut code, 0x25, &[(3, 0x1234_5678)]);
     call(&mut code, 323, &[(3, u32::MAX)]);
     instruction(&mut code, 0x26, &[(3, 0)]);
+    call(&mut code, 326, &[(3, 0)]);
+    instruction(&mut code, 0x26, &[(3, 12)]);
+    call(&mut code, 326, &[(0x13, 0), (3, u32::MAX), (3, u32::MAX)]);
+    instruction(&mut code, 0x26, &[(3, 16)]);
     call(&mut code, 112, &[(3, 0), (3, 0)]);
     instruction(&mut code, 0x26, &[(3, 4)]);
     call(&mut code, 65, &[]);
@@ -43,7 +47,7 @@ fn contexts_capture_languages_and_keep_shared_handles_until_explicit_release() {
     call(&mut code, 324, &[(0x13, 0)]);
     call(&mut code, 324, &[(3, 0)]);
     code.push(0x3b);
-    let program = Program::from_code(&code, vec![0; 12], 64).unwrap();
+    let program = Program::from_code(&code, vec![0; 20], 64).unwrap();
     for budget in [1, 4096] {
         let mut runtime = Runtime::new(
             0,
@@ -84,12 +88,12 @@ fn contexts_capture_languages_and_keep_shared_handles_until_explicit_release() {
         assert!(runtime.cst_context(first).is_none());
         let vm = runtime.object(task).unwrap().interpreter().unwrap();
         let handles: Vec<_> = vm
-            .read(0, 12)
+            .read(0, 20)
             .unwrap()
             .chunks_exact(4)
             .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
             .collect();
-        assert_eq!(handles, [first, 2, second]);
+        assert_eq!(handles, [first, 2, second, 0, u32::MAX]);
         assert_eq!(vm.stack_bytes(), 0x1234_5678u32.to_le_bytes());
         runtime.destroy(task).unwrap();
         assert!(runtime.cst_context(second).is_some());
