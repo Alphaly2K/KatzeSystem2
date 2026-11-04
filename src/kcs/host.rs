@@ -70,6 +70,7 @@ pub struct HostState {
     pub random: ScriptRandom,
     integer_maps: BTreeMap<u32, BTreeMap<Vec<u8>, u32>>,
     sequence_maps: BTreeMap<u32, super::sequences::SequenceMap>,
+    pub(super) record_stacks: BTreeMap<u32, super::record_stack::RecordStack>,
     pub(super) containers: BTreeMap<u32, crate::save::DataContainer>,
     handles: HandleAllocator,
 }
@@ -262,6 +263,9 @@ pub(crate) fn call_native(
     }
     if matches!(index, 238 | 244 | 246..=248 | 254 | 389 | 469) {
         return super::data::call(host, index, arguments, vm);
+    }
+    if matches!(index, 863..=868) {
+        return super::record_stack::call(host, index, arguments, vm);
     }
     if matches!(index, 359 | 360) {
         let count = if index == 359 { 4 } else { 3 };

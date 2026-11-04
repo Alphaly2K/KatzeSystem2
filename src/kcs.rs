@@ -12,6 +12,7 @@ mod ordinary;
 mod particle;
 mod queue;
 mod random;
+mod record_stack;
 mod resource_host;
 mod sequences;
 mod sse;
