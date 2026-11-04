@@ -495,7 +495,7 @@ Scene 消费 `noact`／`lockactive` 并按主体时点处理通知。`preferred_
 
 矩形按钮使用 `Host::dispatch_button_event(button, command, buffers, output)`。运行时在回调期间开放同一份 ButtonObject，允许同步响应、区域、启用、掩码及基类命令；错误返回后保留已完成修改，回调结束后恢复原对象及宿主身份。回调中的主体重入继续诊断；独立宿主的默认实现复用图形响应入口。
 
-`Runtime::input_state(id)`／`input_state_mut(id)` 查询输入状态。`dispatch_input_key`、`scan_input_keys`、`update_input_selection`、`dispatch_input_motion` 将逻辑坐标和设备查询连接到真实任务命令路由。接收者回调可以修改正在执行的输入任务的区域、键开关、指针及基类状态，后续遍历立即生效，错误返回也保留已发生的修改。完整协议见[输入对象](input.md#输入对象与运行时)。
+`Runtime::input_state(id)`／`input_state_mut(id)` 查询输入状态。普通 404 忽略参数，经根对象查询输入任务后将全部逻辑键开关恢复为一，保持键记录和 native 返回槽，可在输入事件回调中调用。`dispatch_input_key`、`scan_input_keys`、`update_input_selection`、`dispatch_input_motion` 将逻辑坐标和设备查询连接到真实任务命令路由。接收者回调可以修改正在执行的输入任务的区域、键开关、指针及基类状态，后续遍历立即生效，错误返回也保留已发生的修改。完整协议见[输入对象](input.md#输入对象与运行时)。
 
 `input::HitMask::from_image(&image)` 按画布尺寸、裁剪偏移及非零 Alpha 生成区域持有的独立位图。输入命令 147 与平面命令 98 通过 `Host::image(handle)` 使用普通 111／112 的解码图像；位图在图像释放后继续有效。独立宿主提供解码图像借用，TaskHost／ResourceHost／SystemHost 向内层委托该查询。边界、替换失败和空句柄规则见[位掩码](input.md#位掩码)。
 

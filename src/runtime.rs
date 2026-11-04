@@ -1699,6 +1699,11 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         if index == 400 {
             return self.load_sound_loop_table(arguments, vm);
         }
+        if index == 404 {
+            let input = self.command_target(0, 34, [0; 3])?;
+            self.command_target(input, 152, [0; 3])?;
+            return Ok(NativeReturn::Continue);
+        }
         if matches!(index, 611..=619 | 695 | 884) {
             return self.message_native(index, arguments, vm);
         }

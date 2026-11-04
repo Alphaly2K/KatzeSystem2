@@ -22,6 +22,10 @@ impl ObjectFactory for ReceiverFactory {
             (0x2f, &[32][..]),
             (0x25, &[0][..]),
             (0x2b, &[108, 8][..]),
+            (0x25, &[0xdead_beef][..]),
+            (0x25, &[u32::MAX][..]),
+            (0x2b, &[404, 4][..]),
+            (0x26, &[4][..]),
             (0x29, &[0][..]),
         ] {
             code.push(opcode);
@@ -73,7 +77,33 @@ fn button_selection_press_and_release_reach_a_waiting_ordinary_vm() -> Result<()
                 external: None,
             },
         )?;
+        for (key, value) in [(0, 0), (40, u32::MAX), (79, 0)] {
+            runtime.dispatch_command(
+                receiver,
+                Command {
+                    target: input,
+                    sender: receiver,
+                    code: 151,
+                    data: [key, value, 0],
+                },
+            )?;
+        }
+        let keys = *runtime.input_state(input).unwrap().keys().records();
         runtime.update_input_selection(input, Some([5, 5]))?;
+        assert_eq!(
+            runtime.input_state(input).unwrap().keys().enabled(),
+            &[1; 80]
+        );
+        assert_eq!(runtime.input_state(input).unwrap().keys().records(), &keys);
+        assert_eq!(
+            runtime
+                .object(receiver)
+                .unwrap()
+                .interpreter()
+                .unwrap()
+                .read(4, 4)?,
+            0xdead_beefu32.to_le_bytes()
+        );
         let message = |runtime: &Runtime<InputFactory<ReceiverFactory>>| {
             runtime
                 .object(receiver)

@@ -141,8 +141,10 @@ fn source_sixteen_restarts_changes_and_disabled_keys_freeze_all_groups() -> Resu
     assert!(services.queries.iter().all(|&(key, _)| key != 0));
     assert_eq!(keys.records()[0][0].count, 1);
     assert_eq!(keys.records()[0][0].mask, 16);
+    let records = *keys.records();
     assert!(command(&mut keys, 152, u32::MAX, u32::MAX)?);
     assert_eq!(keys.enabled(), &[1; 80]);
+    assert_eq!(keys.records(), &records);
     assert!(command(&mut keys, 151, 0, 5)?);
     assert_eq!(keys.enabled()[0], 5);
     assert!(command(&mut keys, 151, 80, 0).is_err());
