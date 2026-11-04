@@ -13,6 +13,8 @@ fn settings() -> SystemSettings {
         effects: [0x33; 0x20],
         window: [0x44; 0x0c],
         auto_select: 0x80000007,
+        fullscreen: 0x8000_0000,
+        fullscreen_mw_pos: 0x8000_0003,
         ..SystemSettings::default()
     }
 }
@@ -31,10 +33,12 @@ fn defaults_and_xml_overlays_keep_missing_values_raw_flags_and_volume_update_ord
     }
     let mut state = SystemSettings::default();
     assert_eq!(state.auto_select, 0);
+    assert_eq!((state.fullscreen, state.fullscreen_mw_pos), (0, 0));
     state
-        .apply_startup_xml(br#"<?xml version="1.0" encoding="UTF-8"?><document><GAME><autoselect>0x80000000</autoselect></GAME></document>"#)
+        .apply_startup_xml(br#"<?xml version="1.0" encoding="UTF-8"?><document><GAME><autoselect>0x80000000</autoselect></GAME><SCREEN><mw_pos>17</mw_pos></SCREEN><WINDOW><fullscreen>1</fullscreen></WINDOW></document>"#)
         .unwrap();
     assert_eq!(state.auto_select, 0x80000000);
+    assert_eq!((state.fullscreen, state.fullscreen_mw_pos), (0, 17));
     assert_eq!(word(&state.message, 12), 15);
     assert_eq!(word(&state.message, 16), 5);
     assert_eq!(word(&state.message, 44), u32::MAX);
@@ -54,6 +58,9 @@ fn defaults_and_xml_overlays_keep_missing_values_raw_flags_and_volume_update_ord
                 <MESSAGE><speed>3</speed></MESSAGE>
                 <GAME><wndcolor>0x80112233</wndcolor><enabledrag>-1</enabledrag><autoselect>-7</autoselect></GAME>
                 <EFFECT><auto_cds>11</auto_cds><skipmot></skipmot></EFFECT>
+                <WINDOW><fullscreen>-3</fullscreen></WINDOW>
+                <FULL_SCREEN><mw_pos>0x80000001</mw_pos></FULL_SCREEN>
+                <SCREEN><mw_pos>99</mw_pos></SCREEN>
             </document>"#,
         )
         .unwrap();
@@ -69,6 +76,10 @@ fn defaults_and_xml_overlays_keep_missing_values_raw_flags_and_volume_update_ord
     assert_eq!(word(&state.window, 0), 0x80112233);
     assert_eq!(word(&state.window, 4), u32::MAX);
     assert_eq!(state.auto_select, (-7i32) as u32);
+    assert_eq!(
+        (state.fullscreen, state.fullscreen_mw_pos),
+        ((-3i32) as u32, 0x8000_0001)
+    );
     state.refresh_sound_volumes();
     assert_eq!(word(&state.sound, 0), 655);
     assert_eq!(word(&state.sound, 4), 65536);
@@ -132,13 +143,23 @@ fn settings_reads_keep_zero_addresses_overlap_order_and_partial_failures() {
     );
     assert!(host.call(359, &arguments(&[0; 4]), &mut vm).is_err());
     assert!(host.call(999, &[], &mut vm).is_err());
+    assert!(host.call(741, &[], &mut vm).is_err());
     host.system_settings = Some(settings());
     for arguments in [&[][..], &[0xff; 3][..], &[0xff; 16][..]] {
         assert_eq!(
             host.call(999, arguments, &mut vm).unwrap(),
             NativeReturn::Value(0x80000007)
         );
+        assert_eq!(
+            host.call(741, arguments, &mut vm).unwrap(),
+            NativeReturn::Value(0x80000003)
+        );
     }
+    host.system_settings.as_mut().unwrap().fullscreen = 0;
+    assert_eq!(
+        host.call(741, &[], &mut vm).unwrap(),
+        NativeReturn::Value(0)
+    );
     host.call(359, &arguments(&[0, 8, 16, 24]), &mut vm)
         .unwrap();
     let mut expected = vec![0x11; 0x15fc];
@@ -197,6 +218,8 @@ impl ProgramLoader for Source {
         ins(&mut code, 0x26, &[6300]);
         ins(&mut code, 0x2b, &[999, 0]);
         ins(&mut code, 0x26, &[6304]);
+        ins(&mut code, 0x2b, &[741, 0]);
+        ins(&mut code, 0x26, &[6308]);
         ins(&mut code, 0x3b, &[]);
         let mut data = vec![0; 6400];
         data[..0x15fc].fill(0x31);
@@ -231,6 +254,7 @@ fn ordinary_settings_writeback_and_external_reads_share_runtime_state() {
         assert!(vm.stack_bytes().is_empty());
         assert_eq!(vm.read(6300, 4).unwrap(), 0xdeadbeefu32.to_le_bytes());
         assert_eq!(vm.read(6304, 4).unwrap(), 0x80000007u32.to_le_bytes());
+        assert_eq!(vm.read(6308, 4).unwrap(), 0x80000003u32.to_le_bytes());
         let mut expected = [0; 512];
         expected[..0x48].fill(0x52);
         expected[0x80..0xa0].fill(0x73);

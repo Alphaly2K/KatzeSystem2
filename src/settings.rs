@@ -13,6 +13,10 @@ pub struct SystemSettings {
     pub global_flag_ranges: [[u32; 2]; 8],
     /// `GAME/autoselect` 的原始 DWORD。
     pub auto_select: u32,
+    /// 用户设置 `WINDOW/fullscreen` 的原始 DWORD。
+    pub fullscreen: u32,
+    /// 启动 `SCREEN/mw_pos`、用户 `FULL_SCREEN/mw_pos` 的原始 DWORD。
+    pub fullscreen_mw_pos: u32,
 }
 
 impl Default for SystemSettings {
@@ -25,6 +29,8 @@ impl Default for SystemSettings {
             local_flag_ranges: [[u32::MAX; 2]; 8],
             global_flag_ranges: [[u32::MAX; 2]; 8],
             auto_select: 0,
+            fullscreen: 0,
+            fullscreen_mw_pos: 0,
         };
         settings.local_flag_ranges[0] = [0, 512];
         settings.global_flag_ranges[0] = [512, 512];
@@ -74,10 +80,11 @@ impl Default for SystemSettings {
 }
 
 impl SystemSettings {
-    /// 覆盖启动 XML 的变量范围及 `GAME/autoselect`；缺失字段保留。
+    /// 覆盖启动 XML 的变量范围、自动选择及全屏布局配置；缺失字段保留。
     pub fn apply_startup_xml(&mut self, input: &[u8]) -> crate::Result<()> {
         let xml = crate::resource::XmlDocument::parse(input)?;
         self.auto_select = xml.integer(b"GAME/autoselect", self.auto_select)?;
+        self.fullscreen_mw_pos = xml.integer(b"SCREEN/mw_pos", self.fullscreen_mw_pos)?;
         for (name, ranges) in [
             ("local", &mut self.local_flag_ranges),
             ("global", &mut self.global_flag_ranges),
@@ -98,6 +105,8 @@ impl SystemSettings {
     pub fn apply_xml(&mut self, input: &[u8]) -> crate::Result<()> {
         let xml = crate::resource::XmlDocument::parse(input)?;
         self.auto_select = xml.integer(b"GAME/autoselect", self.auto_select)?;
+        self.fullscreen = xml.integer(b"WINDOW/fullscreen", self.fullscreen)?;
+        self.fullscreen_mw_pos = xml.integer(b"FULL_SCREEN/mw_pos", self.fullscreen_mw_pos)?;
         apply_words(
             &mut self.sound,
             &[
