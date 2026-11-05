@@ -194,3 +194,56 @@ fn fes_string_creation_retry_and_reconfiguration_keep_text_and_task_identity() {
         );
     }
 }
+
+#[test]
+fn string_waits_finish_the_first_busy_bank_and_resume_after_cached_counts_refresh() {
+    for budget in [1, 4096] {
+        for (name, unicode, encoding) in [
+            ("STRING", false, TextEncoding::Cp932),
+            ("STRING", true, TextEncoding::Unicode),
+            ("STRING8", false, TextEncoding::Unicode),
+        ] {
+            let mut rt = engine(budget, unicode, Rc::new(Cell::new(false)));
+            let script = format!(
+                "#DEFINE\n{name} text[2]\n#OBJECT DISP\ntext[0] 1\ntext[1] 1\n#START\ntext layout view 24 12\ntext layout size 4\ntext layout frame 1000\ntext layout color 255 255 255\ntext str AB\ntext draw -1\nwait string text[($0+=1)-1]\n$1+=1\nwait string text\n$2+=1\nwait 1000\n"
+            );
+            let mut scene = Scene::new(
+                fes::Program::from_text(script.as_bytes()).unwrap(),
+                rt.host().handle_allocator(),
+            )
+            .unwrap();
+            while !rt.prepare_fes_scene(0, &mut scene).unwrap() {}
+            advance(&mut rt, &mut scene, 100).unwrap();
+            let first = scene.objects().lookup("text", 0).unwrap();
+            let second = scene.objects().lookup("text", 1).unwrap();
+            let tasks = [first, second]
+                .map(|handle| scene.objects().get(handle).unwrap().task_id().unwrap());
+            assert_eq!(string(&scene).0.remaining(), 1);
+            for (now, click) in [(101, true), (102, false), (103, false)] {
+                if click {
+                    rt.dispatch_fes_event(0, &mut scene, None, 2).unwrap();
+                }
+                advance(&mut rt, &mut scene, now).unwrap();
+                assert_eq!(rt.numbers().shared[0], 1);
+                assert_eq!(rt.numbers().shared[1], i32::from(now == 103));
+                assert_eq!(rt.numbers().shared[2], 0);
+                assert_eq!(remaining(&mut rt, tasks[0], encoding), 0);
+                assert_eq!(remaining(&mut rt, tasks[1], encoding), 1);
+                assert_eq!(string(&scene).0.remaining(), i32::from(now == 101));
+                assert_eq!(scene.deadline(), Some(u32::MAX - 5));
+            }
+            assert!((0..24).any(|y| {
+                (0..32).any(|x| rt.drawing().target.as_ref().unwrap().pixel(x, y).unwrap() != 0)
+            }));
+            rt.remove_fes_object(0, scene.objects_mut().unwrap(), first)
+                .unwrap();
+            rt.dispatch_fes_event(0, &mut scene, None, 2).unwrap();
+            for now in 104..=106 {
+                advance(&mut rt, &mut scene, now).unwrap();
+                assert_eq!(remaining(&mut rt, tasks[1], encoding), 0);
+                assert_eq!(rt.numbers().shared[..3], [1, 1, i32::from(now == 106)]);
+            }
+            assert_eq!(scene.deadline(), Some(1106));
+        }
+    }
+}

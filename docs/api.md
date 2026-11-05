@@ -442,7 +442,7 @@ Scene 已处理 `execfes`、`endfes` 及 `endkcs` 的结束时序。`execfes` �
 
 `RootObject::new(input_task, sound_task)` 保存输入与声音任务编号，命令 34／35 原样返回相应值；任务删除后不会自动选择替代编号。该对象作为 Runtime 的显式根参数使用，子任务由调用者创建，自动启动链仍待接入。根对象遵循专属命令消费规则，其余未实现的专属入口返回诊断。
 
-`runtime::fes::Scene::new(program, handles)` 组合预先装载的 FES 解释器和对象存储；与 Runtime 共用 `runtime.host().handle_allocator()`。调用前通过 `objects_mut()?.set_image_list(list, clip)` 绑定共享列表；`Runtime::update_fes_scene(owner, &mut scene, now)` 消费已支持的脚本事件并按声明顺序更新对象，返回 false 时继续调用以完成预算续跑，期间保留原时刻和游标。true 表示本轮完成，`exit_code()` 在本轮最终对象更新完成后返回最近已处理的退出通知值，不表示脚本停止。`deadline()` 查询原始等待期限，包含根运动 `0xffffffff`、绝对帧 `0xfffffffe` 和对象 `0xfffffffc`；完成恢复时点见[完成等待](graphics.md#fes-运动与帧完成等待)。`raw_input()` 查询控制器保存的原始输入掩码，`is_pending()` 查询续跑状态，`objects()`／`interpreter()` 提供只读查询；推进未完成时 `objects_mut()` 返回诊断。首次推进绑定 owner，后续不能更换。调用方在所属任务主体时点推进，保证该任务时钟已经更新；下层动画命令继续使用任务自身时钟。支持范围和未接入服务见[场景推进](graphics.md#fes-场景推进)。
+`runtime::fes::Scene::new(program, handles)` 组合预先装载的 FES 解释器和对象存储；与 Runtime 共用 `runtime.host().handle_allocator()`。调用前通过 `objects_mut()?.set_image_list(list, clip)` 绑定共享列表；`Runtime::update_fes_scene(owner, &mut scene, now)` 消费已支持的脚本事件并按声明顺序更新对象，返回 false 时继续调用以完成预算续跑，期间保留原时刻和游标。true 表示本轮完成，`exit_code()` 在本轮最终对象更新完成后返回最近已处理的退出通知值，不表示脚本停止。`deadline()` 查询原始等待期限，包含根运动 `0xffffffff`、绝对帧 `0xfffffffe`、对象 `0xfffffffc`、文字 `0xfffffffa` 和局部标志 `0xfffffff9`；完成恢复时点见[完成等待](graphics.md#fes-运动与帧完成等待)。`raw_input()` 查询控制器保存的原始输入掩码，`is_pending()` 查询续跑状态，`objects()`／`interpreter()` 提供只读查询；推进未完成时 `objects_mut()` 返回诊断。首次推进绑定 owner，后续不能更换。调用方在所属任务主体时点推进，保证该任务时钟已经更新；下层动画命令继续使用任务自身时钟。支持范围和未接入服务见[场景推进](graphics.md#fes-场景推进)。
 
 `Scene::prepare(&mut state, budget)` 只消费装载期声明和对象属性，返回 false 后继续调用；完成时尚未进入 START，也未创建下层媒体任务。可以重复调用。使用与 Runtime 相同的 `numbers_mut()`，初始化表达式的副作用会立即保留。`Runtime::prepare_fes_scene(owner, &mut scene)` 在此基础上先读取 PRELOAD 的图像原始字节，再创建图像空包装及 BUTTON／SLIDER／SCROLL2 的直属类型 6／42／41 任务，不执行 START、解码图像或登记输入区域；false 后继续调用，已完成的读取与创建不重复。每条 CIMAGE／IMAGE／BUTTON 记录分配独立包装，BUTTON 另创建直属任务，SLIDER／SCROLL2 分别创建独立控件任务；后一次覆盖对象的当前包装及任务编号，记录保留各自绑定用于更新、事件反查与回收。普通 update 也会在进入 START 前完成这一准备。退出通知由任务层写入属性槽，脚本继续到等待或块末尾；后续 update 按普通规则推进。每条新通知可覆盖属性，期间的外部改写保持到下一条通知；场景本身不删除所属任务。
 
@@ -499,6 +499,8 @@ FES IMAGE 的 `IDN=−1` 接收完整名称的原始来源，不受 PATHMODE 影
 `Objects::dispatch_object_command(interpreter, line, state)` 消费 `disp`／`size`／`keypos`／`setid`／`getid`／`enable`／`pri`／`pos2`／`delay`／`ismot`／`attach`／`settbl`／`pl`／`lock`、图像／平面的 `getpos`／`getpos2`、文字的 `endpos` 与普通对象的 `lineinfo` 参数处理，以及滑动控件的 `pos`／`page`／`getpos`／`load`。返回 true 后调用者确认事件，其他命令返回 false。目标银行与数值参数使用 FES 自身作用域，图形请求在对象更新时提交；getid／getpos 即时写入共享变量。起始目标缺失时，对行级展开后的原始整行数值求值，保留 FES 作用域与连续操作数规则。Scene 另接图像／平面的 pos 和默认 p 运动，在主体、系统块及对象事件中提供预算续跑与资源重试；独立 Objects 对该路径返回场景服务诊断。getpos 使用本地坐标，getpos2 使用绘制位置；两者按 x86 规则取整，缺省轴、数组、类型和资源时点见[对象控制命令](graphics.md#fes-对象控制命令)。
 
 Scene 消费 `keyskip` 并即时更新等待取消模式，`forced_key_skip()` 查询保存的 force 标志；它与当前输入模式分别维护，完整规则见[等待取消](graphics.md#fes-等待取消与-keyskip)。
+
+Scene 消费 `wait string reference` 与 `wait privateflag index`，分别等待文字对象缓存的全部正文剩余数归零及场景局部变量非零。参数只在执行命令时求值；文字等待的银行扫描与缓存时序见[文字完成等待](fes-text.md#文字完成等待)。处理器内的 wait 保留主等待期限，但仍可改写后续等待使用的目标、银行、帧阈值或局部标志索引。
 
 Scene 消费所有已接入对象类型的 `arc`／`mcarc`，装载默认 m 运动并分别加入分组零／一。参数、运动延迟、基值捕获和已完成银行在资源失败后保留；缺失资源继续脚本。命令适用于普通主体、系统块与对象事件，具体参数及银行规则见[对象控制命令](graphics.md#fes-对象控制命令)。
 

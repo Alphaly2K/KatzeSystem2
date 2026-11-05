@@ -61,6 +61,54 @@ fn frame_waits_use_absolute_scene_time_and_negative_durations_still_yield_one_ro
 }
 
 #[test]
+fn private_flag_waits_use_scene_locals_and_keep_handler_selector_changes() {
+    let source = b"#START\n\\7=0\n\\99=0\nwait privateflag ($0+=7)\n$1=\\7\nwait privateflag 512\n$2+=1\nwait privateflag -1\n$3+=1\nwait privateflag\n$4+=1\nwait 1000\n#_FES_SLEEP_\n\\7=-1\nwait privateflag ($5+=99)\n\\99=2\n#_FES_WAKE_\n\\99=1\n";
+    for budget in [1, 4096] {
+        let mut runtime = runtime(budget);
+        runtime.numbers_mut().local.fill(33);
+        let mut scene = Scene::new(
+            Program::from_text(source).unwrap(),
+            runtime.host().handle_allocator(),
+        )
+        .unwrap();
+        update(&mut runtime, &mut scene, 100);
+        assert_eq!(runtime.numbers().shared[0], 7);
+        assert_eq!(scene.deadline(), Some(u32::MAX - 6));
+        for name in ["_FES_SLEEP_", "_FES_WAKE_"] {
+            let mut done = false;
+            for _ in 0..128 {
+                if runtime
+                    .dispatch_fes_system_block(0, &mut scene, name)
+                    .unwrap()
+                {
+                    done = true;
+                    break;
+                }
+            }
+            assert!(done);
+            assert_eq!(scene.deadline(), Some(u32::MAX - 6));
+            if name == "_FES_SLEEP_" {
+                runtime.dispatch_fes_event(0, &mut scene, None, 2).unwrap();
+                update(&mut runtime, &mut scene, 101);
+                assert_eq!(runtime.numbers().shared[1], 0);
+                assert_eq!(runtime.numbers().shared[5], 99);
+            }
+        }
+        for (now, values, deadline) in [
+            (102, [7, -1, 0, 0, 0, 99], u32::MAX - 6),
+            (103, [7, -1, 1, 0, 0, 99], u32::MAX - 6),
+            (104, [7, -1, 1, 1, 0, 99], 105),
+            (105, [7, -1, 1, 1, 1, 99], 1105),
+        ] {
+            update(&mut runtime, &mut scene, now);
+            assert_eq!(runtime.numbers().shared[..6], values);
+            assert_eq!(scene.deadline(), Some(deadline));
+        }
+        assert!(runtime.numbers().local.iter().all(|&value| value == 33));
+    }
+}
+
+#[test]
 fn object_waits_evaluate_banks_once_and_scan_past_missing_banks() {
     let source =
         b"#DEFINE\nBASE obj[3]\n#START\nwait obj[($2+=1)-1]\n$0+=1\nwait obj\n$1+=1\nwait 1000\n";

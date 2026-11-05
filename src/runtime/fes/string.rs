@@ -89,6 +89,10 @@ impl StringState {
         self.cursor
     }
 
+    pub(super) fn request_skip(&mut self) {
+        self.skip = true;
+    }
+
     pub(super) fn task_kind(&self) -> u32 {
         if self.layout.encoding() == TextEncoding::Unicode {
             kind::STRING_PLANE_UTF8

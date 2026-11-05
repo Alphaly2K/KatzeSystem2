@@ -1,4 +1,5 @@
 use super::Scene;
+use crate::runtime::fes::ObjectState;
 use crate::{Error, Result, expression::State};
 
 impl Scene {
@@ -64,7 +65,33 @@ impl Scene {
                     as u32;
                 return Ok(Some(u32::MAX - 1));
             }
-            b"tag" | b"string" | b"privateflag" => {
+            b"privateflag" if args.get(2).is_some() => {
+                self.wait_private_flag = self.interpreter.eval(&args[2], numbers)? as u32;
+                return Ok(Some(u32::MAX - 6));
+            }
+            b"string" => {
+                if let Some(reference) = args.get(2) {
+                    let target = self.interpreter.object_reference(reference, numbers)?;
+                    if self
+                        .objects
+                        .lookup(
+                            &target.name,
+                            if target.bank == -1 { 0 } else { target.bank },
+                        )
+                        .is_some()
+                    {
+                        self.wait_target = Some(target);
+                        return Ok(Some(u32::MAX - 5));
+                    }
+                }
+                let duration = self.interpreter.eval_fallback(value, numbers)?.max(1) as u32;
+                return Ok(Some(now.wrapping_add(duration)));
+            }
+            b"privateflag" => {
+                let duration = self.interpreter.eval_fallback(value, numbers)?.max(1) as u32;
+                return Ok(Some(now.wrapping_add(duration)));
+            }
+            b"tag" => {
                 return Err(Error::new(offset, "FES 此类完成等待尚未接入"));
             }
             _ => (),
@@ -90,10 +117,40 @@ impl Scene {
             return Ok(false);
         };
         match deadline as i32 {
+            -7 => {
+                return Ok(self.wait_private_flag < 512
+                    && self.interpreter.local_values()[self.wait_private_flag as usize] == 0);
+            }
+            -6 => {
+                let cancel = self.input.left
+                    && (!self.input.mode || self.input.ctrl || self.input.cancel_enabled);
+                if let Some(target) = &self.wait_target {
+                    let banks = if target.bank == -1 {
+                        0..i64::from(self.objects.count(&target.name))
+                    } else {
+                        i64::from(target.bank)..i64::from(target.bank) + 1
+                    };
+                    for bank in banks {
+                        if let Some(handle) = self.objects.lookup(&target.name, bank as i32) {
+                            if let ObjectState::String(state) =
+                                &mut self.objects.get_mut(handle).unwrap().state
+                            {
+                                if state.remaining() != 0 {
+                                    if cancel {
+                                        state.request_skip();
+                                    }
+                                    return Ok(true);
+                                }
+                            }
+                        }
+                    }
+                }
+                return Ok(false);
+            }
             -1 => {
                 if !self.objects.motion_active(self.objects.top())? {
                     self.deadline = Some(0);
-                } else if self.input.cancel_enabled && self.input.left {
+                } else if self.input.cancel_enabled && (self.input.mode || self.input.left) {
                     self.objects.request_motion_finish(self.objects.top())?;
                 }
                 return Ok(true);
@@ -122,13 +179,15 @@ impl Scene {
                 }
                 return Ok(false);
             }
-            -7..=-3 => {
+            -5 | -3 => {
                 return Err(Error::new(0, "FES 此类完成等待尚未接入"));
             }
             _ if now >= deadline => return Ok(false),
             _ => (),
         }
-        if self.input.cancel_enabled && (self.input.mode || self.input.left) {
+        if self.input.cancel_enabled
+            && (self.input.left || (deadline == u32::MAX - 1 && self.input.mode))
+        {
             self.objects.request_motion_finish(self.objects.top())?;
             Ok(false)
         } else {
