@@ -494,6 +494,8 @@ Scene 消费 `noact`／`lockactive` 并按主体时点处理通知。`preferred_
 
 `Objects::set_image_list(task, clip)` 为 CIMAGE／IMAGE 绑定已初始化的共享列表和全局裁剪；列表必须是 owner 通过树路由可达的类型 15 任务。更新按来源重建、属性登记及排序分别消费标记，支持 POS2／SIZE2、CIMAGE／IMAGE 父级位置及 PLANE 裁剪；具体时序见 [CIMAGE](graphics.md#fes-cimage-更新) 与 [IMAGE](graphics.md#fes-image-文件更新) 更新。`Objects::invalidate(handle)` 在直接显示属性修改或运动回写后标记对象及后代；直接来源修改还需请求 rebuild。
 
+`ObjectState::DifImage` 使用同一列表与二维属性，来源通过 `refcap` 建立；`filter` 处理当前捕获像素。声明不创建包装或下层任务。内部捕获前须以 `Runtime::set_frame_view` 提供最终帧视图，`set_frame_capture_rectangle` 可指定读取区域；来源、失败与颜色处理契约见 [DIFIMAGE](fes-difimage.md)。
+
 `Objects::start_motion(handle, program, parameters, delay)` 向对象加入分组零的运动，返回对象内的运动编号；当前支持 BASE、DRAW、CIMAGE、IMAGE、BUTTON、CPLANE、PLANE、SLIDER、SCROLL2 和 SOUND。目标及其后代都没有活动运动时，从对象当前属性捕获基准；有活动运动时沿用已有基准。`motion_active(handle)` 查询目标及其后代，`Object::motions()` 只读查询目标自身队列，`motion_delay()` 查询脚本为后续运动保存的原始开始偏移。`delay` 不改变已经插入的运动；`ismot` 包含尚未到开始时刻的活动条目。`update_motions(now, &mut host, budget_per_task)` 显式按先子后父的顺序推进根对象子树，并回写对象属性及后代失效标记；false 后继续调用，时间、已完成对象与当前队列均保留。续跑期间不得直接修改属性，创建、初始化、重挂、删除及加入运动会返回诊断。Scene 在等待或帧边界自动调用该入口，再按声明顺序刷新媒体；普通 decode 的中间提交先刷新媒体并继续脚本，运动每轮最终阶段执行一次。处理器只加入运动，后续普通更新才执行。失败重试保留已完成的运动阶段；运动与普通 KCS 共用随机序列和调试消息，详见[对象运动](graphics.md#fes-对象运动)。
 
 `Objects::request_motion_finish(handle)` 仅向目标及后代请求结束，保留队列和延迟，供后续普通更新执行；已有运动续跑时返回诊断。

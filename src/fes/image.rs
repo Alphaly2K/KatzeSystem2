@@ -53,6 +53,9 @@ pub struct CImageState {
     pub display: i32,
     pub mask: i32,
     pub button_type: i32,
+    pub filter: crate::graphics::ImageFilter,
+    /// 待 DIFIMAGE 更新阶段消费；直接修改模式时也应设置此标记。
+    pub filter_pending: bool,
     pub position_resource: Option<ImageReference>,
     pub size_resource: Option<ImageReference>,
     pub updates: ImageUpdates,
@@ -79,6 +82,8 @@ impl Default for CImageState {
             display: 0,
             mask: 0,
             button_type: 0,
+            filter: crate::graphics::ImageFilter::None,
+            filter_pending: false,
             position_resource: None,
             size_resource: None,
             updates: ImageUpdates::default(),
@@ -87,6 +92,15 @@ impl Default for CImageState {
 }
 
 impl CImageState {
+    /// 仅在模式变化时请求处理；同一模式不会重复作用于已有像素。
+    pub fn set_filter(&mut self, filter: crate::graphics::ImageFilter) {
+        self.filter_pending |= replace(&mut self.filter, filter);
+    }
+
+    pub(crate) fn take_filter(&mut self) -> Option<crate::graphics::ImageFilter> {
+        std::mem::take(&mut self.filter_pending).then_some(self.filter)
+    }
+
     /// 相同尺寸仍重设零模式的导航偏移，但只在尺寸变化时请求重建。
     pub fn set_size(&mut self, size: [i32; 2]) {
         self.updates.rebuild |= replace(&mut self.size, size);

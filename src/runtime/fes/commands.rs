@@ -14,6 +14,8 @@ enum Command {
     Frame(u32, i32),
     Plane(fes::ObjectReference),
     Lock(i32),
+    Capture([u32; 2]),
+    Filter(crate::graphics::ImageFilter),
 }
 
 impl Objects {
@@ -52,6 +54,8 @@ impl Objects {
                 | b"play"
                 | b"channel"
                 | b"stype"
+                | b"refcap"
+                | b"filter"
         ) {
             return Ok(false);
         }
@@ -124,6 +128,10 @@ impl Objects {
         };
         let command = match name {
             b"disp" => Command::Display(i32::from(number(2, 1)? != 0)),
+            b"refcap" => Command::Capture([number(2, 0)? as u32, number(3, 45000)? as u32]),
+            b"filter" => Command::Filter(crate::graphics::ImageFilter::parse(
+                args.get(2).map_or(b"", Vec::as_slice),
+            )),
             b"size" => Command::Size([number(2, 0)?, number(3, 0)?]),
             b"keypos" => Command::KeyPosition(number(2, 0)?, [number(3, 0)?, number(4, 0)?]),
             b"setid" => Command::SetId(number(2, 0)?),
@@ -179,6 +187,16 @@ impl Objects {
             let object = self.get_mut(handle).unwrap();
             let mut dirty = false;
             match &command {
+                Command::Capture(range) => {
+                    if let ObjectState::DifImage(state) = &mut object.state {
+                        state.capture = Some(*range);
+                    }
+                }
+                Command::Filter(filter) => {
+                    if let Some(image) = object.state.image_mut() {
+                        image.set_filter(*filter);
+                    }
+                }
                 Command::Display(value) => {
                     if let Some(image) = object.state.image_mut() {
                         dirty = image.display != *value;

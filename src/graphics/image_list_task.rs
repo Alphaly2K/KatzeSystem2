@@ -4,7 +4,7 @@ use crate::runtime::{BaseObject, TaskObject, kind};
 use crate::task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock};
 use crate::{Error, Result};
 
-/// 类型 15 的图像列表任务；当前接收无变换的像素与 HG-3 原始数据来源。
+/// 类型 15 的图像列表任务；接收像素、HG-3 原始数据和捕获图像来源。
 pub struct ImageListObject {
     id: u32,
     base: BaseObject,
@@ -225,7 +225,7 @@ impl TaskObject for ImageListObject {
             286 | 288 => {
                 if let Some(list) = &mut self.list {
                     let data = words::<15>(buffers.data1.as_deref())?;
-                    if data[0] != 0 || data[1] != 0 {
+                    if data[0] != 0 || data[1] != 0 || data[3] != 0 {
                         if data[13] != 0 {
                             return Err(Error::new(0, "图像列表变换来源尚未接入"));
                         }
@@ -239,12 +239,17 @@ impl TaskObject for ImageListObject {
                         };
                         if data[0] != 0 {
                             list.set_pixels(key, data[0], properties, images(host)?)?;
-                        } else {
+                        } else if data[1] != 0 {
                             if command.code == 288 {
                                 return Err(Error::new(0, "图像列表原始来源属性更新尚未接入"));
                             }
                             let frames = ImageList::decode_hg3(host.image_data(data[1])?)?;
                             list.set_frames(key, frames, properties, images(host)?)?;
+                        } else {
+                            if command.code == 288 {
+                                return Err(Error::new(0, "图像列表捕获来源属性更新尚未接入"));
+                            }
+                            list.set_capture(key, data[3], properties, images(host)?)?;
                         }
                     } else if data[1..4].iter().any(|&value| value != 0) {
                         return Err(Error::new(0, "图像列表其他来源类型尚未接入"));

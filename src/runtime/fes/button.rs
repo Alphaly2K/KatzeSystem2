@@ -40,7 +40,10 @@ impl<F: ObjectFactory> Store<'_, F> {
             ObjectState::String(state) => Some(state.task_kind()),
             _ => None,
         };
-        if object.state.image().is_some() && record.image.is_none() {
+        if object.state.image().is_some()
+            && !matches!(object.state, ObjectState::DifImage(_))
+            && record.image.is_none()
+        {
             let wrapper = self.resources.images.create_empty(owner)?;
             let object = objects.get_mut(handle).unwrap();
             object.image = Some(wrapper);

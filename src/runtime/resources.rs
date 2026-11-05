@@ -9,6 +9,12 @@ pub(super) struct Resources {
     pub images: Images,
     pub drawing: DrawingContext,
     pub drawables: Drawables,
+    pub frame_view: Option<(
+        crate::graphics::Projection,
+        [f32; 16],
+        crate::graphics::TextureFilter,
+    )>,
+    pub capture_rectangle: Option<Rect>,
     pub raw: ResourceState,
     pub input_callbacks: std::collections::BTreeMap<u32, crate::input::CommandState>,
     pub button_callbacks: std::collections::BTreeMap<u32, crate::input::ButtonObject>,

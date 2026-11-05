@@ -52,6 +52,7 @@ pub struct Image {
     id: u32,
     info: StandardInfo,
     surface: Surface,
+    pub(super) filter_revision: u64,
 }
 
 impl Image {
@@ -68,6 +69,7 @@ impl Image {
                 base: [0; 2],
             },
             surface: Surface::new(size)?,
+            filter_revision: 0,
         })
     }
 
@@ -79,6 +81,7 @@ impl Image {
             id: frame.id,
             info: frame.info,
             surface: Surface::from_bgra(frame.info.size, frame.pixels)?,
+            filter_revision: 0,
         })
     }
 

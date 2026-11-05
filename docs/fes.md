@@ -114,6 +114,8 @@ CIMAGE／IMAGE 的运动传递区已接入：基点 XY 位于 DWORD 3、4；优�
 
 旧手册还介绍 `STRING`、`LOGSTRING`、`NVSTRING` 等类型。本轮样本未使用这些旧文本类型；`CHTABLE3`、`IMGWND`、`VIEWPORT` 等扩展的完整初始化契约待核实。普通文字类型的编码、配置和运行时播放见 [FES 文字对象](fes-text.md)；日志及小说模式类型继续接入。
 
+DIFIMAGE 的画面捕获、深度范围、颜色过滤及运行时视图配置见 [FES 画面捕获图像](fes-difimage.md)。
+
 ### 宏
 
 ```text

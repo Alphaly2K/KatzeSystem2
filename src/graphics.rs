@@ -2,6 +2,8 @@ use crate::{Error, Result, read};
 
 mod image;
 pub use image::{Image, ImageReference, Images};
+mod image_filter;
+pub use image_filter::ImageFilter;
 mod image_list;
 pub use image_list::{ImageList, ImageListProperties};
 mod image_list_task;

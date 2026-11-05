@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 mod animation;
 mod button;
 mod commands;
+mod difimage;
 mod draw;
 mod fonts;
 mod image;
@@ -26,6 +27,7 @@ mod sound;
 mod string;
 mod task;
 pub use animation::ImageAnimationRequest;
+pub use difimage::DifImageState;
 pub use draw::DrawState;
 pub use navigation::NavigationOutcome;
 pub use scene::Scene;
@@ -69,6 +71,7 @@ pub enum ObjectState {
     Base,
     CImage(Box<CImageState>),
     Image(Box<ImageState>),
+    DifImage(Box<DifImageState>),
     Button(Box<ButtonState>),
     CPlane(Box<CPlaneState>),
     Plane(Box<PlaneState>),
@@ -85,6 +88,7 @@ impl ObjectState {
             Self::Base => "BASE",
             Self::CImage(_) => "CIMAGE",
             Self::Image(_) => "IMAGE",
+            Self::DifImage(_) => "DIFIMAGE",
             Self::Button(_) => "BUTTON",
             Self::CPlane(_) => "CPLANE",
             Self::Plane(_) => "PLANE",
@@ -101,6 +105,7 @@ impl ObjectState {
             "BASE" => Self::Base,
             "CIMAGE" => Self::CImage(Box::default()),
             "IMAGE" => Self::Image(Box::default()),
+            "DIFIMAGE" => Self::DifImage(Box::default()),
             "BUTTON" => Self::Button(Box::default()),
             "CPLANE" => Self::CPlane(Box::default()),
             "PLANE" => Self::Plane(Box::default()),
@@ -135,6 +140,7 @@ impl ObjectState {
         match self {
             Self::CImage(state) => Some(state),
             Self::Image(state) => Some(&state.base),
+            Self::DifImage(state) => Some(&state.base),
             Self::Button(state) => Some(&state.image.base),
             _ => None,
         }
@@ -144,6 +150,7 @@ impl ObjectState {
         match self {
             Self::CImage(state) => Some(state),
             Self::Image(state) => Some(&mut state.base),
+            Self::DifImage(state) => Some(&mut state.base),
             Self::Button(state) => Some(&mut state.image.base),
             _ => None,
         }
@@ -573,6 +580,9 @@ impl Objects {
                 ObjectState::CImage(state) => state.apply(&initialization.attributes, bank as u32),
                 ObjectState::Image(state) => {
                     state.apply(&initialization.attributes, bank as u32, &mut transform_name)?
+                }
+                ObjectState::DifImage(state) => {
+                    state.base.apply(&initialization.attributes, bank as u32)
                 }
                 ObjectState::Button(state) => {
                     state.apply(&initialization.attributes, bank as u32, &mut transform_name)?

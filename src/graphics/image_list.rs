@@ -30,6 +30,7 @@ struct Entry {
     image: u32,
     frames: BTreeMap<u32, u32>,
     source_identity: u32,
+    capture_revision: Option<u64>,
     animation: ImageAnimation,
     priority: i32,
     properties: ImageListProperties,
@@ -167,6 +168,20 @@ impl ImageList {
         self.set_pixels(key, images.pixel_handle(source)?, properties, images)
     }
 
+    /// 登记独立捕获图像；后续原地过滤使引用此像素的条目自动重绘。
+    pub fn set_capture(
+        &mut self,
+        key: u32,
+        source: u32,
+        properties: ImageListProperties,
+        images: &mut Images,
+    ) -> Result<()> {
+        self.set(key, source, properties, images)?;
+        self.entries.get_mut(&key).unwrap().capture_revision =
+            Some(images.get(source)?.filter_revision);
+        Ok(())
+    }
+
     /// 按底层像素句柄登记，持有独立包装；不接受普通图像包装或其他资源句柄。
     pub fn set_pixels(
         &mut self,
@@ -205,6 +220,7 @@ impl ImageList {
                 frames,
                 animation,
                 source_identity,
+                capture_revision: None,
                 priority,
                 properties,
                 history,
@@ -295,6 +311,7 @@ impl ImageList {
                 frames,
                 animation,
                 source_identity,
+                capture_revision: None,
                 priority,
                 properties,
                 history,
@@ -547,10 +564,23 @@ impl ImageList {
     }
 
     /// 清除全部脏区后按条目、面块顺序绘制；成功后消费脏区并返回提交矩形。
-    /// 来源像素修改不单独产生脏区，重登记或 invalidate_all 后才重绘。
+    /// 捕获来源的过滤自动产生脏区；其他像素修改需重登记或 invalidate_all。
     pub fn update(&mut self, images: &mut Images) -> Result<Vec<Rect>> {
         self.check_animation_pass()?;
         images.get(self.image)?;
+        let mut changed = Vec::new();
+        for entry in self.entries.values_mut() {
+            if let Some(previous) = entry.capture_revision.as_mut() {
+                let revision = images.get(entry.image)?.filter_revision;
+                if *previous != revision {
+                    *previous = revision;
+                    changed.push(entry.history);
+                }
+            }
+        }
+        for bounds in changed {
+            self.mark(bounds);
+        }
         let regions: Vec<_> = self.dirty_rectangles().collect();
         for &region in &regions {
             images.get_mut(self.image)?.fill_rect_from_bottom(region, 0);

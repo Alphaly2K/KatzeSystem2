@@ -189,7 +189,7 @@ impl<F: ObjectFactory> Store<'_, F> {
         }
     }
 
-    fn register_fes_image(
+    pub(super) fn register_fes_image(
         &mut self,
         owner: u32,
         objects: &mut Objects,
@@ -200,6 +200,7 @@ impl<F: ObjectFactory> Store<'_, F> {
     ) -> Result<()> {
         let cache = objects.preloaded_images.clone();
         let file = objects.get(handle).unwrap().state.image_source().is_some();
+        let captured = matches!(objects.get(handle).unwrap().state, ObjectState::DifImage(_));
         let state = objects.get_mut(handle).unwrap().state.image_mut().unwrap();
         if state.updates.dirty || prepared {
             let reference = state.plane.clone();
@@ -222,11 +223,15 @@ impl<F: ObjectFactory> Store<'_, F> {
                     objects.invalidate(handle)?;
                 }
             }
-            let pixels = self.resources.images.pixel_handle(wrapper)?;
+            let pixels = if wrapper == 0 || captured {
+                0
+            } else {
+                self.resources.images.pixel_handle(wrapper)?
+            };
             let raw = objects.get(handle).unwrap().raw_image;
             let state = objects.get(handle).unwrap().state.image().unwrap();
             let slot = state.parent_priority as u32;
-            if pixels == 0 && raw == 0 {
+            if pixels == 0 && raw == 0 && (!captured || wrapper == 0) {
                 if !file || slot != u32::MAX {
                     self.fes_command(owner, Some(list), 287, [slot, 0, 0], None)?;
                 }
@@ -243,7 +248,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                     pixels,
                     if pixels == 0 { raw } else { 0 },
                     0,
-                    0,
+                    if captured { wrapper } else { 0 },
                     position[0].to_bits(),
                     position[1].to_bits(),
                     state.base_point[0].to_bits(),
@@ -254,7 +259,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                     state.blend as u32,
                     state.display as u32,
                     0,
-                    if pixels == 0 { wrapper } else { 0 },
+                    if pixels == 0 && !captured { wrapper } else { 0 },
                 ]
                 .map(u32::to_le_bytes)
                 .concat();
@@ -277,7 +282,7 @@ impl<F: ObjectFactory> Store<'_, F> {
         Ok(())
     }
 
-    fn update_fes_image_priority(
+    pub(super) fn update_fes_image_priority(
         &mut self,
         owner: u32,
         objects: &mut Objects,

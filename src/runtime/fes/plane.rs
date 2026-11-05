@@ -64,7 +64,11 @@ impl<F: ObjectFactory> Store<'_, F> {
             return Ok(());
         };
         let image = record.image;
-        self.update_fes_object_image(owner, objects, handle, image)
+        self.update_fes_object_image(owner, objects, handle, image)?;
+        if matches!(objects.get(handle).unwrap().state, ObjectState::DifImage(_)) {
+            objects.update_order[index].image = objects.get(handle).unwrap().image;
+        }
+        Ok(())
     }
 
     pub(super) fn update_fes_object_image(
@@ -95,6 +99,9 @@ impl<F: ObjectFactory> Store<'_, F> {
         }
         if matches!(object.state, ObjectState::Image(_)) {
             return self.update_fes_image(owner, objects, handle, image);
+        }
+        if matches!(object.state, ObjectState::DifImage(_)) {
+            return self.update_fes_difimage(owner, objects, handle);
         }
         if matches!(object.state, ObjectState::Button(_)) {
             return self.update_fes_button(owner, objects, handle, image);

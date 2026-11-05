@@ -275,7 +275,7 @@ impl Drawables {
         projection: &Projection,
         parent: [f32; 16],
     ) -> Result<bool> {
-        self.render_to(target, None, projection, parent, TextureFilter::Point)
+        self.render_to(target, None, projection, parent, TextureFilter::Point, None)
     }
 
     /// 读取画布面块并写入独立的最终帧；过滤显式选择，连续调用继续混合输出。
@@ -287,7 +287,30 @@ impl Drawables {
         parent: [f32; 16],
         filter: TextureFilter,
     ) -> Result<bool> {
-        self.render_to(output, Some(canvas), projection, parent, filter)
+        self.render_to(output, Some(canvas), projection, parent, filter, None)
+    }
+
+    /// 按图元基点 Z 选择 [lower, upper)；非正上界不绘制。
+    pub fn render_depth_range(
+        &mut self,
+        output: &mut super::RenderTarget,
+        canvas: &super::RenderTarget,
+        projection: &Projection,
+        parent: [f32; 16],
+        filter: TextureFilter,
+        range: [f32; 2],
+    ) -> Result<bool> {
+        if range[1] <= 0. || range.iter().any(|value| value.is_nan()) {
+            return Ok(false);
+        }
+        self.render_to(
+            output,
+            Some(canvas),
+            projection,
+            parent,
+            filter,
+            Some(range),
+        )
     }
 
     fn render_to(
@@ -297,11 +320,21 @@ impl Drawables {
         projection: &Projection,
         parent: [f32; 16],
         filter: TextureFilter,
+        range: Option<[f32; 2]>,
     ) -> Result<bool> {
         self.order();
         let mut touched = false;
         for id in &self.order {
             let drawable = self.entries.get_mut(id).unwrap();
+            if let Some([lower, upper]) = range {
+                let depth = drawable.transform().base_point()[2];
+                if depth < lower {
+                    continue;
+                }
+                if depth >= upper {
+                    break;
+                }
+            }
             if drawable.display() == 0 {
                 continue;
             }

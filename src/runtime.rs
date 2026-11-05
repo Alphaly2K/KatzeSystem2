@@ -204,6 +204,22 @@ impl<F: ObjectFactory> Runtime<F> {
             .render_frame(output, canvas, projection, parent, filter)
     }
 
+    /// 配置脚本内部画面捕获使用的投影、父变换和纹理取样。
+    /// 调用方应与显式 render_frame 使用同一组参数，并在视图变化时更新。
+    pub fn set_frame_view(
+        &mut self,
+        projection: crate::graphics::Projection,
+        parent: [f32; 16],
+        filter: crate::graphics::TextureFilter,
+    ) {
+        self.resources.frame_view = Some((projection, parent, filter));
+    }
+
+    /// 设置内部捕获所读取的画面区域；None 使用 surface_size 定义的整幅画面。
+    pub fn set_frame_capture_rectangle(&mut self, rectangle: Option<crate::graphics::Rect>) {
+        self.resources.capture_rectangle = rectangle;
+    }
+
     /// 配置同步资源读取与类别名称补全；已有资源对象继续保留。
     pub fn set_resources(&mut self, services: impl crate::kcs::ResourceServices + 'static) {
         self.resources.services = Some(Box::new(services));
