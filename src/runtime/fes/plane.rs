@@ -112,6 +112,9 @@ impl<F: ObjectFactory> Store<'_, F> {
         if object.state.control().is_some() {
             return self.update_fes_control(owner, objects, handle);
         }
+        if matches!(object.state, ObjectState::Viewport(_)) {
+            return self.update_fes_viewport(objects, handle);
+        }
         if matches!(object.state, ObjectState::Sound(_)) {
             return self.update_fes_sound(owner, objects, handle);
         }
@@ -195,17 +198,45 @@ impl<F: ObjectFactory> Store<'_, F> {
     ) -> Result<()> {
         let cache = objects.preloaded_images.clone();
         let state = objects.get(handle).unwrap().state.plane().unwrap();
-        let viewport = state.viewport.clone();
-        if let Some(viewport) = objects.lookup(&viewport.name, viewport.bank) {
-            let target_dirty = objects
-                .get(viewport)
-                .unwrap()
-                .state
-                .plane()
-                .is_some_and(|state| state.dirty);
-            let state = objects.get(handle).unwrap().state.plane().unwrap();
+        let reference = state.viewport.clone();
+        if let Some(viewport) = objects.lookup(&reference.name, reference.bank) {
+            let target_object = objects.get(viewport).unwrap();
+            let target = &target_object.state;
+            let target_dirty = match target {
+                ObjectState::Viewport(state) => state.dirty,
+                ObjectState::Base | ObjectState::Draw(_) => target_object.base_dirty,
+                ObjectState::Sound(state) => state.is_dirty(),
+                _ => {
+                    target.plane().is_some_and(|state| state.dirty)
+                        || target.image().is_some_and(|state| state.updates.is_dirty())
+                        || target.control().is_some_and(|state| state.updates.dirty)
+                }
+            };
             if state.viewport_dirty || target_dirty {
-                return Err(Error::new(0, "FES VIEWPORT 更新需要二维对象命令 89"));
+                let mut bytes = match target {
+                    ObjectState::Viewport(state) => {
+                        let [x, y] = state.position.map(integer_position);
+                        Some(
+                            [
+                                x,
+                                y,
+                                x.wrapping_add(state.size[0]),
+                                y.wrapping_add(state.size[1]),
+                            ]
+                            .map(i32::to_le_bytes)
+                            .concat(),
+                        )
+                    }
+                    _ => None,
+                };
+                objects
+                    .get_mut(handle)
+                    .unwrap()
+                    .state
+                    .plane_mut()
+                    .unwrap()
+                    .viewport_dirty = false;
+                self.fes_command(owner, task, 89, [0, 0, 1], bytes.as_deref_mut())?;
             }
         }
         let state = objects.get_mut(handle).unwrap().state.plane_mut().unwrap();

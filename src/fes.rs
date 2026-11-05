@@ -19,6 +19,7 @@ mod slider;
 mod sound;
 mod string;
 mod subcommands;
+mod viewport;
 pub use attributes::{ObjectAttributes, ObjectInitialization, ObjectReference};
 pub use button::ButtonState;
 pub use events::EventContext;
@@ -37,6 +38,7 @@ pub use subcommands::{
     MappedArgument, Subcommand, SubcommandCall, SubcommandContext, SubcommandMode,
     SubcommandParameter, SubcommandTable,
 };
+pub use viewport::ViewportState;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Line {

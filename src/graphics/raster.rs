@@ -1,4 +1,4 @@
-use super::{Drawables, ProjectedVertex, Projection, Surface};
+use super::{Drawables, ProjectedVertex, Projection, Rect, Surface};
 use crate::{Error, Result};
 
 /// 对归一化 UV 使用镜像寻址的单级纹理过滤。
@@ -11,7 +11,7 @@ pub enum TextureFilter {
 impl Surface {
     /// 按整数像素中心及左／上边包含规则绘制纯色三角形，使用设备普通 Alpha 混合。
     pub fn blend_triangle(&mut self, points: [[f32; 2]; 3], argb: u32) -> bool {
-        self.blend_triangle_at(points, argb, [0; 2])
+        self.blend_triangle_at(points, argb, [0; 2], None)
     }
 
     pub(super) fn blend_triangle_at(
@@ -19,23 +19,25 @@ impl Surface {
         points: [[f32; 2]; 3],
         argb: u32,
         origin: [u32; 2],
+        clip: Option<Rect>,
     ) -> bool {
         if argb >> 24 == 0 {
             return false;
         }
         let color = argb.to_le_bytes().map(f64::from);
-        self.rasterize(points, origin, |_| Some(color))
+        self.rasterize(points, origin, clip, |_| Some(color))
     }
 
     /// 以 RHW 透视插值顶点颜色；不执行深度裁剪或深度缓冲。
     pub fn blend_projected_triangle(&mut self, vertices: [ProjectedVertex; 3]) -> bool {
-        self.blend_projected_triangle_at(vertices, [0; 2])
+        self.blend_projected_triangle_at(vertices, [0; 2], None)
     }
 
     pub(super) fn blend_projected_triangle_at(
         &mut self,
         vertices: [ProjectedVertex; 3],
         origin: [u32; 2],
+        clip: Option<Rect>,
     ) -> bool {
         let Some(interpolation) = Interpolation::new(vertices) else {
             return false;
@@ -43,6 +45,7 @@ impl Surface {
         self.rasterize(
             vertices.map(|v| [v.position[0], v.position[1]]),
             origin,
+            clip,
             |point| Some(interpolation.color(interpolation.weights(point)?)),
         )
     }
@@ -55,7 +58,7 @@ impl Surface {
         texture: &Self,
         filter: TextureFilter,
     ) -> bool {
-        self.blend_textured_triangle_at(vertices, uv, texture, filter, [0; 2])
+        self.blend_textured_triangle_at(vertices, uv, texture, filter, [0; 2], None)
     }
 
     pub(super) fn blend_textured_triangle_at(
@@ -65,6 +68,7 @@ impl Surface {
         texture: &Self,
         filter: TextureFilter,
         origin: [u32; 2],
+        clip: Option<Rect>,
     ) -> bool {
         if texture.size.contains(&0) || uv.iter().flatten().any(|n| !n.is_finite()) {
             return false;
@@ -75,6 +79,7 @@ impl Surface {
         self.rasterize(
             vertices.map(|v| [v.position[0], v.position[1]]),
             origin,
+            clip,
             |point| {
                 let weights = interpolation.weights(point)?;
                 let coordinates = std::array::from_fn(|axis| {
@@ -98,6 +103,7 @@ impl Surface {
         &mut self,
         points: [[f32; 2]; 3],
         origin: [u32; 2],
+        clip: Option<Rect>,
         mut shade: impl FnMut([f64; 2]) -> Option<[f64; 4]>,
     ) -> bool {
         if points.iter().flatten().any(|n| !n.is_finite()) {
@@ -127,6 +133,19 @@ impl Surface {
                 .ceil()
                 .clamp(origin[i] as f64, (origin[i] + self.size[i]) as f64) as u32
         });
+        let (lower, upper) = if let Some(clip) = clip {
+            let lower = [
+                lower[0].max(clip.left.max(0) as u32),
+                lower[1].max(clip.top.max(0) as u32),
+            ];
+            let upper = [
+                upper[0].min(clip.right.max(0) as u32),
+                upper[1].min(clip.bottom.max(0) as u32),
+            ];
+            (lower, upper)
+        } else {
+            (lower, upper)
+        };
         let edges = [
             (points[0], points[1]),
             (points[1], points[2]),
@@ -348,6 +367,7 @@ impl Drawables {
             if drawable.blend_mode() != 0 {
                 return Err(Error::new(0, "三角形特殊混合模式尚未接入"));
             }
+            let clip = drawable.clip().map(|clip| projection.project_clip(clip));
             let position = drawable.transform().position();
             let origin = match drawable.projection_origin_mode() {
                 0 => [position[0], position[1]],
@@ -380,10 +400,15 @@ impl Drawables {
                         if vertices.iter().any(|v| !v.rhw.is_finite() || v.rhw <= 0.) {
                             return Err(Error::new(0, "纹理插值需要有限的正 RHW"));
                         }
-                        touched |=
-                            output.blend_textured_triangle(vertices, triangle.uv, texture, filter);
+                        touched |= output.blend_textured_triangle_clipped(
+                            vertices,
+                            triangle.uv,
+                            texture,
+                            filter,
+                            clip,
+                        );
                     } else {
-                        touched |= draw_colors(output, vertices)?;
+                        touched |= draw_colors(output, vertices, clip)?;
                     }
                 }
             } else {
@@ -393,7 +418,7 @@ impl Drawables {
                         .projected_triangle(index, parent, projection, origin, true)
                         .unwrap();
                     validate_depth(vertices)?;
-                    touched |= draw_colors(output, vertices)?;
+                    touched |= draw_colors(output, vertices, clip)?;
                 }
             }
         }
@@ -411,17 +436,22 @@ fn validate_depth(vertices: [ProjectedVertex; 3]) -> Result<()> {
     Ok(())
 }
 
-fn draw_colors(target: &mut super::RenderTarget, vertices: [ProjectedVertex; 3]) -> Result<bool> {
+fn draw_colors(
+    target: &mut super::RenderTarget,
+    vertices: [ProjectedVertex; 3],
+    clip: Option<Rect>,
+) -> Result<bool> {
     if vertices.iter().all(|v| v.color == vertices[0].color) {
-        Ok(target.blend_triangle(
+        Ok(target.blend_triangle_clipped(
             vertices.map(|v| [v.position[0], v.position[1]]),
             vertices[0].color,
+            clip,
         ))
     } else {
         if vertices.iter().any(|v| !v.rhw.is_finite() || v.rhw <= 0.) {
             return Err(Error::new(0, "颜色插值需要有限的正 RHW"));
         }
-        Ok(target.blend_projected_triangle(vertices))
+        Ok(target.blend_projected_triangle_clipped(vertices, clip))
     }
 }
 

@@ -1032,6 +1032,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                     let object = scene.objects.get(handle).unwrap();
                     let context = match &object.state {
                         super::ObjectState::Base
+                        | super::ObjectState::Viewport(_)
                         | super::ObjectState::Draw(_)
                         | super::ObjectState::Slider(_)
                         | super::ObjectState::Scroll2(_) => fes::SubcommandContext::default(),

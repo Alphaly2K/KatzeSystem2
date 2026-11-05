@@ -122,7 +122,9 @@ impl Objects {
                     sound.volume = value;
                     changed
                 }
-                ObjectState::Base | ObjectState::Draw(_) => return Ok(false),
+                ObjectState::Base | ObjectState::Draw(_) | ObjectState::Viewport(_) => {
+                    return Ok(false);
+                }
                 _ => return Err(Error::new(0, "FES 此对象类型的 blend 尚未接入")),
             }
         };

@@ -2,6 +2,44 @@ use super::{ObjectState, Objects};
 use crate::{Error, Result, expression::State, fes};
 
 impl Objects {
+    pub(super) fn dispatch_size_query(
+        &self,
+        interpreter: &mut fes::Interpreter,
+        offset: usize,
+        args: &[Vec<u8>],
+        target: &fes::ObjectReference,
+        numbers: &mut State,
+    ) -> Result<bool> {
+        if target.bank == -1 {
+            return Ok(true);
+        }
+        let Some(handle) = self.lookup(&target.name, target.bank) else {
+            return Ok(true);
+        };
+        let mut indices = [-1; 3];
+        for (index, bytes) in indices.iter_mut().zip(args.iter().skip(2)) {
+            *index = interpreter
+                .eval(bytes, numbers)
+                .map_err(|error| Error::new(offset + error.offset, error.message))?;
+        }
+        let object = &self.get(handle).unwrap().state;
+        let size = if let Some(image) = object.image() {
+            image.size
+        } else if let Some(plane) = object.plane() {
+            plane.size()
+        } else if let Some(control) = object.control() {
+            [control.position, 0]
+        } else {
+            return Ok(true);
+        };
+        for (index, value) in indices.into_iter().zip([size[0], size[1], 0]) {
+            if let Some(slot) = numbers.shared.get_mut(index as usize) {
+                *slot = value;
+            }
+        }
+        Ok(true)
+    }
+
     pub(super) fn dispatch_query_command(
         &self,
         interpreter: &mut fes::Interpreter,
@@ -68,6 +106,56 @@ impl Objects {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn size_queries_keep_array_skips_axis_order_and_control_position_alias() {
+        let mut objects = Objects::new(Default::default()).unwrap();
+        let handles = objects
+            .define(&fes::ObjectDefinition {
+                kind: "CPLANE",
+                name: "item".into(),
+                banks: 3,
+            })
+            .unwrap();
+        objects
+            .get_mut(handles[0])
+            .unwrap()
+            .state
+            .plane_mut()
+            .unwrap()
+            .size = [8, -9];
+        objects.get_mut(handles[1]).unwrap().state =
+            ObjectState::Slider(Box::new(crate::fes::SliderState {
+                position: 42,
+                ..Default::default()
+            }));
+        objects.get_mut(handles[2]).unwrap().state = ObjectState::Viewport(Box::default());
+        let mut interpreter =
+            fes::Interpreter::new(fes::Program::from_text(b"#START\nexit 0\n").unwrap()).unwrap();
+        objects.publish_bindings(&mut interpreter);
+        let mut numbers = State::new(8);
+        for (line, expected) in [
+            ("item getsize ($0+=1) ($0+=1) ($0+=1)", [0, 0, 0, 0]),
+            ("item[0] getsize ($0+=1) ($0+=1) ($0+=1)", [3, 8, -9, 0]),
+            ("item[1] getsize 1 2 3", [3, 42, 0, 0]),
+            ("item[2] getsize ($0+=1) 1 2", [4, 42, 0, 0]),
+            ("item[0] getsize 0 0 0", [0, 42, 0, 0]),
+        ] {
+            assert!(
+                objects
+                    .dispatch_object_command(
+                        &mut interpreter,
+                        &fes::Line {
+                            offset: 0,
+                            bytes: line.as_bytes().to_vec()
+                        },
+                        &mut numbers
+                    )
+                    .unwrap()
+            );
+            assert_eq!(&numbers.shared[..4], &expected, "{line}");
+        }
+    }
 
     #[test]
     fn world_position_queries_limit_parent_types_and_preserve_array_and_axis_order() {

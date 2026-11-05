@@ -25,6 +25,7 @@ pub struct Drawable {
     pub(super) blend_mode: u32,
     pub(super) camera_id: u32,
     pub(super) projection_origin_mode: u32,
+    pub(super) clip: Option<super::Rect>,
 }
 
 impl Default for Drawable {
@@ -41,6 +42,7 @@ impl Default for Drawable {
             blend_mode: 0,
             camera_id: 0,
             projection_origin_mode: 0,
+            clip: None,
         }
     }
 }
@@ -151,6 +153,11 @@ impl Drawable {
 
     pub fn camera_id(&self) -> u32 {
         self.camera_id
+    }
+
+    /// 最终画布变换前的裁剪区域；None 使用完整输出。
+    pub fn clip(&self) -> Option<super::Rect> {
+        self.clip
     }
 
     /// 透视原点：零取对象平移，一取绘图中心，其他值取坐标零点。
@@ -342,6 +349,10 @@ impl Drawables {
         self.update(id, |d| {
             d.blend_mode = if value <= 5 { value } else { 0 };
         })
+    }
+
+    pub fn set_clip(&mut self, id: u32, clip: Option<super::Rect>) -> bool {
+        self.update(id, |d| d.clip = clip)
     }
 
     pub fn set_projection_origin_mode(&mut self, id: u32, value: u32) -> bool {

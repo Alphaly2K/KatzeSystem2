@@ -284,3 +284,88 @@ fn projection_origin_selection_reaches_frame_pixels() {
     assert_ne!(frames[1], frames[2]);
     assert_eq!(frames[2], frames[3]);
 }
+
+#[test]
+fn viewport_crops_interpolated_and_textured_triangles_without_changing_samples() {
+    use katze_system2::graphics::{CanvasLayout, Rect, TextureFilter};
+    let mut projection = Projection::default();
+    projection.matrix[12] = 100.;
+    projection.matrix[13] = -50.;
+    projection.translation = [-0.75, 2.5];
+    assert_eq!(
+        projection.project_clip(Rect::from_xywh(-2, -1, 7, 6)),
+        Rect {
+            left: 0,
+            top: 2,
+            right: 4,
+            bottom: 7
+        },
+    );
+    let mut bytes = b"KX2\0".to_vec();
+    for value in [0f32, 0., 8., 8.] {
+        bytes.extend(value.to_le_bytes());
+    }
+    bytes.extend(1u32.to_le_bytes());
+    for (point, color) in [
+        ([-4f32, -4., 0.], 0xff123456u32),
+        ([20., -4., 0.], 0xffabcdef),
+        ([-4., 20., 0.], 0xff987654),
+    ] {
+        for value in point {
+            bytes.extend(value.to_le_bytes());
+        }
+        bytes.extend(color.to_le_bytes());
+    }
+    let mut pixels = Surface::new([8, 8]).unwrap();
+    pixels.clear(0xffeeeeee);
+    let texture = RenderTarget::from_tiles([8, 8], [1, 1], vec![Some(pixels)]).unwrap();
+    let clip = Rect::from_xywh(1, 2, 4, 3);
+    for textured in [false, true] {
+        let source = Drawable::from_kx2(&bytes).unwrap();
+        let drawable = if textured {
+            Drawable::from_canvas_source(source, CanvasLayout::new([8, 8], [1, 1], [8, 8]).unwrap())
+                .unwrap()
+        } else {
+            source
+        };
+        let mut drawings = Drawables::default();
+        drawings.insert(1, drawable).unwrap();
+        drawings.set_display(1, 1);
+        let mut whole = RenderTarget::new([8, 8]).unwrap();
+        let mut cropped =
+            RenderTarget::from_tiles([4, 4], [2, 2], vec![Some(Surface::new([4, 4]).unwrap()); 4])
+                .unwrap();
+        drawings
+            .render_frame(
+                &mut whole,
+                &texture,
+                &Projection::default(),
+                IDENTITY,
+                TextureFilter::Linear,
+            )
+            .unwrap();
+        drawings.set_clip(1, Some(clip));
+        drawings
+            .render_frame(
+                &mut cropped,
+                &texture,
+                &Projection::default(),
+                IDENTITY,
+                TextureFilter::Linear,
+            )
+            .unwrap();
+        assert_ne!(whole.pixel(2, 3), Some(0));
+        for y in 0..8 {
+            for x in 0..8 {
+                assert_eq!(
+                    cropped.pixel(x, y),
+                    if (1..5).contains(&x) && (2..5).contains(&y) {
+                        whole.pixel(x, y)
+                    } else {
+                        Some(0)
+                    }
+                );
+            }
+        }
+    }
+}

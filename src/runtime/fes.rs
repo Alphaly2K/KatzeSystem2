@@ -27,6 +27,7 @@ mod slider;
 mod sound;
 mod string;
 mod task;
+mod viewport;
 pub use animation::ImageAnimationRequest;
 pub use difimage::DifImageState;
 pub use draw::DrawState;
@@ -70,6 +71,7 @@ impl MediaRecord {
 #[derive(Clone, Debug, PartialEq)]
 pub enum ObjectState {
     Base,
+    Viewport(Box<crate::fes::ViewportState>),
     CImage(Box<CImageState>),
     Image(Box<ImageState>),
     ImageWindow(Box<ImageState>),
@@ -88,6 +90,7 @@ impl ObjectState {
     pub fn kind(&self) -> &'static str {
         match self {
             Self::Base => "BASE",
+            Self::Viewport(_) => "VIEWPORT",
             Self::CImage(_) => "CIMAGE",
             Self::Image(_) => "IMAGE",
             Self::ImageWindow(_) => "IMGWND",
@@ -106,6 +109,7 @@ impl ObjectState {
     fn new(kind: &str, text: &string::Context) -> Result<Self> {
         Ok(match kind {
             "BASE" => Self::Base,
+            "VIEWPORT" => Self::Viewport(Box::default()),
             "CIMAGE" => Self::CImage(Box::default()),
             "IMAGE" => Self::Image(Box::default()),
             "IMGWND" => Self::ImageWindow(Box::default()),
@@ -211,6 +215,7 @@ pub struct Object {
     button_update: Option<crate::fes::ImageUpdates>,
     motions: crate::kcs::MotionQueue,
     motion_delay: u32,
+    base_dirty: bool,
     pub state: ObjectState,
 }
 
@@ -338,6 +343,7 @@ impl Objects {
                     button_update: None,
                     motions: crate::kcs::MotionQueue::default(),
                     motion_delay: 0,
+                    base_dirty: false,
                     state: ObjectState::Base,
                 },
             )]),
@@ -481,6 +487,7 @@ impl Objects {
                     button_update: None,
                     motions: crate::kcs::MotionQueue::default(),
                     motion_delay: 0,
+                    base_dirty: false,
                     state: initial.clone(),
                 },
             );
@@ -581,6 +588,7 @@ impl Objects {
             }
             let dirty = match &mut self.objects.get_mut(&handle).unwrap().state {
                 ObjectState::Base | ObjectState::Draw(_) => false,
+                ObjectState::Viewport(state) => state.apply(&initialization.attributes),
                 ObjectState::CImage(state) => state.apply(&initialization.attributes, bank as u32),
                 ObjectState::Image(state) | ObjectState::ImageWindow(state) => {
                     state.apply(&initialization.attributes, bank as u32, &mut transform_name)?
@@ -629,6 +637,9 @@ impl Objects {
         let mut pending = vec![handle];
         while let Some(handle) = pending.pop() {
             let object = self.objects.get_mut(&handle).unwrap();
+            if matches!(object.state, ObjectState::Base | ObjectState::Draw(_)) {
+                object.base_dirty = true;
+            }
             if let Some(state) = object.state.plane_mut() {
                 state.dirty = true;
             }
@@ -637,6 +648,9 @@ impl Objects {
             }
             if let Some(state) = object.state.control_mut() {
                 state.updates.dirty = true;
+            }
+            if let ObjectState::Viewport(state) = &mut object.state {
+                state.dirty = true;
             }
             if let ObjectState::Sound(state) = &mut object.state {
                 state.dirty = true;

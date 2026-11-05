@@ -47,6 +47,7 @@ impl Objects {
                 | b"page"
                 | b"getpos"
                 | b"getpos2"
+                | b"getsize"
                 | b"endpos"
                 | b"lineinfo"
                 | b"load"
@@ -74,6 +75,9 @@ impl Objects {
         }
         if self.count(&target.name) == 1 {
             target.bank = 0;
+        }
+        if name == b"getsize" {
+            return self.dispatch_size_query(interpreter, line.offset, &args, &target, state);
         }
         if matches!(name, b"getpos2" | b"endpos" | b"lineinfo") {
             return self.dispatch_query_command(interpreter, line.offset, &args, &target, state);
@@ -411,7 +415,9 @@ impl Objects {
                     b"load" => slider.set_file(args.get(2).map_or(b"", Vec::as_slice))?,
                     _ => unreachable!(),
                 }
-            } else if !matches!(object, ObjectState::Base) && name != b"pos" {
+            } else if !matches!(object, ObjectState::Base | ObjectState::Viewport(_))
+                && name != b"pos"
+            {
                 return Err(Error::new(offset, "FES 此对象类型的数值或装载命令尚未接入"));
             }
         }

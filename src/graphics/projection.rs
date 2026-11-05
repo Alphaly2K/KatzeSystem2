@@ -40,6 +40,29 @@ impl Default for Projection {
 }
 
 impl Projection {
+    /// 负端点先归零，再以 W=0 应用画布矩阵及独立平移；保留端点顺序。
+    pub fn project_clip(&self, clip: super::Rect) -> super::Rect {
+        let point = |x: i32, y: i32| {
+            let value = transform_vector([x.max(0) as f32, y.max(0) as f32, 0., 0.], self.matrix);
+            std::array::from_fn::<_, 2, _>(|i| {
+                let v = f(1, value[i], self.translation[i]);
+                if (-2147483648.0..2147483648.0).contains(&v) {
+                    v as i32
+                } else {
+                    i32::MIN
+                }
+            })
+        };
+        let [left, top] = point(clip.left, clip.top);
+        let [right, bottom] = point(clip.right, clip.bottom);
+        super::Rect {
+            left,
+            top,
+            right,
+            bottom,
+        }
+    }
+
     /// origin 为已选择的投影原点；零 Z 或关闭 perspective 使用平面路径。
     pub fn project_triangle(
         &self,

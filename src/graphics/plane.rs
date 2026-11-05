@@ -868,6 +868,22 @@ impl TaskObject for PlaneObject {
             592 => {
                 drawings(host)?.set_camera(id, 0);
             }
+            89 => {
+                let clip = buffers
+                    .data1
+                    .as_deref()
+                    .map(|bytes| {
+                        let [left, top, right, bottom] = words::<4>(Some(bytes))?.map(|v| v as i32);
+                        Ok(super::Rect {
+                            left,
+                            top,
+                            right,
+                            bottom,
+                        })
+                    })
+                    .transpose()?;
+                drawings(host)?.set_clip(id, clip);
+            }
             60 | 71 | 85 | 86 => {}
             41..=99 => {
                 return Err(Error::new(

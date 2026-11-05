@@ -520,7 +520,7 @@ fn rebuild_and_metadata_keep_separate_update_flags_and_one_shot_position() {
 }
 
 #[test]
-fn failed_creation_clears_rebuild_and_viewport_reports_the_real_boundary() {
+fn failed_creation_clears_rebuild_and_non_viewport_binding_clears_clipping() {
     let (mut runtime, mut objects) = setup();
     let handle = define(&mut objects, "panel");
     initialize(
@@ -561,17 +561,13 @@ fn failed_creation_clears_rebuild_and_viewport_reports_the_real_boundary() {
             ..Default::default()
         },
     );
-    assert!(
-        runtime
-            .update_fes_object(0, &mut objects, handle)
-            .unwrap_err()
-            .message
-            .contains("89")
-    );
+    runtime.update_fes_object(0, &mut objects, handle).unwrap();
     let task = objects.get(handle).unwrap().task_id().unwrap();
     assert_ne!(task, 0);
     assert!(runtime.drawables().get(task).is_some());
-    assert!(plane(&objects, handle).is_dirty());
+    assert!(!plane(&objects, handle).is_dirty());
+    assert_eq!(runtime.drawables().get(task).unwrap().clip(), None);
+    assert!(!plane(&objects, handle).viewport_changed());
     assert!(runtime.update_fes_object(99, &mut objects, handle).is_err());
     assert!(runtime.remove_fes_object(99, &mut objects, handle).is_err());
     let top = objects.top();
@@ -601,4 +597,210 @@ fn failed_creation_clears_rebuild_and_viewport_reports_the_real_boundary() {
     assert!(runtime.drawables().get(0).is_some());
     runtime.remove_fes_object(7, &mut objects, handle).unwrap();
     assert!(runtime.drawables().get(0).is_none());
+}
+
+#[test]
+fn viewport_binding_crops_across_tiles_and_preserves_missing_targets() {
+    use katze_system2::graphics::{Rect, Surface};
+    let (mut runtime, mut objects) = setup();
+    let panel = define(&mut objects, "panel");
+    let viewport = objects
+        .define(&ObjectDefinition {
+            kind: "VIEWPORT",
+            name: "view".into(),
+            banks: 1,
+        })
+        .unwrap()[0];
+    initialize(
+        &mut objects,
+        "view",
+        ObjectAttributes {
+            position: [Some(1), Some(1), Some(99)],
+            size: Some([4, 3]),
+            ..Default::default()
+        },
+    );
+    initialize(
+        &mut objects,
+        "panel",
+        ObjectAttributes {
+            size: Some([8, 6]),
+            display: Some(1),
+            color: Some(-1),
+            viewport: Some(ObjectReference {
+                name: "view".into(),
+                bank: 0,
+            }),
+            ..Default::default()
+        },
+    );
+    runtime.update_fes_object(0, &mut objects, panel).unwrap();
+    runtime
+        .update_fes_object(0, &mut objects, viewport)
+        .unwrap();
+    assert_eq!(objects.get(viewport).unwrap().task_id(), None);
+    let task = objects.get(panel).unwrap().task_id().unwrap();
+    assert_eq!(
+        runtime.drawables().get(task).unwrap().clip(),
+        Some(Rect::from_xywh(1, 1, 4, 3))
+    );
+    assert!(!plane(&objects, panel).viewport_changed());
+    runtime.drawing_mut().enabled = true;
+    runtime.drawing_mut().active = true;
+    runtime.drawing_mut().target = Some(
+        RenderTarget::from_tiles(
+            [4, 3],
+            [2, 2],
+            (0..4)
+                .map(|_| Some(Surface::new([4, 3]).unwrap()))
+                .collect(),
+        )
+        .unwrap(),
+    );
+    runtime
+        .render_triangles(&Projection::default(), *Transform::default().matrix())
+        .unwrap();
+    let target = runtime.drawing().target.as_ref().unwrap();
+    for y in 0..6 {
+        for x in 0..8 {
+            assert_eq!(
+                target.pixel(x, y),
+                Some(if (1..5).contains(&x) && (1..4).contains(&y) {
+                    u32::MAX
+                } else {
+                    0
+                })
+            );
+        }
+    }
+    initialize(
+        &mut objects,
+        "view",
+        ObjectAttributes {
+            position: [Some(3), Some(2), None],
+            size: Some([-1, 2]),
+            ..Default::default()
+        },
+    );
+    runtime.update_fes_object(0, &mut objects, panel).unwrap();
+    let empty = Some(Rect::from_xywh(3, 2, -1, 2));
+    assert_eq!(runtime.drawables().get(task).unwrap().clip(), empty);
+    runtime
+        .remove_fes_object(0, &mut objects, viewport)
+        .unwrap();
+    runtime.update_fes_object(0, &mut objects, panel).unwrap();
+    assert_eq!(runtime.drawables().get(task).unwrap().clip(), empty);
+    initialize(
+        &mut objects,
+        "panel",
+        ObjectAttributes {
+            viewport: Some(ObjectReference {
+                name: "_TOPOBJ_".into(),
+                bank: 0,
+            }),
+            ..Default::default()
+        },
+    );
+    runtime.update_fes_object(0, &mut objects, panel).unwrap();
+    assert_eq!(runtime.drawables().get(task).unwrap().clip(), None);
+    runtime.drawables_mut().set_clip(task, empty);
+    objects.invalidate(objects.top()).unwrap();
+    runtime.update_fes_object(0, &mut objects, panel).unwrap();
+    assert_eq!(runtime.drawables().get(task).unwrap().clip(), None);
+}
+
+#[test]
+fn viewport_metadata_is_gated_by_size2_and_ordinary_position_commands_are_ignored() {
+    let (mut runtime, mut objects) = setup();
+    let requests = Rc::new(RefCell::new(Vec::new()));
+    runtime.set_resources(Metadata(requests.clone()));
+    let viewport = objects
+        .define(&ObjectDefinition {
+            kind: "VIEWPORT",
+            name: "view".into(),
+            banks: 1,
+        })
+        .unwrap()[0];
+    initialize(
+        &mut objects,
+        "view",
+        ObjectAttributes {
+            position: [Some(13), Some(-7), None],
+            size: Some([31, 29]),
+            position_resource: Some(b"position:3".to_vec()),
+            ..Default::default()
+        },
+    );
+    runtime
+        .update_fes_object(0, &mut objects, viewport)
+        .unwrap();
+    assert!(requests.borrow().is_empty());
+    let state = |objects: &Objects| match &objects.get(viewport).unwrap().state {
+        ObjectState::Viewport(v) => (
+            v.position(),
+            v.size(),
+            v.is_dirty(),
+            v.needs_rebuild(),
+            v.position_resource().is_some(),
+        ),
+        _ => unreachable!(),
+    };
+    assert_eq!(state(&objects), ([13., -7.], [31, 29], false, false, true));
+    initialize(
+        &mut objects,
+        "view",
+        ObjectAttributes {
+            size_resource: Some(b"size:3".to_vec()),
+            ..Default::default()
+        },
+    );
+    runtime
+        .update_fes_object(0, &mut objects, viewport)
+        .unwrap();
+    assert_eq!(
+        *requests.borrow(),
+        [b"size.hg3".to_vec(), b"position.hg3".to_vec()]
+    );
+    assert_eq!(state(&objects), ([2., 4.], [3, 2], true, false, false));
+    runtime
+        .update_fes_object(0, &mut objects, viewport)
+        .unwrap();
+    assert!(!state(&objects).2);
+    assert_eq!(requests.borrow().len(), 2);
+    let mut interpreter =
+        fes::Interpreter::new(fes::Program::from_text(b"#START\nexit 0\n").unwrap()).unwrap();
+    objects.publish_bindings(&mut interpreter);
+    for command in [
+        "view pos 9 8",
+        "view size 9 8",
+        "view pos2 ignored:7",
+        "view getpos 0 1 2",
+        "view getpos2 0 1 2",
+    ] {
+        assert!(
+            objects
+                .dispatch_object_command(
+                    &mut interpreter,
+                    &fes::Line {
+                        offset: 0,
+                        bytes: command.as_bytes().to_vec()
+                    },
+                    runtime.numbers_mut()
+                )
+                .unwrap()
+        );
+    }
+    assert_eq!(state(&objects), ([2., 4.], [3, 2], false, false, false));
+    initialize(
+        &mut objects,
+        "view",
+        ObjectAttributes {
+            size_resource: Some(b"missing:3".to_vec()),
+            ..Default::default()
+        },
+    );
+    runtime
+        .update_fes_object(0, &mut objects, viewport)
+        .unwrap();
+    assert_eq!(state(&objects), ([2., 4.], [0, 0], true, false, false));
 }

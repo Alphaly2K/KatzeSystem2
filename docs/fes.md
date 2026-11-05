@@ -95,7 +95,7 @@ BUTTON 的 `fes::ButtonState` 继承 IMAGE，另应用 SIZE、ENABLE、DEFAULT�
 
 CPLANE 使用 POS、BASE、SIZE、POS2、SIZE2、PRI、DISP、COLOR、BLEND、TYPE、EXPOS 和 VIEWPORT。POS 仅在 X／Y 至少一项存在时生效，未指定分量保持，单独 Z 不生效；BASE 的 W 写零。PRI 按银行递增后直接保存。BLEND 在 COLOR 之后覆盖颜色高字节。TYPE 只将输入 2 映射为 2，其余映射为 1；TYPE／EXPOS 单独变化不使属性或尺寸失效。387 组有效输入的属性、资源引用和标记均与原应用入口一致。
 
-CPLANE 的尺寸重建与属性更新分别触发。SIZE 总使尺寸失效，即使数值未变；SIZE2 保留引用，在重建时读取裁剪尺寸。重建先标记旧任务删除，再在 FES 所属任务下创建类型 2 的二维任务；只发创建类型和矩形命令，不自动恢复旧任务的位置、基点或显示。属性失效时先应用一次性 POS2，再提交有效位置、基点 XY 与 PRI、默认缩放及矩阵、颜色、显示和混合模式。位置沿 CPLANE／PLANE 父级累加，基点只沿直接为 PLANE 的父级累加；属性失效会标记 FES 后代。运动、有效 VIEWPORT 对应的二维命令 89 仍待接入。缺失的元数据文件或帧得到零尺寸／零位置，无法读取的格式返回诊断。
+CPLANE 的尺寸重建与属性更新分别触发。SIZE 总使尺寸失效，即使数值未变；SIZE2 保留引用，在重建时读取裁剪尺寸。重建先标记旧任务删除，再在 FES 所属任务下创建类型 2 的二维任务；只发创建类型和矩形命令，不自动恢复旧任务的位置、基点或显示。属性失效时先应用一次性 POS2，再提交有效位置、基点 XY 与 PRI、默认缩放及矩阵、颜色、显示和混合模式。位置沿 CPLANE／PLANE 父级累加，基点只沿直接为 PLANE 的父级累加；属性失效会标记 FES 后代。平面运动见[对象运动](graphics.md#fes-对象运动)，VIEWPORT 引用通过二维命令 89 更新裁剪，规则见 [VIEWPORT](graphics.md#fes-viewport-裁剪区域)。缺失的元数据文件或帧得到零尺寸／零位置，无法读取的格式返回诊断。
 
 PLANE 复用上述平面列，另外应用 VRAM，不读取 FILE。VRAM 初值为四维 `[0,0,0,1]`，初始化列写成 `[x,y,0,0]` 并在值变化时使属性失效。它从共享画布取样，与屏幕位置分别维护；资源来自当前绘图画布，SIZE2 只读取几何元数据。PLANE 重建时先创建二维任务并设置 TYPE，再读取 SIZE2、建立画布纹理矩形，并总是重发有效屏幕位置。后续属性更新在基点之后提交 VRAM 与画布偏移的和；这两个坐标先将 VRAM 向零截断为 i32，再与偏移回绕相加，最后转回 f32。画布偏移改变本身不触发重新提交。基点、显示等仍按属性失效标记更新；仅 SIZE 重建后保留屏幕位置，其余属性恢复下层任务初值。
 
@@ -112,7 +112,7 @@ CIMAGE／IMAGE 的运动传递区已接入：基点 XY 位于 DWORD 3、4；优�
 |存档／表格／粒子|`SAVEPANEL`、`BGTABLE2`、`CHTABLE3`、`PARTICLE`|
 |其他基线类型|`IMGWND`、`VIEWPORT`|
 
-旧手册还介绍 `STRING`、`LOGSTRING`、`NVSTRING` 等类型。本轮样本未使用这些旧文本类型；`CHTABLE3`、`VIEWPORT` 等扩展的完整初始化契约待核实。IMGWND 沿用 IMAGE 初始化，窗口拼接、尺寸与来源寿命见 [IMGWND](graphics.md#fes-imgwnd-窗口图像)。普通文字类型的编码、配置和运行时播放见 [FES 文字对象](fes-text.md)；日志及小说模式类型继续接入。
+旧手册还介绍 `STRING`、`LOGSTRING`、`NVSTRING` 等类型。本轮样本未使用这些旧文本类型；`CHTABLE3` 等扩展的完整初始化契约待核实。VIEWPORT 的独立状态、元数据门控与平面裁剪见 [VIEWPORT](graphics.md#fes-viewport-裁剪区域)。IMGWND 沿用 IMAGE 初始化，窗口拼接、尺寸与来源寿命见 [IMGWND](graphics.md#fes-imgwnd-窗口图像)。普通文字类型的编码、配置和运行时播放见 [FES 文字对象](fes-text.md)；日志及小说模式类型继续接入。
 
 DIFIMAGE 的画面捕获、深度范围、颜色过滤及运行时视图配置见 [FES 画面捕获图像](fes-difimage.md)。
 

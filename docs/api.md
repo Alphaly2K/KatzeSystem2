@@ -474,9 +474,11 @@ FES `blend` 已连接 SOUND、CIMAGE／IMAGE／BUTTON、CPLANE／PLANE 和 SLIDE
 
 `fes::CPlaneState` 通过只读查询提供位置、基点、旋转、缩放、矩阵、尺寸、优先级、颜色、显示、创建类型、EXPOS、资源／VIEWPORT 引用及更新标记。`apply(&attributes, bank)` 返回本次是否使属性失效；`Objects::initialize` 同时标记 FES 后代。`motion_properties()`／`apply_motion_properties()` 捕获及回写平面运动，`subcommand_context()` 提供本地属性换算上下文；PLANE 的同名上下文另使用 VRAM。尺寸重建与属性失效独立，具体运动规则见[对象运动](graphics.md#fes-对象运动)。
 
+`fes::ViewportState` 提供位置、尺寸、元数据引用及失效／重建查询；`apply(&attributes)` 返回是否需要使后代失效。`ObjectState::Viewport` 接受普通对象声明、初始化、父子与释放协议，自身没有下层任务。平面通过 VIEWPORT 名称／银行引用设置裁剪，使用同一 `Runtime::update_fes_object` 或声明记录入口推进；更新顺序及裁剪范围契约见 [VIEWPORT](graphics.md#fes-viewport-裁剪区域)。
+
 `fes::StringState::new(encoding, &message_defaults, measurement_parameter)` 创建文字配置核心，复用 PLANE 属性并保存两种编码的消息配置。`apply_layout` 接受数值求值回调，`set_font` 接受 UTF-16 名称与后端 DWORD，`refresh_font_defaults` 更新仍启用继承的字段；只读查询提供配置字节、恢复颜色、继承标记和重配标记，`reset_layout` 恢复布局及全局字体设置。运行时 `ObjectState::String` 已组合该配置，接入下层消息任务和普通文字播放。参数、缺省值与基线更新行为见 [FES 文字对象](fes-text.md)。
 
-`Runtime::update_fes_object(owner, &mut objects, handle)` 显式推进一个对象。BASE 无媒体操作，CPLANE／PLANE 使用实际对象工厂和命令路由创建／更新直属二维任务，`Object::task_id()` 返回可选编号。CIMAGE 与 IMAGE 通过共享类型 15 列表更新来源与登记，`Object::image_handle()` 查询可选来源包装；IMAGE 支持按当前映射帧装载普通 HG-3 文件及多文件合成，缺失文件或帧清空像素绑定。非零 PATHMODE 使用完整直接路径，跳过类别补全；IDN=−1 的原始来源与像素独立保存，具体契约见下文。调用者按 FES 对象更新顺序推进，并将 objects 与 owner 保持同一生命周期，下层任务由此入口维护。CPLANE 在创建下层任务前读取 SIZE2，PLANE 在创建后读取；POS2 在属性更新时消费；读取共用 Runtime 的资源服务，按 image 类别补全名称，支持 HG-3 元数据。已有绑定的 VIEWPORT 更新返回命令 89 的诊断。此入口尚不执行运动和 FES 主体调度。
+`Runtime::update_fes_object(owner, &mut objects, handle)` 显式推进一个对象。BASE 无媒体操作，CPLANE／PLANE 使用实际对象工厂和命令路由创建／更新直属二维任务，`Object::task_id()` 返回可选编号。CIMAGE 与 IMAGE 通过共享类型 15 列表更新来源与登记，`Object::image_handle()` 查询可选来源包装；IMAGE 支持按当前映射帧装载普通 HG-3 文件及多文件合成，缺失文件或帧清空像素绑定。非零 PATHMODE 使用完整直接路径，跳过类别补全；IDN=−1 的原始来源与像素独立保存，具体契约见下文。调用者按 FES 对象更新顺序推进，并将 objects 与 owner 保持同一生命周期，下层任务由此入口维护。CPLANE 在创建下层任务前读取 SIZE2，PLANE 在创建后读取；POS2 在属性更新时消费；读取共用 Runtime 的资源服务，按 image 类别补全名称，支持 HG-3 元数据。VIEWPORT 引用连接二维命令 89，目标缺失保留旧裁剪；VIEWPORT 自身只更新元数据和失效标记。此入口尚不执行运动和 FES 主体调度。
 
 `Objects::preloaded_image(full_name)` 以补全后的完整名称查询当前场景的图像原始字节，区分大小写并在首个零字节结束。返回 `None` 表示未缓存，`Some(&[])` 表示成功读取的空文件。预加载错误保留已完成行和当前行的补全名称，继续调用准备入口即可重试；期间 `Scene::is_pending()` 为 true，禁止通过 `objects_mut()` 修改。直接调用 `update_fes_scene` 也会在进入 START 前完成预加载。缓存范围及使用规则见[图像预加载](graphics.md#fes-图像预加载)。
 
