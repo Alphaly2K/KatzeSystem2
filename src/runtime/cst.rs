@@ -4,6 +4,7 @@ use crate::{Error, Result, read};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
+mod details;
 mod save;
 
 /// 独立 CST 上下文，语言注册在构造时从全局前缀复制。
@@ -205,6 +206,9 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         arguments: &[u8],
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
+        if matches!(index, 333..=337) {
+            return self.cst_detail_native(index, arguments, vm);
+        }
         if matches!(index, 385 | 386) {
             return self.cst_record_native(index, arguments, vm);
         }

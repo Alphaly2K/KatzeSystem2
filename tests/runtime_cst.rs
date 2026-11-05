@@ -216,7 +216,7 @@ fn cst_record_storage_keeps_details_data_and_first_matching_container_record() {
             payload[start..start + 6].copy_from_slice(b"Alpha\0");
             payload[start + 32..start + 36].copy_from_slice(&7u32.to_le_bytes());
             payload[start + 36..start + 40].copy_from_slice(&1u32.to_le_bytes());
-            let details: Vec<_> = (0..72u8).collect();
+            let mut details: Vec<_> = (0..72u8).collect();
             if !legacy {
                 payload[start + 40..start + 44].copy_from_slice(&3u32.to_le_bytes());
                 payload[start + 44..start + 48].copy_from_slice(&120u32.to_le_bytes());
@@ -227,6 +227,7 @@ fn cst_record_storage_keeps_details_data_and_first_matching_container_record() {
             }
             let mut memory = vec![0; 128 + payload.len()];
             memory[64..74].copy_from_slice(b"alpha.cst\0");
+            memory[80..82].copy_from_slice(b"x\0");
             memory[128..].copy_from_slice(&payload);
             let mut code = vec![];
             instruction(&mut code, 0x25, &[(3, 0xdeadbeef)]);
@@ -244,6 +245,24 @@ fn cst_record_storage_keeps_details_data_and_first_matching_container_record() {
             instruction(&mut code, 0x26, &[(3, 8)]);
             call(&mut code, 329, &[(0x13, 0), (3, 64), (3, 11)]);
             instruction(&mut code, 0x26, &[(3, 12)]);
+            call(
+                &mut code,
+                334,
+                &[
+                    (0x13, 0),
+                    (3, u32::MAX),
+                    (3, 0x03020100),
+                    (3, 0x07060504),
+                    (3, 80),
+                ],
+            );
+            instruction(&mut code, 0x26, &[(3, 16)]);
+            call(
+                &mut code,
+                335,
+                &[(0x13, 0), (3, 0), (3, 0x03020100), (3, 0x07060504), (3, 96)],
+            );
+            instruction(&mut code, 0x26, &[(3, 16)]);
             for (record, data) in [(8, 1), (9, 0), (8, 0)] {
                 call(
                     &mut code,
@@ -280,6 +299,7 @@ fn cst_record_storage_keeps_details_data_and_first_matching_container_record() {
                     .collect::<Vec<_>>()
             );
             assert_eq!(vm.stack_bytes(), 0xdeadbeefu32.to_le_bytes());
+            assert_eq!(vm.read(96, 2).unwrap(), b"x\0");
             let context = runtime.cst_context(1).unwrap();
             assert_eq!(
                 context.history().collect::<Vec<_>>(),
@@ -296,6 +316,7 @@ fn cst_record_storage_keeps_details_data_and_first_matching_container_record() {
                 expected[44..48].copy_from_slice(&3u32.to_le_bytes());
                 expected[48..52].copy_from_slice(&120u32.to_le_bytes());
             }
+            details[8..10].copy_from_slice(b"x\0");
             expected.extend(&details);
             let without_data = {
                 let mut bytes = expected.clone();
@@ -308,5 +329,108 @@ fn cst_record_storage_keeps_details_data_and_first_matching_container_record() {
             assert_eq!(saved, expected);
             assert_eq!(container.record(9).unwrap().unwrap(), without_data);
         }
+    }
+}
+
+#[test]
+fn cst_history_strings_use_global_position_fallback_and_preserve_raw_marker_punctuation() {
+    let mut code = vec![];
+    instruction(&mut code, 0x25, &[(3, 0xdeadbeef)]);
+    call(&mut code, 323, &[]);
+    instruction(&mut code, 0x26, &[(3, 0)]);
+    for (slot, index, args) in [
+        (8, 333, vec![0, 280, 276]),
+        (12, 335, vec![0, 0, 3, 288]),
+        (16, 329, vec![128, 1]),
+        (20, 334, vec![u32::MAX, 0, 3, 64]),
+        (24, 335, vec![0, 1, 4, 300]),
+        (28, 334, vec![0, 5, 4, 96]),
+        (32, 335, vec![0, 7, 3, 320]),
+        (36, 334, vec![0, 8, 3, 512]),
+        (40, 335, vec![0, 9, 3, 352]),
+    ] {
+        let args: Vec<_> = [(0x13, 0)]
+            .into_iter()
+            .chain(args.into_iter().map(|n| (3, n)))
+            .collect();
+        call(&mut code, index, &args);
+        instruction(&mut code, 0x26, &[(3, slot)]);
+    }
+    for index in [336, 337] {
+        call(
+            &mut code,
+            index,
+            &[
+                (0x13, 0),
+                (3, u32::MAX),
+                (3, 7),
+                (3, if index == 336 { 160 } else { 200 }),
+            ],
+        );
+        call(&mut code, index, &[(3, 0)]);
+    }
+    call(
+        &mut code,
+        335,
+        &[(0x13, 0), (3, 0), (3, 7), (3, 3), (3, 416)],
+    );
+    instruction(&mut code, 0x26, &[(3, 44)]);
+    call(
+        &mut code,
+        333,
+        &[(0x13, 0), (3, u32::MAX), (3, 256), (3, 272)],
+    );
+    instruction(&mut code, 0x26, &[(3, 48)]);
+    instruction(&mut code, 0x3b, &[]);
+    let mut data = vec![0; 1024];
+    for (address, bytes) in [
+        (64, b"zero".as_slice()),
+        (96, b"late"),
+        (128, b"A.cst"),
+        (160, b"$str3;$str8/$str4"),
+        (200, b"$str3;$str8/$str4"),
+        (288, b"KEEP"),
+        (300, b"X"),
+        (320, b"X"),
+    ] {
+        data[address..address + bytes.len()].copy_from_slice(bytes);
+    }
+    data[512..582].fill(b'x');
+    let program = Program::from_code(&code, data, 128).unwrap();
+    for budget in [1, 4096] {
+        let mut state = State::new(0);
+        state.strings.extend([(3, b"GLOBAL".to_vec()), (8, vec![])]);
+        let mut runtime = Runtime::new(
+            0,
+            kind::ROOT,
+            Box::new(BaseObject::new()),
+            state,
+            KcsFactory::new(Loader(program.clone())),
+        );
+        runtime.set_budget(budget, 1 << 20);
+        let task = runtime.create(0, kind::ORDINARY, b"details", b"").unwrap();
+        runtime.update(0, 1).unwrap();
+        let vm = runtime.object(task).unwrap().interpreter().unwrap();
+        assert_eq!(
+            vm.read(8, 44).unwrap(),
+            [u32::MAX, 0, 0, 1, 0, 1, 0, 1, 1, 1, 0]
+                .into_iter()
+                .flat_map(u32::to_le_bytes)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(vm.read(276, 4).unwrap(), u32::MAX.to_le_bytes());
+        assert_eq!(vm.read(280, 1).unwrap(), [0]);
+        assert_eq!(vm.read(288, 5).unwrap(), b"KEEP\0");
+        assert_eq!(vm.read(300, 1).unwrap(), [0]);
+        assert_eq!(vm.read(320, 1).unwrap(), [0]);
+        assert_eq!(
+            vm.read(352, 63).unwrap(),
+            [vec![b'x'; 62], vec![0]].concat()
+        );
+        assert_eq!(vm.read(416, 7).unwrap(), b"GLOBAL\0");
+        assert_eq!(vm.read(200, 14).unwrap(), b"GLOBAL;/late\0\0");
+        assert_eq!(vm.read(256, 2).unwrap(), b"A\0");
+        assert_eq!(vm.read(272, 4).unwrap(), 1u32.to_le_bytes());
+        assert_eq!(vm.stack_bytes(), 0xdeadbeefu32.to_le_bytes());
     }
 }
