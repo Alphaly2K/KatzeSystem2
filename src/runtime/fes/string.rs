@@ -218,13 +218,30 @@ impl Objects {
             match command {
                 b"layout" => {
                     let Some(name) = args.get(2) else { continue };
-                    if name == b"font" {
-                        let raw = remainder(&line.bytes, 3);
-                        let text = std::str::from_utf8(raw)
-                            .map_err(|_| Error::new(line.offset, "FES 字体名需要有效 UTF-8"))?;
-                        state
-                            .layout
-                            .set_font(&text.encode_utf16().collect::<Vec<_>>(), 0)?;
+                    if matches!(name.as_slice(), b"font" | b"fontind") {
+                        let backend = if name == b"fontind" {
+                            if let Some(value) = layout_values.get(&0) {
+                                *value
+                            } else {
+                                let value = args
+                                    .get(3)
+                                    .map_or(Ok(0), |bytes| interpreter.eval(bytes, numbers))?;
+                                layout_values.insert(0, value);
+                                value
+                            }
+                        } else {
+                            0
+                        };
+                        let raw = remainder(&line.bytes, if name == b"fontind" { 4 } else { 3 });
+                        let name = if raw.is_empty() {
+                            defaults.font_name.clone()
+                        } else {
+                            std::str::from_utf8(raw)
+                                .map_err(|_| Error::new(line.offset, "FES 字体名需要有效 UTF-8"))?
+                                .encode_utf16()
+                                .collect::<Vec<_>>()
+                        };
+                        state.layout.set_font(&name, backend as u32)?;
                     } else if !state.layout.apply_layout(
                         name,
                         |index, default| {
@@ -238,8 +255,14 @@ impl Objects {
                             Ok(value)
                         },
                         frame_delay,
-                    )? {
-                        return Err(Error::new(line.offset, "FES 此类文字布局尚未接入"));
+                    )? && matches!(
+                        name.as_slice(),
+                        b"shift" | b"prof" | b"d_prof" | b"c_prof"
+                    ) {
+                        return Err(Error::new(
+                            line.offset,
+                            "FES 文字移位或专用替换服务尚未接入",
+                        ));
                     }
                 }
                 b"str" => state.set_text(remainder(&line.bytes, 2).to_vec()),
@@ -281,7 +304,7 @@ impl Objects {
 }
 
 // 原文入口按空格数量定位，连续空格也分别计数。
-fn remainder(bytes: &[u8], count: usize) -> &[u8] {
+pub(super) fn remainder(bytes: &[u8], count: usize) -> &[u8] {
     let end = bytes
         .iter()
         .position(|&byte| byte == 0)

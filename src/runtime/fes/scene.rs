@@ -17,6 +17,7 @@ use scripts::{ChildScripts, ScriptDisposition, ScriptRequest};
 pub struct Scene {
     pub(super) interpreter: fes::Interpreter,
     pub(super) objects: Objects,
+    pub(super) font_names: Option<Vec<Vec<u16>>>,
     owner: Option<u32>,
     frame_origin: u32,
     deadline: Option<u32>,
@@ -115,6 +116,7 @@ impl Scene {
         Ok(Self {
             interpreter,
             objects,
+            font_names: None,
             owner: None,
             frame_origin: 0,
             deadline: None,
@@ -146,6 +148,11 @@ impl Scene {
 
     pub fn interpreter(&self) -> &fes::Interpreter {
         &self.interpreter
+    }
+
+    /// 最近一次 fontcom init 的结果；未初始化或初始化失败时为 None。
+    pub fn font_names(&self) -> Option<&[Vec<u16>]> {
+        self.font_names.as_deref()
     }
 
     pub(super) fn set_external_storage(&mut self, external: crate::memory::SharedMemory) {
@@ -884,7 +891,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                         }
                     } else if scene.string_command(&args, line.offset, self.numbers)?
                         || self.fes_debug_command(scene, &args)?
-                        || self.fes_font_command(&args, line.offset)?
+                        || self.fes_font_command(scene, &args, &line)?
                         || self.fes_sound_command(scene, &args, line.offset)?
                     {
                         scene.interpreter.resume();
@@ -1334,7 +1341,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                             }
                             if scene.string_command(&args, line.offset, self.numbers)?
                                 || self.fes_debug_command(scene, &args)?
-                                || self.fes_font_command(&args, line.offset)?
+                                || self.fes_font_command(scene, &args, &line)?
                                 || self.fes_sound_command(scene, &args, line.offset)?
                             {
                                 scene.interpreter.resume();

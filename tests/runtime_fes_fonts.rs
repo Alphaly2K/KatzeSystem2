@@ -2,7 +2,7 @@ use katze_system2::{
     Error, Result,
     expression::State,
     fes::{ObjectReference, Program},
-    message::{FontRequest, FontServices, GlyphMask},
+    message::{FontRequest, FontServices, GlyphMask, MessageDefaults},
     runtime::{BaseObject, ObjectFactory, Runtime, TaskObject, fes::Scene, kind},
 };
 use std::{
@@ -146,18 +146,113 @@ fn font_add_skips_empty_names_and_unknown_operations_but_requires_a_registration
     update(&mut runtime, &mut scene).unwrap();
     assert_eq!(*fonts.names.borrow(), [b"real.ttf".to_vec()]);
     assert_eq!(runtime.numbers().shared[..2], [1, 1]);
-    for operation in ["init", "count", "get", "search", "default"] {
-        let source = format!("#START\nfontcom {operation} 0\n");
+    let mut scene = Scene::new(
+        Program::from_text(b"#START\nfontcom init 0\n").unwrap(),
+        runtime.host().handle_allocator(),
+    )
+    .unwrap();
+    assert!(
+        update(&mut runtime, &mut scene)
+            .unwrap_err()
+            .message
+            .contains("字体枚举")
+    );
+}
+
+struct EnumerationFonts(Rc<RefCell<Vec<(u32, u32)>>>);
+impl FontServices for EnumerationFonts {
+    fn enumerate(&mut self, charset: u32, variable: u32) -> Result<Vec<Vec<u16>>> {
+        self.0.borrow_mut().push((charset, variable));
+        if charset == 555 {
+            return Err(Error::new(0, "合成枚举失败"));
+        }
+        if charset == 777 {
+            return Ok(Vec::new());
+        }
+        Ok(["Alpha Face", "alpha face", "あい", "Alpha Face"]
+            .into_iter()
+            .map(|name| name.encode_utf16().collect())
+            .collect())
+    }
+    fn validate(&mut self, _: &FontRequest) -> Result<()> {
+        unreachable!()
+    }
+    fn measure(&mut self, _: &FontRequest, _: char, _: u32) -> Result<i32> {
+        unreachable!()
+    }
+    fn rasterize(&mut self, _: &FontRequest, _: char, _: u32) -> Result<GlyphMask> {
+        unreachable!()
+    }
+}
+fn advance(rt: &mut Runtime<Reject>, scene: &mut Scene, now: u32) -> Result<()> {
+    for _ in 0..1000 {
+        if rt.update_fes_scene(0, scene, now)? {
+            return Ok(());
+        }
+    }
+    panic!("合成场景未在预算内完成");
+}
+
+#[test]
+fn font_commands_keep_scene_lists_raw_names_evaluation_order_and_failed_initialization() {
+    for budget in [1, 4096] {
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let mut rt = Runtime::new(
+            0,
+            kind::ROOT,
+            Box::new(BaseObject::new()),
+            State::new(16),
+            Reject,
+        );
+        rt.set_budget(budget, 10000);
+        rt.set_fonts(EnumerationFonts(calls.clone()));
+        rt.host_mut().message_measurement_parameter = 7;
+        rt.host_mut().message_defaults = Some(MessageDefaults {
+            font_name: "あい Face".encode_utf16().collect(),
+            ..MessageDefaults::default()
+        });
+        let script = b"#START\nfontcom count ($0+=1)\nfontcom get ($0+=1) ($0+=1)\nfontcom default ($0+=1)\nfontcom search ($0+=1) Alpha Face\nfontcom init\nfontcom count 1\nfontcom get 0 10\nfontcom get 2 11\nfontcom search 2 Alpha Face\nfontcom search 3 ALPHA FACE\nfontcom default 12\nfontcom get ($0+=1) ($0+=1)\nfontcom get ($0+=1)\nfontcom search ($0+=1)\nfontcom unknown ($0+=1)\nwait 1\nfontcom init 777\nfontcom count 1\nfontcom get 0 10\nfontcom default 13\nwait 1\nfontcom init 555\nwait 999\n#_FES_WAKE_\nfontcom count 5\nfontcom get 2 15\n";
         let mut scene = Scene::new(
-            Program::from_text(source.as_bytes()).unwrap(),
-            runtime.host().handle_allocator(),
+            Program::from_text(script).unwrap(),
+            rt.host().handle_allocator(),
         )
         .unwrap();
-        assert!(
-            update(&mut runtime, &mut scene)
-                .unwrap_err()
-                .message
-                .contains("字体枚举")
+        advance(&mut rt, &mut scene, 0).unwrap();
+        assert_eq!(rt.numbers().shared[..4], [4, 4, 0, -1]);
+        let strings = &rt.numbers().strings;
+        assert_eq!(strings[&10], b"Alpha Face");
+        assert_eq!(strings[&11], "あい".as_bytes());
+        assert_eq!(strings[&12], "あい Face".as_bytes());
+        assert_eq!(strings[&2], b"alpha face");
+        assert_eq!(scene.font_names().unwrap().len(), 4);
+        assert_eq!(
+            scene.font_names().unwrap()[0],
+            scene.font_names().unwrap()[3]
         );
+        while !rt
+            .dispatch_fes_system_block(0, &mut scene, "_FES_WAKE_")
+            .unwrap()
+        {}
+        assert_eq!(rt.numbers().shared[5], 4);
+        assert_eq!(rt.numbers().strings[&15], "あい".as_bytes());
+        let mut other = Scene::new(
+            Program::from_text(b"#START\nfontcom count ($0+=1)\nwait 999\n").unwrap(),
+            rt.host().handle_allocator(),
+        )
+        .unwrap();
+        advance(&mut rt, &mut other, 0).unwrap();
+        assert_eq!(other.font_names(), None);
+        assert_eq!(rt.numbers().shared[0], 4);
+        advance(&mut rt, &mut scene, 1).unwrap();
+        assert_eq!(rt.numbers().shared[1], 0);
+        assert!(rt.numbers().strings[&10].is_empty());
+        assert_eq!(rt.numbers().strings[&13], "あい Face".as_bytes());
+        assert_eq!(scene.font_names(), Some([].as_slice()));
+        assert_eq!(
+            advance(&mut rt, &mut scene, 2).unwrap_err().message,
+            "合成枚举失败"
+        );
+        assert_eq!(scene.font_names(), None);
+        assert_eq!(*calls.borrow(), [(128, 7), (777, 7), (555, 7)]);
     }
 }

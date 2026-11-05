@@ -100,8 +100,10 @@ fn fes_strings_preserve_accumulation_segment_limits_cached_queries_and_canvas_su
             ("STRING8", false, TextEncoding::Unicode),
         ] {
             let mut rt = engine(budget, unicode, Rc::new(Cell::new(false)));
+            rt.host_mut().message_defaults.as_mut().unwrap().font_name =
+                "Global Face".encode_utf16().collect();
             let script = format!(
-                "#DEFINE\n{name} text\n#OBJECT VRAM DISP\ntext 2,3 1\n#START\ntext layout view 24 12\ntext layout size 4\ntext layout color 255 255 255\ntext str A\ntext apendmark\ntext apend B\nwait 1\ntext linecnt 1\ntext isdraw\n$2 = \\0\ntext draw 0\nwait 1\ntext skip\nwait 1\ntext draw -1\ntext skip\nwait 1\ntext clear\nwait 1\ntext str \"C D\" tail\nwait 1\ntext str   E\nwait 1000\n"
+                "#DEFINE\n{name} text\n#OBJECT VRAM DISP\ntext 2,3 1\n#START\ntext layout view 24 12\ntext layout size 4\ntext layout vdraw ($0+=1)\ntext layout fontind 5\ntext layout fontfix 9\ntext layout color 255 255 255\ntext str A\ntext apendmark\ntext apend B\nwait 1\ntext linecnt 1\ntext isdraw\n$2 = \\0\ntext draw 0\nwait 1\ntext skip\nwait 1\ntext draw -1\ntext skip\nwait 1\ntext clear\nwait 1\ntext str \"C D\" tail\nwait 1\ntext str   E\nwait 1000\n"
             );
             let mut scene = Scene::new(
                 fes::Program::from_text(script.as_bytes()).unwrap(),
@@ -112,6 +114,21 @@ fn fes_strings_preserve_accumulation_segment_limits_cached_queries_and_canvas_su
             advance(&mut rt, &mut scene, 0).unwrap();
             let (state, task) = string(&scene);
             assert_eq!(state.layout.encoding(), encoding);
+            let bytes = state.layout.configuration_bytes();
+            let backend = if encoding == TextEncoding::Unicode {
+                0x118
+            } else {
+                0xd8
+            };
+            assert_eq!(
+                u32::from_le_bytes(bytes[backend..backend + 4].try_into().unwrap()),
+                5
+            );
+            assert_eq!(
+                u16::from_le_bytes(bytes[0x84..0x86].try_into().unwrap()),
+                b'G' as u16
+            );
+            assert_eq!(rt.numbers().shared[0], 0);
             assert_eq!(state.remaining(), 2);
             assert_eq!(state.line_count(), 1);
             assert_eq!(remaining(&mut rt, task, encoding), 2);

@@ -23,6 +23,12 @@ pub struct FontRequest {
 
 /// 同步选择字体、度量并生成六十四级灰度遮罩；不支持的请求应返回诊断。
 pub trait FontServices {
+    /// 按平台枚举顺序提供水平字体名，保留重复名称。
+    /// character_set 为原始字符集（MAX 表示全部）；variable_pitch 为零时仅保留定宽字体。
+    fn enumerate(&mut self, _character_set: u32, _variable_pitch: u32) -> Result<Vec<Vec<u16>>> {
+        Err(Error::new(0, "字体服务未提供字体枚举"))
+    }
+
     /// 注册 CP932 文件名指定的字体；false 表示平台未接受该文件。
     fn add_resource(&mut self, _name: &[u8]) -> Result<bool> {
         Err(Error::new(0, "字体服务未提供字体资源注册"))

@@ -1,12 +1,44 @@
+use super::Scene;
 use crate::runtime::{ObjectFactory, Store};
-use crate::{Error, Result};
+use crate::{Error, Result, fes};
 
 impl<F: ObjectFactory> Store<'_, F> {
-    pub(super) fn fes_font_command(&mut self, args: &[Vec<u8>], offset: usize) -> Result<bool> {
+    pub(super) fn fes_font_command(
+        &mut self,
+        scene: &mut Scene,
+        args: &[Vec<u8>],
+        line: &fes::Line,
+    ) -> Result<bool> {
         if !args.first().is_some_and(|name| name == b"fontcom") {
             return Ok(false);
         }
+        let offset = line.offset;
         match args.get(1).map(Vec::as_slice) {
+            Some(b"init") => {
+                scene.font_names = None;
+                let character_set = args
+                    .get(2)
+                    .map_or(Ok(128), |value| scene.interpreter.eval(value, self.numbers))?
+                    as u32;
+                let mut names = self
+                    .resources
+                    .fonts
+                    .as_mut()
+                    .ok_or_else(|| Error::new(offset, "运行时未配置字体服务"))?
+                    .enumerate(character_set, self.host.message_measurement_parameter)?;
+                if names.len() > crate::read::MAX_ITEMS {
+                    return Err(Error::new(offset, "字体枚举数量超过上限"));
+                }
+                for name in &mut names {
+                    if let Some(end) = name.iter().position(|&unit| unit == 0) {
+                        name.truncate(end);
+                    }
+                    if name.len() >= 64 || String::from_utf16(name).is_err() {
+                        return Err(Error::new(offset, "枚举字体名称过长或不是有效 UTF-16"));
+                    }
+                }
+                scene.font_names = Some(names);
+            }
             Some(b"add") => {
                 if let Some(name) = args.get(2).filter(|name| !name.is_empty()) {
                     self.resources
@@ -16,8 +48,55 @@ impl<F: ObjectFactory> Store<'_, F> {
                         .add_resource(name)?;
                 }
             }
-            Some(b"init" | b"count" | b"get" | b"search" | b"default") => {
-                return Err(Error::new(offset, "FES 字体枚举及默认名称命令尚未接入"));
+            Some(command @ (b"count" | b"get" | b"search" | b"default")) => {
+                let Some(names) = scene.font_names.as_ref() else {
+                    return Ok(true);
+                };
+                let Some(index) = args.get(2) else {
+                    return Ok(true);
+                };
+                let index = scene.interpreter.eval(index, self.numbers)? as u32;
+                match command {
+                    b"count" => {
+                        if let Some(slot) = self.numbers.shared.get_mut(index as usize) {
+                            *slot = names.len() as i32;
+                        }
+                    }
+                    b"get" => {
+                        let Some(output) = args.get(3) else {
+                            return Ok(true);
+                        };
+                        let output = scene.interpreter.eval(output, self.numbers)? as u32;
+                        let value = names.get(index as usize).map_or_else(Vec::new, |name| {
+                            String::from_utf16(name).unwrap().into_bytes()
+                        });
+                        self.numbers.strings.insert(output, value);
+                    }
+                    b"search" => {
+                        let raw = super::string::remainder(&line.bytes, 3);
+                        if raw.is_empty() {
+                            return Ok(true);
+                        }
+                        let text = std::str::from_utf8(raw)
+                            .map_err(|_| Error::new(offset, "FES 字体查询名称需要有效 UTF-8"))?;
+                        let name = text.encode_utf16().collect::<Vec<_>>();
+                        let found = names
+                            .iter()
+                            .position(|value| value == &name)
+                            .map_or(-1, |index| index as i32);
+                        if let Some(slot) = self.numbers.shared.get_mut(index as usize) {
+                            *slot = found;
+                        }
+                    }
+                    b"default" => {
+                        let defaults = self.host.message_defaults.clone().unwrap_or_default();
+                        let name = defaults.font_name.split(|&unit| unit == 0).next().unwrap();
+                        let text = String::from_utf16(name)
+                            .map_err(|_| Error::new(offset, "全局字体名称不是有效 UTF-16"))?;
+                        self.numbers.strings.insert(index, text.into_bytes());
+                    }
+                    _ => unreachable!(),
+                }
             }
             _ => (),
         }

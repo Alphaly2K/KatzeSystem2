@@ -224,7 +224,7 @@ Unicode 的 `word_wrap` 按半角空格确定单词边界，空间不足时回�
 
 `FontServices::add_resource(cp932_name)` 注册直接文件名指定的字体，返回平台是否接受该资源。FES 的 `fontcom add name` 将展开后的单个名称交给该服务，不进行资源类别补全，忽略额外参数；false 保持脚本继续，服务错误保留当前事件供修复后重试。缺失或空名称直接继续。服务的默认实现返回未支持诊断，宿主须提供实际注册操作；没有绑定字体服务时返回配置诊断。
 
-此命令可在 FES 主体、系统块及对象事件中执行，注册作用域由共享字体服务维护。子命令区分大小写，未知子命令沿基线继续；`init`／`count`／`get`／`search`／`default` 尚未接入，返回明确诊断。进程字体注册和后续 `FontRequest` 的选择、度量及栅格化分别由服务完成。
+字体命令可在 FES 主体、系统块及对象事件中执行，注册作用域由共享字体服务维护。`FontServices::enumerate(character_set, variable_pitch)` 提供水平字体的有序 UTF-16 名称列表；零 variable_pitch 仅接受定宽字体，MAX 字符集表示全部，不合并重复名称。默认实现返回未支持诊断。FES 的 init／count／get／search／default 已接入每份 Scene 的独立列表，完整规则见 [字体枚举命令](fes-text.md#字体枚举命令)。进程字体注册和后续 `FontRequest` 的选择、度量及栅格化分别由服务完成。
 
 `HostState::message_time_scale` 提供生成消息时间的全局比例，初值 None；与任务时钟和外层帧增量分别保存。独立宿主提供 `Host::fonts`、`message_time_scale`、`message_plane_display` 和 `submit_message`。后者按顶部起算的源矩形直接复制 BGRA，目标位置已包含配置偏移和矩形起点；保留 Alpha 及透明 RGB。运行时使用 `DrawingContext::copy_surface` 提交到分块画布，并沿已有平面进入最终帧。
 

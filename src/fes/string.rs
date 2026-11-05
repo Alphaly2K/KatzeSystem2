@@ -166,6 +166,32 @@ impl StringState {
                 (if command == b"size" { 0x18 } else { 0x2c }, sizes)
             }
             b"indent" => (0x6c, vec![value(0, 0)?]),
+            b"fontfix" => (self.font_offset() + 0xc, vec![value(0, 0)?]),
+            b"prof_enable" => (0x68, vec![value(0, 0)?]),
+            b"scrolltype" => (0, vec![i32::from(value(0, 0)? != 0)]),
+            b"wipewidth" => (self.font_offset() + 0x10, vec![value(0, 100)?]),
+            b"profmode" => {
+                let mode = value(0, 0)?;
+                if self.encoding == TextEncoding::Cp932 {
+                    return Ok(true);
+                }
+                (0x118, vec![mode])
+            }
+            b"vcolor" | b"acolor" | b"vacolor" | b"pcolor" | b"vpcolor" => {
+                for index in 0..9 {
+                    value(index, 0)?;
+                }
+                return Ok(true);
+            }
+            b"fontind_sub" | b"profmode_sub" | b"prof_enable_sub" | b"c_prof_sub" | b"prof_sub" => {
+                value(0, 0)?;
+                return Ok(true);
+            }
+            b"shift_sub" => {
+                value(0, 0)?;
+                value(1, 0)?;
+                return Ok(true);
+            }
             b"weight" => {
                 let weight = value(0, -1)?;
                 self.font_inheritance[2] = weight == -1;

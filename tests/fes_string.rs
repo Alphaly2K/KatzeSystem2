@@ -167,5 +167,68 @@ fn layout_preserves_legacy_view_flags_color_packing_and_atomic_parameter_errors(
             [encoding == TextEncoding::Cp932, true, true, true]
         );
         assert!(state.configuration_dirty());
+        state.clear_configuration_dirty();
+        for command in [
+            b"vcolor".as_slice(),
+            b"fontind_sub",
+            b"profmode_sub",
+            b"shift_sub",
+        ] {
+            let mut calls = 0;
+            let snapshot = state.clone();
+            state
+                .apply_layout(
+                    command,
+                    |_, _| {
+                        calls += 1;
+                        Ok(7)
+                    },
+                    0,
+                )
+                .unwrap();
+            assert_eq!(
+                calls,
+                if command == b"vcolor" {
+                    9
+                } else if command == b"shift_sub" {
+                    2
+                } else {
+                    1
+                }
+            );
+            assert_eq!(state, snapshot);
+        }
+        state.apply_layout(b"profmode", |_, _| Ok(7), 0).unwrap();
+        assert_eq!(
+            state.configuration_dirty(),
+            encoding == TextEncoding::Unicode
+        );
+        if encoding == TextEncoding::Unicode {
+            assert_eq!(word(&state, 0x11c), 7);
+        }
+        state.apply_layout(b"fontfix", |_, _| Ok(9), 0).unwrap();
+        state
+            .apply_layout(b"prof_enable", |_, _| Ok(-3), 0)
+            .unwrap();
+        state.apply_layout(b"scrolltype", |_, _| Ok(-7), 0).unwrap();
+        state
+            .apply_layout(b"wipewidth", |_, default| Ok(default), 0)
+            .unwrap();
+        assert_eq!(word(&state, font_offset + 0xc), 9);
+        assert_eq!(word(&state, font_offset + 0x10), 100);
+        assert_eq!(word(&state, 0x6c), (-3i32) as u32);
+        assert_eq!(word(&state, 4), 1);
+        assert_eq!(state.font_inheritance()[0], encoding == TextEncoding::Cp932);
+        state
+            .refresh_font_defaults(&MessageDefaults::default())
+            .unwrap();
+        assert_eq!(
+            word(&state, font_offset + 0xc),
+            if encoding == TextEncoding::Cp932 {
+                0
+            } else {
+                9
+            }
+        );
     }
 }

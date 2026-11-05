@@ -37,7 +37,7 @@
 
 `message::MessageFactory { fallback }` 创建类型 48／63 的 `MessageObject`，复用平面属性与生命周期，接入默认配置、配置、追加、分隔、逐字／渐显、强制显示、速度、剩余数量和画布提交。调用前通过 `Runtime::set_fonts` 绑定 `FontServices`，通过 `host_mut().message_time_scale` 配置消息全局时间比例，按需设置 `host_mut().message_defaults = Some(MessageDefaults { .. })`；独立宿主提供相应字体、默认配置、可见性与提交服务。原配置使用显式 `CommandBuffers`，不解引用进程指针。运行时接入普通 611～619、695 和 884，配置地址可来自 VM 普通区或外部区，数量查询要求有效类型 48 对象。具体契约见[消息任务对象](message.md#消息任务对象)和[普通 KCS 调用](message.md#默认配置与普通-kcs-调用)；CST 消息及完成等待继续接入。
 
-FES `fontcom add name` 调用同一字体服务的 `add_resource`，名称为已展开的 CP932 直接文件名；缺失／空名称跳过。返回 false 时继续脚本，服务错误保留当前事件。默认方法返回未支持诊断，宿主应实现实际字体注册；其余字体枚举及默认名称命令继续诊断。
+FES `fontcom add name` 调用同一字体服务的 `add_resource`，名称为已展开的 CP932 直接文件名；缺失／空名称跳过。返回 false 时继续脚本，服务错误保留当前事件。init 调用 `FontServices::enumerate`，每份 Scene 独立保存字体列表，count／get／search／default 分别提供数量、UTF-8 名称、名称查询和全局默认名称；`Scene::font_names()` 提供只读视图。默认服务方法返回未支持诊断，宿主应实现实际注册与枚举，完整契约见 [字体枚举命令](fes-text.md#字体枚举命令)。
 
 `audio::parse_loop_table(bytes)` 读取循环点表，保留待补全的字节名称及原始 64 位起点／终点。`LoopPoints::register(name, start, end)` 保存声音命令 199 的原始循环范围。首次登记追加记录；同名更新只改起点，保留原终点、名称与顺序。`find(name)` 和 `entries()` 提供只读查询，名称及范围限制见[声音接口](audio.md)。当前接口不解码音频，也不执行播放。
 
