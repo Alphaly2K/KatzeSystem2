@@ -70,9 +70,6 @@ pub fn decode_frame(data: &[u8], id: i32) -> Result<Option<DecodedFrame>> {
     let data_size = read::sized(read::u32_at(payload, 12)?, offset + 12)?;
     let command_length = read::sized(read::u32_at(payload, 16)?, offset + 16)?;
     let command_size = read::sized(read::u32_at(payload, 20)?, offset + 20)?;
-    if data_size > size {
-        return Err(Error::new(offset + 12, "HG-3 游程数据超过像素长度"));
-    }
     let literals = read::inflate(read::range(payload, 24, data_length)?, data_size)?;
     let commands = read::inflate(
         read::range(payload, 24 + data_length, command_length)?,
@@ -80,7 +77,8 @@ pub fn decode_frame(data: &[u8], id: i32) -> Result<Option<DecodedFrame>> {
     )?;
     let planes = expand_runs(&literals, &commands, size)?;
     let mut pixels = vec![0; size];
-    let plane_size = size / 4;
+    // 位平面按完整游程缓冲分组；小图允许在可见像素之后保留填充。
+    let plane_size = planes.len() / 4;
     for (index, pixel) in pixels.chunks_exact_mut(4).enumerate() {
         for (channel, value) in pixel.iter_mut().enumerate() {
             let mut packed = 0;
@@ -137,14 +135,21 @@ impl Bits<'_> {
     }
 }
 
-fn expand_runs(literals: &[u8], commands: &[u8], size: usize) -> Result<Vec<u8>> {
+fn expand_runs(literals: &[u8], commands: &[u8], minimum_size: usize) -> Result<Vec<u8>> {
     let mut bits = Bits {
         bytes: commands,
         position: 0,
     };
     let mut copy = bits.bit()?;
-    if bits.gamma()? != size {
-        return Err(Error::new(0, "HG-3 游程输出长度与像素尺寸不符"));
+    let size = bits.gamma()?;
+    if size < minimum_size {
+        return Err(Error::new(0, "HG-3 游程输出短于像素长度"));
+    }
+    if size > read::MAX_BYTES {
+        return Err(Error::new(0, "HG-3 游程输出超过存储上限"));
+    }
+    if size % 4 != 0 {
+        return Err(Error::new(0, "HG-3 游程输出没有四字节对齐"));
     }
     let mut output = vec![0; size];
     let mut position = 0;

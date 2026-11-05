@@ -137,6 +137,23 @@ fn native_pixels_restore_bit_planes_signed_deltas_and_top_down_bgra() {
 }
 
 #[test]
+fn padded_run_buffers_keep_the_full_plane_stride_and_return_only_visible_pixels() {
+    let bytes = pixel_image([1, 1], LITERALS, COMMANDS);
+    let frame = hg3::decode_frame(&bytes, 0x8000_0001u32 as i32)
+        .unwrap()
+        .unwrap();
+    assert_eq!(frame.info.size, [1, 1]);
+    assert_eq!(frame.pixels, [11, 22, 33, 44]);
+
+    let zero = pixel_image([2, 2], &[], &[0, 0x08, 0, 0, 1, 0]);
+    let frame = hg3::decode_frame(&zero, 0x8000_0001u32 as i32)
+        .unwrap()
+        .unwrap();
+    assert_eq!(frame.info.size, [2, 2]);
+    assert_eq!(frame.pixels, [0; 16]);
+}
+
+#[test]
 fn native_pixels_reject_bad_runs_dimensions_streams_and_unsupported_encodings() {
     let mut cases = vec![
         pixel_image([2, 3], &LITERALS[..LITERALS.len() - 1], COMMANDS),
@@ -144,6 +161,9 @@ fn native_pixels_reject_bad_runs_dimensions_streams_and_unsupported_encodings() 
         pixel_image([2, 3], LITERALS, &[0; 8]),
         pixel_image([2, 3], LITERALS, &[0x02]),
         pixel_image([1, 1], &[], &[0x08, 0x05]),
+        pixel_image([1, 1], &[], &[0x28, 0x05]),
+        pixel_image([1, 1], &[], &[0, 0, 0, 0x10, 0, 0, 0]),
+        pixel_image([3, 3], LITERALS, COMMANDS),
         pixel_image([0, 3], &[], COMMANDS),
         pixel_image([u32::MAX, u32::MAX], &[], COMMANDS),
     ];
