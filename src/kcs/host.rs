@@ -73,7 +73,7 @@ pub struct HostState {
     pub implicit_matrix: [u32; 16],
     pub random: ScriptRandom,
     pub(super) integer_maps: BTreeMap<u32, BTreeMap<Vec<u8>, u32>>,
-    sequence_maps: BTreeMap<u32, super::sequences::SequenceMap>,
+    pub(super) sequence_maps: BTreeMap<u32, super::sequences::SequenceMap>,
     pub(super) record_stacks: BTreeMap<u32, super::record_stack::RecordStack>,
     pub(super) containers: BTreeMap<u32, crate::save::DataContainer>,
     pub(super) raw_buffers: BTreeMap<u32, Vec<u8>>,
@@ -300,6 +300,9 @@ pub(crate) fn call_native(
     }
     if matches!(index, 900 | 901) {
         return super::map_data::call(host, index, arguments, vm);
+    }
+    if matches!(index, 424 | 425) {
+        return super::sequences::call(host, index, arguments, vm);
     }
     if matches!(index, 863..=868) {
         return super::record_stack::call(host, index, arguments, vm);

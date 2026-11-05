@@ -90,13 +90,25 @@ fn sequence_file_replacement_keeps_names_and_clear_keeps_file_data() {
         call(&mut host, &mut vm, 423, &[handle, 256]).unwrap(),
         NativeReturn::Value(1)
     );
+    let NativeReturn::Value(container) = call(&mut host, &mut vm, 238, &[77]).unwrap() else {
+        panic!()
+    };
+    assert_eq!(
+        call(&mut host, &mut vm, 424, &[container, 7, handle]).unwrap(),
+        NativeReturn::Value(1)
+    );
     call(&mut host, &mut vm, 421, &[handle]).unwrap();
     assert_eq!(host.inner.sequence_data(handle).unwrap().bytes(), b"ABC");
     assert_eq!(
         call(&mut host, &mut vm, 423, &[handle, 256]).unwrap(),
         NativeReturn::Value(0)
     );
-    call(&mut host, &mut vm, 422, &[handle, 256]).unwrap();
+    assert_eq!(
+        call(&mut host, &mut vm, 425, &[container, 7, handle]).unwrap(),
+        NativeReturn::Value(1)
+    );
+    call(&mut host, &mut vm, 246, &[container]).unwrap();
+    assert_eq!(host.inner.sequence_data(handle).unwrap().bytes(), b"ABC");
     for missing in [None, Some(Vec::new())] {
         *bytes.borrow_mut() = missing;
         call(&mut host, &mut vm, 458, &[handle, 128]).unwrap();
@@ -166,7 +178,7 @@ fn ins(code: &mut Vec<u8>, op: u8, args: &[(u8, u32)]) {
 }
 
 #[test]
-fn runtime_script_loads_and_releases_sequence_data_across_budget_continuations() {
+fn runtime_script_roundtrips_sequence_tree_and_keeps_file_data_across_budget_continuations() {
     let mut code = Vec::new();
     ins(&mut code, 0x25, &[(3, 0)]);
     ins(&mut code, 0x2b, &[(3, 458), (3, 4)]);
@@ -175,6 +187,29 @@ fn runtime_script_loads_and_releases_sequence_data_across_budget_continuations()
     ins(&mut code, 0x25, &[(0x13, 0)]);
     ins(&mut code, 0x25, &[(3, 128)]);
     ins(&mut code, 0x2b, &[(3, 458), (3, 8)]);
+    ins(&mut code, 0x25, &[(0x13, 0)]);
+    ins(&mut code, 0x25, &[(3, 160)]);
+    ins(&mut code, 0x2b, &[(3, 422), (3, 8)]);
+    ins(&mut code, 0x25, &[(3, 77)]);
+    ins(&mut code, 0x2b, &[(3, 238), (3, 4)]);
+    ins(&mut code, 0x26, &[(3, 8)]);
+    for index in [424, 425] {
+        ins(&mut code, 0x25, &[(0x13, 8)]);
+        ins(&mut code, 0x25, &[(3, 7)]);
+        ins(&mut code, 0x25, &[(0x13, 0)]);
+        ins(&mut code, 0x2b, &[(3, index), (3, 12)]);
+        ins(&mut code, 0x26, &[(3, if index == 424 { 12 } else { 20 })]);
+        if index == 424 {
+            ins(&mut code, 0x25, &[(0x13, 0)]);
+            ins(&mut code, 0x2b, &[(3, 421), (3, 4)]);
+        }
+    }
+    ins(&mut code, 0x25, &[(0x13, 0)]);
+    ins(&mut code, 0x25, &[(3, 160)]);
+    ins(&mut code, 0x2b, &[(3, 423), (3, 8)]);
+    ins(&mut code, 0x26, &[(3, 16)]);
+    ins(&mut code, 0x25, &[(0x13, 8)]);
+    ins(&mut code, 0x2b, &[(3, 246), (3, 4)]);
     ins(&mut code, 0x2b, &[(3, 65), (3, 0)]);
     ins(&mut code, 0x25, &[(0x13, 0)]);
     ins(&mut code, 0x2b, &[(3, 420), (3, 4)]);
@@ -183,6 +218,7 @@ fn runtime_script_loads_and_releases_sequence_data_across_budget_continuations()
     data[16..20].copy_from_slice(&7u32.to_le_bytes());
     let name = b"item%d[G16]\0";
     data[128..128 + name.len()].copy_from_slice(name);
+    data[160..166].copy_from_slice(b"a,b,1\0");
     let program = Program::from_code(&code, data, 64).unwrap();
     for budget in [1, 4096] {
         let requests = Requests::default();
@@ -215,6 +251,14 @@ fn runtime_script_loads_and_releases_sequence_data_across_budget_continuations()
         assert_eq!(
             runtime.host().sequence_data(handle).unwrap().bytes(),
             b"payload"
+        );
+        let vm = runtime.object(task).unwrap().interpreter().unwrap();
+        assert_eq!(
+            vm.read(12, 12).unwrap(),
+            [1u32; 3]
+                .into_iter()
+                .flat_map(u32::to_le_bytes)
+                .collect::<Vec<_>>()
         );
         assert_eq!(
             *requests.borrow(),

@@ -138,3 +138,124 @@ fn sequence_name_modes_add_only_the_first_matching_variant() {
         }
     }
 }
+
+#[test]
+fn sequence_container_format_keeps_full_keys_first_records_and_bounded_tree_reads() {
+    fn root(name: &[u8], count: u32) -> Vec<u8> {
+        let mut bytes = vec![0; 68];
+        bytes[..4].copy_from_slice(&count.to_le_bytes());
+        bytes[4..4 + name.len()].copy_from_slice(name);
+        bytes
+    }
+    fn edge(bytes: &mut Vec<u8>, count: u32, key: i32) {
+        bytes.extend(count.to_le_bytes());
+        bytes.extend(key.to_le_bytes());
+    }
+    let mut state = State::new(0);
+    let mut host = CoreHost::new(&mut state);
+    let mut vm =
+        Interpreter::new(Program::from_code(&[], vec![0; 8192], 32).unwrap(), vec![]).unwrap();
+    let map = create(&mut host, &mut vm);
+    let NativeReturn::Value(container) = call(&mut host, &mut vm, 238, &[77]) else {
+        panic!()
+    };
+    let mut expected = root(b"a_b", 3);
+    edge(&mut expected, 0, -128);
+    edge(&mut expected, 1, 49);
+    edge(&mut expected, 0, -1);
+    edge(&mut expected, 0, 256);
+    let mut source = expected.clone();
+    source[8..68].fill(0xa5);
+    source.extend(root(b"a_b", 0));
+    source.extend(root(b"ignored", 0));
+    vm.write(1024, &source).unwrap();
+    call(
+        &mut host,
+        &mut vm,
+        244,
+        &[container, 17, source.len() as u32, 1024],
+    );
+    for _ in 0..2 {
+        assert_eq!(
+            call(&mut host, &mut vm, 425, &[container, 17, map]),
+            NativeReturn::Value(1)
+        );
+        for (query, found) in [
+            (b"a,b,1".as_slice(), 1),
+            (b"a,b,\x80", 1),
+            (b"a,b,\xff", 0),
+            (b"ignored", 0),
+        ] {
+            assert_eq!(
+                text(&mut host, &mut vm, 423, map, query),
+                NativeReturn::Value(found)
+            );
+        }
+        call(&mut host, &mut vm, 424, &[container, 30, map]);
+        assert_eq!(
+            host.data_container(container).unwrap().record(30).unwrap(),
+            Some(expected.as_slice())
+        );
+        call(&mut host, &mut vm, 421, &[map]);
+    }
+    let used = host.data_container(container).unwrap().used_len();
+    call(&mut host, &mut vm, 424, &[container, 30, map]);
+    assert_eq!(host.data_container(container).unwrap().used_len(), used + 8);
+    for args in [vec![0], vec![0, u32::MAX, u32::MAX], vec![container, 17, 0]] {
+        for index in [424, 425] {
+            assert_eq!(
+                call(&mut host, &mut vm, index, &args),
+                NativeReturn::Value(0)
+            );
+        }
+    }
+    assert_eq!(
+        call(&mut host, &mut vm, 425, &[container, 999, u32::MAX]),
+        NativeReturn::Value(0)
+    );
+    assert_eq!(
+        call(&mut host, &mut vm, 424, &[u32::MAX, 17, 0]),
+        NativeReturn::Value(0)
+    );
+    let mut unterminated = root(b"a_b", 0);
+    unterminated[4..].fill(b'x');
+    let mut duplicate = root(b"a_b", 2);
+    edge(&mut duplicate, 0, 49);
+    edge(&mut duplicate, 0, 49);
+    let mut too_deep = root(b"a_b", 1);
+    for _ in 0..257 {
+        edge(&mut too_deep, 1, 49);
+    }
+    edge(&mut too_deep, 0, -1);
+    for (index, bytes) in [
+        vec![0; 67],
+        unterminated,
+        root(b"a_b", 1),
+        root(b"a_b", i32::MAX as u32),
+        duplicate,
+        too_deep,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let id = 100 + index as u32;
+        vm.write(1024, &bytes).unwrap();
+        call(
+            &mut host,
+            &mut vm,
+            244,
+            &[container, id, bytes.len() as u32, 1024],
+        );
+        let args: Vec<_> = [container, id, map]
+            .into_iter()
+            .flat_map(u32::to_le_bytes)
+            .collect();
+        assert!(host.call(425, &args, &mut vm).is_err());
+        call(&mut host, &mut vm, 425, &[container, 30, map]);
+    }
+    call(&mut host, &mut vm, 246, &[container]);
+    assert_eq!(
+        text(&mut host, &mut vm, 423, map, b"a,b,1"),
+        NativeReturn::Value(1)
+    );
+}
