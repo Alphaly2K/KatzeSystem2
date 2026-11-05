@@ -1757,11 +1757,10 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
                 | 260
                 | 262
                 | 263
+                | 339
                 | 342
-                | 542
-                | 739
-                | 848
-                | 849
+                | 455
+                | 462..=464 | 542 | 625 | 663 | 739 | 848 | 849 | 880
         ) {
             return self.graphics_native(index, arguments, vm);
         }

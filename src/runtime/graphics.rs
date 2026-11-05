@@ -56,9 +56,11 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             78 => 12,
             79 => 16,
             80 | 83 | 342 => 4,
-            82 | 88 | 92 | 105 | 258 | 262 | 848 | 849 => 8,
+            82 | 88 | 92 | 105 | 258 | 262 | 455 | 462 | 464 | 848 | 849 => 8,
+            880 => 16,
+            339 => 24,
             84 | 101 => 20,
-            100 | 256 | 260 | 263 => 12,
+            100 | 256 | 260 | 263 | 463 | 625 | 663 => 12,
             104 => 28,
             _ => unreachable!(),
         };
@@ -67,7 +69,8 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         }
         let route_zero = matches!(
             index,
-            104 | 105 | 256 | 258 | 260 | 262 | 263 | 342 | 848 | 849
+            104 | 105 | 256 | 258 | 260 | 262 | 263 | 339 | 342 | 455 | 462
+                ..=464 | 625 | 663 | 848 | 849 | 880
         );
         if route_zero && arguments.len() != count {
             return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
@@ -216,6 +219,70 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             }
             342 => {
                 self.command_target(target, 298, [0; 3])?;
+            }
+            339 => {
+                let mut rectangle = [0; 16];
+                let values = [
+                    word(2),
+                    word(3),
+                    word(2).wrapping_add(word(4)),
+                    word(3).wrapping_add(word(5)),
+                ];
+                for (bytes, value) in rectangle.chunks_exact_mut(4).zip(values) {
+                    bytes.copy_from_slice(&value.to_le_bytes());
+                }
+                self.command_target_with_buffers(
+                    target,
+                    295,
+                    [word(1), 0, 0],
+                    &mut CommandBuffers {
+                        data0: None,
+                        data1: Some(&mut rectangle),
+                        external: None,
+                    },
+                )?;
+            }
+            455 => {
+                self.command_target(target, 302, [0, word(1), 0])?;
+            }
+            462 => {
+                let mut priority = u32::MAX.to_le_bytes();
+                self.command_target_with_buffers(
+                    target,
+                    304,
+                    [word(1), 0, 0],
+                    &mut CommandBuffers {
+                        data0: None,
+                        data1: Some(&mut priority),
+                        external: None,
+                    },
+                )?;
+                return Ok(NativeReturn::Value(u32::from_le_bytes(priority)));
+            }
+            463 | 625 | 663 => {
+                let code = match index {
+                    463 => 305,
+                    625 => 301,
+                    _ => 314,
+                };
+                self.command_target(target, code, [word(1), word(2), 0])?;
+            }
+            464 => {
+                self.command_target(target, 306, [word(1), 0, 0])?;
+            }
+            880 => {
+                let mut values = [0; 8];
+                values.copy_from_slice(&arguments[8..16]);
+                self.command_target_with_buffers(
+                    target,
+                    318,
+                    [word(1), 0, 0],
+                    &mut CommandBuffers {
+                        data0: None,
+                        data1: Some(&mut values),
+                        external: None,
+                    },
+                )?;
             }
             _ => unreachable!(),
         }

@@ -146,6 +146,35 @@ impl ProgramLoader for Programs {
         }
         let mut code = Vec::new();
         ins(&mut code, 0x25, &[0xdead_beef]);
+        if name == b"controls" {
+            for (native, args) in [
+                (256, vec![1, 5, 3]),
+                (455, vec![1, 1]),
+                (463, vec![1, 0, (-7i32) as u32]),
+                (462, vec![1, 0]),
+                (339, vec![1, 0, 0, 0, 1, 1]),
+                (625, vec![1, 0, 1]),
+                (464, vec![1, 0]),
+                (462, vec![1, 99]),
+                (342, vec![1]),
+            ] {
+                for value in &args {
+                    ins(&mut code, 0x25, &[*value]);
+                }
+                ins(&mut code, 0x2b, &[native, args.len() as u32 * 4]);
+                if native == 462 {
+                    ins(&mut code, 0x26, &[if args[1] == 0 { 4 } else { 8 }]);
+                }
+            }
+            ins(&mut code, 0x26, &[0]);
+            ins(&mut code, 0x2b, &[65, 0]);
+            for value in [1, 0] {
+                ins(&mut code, 0x25, &[value]);
+            }
+            ins(&mut code, 0x2b, &[455, 8]);
+            ins(&mut code, 0x2b, &[65, 0]);
+            return Ok(Some(Program::from_code(&code, vec![0; 12], 128)?));
+        }
         for (native, args) in [
             (256, vec![1, 5, 3]),
             (260, vec![1, 2, (-1i32) as u32]),
@@ -167,6 +196,61 @@ impl ProgramLoader for Programs {
         ins(&mut code, 0x26, &[0]);
         ins(&mut code, 0x3b, &[]);
         Ok(Some(Program::from_code(&code, vec![0; 4], 128)?))
+    }
+}
+
+#[test]
+fn ordinary_list_controls_preserve_missing_priority_and_copy_background_pixels() {
+    for budget in [1, 4096] {
+        let mut runtime = Runtime::new(
+            0,
+            kind::ROOT,
+            Box::new(BaseObject::new()),
+            State::new(0),
+            GraphicsFactory {
+                fallback: KcsFactory::new(Programs),
+            },
+        );
+        runtime.set_budget(budget, 1 << 20);
+        runtime.host_mut().surface_size = [5, 3];
+        runtime.drawing_mut().target = Some(RenderTarget::new([5, 3]).unwrap());
+        let source = runtime.images_mut().create(99, [3, 2]).unwrap();
+        assert_eq!(source, 1);
+        for pixel in runtime
+            .images_mut()
+            .get_mut(source)
+            .unwrap()
+            .pixels_mut()
+            .chunks_exact_mut(4)
+        {
+            pixel.copy_from_slice(&0xff12_3456u32.to_le_bytes());
+        }
+        let list = runtime.create(0, kind::IMAGE_LIST, b"list", b"").unwrap();
+        let script = runtime.create(0, kind::ORDINARY, b"controls", b"").unwrap();
+        runtime.update(0, 0).unwrap();
+        let vm = runtime.object(script).unwrap().interpreter().unwrap();
+        assert_eq!(
+            vm.read(0, 4).unwrap().as_ref(),
+            &0xdead_beefu32.to_le_bytes()
+        );
+        assert_eq!(vm.read(4, 4).unwrap().as_ref(), &u32::MAX.to_le_bytes());
+        assert_eq!(vm.read(8, 4).unwrap().as_ref(), &u32::MAX.to_le_bytes());
+        assert!(vm.stack_bytes().is_empty());
+        runtime.images_mut().release(source).unwrap();
+        let image = output_image(&mut runtime, list);
+        let surface = runtime.images().get(image).unwrap().surface();
+        assert_eq!(
+            surface
+                .pixels()
+                .chunks_exact(4)
+                .filter(|p| *p == 0xff12_3456u32.to_le_bytes())
+                .count(),
+            6
+        );
+        runtime.update(1, 0).unwrap();
+        assert_eq!(send(&mut runtime, list, 294, 0, 0), 0);
+        let plane = runtime.tree().children(list).unwrap().next().unwrap();
+        assert_eq!(runtime.drawables().get(plane).unwrap().display(), 0);
     }
 }
 
