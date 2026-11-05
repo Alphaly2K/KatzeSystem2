@@ -222,7 +222,7 @@ impl<F: ObjectFactory> Runtime<F> {
 
     /// 配置同步资源读取与类别名称补全；已有资源对象继续保留。
     pub fn set_resources(&mut self, services: impl crate::kcs::ResourceServices + 'static) {
-        self.resources.services = Some(Box::new(services));
+        self.resources.services = Some(Box::new(crate::kcs::CachedResources::new(services)));
     }
 
     /// 配置按任务存档目录读取 CSS 文件及查询修改时间的服务；已有容器继续保留。
@@ -1789,7 +1789,7 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         }
         if matches!(
             index,
-            111 | 112 | 114 | 115 | 117 | 365 | 366 | 368 | 590..=597
+            111 | 112 | 114 | 115 | 117 | 365 | 366 | 368 | 434..=438 | 590..=597
         ) {
             return self.resources.call(self.host.task_id, index, arguments, vm);
         }

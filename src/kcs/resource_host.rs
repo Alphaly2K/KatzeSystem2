@@ -1,4 +1,4 @@
-use super::{Host, Interpreter, NativeReturn, TaskClock, strings};
+use super::{CachedResources, Host, Interpreter, NativeReturn, ResourceCache, TaskClock, strings};
 use crate::resource::{ResourceMode, XmlDocument};
 use crate::{Error, HandleAllocator, Result, read};
 use std::collections::BTreeMap;
@@ -11,6 +11,23 @@ pub trait ResourceServices {
     }
 
     fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>>;
+
+    /// 返回与普通读取共用的预读缓存；默认由 CachedResources 提供。
+    fn resource_cache(&self) -> Option<ResourceCache> {
+        None
+    }
+}
+
+impl<S: ResourceServices + ?Sized> ResourceServices for &mut S {
+    fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+        (**self).resolve(category, name)
+    }
+    fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
+        (**self).read(name, mode)
+    }
+    fn resource_cache(&self) -> Option<ResourceCache> {
+        (**self).resource_cache()
+    }
 }
 
 pub(crate) fn load_sequence_file(
@@ -42,7 +59,7 @@ pub(crate) fn load_sequence_file(
 /// 为已有宿主提供图像原始数据、XML、三整数分组表、名称表及句柄生命周期。
 pub struct ResourceHost<'a, H, S> {
     pub inner: &'a mut H,
-    pub services: &'a mut S,
+    pub services: CachedResources<&'a mut S>,
     state: ResourceState,
 }
 
@@ -65,7 +82,7 @@ impl<'a, H: Host, S: ResourceServices> ResourceHost<'a, H, S> {
         let handles = inner.handle_allocator().unwrap_or_default();
         Self {
             inner,
-            services,
+            services: CachedResources::new(services),
             state: ResourceState::with_handles(handles),
         }
     }
@@ -277,7 +294,7 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
     }
 
     fn resource_services(&mut self) -> Option<&mut dyn ResourceServices> {
-        Some(self.services)
+        Some(&mut self.services)
     }
 
     fn set_task_clock(&mut self, clock: &TaskClock) {
@@ -297,17 +314,22 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
     }
 
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn> {
+        if matches!(index, 434..=438) {
+            return super::prefetch_call(index, arguments, vm, Some(&mut self.services));
+        }
         if matches!(index, 633..=638) {
             return self.state.name_table_call(
                 index,
                 arguments,
                 vm,
-                Some(self.services),
+                Some(&mut self.services),
                 self.inner.unicode_text(),
             );
         }
         if index == 458 {
-            if let Some((handle, bytes)) = load_sequence_file(arguments, vm, Some(self.services))? {
+            if let Some((handle, bytes)) =
+                load_sequence_file(arguments, vm, Some(&mut self.services))?
+            {
                 self.inner.load_sequence_data(handle, bytes)?;
             }
             return Ok(NativeReturn::Continue);
@@ -315,7 +337,8 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
         if !matches!(index, 365 | 366 | 368 | 590..=597) {
             return self.inner.call(index, arguments, vm);
         }
-        self.state.call(index, arguments, vm, Some(self.services))
+        self.state
+            .call(index, arguments, vm, Some(&mut self.services))
     }
 }
 

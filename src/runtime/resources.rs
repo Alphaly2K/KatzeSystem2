@@ -99,6 +99,16 @@ impl Resources {
         arguments: &[u8],
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
+        if matches!(index, 434..=438) {
+            return crate::kcs::prefetch_call(
+                index,
+                arguments,
+                vm,
+                self.services
+                    .as_mut()
+                    .map(|services| services.as_mut() as _),
+            );
+        }
         if matches!(index, 365 | 366 | 368 | 590..=597) {
             return self.raw.call(
                 index,
