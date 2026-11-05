@@ -18,6 +18,7 @@ use std::collections::BTreeMap;
 mod audio;
 mod backlog;
 mod cst;
+mod emocon;
 pub mod fes;
 pub use cst::CstContext;
 mod graphics;
@@ -1669,6 +1670,9 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
     }
 
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn> {
+        if matches!(index, 1055..=1061) {
+            return self.emocon_native(index, arguments, vm);
+        }
         if matches!(index, 696..=700 | 785 | 850 | 851 | 876 | 977 | 1034) {
             return self.backlog_native(index, arguments, vm);
         }
@@ -1851,6 +1855,7 @@ impl<F: ObjectFactory> Lifecycle for TaskLifecycle<'_, F> {
         self.resources.images.release_owner(id);
         self.resources.raw.release_owner(id);
         self.resources.drawables.remove(id);
+        self.resources.emocon.remove(&id);
         self.objects.remove(&id);
         Ok(())
     }
