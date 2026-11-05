@@ -72,6 +72,7 @@ pub enum ObjectState {
     Base,
     CImage(Box<CImageState>),
     Image(Box<ImageState>),
+    ImageWindow(Box<ImageState>),
     DifImage(Box<DifImageState>),
     Button(Box<ButtonState>),
     CPlane(Box<CPlaneState>),
@@ -89,6 +90,7 @@ impl ObjectState {
             Self::Base => "BASE",
             Self::CImage(_) => "CIMAGE",
             Self::Image(_) => "IMAGE",
+            Self::ImageWindow(_) => "IMGWND",
             Self::DifImage(_) => "DIFIMAGE",
             Self::Button(_) => "BUTTON",
             Self::CPlane(_) => "CPLANE",
@@ -106,6 +108,7 @@ impl ObjectState {
             "BASE" => Self::Base,
             "CIMAGE" => Self::CImage(Box::default()),
             "IMAGE" => Self::Image(Box::default()),
+            "IMGWND" => Self::ImageWindow(Box::default()),
             "DIFIMAGE" => Self::DifImage(Box::default()),
             "BUTTON" => Self::Button(Box::default()),
             "CPLANE" => Self::CPlane(Box::default()),
@@ -140,7 +143,7 @@ impl ObjectState {
     fn image(&self) -> Option<&CImageState> {
         match self {
             Self::CImage(state) => Some(state),
-            Self::Image(state) => Some(&state.base),
+            Self::Image(state) | Self::ImageWindow(state) => Some(&state.base),
             Self::DifImage(state) => Some(&state.base),
             Self::Button(state) => Some(&state.image.base),
             _ => None,
@@ -150,7 +153,7 @@ impl ObjectState {
     fn image_mut(&mut self) -> Option<&mut CImageState> {
         match self {
             Self::CImage(state) => Some(state),
-            Self::Image(state) => Some(&mut state.base),
+            Self::Image(state) | Self::ImageWindow(state) => Some(&mut state.base),
             Self::DifImage(state) => Some(&mut state.base),
             Self::Button(state) => Some(&mut state.image.base),
             _ => None,
@@ -159,7 +162,7 @@ impl ObjectState {
 
     fn image_source(&self) -> Option<&ImageState> {
         match self {
-            Self::Image(state) => Some(state),
+            Self::Image(state) | Self::ImageWindow(state) => Some(state),
             Self::Button(state) => Some(&state.image),
             _ => None,
         }
@@ -167,7 +170,7 @@ impl ObjectState {
 
     fn image_source_mut(&mut self) -> Option<&mut ImageState> {
         match self {
-            Self::Image(state) => Some(state),
+            Self::Image(state) | Self::ImageWindow(state) => Some(state),
             Self::Button(state) => Some(&mut state.image),
             _ => None,
         }
@@ -579,7 +582,7 @@ impl Objects {
             let dirty = match &mut self.objects.get_mut(&handle).unwrap().state {
                 ObjectState::Base | ObjectState::Draw(_) => false,
                 ObjectState::CImage(state) => state.apply(&initialization.attributes, bank as u32),
-                ObjectState::Image(state) => {
+                ObjectState::Image(state) | ObjectState::ImageWindow(state) => {
                     state.apply(&initialization.attributes, bank as u32, &mut transform_name)?
                 }
                 ObjectState::DifImage(state) => {

@@ -21,6 +21,95 @@ impl Objects {
 }
 
 impl<F: ObjectFactory> Store<'_, F> {
+    pub(super) fn update_fes_image_window(
+        &mut self,
+        owner: u32,
+        objects: &mut Objects,
+        handle: u32,
+        image: Option<u32>,
+    ) -> Result<()> {
+        let cache = objects.preloaded_images.clone();
+        let list = self.check_fes_image_list(owner, objects)?;
+        let wrapper = match image {
+            Some(image) => image,
+            None => self.fes_image_wrapper(owner, objects, handle)?,
+        };
+        let state = objects.get(handle).unwrap().state.image_source().unwrap();
+        let mut prepared = false;
+        if state.base.updates.needs_rebuild() {
+            let name = &state.file[..state
+                .file
+                .iter()
+                .position(|&b| b == 0)
+                .unwrap_or(state.file.len())];
+            let raw = if name.is_empty() {
+                0
+            } else {
+                let services = self
+                    .resources
+                    .services
+                    .as_deref_mut()
+                    .ok_or_else(|| Error::new(0, "运行时未配置 FES 图像资源服务"))?;
+                let mut services = super::preload::ImageServices::new(&cache, services);
+                self.resources
+                    .raw
+                    .load_fes_image(name, &mut services, owner, 0)?
+            };
+            objects
+                .get_mut(handle)
+                .unwrap()
+                .state
+                .image_mut()
+                .unwrap()
+                .updates
+                .source_rebuild = false;
+            if raw != 0 {
+                objects
+                    .get_mut(handle)
+                    .unwrap()
+                    .state
+                    .image_mut()
+                    .unwrap()
+                    .updates
+                    .rebuild = false;
+                let result = (|| {
+                    let reference = objects
+                        .get(handle)
+                        .unwrap()
+                        .state
+                        .image()
+                        .unwrap()
+                        .size_resource
+                        .clone();
+                    if let Some(reference) = reference {
+                        let size = self.fes_image_geometry(&cache, &reference, true)?;
+                        objects
+                            .get_mut(handle)
+                            .unwrap()
+                            .state
+                            .image_mut()
+                            .unwrap()
+                            .set_size(size);
+                    }
+                    let size = objects.get(handle).unwrap().state.image().unwrap().size;
+                    if size.into_iter().all(|axis| axis > 0) {
+                        self.resources.images.build_window(
+                            wrapper,
+                            self.resources.raw.image_data(raw)?,
+                            size.map(|v| v as u32),
+                        )?;
+                    }
+                    Ok(())
+                })();
+                self.resources.raw.release_image(raw)?;
+                result?;
+                prepared = true;
+            }
+        }
+        self.register_fes_image(owner, objects, handle, list, wrapper, prepared)?;
+        self.update_fes_image_priority(owner, objects, handle, list)
+    }
+
     pub(super) fn update_fes_cimage(
         &mut self,
         owner: u32,
@@ -81,7 +170,7 @@ impl<F: ObjectFactory> Store<'_, F> {
             None => self.fes_image_wrapper(owner, objects, handle)?,
         };
         let state = objects.get(handle).unwrap().state.image_source().unwrap();
-        let prepared = state.base.updates.rebuild;
+        let prepared = state.base.updates.needs_rebuild();
         if prepared {
             let name = &state.file[..state
                 .file
@@ -199,7 +288,9 @@ impl<F: ObjectFactory> Store<'_, F> {
         prepared: bool,
     ) -> Result<()> {
         let cache = objects.preloaded_images.clone();
-        let file = objects.get(handle).unwrap().state.image_source().is_some();
+        let object = objects.get(handle).unwrap();
+        let file = object.state.image_source().is_some();
+        let window = matches!(object.state, ObjectState::ImageWindow(_));
         let captured = matches!(objects.get(handle).unwrap().state, ObjectState::DifImage(_));
         let state = objects.get_mut(handle).unwrap().state.image_mut().unwrap();
         if state.updates.dirty || prepared {
@@ -235,7 +326,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                 if !file || slot != u32::MAX {
                     self.fes_command(owner, Some(list), 287, [slot, 0, 0], None)?;
                 }
-            } else if file || slot != u32::MAX {
+            } else if (file && !window) || slot != u32::MAX {
                 let position = objects.image_position(handle);
                 let position: [f32; 2] = std::array::from_fn(|i| {
                     if file {
@@ -277,6 +368,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                 .unwrap()
                 .updates;
             updates.rebuild = false;
+            updates.source_rebuild = false;
             updates.dirty = false;
         }
         Ok(())

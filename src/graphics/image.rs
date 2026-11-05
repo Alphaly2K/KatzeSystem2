@@ -5,6 +5,8 @@ use crate::resource::ResourceMode;
 use crate::{Error, HandleAllocator, Result, hg3, read};
 use std::collections::BTreeMap;
 
+mod window;
+
 /// 普通 111 的单个图像名称；帧号位于冒号后，扩展名按原名称重新拼接。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ImageReference {

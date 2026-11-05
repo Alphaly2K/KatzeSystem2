@@ -100,6 +100,9 @@ impl<F: ObjectFactory> Store<'_, F> {
         if matches!(object.state, ObjectState::Image(_)) {
             return self.update_fes_image(owner, objects, handle, image);
         }
+        if matches!(object.state, ObjectState::ImageWindow(_)) {
+            return self.update_fes_image_window(owner, objects, handle, image);
+        }
         if matches!(object.state, ObjectState::DifImage(_)) {
             return self.update_fes_difimage(owner, objects, handle);
         }

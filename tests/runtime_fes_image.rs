@@ -115,7 +115,7 @@ fn initialize(objects: &mut Objects, name: &str, attributes: ObjectAttributes) {
 fn image(objects: &Objects, handle: u32) -> &fes::CImageState {
     match &objects.get(handle).unwrap().state {
         ObjectState::CImage(state) => state,
-        ObjectState::Image(state) => &state.base,
+        ObjectState::Image(state) | ObjectState::ImageWindow(state) => &state.base,
         _ => panic!(),
     }
 }
@@ -501,6 +501,157 @@ fn pixel_file(color: u32) -> Vec<u8> {
     bytes.extend(data);
     bytes.extend(control);
     bytes
+}
+
+fn window_file() -> (Vec<u8>, [u32; 9]) {
+    let colors = std::array::from_fn(|i| 0xff00_0000 | ((i as u32 + 1) * 0x11_1111));
+    let mut bytes = b"HG-3".to_vec();
+    bytes.extend(12u32.to_le_bytes());
+    bytes.extend(0x300u32.to_le_bytes());
+    for (id, color) in colors.into_iter().enumerate() {
+        let mut frame = pixel_file(color).split_off(12);
+        let next = if id == 8 { 0 } else { frame.len() as u32 };
+        frame[..4].copy_from_slice(&next.to_le_bytes());
+        frame[4..8].copy_from_slice(&(id as u32).to_le_bytes());
+        bytes.extend(frame);
+    }
+    (bytes, colors)
+}
+
+#[test]
+fn window_composition_tiles_fixed_frames_and_keeps_bottom_origin_and_safe_extents() {
+    let (bytes, colors) = window_file();
+    let image = katze_system2::graphics::Image::from_window(&bytes, [5, 4]).unwrap();
+    let indices = [
+        [2, 7, 7, 7, 3],
+        [4, 8, 8, 8, 5],
+        [4, 8, 8, 8, 5],
+        [0, 6, 6, 6, 1],
+    ];
+    for (y, row) in indices.into_iter().enumerate() {
+        for (x, index) in row.into_iter().enumerate() {
+            assert_eq!(
+                image.surface().pixel(x as u32, y as u32),
+                Some(colors[index])
+            );
+        }
+    }
+    assert_eq!(image.info().offset, [0; 2]);
+    assert_eq!(image.info().base, [0; 2]);
+    let missing =
+        katze_system2::graphics::Image::from_window(&pixel_file(colors[7]), [3, 3]).unwrap();
+    assert_eq!(missing.surface().pixel(1, 0), Some(colors[7]));
+    assert_eq!(missing.surface().pixel(1, 1), Some(0));
+    assert!(katze_system2::graphics::Image::from_window(&bytes, [0, 4]).is_err());
+    assert!(katze_system2::graphics::Image::from_window(&bytes, [u32::MAX, 1]).is_err());
+    assert!(katze_system2::graphics::Image::from_window(b"invalid", [3, 3]).is_err());
+}
+
+#[test]
+fn image_windows_keep_old_pixels_retry_size_changes_and_release_independent_shares() {
+    for budget in [1, 4096] {
+        let (mut runtime, mut objects, list) = setup();
+        runtime.set_budget(budget, 10000);
+        let (bytes, colors) = window_file();
+        let reads = FileReads::default();
+        runtime.set_resources(PixelFiles {
+            files: BTreeMap::from([(b"panel".to_vec(), bytes)]),
+            reads: reads.clone(),
+        });
+        let window = define(&mut objects, "IMGWND", "window");
+        initialize(
+            &mut objects,
+            "window",
+            ObjectAttributes {
+                file: Some(b"panel".to_vec()),
+                size: Some([5, 4]),
+                image_number: Some(999),
+                position: [Some(1), Some(1), None],
+                priority: Some(5),
+                display: Some(1),
+                ..Default::default()
+            },
+        );
+        assert_eq!(image(&objects, window).size, [-1; 2]);
+        let mut interpreter =
+            fes::Interpreter::new(fes::Program::from_text(b"#START\nexit 0\n").unwrap()).unwrap();
+        objects.publish_bindings(&mut interpreter);
+        objects
+            .dispatch_object_command(
+                &mut interpreter,
+                &fes::Line {
+                    offset: 0,
+                    bytes: b"window size 5 4".to_vec(),
+                },
+                runtime.numbers_mut(),
+            )
+            .unwrap();
+        runtime.update_fes_record(0, &mut objects, 0).unwrap();
+        let wrapper = objects.get(window).unwrap().image_handle().unwrap();
+        let old = runtime.images_mut().share(wrapper).unwrap();
+        let pixels = runtime.images().pixel_handle(wrapper).unwrap();
+        assert_eq!(runtime.images().get(wrapper).unwrap().info().size, [5, 4]);
+        assert_eq!(send(&mut runtime, list, 294, 0, 0), 1);
+        frame(&mut runtime, budget);
+        assert_eq!(
+            runtime.drawing().target.as_ref().unwrap().pixel(1, 1),
+            Some(colors[0])
+        );
+        image_size(&mut objects, window, [6, 4]);
+        runtime.update_fes_object(0, &mut objects, window).unwrap();
+        assert_ne!(runtime.images().pixel_handle(wrapper).unwrap(), pixels);
+        assert_eq!(runtime.images().get(old).unwrap().info().size, [5, 4]);
+        assert_eq!(runtime.images().get(wrapper).unwrap().info().size, [6, 4]);
+        let pixels = runtime.images().pixel_handle(wrapper).unwrap();
+        initialize(
+            &mut objects,
+            "window",
+            ObjectAttributes {
+                file: Some(b"missing".to_vec()),
+                ..Default::default()
+            },
+        );
+        let before = reads.borrow().len();
+        for _ in 0..2 {
+            runtime.update_fes_object(0, &mut objects, window).unwrap();
+        }
+        assert_eq!(reads.borrow().len(), before + 1);
+        assert_eq!(runtime.images().pixel_handle(wrapper).unwrap(), pixels);
+        image_size(&mut objects, window, [6, 5]);
+        for _ in 0..2 {
+            runtime.update_fes_object(0, &mut objects, window).unwrap();
+        }
+        assert_eq!(reads.borrow().len(), before + 3);
+        assert!(image(&objects, window).updates.needs_rebuild());
+        initialize(
+            &mut objects,
+            "window",
+            ObjectAttributes {
+                file: Some(b"panel".to_vec()),
+                ..Default::default()
+            },
+        );
+        runtime.update_fes_object(0, &mut objects, window).unwrap();
+        assert_eq!(runtime.images().get(wrapper).unwrap().info().size, [6, 5]);
+        assert!(!image(&objects, window).updates.needs_rebuild());
+        let pixels = runtime.images().pixel_handle(wrapper).unwrap();
+        image_size(&mut objects, window, [0, 5]);
+        runtime.update_fes_object(0, &mut objects, window).unwrap();
+        assert_eq!(runtime.images().pixel_handle(wrapper).unwrap(), pixels);
+        assert_eq!(objects.get(window).unwrap().raw_image_handle(), 0);
+        runtime.remove_fes_object(0, &mut objects, window).unwrap();
+        assert!(runtime.images().get(wrapper).is_err());
+        assert_eq!(send(&mut runtime, list, 294, 0, 0), 0);
+        assert_eq!(runtime.images().get(old).unwrap().info().size, [5, 4]);
+        runtime.images_mut().release(old).unwrap();
+    }
+
+    fn image_size(objects: &mut Objects, handle: u32, size: [i32; 2]) {
+        let ObjectState::ImageWindow(image) = &mut objects.get_mut(handle).unwrap().state else {
+            panic!()
+        };
+        image.base.set_size(size);
+    }
 }
 
 #[derive(Default)]

@@ -6,6 +6,7 @@ use crate::{Result, hg3::StandardInfo};
 pub struct ImageUpdates {
     pub(crate) dirty: bool,
     pub(crate) rebuild: bool,
+    pub(crate) source_rebuild: bool,
     pub(crate) priority_changed: bool,
 }
 
@@ -15,7 +16,7 @@ impl ImageUpdates {
     }
 
     pub fn needs_rebuild(&self) -> bool {
-        self.rebuild
+        self.rebuild || self.source_rebuild
     }
 
     pub fn priority_changed(&self) -> bool {
@@ -324,7 +325,7 @@ impl ImageState {
             {
                 self.image_number = number;
                 self.frame_mapping_changed = false;
-                self.base.updates.rebuild = true;
+                self.base.updates.source_rebuild = true;
             }
             _ => (),
         }
@@ -348,7 +349,7 @@ impl ImageState {
     ) -> Result<()> {
         if self.requested_file.first().is_some_and(|&byte| byte != 0) {
             let next = transform_name(&self.requested_file)?;
-            self.base.updates.rebuild |= replace(&mut self.file, next);
+            self.base.updates.source_rebuild |= replace(&mut self.file, next);
         }
         Ok(())
     }

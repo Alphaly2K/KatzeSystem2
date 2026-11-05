@@ -112,7 +112,7 @@ impl<F: ObjectFactory> Store<'_, F> {
         };
         self.update_fes_image(owner, objects, handle, Some(wrapper))?;
         let flags = objects.get(handle).unwrap().button_update.clone().unwrap();
-        if !flags.rebuild && !flags.dirty && !flags.priority_changed {
+        if !flags.needs_rebuild() && !flags.dirty && !flags.priority_changed {
             objects.get_mut(handle).unwrap().button_update = None;
             return Ok(());
         }
@@ -131,7 +131,7 @@ impl<F: ObjectFactory> Store<'_, F> {
         {
             return Err(Error::new(0, "FES 输入任务绑定失效"));
         }
-        if flags.rebuild || flags.dirty {
+        if flags.needs_rebuild() || flags.dirty {
             let rectangle = self.fes_button_rectangle(objects, handle, wrapper)?;
             let ObjectState::Button(button) = &objects.get(handle).unwrap().state else {
                 unreachable!()
@@ -148,7 +148,7 @@ impl<F: ObjectFactory> Store<'_, F> {
             ]
             .map(i32::to_le_bytes)
             .concat();
-            if flags.rebuild {
+            if flags.needs_rebuild() {
                 let mut registration = bytes.clone();
                 registration.extend(priority.to_le_bytes());
                 registration.extend(0u32.to_le_bytes());
@@ -161,7 +161,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                 self.button_command(owner, task, 101, [0; 3], Some(&mut bytes))?;
             }
             self.button_command(owner, task, 93, [0, enabled, 0], None)?;
-            if flags.rebuild && mask && self.resources.images.pixel_handle(wrapper)? != 0 {
+            if flags.needs_rebuild() && mask && self.resources.images.pixel_handle(wrapper)? != 0 {
                 self.button_command(owner, task, 98, [0, wrapper, 0], None)?;
             }
             let updates = &mut objects
@@ -172,9 +172,10 @@ impl<F: ObjectFactory> Store<'_, F> {
                 .unwrap()
                 .updates;
             updates.rebuild = false;
+            updates.source_rebuild = false;
             updates.dirty = false;
         }
-        if !flags.rebuild && flags.priority_changed {
+        if !flags.needs_rebuild() && flags.priority_changed {
             let priority = objects
                 .get(handle)
                 .unwrap()

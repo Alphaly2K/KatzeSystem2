@@ -160,6 +160,8 @@ FES 内部执行宏声明，初始化按以下顺序交给宿主：
 
 `fes::ImageState` 为 IMAGE 保存基础显示状态、资源名、当前图像编号和 32 项帧映射。`apply` 接受按配置转换资源名称的闭包，成功返回本次显示属性是否失效；空 FILE 只清空请求名称，保留当前名称。`refresh_file(transform_name)` 根据保留的请求重新计算当前名称，变化时请求重建；空请求保留旧来源。此阶段保存状态，实际资源加载和像素绘制由宿主在对象更新阶段完成。IMAGE 不应用 CIMAGE 的 SIZE／COLOR 列。
 
+`ObjectState::ImageWindow(Box<ImageState>)` 提供 IMGWND 身份与同一初始化契约。`Runtime::update_fes_object` 使用指定尺寸，将资源的固定九帧拼接成窗口；缺失资源保留旧像素，尺寸变化成功后替换像素，已有共享包装保留旧图。`graphics::Image::from_window(bytes, size)` 提供独立的 HG-3 拼接入口；帧顺序、裁剪、尺寸约束及重试行为见 [IMGWND](graphics.md#fes-imgwnd-窗口图像)。
+
 `selected_frame()` 返回当前映射后的帧 ID。初始映射未启用时，IDN 可直接指定任意帧 ID；设置任意 ID 列后启用映射，后续 IDN 仅接受 0～31。一次初始化中先应用 IDN，再更新 ID 映射，因此首次启用映射时仍可能保留范围外的当前编号，此时 `selected_frame()` 返回 0。POS2 由对象属性登记阶段消费，IMAGE 普通文件更新不读取 SIZE2。
 
 IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的转换结果实际改变时置位；空 FILE 或转换结果相同不置位。`frame_mapping_changed` 初始为 true，写入任何 ID 列也置为 true；下次有效 IDN 在编号变化或此标记为 true 时请求装载并清除此标记。首次 IDN=0 因此也请求装载。ID 列本身只更新映射，非法 IDN 保留待应用标记。直接修改公开映射后应同时设置 `frame_mapping_changed`；实际来源装载由运行时对象更新执行。
