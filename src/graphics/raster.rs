@@ -349,7 +349,11 @@ impl Drawables {
                 return Err(Error::new(0, "三角形特殊混合模式尚未接入"));
             }
             let position = drawable.transform().position();
-            let origin = [position[0], position[1]];
+            let origin = match drawable.projection_origin_mode() {
+                0 => [position[0], position[1]],
+                1 => projection.center,
+                _ => [0.; 2],
+            };
             let mut selected = projection.clone();
             if let Some(camera) = self.cameras.get(&drawable.camera_id()) {
                 camera.apply_projection(&mut selected);

@@ -77,10 +77,19 @@ fn plane_factory_commands_and_lifecycle_share_the_runtime_drawing_registry() {
             .dispatch_command(0, command(code, u32::MAX, 0))
             .unwrap();
     }
-    let error = runtime
-        .dispatch_command(0, command(82, 0x1234, 0))
-        .unwrap_err();
-    assert!(error.message.contains("二维对象命令 82"));
+    for mode in [0, 1, 2, u32::MAX] {
+        runtime
+            .dispatch_command(0, command(82, 0x1234, mode))
+            .unwrap();
+        assert_eq!(
+            runtime
+                .drawables()
+                .get(id)
+                .unwrap()
+                .projection_origin_mode(),
+            mode
+        );
+    }
     runtime.dispatch_command(0, command(68, 0, 0)).unwrap();
     assert!(runtime.drawables().get(id).is_none());
     assert!(runtime.object(id).is_some());
@@ -783,5 +792,163 @@ fn ordinary_graphics_natives_preserve_stack_and_replace_geometry_under_both_budg
                 }
             }
         }
+    }
+}
+
+#[test]
+fn ordinary_plane_queries_preserve_aliases_and_share_geometry_and_input_state() {
+    struct IdleDevice;
+    impl katze_system2::input::InputDevice for IdleDevice {
+        fn poll(&mut self) -> Result<()> {
+            Ok(())
+        }
+        fn pointer(&mut self) -> Result<katze_system2::input::PointerSample> {
+            Ok(Default::default())
+        }
+        fn key(&mut self, _: u32, _: u32, _: bool) -> Result<katze_system2::input::KeySample> {
+            Ok(Default::default())
+        }
+        fn take_wheel(&mut self) -> Result<u32> {
+            Ok(0)
+        }
+        fn is_foreground(&mut self) -> Result<bool> {
+            Ok(true)
+        }
+        fn finish(&mut self) -> Result<()> {
+            Ok(())
+        }
+        fn commit(&mut self) -> Result<()> {
+            Ok(())
+        }
+        fn history(&mut self) -> Result<[u8; 32]> {
+            Ok([0; 32])
+        }
+        fn show_cursor(&mut self, _: u32) -> Result<()> {
+            Ok(())
+        }
+        fn cursor_visible(&mut self) -> Result<u32> {
+            Ok(1)
+        }
+        fn set_pointer(&mut self, _: [i32; 2]) -> Result<()> {
+            Ok(())
+        }
+        fn clear_keys(&mut self) -> Result<()> {
+            Ok(())
+        }
+    }
+    struct Queries;
+    impl ProgramLoader for Queries {
+        fn load(&mut self, _: &[u8]) -> Result<Option<Program>> {
+            fn ins(code: &mut Vec<u8>, op: u8, args: &[u32]) {
+                code.push(op);
+                for arg in args {
+                    code.push(3);
+                    code.extend(arg.to_le_bytes());
+                }
+            }
+            fn call(code: &mut Vec<u8>, id: u32, args: &[u32]) {
+                for arg in args {
+                    ins(code, 0x25, &[*arg]);
+                }
+                ins(code, 0x2b, &[id, args.len() as u32 * 4]);
+            }
+            let mut code = vec![];
+            ins(&mut code, 0x25, &[0xdeadbeef]);
+            for id in [
+                85, 86, 87, 91, 93, 94, 95, 96, 97, 99, 102, 103, 343, 344, 345, 466,
+            ] {
+                call(&mut code, id, &[0]);
+            }
+            call(
+                &mut code,
+                85,
+                &[2, 1.25f32.to_bits(), (-2.5f32).to_bits(), 0],
+            );
+            call(&mut code, 86, &[2, 0, 0, 0]);
+            call(&mut code, 87, &[2, 0x80000020, 0x80000020, 0x80000020, 0]);
+            call(&mut code, 89, &[2]);
+            ins(&mut code, 0x26, &[8]);
+            call(&mut code, 343, &[2, 12, 12]);
+            call(&mut code, 345, &[2, 16, 16, 16, 16]);
+            call(&mut code, 344, &[2, 80, 0]);
+            call(&mut code, 93, &[2, 0, 0, 0, 0]);
+            call(&mut code, 94, &[2, u32::MAX]);
+            call(&mut code, 94, &[2, 256]);
+            call(&mut code, 95, &[2, 0]);
+            call(&mut code, 96, &[2, 0, 144]);
+            call(&mut code, 97, &[2, 0x80000002]);
+            call(&mut code, 98, &[2]);
+            ins(&mut code, 0x26, &[20]);
+            call(&mut code, 107, &[2]);
+            ins(&mut code, 0x26, &[24]);
+            call(&mut code, 102, &[2, u32::MAX]);
+            call(&mut code, 103, &[2, 0]);
+            call(&mut code, 106, &[2, 1]);
+            call(&mut code, 402, &[2, 0]);
+            call(&mut code, 466, &[2, 1]);
+            call(&mut code, 653, &[2, 2]);
+            call(&mut code, 1065, &[4]);
+            call(&mut code, 1066, &[2, 4]);
+            call(&mut code, 1067, &[2]);
+            call(&mut code, 1068, &[2, 4]);
+            call(&mut code, 1069, &[2]);
+            call(&mut code, 1068, &[2, 4]);
+            call(&mut code, 91, &[2]);
+            call(&mut code, 99, &[2]);
+            ins(&mut code, 0x3b, &[]);
+            let mut memory = vec![0; 192];
+            for i in 0..4 {
+                memory[80 + i * 20..84 + i * 20].copy_from_slice(&1f32.to_le_bytes());
+                memory[144 + i * 12..148 + i * 12].copy_from_slice(&1u32.to_le_bytes());
+            }
+            Ok(Some(Program::from_code(&code, memory, 128)?))
+        }
+    }
+    for budget in [1, 4096] {
+        let mut kcs = KcsFactory::new(Queries);
+        kcs.external = katze_system2::memory::SharedMemory::new(vec![0; 64]).unwrap();
+        let mut runtime = Runtime::new(
+            0,
+            kind::ROOT,
+            Box::new(katze_system2::runtime::RootObject::new(1, 0)),
+            State::new(0),
+            katze_system2::input::InputFactory {
+                fallback: GraphicsFactory { fallback: kcs },
+            },
+        );
+        assert_eq!(runtime.create(0, kind::INPUT, b"input", b"").unwrap(), 1);
+        runtime.set_input_device(IdleDevice).unwrap();
+        let plane = runtime.create(0, kind::PLANE, b"plane", b"").unwrap();
+        let mut rectangle = bytes(&[0, 0, 0, 5f32.to_bits(), 6f32.to_bits(), 0, 0, u32::MAX]);
+        buffered(&mut runtime, plane, 42, &mut rectangle).unwrap();
+        runtime.drawables_mut().set_base_point(plane, [9., -4., 7.]);
+        runtime.drawables_mut().set_position(plane, [3., 4., 5.]);
+        let caller = runtime.create(0, kind::ORDINARY, b"queries", b"").unwrap();
+        assert_eq!(
+            runtime.create(0, kind::CAMERA_2D, b"camera", b"").unwrap(),
+            4
+        );
+        runtime.update(0, budget).unwrap();
+        let vm = runtime.object(caller).unwrap().interpreter().unwrap();
+        for (address, expected) in [
+            (0, (-2.5f32).to_bits()),
+            (8, 7f32.to_bits()),
+            (12, 6f32.to_bits()),
+            (16, 6f32.to_bits()),
+            (20, 0x80000002),
+            (24, 0),
+            (0x80000020, 5f32.to_bits()),
+        ] {
+            assert_eq!(vm.read(address, 4).unwrap(), expected.to_le_bytes());
+        }
+        assert_eq!(vm.stack_bytes(), 0xdeadbeefu32.to_le_bytes());
+        let drawable = runtime.drawables().get(plane).unwrap();
+        assert_eq!(drawable.color(), (u32::MAX, 1));
+        assert_eq!(drawable.projection_origin_mode(), 1);
+        assert_ne!(drawable.camera_id(), 0);
+        assert_eq!(drawable.transform().base_point(), [1.25, -2.5, 7.]);
+        assert_eq!(drawable.transform().position(), [0., 0., 5.]);
+        let input = runtime.object(1).unwrap().input_state().unwrap();
+        assert!(input.regions().records().is_empty());
     }
 }

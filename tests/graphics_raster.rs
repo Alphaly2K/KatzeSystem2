@@ -243,3 +243,44 @@ fn render_order_visibility_and_submission_limit_are_kept() {
     );
     assert_eq!(target.pixel(0, 0), Some(0xff0000ff));
 }
+
+#[test]
+fn projection_origin_selection_reaches_frame_pixels() {
+    let mut drawables = Drawables::default();
+    drawables
+        .insert(1, Drawable::rectangle([0., 0., 30000.], [6., 6.], u32::MAX))
+        .unwrap();
+    drawables.set_display(1, 1);
+    drawables.set_position(1, [8., 8., 0.]);
+    let projection = Projection {
+        center: [16., 16.],
+        camera_depth: 50000.,
+        ..Projection::default()
+    };
+    let mut frames = vec![];
+    for (mode, origin) in [
+        (0, [8., 8.]),
+        (1, [16., 16.]),
+        (2, [0., 0.]),
+        (u32::MAX, [0., 0.]),
+    ] {
+        drawables.set_projection_origin_mode(1, mode);
+        let mut target = RenderTarget::new([32, 32]).unwrap();
+        drawables
+            .render_triangles(&mut target, &projection, IDENTITY)
+            .unwrap();
+        let mut expected = RenderTarget::new([32, 32]).unwrap();
+        let drawable = drawables.get(1).unwrap();
+        for index in 0..2 {
+            let triangle = drawable
+                .projected_triangle(index, IDENTITY, &projection, origin, true)
+                .unwrap();
+            expected.blend_projected_triangle(triangle);
+        }
+        assert_eq!(target, expected);
+        frames.push(target);
+    }
+    assert_ne!(frames[0], frames[1]);
+    assert_ne!(frames[1], frames[2]);
+    assert_eq!(frames[2], frames[3]);
+}

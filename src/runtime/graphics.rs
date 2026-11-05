@@ -55,12 +55,14 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         let count = match index {
             78 => 12,
             79 => 16,
-            80 | 83 | 342 => 4,
-            82 | 88 | 92 | 105 | 258 | 262 | 455 | 462 | 464 | 848 | 849 => 8,
+            80 | 83 | 89 | 91 | 98 | 99 | 107 | 342 | 1065 | 1067 | 1069 => 4,
+            82 | 88 | 92 | 94 | 95 | 97 | 102 | 103 | 105 | 106 | 258 | 262 | 402 | 455 | 462
+            | 464 | 466 | 653 | 848 | 849 | 1066 | 1068 => 8,
             880 => 16,
             339 => 24,
-            84 | 101 => 20,
-            100 | 256 | 260 | 263 | 463 | 625 | 663 => 12,
+            84 | 87 | 93 | 101 | 345 => 20,
+            85 | 86 => 16,
+            96 | 100 | 256 | 260 | 263 | 343 | 344 | 463 | 625 | 663 => 12,
             104 => 28,
             _ => unreachable!(),
         };
@@ -69,15 +71,19 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         }
         let route_zero = matches!(
             index,
-            104 | 105 | 256 | 258 | 260 | 262 | 263 | 339 | 342 | 455 | 462
-                ..=464 | 625 | 663 | 848 | 849 | 880
+            104 | 105 | 106 | 107 | 256 | 258 | 260 | 262 | 263 | 339 | 342 | 402 | 455 | 462
+                ..=464 | 625 | 653 | 663 | 848 | 849 | 880 | 1065..=1069
         );
         if route_zero && arguments.len() != count {
             return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
         }
         let target = u32::from_le_bytes(arguments[..4].try_into().unwrap());
         if target == 0 && !route_zero {
-            return Ok(NativeReturn::Continue);
+            return Ok(if matches!(index, 89 | 98) {
+                NativeReturn::Value(0)
+            } else {
+                NativeReturn::Continue
+            });
         }
         if arguments.len() != count {
             return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
@@ -105,8 +111,16 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     },
                 )?;
             }
-            80 | 83 => {
-                self.command_target(target, if index == 80 { 45 } else { 68 }, [0; 3])?;
+            80 | 83 | 91 | 99 | 1065 | 1067 | 1069 => {
+                let code = match index {
+                    80 => 45,
+                    83 => 68,
+                    91 => 54,
+                    99 => 91,
+                    1065 => 590,
+                    _ => 592,
+                };
+                self.command_target(target, code, [0; 3])?;
             }
             82 => {
                 let formatted = format_string(vm, word(1), 0)?;
@@ -133,13 +147,18 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     },
                 )?;
             }
-            84 | 101 => {
+            84 | 93 | 101 => {
                 let mut vector = [0; 12];
                 vector.copy_from_slice(&arguments[4..16]);
+                let code = match index {
+                    84 => 51,
+                    93 => 55,
+                    _ => 66,
+                };
                 self.command_target_with_buffers(
                     target,
-                    if index == 84 { 51 } else { 66 },
-                    [word(4), 0, 0],
+                    code,
+                    [word(4), 0, u32::from(index == 93)],
                     &mut CommandBuffers {
                         data0: None,
                         data1: Some(&mut vector),
@@ -147,16 +166,21 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     },
                 )?;
             }
-            88 => {
+            85 | 88 => {
                 let mut vector = [0; 12];
+                let source = if index == 85 { word(3) } else { 0 };
                 for code in [61, 49] {
                     if code == 49 {
-                        vector[8..12].copy_from_slice(&arguments[4..8]);
+                        if index == 85 {
+                            vector[..8].copy_from_slice(&arguments[4..12]);
+                        } else {
+                            vector[8..12].copy_from_slice(&arguments[4..8]);
+                        }
                     }
                     self.command_target_with_buffers(
                         target,
                         code,
-                        [0, 0, 1],
+                        [source, 0, 1],
                         &mut CommandBuffers {
                             data0: None,
                             data1: Some(&mut vector),
@@ -165,17 +189,143 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     )?;
                 }
             }
+            86 | 87 | 89 => {
+                let mut vector = [0; 12];
+                let source = match index {
+                    86 => word(3),
+                    87 => word(4),
+                    _ => 0,
+                };
+                self.command_target_with_buffers(
+                    target,
+                    if index == 87 { 62 } else { 61 },
+                    [source, 0, 1],
+                    &mut CommandBuffers {
+                        data1: Some(&mut vector),
+                        ..CommandBuffers::default()
+                    },
+                )?;
+                if index == 89 {
+                    return Ok(NativeReturn::Value(u32::from_le_bytes(
+                        vector[8..12].try_into().unwrap(),
+                    )));
+                }
+                let axes = if index == 86 { 2 } else { 3 };
+                for axis in 0..axes {
+                    vm.read(word(axis + 1), 4)?;
+                }
+                for axis in 0..axes {
+                    vm.write(word(axis + 1), &vector[axis * 4..axis * 4 + 4])?;
+                }
+            }
+            94 => {
+                let alpha = (word(1) as i32).clamp(0, 255) as u32;
+                self.command_target(target, 63, [0, alpha, 1])?;
+            }
+            95 => {
+                self.command_target(target, 90, [self.host.task_id, word(1), 0])?;
+            }
+            96 => {
+                let mut states = vm.read(word(2), 48)?.to_vec();
+                self.command_target_with_buffers(
+                    target,
+                    72,
+                    [0, word(1), 0],
+                    &mut CommandBuffers {
+                        data0: Some(&mut states),
+                        ..CommandBuffers::default()
+                    },
+                )?;
+            }
+            98 => {
+                return Ok(NativeReturn::Value(
+                    self.command_target(target, 74, [0; 3])?,
+                ));
+            }
+            107 => {
+                let input = self.command_target(0, 34, [0; 3])?;
+                return Ok(NativeReturn::Value(self.command_target(
+                    input,
+                    134,
+                    [target, 0, 0],
+                )?));
+            }
+            343 => {
+                let addresses = [word(1), word(2)];
+                let mut width = vm.read(addresses[0], 4)?.to_vec();
+                let mut height = vm.read(addresses[1], 4)?.to_vec();
+                let result = self.command_target_with_buffers(
+                    target,
+                    75,
+                    [addresses[0], addresses[1], 0],
+                    &mut CommandBuffers {
+                        data0: Some(&mut width),
+                        data1: Some(&mut height),
+                        external: None,
+                    },
+                );
+                vm.write(addresses[0], &width)?;
+                vm.write(addresses[1], &height)?;
+                result?;
+            }
+            344 => {
+                let mut matrix = vm.read(word(1), 64)?.to_vec();
+                let result = self.command_target_with_buffers(
+                    target,
+                    57,
+                    [word(2), word(1), 1],
+                    &mut CommandBuffers {
+                        data1: Some(&mut matrix),
+                        ..CommandBuffers::default()
+                    },
+                );
+                vm.write(word(1), &matrix)?;
+                result?;
+            }
+            345 => {
+                for axis in 1..=4 {
+                    vm.read(word(axis), 4)?;
+                }
+                let mut start = [0; 12];
+                let mut end = [0; 12];
+                self.command_target_with_buffers(
+                    target,
+                    76,
+                    [0; 3],
+                    &mut CommandBuffers {
+                        data0: Some(&mut start),
+                        data1: Some(&mut end),
+                        external: None,
+                    },
+                )?;
+                for (address, bytes) in [word(1), word(2), word(3), word(4)].into_iter().zip([
+                    &start[..4],
+                    &start[4..8],
+                    &end[..4],
+                    &end[4..8],
+                ]) {
+                    vm.write(address, bytes)?;
+                }
+            }
             100 => {
                 self.command_target(target, 59, [word(2), word(1), 0])?;
             }
             92 => {
                 self.command_target(target, 47, [0, word(1), 1])?;
             }
-            105 | 848 | 849 => {
+            97 | 102 | 103 | 105 | 106 | 402 | 466 | 653 | 848 | 849 | 1066 | 1068 => {
                 let code = match index {
+                    97 => 73,
+                    102 => 77,
+                    103 => 78,
                     105 => 93,
+                    106 => 94,
+                    402 => 81,
+                    466 => 82,
+                    653 => 84,
                     848 => 99,
-                    _ => 100,
+                    849 => 100,
+                    _ => 591,
                 };
                 self.command_target(target, code, [0, word(1), 0])?;
             }

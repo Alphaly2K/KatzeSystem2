@@ -787,6 +787,16 @@ impl TaskObject for PlaneObject {
                 self.unregister_input(command.data[2], host)?;
             }
             93 => self.enable_input(command.data[1], command.data[2], host)?,
+            94 => {
+                if self.event_target != u32::MAX {
+                    self.input_command(
+                        133,
+                        [id, command.data[1], command.data[2]],
+                        &mut CommandBuffers::default(),
+                        host,
+                    )?;
+                }
+            }
             95 => self.event_response = command.data[1],
             96 => {
                 *output = self.input_command(
@@ -832,6 +842,9 @@ impl TaskObject for PlaneObject {
                 let value = command.data[1];
                 self.blend_mode = if value <= 5 { value } else { 0 };
                 drawings(host)?.set_blend_mode(id, value);
+            }
+            82 => {
+                drawings(host)?.set_projection_origin_mode(id, command.data[1]);
             }
             84 => self.creation_flags = command.data[1],
             57 => {
