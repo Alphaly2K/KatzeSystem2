@@ -11,14 +11,15 @@ pub(super) fn call(
     let count = match index {
         244 | 254 | 835 => 4,
         469 => 2,
-        836 => 3,
+        242 | 836 => 3,
+        252 => 2,
         _ => 1,
     };
     let first = arguments
         .get(..4)
         .map(|a| u32::from_le_bytes(a.try_into().unwrap()))
         .ok_or_else(|| Error::new(vm.pc, "KCS native 参数字节数不匹配"))?;
-    let null = first == 0 && matches!(index, 244 | 254 | 469 | 835 | 836);
+    let null = first == 0 && matches!(index, 244 | 252 | 254 | 469 | 835 | 836);
     if arguments.len() != count * 4 && !(null && arguments.len() == 4) {
         return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
     }
@@ -33,9 +34,20 @@ pub(super) fn call(
         }
         return Ok(NativeReturn::Continue);
     }
-    if matches!(index, 238 | 247) {
+    if matches!(index, 238 | 247 | 252) {
         let container = if index == 238 {
             DataContainer::new(first)
+        } else if index == 252 {
+            if first == 0 {
+                return Ok(NativeReturn::Value(0));
+            }
+            let Some(data) = host
+                .data_container(first)?
+                .record(read::u32_at(arguments, 4)?)?
+            else {
+                return Ok(NativeReturn::Value(0));
+            };
+            DataContainer::from_snapshot(data)?
         } else {
             let name = strings::format(vm, first, 0)?;
             let bytes = host
@@ -75,6 +87,14 @@ pub(super) fn call(
         .chunks_exact(4)
         .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
         .collect();
+    if index == 242 {
+        if args[2] == 0 {
+            return Ok(NativeReturn::Value(0));
+        }
+        let data = host.data_container(args[2])?.snapshot()?;
+        host.data_container_mut(first)?.append(args[1], &data)?;
+        return Ok(NativeReturn::Value(1));
+    }
     if index == 835 {
         if args[3] == 0 {
             return Ok(NativeReturn::Value(0));

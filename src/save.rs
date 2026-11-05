@@ -86,6 +86,39 @@ impl DataContainer {
         read::range(&self.bytes, 0, self.used as usize)
     }
 
+    /// 嵌套记录的未压缩快照；首 DWORD 的原生地址不参与恢复，固定写零。
+    pub fn snapshot(&self) -> Result<Vec<u8>> {
+        let data = self.used_bytes()?;
+        if data.len() > read::MAX_BYTES - 16 {
+            return Err(Error::new(0, "CSS 快照超过读取上限"));
+        }
+        let mut bytes = Vec::with_capacity(16 + data.len());
+        for value in [0, self.capacity as u32, self.used, self.tag] {
+            bytes.extend(value.to_le_bytes());
+        }
+        bytes.extend(data);
+        Ok(bytes)
+    }
+
+    /// 从嵌套记录恢复独立容器，保留快照中的逻辑容量、用量和标签。
+    pub fn from_snapshot(snapshot: &[u8]) -> Result<Self> {
+        let capacity = read::u32_at(snapshot, 4)? as usize;
+        let used = read::u32_at(snapshot, 8)?;
+        let tag = read::u32_at(snapshot, 12)?;
+        if capacity > read::MAX_BYTES || used as usize > capacity {
+            return Err(Error::new(4, "CSS 快照容量或用量越界"));
+        }
+        let data = read::range(snapshot, 16, used as usize)?;
+        let mut bytes = vec![0; capacity];
+        bytes[..data.len()].copy_from_slice(data);
+        Ok(Self {
+            bytes,
+            capacity,
+            used,
+            tag,
+        })
+    }
+
     /// 读取首个同编号记录；查找扫描逻辑容量，包含声明用量之后的解压数据。
     pub fn record(&self, id: u32) -> Result<Option<&[u8]>> {
         let Some((start, length)) = self.find(id)? else {

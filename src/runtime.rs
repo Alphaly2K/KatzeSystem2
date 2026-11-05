@@ -1730,8 +1730,8 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
             }
             return Ok(NativeReturn::Continue);
         }
-        if index == 250 {
-            return self.restore_shared_record(arguments, vm);
+        if matches!(index, 240 | 250) {
+            return self.shared_record(index, arguments, vm);
         }
         if index == 400 {
             return self.load_sound_loop_table(arguments, vm);

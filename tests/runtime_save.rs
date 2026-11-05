@@ -251,6 +251,98 @@ fn data_natives_preserve_null_paths_and_validate_vm_spans_handles_and_services()
     );
 }
 
+#[test]
+fn nested_containers_keep_first_snapshot_capacity_and_independent_lifetimes() {
+    fn call(host: &mut impl Host, vm: &mut Interpreter, index: u32, args: &[u32]) -> u32 {
+        let NativeReturn::Value(value) = host
+            .call(
+                index,
+                &args
+                    .iter()
+                    .flat_map(|v| v.to_le_bytes())
+                    .collect::<Vec<_>>(),
+                vm,
+            )
+            .unwrap()
+        else {
+            panic!("expected value")
+        };
+        value
+    }
+    fn release(host: &mut impl Host, vm: &mut Interpreter, handle: u32) {
+        assert_eq!(
+            host.call(246, &handle.to_le_bytes(), vm).unwrap(),
+            NativeReturn::Continue
+        );
+    }
+    let mut state = State::new(0);
+    let mut host = CoreHost::new(&mut state);
+    let mut vm = Interpreter::new(
+        Program::from_code(&[], b"abclater".to_vec(), 64).unwrap(),
+        vec![],
+    )
+    .unwrap();
+    let outer = call(&mut host, &mut vm, 238, &[9]);
+    let inner = call(&mut host, &mut vm, 238, &[0xfedc_ba98]);
+    for (length, address) in [(3, 0), (5, 3)] {
+        assert_eq!(
+            call(&mut host, &mut vm, 244, &[inner, 17, length, address]),
+            1
+        );
+    }
+    host.call(
+        469,
+        &[inner, 17]
+            .into_iter()
+            .flat_map(u32::to_le_bytes)
+            .collect::<Vec<_>>(),
+        &mut vm,
+    )
+    .unwrap();
+    assert_eq!(call(&mut host, &mut vm, 242, &[outer, 44, inner]), 1);
+    assert_eq!(call(&mut host, &mut vm, 389, &[inner]), 1);
+    assert_eq!(call(&mut host, &mut vm, 242, &[outer, 44, inner]), 1);
+    assert_eq!(call(&mut host, &mut vm, 242, &[0, 44, u32::MAX]), 0);
+    assert_eq!(call(&mut host, &mut vm, 242, &[u32::MAX, 44, 0]), 0);
+    assert_eq!(call(&mut host, &mut vm, 252, &[0]), 0);
+    assert_eq!(call(&mut host, &mut vm, 252, &[outer, 45]), 0);
+    let restored = call(&mut host, &mut vm, 252, &[outer, 44]);
+    release(&mut host, &mut vm, inner);
+    release(&mut host, &mut vm, outer);
+    let data = host.data_container(restored).unwrap();
+    assert_eq!(data.tag(), 0xfedc_ba98);
+    assert_eq!((data.capacity(), data.used_len()), (0x80000 - 11, 13));
+    assert_eq!(data.record(17).unwrap(), Some(b"later".as_slice()));
+    assert_eq!(call(&mut host, &mut vm, 242, &[restored, 55, restored]), 1);
+    let copy = call(&mut host, &mut vm, 252, &[restored, 55]);
+    release(&mut host, &mut vm, restored);
+    let data = host.data_container(copy).unwrap();
+    assert_eq!(data.record(17).unwrap(), Some(b"later".as_slice()));
+    assert_eq!(data.record(55).unwrap(), None);
+    let mut bytes = data.snapshot().unwrap();
+    assert_eq!(
+        &bytes[..16],
+        [0u32, 0x80000 - 11, 13, 0xfedc_ba98]
+            .into_iter()
+            .flat_map(u32::to_le_bytes)
+            .collect::<Vec<_>>()
+    );
+    bytes[..4].copy_from_slice(&u32::MAX.to_le_bytes());
+    assert_eq!(
+        katze_system2::save::DataContainer::from_snapshot(&bytes)
+            .unwrap()
+            .record(17)
+            .unwrap(),
+        Some(b"later".as_slice())
+    );
+    bytes.pop();
+    assert!(katze_system2::save::DataContainer::from_snapshot(&bytes).is_err());
+    bytes[4..8].copy_from_slice(&12u32.to_le_bytes());
+    assert!(katze_system2::save::DataContainer::from_snapshot(&bytes).is_err());
+    bytes[4..8].copy_from_slice(&u32::MAX.to_le_bytes());
+    assert!(katze_system2::save::DataContainer::from_snapshot(&bytes).is_err());
+}
+
 struct RestorePrograms;
 impl ProgramLoader for RestorePrograms {
     fn load(&mut self, name: &[u8]) -> Result<Option<Program>> {
@@ -261,6 +353,23 @@ impl ProgramLoader for RestorePrograms {
             push(&mut code, 99);
             native(&mut code, 238, 1);
             store(&mut code, 0);
+            for (i, args) in [
+                [11, 1, 1, 9],
+                [11, 2, 0, 1],
+                [12, 2, 4, 1],
+                [13, 2, 0, 0],
+                [14, 999, 0, 1],
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                load(&mut code, 0);
+                for value in args {
+                    push(&mut code, value);
+                }
+                native(&mut code, 240, 5);
+                store(&mut code, 80 + i as u32 * 4);
+            }
             for (id, length) in [(9, 7), (10, 0)] {
                 load(&mut code, 0);
                 for value in [id, length, 64] {
@@ -304,6 +413,26 @@ impl ProgramLoader for RestorePrograms {
             }
             native(&mut code, 250, 4);
             store(&mut code, 40);
+            load(&mut code, 0);
+            for value in [14, 1, 0, 1] {
+                push(&mut code, value);
+            }
+            native(&mut code, 240, 5);
+            store(&mut code, 100);
+            push(&mut code, 0);
+            native(&mut code, 240, 1);
+            store(&mut code, 104);
+            for value in [0xdead_beef, 14, 999, 0, 1] {
+                push(&mut code, value);
+            }
+            native(&mut code, 240, 5);
+            store(&mut code, 108);
+            load(&mut code, 0);
+            for value in [11, 2, 1] {
+                push(&mut code, value);
+            }
+            native(&mut code, 250, 4);
+            store(&mut code, 112);
         } else {
             assert_eq!(name, b"idle");
         }
@@ -313,7 +442,7 @@ impl ProgramLoader for RestorePrograms {
 }
 
 #[test]
-fn restore_queries_idle_and_running_tasks_and_copies_whole_values_with_clipping() {
+fn shared_records_query_idle_and_running_tasks_and_copy_independent_clipped_values() {
     for budget in [1, 4096] {
         let mut numbers = State::new(4);
         numbers.shared.copy_from_slice(&[11, 22, 33, 44]);
@@ -339,7 +468,26 @@ fn restore_queries_idle_and_running_tasks_and_copies_whole_values_with_clipping(
             .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
             .collect();
         assert_eq!(results, [1, 1, 1, 1, 0, 0, 0, 0, 0, 0]);
-        assert_eq!(rt.numbers().shared, [0x3433_3231, 22, 0x3433_3231, 44]);
+        assert_eq!(
+            vm.read(80, 36).unwrap(),
+            [1u32, 1, 1, 1, 0, 0, 0, 0, 1]
+                .into_iter()
+                .flat_map(u32::to_le_bytes)
+                .collect::<Vec<_>>()
+        );
+        let handle = u32::from_le_bytes(vm.read(0, 4).unwrap().try_into().unwrap());
+        let records = rt.host().data_container(handle).unwrap();
+        assert_eq!(
+            records.record(11).unwrap().unwrap(),
+            [22i32, 33, 44]
+                .into_iter()
+                .flat_map(i32::to_le_bytes)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(records.record(12).unwrap(), Some(b"".as_slice()));
+        assert_eq!(records.record(13).unwrap(), Some(b"".as_slice()));
+        assert_eq!(records.record(14).unwrap(), None);
+        assert_eq!(rt.numbers().shared, [0x3433_3231, 22, 33, 44]);
         assert_eq!(rt.numbers().local[0], 55);
         assert_eq!(rt.numbers().strings[&7], b"keep");
     }

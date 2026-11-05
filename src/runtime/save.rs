@@ -4,13 +4,15 @@ use crate::task::CommandBuffers;
 use crate::{Error, Result, read};
 
 impl<F: ObjectFactory> ObjectHost<'_, F> {
-    pub(super) fn restore_shared_record(
+    pub(super) fn shared_record(
         &mut self,
+        index: u32,
         arguments: &[u8],
         vm: &Interpreter,
     ) -> Result<NativeReturn> {
         let handle = read::u32_at(arguments, 0)?;
-        if arguments.len() != 16 && !(handle == 0 && arguments.len() == 4) {
+        let size = if index == 240 { 20 } else { 16 };
+        if arguments.len() != size && !(handle == 0 && arguments.len() == 4) {
             return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
         }
         if handle == 0 {
@@ -30,14 +32,30 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         if available == [0; 4] {
             return Ok(NativeReturn::Value(0));
         }
-        let Some(data) = self
-            .host
-            .data_container(handle)?
-            .record(read::u32_at(arguments, 4)?)?
-        else {
+        let record = read::u32_at(arguments, 4)?;
+        let start = read::u32_at(arguments, 12)? as usize;
+        if index == 240 {
+            let count = read::u32_at(arguments, 16)? as usize;
+            if count > read::MAX_BYTES / 4 {
+                return Err(Error::new(vm.pc, "CSS 数值记录超过读取上限"));
+            }
+            let data: Vec<_> = self
+                .numbers
+                .shared
+                .get(start..)
+                .unwrap_or_default()
+                .iter()
+                .take(count)
+                .flat_map(|value| value.to_le_bytes())
+                .collect();
+            self.host
+                .data_container_mut(handle)?
+                .append(record, &data)?;
+            return Ok(NativeReturn::Value(1));
+        }
+        let Some(data) = self.host.data_container(handle)?.record(record)? else {
             return Ok(NativeReturn::Value(0));
         };
-        let start = read::u32_at(arguments, 12)? as usize;
         if let Some(target) = self.numbers.shared.get_mut(start..) {
             for (target, source) in target.iter_mut().zip(data.chunks_exact(4)) {
                 *target = i32::from_le_bytes(source.try_into().unwrap());
