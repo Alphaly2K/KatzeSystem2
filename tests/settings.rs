@@ -243,7 +243,7 @@ impl ProgramLoader for Source {
 fn ordinary_settings_writeback_and_external_reads_share_runtime_state() {
     for budget in [1, 4096] {
         let mut factory = KcsFactory::new(Source);
-        factory.external_bytes = 512;
+        factory.external = katze_system2::memory::SharedMemory::new(vec![0; 512]).unwrap();
         let mut rt = Runtime::new(
             0,
             kind::BASE,

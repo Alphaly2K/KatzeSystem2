@@ -146,7 +146,7 @@ fn import_selects_history_window_and_preserves_flags_and_void_return_slot() {
                 numbers,
                 KcsFactory {
                     programs: Loader(Program::from_code(&code, data, 64).unwrap()),
-                    external_bytes: 0,
+                    external: katze_system2::memory::SharedMemory::new(vec![0; 0]).unwrap(),
                 },
             );
             rt.set_budget(budget, 1 << 20);

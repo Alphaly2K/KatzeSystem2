@@ -122,7 +122,7 @@ fn runtime(code: &[u8], budget: usize) -> (Runtime<KcsFactory<Loader>>, u32, Fil
         State::new(0),
         KcsFactory {
             programs: Loader(Program::from_code(code, data, 64).unwrap()),
-            external_bytes: 256,
+            external: katze_system2::memory::SharedMemory::new(vec![0; 256]).unwrap(),
         },
     );
     rt.set_budget(budget, 1 << 20);

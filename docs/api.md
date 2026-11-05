@@ -408,7 +408,7 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 
 `CanvasLayout::new(tile_size, grid, step)` 与 `triangulate(source)` 将已变换的源几何切成逐块画布三角形，保留原顺序、颜色及局部 UV。步长、整数裁剪门控和资源上限见[画布几何切割](graphics.md#画布几何切割)。`Drawable::from_canvas_source` 与平面命令 41 保留源和包装两套变换；源变化后通过 `prepare_canvas` 更新，帧提交自动准备可见对象。直接查询与属性选择契约见[画布纹理包装](graphics.md#画布纹理包装)。
 
-对象实现 `runtime::TaskObject`：基类控制与时钟、可选 VM、创建上下文、主体、对象命令、排队与同步消息、删除通知和释放。默认空操作的 `begin_update()` 在时钟和子任务更新前执行，用于按钮的每轮响应重置。除对象命令外，返回 `false` 的方法表示本次预算耗尽，续跑由运行时完成；对象命令返回 `task::CommandOutcome`，完成状态与传播状态分开表达。库提供 `BaseObject`（只有控制与时钟）与 `OrdinaryObject`（可选的 `OrdinaryTask` 及未装载状态）。`ObjectFactory::create` 按类型编号创建对象；`KcsFactory` 经 `ProgramLoader` 按名称装载普通 KCS，`external_bytes` 指定 VM 外部区容量。`graphics::GraphicsFactory { fallback }` 创建二维平面、图像列表、画布淡入淡出和二维相机任务，其他类型委托 fallback；基础平面提供基类控制、几何及查询、显示与输入绑定、事件响应、内部子任务传播及绘图登记清理，运动等缺失入口返回诊断，详见[二维任务对象](graphics.md#基础二维任务对象)。`input::InputFactory { fallback }` 创建类型 11 的 InputObject、类型 6 的 ButtonObject、类型 42 的 SliderObject 和类型 41 的 Scroll2Object，提供设备输入、矩形按钮及滑动控件事件；命令与约束见[输入接口](input.md)。文字类型由 `message::MessageFactory` 提供，声音类型由 `audio::SoundFactory` 提供；`kind` 保存基线类型编号。
+对象实现 `runtime::TaskObject`：基类控制与时钟、可选 VM、创建上下文、主体、对象命令、排队与同步消息、删除通知和释放。默认空操作的 `begin_update()` 在时钟和子任务更新前执行，用于按钮的每轮响应重置。除对象命令外，返回 `false` 的方法表示本次预算耗尽，续跑由运行时完成；对象命令返回 `task::CommandOutcome`，完成状态与传播状态分开表达。库提供 `BaseObject`（只有控制与时钟）与 `OrdinaryObject`（可选的 `OrdinaryTask` 及未装载状态）。`ObjectFactory::create` 按类型编号创建对象；`KcsFactory` 经 `ProgramLoader` 按名称装载普通 KCS，`external` 指定所有新建普通任务和 FES 任务共用的 `SharedMemory` 视图。`graphics::GraphicsFactory { fallback }` 创建二维平面、图像列表、画布淡入淡出和二维相机任务，其他类型委托 fallback；基础平面提供基类控制、几何及查询、显示与输入绑定、事件响应、内部子任务传播及绘图登记清理，运动等缺失入口返回诊断，详见[二维任务对象](graphics.md#基础二维任务对象)。`input::InputFactory { fallback }` 创建类型 11 的 InputObject、类型 6 的 ButtonObject、类型 42 的 SliderObject 和类型 41 的 Scroll2Object，提供设备输入、矩形按钮及滑动控件事件；命令与约束见[输入接口](input.md)。文字类型由 `message::MessageFactory` 提供，声音类型由 `audio::SoundFactory` 提供；`kind` 保存基线类型编号。
 
 `GraphicsFactory` 另创建类型 65 的 `Camera2DObject`。`TaskObject::register_graphics` 在创建上下文验证后、任务进入树前调用，用于登记对象直接持有的绘图资源，默认无操作。相机通过 51／57／66 设置二维偏移、矩阵和比例，589 查询独立编号，590 重置；实际释放时回收记录。`Drawables` 提供 `create_camera`、`camera`、`camera_mut`、`release_camera` 和 `set_camera`，`Drawable::camera_id` 查询图元绑定。平面 591 向第二数据项指定的任务查询相机编号，592 恢复默认；渲染按图元选择坐标组，缺失记录使用传入的默认投影。完整缓冲区、编号及生命周期契约见[二维相机任务](graphics.md#二维相机任务)。
 
@@ -424,7 +424,7 @@ FES 的 `prepare_release` 在子任务释放后，先向非零的共享列表发
 
 普通 452 接收目标编号并发送全零数据的命令 23，以状态一返回原始任务属性。目标缺失或未写入时返回 `0xffffffff`，零目标仍进入路由；同步分派遵守运行时对执行中对象的访问约束。
 
-Scene 已处理 `execfes`、`endfes` 及 `endkcs` 的结束时序。`execfes` 使用同一资源服务补全名称，继承创建上下文和共享列表，传递最多十六个数值参数，立即启动直属子任务后在同一时刻继续父脚本；预算和资源错误续跑保留创建进度及参数。`endfes` 在正常主体中请求子任务删除，普通主体等到下一时刻再继续；事件处理器中的结束或创建请求留待正常主体消费。`Scene::child_fes()` 查询保存的子任务编号，退出码不会自动回收子任务，后续状态通过 `_EXITCODE_` 提供；完整协议见[图形文档](graphics.md#fes-任务对象)。`execkcs` 构造普通子任务后补全 KCS 名称，依序执行 161 的装载及初始化、172 的空外部区绑定，再保存编号并继续父脚本。`Scene::child_kcs()` 查询保存编号，额外词项不求值。
+Scene 已处理 `execfes`、`endfes` 及 `endkcs` 的结束时序。`execfes` 使用同一资源服务补全名称，继承创建上下文和共享列表，传递最多十六个数值参数，立即启动直属子任务后在同一时刻继续父脚本；预算和资源错误续跑保留创建进度及参数。`endfes` 在正常主体中请求子任务删除，普通主体等到下一时刻再继续；事件处理器中的结束或创建请求留待正常主体消费。`Scene::child_fes()` 查询保存的子任务编号，退出码不会自动回收子任务，后续状态通过 `_EXITCODE_` 提供；完整协议见[图形文档](graphics.md#fes-任务对象)。`execkcs` 构造普通子任务后补全 KCS 名称，依序执行 161 的装载及初始化、172 的 FES 构造时外部区绑定，再保存编号并继续父脚本。`Scene::child_kcs()` 查询保存编号，额外词项不求值。
 
 `RootObject::new(input_task, sound_task)` 保存输入与声音任务编号，命令 34／35 原样返回相应值；任务删除后不会自动选择替代编号。该对象作为 Runtime 的显式根参数使用，子任务由调用者创建，自动启动链仍待接入。根对象遵循专属命令消费规则，其余未实现的专属入口返回诊断。
 
@@ -530,9 +530,11 @@ Scene 消费 `noact`／`lockactive` 并按主体时点处理通知。`preferred_
 
 主体、命令和消息在返回前完成预算续跑。`DEFAULT_BUDGET` 为单次推进预算，零预算按一处理；连续耗尽预算时，`DEFAULT_LIMIT` 按续跑累计额度触发同步执行诊断。与库的其他执行错误一样，出现该错误后应丢弃解释器状态。不结束的普通指令循环因此会返回诊断。
 
-当前运行时接入普通表任务 native 66／67／69／70／72／73／75／76／108／109／110／143／452 和已核实的普通表接口；108／110 接受目标编号和值两个 DWORD。`KcsFactory.external_bytes` 超过库的 64 MiB 上限时在分配前返回诊断。629 仍由 `SystemHost` 单独包装，尚未并入；367 尚未实现。`Runtime::create` 配合 `KcsFactory` 保留按名称预先装载的便利入口；`Runtime::create_unloaded_ordinary(parent, context)` 构造无 VM 的普通对象。工厂包装需转发 `create_unloaded_ordinary` 和 `load_kcs_program`，宿主包装需转发程序装载及共享数值绑定状态。命令 161 从 `CommandBuffers.data1` 读取完整名称；首参非零时立即初始化，零时只装载。缺失程序会移除旧 VM，保留任务编号、控制、时钟和队列，随后仍继承父级数值区及上下文；程序读取服务错误保留装载阶段，沿用同一命令重试。172 仅在 VM 存在时更新对象保存的外部区及 VM 绑定，不执行脚本；长度零清空，非零长度从 `CommandBuffers.external` 的起点取对应长度的共享视图，缓冲区缺失或长度不足返回诊断。装载失败后对象仍保留该描述，后续重载继续共享同一份字节。
+当前运行时接入普通表任务 native 66／67／69／70／72／73／75／76／108／109／110／143／452 和已核实的普通表接口；108／110 接受目标编号和值两个 DWORD。外部区由调用方通过受检 `SharedMemory` 提供，默认空区。629 仍由 `SystemHost` 单独包装，尚未并入；367 尚未实现。`Runtime::create` 配合 `KcsFactory` 保留按名称预先装载的便利入口；`Runtime::create_unloaded_ordinary(parent, context)` 构造无 VM 的普通对象。工厂包装需转发 `external_storage`、`create_unloaded_ordinary` 和 `load_kcs_program`，宿主包装需转发程序装载及共享数值绑定状态。命令 161 从 `CommandBuffers.data1` 读取完整名称；首参非零时立即初始化，零时只装载。缺失程序会移除旧 VM，保留任务编号、控制、时钟和队列，随后仍继承父级数值区及上下文；程序读取服务错误保留装载阶段，沿用同一命令重试。172 仅在 VM 存在时更新对象保存的外部区及 VM 绑定，不执行脚本；长度零清空，非零长度从 `CommandBuffers.external` 的起点取对应长度的共享视图，缓冲区缺失或长度不足返回诊断。装载失败后对象仍保留该描述，后续重载继续共享同一份字节。
 
-普通 143 接收目标、名称格式地址及初始化 DWORD。通过资源服务的 `kcs` 类别补全名称后，依序发送 161 和 172，后者绑定调用对象保存的外部区。目标零仍路由；初始化零以状态二继续，非零以状态四让出，均保持 native 返回槽。`TaskObject::external_storage()` 提供该对象描述，默认从 VM 查询；普通对象独立保存，直接重绑其 VM 不会修改对象保存的描述。
+普通 143 接收目标、名称格式地址及初始化 DWORD。通过资源服务的 `kcs` 类别补全名称后，依序发送 161 和 172，后者绑定调用对象保存的外部区。目标零仍路由；初始化零以状态二继续，非零以状态四让出，均保持 native 返回槽。`TaskObject::external_storage()` 提供该对象描述，默认从 VM 查询；普通对象独立保存，直接重绑其 VM 不会修改对象保存的描述。 FES 在构造时保存工厂的共享视图，`execkcs` 在初始化子任务后转交此视图；子任务被重绑不改变 FES 或工厂保存的描述。`FesObject::with_external` 用于自定义工厂的显式构造。
+
+外部区配置由 `KcsFactory.external_bytes = n` 迁移为 `KcsFactory.external = SharedMemory::new(vec![0; n])?`。复用同一视图才能保持各任务的即时读写关系；替换工厂字段只影响此后创建的任务。
 
 `memory::SharedMemory::new(bytes)` 接管字节，`clone()`／`slice(offset, length)` 共享存储，切片按相对范围检查边界；`read` 返回只读借用，`write` 立即对所有视图可见。视图持有字节区，不依赖最初对象的生命周期。`Interpreter::external_storage()` 返回当前绑定的共享视图，`bind_external(view)` 替换并返回旧绑定；`replace_external(Vec)` 则替换为独立存储并返回旧视图内容，其他绑定继续持有旧区。普通区、栈和等待状态保持。72／73 在不同 VM 共享同一外部区时继续保留复制模式的块顺序和重叠反馈。
 

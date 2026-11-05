@@ -63,6 +63,11 @@ pub const DEFAULT_LIMIT: usize = 1 << 20;
 
 /// 按对象类型创建对象；未实现的类型返回诊断。
 pub trait ObjectFactory {
+    /// 新建普通任务与 FES 任务共用的初始外部区；包装工厂应转交同一视图。
+    fn external_storage(&self) -> crate::memory::SharedMemory {
+        crate::memory::SharedMemory::default()
+    }
+
     /// `id` 为已选定的任务编号，`name` 为命令 66 展开后的名称字节。
     fn create(&mut self, id: u32, kind: u32, name: &[u8]) -> Result<Box<dyn TaskObject>>;
 
@@ -84,28 +89,29 @@ pub trait ProgramLoader {
 /// 只创建普通 KCS 对象的工厂；其他类型由子系统提供的工厂接入。
 pub struct KcsFactory<L> {
     pub programs: L,
-    /// 普通任务 VM 的外部存储容量。
-    pub external_bytes: usize,
+    /// 新建普通任务与 FES 任务持有的共享外部区。
+    pub external: crate::memory::SharedMemory,
 }
 
 impl<L: ProgramLoader> KcsFactory<L> {
     pub fn new(programs: L) -> Self {
         Self {
             programs,
-            external_bytes: 0,
+            external: crate::memory::SharedMemory::default(),
         }
     }
 }
 
 impl<L: ProgramLoader> ObjectFactory for KcsFactory<L> {
+    fn external_storage(&self) -> crate::memory::SharedMemory {
+        self.external.clone()
+    }
+
     fn create_unloaded_ordinary(&mut self, id: u32) -> Result<Box<dyn TaskObject>> {
-        if self.external_bytes > read::MAX_BYTES {
-            return Err(Error::new(0, "普通任务外部存储超过上限"));
-        }
-        Ok(Box::new(OrdinaryObject::unloaded(
+        Ok(Box::new(OrdinaryObject::unloaded_shared(
             id,
-            vec![0; self.external_bytes],
-        )?))
+            self.external.clone(),
+        )))
     }
 
     fn load_kcs_program(&mut self, name: &[u8]) -> Result<Option<Program>> {
@@ -116,14 +122,12 @@ impl<L: ProgramLoader> ObjectFactory for KcsFactory<L> {
         if kind != kind::ORDINARY {
             return Err(Error::new(0, format!("对象类型 {kind} 需要对应子系统工厂")));
         }
-        if self.external_bytes > read::MAX_BYTES {
-            return Err(Error::new(0, "普通任务外部存储超过上限"));
-        }
         let program = self
             .programs
             .load(name)?
             .ok_or_else(|| Error::new(0, "KCS 程序不存在"))?;
-        let mut task = OrdinaryTask::new(program, vec![0; self.external_bytes])?;
+        let mut task = OrdinaryTask::new(program, Vec::new())?;
+        task.interpreter.bind_external(self.external.clone());
         task.task_id = id;
         Ok(Box::new(OrdinaryObject::new(task)))
     }

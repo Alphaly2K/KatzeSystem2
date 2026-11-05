@@ -38,7 +38,7 @@ fn render_offset_query_keeps_shared_outputs_gate_order_and_void_return() {
             ins(&mut code, 0x2b, &[65, 0]);
             let program = Program::from_code(&code, vec![0xaa; 16], 32).unwrap();
             let mut factory = KcsFactory::new(Loader(program));
-            factory.external_bytes = 4;
+            factory.external = katze_system2::memory::SharedMemory::new(vec![0; 4]).unwrap();
             let mut runtime = Runtime::new(
                 0,
                 kind::BASE,

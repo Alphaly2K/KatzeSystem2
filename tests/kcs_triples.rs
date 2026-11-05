@@ -195,7 +195,7 @@ fn runtime_loads_and_queries_both_table_names_then_rejects_the_released_handle()
     let program = Program::from_code(&code, data, 64).unwrap();
     for budget in [1, 4096] {
         let mut factory = KcsFactory::new(Loader(program.clone()));
-        factory.external_bytes = 8;
+        factory.external = katze_system2::memory::SharedMemory::new(vec![0; 8]).unwrap();
         let mut runtime = Runtime::new(
             0,
             kind::BASE,

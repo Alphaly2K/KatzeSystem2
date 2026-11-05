@@ -7,6 +7,7 @@ use crate::{Error, Result};
 
 #[derive(Default)]
 pub(super) struct ChildScripts {
+    pub(super) external: crate::memory::SharedMemory,
     pub(super) fes: Option<u32>,
     pub(super) kcs: Option<u32>,
     pub(super) active: Option<ScriptRequest>,
@@ -224,7 +225,25 @@ impl<F: ObjectFactory> Store<'_, F> {
                         resolved.push(0);
                     }
                     2 => self.fes_command(owner, *child, 161, [1, 0, 0], Some(resolved))?,
-                    3 => self.fes_command(owner, *child, 172, [0; 3], None)?,
+                    3 => {
+                        if let Some(child) = *child {
+                            route_command(
+                                self.reborrow(),
+                                owner,
+                                Command {
+                                    target: child,
+                                    sender: owner,
+                                    code: 172,
+                                    data: [scene.scripts.external.len() as u32, 0, 0],
+                                },
+                                &mut CommandBuffers {
+                                    external: Some(scene.scripts.external.clone()),
+                                    ..CommandBuffers::default()
+                                },
+                                &mut 0,
+                            )?;
+                        }
+                    }
                     4 => {
                         scene.scripts.kcs = *child;
                         return Ok(true);

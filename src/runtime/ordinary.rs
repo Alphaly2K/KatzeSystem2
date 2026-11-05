@@ -97,17 +97,18 @@ impl OrdinaryObject {
     }
 
     pub fn unloaded(id: u32, external: Vec<u8>) -> Result<Self> {
-        if external.len() > read::MAX_BYTES {
-            return Err(Error::new(0, "普通任务外部存储超过上限"));
-        }
-        Ok(Self {
+        Ok(Self::unloaded_shared(id, SharedMemory::new(external)?))
+    }
+
+    pub(crate) fn unloaded_shared(id: u32, external: SharedMemory) -> Self {
+        Self {
             id,
             task: None,
             unloaded: Unloaded::default(),
             shared_numbers: false,
             loading: None,
-            external: SharedMemory::new(external)?,
-        })
+            external,
+        }
     }
 
     pub fn running(&self) -> i32 {

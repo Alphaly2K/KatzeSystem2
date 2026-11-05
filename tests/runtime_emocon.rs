@@ -69,7 +69,7 @@ impl ProgramLoader for Loader {
         } else {
             call(&mut code, 1057, &[], Some(4));
         }
-        call(&mut code, 1060, &[0x80000060], None);
+        call(&mut code, 1060, &[192], None);
         call(&mut code, 65, &[], None);
         code.push(0x3b);
         Ok(Some(Program::from_code(&code, data, 64)?))
@@ -86,7 +86,7 @@ fn native_family_scales_metadata_and_clears_only_its_task_on_reload_and_release(
             State::new(0),
             KcsFactory {
                 programs: Loader,
-                external_bytes: 256,
+                external: katze_system2::memory::SharedMemory::new(vec![0; 256]).unwrap(),
             },
         );
         rt.set_budget(budget, 1 << 20);
@@ -118,19 +118,16 @@ fn native_family_scales_metadata_and_clears_only_its_task_on_reload_and_release(
         let vm = rt.object(loaded).unwrap().interpreter().unwrap();
         assert_eq!(vm.read(4, 4).unwrap().as_ref(), &[0; 4]);
         let stop = encoding_rs::SHIFT_JIS.encode("停止\0").0;
-        assert_eq!(
-            vm.read(0x80000060, stop.len()).unwrap().as_ref(),
-            stop.as_ref()
-        );
+        assert_eq!(vm.read(192, stop.len()).unwrap().as_ref(), stop.as_ref());
         let vm = rt.object(empty).unwrap().interpreter().unwrap();
         assert_eq!(vm.read(4, 4).unwrap().as_ref(), &[0; 4]);
-        assert_eq!(vm.read(0x80000060, 1).unwrap().as_ref(), &[0]);
+        assert_eq!(vm.read(192, 1).unwrap().as_ref(), &[0]);
         rt.destroy(loaded).unwrap();
         rt.update(2, 1).unwrap();
         let reused = rt.create(0, kind::ORDINARY, b"empty", b"").unwrap();
         assert_eq!(loaded, reused);
         rt.update(3, 1).unwrap();
         let vm = rt.object(reused).unwrap().interpreter().unwrap();
-        assert_eq!(vm.read(0x80000060, 1).unwrap().as_ref(), &[0]);
+        assert_eq!(vm.read(192, 1).unwrap().as_ref(), &[0]);
     }
 }

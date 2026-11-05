@@ -241,6 +241,7 @@ pub struct FesObject {
     loaded: bool,
     started: bool,
     scene: Option<Scene>,
+    external: crate::memory::SharedMemory,
     pending: Option<Command>,
     name: Vec<u8>,
     context: Vec<u8>,
@@ -297,6 +298,10 @@ enum InputResponse {
 
 impl FesObject {
     pub fn new(id: u32) -> Self {
+        Self::with_external(id, crate::memory::SharedMemory::default())
+    }
+
+    pub fn with_external(id: u32, external: crate::memory::SharedMemory) -> Self {
         Self {
             id,
             base: BaseObject::new(),
@@ -304,6 +309,7 @@ impl FesObject {
             loaded: false,
             started: false,
             scene: None,
+            external,
             pending: None,
             name: Vec::new(),
             context: Vec::new(),
@@ -809,6 +815,7 @@ impl FesObject {
 
     fn bind(&mut self) -> Result<()> {
         if let Some(scene) = &mut self.scene {
+            scene.set_external_storage(self.external.clone());
             let objects = scene.objects_mut()?;
             if let Some(list) = self.list {
                 objects.set_image_list(list, self.clip);
@@ -865,6 +872,10 @@ impl FesObject {
 }
 
 impl TaskObject for FesObject {
+    fn external_storage(&self) -> Option<crate::memory::SharedMemory> {
+        Some(self.external.clone())
+    }
+
     fn shared_numbers_available(&self) -> Option<bool> {
         Some(self.initialized)
     }
@@ -1240,6 +1251,10 @@ pub struct FesFactory<F> {
 }
 
 impl<F: ObjectFactory> ObjectFactory for FesFactory<F> {
+    fn external_storage(&self) -> crate::memory::SharedMemory {
+        self.fallback.external_storage()
+    }
+
     fn create_unloaded_ordinary(&mut self, id: u32) -> Result<Box<dyn TaskObject>> {
         self.fallback.create_unloaded_ordinary(id)
     }
@@ -1250,7 +1265,10 @@ impl<F: ObjectFactory> ObjectFactory for FesFactory<F> {
 
     fn create(&mut self, id: u32, object_kind: u32, name: &[u8]) -> Result<Box<dyn TaskObject>> {
         if object_kind == kind::FES {
-            Ok(Box::new(FesObject::new(id)))
+            Ok(Box::new(FesObject::with_external(
+                id,
+                self.external_storage(),
+            )))
         } else {
             self.fallback.create(id, object_kind, name)
         }

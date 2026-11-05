@@ -586,6 +586,10 @@ pub struct MessageFactory<F> {
     pub fallback: F,
 }
 impl<F: ObjectFactory> ObjectFactory for MessageFactory<F> {
+    fn external_storage(&self) -> crate::memory::SharedMemory {
+        self.fallback.external_storage()
+    }
+
     fn create_unloaded_ordinary(&mut self, id: u32) -> Result<Box<dyn TaskObject>> {
         self.fallback.create_unloaded_ordinary(id)
     }

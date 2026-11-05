@@ -307,7 +307,7 @@ fn ordinary_text_calls_write_vm_configuration_and_render_segmented_messages() {
     for budget in [1, 4096] {
         for address in [64, 0x80000040] {
             let mut factory = KcsFactory::new(MessageProgram { address });
-            factory.external_bytes = 384;
+            factory.external = katze_system2::memory::SharedMemory::new(vec![0; 384]).unwrap();
             let mut rt = Runtime::new(
                 0,
                 kind::ROOT,

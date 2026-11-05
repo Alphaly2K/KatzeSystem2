@@ -86,7 +86,7 @@ impl ResourceServices for Resources {
 type Rt = Runtime<SoundFactory<KcsFactory<Source>>>;
 fn runtime(address: u32, enabled: bool, extra: bool, sound_target: u32) -> (Rt, u32) {
     let mut kcs = KcsFactory::new(Source { address, extra });
-    kcs.external_bytes = 256;
+    kcs.external = katze_system2::memory::SharedMemory::new(vec![0; 256]).unwrap();
     let mut rt = Runtime::new(
         0,
         kind::ROOT,

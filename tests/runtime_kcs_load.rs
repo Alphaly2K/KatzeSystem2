@@ -250,18 +250,46 @@ fn packed(source: &[u8]) -> Vec<u8> {
 
 #[test]
 fn fes_child_load_retries_on_the_same_object_then_returns_status_and_destroys_normally() {
+    struct ChildFactory(KcsFactory<Loader>);
+    impl ObjectFactory for ChildFactory {
+        fn external_storage(&self) -> katze_system2::memory::SharedMemory {
+            self.0.external_storage()
+        }
+        fn create_unloaded_ordinary(
+            &mut self,
+            id: u32,
+        ) -> Result<Box<dyn katze_system2::runtime::TaskObject>> {
+            Ok(Box::new(OrdinaryObject::unloaded(id, vec![9; 16])?))
+        }
+        fn load_kcs_program(&mut self, name: &[u8]) -> Result<Option<Program>> {
+            self.0.load_kcs_program(name)
+        }
+        fn create(
+            &mut self,
+            id: u32,
+            kind: u32,
+            name: &[u8],
+        ) -> Result<Box<dyn katze_system2::runtime::TaskObject>> {
+            self.0.create(id, kind, name)
+        }
+    }
     for budget in [1, 4096] {
         let fail = Rc::new(Cell::new(true));
         let loads = Rc::new(RefCell::new(Vec::new()));
+        let external = katze_system2::memory::SharedMemory::new(vec![0; 16]).unwrap();
+        external.write(4, &[1, 2, 3, 4]).unwrap();
         let factory = MessageFactory {
             fallback: FesFactory {
                 fallback: GraphicsFactory {
                     fallback: InputFactory {
                         fallback: SoundFactory {
                             enabled: false,
-                            fallback: KcsFactory::new(Loader {
-                                fail: fail.clone(),
-                                loads: loads.clone(),
+                            fallback: ChildFactory(KcsFactory {
+                                programs: Loader {
+                                    fail: fail.clone(),
+                                    loads: loads.clone(),
+                                },
+                                external: external.clone(),
                             }),
                         },
                     },
@@ -283,6 +311,16 @@ fn fes_child_load_retries_on_the_same_object_then_returns_status_and_destroys_no
         runtime.create(0, kind::SOUND, b"sound", b"").unwrap();
         runtime.set_resources(Files(packed(b"#START\nexeckcs child ($7+=100)\n$0+=1\nwait 1\nwait 1\n$1=_EXITCODE_\nendkcs\n$2+=1\nwait 100\n")));
         let parent = runtime.create(0, kind::FES, b"parent", b"").unwrap();
+        assert_eq!(
+            &*runtime
+                .object(parent)
+                .unwrap()
+                .external_storage()
+                .unwrap()
+                .read(4, 4)
+                .unwrap(),
+            &[1, 2, 3, 4]
+        );
         runtime
             .dispatch_command(0, command(parent, 337, [0; 3]))
             .unwrap();
@@ -330,6 +368,14 @@ fn fes_child_load_retries_on_the_same_object_then_returns_status_and_destroys_no
             .dispatch_command(0, command(parent, 339, [0; 3]))
             .unwrap();
         assert_eq!(counter(&runtime, child), 1);
+        let vm = runtime
+            .object_mut(child)
+            .unwrap()
+            .interpreter_mut()
+            .unwrap();
+        assert_eq!(&*vm.read(0x8000_0004, 4).unwrap(), &[1, 2, 3, 4]);
+        vm.write(0x8000_0004, &[5, 6, 7, 8]).unwrap();
+        assert_eq!(&*external.read(4, 4).unwrap(), &[5, 6, 7, 8]);
         assert_eq!(
             runtime.object(child).unwrap().creation_context(),
             Some(b"parent context".as_slice())
@@ -430,7 +476,7 @@ fn native_load_initializes_before_binding_and_nested_messages_share_the_live_ext
             caller: caller.clone(),
             child: child.clone(),
         });
-        factory.external_bytes = 16;
+        factory.external = katze_system2::memory::SharedMemory::new(vec![0; 16]).unwrap();
         let mut runtime = Runtime::new(
             0,
             kind::ROOT,

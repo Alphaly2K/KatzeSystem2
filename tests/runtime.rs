@@ -595,14 +595,38 @@ fn unsupported_creation_targets_and_missing_message_targets_report_diagnostics()
 }
 
 #[test]
-fn oversized_external_memory_is_rejected_before_allocation() {
-    let mut factory = KcsFactory::new(Source::new());
-    factory.external_bytes = usize::MAX;
-    let error = factory
-        .create(1, kind::ORDINARY, b"missing")
-        .err()
-        .expect("超大外部存储应被拒绝");
-    assert!(error.message.contains("外部存储"));
+fn factory_external_storage_is_shared_and_existing_tasks_keep_their_view() {
+    use katze_system2::memory::SharedMemory;
+    let mut source = Source::new();
+    source.add(b"child", vec![0x3b], vec![]);
+    let mut factory = KcsFactory::new(source);
+    factory.external = SharedMemory::new(vec![0; 8]).unwrap();
+    let mut loaded = factory.create(1, kind::ORDINARY, b"child").unwrap();
+    let unloaded = factory.create_unloaded_ordinary(2).unwrap();
+    factory.external_storage().write(4, &[1, 2, 3, 4]).unwrap();
+    assert_eq!(
+        &*loaded.interpreter().unwrap().read(0x8000_0004, 4).unwrap(),
+        &[1, 2, 3, 4]
+    );
+    assert_eq!(
+        &*unloaded.external_storage().unwrap().read(4, 4).unwrap(),
+        &[1, 2, 3, 4]
+    );
+    factory.external = SharedMemory::new(vec![9; 4]).unwrap();
+    loaded
+        .interpreter_mut()
+        .unwrap()
+        .write(0x8000_0000, &[7])
+        .unwrap();
+    assert_eq!(
+        &*unloaded.external_storage().unwrap().read(0, 1).unwrap(),
+        &[7]
+    );
+    let next = factory.create(3, kind::ORDINARY, b"child").unwrap();
+    assert_eq!(
+        &*next.interpreter().unwrap().read(0x8000_0000, 4).unwrap(),
+        &[9; 4]
+    );
 }
 
 #[test]

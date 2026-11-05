@@ -74,7 +74,7 @@ fn scripts_share_logs_and_save_records_across_tasks_and_keep_void_return_slots()
             State::new(0),
             KcsFactory {
                 programs: Loader,
-                external_bytes: 64,
+                external: katze_system2::memory::SharedMemory::new(vec![0; 64]).unwrap(),
             },
         );
         runtime.set_budget(budget, 1 << 20);

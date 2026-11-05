@@ -148,6 +148,10 @@ impl Scene {
         &self.interpreter
     }
 
+    pub(super) fn set_external_storage(&mut self, external: crate::memory::SharedMemory) {
+        self.scripts.external = external;
+    }
+
     pub(super) fn load_program(&mut self, program: fes::Program) -> Result<()> {
         if self.is_pending() {
             return Err(Error::new(0, "FES 本轮推进尚未完成"));
