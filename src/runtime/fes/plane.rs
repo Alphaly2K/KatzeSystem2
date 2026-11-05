@@ -444,7 +444,11 @@ impl Objects {
                 break;
             };
             chain.push(state.position);
-            next = object.parent;
+            next = object.parent.filter(|&parent| {
+                matches!(self.get(parent).unwrap().state, ObjectState::CPlane(_) | ObjectState::Plane(_))
+                    || matches!(&self.get(parent).unwrap().state,
+                        ObjectState::String(state) if state.layout.encoding() == crate::message::TextEncoding::Cp932)
+            });
         }
         chain.into_iter().rev().fold([0.0; 4], |parent, local| {
             std::array::from_fn(|i| local[i] + parent[i])

@@ -21,6 +21,7 @@ mod navigation;
 mod plane;
 mod preload;
 mod properties;
+mod queries;
 mod scene;
 mod slider;
 mod sound;

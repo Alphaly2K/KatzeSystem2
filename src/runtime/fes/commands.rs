@@ -46,6 +46,9 @@ impl Objects {
                 | b"pos"
                 | b"page"
                 | b"getpos"
+                | b"getpos2"
+                | b"endpos"
+                | b"lineinfo"
                 | b"load"
                 | b"attach"
                 | b"settbl"
@@ -71,6 +74,9 @@ impl Objects {
         }
         if self.count(&target.name) == 1 {
             target.bank = 0;
+        }
+        if matches!(name, b"getpos2" | b"endpos" | b"lineinfo") {
+            return self.dispatch_query_command(interpreter, line.offset, &args, &target, state);
         }
         if matches!(name, b"play" | b"channel" | b"stype") {
             return self.dispatch_sound_value_command(

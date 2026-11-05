@@ -480,7 +480,7 @@ BUTTON 先通过 `prepare_fes_scene` 或任务 338 完成下层创建，再由�
 
 FES IMAGE 的 `IDN=−1` 接收完整名称的原始来源，不受 PATHMODE 影响；`Object::raw_image_handle` 返回其非持有查询句柄，零表示没有来源。像素和原始数据独立保留，登记优先使用像素；普通装载缺帧后可退回旧原始来源。FES 持有的数据随替换、对象删除或所属任务实际回收释放，列表已经解码的帧继续存活。原始来源登记以当前更新记录的包装保存来源身份，可用 308 反查；具体几何和槽号规则见[原始来源更新](graphics.md#fes-image-原始来源更新)。
 
-`Objects::dispatch_object_command(interpreter, line, state)` 消费 `disp`／`size`／`keypos`／`setid`／`getid`／`enable`／`pri`／`pos2`／`delay`／`ismot`／`attach`／`settbl`／`pl`／`lock`、图像／平面的 `getpos`，以及滑动控件的 `pos`／`page`／`getpos`／`load`。返回 true 后调用者确认事件，其他命令返回 false。目标银行与数值参数使用 FES 自身作用域，图形请求在对象更新时提交；getid／getpos 即时写入共享变量。起始目标缺失时，对行级展开后的原始整行数值求值，保留 FES 作用域与连续操作数规则。Scene 另接图像／平面的 pos 和默认 p 运动，在主体、系统块及对象事件中提供预算续跑与资源重试；独立 Objects 对该路径返回场景服务诊断。位置查询使用本地坐标并按 x86 规则取整，缺省轴、数组、类型和资源时点见[对象控制命令](graphics.md#fes-对象控制命令)。
+`Objects::dispatch_object_command(interpreter, line, state)` 消费 `disp`／`size`／`keypos`／`setid`／`getid`／`enable`／`pri`／`pos2`／`delay`／`ismot`／`attach`／`settbl`／`pl`／`lock`、图像／平面的 `getpos`／`getpos2`、文字的 `endpos` 与普通对象的 `lineinfo` 参数处理，以及滑动控件的 `pos`／`page`／`getpos`／`load`。返回 true 后调用者确认事件，其他命令返回 false。目标银行与数值参数使用 FES 自身作用域，图形请求在对象更新时提交；getid／getpos 即时写入共享变量。起始目标缺失时，对行级展开后的原始整行数值求值，保留 FES 作用域与连续操作数规则。Scene 另接图像／平面的 pos 和默认 p 运动，在主体、系统块及对象事件中提供预算续跑与资源重试；独立 Objects 对该路径返回场景服务诊断。getpos 使用本地坐标，getpos2 使用绘制位置；两者按 x86 规则取整，缺省轴、数组、类型和资源时点见[对象控制命令](graphics.md#fes-对象控制命令)。
 
 Scene 消费 `keyskip` 并即时更新等待取消模式，`forced_key_skip()` 查询保存的 force 标志；它与当前输入模式分别维护，完整规则见[等待取消](graphics.md#fes-等待取消与-keyskip)。
 
