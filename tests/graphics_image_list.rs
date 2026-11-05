@@ -618,3 +618,45 @@ fn clipping_keeps_history_shrinks_and_null_reset_waits_for_new_invalidation() {
     );
     assert!(!list.set_clip(99, Some(clip), &images).unwrap());
 }
+
+#[test]
+fn list_opacity_keeps_full_words_until_the_pixel_alpha_lookup() {
+    let mut images = Images::default();
+    let source = images.create(1, [1, 1]).unwrap();
+    images
+        .get_mut(source)
+        .unwrap()
+        .pixels_mut()
+        .copy_from_slice(&0x8012_3456u32.to_le_bytes());
+    for (opacity, expected) in [
+        (0, 0),
+        (255, 0x8012_3456),
+        (256, 0x8112_3456),
+        (511, 0x0112_3456),
+        (65536, 0x0012_3456),
+        (0x8000_0000, 0x0012_3456),
+        (0xffff_ff00, 0x7f12_3456),
+        (u32::MAX, 0xff12_3456),
+    ] {
+        let mut list = ImageList::new(2, [3, 1], &mut images).unwrap();
+        list.set(
+            7,
+            source,
+            ImageListProperties {
+                position: [1., 0.],
+                opacity,
+                ..Default::default()
+            },
+            &mut images,
+        )
+        .unwrap();
+        list.update(&mut images).unwrap();
+        let surface = images.get(list.image()).unwrap().surface();
+        assert_eq!(surface.pixel(1, 0), Some(expected), "opacity={opacity}");
+        assert_eq!(
+            surface.pixel(0, 0),
+            Some(if opacity == 0 { 0 } else { 0x0012_3456 })
+        );
+        list.release(&mut images).unwrap();
+    }
+}

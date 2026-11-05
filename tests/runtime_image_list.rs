@@ -714,3 +714,209 @@ fn pixel_lookup_uses_signed_keys_and_preserves_missing_output_and_buffer_tails()
     send(&mut runtime, list, 287, 7, 0);
     assert_eq!(send(&mut runtime, list, 307, pixels, 0), 0);
 }
+
+fn buffer_command<F: ObjectFactory>(
+    runtime: &mut Runtime<F>,
+    id: u32,
+    code: u32,
+    bytes: &mut [u8],
+) -> u32 {
+    runtime
+        .dispatch_command_with_buffers(
+            0,
+            command(id, code, 7, 0),
+            &mut CommandBuffers {
+                data1: Some(bytes),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+}
+
+#[test]
+fn list_resize_and_animation_variables_preserve_entries_plane_and_deferred_updates() {
+    use katze_system2::{kcs::ResourceServices, resource::ResourceMode};
+    struct Animation(Vec<u8>);
+    impl ResourceServices for Animation {
+        fn resolve(&mut self, _: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+            Ok(name.to_vec())
+        }
+        fn read(&mut self, _: &[u8], _: ResourceMode) -> Result<Option<Vec<u8>>> {
+            Ok(Some(self.0.clone()))
+        }
+    }
+    let mut animation = vec![0; 32 + 68 * 2];
+    animation[..4].copy_from_slice(b"ANM\0");
+    for (at, value) in [(8, 2_u32), (32, 12), (36, 1), (40, 3), (116, 1), (124, 1)] {
+        animation[at..at + 4].copy_from_slice(&value.to_le_bytes());
+    }
+    let mut runtime = Runtime::new(
+        0,
+        kind::ROOT,
+        Box::new(BaseObject::new()),
+        State::new(0),
+        GraphicsFactory { fallback: Fallback },
+    );
+    runtime.set_resources(Animation(animation));
+    runtime.host_mut().surface_size = [8, 6];
+    runtime.drawing_mut().target = Some(RenderTarget::new([8, 6]).unwrap());
+    let list = runtime.create(0, kind::IMAGE_LIST, b"list", b"").unwrap();
+    send(&mut runtime, list, 314, 6, 4);
+    send(&mut runtime, list, 285, 4, 3);
+    let plane = runtime.tree().children(list).unwrap().next().unwrap();
+    let old_output = output_image(&mut runtime, list);
+    let source = runtime.images_mut().create(99, [1, 1]).unwrap();
+    runtime
+        .images_mut()
+        .get_mut(source)
+        .unwrap()
+        .pixels_mut()
+        .copy_from_slice(&0x8012_3456u32.to_le_bytes());
+    let pixels = runtime.images().pixel_handle(source).unwrap();
+    let mut record = [
+        pixels,
+        0,
+        0,
+        0,
+        1f32.to_bits(),
+        1f32.to_bits(),
+        0,
+        0,
+        0,
+        1f32.to_bits(),
+        1f32.to_bits(),
+        256,
+        1,
+        0,
+        0,
+    ]
+    .into_iter()
+    .flat_map(u32::to_le_bytes)
+    .collect::<Vec<_>>();
+    buffer_command(&mut runtime, list, 286, &mut record);
+    send(&mut runtime, list, 296, 0, 0);
+    assert_eq!(
+        runtime
+            .images()
+            .get(old_output)
+            .unwrap()
+            .surface()
+            .pixel(1, 1),
+        Some(0x8112_3456)
+    );
+    record[44..48].copy_from_slice(&u32::MAX.to_le_bytes());
+    buffer_command(&mut runtime, list, 288, &mut record);
+    send(&mut runtime, list, 296, 0, 0);
+    assert_eq!(
+        runtime
+            .images()
+            .get(old_output)
+            .unwrap()
+            .surface()
+            .pixel(1, 1),
+        Some(0xff12_3456)
+    );
+    let mut variable = [3_u32, 128]
+        .into_iter()
+        .flat_map(u32::to_le_bytes)
+        .collect::<Vec<_>>();
+    buffer_command(&mut runtime, list, 318, &mut variable);
+    let mut name = b"synthetic.anm\0".to_vec();
+    buffer_command(&mut runtime, list, 299, &mut name);
+    send(&mut runtime, list, 301, 7, 1);
+    send(&mut runtime, list, 298, 0, 0);
+    assert_eq!(
+        runtime
+            .images()
+            .get(old_output)
+            .unwrap()
+            .surface()
+            .pixel(1, 1),
+        Some(0)
+    );
+    buffer_command(&mut runtime, list, 318, &mut variable);
+    send(&mut runtime, list, 296, 0, 0);
+    assert_eq!(
+        runtime
+            .images()
+            .get(old_output)
+            .unwrap()
+            .surface()
+            .pixel(1, 1),
+        Some(0)
+    );
+    for index in [64_u32, u32::MAX] {
+        variable[..4].copy_from_slice(&index.to_le_bytes());
+        variable[4..].copy_from_slice(&0_u32.to_le_bytes());
+        buffer_command(&mut runtime, list, 318, &mut variable);
+    }
+    send(&mut runtime, list, 306, 7, 0);
+    send(&mut runtime, list, 296, 0, 0);
+    assert_eq!(
+        runtime
+            .images()
+            .get(old_output)
+            .unwrap()
+            .surface()
+            .pixel(1, 1),
+        Some(0x8012_3456)
+    );
+    send(&mut runtime, list, 289, 2, u32::MAX);
+    send(&mut runtime, list, 305, 7, u32::MAX);
+    send(&mut runtime, list, 314, 6, 4);
+    assert_eq!(
+        runtime.tree().children(list).unwrap().collect::<Vec<_>>(),
+        [plane]
+    );
+    assert_eq!(send(&mut runtime, list, 294, 0, 0), 1);
+    let output = output_image(&mut runtime, list);
+    assert_ne!(output, old_output);
+    assert!(runtime.images().get(old_output).is_err());
+    assert_eq!(runtime.images().get(output).unwrap().info().size, [6, 4]);
+    assert!(
+        runtime
+            .images()
+            .get(output)
+            .unwrap()
+            .surface()
+            .pixels()
+            .iter()
+            .all(|&b| b == 0)
+    );
+    let mut priority = [0; 4];
+    assert_eq!(
+        runtime
+            .dispatch_command_with_buffers(
+                0,
+                command(list, 304, 7, 0),
+                &mut CommandBuffers {
+                    data1: Some(&mut priority),
+                    ..Default::default()
+                }
+            )
+            .unwrap(),
+        1
+    );
+    assert_eq!(priority, u32::MAX.to_le_bytes());
+    send(&mut runtime, list, 296, 0, 0);
+    assert_eq!(
+        runtime.images().get(output).unwrap().surface().pixel(1, 2),
+        Some(0x8012_3456)
+    );
+    let (mut x, mut y) = ([0; 4], [0; 4]);
+    runtime
+        .dispatch_command_with_buffers(
+            0,
+            command(list, 290, 0, 0),
+            &mut CommandBuffers {
+                data0: Some(&mut x),
+                data1: Some(&mut y),
+                external: None,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        [u32::from_le_bytes(x), u32::from_le_bytes(y)],
+        [2, u32::MAX]
+    );
+}

@@ -14,6 +14,21 @@ impl ImageList {
         self.entries.get(&key).map(|entry| &entry.animation)
     }
 
+    /// 只写已经装载的 ANM；缺失条目、时间线或超出 64 项的下标均跳过，不标脏。
+    pub fn set_animation_variable(&mut self, key: u32, index: u32, value: i32) -> Result<()> {
+        self.check_animation_pass()?;
+        if let Some(timeline) = self
+            .entries
+            .get_mut(&key)
+            .and_then(|entry| entry.animation.timeline.as_mut())
+        {
+            if let Some(slot) = timeline.interpreter.variables.get_mut(index as usize) {
+                *slot = value;
+            }
+        }
+        Ok(())
+    }
+
     /// 已有条目装载 ANM；失败移除旧时间线，保留播放控制和旧显示缓存。
     pub fn load_animation(&mut self, key: u32, bytes: &[u8]) -> Result<bool> {
         self.check_animation_pass()?;

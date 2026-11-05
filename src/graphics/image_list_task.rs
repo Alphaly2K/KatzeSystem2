@@ -229,12 +229,10 @@ impl TaskObject for ImageListObject {
                         if data[13] != 0 {
                             return Err(Error::new(0, "图像列表变换来源尚未接入"));
                         }
-                        let opacity = u8::try_from(data[11])
-                            .map_err(|_| Error::new(0, "图像列表超范围透明度尚未核实"))?;
                         let properties = ImageListProperties {
                             position: [data[4], data[5]].map(f32::from_bits),
                             base_point: [data[6], data[7]].map(f32::from_bits),
-                            opacity,
+                            opacity: data[11],
                             visible: data[12] != 0,
                         };
                         if data[0] != 0 {
@@ -451,6 +449,24 @@ impl TaskObject for ImageListObject {
                 }
             }
             310 => self.enabled = b,
+            314 => {
+                if let Some(list) = &mut self.list {
+                    let size = [a, b];
+                    let tiles = host
+                        .canvas_layout()?
+                        .map_or([size[0].max(size[1]).max(1); 2], |layout| {
+                            layout.tile_size()
+                        });
+                    list.resize(size, tiles, images(host)?)?;
+                }
+            }
+            318 => {
+                let [index, value] = words::<2>(buffers.data1.as_deref())?;
+                self.list
+                    .as_mut()
+                    .ok_or_else(|| Error::new(0, "图像列表尚未创建"))?
+                    .set_animation_variable(key, index, value as i32)?;
+            }
             288..=308 | 310..=319 => {
                 return Err(Error::new(
                     0,

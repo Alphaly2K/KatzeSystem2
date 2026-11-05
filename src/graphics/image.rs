@@ -181,7 +181,7 @@ impl Image {
         source: &Self,
         position: [f32; 2],
         base: [f32; 2],
-        opacity: u8,
+        opacity: u32,
         clip: Rect,
         has_alpha: &mut Option<bool>,
     ) {
@@ -207,7 +207,8 @@ impl Image {
                 [region.x as i32, region.y as i32],
             );
         } else {
-            self.surface.blend_region(&source.surface, region, opacity);
+            self.surface
+                .blend_region_raw(&source.surface, region, opacity);
         }
     }
 
@@ -697,7 +698,7 @@ impl Images {
         source: u32,
         position: [f32; 2],
         base: [f32; 2],
-        opacity: u8,
+        opacity: u32,
         clip: Rect,
     ) -> Result<()> {
         let source_data = self.entry_mut(source)?.data;

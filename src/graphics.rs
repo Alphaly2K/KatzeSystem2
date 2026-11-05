@@ -200,6 +200,10 @@ impl Surface {
     }
 
     fn blend_region(&mut self, source: &Self, region: ImageRegion, opacity: u8) {
+        self.blend_region_raw(source, region, u32::from(opacity));
+    }
+
+    fn blend_region_raw(&mut self, source: &Self, region: ImageRegion, opacity: u32) {
         let count = region.width * 4;
         let stride = self.stride();
         let source_stride = source.stride();
@@ -240,7 +244,11 @@ impl Surface {
                 let source = from + column * 4;
                 let target = start + column * 4;
                 let pixel: [u8; 4] = self.pixels[source..source + 4].try_into().unwrap();
-                blend_pixel(&mut self.pixels[target..target + 4], &pixel, opacity);
+                blend_pixel(
+                    &mut self.pixels[target..target + 4],
+                    &pixel,
+                    u32::from(opacity),
+                );
             }
             if region.x + region.width < self.size[0] as usize {
                 let pixel: [u8; 4] = self.pixels[from + count - 4..from + count]
@@ -307,8 +315,9 @@ fn extend_color(target: &mut [u8], source: &[u8]) {
     }
 }
 
-fn blend_pixel(target: &mut [u8], source: &[u8], opacity: u8) {
-    let alpha = (u32::from(opacity) * (u32::from(source[3]) + 1)) >> 8;
+fn blend_pixel(target: &mut [u8], source: &[u8], opacity: u32) {
+    // 原混合入口按透明度低十六位生成字节查找表，随后才查源 Alpha。
+    let alpha = (((opacity & 0xffff) * (u32::from(source[3]) + 1)) >> 8) & 0xff;
     if alpha == 0 {
         extend_color(target, source);
     } else if alpha == 255 || target[3] == 0 {

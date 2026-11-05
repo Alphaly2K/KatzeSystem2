@@ -10,7 +10,7 @@ mod animation;
 pub struct ImageListProperties {
     pub position: [f32; 2],
     pub base_point: [f32; 2],
-    pub opacity: u8,
+    pub opacity: u32,
     pub visible: bool,
 }
 
@@ -45,11 +45,16 @@ impl Entry {
         } else {
             DisplayState::default()
         };
-        state.compose(
+        let mut state = state.compose(
             self.properties.position,
-            i32::from(self.properties.opacity),
+            self.properties.opacity as i32,
             i32::from(self.properties.visible),
-        )
+        );
+        if self.animation.timeline.is_none() {
+            state.blend = self.properties.opacity as i32;
+            state.visible = i32::from(self.properties.visible);
+        }
+        state
     }
 
     fn visible(&self) -> bool {
@@ -155,6 +160,22 @@ impl ImageList {
     /// 提交偏移不改变列表自有图像的几何和像素，也不产生脏区。
     pub fn set_offset(&mut self, offset: [i32; 2]) {
         self.offset = offset;
+    }
+
+    /// 重建输出及面块，保留条目、动画、裁剪、优先级和提交偏移；新面块全部标脏。
+    pub fn resize(
+        &mut self,
+        size: [u32; 2],
+        tile_size: [u32; 2],
+        images: &mut Images,
+    ) -> Result<()> {
+        self.check_animation_pass()?;
+        let replacement = Self::new_tiled(self.owner, size, tile_size, images)?;
+        images.release(self.image)?;
+        self.image = replacement.image;
+        self.blocks = replacement.blocks;
+        self.invalidate_all();
+        Ok(())
     }
 
     /// 新条目创建自己的包装，已有条目保留包装并替换像素来源。
@@ -600,7 +621,7 @@ impl ImageList {
                         entry.image,
                         entry.properties.position,
                         p.base_point,
-                        display.blend as u8,
+                        display.blend as u32,
                         clip,
                     )?;
                 }
