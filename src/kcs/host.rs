@@ -262,8 +262,12 @@ pub(crate) fn call_native(
     vm: &mut Interpreter,
 ) -> Result<NativeReturn> {
     let index = match index {
-        885 | 894 => 515,
-        886 | 895 => 516,
+        675 | 885 | 894 => 515,
+        676 | 886 | 895 => 516,
+        888 => 897,
+        889 => 898,
+        890 => 899,
+        893 => 902,
         _ => index,
     };
     if index == 1036 {
