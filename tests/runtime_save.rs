@@ -344,3 +344,118 @@ fn restore_queries_idle_and_running_tasks_and_copies_whole_values_with_clipping(
         assert_eq!(rt.numbers().strings[&7], b"keep");
     }
 }
+
+#[test]
+fn raw_buffer_container_roundtrip_survives_producer_exit_and_frees_by_base_address() {
+    struct RawPrograms;
+    impl ProgramLoader for RawPrograms {
+        fn load(&mut self, name: &[u8]) -> Result<Option<Program>> {
+            let mut code = vec![];
+            push(&mut code, 0xdeadbeef);
+            push(&mut code, 1);
+            native(&mut code, 238, 1);
+            store(&mut code, 0);
+            load(&mut code, 0);
+            push(&mut code, 7);
+            if name == b"producer" {
+                push(&mut code, 4);
+                push(&mut code, 64);
+                native(&mut code, 244, 4);
+                store(&mut code, 8);
+            } else {
+                push(&mut code, 3);
+                load(&mut code, 0x80000008);
+                native(&mut code, 835, 4);
+                store(&mut code, 8);
+                load(&mut code, 0x80000000);
+                native(&mut code, 834, 1);
+            }
+            load(&mut code, 0);
+            push(&mut code, 7);
+            push(&mut code, 0x80000004);
+            native(&mut code, 836, 3);
+            store(
+                &mut code,
+                if name == b"producer" {
+                    0x80000000
+                } else {
+                    0x80000010
+                },
+            );
+            load(&mut code, 0);
+            native(&mut code, 246, 1);
+            native(&mut code, 65, 0);
+            if name != b"producer" {
+                load(&mut code, 0x80000010);
+                native(&mut code, 290, 1);
+                push(&mut code, 0);
+                native(&mut code, 833, 1);
+                store(&mut code, 12);
+                load(&mut code, 12);
+                native(&mut code, 834, 1);
+                push(&mut code, 0);
+                native(&mut code, 834, 1);
+            }
+            code.push(0x3b);
+            let mut data = vec![0; 128];
+            data[64..68].copy_from_slice(b"ABCD");
+            Ok(Some(Program::from_code(&code, data, 64)?))
+        }
+    }
+    for budget in [1, 4096] {
+        let external = katze_system2::memory::SharedMemory::new(vec![0; 32]).unwrap();
+        let mut factory = KcsFactory::new(RawPrograms);
+        factory.external = external.clone();
+        let mut runtime = Runtime::new(
+            0,
+            kind::ROOT,
+            Box::new(BaseObject::new()),
+            State::new(0),
+            factory,
+        );
+        runtime.set_budget(budget, 1 << 20);
+        let producer = runtime.create(0, kind::ORDINARY, b"producer", b"").unwrap();
+        runtime.update(0, 1).unwrap();
+        let raw = u32::from_le_bytes(external.read(0, 4).unwrap()[..].try_into().unwrap());
+        assert_eq!(runtime.host().raw_buffer(raw, 4).unwrap(), b"ABCD");
+        assert!(raw.is_multiple_of(4));
+        assert!(runtime.host().raw_buffer(raw + 1, 4).is_err());
+        assert!(runtime.host_mut().raw_buffer_mut(raw + 4, 1).is_err());
+        runtime.destroy(producer).unwrap();
+        runtime.host_mut().raw_buffer_mut(raw + 1, 1).unwrap()[0] = b'Z';
+        external.write(8, &(raw + 1).to_le_bytes()).unwrap();
+        let consumer = runtime.create(0, kind::ORDINARY, b"consumer", b"").unwrap();
+        runtime.update(1, 1).unwrap();
+        let copied = u32::from_le_bytes(external.read(16, 4).unwrap()[..].try_into().unwrap());
+        assert_eq!(external.read(4, 4).unwrap().as_ref(), 3u32.to_le_bytes());
+        assert_eq!(runtime.host().raw_buffer(copied, 3).unwrap(), b"ZCD");
+        assert!(runtime.host().raw_buffer(raw, 1).is_err());
+        assert_eq!(
+            runtime
+                .object(consumer)
+                .unwrap()
+                .interpreter()
+                .unwrap()
+                .stack_bytes(),
+            0xdeadbeefu32.to_le_bytes()
+        );
+        runtime.update(2, 1).unwrap();
+        assert!(runtime.host().raw_buffer(copied, 1).is_err());
+        let vm = runtime.object(consumer).unwrap().interpreter().unwrap();
+        let empty = u32::from_le_bytes(vm.read(12, 4).unwrap()[..].try_into().unwrap());
+        assert_ne!(empty, 0);
+        assert!(runtime.host().raw_buffer(empty, 0).is_err());
+        assert_eq!(vm.stack_bytes(), 0xdeadbeefu32.to_le_bytes());
+    }
+    let mut numbers = State::new(0);
+    let mut host = CoreHost::new(&mut numbers);
+    let mut vm =
+        Interpreter::new(Program::from_code(&[0x3b], vec![0; 8], 16).unwrap(), vec![]).unwrap();
+    let NativeReturn::Value(raw) = host.call(833, &8u32.to_le_bytes(), &mut vm).unwrap() else {
+        panic!()
+    };
+    assert!(vm.read(raw, 1).is_err());
+    assert!(host.call(834, &(raw + 1).to_le_bytes(), &mut vm).is_err());
+    assert!(host.call(833, &u32::MAX.to_le_bytes(), &mut vm).is_err());
+    assert_eq!(host.raw_buffer(raw, 8).unwrap(), [0; 8]);
+}

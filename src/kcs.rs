@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 
 mod data;
 mod host;
+mod map_data;
 mod matrix;
 mod memory;
 mod messages;

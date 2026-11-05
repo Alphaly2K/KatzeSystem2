@@ -87,6 +87,10 @@ fn null_integer_map_operations_skip_key_address_resolution() {
         (897, vec![0, u32::MAX], NativeReturn::Value(0)),
         (898, vec![0], NativeReturn::Continue),
         (899, vec![0], NativeReturn::Value(0)),
+        (900, vec![0, u32::MAX], NativeReturn::Continue),
+        (900, vec![u32::MAX, 0], NativeReturn::Continue),
+        (901, vec![0, u32::MAX], NativeReturn::Continue),
+        (901, vec![u32::MAX, 0], NativeReturn::Continue),
         (902, vec![u32::MAX, 0, u32::MAX], NativeReturn::Value(0)),
         (895, vec![0], NativeReturn::Continue),
     ] {
@@ -153,6 +157,55 @@ fn named_values_share_dictionary_handles_and_keep_formatted_updates_and_sorted_k
         NativeReturn::Value(0)
     );
     assert_eq!(vm.read(0x80000000, 64).unwrap(), before);
+    let NativeReturn::Value(raw) = call(&mut host, &mut vm, 833, &[64]) else {
+        panic!()
+    };
+    host.raw_buffer_mut(raw, 64).unwrap().fill(0xcc);
+    call(&mut host, &mut vm, 900, &[handle, raw + 1]);
+    let mut expected = vec![0xcc; 40];
+    expected[..4].copy_from_slice(&4u32.to_le_bytes());
+    expected[4..11].copy_from_slice(b"%d[G0]\0");
+    expected[12..16].copy_from_slice(&7u32.to_le_bytes());
+    expected[16..19].copy_from_slice(b"17\0");
+    expected[20..24].copy_from_slice(&0x80000001u32.to_le_bytes());
+    expected[24..28].copy_from_slice(b"ABC\0");
+    expected[28..32].copy_from_slice(&9u32.to_le_bytes());
+    expected[32..36].copy_from_slice(b"abc\0");
+    expected[36..40].copy_from_slice(&11u32.to_le_bytes());
+    assert_eq!(host.raw_buffer(raw + 1, 40).unwrap(), expected);
+    assert_eq!(host.raw_buffer(raw, 1).unwrap(), [0xcc]);
+    host.raw_buffer_mut(raw + 1, 4)
+        .unwrap()
+        .copy_from_slice(&5u32.to_le_bytes());
+    host.raw_buffer_mut(raw + 41, 8)
+        .unwrap()
+        .copy_from_slice(b"abc\0\x99\0\0\0");
+    let target = create(&mut host, &mut vm);
+    call(&mut host, &mut vm, 517, &[target, 48, 55]);
+    call(&mut host, &mut vm, 517, &[target, 96, 33]);
+    call(&mut host, &mut vm, 901, &[target, raw + 1]);
+    for (key, value) in [(48, 55), (96, 33), (80, 11)] {
+        assert_eq!(
+            call(&mut host, &mut vm, 518, &[target, key]),
+            NativeReturn::Value(value)
+        );
+    }
+    let bad: Vec<_> = [target, raw + 63]
+        .into_iter()
+        .flat_map(u32::to_le_bytes)
+        .collect();
+    assert!(host.call(901, &bad, &mut vm).is_err());
+    let short: Vec<_> = [handle, raw + 63]
+        .into_iter()
+        .flat_map(u32::to_le_bytes)
+        .collect();
+    assert!(host.call(900, &short, &mut vm).is_err());
+    call(&mut host, &mut vm, 834, &[raw]);
+    assert_eq!(
+        call(&mut host, &mut vm, 518, &[target, 80]),
+        NativeReturn::Value(11)
+    );
+    call(&mut host, &mut vm, 516, &[target]);
     call(&mut host, &mut vm, 898, &[handle]);
     assert_eq!(
         call(&mut host, &mut vm, 899, &[handle]),

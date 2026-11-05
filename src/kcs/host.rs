@@ -72,10 +72,11 @@ pub struct HostState {
     /// 普通矩阵接口在地址解析失败时使用的共享矩阵，初值为零。
     pub implicit_matrix: [u32; 16],
     pub random: ScriptRandom,
-    integer_maps: BTreeMap<u32, BTreeMap<Vec<u8>, u32>>,
+    pub(super) integer_maps: BTreeMap<u32, BTreeMap<Vec<u8>, u32>>,
     sequence_maps: BTreeMap<u32, super::sequences::SequenceMap>,
     pub(super) record_stacks: BTreeMap<u32, super::record_stack::RecordStack>,
     pub(super) containers: BTreeMap<u32, crate::save::DataContainer>,
+    pub(super) raw_buffers: BTreeMap<u32, Vec<u8>>,
     handles: HandleAllocator,
 }
 
@@ -294,8 +295,11 @@ pub(crate) fn call_native(
         }
         return Ok(NativeReturn::Continue);
     }
-    if matches!(index, 238 | 244 | 246..=248 | 254 | 389 | 469) {
+    if matches!(index, 238 | 244 | 246..=248 | 254 | 290 | 389 | 469 | 833..=836) {
         return super::data::call(host, index, arguments, vm);
+    }
+    if matches!(index, 900 | 901) {
+        return super::map_data::call(host, index, arguments, vm);
     }
     if matches!(index, 863..=868) {
         return super::record_stack::call(host, index, arguments, vm);
