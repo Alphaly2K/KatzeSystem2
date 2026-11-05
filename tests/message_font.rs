@@ -1,13 +1,48 @@
 use katze_system2::{
     graphics::Surface,
     message::{
-        BreakCharacters, Font, GlyphEffects, GlyphMask, LayoutSettings, Page, StyleDefaults,
-        TextEncoding, TimingSettings, VerticalAlignment,
+        BreakCharacters, Font, FontRequest, GlyphEffects, GlyphMask, LayoutSettings, Page,
+        StyleDefaults, TextEncoding, TimingSettings, VerticalAlignment,
     },
 };
 
 fn font() -> Font {
     Font::from_bytes(include_bytes!("fixtures/synthetic-triangle.ttf"), 0).unwrap()
+}
+
+#[test]
+fn fixed_pitch_uses_cp932_mapping_and_preserves_wide_platform_advances() {
+    for encoding in [TextEncoding::Cp932, TextEncoding::Unicode] {
+        let mut request = FontRequest {
+            encoding,
+            name: Vec::new(),
+            weight: 400,
+            backend: 0,
+            glyph_parameter: 1,
+            measure_parameter: 0,
+        };
+        for (character, size, measured, fixed, expected) in [
+            ('あ', 21, 6, 1, 21),
+            ('Ж', 21, 25, 1, 21),
+            ('ｱ', 21, 5, 1, 11),
+            ('é', 21, 0, 1, 11),
+            ('A', 20, 4, 1, 10),
+            ('A', 21, 25, 1, 25),
+            ('A', 20, -1, u32::MAX, 10),
+            ('あ', 20, 7, 0, 7),
+            ('A', 21, 7, 0, 7),
+            ('一', 0, 25, 1, 0),
+        ] {
+            request.measure_parameter = fixed;
+            assert_eq!(
+                request
+                    .character_advance(character, size, measured)
+                    .unwrap(),
+                expected
+            );
+        }
+        assert!(request.character_advance('A', u32::MAX, 10).is_err());
+    }
 }
 
 #[test]

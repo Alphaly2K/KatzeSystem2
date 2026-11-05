@@ -29,7 +29,7 @@
 
 消息文本可通过 `message::Markup::parse(text, &defaults)` 解析，输入已解码为 Unicode，字体尺寸与三种默认颜色由调用者提供。输出保留逐字符样式、分组及 UTF-8 来源区间。`Markup::layout(&settings, measure)` 使用字宽闭包完成换行、禁则、分组、悬挂缩进、对齐及注音定位；设置保留 CP932／Unicode 对象路径，`BreakCharacters::for_encoding` 提供对应默认集合。`Markup::schedule(&layout, &timing, initial_units)` 将等待、字间隔及注音关联换算为逐记录显示时间，返回下一片段可使用的累计计数。`message::Page` 提供延后解析的追加、整页准备、布局失效和清空，保留样式、分组编号、旧自动换行及显示时间；失败后可重试。`Page::advance` 推进普通逐字显示并返回首次显示的布局下标及当前范围完成状态，`remaining` 查询尚未显示的字形数量，`set_speed` 切换速度并维护时间基准。字体配置及宿主等待继续接入，详见 [消息标记接口](message.md)。
 
-`message::Font::from_bytes(bytes, collection_index)` 提供显式字体的整数度量与六十四级灰度遮罩，不查询系统字体或自动处理缺字回退。`GlyphMask::colorize` 使用消息颜色及基线覆盖表生成 BGRA 像素。`Page::paint_foreground(&mut surface, origin, glyph)` 将已显示的正文／注音前景混合到目标，调用者负责重绘背景。`GlyphEffects` 提供轮廓与偏移阴影，`GlyphMask::paint` 合成单个字形，`Page::paint` 将字形效果连接到已显示的正文与注音；保留阴影独立颜色顺序和小字号偏移规则。字体配置及宿主等待继续接入，具体约束见[字形与前景绘制](message.md#显式字体与前景绘制)及[字形效果](message.md#轮廓偏移阴影与字形合成)。
+`message::Font::from_bytes(bytes, collection_index)` 提供显式字体的整数度量与六十四级灰度遮罩，不查询系统字体或自动处理缺字回退。`GlyphMask::colorize` 使用消息颜色及基线覆盖表生成 BGRA 像素。`Page::paint_foreground(&mut surface, origin, glyph)` 将已显示的正文／注音前景混合到目标，调用者负责重绘背景。`GlyphEffects` 提供轮廓与偏移阴影，`GlyphMask::paint` 合成单个字形，`Page::paint` 将字形效果连接到已显示的正文与注音；保留阴影独立颜色顺序和小字号偏移规则。macOS 可通过 `Runtime::set_fonts(message::macos::MacFonts::new(resource_root))` 接入私有字体装载、系统字体选择、度量和栅格化，`add_data(bytes)` 另接受显式字体或集合。`FontRequest::character_advance` 提供两种编码共用的定宽规则。支持范围及平台差异见[macOS 字体服务](message.md#macos-字体服务)，通用字形接口见[字形与前景绘制](message.md#显式字体与前景绘制)及[字形效果](message.md#轮廓偏移阴影与字形合成)。
 
 `message::Reveal` 提供水平渐显的过渡表、原始时间换算、整面颜色同步和逐字形 Alpha 更新，来源保存完整像素，目标持续保留显示状态。`Layout::reveal_starts` 生成跨行起点，`RevealGlyph` 组合起点、消息面位置和局部绘制范围；接口约束见[水平渐显核心](message.md#水平渐显核心)。持久页面推进见下文的 `Display`，脚本完成等待继续接入消息对象。
 

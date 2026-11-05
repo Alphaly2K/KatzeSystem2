@@ -220,11 +220,23 @@ Unicode 的 `word_wrap` 按半角空格确定单词边界，空间不足时回�
 
 `MessageObject::new(id, encoding)` 组合二维平面与消息显示。`MessageFactory { fallback }` 创建类型 48（`kind::STRING_PLANE`，CP932）与类型 63（`kind::STRING_PLANE_UTF8`，UTF-8 输入及 Unicode 布局），其他类型委托 fallback。创建不登记图元；配置命令创建画布纹理矩形，显示仍需平面命令 47 开启。
 
-`Runtime::set_fonts(services)` 绑定同步 `FontServices`。服务依次承担请求检查、字符度量和六十四级遮罩生成，接收同一 `FontRequest` 的编码、UTF-16 字体名、原始字重、后端、字形附加参数及度量开关。不支持的字体或参数返回诊断。字形效果及覆盖加倍由消息显示处理，字重恰为 700 时选择加倍覆盖。当前系统字体选择和 GDI 后端仍需提供适配。
+`Runtime::set_fonts(services)` 绑定同步 `FontServices`。服务依次承担请求检查、字符度量和六十四级遮罩生成，接收同一 `FontRequest` 的编码、UTF-16 字体名、原始字重、后端、字符集及度量开关。不支持的字体或参数返回诊断。`glyph_parameter` 的低八位为 GDI 字符集；原绘字入口仅在字重恰为 700 时选择粗体，消息显示同时使用加倍覆盖，其他字重按常规字体处理。
+
+`FontRequest::character_advance(character, size, measured)` 将平台整数度量换算为布局字宽。`measure_parameter` 为零时返回平台度量；非零时，能映射为 CP932 双字节的字符占整字号，其余字符至少占向上取整的半字号，较宽的平台度量保留。Unicode 路径也使用该 CP932 分类；半角片假名属于半字号，CP932 中的西里尔字母属于整字号。支持 `0..=i32::MAX` 字号，越界返回诊断。
 
 `FontServices::add_resource(cp932_name)` 注册直接文件名指定的字体，返回平台是否接受该资源。FES 的 `fontcom add name` 将展开后的单个名称交给该服务，不进行资源类别补全，忽略额外参数；false 保持脚本继续，服务错误保留当前事件供修复后重试。缺失或空名称直接继续。服务的默认实现返回未支持诊断，宿主须提供实际注册操作；没有绑定字体服务时返回配置诊断。
 
 字体命令可在 FES 主体、系统块及对象事件中执行，注册作用域由共享字体服务维护。`FontServices::enumerate(character_set, variable_pitch)` 提供水平字体的有序 UTF-16 名称列表；零 variable_pitch 仅接受定宽字体，MAX 字符集表示全部，不合并重复名称。默认实现返回未支持诊断。FES 的 init／count／get／search／default 已接入每份 Scene 的独立列表，完整规则见 [字体枚举命令](fes-text.md#字体枚举命令)。进程字体注册和后续 `FontRequest` 的选择、度量及栅格化分别由服务完成。
+
+### macOS 字体服务
+
+macOS 10.13 及以上可通过 `Runtime::set_fonts(message::macos::MacFonts::new(resource_root))` 使用 CoreText 字体选择和 CoreGraphics 灰度字形，不要求窗口或显示设备。`add_resource` 按 CP932 直接文件名读取字体，反斜杠转换为平台分隔符，相对名称基于 `resource_root`；文件不存在或格式不被平台接受时返回 false。`add_data(bytes)` 装载字体或集合的全部成员并返回数量；失败保留已有字体。资源仅此服务可见，同一运行时的任务共享它们，释放服务时结束持有。
+
+选择优先使用已装载资源，再查询系统字体；支持族名、完整名称、PostScript 名及平台提供的本地化名称，比较不区分大小写。同名资源按装载次序选择，优先匹配常规／粗体样式。空名称使用 macOS 用户默认字体；命名字体不接受系统悄然替换，缺字、缺少请求样式和垂直字体均返回诊断。当前支持后端零，以及低字节为 0／1／128 的字符集；这些请求通过所选字体的 Unicode 映射取字，其他字符集与后端明确诊断。
+
+服务对字号零返回零字宽和空遮罩；其他字号使用平台整数度量及前述定宽规则，字形为顶端起始的 0～64 覆盖。轮廓、阴影及覆盖加倍仍由消息层处理。CoreText 的字体样式选择、字宽舍入和抗锯齿存在平台差异，当前未复现 GDI hinting、缺字回退或零高度字体映射。
+
+`enumerate` 当前接受 MAX 字符集：先提供服务内资源，再按平台返回次序提供系统字体，保留重复族名；零 `variable_pitch` 使用平台定宽标记筛选，名称最多 63 个 UTF-16 单元。具体 GDI 字符集筛选仍返回诊断。跨平台核心可继续使用显式 `Font` 或其他 `FontServices` 实现。
 
 `HostState::message_time_scale` 提供生成消息时间的全局比例，初值 None；与任务时钟和外层帧增量分别保存。独立宿主提供 `Host::fonts`、`message_time_scale`、`message_plane_display` 和 `submit_message`。后者按顶部起算的源矩形直接复制 BGRA，目标位置已包含配置偏移和矩形起点；保留 Alpha 及透明 RGB。运行时使用 `DrawingContext::copy_surface` 提交到分块画布，并沿已有平面进入最终帧。
 

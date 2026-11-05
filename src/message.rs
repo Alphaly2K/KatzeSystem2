@@ -8,6 +8,8 @@ mod effects;
 mod font;
 mod layout;
 mod line_breaks;
+#[cfg(target_os = "macos")]
+pub mod macos;
 mod markup;
 mod page;
 mod playback;
