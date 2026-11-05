@@ -17,6 +17,7 @@ mod resources;
 mod scroll2;
 mod slider;
 mod sound;
+mod string;
 mod subcommands;
 pub use attributes::{ObjectAttributes, ObjectInitialization, ObjectReference};
 pub use button::ButtonState;
@@ -31,6 +32,7 @@ pub use scroll2::Scroll2State;
 pub use slider::{SliderState, SliderUpdates};
 pub use sound::SoundState;
 use std::collections::{BTreeMap, VecDeque};
+pub use string::StringState;
 pub use subcommands::{
     MappedArgument, Subcommand, SubcommandCall, SubcommandContext, SubcommandMode,
     SubcommandParameter, SubcommandTable,

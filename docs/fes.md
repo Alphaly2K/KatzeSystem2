@@ -112,7 +112,7 @@ CIMAGE／IMAGE 的运动传递区已接入：基点 XY 位于 DWORD 3、4；优�
 |存档／表格／粒子|`SAVEPANEL`、`BGTABLE2`、`CHTABLE3`、`PARTICLE`|
 |其他基线类型|`IMGWND`、`VIEWPORT`|
 
-旧手册还介绍 `STRING`、`LOGSTRING`、`NVSTRING` 等类型。本轮样本未使用这些旧文本类型；`CHTABLE3`、`IMGWND`、`VIEWPORT` 等扩展的完整初始化契约待核实。语法层可识别类型名，执行层需要单独说明已支持的类型。
+旧手册还介绍 `STRING`、`LOGSTRING`、`NVSTRING` 等类型。本轮样本未使用这些旧文本类型；`CHTABLE3`、`IMGWND`、`VIEWPORT` 等扩展的完整初始化契约待核实。文字类型的编码选择及配置核心见 [FES 文字对象](fes-text.md)；运行时创建与播放继续接入。
 
 ### 宏
 

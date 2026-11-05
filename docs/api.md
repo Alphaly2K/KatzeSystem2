@@ -15,7 +15,7 @@
 |`settings`|四块全局配置、基线初值、XML 字段覆盖、音量换算及普通 359／360 的 VM 读写|配置自动装载及媒体服务应用|
 |`language`|主语言／消息语言前缀、默认回退、普通 1036 查询／1062 字符串替换与 FES 图像文件刷新|语言配置自动装载、平台语言识别及切换命令|
 |`save`|CSS 加载、编号记录、容量／标签、普通容器 native、250 共享值恢复、任务目录读取及修改时间服务、FES 最新槽号查询|文件写入、其他数值分组与对象恢复、嵌套容器及平台目录发现|
-|`fes`|容器、混合编码字节保留、注释、重复块、条件、调用、数值赋值、帧等待／重启、宏、对象创建与初始化请求、CIMAGE／IMAGE／CPLANE／PLANE 状态应用、事件分派、声明、子命令绑定／换算／调用事件|其他类型的对象属性、对象操作、其他事件入口、运动资源装载及子任务协议|
+|`fes`|容器、混合编码字节保留、注释、重复块、条件、调用、数值赋值、帧等待／重启、宏、对象创建与初始化请求、CIMAGE／IMAGE／CPLANE／PLANE 状态应用、文字布局配置核心、事件分派、声明、子命令绑定／换算／调用事件|其他类型的对象属性、对象操作、其他事件入口、运动资源装载及子任务协议|
 |`anm`|容器、全部 18 种指令、随机源、时间调度、重启、图像动画装载及属性组合|资源名称请求、图像选帧及主循环衔接|
 |`kcs`|容器、全部有效指令、地址／类型运算、调用帧、调试元数据、普通任务／消息／跨任务服务包装、数值／字符串／集合／XML／图像数据宿主、运动与粒子宿主|扩展分配区、其余普通 native 及图形／音频等具体服务|
 |`resource`|启动归档类别配置、名称补全、目录索引、KIF 解密及虚拟名路由|自动挂载、列表读取、补丁发现、缓存及别名|
@@ -467,6 +467,8 @@ FES `blend` 已连接 SOUND、CIMAGE／IMAGE／BUTTON、CPLANE／PLANE 和 SLIDE
 `initialize(&initialization, transform_name)` 按银行查找实际类型，先应用 PARENT，再复用各类型的属性规则；IMAGE／BUTTON 的非空 FILE 通过闭包转换。PARENT 的精确查找无结果时解除父级。`set_parent(handle, parent)` 可显式重挂或解除 FES 父级，循环、无效标识及根重挂返回诊断。该关系独立于任务树。`remove(handle)` 移出对象及后代，按后代先于父对象的顺序返回所有权；数量表保留、绑定移除、未绑定的重复对象不自动补位。根对象随存储释放。直接调用 remove 时，调用方负责返回对象所持的媒体资源和下层任务清理；`Object::image_handles()` 与 `button_task_ids()` 遍历其全部包装和按钮，包括重复声明的绑定，`image_handle()`／`task_id()` 只查询当前绑定。对象存储不自行推进 FES 主体。初始化错误保留先前已完成的银行及属性修改。
 
 `fes::CPlaneState` 通过只读查询提供位置、基点、旋转、缩放、矩阵、尺寸、优先级、颜色、显示、创建类型、EXPOS、资源／VIEWPORT 引用及更新标记。`apply(&attributes, bank)` 返回本次是否使属性失效；`Objects::initialize` 同时标记 FES 后代。`motion_properties()`／`apply_motion_properties()` 捕获及回写平面运动，`subcommand_context()` 提供本地属性换算上下文；PLANE 的同名上下文另使用 VRAM。尺寸重建与属性失效独立，具体运动规则见[对象运动](graphics.md#fes-对象运动)。
+
+`fes::StringState::new(encoding, &message_defaults, measurement_parameter)` 创建文字配置核心，复用 PLANE 属性并保存两种编码的消息配置。`apply_layout` 接受数值求值回调，`set_font` 接受 UTF-16 名称与后端 DWORD，`refresh_font_defaults` 更新仍启用继承的字段；只读查询提供配置字节、恢复颜色、继承标记和重配标记。该状态尚未接入 Runtime 的 FES 文字对象创建和播放。参数、缺省值与基线更新行为见 [FES 文字对象](fes-text.md)。
 
 `Runtime::update_fes_object(owner, &mut objects, handle)` 显式推进一个对象。BASE 无媒体操作，CPLANE／PLANE 使用实际对象工厂和命令路由创建／更新直属二维任务，`Object::task_id()` 返回可选编号。CIMAGE 与 IMAGE 通过共享类型 15 列表更新来源与登记，`Object::image_handle()` 查询可选来源包装；IMAGE 支持按当前映射帧装载普通 HG-3 文件及多文件合成，缺失文件或帧清空像素绑定。非零 PATHMODE 使用完整直接路径，跳过类别补全；IDN=−1 的原始来源与像素独立保存，具体契约见下文。调用者按 FES 对象更新顺序推进，并将 objects 与 owner 保持同一生命周期，下层任务由此入口维护。CPLANE 在创建下层任务前读取 SIZE2，PLANE 在创建后读取；POS2 在属性更新时消费；读取共用 Runtime 的资源服务，按 image 类别补全名称，支持 HG-3 元数据。已有绑定的 VIEWPORT 更新返回命令 89 的诊断。此入口尚不执行运动和 FES 主体调度。
 
