@@ -206,3 +206,107 @@ fn cst_tables_merge_values_preserve_nonadjacent_records_and_clear_independently(
         assert_eq!(runtime.cst_context(1).unwrap().history().len(), 1);
     }
 }
+
+#[test]
+fn cst_record_storage_keeps_details_data_and_first_matching_container_record() {
+    for budget in [1, 4096] {
+        for legacy in [false, true] {
+            let mut payload = vec![0; if legacy { 40 } else { 52 }];
+            let start = if legacy { 0 } else { 4 };
+            payload[start..start + 6].copy_from_slice(b"Alpha\0");
+            payload[start + 32..start + 36].copy_from_slice(&7u32.to_le_bytes());
+            payload[start + 36..start + 40].copy_from_slice(&1u32.to_le_bytes());
+            let details: Vec<_> = (0..72u8).collect();
+            if !legacy {
+                payload[start + 40..start + 44].copy_from_slice(&3u32.to_le_bytes());
+                payload[start + 44..start + 48].copy_from_slice(&120u32.to_le_bytes());
+            }
+            payload.extend(&details);
+            if !legacy {
+                payload.extend(b"xyz");
+            }
+            let mut memory = vec![0; 128 + payload.len()];
+            memory[64..74].copy_from_slice(b"alpha.cst\0");
+            memory[128..].copy_from_slice(&payload);
+            let mut code = vec![];
+            instruction(&mut code, 0x25, &[(3, 0xdeadbeef)]);
+            call(&mut code, 323, &[]);
+            instruction(&mut code, 0x26, &[(3, 0)]);
+            call(&mut code, 238, &[(3, 17)]);
+            instruction(&mut code, 0x26, &[(3, 4)]);
+            call(
+                &mut code,
+                244,
+                &[(0x13, 4), (3, 7), (3, payload.len() as u32), (3, 128)],
+            );
+            instruction(&mut code, 0x26, &[(3, 8)]);
+            call(&mut code, 386, &[(0x13, 4), (3, 7), (0x13, 0), (3, 1)]);
+            instruction(&mut code, 0x26, &[(3, 8)]);
+            call(&mut code, 329, &[(0x13, 0), (3, 64), (3, 11)]);
+            instruction(&mut code, 0x26, &[(3, 12)]);
+            for (record, data) in [(8, 1), (9, 0), (8, 0)] {
+                call(
+                    &mut code,
+                    385,
+                    &[(0x13, 4), (3, record), (0x13, 0), (3, 1), (3, data)],
+                );
+                instruction(&mut code, 0x26, &[(3, 16)]);
+            }
+            call(&mut code, 386, &[(0x13, 4), (3, 999), (0x13, 0), (3, 1)]);
+            instruction(&mut code, 0x26, &[(3, 20)]);
+            call(
+                &mut code,
+                385,
+                &[(3, 0), (3, 999), (0x13, 0), (3, 1), (3, 1)],
+            );
+            instruction(&mut code, 0x26, &[(3, 24)]);
+            instruction(&mut code, 0x3b, &[]);
+            let mut runtime = Runtime::new(
+                0,
+                kind::ROOT,
+                Box::new(BaseObject::new()),
+                State::new(0),
+                KcsFactory::new(Loader(Program::from_code(&code, memory, 128).unwrap())),
+            );
+            runtime.set_budget(budget, 1 << 20);
+            let caller = runtime.create(0, kind::ORDINARY, b"records", b"").unwrap();
+            runtime.update(0, 1).unwrap();
+            let vm = runtime.object(caller).unwrap().interpreter().unwrap();
+            assert_eq!(
+                vm.read(8, 20).unwrap(),
+                [1u32, 0, 1, 0, 0]
+                    .into_iter()
+                    .flat_map(u32::to_le_bytes)
+                    .collect::<Vec<_>>()
+            );
+            assert_eq!(vm.stack_bytes(), 0xdeadbeefu32.to_le_bytes());
+            let context = runtime.cst_context(1).unwrap();
+            assert_eq!(
+                context.history().collect::<Vec<_>>(),
+                [(b"Alpha".as_slice(), 11)]
+            );
+            assert_eq!(context.registrations().len(), 0);
+            let container = runtime.host().data_container(2).unwrap();
+            let saved = container.record(8).unwrap().unwrap();
+            let mut expected = vec![0; 52];
+            expected[4..10].copy_from_slice(b"Alpha\0");
+            expected[36..40].copy_from_slice(&11u32.to_le_bytes());
+            expected[40..44].copy_from_slice(&1u32.to_le_bytes());
+            if !legacy {
+                expected[44..48].copy_from_slice(&3u32.to_le_bytes());
+                expected[48..52].copy_from_slice(&120u32.to_le_bytes());
+            }
+            expected.extend(&details);
+            let without_data = {
+                let mut bytes = expected.clone();
+                bytes[44..52].fill(0);
+                bytes
+            };
+            if !legacy {
+                expected.extend(b"xyz");
+            }
+            assert_eq!(saved, expected);
+            assert_eq!(container.record(9).unwrap().unwrap(), without_data);
+        }
+    }
+}

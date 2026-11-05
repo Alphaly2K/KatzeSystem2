@@ -4,6 +4,8 @@ use crate::{Error, Result, read};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
+mod save;
+
 /// 独立 CST 上下文，语言注册在构造时从全局前缀复制。
 pub struct CstContext {
     languages: BTreeSet<Vec<u8>>,
@@ -17,6 +19,18 @@ pub struct CstContext {
 struct Entry {
     name: Vec<u8>,
     value: u32,
+    details: Vec<u8>,
+    saved_data: Vec<u8>,
+}
+
+impl Entry {
+    fn name(&self) -> &[u8] {
+        &self.name[..self
+            .name
+            .iter()
+            .position(|&b| b == 0)
+            .unwrap_or(self.name.len())]
+    }
 }
 
 impl CstContext {
@@ -175,14 +189,12 @@ impl CstContext {
     pub fn registrations(&self) -> impl ExactSizeIterator<Item = (&[u8], u32)> {
         self.registrations
             .iter()
-            .map(|entry| (entry.name.as_slice(), entry.value))
+            .map(|entry| (entry.name(), entry.value))
     }
 
     /// 按追加顺序枚举记录；相邻同名记录合并，非相邻同名记录独立保存。
     pub fn history(&self) -> impl ExactSizeIterator<Item = (&[u8], u32)> {
-        self.history
-            .iter()
-            .map(|entry| (entry.name.as_slice(), entry.value))
+        self.history.iter().map(|entry| (entry.name(), entry.value))
     }
 }
 
@@ -193,6 +205,9 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         arguments: &[u8],
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
+        if matches!(index, 385 | 386) {
+            return self.cst_record_native(index, arguments, vm);
+        }
         if index == 323 {
             if self.resources.cst_contexts.len() >= read::MAX_ITEMS {
                 return Err(Error::new(vm.pc, "CST 上下文数量超过上限"));
@@ -311,7 +326,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     let value = context
                         .registrations
                         .iter()
-                        .find(|entry| entry.name.eq_ignore_ascii_case(&name))
+                        .find(|entry| entry.name().eq_ignore_ascii_case(&name))
                         .map_or(0, |entry| entry.value);
                     return Ok(NativeReturn::Value(value));
                 }
@@ -327,11 +342,11 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                 let existing = if index == 328 {
                     entries
                         .iter_mut()
-                        .find(|entry| entry.name.eq_ignore_ascii_case(&name))
+                        .find(|entry| entry.name().eq_ignore_ascii_case(&name))
                 } else {
                     entries
                         .last_mut()
-                        .filter(|entry| entry.name.eq_ignore_ascii_case(&name))
+                        .filter(|entry| entry.name().eq_ignore_ascii_case(&name))
                 };
                 if let Some(entry) = existing {
                     entry.value = entry.value.max(value);
@@ -339,7 +354,12 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     if entries.len() == read::MAX_ITEMS {
                         return Err(Error::new(vm.pc, "CST 登记数量超过上限"));
                     }
-                    entries.push(Entry { name, value });
+                    entries.push(Entry {
+                        name,
+                        value,
+                        details: Vec::new(),
+                        saved_data: Vec::new(),
+                    });
                 }
                 Ok(NativeReturn::Value(if index == 328 {
                     1
