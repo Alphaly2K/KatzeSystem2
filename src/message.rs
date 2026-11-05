@@ -16,6 +16,7 @@ mod playback;
 mod reveal;
 mod task;
 mod timing;
+mod userfont;
 
 pub use defaults::MessageDefaults;
 pub use display::{Display, DisplayProgress, DisplaySettings};

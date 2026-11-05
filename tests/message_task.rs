@@ -568,6 +568,7 @@ struct TestHost {
     drawings: Drawables,
     fonts: Fonts,
     submissions: Vec<Rect>,
+    image: Vec<u8>,
 }
 impl Host for TestHost {
     fn call(&mut self, _: u32, _: &[u8], _: &mut Interpreter) -> Result<NativeReturn> {
@@ -575,6 +576,10 @@ impl Host for TestHost {
     }
     fn fonts(&mut self) -> Option<&mut dyn FontServices> {
         Some(&mut self.fonts)
+    }
+    fn image_data(&self, handle: u32) -> Result<&[u8]> {
+        assert_eq!(handle, 1);
+        Ok(&self.image)
     }
     fn message_time_scale(&self) -> Option<u32> {
         Some(10)
@@ -638,6 +643,7 @@ fn task_keeps_snapshot_separate_from_completion_and_reconfigures_without_resetti
         drawings: Drawables::default(),
         fonts: Fonts,
         submissions: Vec::new(),
+        image: Vec::new(),
     };
     let mut object = MessageObject::new(1, TextEncoding::Cp932);
     let mut config = configuration(TextEncoding::Cp932, true);
@@ -686,4 +692,97 @@ fn task_keeps_snapshot_separate_from_completion_and_reconfigures_without_resetti
     assert_eq!(object.segment_limit(), 0);
     assert!(!object.complete_snapshot());
     assert_eq!(send(&mut object, &mut host, 460, 0, None), 0);
+}
+
+#[test]
+fn user_glyph_commands_retain_sources_across_clear_and_rebuild_mappings_on_configuration() {
+    use std::io::Write;
+    fn frame(id: u32) -> Vec<u8> {
+        let literals = [
+            0x50, 0x55, 0x5a, 0x59, 0xaa, 0xf0, 0x49, 0x55, 0xb1, 0x22, 0xaa, 0xb0, 0x8d, 0xaa,
+            0x1b, 0xd3, 0xff, 0xcf, 0x22, 0xaf, 0xff, 0x50,
+        ];
+        let compress = |bytes: &[u8]| {
+            let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+            z.write_all(bytes).unwrap();
+            z.finish().unwrap()
+        };
+        let data = compress(&literals);
+        let commands = compress(&[0x61, 0x40, 0x96, 1]);
+        let mut out = b"HG-3".to_vec();
+        for word in [12u32, 0x300, 0, id] {
+            out.extend(word.to_le_bytes());
+        }
+        out.extend(b"stdinfo\0");
+        for word in [56u32, 40, 1, 1, 32, 0, 0, 1, 1, 0, 0, 0] {
+            out.extend(word.to_le_bytes());
+        }
+        out.extend(b"img0000\0");
+        for word in [
+            0,
+            24 + data.len() as u32 + commands.len() as u32,
+            0,
+            1,
+            data.len() as u32,
+            literals.len() as u32,
+            commands.len() as u32,
+            4,
+        ] {
+            out.extend(word.to_le_bytes());
+        }
+        out.extend(data);
+        out.extend(commands);
+        out
+    }
+    for (encoding, shift, text, key) in [
+        (TextEncoding::Cp932, 0, vec![0x82, 0xa0, 0], 0x82a0),
+        (
+            TextEncoding::Unicode,
+            21,
+            "あ\0".as_bytes().to_vec(),
+            0x3042,
+        ),
+    ] {
+        let mut host = TestHost {
+            drawings: Drawables::default(),
+            fonts: Fonts,
+            submissions: Vec::new(),
+            image: frame(7),
+        };
+        let mut object = MessageObject::new(1, encoding);
+        let mut config = configuration(encoding, false);
+        send(&mut object, &mut host, 456 + shift, 0, Some(&mut config));
+        send(&mut object, &mut host, 47, 1, None);
+        send(&mut object, &mut host, 464 + shift, 1, None);
+        let mapping = Command {
+            code: 465 + shift,
+            data: [key, 7, 0],
+            ..command(1, 0, 0)
+        };
+        object
+            .dispatch_command_with_buffers(
+                kind::STRING_PLANE,
+                &mapping,
+                &mut CommandBuffers::default(),
+                &mut 0,
+                &mut host,
+                4096,
+            )
+            .unwrap();
+        host.image = frame(8);
+        let draw = |object: &mut MessageObject, host: &mut TestHost| {
+            send(object, host, 459 + shift, 0, None);
+            send(object, host, 458 + shift, 0, Some(&mut text.clone()));
+            send(object, host, 461 + shift, 0, None);
+            object.display().unwrap().surface().pixels().to_vec()
+        };
+        let first = draw(&mut object, &mut host);
+        assert_eq!(&first[(24 + 1) * 4..(24 + 2) * 4], [11, 22, 33, 44]);
+        send(&mut object, &mut host, 457 + shift, 0, Some(&mut config));
+        assert_eq!(draw(&mut object, &mut host), first);
+        send(&mut object, &mut host, 464 + shift, 1, None);
+        assert_eq!(draw(&mut object, &mut host), first);
+        send(&mut object, &mut host, 457 + shift, 0, Some(&mut config));
+        assert!(draw(&mut object, &mut host).iter().all(|&b| b == 0));
+    }
 }

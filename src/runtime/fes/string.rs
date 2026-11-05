@@ -30,6 +30,9 @@ pub struct StringState {
     remaining: [i32; 2],
     lines: u32,
     cursor: [i32; 2],
+    user_font_source: Option<u32>,
+    user_fonts: Vec<(u16, u16)>,
+    user_fonts_dirty: bool,
 }
 
 impl StringState {
@@ -61,6 +64,9 @@ impl StringState {
             remaining: [0; 2],
             lines: 0,
             cursor: [0; 2],
+            user_font_source: None,
+            user_fonts: Vec::new(),
+            user_fonts_dirty: false,
         })
     }
 
@@ -164,6 +170,8 @@ impl Objects {
                 | b"isdraw"
                 | b"isdrawmark"
                 | b"linecnt"
+                | b"userfontobj"
+                | b"userfont"
         ) {
             return Ok(false);
         }
@@ -178,8 +186,29 @@ impl Objects {
         if !first
             .is_some_and(|handle| matches!(self.get(handle).unwrap().state, ObjectState::String(_)))
         {
-            return Ok(false);
+            return Ok(matches!(command, b"userfontobj" | b"userfont"));
         }
+        let user_source = if command == b"userfontobj" {
+            let Some(reference) = args.get(2) else {
+                return Ok(true);
+            };
+            let reference = interpreter.object_reference(reference, numbers)?;
+            Some(self.lookup(&reference.name, reference.bank))
+        } else {
+            None
+        };
+        let user_mapping = if command == b"userfont" {
+            let Some(character) = args.get(2) else {
+                return Ok(true);
+            };
+            let character = interpreter.eval(character, numbers)? as u16;
+            let Some(frame) = args.get(3) else {
+                return Ok(true);
+            };
+            Some((character, interpreter.eval(frame, numbers)? as u16))
+        } else {
+            None
+        };
         let banks = if target.bank == -1 {
             0..i64::from(self.count(&target.name))
         } else {
@@ -282,6 +311,17 @@ impl Objects {
                 }
                 b"clear" => state.set_text(Vec::new()),
                 b"reset" => state.layout.reset_layout(&defaults, measurement)?,
+                b"userfontobj" => {
+                    state.user_font_source = user_source.unwrap();
+                    state.user_fonts_dirty = true;
+                }
+                b"userfont" => {
+                    if state.user_fonts.len() >= crate::read::MAX_ITEMS {
+                        return Err(Error::new(line.offset, "FES 用户字形映射超过存储上限"));
+                    }
+                    state.user_fonts.push(user_mapping.unwrap());
+                    state.user_fonts_dirty = true;
+                }
                 b"draw" => {
                     state.draw = Some(argument.unwrap() as u32);
                     state.remaining[0] = 1;
@@ -346,6 +386,10 @@ impl<F: ObjectFactory> Store<'_, F> {
         };
         let vram = state.layout.base.vram();
         let offset = [vram[0], vram[1]].map(super::plane::integer_position);
+        if !state.initial {
+            self.update_fes_user_fonts(owner, objects, handle, task, extra)?;
+        }
+        let state = objects.string(handle);
         if state.initial || state.layout.configuration_dirty() {
             let initial = state.initial;
             let mut bytes = state.layout.submission_configuration(offset);
@@ -360,6 +404,7 @@ impl<F: ObjectFactory> Store<'_, F> {
             state.initial = false;
             state.layout.clear_configuration_dirty();
         }
+        self.update_fes_user_fonts(owner, objects, handle, task, extra)?;
         if objects.string(handle).clear {
             self.fes_command(owner, Some(task), 459 + extra, [0, 0, 1], None)?;
             objects.string_mut(handle).clear = false;
@@ -422,6 +467,41 @@ impl<F: ObjectFactory> Store<'_, F> {
         Ok(())
     }
 
+    fn update_fes_user_fonts(
+        &mut self,
+        owner: u32,
+        objects: &mut Objects,
+        handle: u32,
+        task: u32,
+        extra: u32,
+    ) -> Result<()> {
+        let state = objects.string(handle);
+        if !state.user_fonts_dirty {
+            return Ok(());
+        }
+        let source = match state
+            .user_font_source
+            .and_then(|source| objects.get(source))
+        {
+            Some(source) if source.state.image_source().is_some() => source.raw_image,
+            Some(_) => return Err(Error::new(0, "FES 用户字形来源需要原始图像对象")),
+            None => 0,
+        };
+        let mappings = state.user_fonts.clone();
+        self.fes_command(owner, Some(task), 464 + extra, [0, source, 1], None)?;
+        for (character, frame) in mappings {
+            self.fes_command(
+                owner,
+                Some(task),
+                465 + extra,
+                [u32::from(character), u32::from(frame), 1],
+                None,
+            )?;
+        }
+        objects.string_mut(handle).user_fonts_dirty = false;
+        Ok(())
+    }
+
     fn string_query(&mut self, owner: u32, target: u32, code: u32) -> Result<u32> {
         route_with_buffers(
             self.reborrow(),
@@ -434,5 +514,63 @@ impl<F: ObjectFactory> Store<'_, F> {
             },
             &mut CommandBuffers::default(),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn user_fonts_resolve_source_banks_and_evaluate_truncated_mapping_values_once() {
+        for string_kind in ["STRING", "STRING8"] {
+            let mut objects = Objects::new(crate::HandleAllocator::default()).unwrap();
+            for (kind, name, banks) in [
+                (string_kind, "target", 2),
+                ("IMAGE", "source", 2),
+                ("BASE", "other", 1),
+            ] {
+                objects
+                    .define(&fes::ObjectDefinition {
+                        kind,
+                        name: name.into(),
+                        banks,
+                    })
+                    .unwrap();
+            }
+            let mut interpreter = fes::Interpreter::new(fes::Program::from_text(
+                format!("#DEFINE\n{string_kind} target[2]\nIMAGE source[2]\nBASE other\n#START\nwait 99\n").as_bytes()
+            ).unwrap()).unwrap();
+            let mut numbers = expression::State::new(4);
+            objects.publish_bindings(&mut interpreter);
+            for bytes in [
+                b"target userfontobj source[1]".as_slice(),
+                b"target userfont ($0+=65537) ($1-=1)",
+                b"target userfont ($2+=1)",
+                b"other userfont ($3+=1) 0",
+            ] {
+                assert!(
+                    objects
+                        .dispatch_string_command(
+                            &mut interpreter,
+                            &fes::Line {
+                                offset: 0,
+                                bytes: bytes.to_vec()
+                            },
+                            &mut numbers,
+                            1
+                        )
+                        .unwrap()
+                );
+            }
+            assert_eq!(numbers.shared, [65537, -1, 1, 0]);
+            let source = objects.lookup("source", 1).unwrap();
+            for bank in 0..2 {
+                let state = objects.string(objects.lookup("target", bank).unwrap());
+                assert_eq!(state.user_font_source, Some(source));
+                assert_eq!(state.user_fonts, [(1, 65535)]);
+                assert!(state.user_fonts_dirty);
+            }
+        }
     }
 }

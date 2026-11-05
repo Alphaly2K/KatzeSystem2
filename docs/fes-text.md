@@ -65,6 +65,12 @@
 
 枚举由 `FontServices::enumerate(character_set, variable_pitch)` 提供已筛选的水平字体名。variable_pitch 使用独立全局度量 DWORD，零要求定宽字体，非零允许不定宽；顺序和重复项不由运行时重新整理。接口返回 UTF-16 名称，单项最多 63 个非零单元。服务默认返回未支持诊断；平台实际选择、度量与绘字继续由同一字体服务实现。
 
+## 用户字形命令
+
+普通 STRING／STRING8 接受 `object userfontobj source[bank]` 和 `object userfont character frame`。来源是已装载原始数据的 IMAGE 对象，使用 IDN −1 保留多帧资源。缺失来源解除绑定；不兼容来源类型返回诊断。参数缺失时跳过，userfont 缺少帧号时保留字符表达式的副作用；字符与帧号均截为无符号十六位。目标为全部银行时，参数只求值一次，再按银行顺序登记。
+
+来源与映射先记入 FES 状态，在后续文字对象更新时下发；映射保留登记次序及重复项，每次变更重放整组映射。既有文字配置更新之前同步用户字形，新消息任务先完成初始配置。来源切换、缓存保留及实际绘制规则见 [消息用户字形](message.md#用户字形)。日志与页面引用类型的用户字形分发继续随对应对象整合。
+
 ## 运行时使用
 
 `runtime::fes::ObjectState::String` 持有运行时 `StringState`，其 `layout` 字段为上述配置核心。`Objects::configure_messages(unicode, defaults, measurement)` 设置后续声明及重置使用的全局值；通过 Runtime 推进 Scene 时，自动从 `HostState` 的 `unicode_text`、`message_defaults` 和 `message_measurement_parameter` 同步。未提供默认值时使用 `MessageDefaults::default()`。`fes_message_frame_delay` 是 `layout frame` 缺省的延时来源。

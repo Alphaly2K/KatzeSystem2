@@ -156,6 +156,17 @@ impl Display {
         segment_limit: u32,
         mut glyph: impl FnMut(char, u32) -> Result<GlyphMask>,
     ) -> Result<DisplayProgress> {
+        self.advance_glyphs(now, segment_limit, |c, s| {
+            glyph(c, s).map(super::userfont::Glyph::Mask)
+        })
+    }
+
+    pub(super) fn advance_glyphs(
+        &mut self,
+        now: u32,
+        segment_limit: u32,
+        mut glyph: impl FnMut(char, u32) -> Result<super::userfont::Glyph>,
+    ) -> Result<DisplayProgress> {
         self.page.require_prepared()?;
         let mut canvas = Surface::new([128; 2])?;
         let encoding = self.page.encoding;
@@ -299,7 +310,7 @@ fn draw(
     canvas: &mut Surface,
     settings: &DisplaySettings,
     encoding: TextEncoding,
-    glyph: &mut impl FnMut(char, u32) -> Result<GlyphMask>,
+    glyph: &mut impl FnMut(char, u32) -> Result<super::userfont::Glyph>,
 ) -> Result<Option<DrawnGlyph>> {
     if Rect::from_xywh(entry.position[0], entry.position[1], 128, 128)
         .intersect(target.bounds())
@@ -310,12 +321,9 @@ fn draw(
     let AtomKind::Character(character) = entry.kind else {
         unreachable!()
     };
-    let mask = glyph(character, entry.size[1] as u32)?;
-    if mask.coverage().is_empty() {
-        return Ok(Some(DrawnGlyph::default()));
-    }
+    let glyph = glyph(character, entry.size[1] as u32)?;
     canvas.clear(0);
-    let bounds = mask.paint(
+    let bounds = glyph.paint(
         canvas,
         &GlyphPaint {
             color: if entry.group.is_some_and(|g| g.ruby) {

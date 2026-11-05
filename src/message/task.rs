@@ -179,6 +179,7 @@ pub struct MessageObject {
     previous: u32,
     segment: u32,
     complete_snapshot: bool,
+    user_fonts: super::userfont::UserFonts,
 }
 
 impl MessageObject {
@@ -193,6 +194,7 @@ impl MessageObject {
             previous: 0,
             segment: 0,
             complete_snapshot: true,
+            user_fonts: super::userfont::UserFonts::default(),
         }
     }
 
@@ -237,8 +239,14 @@ impl MessageObject {
         let display = self.display.as_mut().unwrap();
         let fonts = fonts(host)?;
         Ok(display
-            .advance(now, self.segment, |c, s| {
-                fonts.rasterize(&config.font, c, s)
+            .advance_glyphs(now, self.segment, |c, s| {
+                if let Some(glyph) = self.user_fonts.glyph(c, self.encoding) {
+                    Ok(glyph)
+                } else {
+                    fonts
+                        .rasterize(&config.font, c, s)
+                        .map(super::userfont::Glyph::Mask)
+                }
             })?
             .complete)
     }
@@ -301,6 +309,7 @@ impl MessageObject {
         budget: usize,
     ) -> Result<()> {
         fonts(host)?.validate(&config.font)?;
+        self.user_fonts.reconfigure()?;
         let timing = config.timing(host.message_time_scale());
         let fonts = fonts(host)?;
         if replace {
@@ -578,6 +587,17 @@ impl TaskObject for MessageObject {
             467 if self.display.is_some() => {
                 self.display.as_mut().unwrap().set_speed(command.data[1])
             }
+            464 if self.display.is_some() => {
+                self.user_fonts.set_source(if command.data[1] == 0 {
+                    None
+                } else {
+                    Some(host.image_data(command.data[1])?)
+                });
+            }
+            465 if self.display.is_some() => {
+                self.user_fonts
+                    .insert(command.data[0] as u16, command.data[1])?;
+            }
             466 if self.display.is_some() => {
                 let cursor = self
                     .display
@@ -621,7 +641,7 @@ impl TaskObject for MessageObject {
                     *output = lines - u32::from(newline);
                 }
             }
-            458 | 461 | 462 | 463 | 467 => (),
+            458 | 461 | 462 | 463 | 464 | 465 | 467 => (),
             466 | 475 => (),
             _ => {
                 return Err(Error::new(
