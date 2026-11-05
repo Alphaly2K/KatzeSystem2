@@ -57,6 +57,41 @@ impl StringState {
         self.configuration_dirty = false;
     }
 
+    pub fn reset_layout(&mut self, defaults: &MessageDefaults, measurement: u32) -> Result<()> {
+        let initial = Self::new(self.encoding, defaults, measurement)?;
+        self.configuration[0x10..0x84].copy_from_slice(&initial.configuration[0x10..0x84]);
+        for (index, color) in self.restore_colors.into_iter().enumerate() {
+            self.set(0xc + index * 4, color);
+        }
+        self.copy_font_name(&defaults.font_name)?;
+        let font = self.font_offset();
+        for offset in [0, 4, 8, 0xc, 0x14] {
+            let start = font + offset + 4;
+            self.configuration[start..start + 4]
+                .copy_from_slice(&initial.configuration[start..start + 4]);
+        }
+        if self.encoding == TextEncoding::Unicode {
+            self.set(0x114, 0);
+            self.set(0x118, 0);
+        }
+        self.defaults = defaults.clone();
+        self.font_inheritance = initial.font_inheritance;
+        self.configuration_dirty = true;
+        Ok(())
+    }
+
+    pub(crate) fn submission_configuration(&self, offset: [i32; 2]) -> Vec<u8> {
+        let mut bytes = self.configuration.clone();
+        let end = bytes.len();
+        for (index, value) in [offset[0] as u32, offset[1] as u32, 1]
+            .into_iter()
+            .enumerate()
+        {
+            bytes[end - 12 + index * 4..end - 8 + index * 4].copy_from_slice(&value.to_le_bytes());
+        }
+        bytes
+    }
+
     pub fn restore_colors(&self) -> [u32; 3] {
         self.restore_colors
     }
@@ -64,6 +99,10 @@ impl StringState {
     /// 顺序为字形参数、字体名、字重及阴影设置。
     pub fn font_inheritance(&self) -> [bool; 4] {
         self.font_inheritance
+    }
+
+    pub(crate) fn set_layout_defaults(&mut self, defaults: &MessageDefaults) {
+        self.defaults = defaults.clone();
     }
 
     pub fn refresh_font_defaults(&mut self, defaults: &MessageDefaults) -> Result<()> {

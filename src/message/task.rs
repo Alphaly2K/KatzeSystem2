@@ -500,7 +500,11 @@ impl TaskObject for MessageObject {
                     0,
                 )?;
                 let text = match self.encoding {
-                    TextEncoding::Cp932 => text::cp932(input)?,
+                    TextEncoding::Cp932 => input
+                        .split(|&byte| byte == 0xff)
+                        .map(text::cp932)
+                        .collect::<Result<Vec<_>>>()?
+                        .join("\u{ffff}"),
                     TextEncoding::Unicode => {
                         let text = std::str::from_utf8(input)
                             .map_err(|_| Error::new(0, "消息追加需要有效 UTF-8"))?;
@@ -549,8 +553,51 @@ impl TaskObject for MessageObject {
             467 if self.display.is_some() => {
                 self.display.as_mut().unwrap().set_speed(command.data[1])
             }
+            466 if self.display.is_some() => {
+                let cursor = self
+                    .display
+                    .as_ref()
+                    .unwrap()
+                    .page()
+                    .layout()
+                    .cursor
+                    .unwrap_or([0; 2]);
+                for (buffer, value) in [&mut buffers.data0, &mut buffers.data1]
+                    .into_iter()
+                    .zip(cursor)
+                {
+                    let bytes = buffer
+                        .as_deref_mut()
+                        .ok_or_else(|| Error::new(0, "消息坐标查询缺少输出缓冲区"))?;
+                    bytes
+                        .get_mut(..4)
+                        .ok_or_else(|| Error::new(0, "消息坐标输出缓冲区过短"))?
+                        .copy_from_slice(&value.to_le_bytes());
+                }
+            }
+            469 => {
+                *output = 0;
+                if self.display.is_some() {
+                    self.prepare(host)?;
+                    let mut lines = 1u32;
+                    let mut newline = false;
+                    for entry in &self.display.as_ref().unwrap().page().layout().entries {
+                        match entry.kind {
+                            super::AtomKind::NewLine => {
+                                lines += 1;
+                                newline = true;
+                            }
+                            super::AtomKind::Character(c) if c > '\t' && c != '\u{ffff}' => {
+                                newline = false
+                            }
+                            _ => (),
+                        }
+                    }
+                    *output = lines - u32::from(newline);
+                }
+            }
             458 | 461 | 462 | 463 | 467 => (),
-            475 if self.encoding == TextEncoding::Cp932 => (),
+            466 | 475 => (),
             _ => {
                 return Err(Error::new(
                     0,

@@ -548,6 +548,14 @@ impl<F: ObjectFactory> Store<'_, F> {
             return Err(Error::new(0, "FES 装载所属任务无效"));
         }
         scene.owner = Some(owner);
+        scene.objects.configure_messages(
+            self.host.unicode_text != 0,
+            self.host
+                .message_defaults
+                .as_ref()
+                .unwrap_or(&crate::message::MessageDefaults::default()),
+            self.host.message_measurement_parameter,
+        );
         if scene.media_preparation.is_none()
             && !scene.preload.is_pending()
             && !scene.prepare(self.numbers, self.budget)?
@@ -694,6 +702,14 @@ impl<F: ObjectFactory> Store<'_, F> {
             }
         } else {
             scene.owner = Some(owner);
+            scene.objects.configure_messages(
+                self.host.unicode_text != 0,
+                self.host
+                    .message_defaults
+                    .as_ref()
+                    .unwrap_or(&crate::message::MessageDefaults::default()),
+                self.host.message_measurement_parameter,
+            );
             let exists = scene.interpreter.dispatch_system_block(name, target)?;
             scene.system_block = Some(SystemBlock {
                 name: name.to_owned(),
@@ -788,6 +804,14 @@ impl<F: ObjectFactory> Store<'_, F> {
             }
         } else {
             scene.owner = Some(owner);
+            scene.objects.configure_messages(
+                self.host.unicode_text != 0,
+                self.host
+                    .message_defaults
+                    .as_ref()
+                    .unwrap_or(&crate::message::MessageDefaults::default()),
+                self.host.message_measurement_parameter,
+            );
             let handle = match target {
                 Some(target) => match scene.objects.lookup(&target.name, target.bank) {
                     Some(handle) => Some(handle),
@@ -893,7 +917,13 @@ impl<F: ObjectFactory> Store<'_, F> {
                             return Ok(false);
                         }
                         scene.interpreter.resume();
-                    } else if self.run_fes_draw(scene, &args, &line)? {
+                    } else if scene.objects.dispatch_string_command(
+                        &mut scene.interpreter,
+                        &line,
+                        self.numbers,
+                        self.host.fes_message_frame_delay,
+                    )? || self.run_fes_draw(scene, &args, &line)?
+                    {
                         scene.interpreter.resume();
                     } else if let Some(complete) = self.run_fes_stop(scene, &args, &line)? {
                         if !complete {
@@ -1165,6 +1195,14 @@ impl<F: ObjectFactory> Store<'_, F> {
             return Err(Error::new(0, "FES 执行状态已绑定其他所属任务"));
         }
         scene.owner = Some(owner);
+        scene.objects.configure_messages(
+            self.host.unicode_text != 0,
+            self.host
+                .message_defaults
+                .as_ref()
+                .unwrap_or(&crate::message::MessageDefaults::default()),
+            self.host.message_measurement_parameter,
+        );
         if scene.invocation.is_none() {
             let old_count = scene.objects.update_order.len();
             let objects = &scene.objects.objects;
@@ -1336,7 +1374,13 @@ impl<F: ObjectFactory> Store<'_, F> {
                                 if !complete {
                                     return Ok(false);
                                 }
-                            } else if self.run_fes_draw(scene, &args, &line)? {
+                            } else if scene.objects.dispatch_string_command(
+                                &mut scene.interpreter,
+                                &line,
+                                self.numbers,
+                                self.host.fes_message_frame_delay,
+                            )? || self.run_fes_draw(scene, &args, &line)?
+                            {
                             } else if let Some(complete) = self.run_fes_stop(scene, &args, &line)? {
                                 if !complete {
                                     return Ok(false);

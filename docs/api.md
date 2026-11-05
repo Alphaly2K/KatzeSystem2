@@ -468,13 +468,13 @@ FES `blend` 已连接 SOUND、CIMAGE／IMAGE／BUTTON、CPLANE／PLANE 和 SLIDE
 
 `fes::CPlaneState` 通过只读查询提供位置、基点、旋转、缩放、矩阵、尺寸、优先级、颜色、显示、创建类型、EXPOS、资源／VIEWPORT 引用及更新标记。`apply(&attributes, bank)` 返回本次是否使属性失效；`Objects::initialize` 同时标记 FES 后代。`motion_properties()`／`apply_motion_properties()` 捕获及回写平面运动，`subcommand_context()` 提供本地属性换算上下文；PLANE 的同名上下文另使用 VRAM。尺寸重建与属性失效独立，具体运动规则见[对象运动](graphics.md#fes-对象运动)。
 
-`fes::StringState::new(encoding, &message_defaults, measurement_parameter)` 创建文字配置核心，复用 PLANE 属性并保存两种编码的消息配置。`apply_layout` 接受数值求值回调，`set_font` 接受 UTF-16 名称与后端 DWORD，`refresh_font_defaults` 更新仍启用继承的字段；只读查询提供配置字节、恢复颜色、继承标记和重配标记。该状态尚未接入 Runtime 的 FES 文字对象创建和播放。参数、缺省值与基线更新行为见 [FES 文字对象](fes-text.md)。
+`fes::StringState::new(encoding, &message_defaults, measurement_parameter)` 创建文字配置核心，复用 PLANE 属性并保存两种编码的消息配置。`apply_layout` 接受数值求值回调，`set_font` 接受 UTF-16 名称与后端 DWORD，`refresh_font_defaults` 更新仍启用继承的字段；只读查询提供配置字节、恢复颜色、继承标记和重配标记，`reset_layout` 恢复布局及全局字体设置。运行时 `ObjectState::String` 已组合该配置，接入下层消息任务和普通文字播放。参数、缺省值与基线更新行为见 [FES 文字对象](fes-text.md)。
 
 `Runtime::update_fes_object(owner, &mut objects, handle)` 显式推进一个对象。BASE 无媒体操作，CPLANE／PLANE 使用实际对象工厂和命令路由创建／更新直属二维任务，`Object::task_id()` 返回可选编号。CIMAGE 与 IMAGE 通过共享类型 15 列表更新来源与登记，`Object::image_handle()` 查询可选来源包装；IMAGE 支持按当前映射帧装载普通 HG-3 文件及多文件合成，缺失文件或帧清空像素绑定。非零 PATHMODE 使用完整直接路径，跳过类别补全；IDN=−1 的原始来源与像素独立保存，具体契约见下文。调用者按 FES 对象更新顺序推进，并将 objects 与 owner 保持同一生命周期，下层任务由此入口维护。CPLANE 在创建下层任务前读取 SIZE2，PLANE 在创建后读取；POS2 在属性更新时消费；读取共用 Runtime 的资源服务，按 image 类别补全名称，支持 HG-3 元数据。已有绑定的 VIEWPORT 更新返回命令 89 的诊断。此入口尚不执行运动和 FES 主体调度。
 
 `Objects::preloaded_image(full_name)` 以补全后的完整名称查询当前场景的图像原始字节，区分大小写并在首个零字节结束。返回 `None` 表示未缓存，`Some(&[])` 表示成功读取的空文件。预加载错误保留已完成行和当前行的补全名称，继续调用准备入口即可重试；期间 `Scene::is_pending()` 为 true，禁止通过 `objects_mut()` 修改。直接调用 `update_fes_scene` 也会在进入 START 前完成预加载。缓存范围及使用规则见[图像预加载](graphics.md#fes-图像预加载)。
 
-`Objects::media_records()` 按声明／银行顺序提供 `MediaRecord`，通过 `target()`、`image_handle()`、`task_id()` 查询名称引用、包装及该记录创建的 BUTTON 编号；其他类型的记录 task_id 为 None。`Runtime::update_fes_record(owner, objects, index)` 用当前名称绑定和记录包装推进；Scene 普通收尾、decode 及暂停刷新自动采用这一入口。`update_fes_object` 则使用对象的当前包装。先完成 `prepare_fes_scene` 再显式逐记录更新，可保留装载早于更新的时序；记录编号越界返回诊断。类型的不同取图规则见[媒体记录](graphics.md#fes-媒体记录与来源包装)。
+`Objects::media_records()` 按声明／银行顺序提供 `MediaRecord`，通过 `target()`、`image_handle()`、`task_id()` 查询名称引用、包装及该记录创建的下层任务编号；没有独立下层任务的记录为 None。`Runtime::update_fes_record(owner, objects, index)` 用当前名称绑定和记录包装推进；Scene 普通收尾、decode 及暂停刷新自动采用这一入口。`update_fes_object` 则使用对象的当前包装。先完成 `prepare_fes_scene` 再显式逐记录更新，可保留装载早于更新的时序；记录编号越界返回诊断。类型的不同取图规则见[媒体记录](graphics.md#fes-媒体记录与来源包装)。
 
 BUTTON 先通过 `prepare_fes_scene` 或任务 338 完成下层创建，再由对象更新复用 IMAGE 并维护实际输入区域、启用值、优先级及可选 Alpha 掩码。`Objects::set_input_task(id)` 显式绑定输入任务，`input_task()` 查询当前绑定；缺省由根命令 34 查询。输入服务错误保留尚未提交的按钮更新，后续以同一场景续跑。脚本 enable 将非零归一为一，初始化 ENABLE 保留原始值；区域与显示分别维护。对象事件通过任务 9／10／64／65 或显式场景分派接入，网格导航与坐标锁已接入，拖动命令继续诊断；详细行为见[BUTTON 区域更新](graphics.md#fes-button-区域更新)。
 
@@ -604,3 +604,7 @@ Runtime 的普通 294 创建独立控制器，使用与图像、集合共用且�
 `resource::verification_seed(code)` 从已解密校验码计算名称种子。`KifArchive::parse(bytes, seed)` 借用完整归档，解密目录并检查所有资源范围；`directory()` 提供目录，`read(name)` 返回可选明文，`read_entry(entry)` 读取指定范围。条目数据上限为 64 MiB。未加密归档忽略名称种子，末尾不足八字节的数据保持原值。校验码提取和文件系统读取由宿主完成。
 
 `resource::ResourceRouter` 接收 256 个槽位、显式列表组及补丁顺序，挂载的 `KifArchive` 和输入数据需在读取期间存活。`read(cp932_name, mode, file)`／`read_utf16(name, mode, file)` 返回可选 `ResourceData { source, bytes }`，保留来源归档身份。`ResourceMode` 提供直接文件、归档、散装优先和归档优先四种模式，文件闭包以 `Ok(None)` 请求继续回退，错误则传播。路由前缀当前限定 ASCII，生成路径最多 259 个 UTF-16 单元；详细顺序、空前缀特例和列表契约见[资源文档](resources.md)。自动挂载、列表解析、补丁发现、缓存和别名由宿主准备。
+
+### FES 普通文字对象
+
+`runtime::fes::ObjectState::String` 的 `layout` 提供 `fes::StringState` 配置，其他访问器提供累计文本及最近更新的查询缓存。`Scene` 已路由普通文字声明、布局、替换／追加、段标记、清空／重置、播放／跳过和剩余数／行数查询；工厂组合 `MessageFactory` 并提供 `FontServices` 后，文字通过消息任务提交到共享画布。`Objects::configure_messages` 可显式提供全局上下文；Runtime 使用 `HostState` 中的消息默认值、编码开关、度量参数及 FES 缺省延时。用法、编码及剩余接口见 [FES 文字对象](fes-text.md)。

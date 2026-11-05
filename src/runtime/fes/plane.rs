@@ -84,6 +84,9 @@ impl<F: ObjectFactory> Store<'_, F> {
             .get(handle)
             .ok_or_else(|| Error::new(0, "FES 对象标识无效"))?;
         let canvas = matches!(object.state, ObjectState::Plane(_));
+        if matches!(object.state, ObjectState::String(_)) {
+            return self.update_fes_string(owner, objects, handle);
+        }
         if matches!(object.state, ObjectState::Draw(_)) {
             return self.update_fes_draw(owner, objects, handle);
         }
@@ -170,6 +173,18 @@ impl<F: ObjectFactory> Store<'_, F> {
             }
             state.rebuild = false;
         }
+        self.update_fes_plane_properties(owner, objects, handle, task)
+    }
+
+    pub(super) fn update_fes_plane_properties(
+        &mut self,
+        owner: u32,
+        objects: &mut Objects,
+        handle: u32,
+        task: Option<u32>,
+    ) -> Result<()> {
+        let cache = objects.preloaded_images.clone();
+        let state = objects.get(handle).unwrap().state.plane().unwrap();
         let viewport = state.viewport.clone();
         if let Some(viewport) = objects.lookup(&viewport.name, viewport.bank) {
             let target_dirty = objects
@@ -226,9 +241,11 @@ impl<F: ObjectFactory> Store<'_, F> {
         for (code, data) in [
             (59, [1, state.color, 1]),
             (47, [0, state.display as u32, 1]),
-            (81, [0, 0, 1]),
         ] {
             self.fes_command(owner, task, code, data, None)?;
+        }
+        if !matches!(object.state, ObjectState::String(_)) {
+            self.fes_command(owner, task, 81, [0, 0, 1], None)?;
         }
         objects
             .get_mut(handle)
@@ -266,6 +283,14 @@ impl<F: ObjectFactory> Store<'_, F> {
                 self.check_fes_button_binding(owner, object.task_id)?;
             } else if let Some(protocol) = super::slider::ControlKind::of(&object.state) {
                 self.check_fes_control_binding(owner, object.task_id, protocol)?;
+            } else if let ObjectState::String(state) = &object.state {
+                if object.task_id.is_some_and(|task| {
+                    !self.tree.node(task).is_some_and(|node| {
+                        node.parent == Some(owner) && node.kind == state.task_kind()
+                    })
+                }) {
+                    return Err(Error::new(0, "FES 下层文字任务绑定失效"));
+                }
             } else {
                 self.check_fes_plane_binding(owner, object.task_id)?;
             }

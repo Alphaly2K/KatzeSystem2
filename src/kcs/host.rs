@@ -61,6 +61,8 @@ pub struct HostState {
     /// 消息记录生成显示时间时使用的全局比例；None 表示尚无时间上下文。
     pub message_time_scale: Option<u32>,
     pub message_defaults: Option<crate::message::MessageDefaults>,
+    pub message_measurement_parameter: u32,
+    pub fes_message_frame_delay: i32,
     pub system_settings: Option<crate::settings::SystemSettings>,
     pub languages: crate::language::LanguageState,
     pub save_services: Option<Box<dyn crate::save::SaveServices>>,

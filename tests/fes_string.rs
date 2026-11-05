@@ -151,5 +151,21 @@ fn layout_preserves_legacy_view_flags_color_packing_and_atomic_parameter_errors(
         assert_eq!(word(&state, font_offset), 700);
         assert!(!state.configuration_dirty());
         assert!(state.font_inheritance()[2]);
+        state.reset_layout(&MessageDefaults::default(), 13).unwrap();
+        assert_eq!([word(&state, 8), word(&state, 12)], [u32::MAX - 8, 17]);
+        assert_eq!(
+            [word(&state, 16), word(&state, 20), word(&state, 24)],
+            state.restore_colors()
+        );
+        assert_eq!(word(&state, 0x1c), 24);
+        assert_eq!(word(&state, 0x30), 10);
+        assert_eq!(word(&state, 0x80), 13);
+        assert_eq!(word(&state, font_offset), 400);
+        assert_eq!(word(&state, font_offset + 0x14), 0);
+        assert_eq!(
+            state.font_inheritance(),
+            [encoding == TextEncoding::Cp932, true, true, true]
+        );
+        assert!(state.configuration_dirty());
     }
 }

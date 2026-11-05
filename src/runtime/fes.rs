@@ -23,11 +23,13 @@ mod properties;
 mod scene;
 mod slider;
 mod sound;
+mod string;
 mod task;
 pub use animation::ImageAnimationRequest;
 pub use draw::DrawState;
 pub use navigation::NavigationOutcome;
 pub use scene::Scene;
+pub use string::StringState;
 pub(super) use task::dispatch_borrowed_control_event;
 pub use task::{FesFactory, FesObject, Services};
 
@@ -55,7 +57,7 @@ impl MediaRecord {
     pub fn image_handle(&self) -> Option<u32> {
         self.image
     }
-    /// 装载记录创建的 BUTTON、SLIDER、SCROLL2 或 DRAW 编号。
+    /// 该装载记录创建的独立下层任务编号。
     pub fn task_id(&self) -> Option<u32> {
         self.task_id
     }
@@ -74,6 +76,7 @@ pub enum ObjectState {
     Scroll2(Box<Scroll2State>),
     Sound(Box<SoundState>),
     Draw(Box<DrawState>),
+    String(Box<StringState>),
 }
 
 impl ObjectState {
@@ -89,10 +92,11 @@ impl ObjectState {
             Self::Scroll2(_) => "SCROLL2",
             Self::Sound(_) => "SOUND",
             Self::Draw(_) => "DRAW",
+            Self::String(state) => state.kind(),
         }
     }
 
-    fn new(kind: &str) -> Result<Self> {
+    fn new(kind: &str, text: &string::Context) -> Result<Self> {
         Ok(match kind {
             "BASE" => Self::Base,
             "CIMAGE" => Self::CImage(Box::default()),
@@ -104,6 +108,7 @@ impl ObjectState {
             "SCROLL2" => Self::Scroll2(Box::default()),
             "SOUND" => Self::Sound(Box::default()),
             "DRAW" => Self::Draw(Box::default()),
+            "STRING" | "STRING8" => Self::String(Box::new(StringState::new(kind, text)?)),
             _ => return Err(Error::new(0, format!("FES 对象类型 {kind} 尚未接入"))),
         })
     }
@@ -112,6 +117,7 @@ impl ObjectState {
         match self {
             Self::CPlane(state) => Some(state),
             Self::Plane(state) => Some(&state.base),
+            Self::String(state) => Some(&state.layout.base.base),
             _ => None,
         }
     }
@@ -120,6 +126,7 @@ impl ObjectState {
         match self {
             Self::CPlane(state) => Some(state),
             Self::Plane(state) => Some(&mut state.base),
+            Self::String(state) => Some(&mut state.layout.base.base),
             _ => None,
         }
     }
@@ -292,6 +299,7 @@ pub struct Objects {
     draw_restore: Option<u32>,
     preloaded_images: preload::Cache,
     languages: crate::language::LanguageState,
+    text: string::Context,
 }
 
 impl Objects {
@@ -334,6 +342,7 @@ impl Objects {
             draw_restore: None,
             preloaded_images: std::rc::Rc::default(),
             languages: crate::language::LanguageState::default(),
+            text: string::Context::default(),
         })
     }
 
@@ -437,7 +446,7 @@ impl Objects {
         {
             return Err(Error::new(0, "FES 对象数量超出上限"));
         }
-        let initial = ObjectState::new(definition.kind)?;
+        let initial = ObjectState::new(definition.kind, &self.text)?;
         let handles: Vec<_> = (0..count)
             .map(|_| self.handles.allocate())
             .collect::<Result<_>>()?;
@@ -570,6 +579,10 @@ impl Objects {
                 }
                 ObjectState::CPlane(state) => state.apply(&initialization.attributes, bank as u32),
                 ObjectState::Plane(state) => state.apply(&initialization.attributes, bank as u32),
+                ObjectState::String(state) => state
+                    .layout
+                    .base
+                    .apply(&initialization.attributes, bank as u32),
                 ObjectState::Slider(state) => {
                     state.apply(&initialization.attributes, bank as u32)?
                 }
