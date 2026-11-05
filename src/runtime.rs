@@ -1669,7 +1669,7 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
     }
 
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn> {
-        if matches!(index, 696..=698 | 700 | 785 | 850 | 851 | 876 | 977) {
+        if matches!(index, 696..=700 | 785 | 850 | 851 | 876 | 977 | 1034) {
             return self.backlog_native(index, arguments, vm);
         }
         if index == 143 {

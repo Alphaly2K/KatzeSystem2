@@ -20,7 +20,7 @@ struct Entry {
 }
 
 impl CstContext {
-    fn new(prefixes: &[Vec<u8>]) -> Self {
+    pub(super) fn new(prefixes: &[Vec<u8>]) -> Self {
         Self {
             languages: prefixes
                 .iter()
@@ -64,7 +64,7 @@ impl CstContext {
             .map(Vec::as_slice)
     }
 
-    fn load(
+    pub(super) fn load(
         &mut self,
         name: &[u8],
         services: &mut dyn crate::kcs::ResourceServices,
@@ -113,7 +113,7 @@ impl CstContext {
         Ok(loaded)
     }
 
-    fn record_text(
+    pub(super) fn record_text(
         &self,
         input: i32,
         record: i32,

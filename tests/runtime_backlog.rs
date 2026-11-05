@@ -34,7 +34,7 @@ impl ProgramLoader for Loader {
             call(&mut code, 238, &[7]);
             store(&mut code, 4);
             data[64..74].copy_from_slice(b"scene.cst\0");
-            let name = "tag※Alice\0".as_bytes();
+            let name = "tag※note＠Alice\0".as_bytes();
             data[96..96 + name.len()].copy_from_slice(name);
             data[128..132].copy_from_slice(b"abc\0");
             call(&mut code, 977, &[1, 64, 5, 96, 128, 1, 0, 0x99887766]);
