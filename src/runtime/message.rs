@@ -11,7 +11,8 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
         let length = match index {
-            611..=614 | 619 | 695 => 8,
+            611..=614 | 619..=620 | 695 => 8,
+            621 => 12,
             615..=618 | 884 => 4,
             _ => unreachable!(),
         };
@@ -56,6 +57,17 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                         data1: Some(&mut text),
                         ..CommandBuffers::default()
                     },
+                )?;
+            }
+            620 if read::u32_at(arguments, 4)? != 0 => {
+                self.command_target(target, 464, [0, read::u32_at(arguments, 4)?, 0])?;
+            }
+            620 => (),
+            621 => {
+                self.command_target(
+                    target,
+                    465,
+                    [read::u32_at(arguments, 4)?, read::u32_at(arguments, 8)?, 0],
                 )?;
             }
             616 | 884 => {

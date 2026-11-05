@@ -1741,7 +1741,7 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
             self.command_target(input, 152, [0; 3])?;
             return Ok(NativeReturn::Continue);
         }
-        if matches!(index, 611..=619 | 695 | 884) {
+        if matches!(index, 611..=621 | 695 | 884) {
             return self.message_native(index, arguments, vm);
         }
         if matches!(index, 447..=449 | 630 | 645 | 646) {

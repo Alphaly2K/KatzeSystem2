@@ -263,6 +263,8 @@ impl ProgramLoader for MessageProgram {
         call(&mut code, 611, &[1, self.address]);
         wait(&mut code);
         call(&mut code, 612, &[1, self.address]);
+        call(&mut code, 620, &[u32::MAX, 0]);
+        call(&mut code, 621, &[1, 0x10041, u32::MAX]);
         wait(&mut code);
         call(&mut code, 613, &[1, self.address]);
         call(&mut code, 614, &[1, 320]);
