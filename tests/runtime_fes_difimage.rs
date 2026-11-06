@@ -128,6 +128,9 @@ fn capture_uses_saved_view_depth_bounds_crop_and_replaces_sources() {
     assert_eq!(snapshot.surface().pixel(3, 0), Some(0));
     assert_eq!(snapshot.surface().pixel(0, 2), Some(0));
     assert_eq!(rt.drawing().target, canvas);
+    let frame = rt.offscreen_frame().unwrap().tiles()[0].as_ref().unwrap();
+    assert_eq!(frame.size(), [8, 6]);
+    assert_eq!(frame.pixel(1, 0), Some(0xff123456));
     command(&mut rt, &mut objects, "item filter np");
     rt.update_fes_object(0, &mut objects, handle).unwrap();
     assert_eq!(

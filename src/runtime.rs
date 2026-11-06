@@ -222,6 +222,11 @@ impl<F: ObjectFactory> Runtime<F> {
         self.resources.capture_rectangle = rectangle;
     }
 
+    /// 最近一次离屏绘制的目标；绘制错误保留已写像素，跳过的调用保留旧目标。
+    pub fn offscreen_frame(&self) -> Option<&crate::graphics::RenderTarget> {
+        self.resources.offscreen_frame.as_ref()
+    }
+
     /// 配置同步资源读取与类别名称补全；已有资源对象继续保留。
     pub fn set_resources(&mut self, services: impl crate::kcs::ResourceServices + 'static) {
         self.resources.services = Some(Box::new(crate::kcs::CachedResources::new(services)));
@@ -1786,7 +1791,7 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
                 | 343..=345
                 | 402
                 | 455 | 732
-                | 462..=464 | 466 | 534 | 542 | 572 | 625 | 653 | 663 | 739 | 848 | 849 | 880 | 1065..=1069
+                | 462..=464 | 466 | 534 | 542 | 568 | 572 | 625 | 653 | 663 | 739 | 848 | 849 | 880 | 1065..=1069
         ) {
             return self.graphics_native(index, arguments, vm);
         }

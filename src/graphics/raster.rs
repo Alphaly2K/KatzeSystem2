@@ -319,7 +319,7 @@ impl Drawables {
         filter: TextureFilter,
         range: [f32; 2],
     ) -> Result<bool> {
-        if range[1] <= 0. || range.iter().any(|value| value.is_nan()) {
+        if range[1] <= 0. {
             return Ok(false);
         }
         self.render_to(

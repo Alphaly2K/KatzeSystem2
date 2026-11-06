@@ -1,7 +1,7 @@
 use super::{ObjectFactory, ObjectHost};
 use crate::kcs::{Interpreter, NativeReturn, format_string};
 use crate::task::CommandBuffers;
-use crate::{Error, Result};
+use crate::{Error, Result, read};
 
 impl<F: ObjectFactory> ObjectHost<'_, F> {
     pub(super) fn graphics_native(
@@ -10,6 +10,15 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         arguments: &[u8],
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
+        if index == 568 {
+            let range = [
+                f32::from_bits(read::u32_at(arguments, 0)?),
+                f32::from_bits(read::u32_at(arguments, 4)?),
+            ];
+            self.resources
+                .render_offscreen(self.host.surface_size, range)?;
+            return Ok(NativeReturn::Continue);
+        }
         if index == 542 {
             let drawing = &mut self.resources.drawing;
             if drawing.mode == 0 && drawing.enabled {

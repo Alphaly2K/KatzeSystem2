@@ -454,6 +454,8 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 
 `Drawable::from_canvas(data, count)` 读取显式画布三角形，`CanvasTriangle` 保留 tag、面块索引、顶点和 UV；平面命令 83 使用显式缓冲区接入。`Drawables::render_frame` 读取画布并写入独立目标，`Runtime::render_frame` 使用运行时当前画布。提交、缺失纹理和过滤约束见[画布图元与帧](graphics.md#画布图元与独立帧提交)。
 
+普通 568 用两个原始 f32 深度边界执行离屏绘制，状态二保留返回栈；与 DIFIMAGE 捕获共用保存的帧视图。`Runtime::offscreen_frame()` 借用最近一次离屏目标，跳过的调用保留旧目标，绘制错误保留已写像素。门控、范围和生命周期见[脚本离屏绘制](graphics.md#脚本离屏绘制)。
+
 `CanvasLayout::new(tile_size, grid, step)` 与 `triangulate(source)` 将已变换的源几何切成逐块画布三角形，保留原顺序、颜色及局部 UV。步长、整数裁剪门控和资源上限见[画布几何切割](graphics.md#画布几何切割)。`Drawable::from_canvas_source` 与平面命令 41 保留源和包装两套变换；源变化后通过 `prepare_canvas` 更新，帧提交自动准备可见对象。直接查询与属性选择契约见[画布纹理包装](graphics.md#画布纹理包装)。
 
 `TaskObject::message_page()` 返回已配置消息页的借用视图，缺省为 None，不触发页面准备或播放；消息任务提供此视图，FES `strid` 用它读取当前编号映射。

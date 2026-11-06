@@ -15,6 +15,7 @@ pub(super) struct Resources {
         crate::graphics::TextureFilter,
     )>,
     pub capture_rectangle: Option<Rect>,
+    pub offscreen_frame: Option<crate::graphics::RenderTarget>,
     pub raw: ResourceState,
     pub input_callbacks: std::collections::BTreeMap<u32, crate::input::CommandState>,
     pub button_callbacks: std::collections::BTreeMap<u32, crate::input::ButtonObject>,
@@ -32,6 +33,29 @@ pub(super) struct Resources {
 }
 
 impl Resources {
+    pub fn render_offscreen(&mut self, size: [u32; 2], range: [f32; 2]) -> Result<bool> {
+        if self.drawing.mode != 0 || !self.drawing.enabled {
+            return Ok(false);
+        }
+        let Some(canvas) = &self.drawing.target else {
+            return Ok(false);
+        };
+        let (projection, parent, filter) = self
+            .frame_view
+            .as_ref()
+            .ok_or_else(|| Error::new(0, "离屏绘制需要配置运行时帧视图"))?;
+        self.offscreen_frame = Some(crate::graphics::RenderTarget::new(size)?);
+        self.drawables.render_depth_range(
+            self.offscreen_frame.as_mut().unwrap(),
+            canvas,
+            projection,
+            *parent,
+            *filter,
+            range,
+        )?;
+        Ok(true)
+    }
+
     pub fn load_motion(&mut self, name: &[u8]) -> Result<Option<crate::kcs::Program>> {
         let name = &name[..name
             .iter()

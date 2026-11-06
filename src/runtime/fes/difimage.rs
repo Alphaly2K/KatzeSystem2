@@ -1,5 +1,5 @@
 use super::{ObjectState, Objects};
-use crate::graphics::{Image, Rect, RenderTarget, Surface};
+use crate::graphics::{Image, Rect, Surface};
 use crate::runtime::{ObjectFactory, Store};
 use crate::{Error, Result};
 
@@ -68,28 +68,14 @@ impl<F: ObjectFactory> Store<'_, F> {
     }
 
     fn capture_fes_image(&mut self, range: [u32; 2]) -> Result<Option<u32>> {
-        let drawing = &self.resources.drawing;
-        if drawing.mode != 0 || !drawing.enabled {
+        let size = self.host.surface_size;
+        if !self
+            .resources
+            .render_offscreen(size, range.map(|value| value as f32))?
+        {
             return Ok(None);
         }
-        let Some(canvas) = &drawing.target else {
-            return Ok(None);
-        };
-        let (projection, parent, filter) = self
-            .resources
-            .frame_view
-            .as_ref()
-            .ok_or_else(|| Error::new(0, "画面捕获需要配置运行时帧视图"))?;
-        let size = self.host.surface_size;
-        let mut frame = RenderTarget::new(size)?;
-        self.resources.drawables.render_depth_range(
-            &mut frame,
-            canvas,
-            projection,
-            *parent,
-            *filter,
-            range.map(|value| value as f32),
-        )?;
+        let frame = self.resources.offscreen_frame.as_ref().unwrap();
         let rectangle = self
             .resources
             .capture_rectangle
