@@ -933,6 +933,12 @@ impl<F: ObjectFactory> Store<'_, F> {
                             self.numbers,
                             self.host.fes_message_frame_delay,
                         )?
+                        || self.fes_reference_command(
+                            &mut scene.objects,
+                            &mut scene.interpreter,
+                            &args,
+                            &line,
+                        )?
                         || self.run_fes_draw(scene, &args, &line)?
                     {
                         scene.interpreter.resume();
@@ -1392,6 +1398,12 @@ impl<F: ObjectFactory> Store<'_, F> {
                                     &line,
                                     self.numbers,
                                     self.host.fes_message_frame_delay,
+                                )?
+                                || self.fes_reference_command(
+                                    &mut scene.objects,
+                                    &mut scene.interpreter,
+                                    &args,
+                                    &line,
                                 )?
                                 || self.run_fes_draw(scene, &args, &line)?
                             {

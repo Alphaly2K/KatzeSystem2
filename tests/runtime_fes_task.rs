@@ -355,6 +355,85 @@ fn setup(budget: usize, source: &[u8]) -> Setup {
 }
 
 #[test]
+fn shared_image_references_switch_in_handlers_and_release_with_the_fes_task() {
+    for image_kind in ["CIMAGE", "IMAGE"] {
+        let source = format!(
+            "#DEFINE\n{image_kind} item[2]\n#OBJECT SIZE COLOR PRI DISP\nitem 2,2 0xff00ff00 5 1\n#START\nitem refex $0 ($7+=100)\nwait 999\n#SWITCH\nitem refex $1\n#CLEAR\nitem refex\n#REBIND\nitem refex $2\n"
+        );
+        for budget in [1, 4096] {
+            let Setup { mut runtime, .. } = setup(budget, source.as_bytes());
+            let list = runtime.create(0, kind::IMAGE_LIST, b"shared", b"").unwrap();
+            send(&mut runtime, list, 285, 8, 6);
+            let mut images = Vec::new();
+            for color in [0xff123456u32, 0xff654321, 0xffaabbcc] {
+                let image = runtime.images_mut().create(0, [2, 2]).unwrap();
+                for pixel in runtime
+                    .images_mut()
+                    .get_mut(image)
+                    .unwrap()
+                    .pixels_mut()
+                    .chunks_exact_mut(4)
+                {
+                    pixel.copy_from_slice(&color.to_le_bytes());
+                }
+                images.push(image);
+            }
+            for (slot, &image) in runtime.numbers_mut().shared.iter_mut().zip(&images) {
+                *slot = image as i32;
+            }
+            let fes = runtime.create(0, kind::FES, b"references", b"").unwrap();
+            send(&mut runtime, fes, 337, 0, 0);
+            send(&mut runtime, fes, 340, 0, list);
+            file(&mut runtime, fes, b"complete.fes").unwrap();
+            send(&mut runtime, fes, 339, 0, 0);
+            runtime.update(100, 1).unwrap();
+            assert_eq!(runtime.numbers().shared[7], 0);
+            runtime.images_mut().release_for(0, images[0]).unwrap();
+            assert!(runtime.images().get(images[0]).is_ok());
+            let block = |runtime: &mut TestRuntime, text: &[u8]| {
+                let mut name = text.to_vec();
+                name.push(0);
+                runtime
+                    .dispatch_command_with_buffers(
+                        0,
+                        command(fes, 343, 0, 0),
+                        &mut CommandBuffers {
+                            data1: Some(&mut name),
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap();
+                send(runtime, list, 298, 0, 0);
+            };
+            block(&mut runtime, b"SWITCH");
+            assert!(runtime.images().get(images[0]).is_err());
+            assert_eq!(
+                runtime.drawing().target.as_ref().unwrap().pixel(0, 0),
+                Some(0xff654321)
+            );
+            runtime.images_mut().release_for(0, images[1]).unwrap();
+            assert!(runtime.images().get(images[1]).is_ok());
+            block(&mut runtime, b"CLEAR");
+            assert!(runtime.images().get(images[1]).is_err());
+            assert_eq!(
+                runtime.drawing().target.as_ref().unwrap().pixel(0, 0),
+                Some(if image_kind == "CIMAGE" {
+                    0xff00ff00
+                } else {
+                    0
+                }),
+            );
+            block(&mut runtime, b"REBIND");
+            runtime.images_mut().release_for(0, images[2]).unwrap();
+            assert!(runtime.images().get(images[2]).is_ok());
+            runtime.destroy(fes).unwrap();
+            assert!(runtime.images().get(images[2]).is_err());
+            assert!(runtime.object(list).is_some());
+        }
+    }
+}
+
+#[test]
 fn destroying_a_fes_during_draw_restores_the_surviving_shared_canvas() {
     let source = b"#DEFINE\nCIMAGE sprite\nPLANE panel\n#OBJECT SIZE COLOR PRI DISP\nsprite 8,6 0xff123456 0 1\n#OBJECT SIZE DISP VRAM\npanel 8,6 0 0,0\n#START\npanel draw\nwait 1000\n";
     for budget in [1, 4096] {

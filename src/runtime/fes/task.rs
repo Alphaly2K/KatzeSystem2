@@ -1271,6 +1271,19 @@ impl TaskObject for FesObject {
                 *target = None;
             }
         }
+        if let Some(scene) = &mut self.scene {
+            if scene
+                .objects
+                .objects
+                .values()
+                .any(|object| object.reference_image.is_some())
+            {
+                let images = host
+                    .images_mut()
+                    .ok_or_else(|| Error::new(0, "FES 引用释放需要图像服务"))?;
+                scene.objects.release_image_references(images)?;
+            }
+        }
         Ok(true)
     }
 }

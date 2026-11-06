@@ -389,6 +389,23 @@ impl<F: ObjectFactory> Store<'_, F> {
                     }
                 }
             }
+            if let Some(image) = objects.get(id).unwrap().reference_image {
+                if objects.image_list.is_some() {
+                    let list = self.check_fes_image_list(owner, objects)?;
+                    let slot = objects
+                        .get(id)
+                        .unwrap()
+                        .state
+                        .image()
+                        .unwrap()
+                        .parent_priority;
+                    if slot != -1 {
+                        self.fes_command(owner, Some(list), 287, [slot as u32, 0, 0], None)?;
+                    }
+                }
+                self.resources.images.release_reference(image)?;
+                objects.get_mut(id).unwrap().reference_image = None;
+            }
             let raw = objects.get(id).unwrap().raw_image;
             self.resources.raw.release_image(raw)?;
             objects.get_mut(id).unwrap().raw_image = 0;

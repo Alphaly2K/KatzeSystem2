@@ -151,7 +151,8 @@ impl<F: ObjectFactory> Store<'_, F> {
             }
         }
         // 重复声明后两个包装可能不同，CIMAGE 的显示跟随对象绑定。
-        let displayed = objects.get(handle).unwrap().image.unwrap();
+        let object = objects.get(handle).unwrap();
+        let displayed = object.reference_image.or(object.image).unwrap();
         self.register_fes_image(owner, objects, handle, list, displayed, prepared)?;
         self.update_fes_image_priority(owner, objects, handle, list)
     }
@@ -271,8 +272,13 @@ impl<F: ObjectFactory> Store<'_, F> {
             Some(image) => Ok(image),
             None => {
                 let image = self.resources.images.create_empty(owner)?;
-                objects.get_mut(handle).unwrap().image = Some(image);
-                objects.get_mut(handle).unwrap().images.push(image);
+                let object = objects.get_mut(handle).unwrap();
+                if let Some(reference) = object.reference_image {
+                    self.resources.images.release_reference(reference)?;
+                    object.reference_image = None;
+                }
+                object.image = Some(image);
+                object.images.push(image);
                 Ok(image)
             }
         }
@@ -314,6 +320,11 @@ impl<F: ObjectFactory> Store<'_, F> {
                     objects.invalidate(handle)?;
                 }
             }
+            let wrapper = objects
+                .get(handle)
+                .unwrap()
+                .reference_image
+                .unwrap_or(wrapper);
             let pixels = if wrapper == 0 || captured {
                 0
             } else {

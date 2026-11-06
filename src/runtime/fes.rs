@@ -22,6 +22,7 @@ mod plane;
 mod preload;
 mod properties;
 mod queries;
+mod reference;
 mod scene;
 mod slider;
 mod sound;
@@ -207,6 +208,7 @@ pub struct Object {
     children: BTreeSet<u32>,
     task_id: Option<u32>,
     image: Option<u32>,
+    reference_image: Option<u32>,
     images: Vec<u32>,
     input_tasks: Vec<u32>,
     raw_image: u32,
@@ -248,6 +250,11 @@ impl Object {
     /// 当前来源包装；重复声明指向最后准备的包装，尚未装填时没有像素。
     pub fn image_handle(&self) -> Option<u32> {
         self.image
+    }
+
+    /// CIMAGE／IMAGE 的共享来源覆盖；零引用时继续使用对象自己的来源包装。
+    pub fn referenced_image_handle(&self) -> Option<u32> {
+        self.reference_image
     }
 
     /// 本对象持有的全部包装，包含重复声明记录的独立包装。
@@ -335,6 +342,7 @@ impl Objects {
                     children: BTreeSet::new(),
                     task_id: None,
                     image: None,
+                    reference_image: None,
                     images: Vec::new(),
                     input_tasks: Vec::new(),
                     raw_image: 0,
@@ -479,6 +487,7 @@ impl Objects {
                     children: BTreeSet::new(),
                     task_id: None,
                     image: None,
+                    reference_image: None,
                     images: Vec::new(),
                     input_tasks: Vec::new(),
                     raw_image: 0,

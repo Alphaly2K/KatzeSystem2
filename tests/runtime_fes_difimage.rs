@@ -160,6 +160,22 @@ fn capture_uses_saved_view_depth_bounds_crop_and_replaces_sources() {
         rt.images().get(held).unwrap().surface().pixel(0, 0),
         Some(0xffedcba9)
     );
+    let mut interpreter =
+        fes::Interpreter::new(fes::Program::from_text(b"#START\nwait 99\n").unwrap()).unwrap();
+    objects.publish_bindings(&mut interpreter);
+    assert!(
+        rt.dispatch_fes_reference(
+            &mut objects,
+            &mut interpreter,
+            &fes::Line {
+                offset: 0,
+                bytes: b"item refex".to_vec()
+            },
+        )
+        .unwrap()
+    );
+    rt.update_fes_object(0, &mut objects, handle).unwrap();
+    assert_eq!(objects.get(handle).unwrap().image_handle(), None);
     rt.remove_fes_object(0, &mut objects, handle).unwrap();
     assert!(rt.images().get(second).is_err());
     rt.images_mut().release(held).unwrap();

@@ -528,6 +528,8 @@ Scene 消费 `noact`／`lockactive` 并按主体时点处理通知。`preferred_
 
 `Objects::dispatch_image_animation(interpreter, line, state)` 消费 `Event::Command` 中的 IMAGE `setanm`／`anm` 请求；返回 true 后可确认事件，其他命令返回 false。`Object::image_animation_request()` 查询保存的名称、播放开关及待处理标记。命令阶段不装载，`update_fes_object` 在来源登记后、排序前消费请求；播放重新读取动画并启动，暂停只更新开关。完整参数、类型门控及失败契约见 [FES 动画请求](graphics.md#fes-image-动画请求)。
 
+`Runtime::dispatch_fes_reference(objects, interpreter, line)` 消费 `refex`。CIMAGE／IMAGE 在命令阶段持有普通图像包装，媒体更新时用该来源登记；零值清除引用并恢复自有来源。`Object::referenced_image_handle()` 查询这一共享覆盖，不改变 `image_handle()` 的自有包装。任务内场景随任务回收释放引用；独立对象存储在停用时调用 `Runtime::release_fes_image_references(objects)`，或逐对象调用 `remove_fes_object`。Scene 主体、系统块和对象事件自动分派；DIFIMAGE 当前接受零引用，非零图像资源尚待接入，完整类型和银行规则见[共享图像引用](graphics.md#fes-共享图像引用)。
+
 `fes::PlaneState` 的 `base` 复用平面属性，`vram()` 返回独立的画布取样位置，`apply(&attributes, bank)` 另应用 VRAM。运行时 PLANE 需要先在 DrawingContext 提供画布目标，再通过 `render_frame` 输出；支持跨面块取样。`Objects::set_canvas_offset([x, y])` 保存共享绘制服务给出的画布偏移，`canvas_offset()` 查询该值；设置本身不使对象失效，在下一次 PLANE 属性更新时叠加到 VRAM。PLANE 的尺寸重建保留有效屏幕位置，其他属性仍等到失效后提交。当前支持 CPLANE／PLANE 父级的位置累加，基点仅沿直接为 PLANE 的父级累加。
 
 `Objects::set_image_list(task, clip)` 为 CIMAGE／IMAGE 绑定已初始化的共享列表和全局裁剪；列表必须是 owner 通过树路由可达的类型 15 任务。更新按来源重建、属性登记及排序分别消费标记，支持 POS2／SIZE2、CIMAGE／IMAGE 父级位置及 PLANE 裁剪；具体时序见 [CIMAGE](graphics.md#fes-cimage-更新) 与 [IMAGE](graphics.md#fes-image-文件更新) 更新。`Objects::invalidate(handle)` 在直接显示属性修改或运动回写后标记对象及后代；直接来源修改还需请求 rebuild。

@@ -46,6 +46,10 @@ impl<F: ObjectFactory> Store<'_, F> {
         {
             let wrapper = self.resources.images.create_empty(owner)?;
             let object = objects.get_mut(handle).unwrap();
+            if let Some(reference) = object.reference_image {
+                self.resources.images.release_reference(reference)?;
+                object.reference_image = None;
+            }
             object.image = Some(wrapper);
             object.images.push(wrapper);
             objects.update_order[index].image = Some(wrapper);
