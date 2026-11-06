@@ -8,6 +8,9 @@ use crate::runtime::{ObjectFactory, TaskObject, kind};
 use crate::task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock};
 use crate::{Error, Result, read, text};
 
+mod characters;
+use characters::CharacterSets;
+
 /// 字体服务接收原始字体选择参数；度量与绘字必须使用同一份请求。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FontRequest {
@@ -180,6 +183,7 @@ pub struct MessageObject {
     segment: u32,
     complete_snapshot: bool,
     user_fonts: super::userfont::UserFonts,
+    character_sets: CharacterSets,
 }
 
 impl MessageObject {
@@ -195,6 +199,7 @@ impl MessageObject {
             segment: 0,
             complete_snapshot: true,
             user_fonts: super::userfont::UserFonts::default(),
+            character_sets: CharacterSets::new(encoding),
         }
     }
 
@@ -302,12 +307,13 @@ impl MessageObject {
 
     fn configure(
         &mut self,
-        config: Configuration,
+        mut config: Configuration,
         replace: bool,
         command: &Command,
         host: &mut dyn Host,
         budget: usize,
     ) -> Result<()> {
+        config.layout.break_characters = self.character_sets.layout();
         fonts(host)?.validate(&config.font)?;
         self.user_fonts.reconfigure()?;
         let timing = config.timing(host.message_time_scale());
@@ -598,6 +604,27 @@ impl TaskObject for MessageObject {
                 self.user_fonts
                     .insert(command.data[0] as u16, command.data[1])?;
             }
+            468 | 471 | 474 if self.display.is_some() => {
+                let index = command.data[0];
+                if code == 474 {
+                    self.character_sets.clear(index);
+                } else {
+                    let bytes = read::zstr(
+                        buffers
+                            .data1
+                            .as_deref()
+                            .ok_or_else(|| Error::new(0, "消息字符集合缺少文字缓冲区"))?,
+                        0,
+                    )?;
+                    if code == 471 {
+                        self.character_sets.add(index, bytes)?;
+                    } else {
+                        self.character_sets.remove(index, bytes);
+                    }
+                }
+                self.configuration.as_mut().unwrap().layout.break_characters =
+                    self.character_sets.layout();
+            }
             466 if self.display.is_some() => {
                 let cursor = self
                     .display
@@ -641,7 +668,7 @@ impl TaskObject for MessageObject {
                     *output = lines - u32::from(newline);
                 }
             }
-            458 | 461 | 462 | 463 | 464 | 465 | 467 => (),
+            458 | 461 | 462 | 463 | 464 | 465 | 467 | 468 | 471 | 474 => (),
             466 | 475 => (),
             _ => {
                 return Err(Error::new(

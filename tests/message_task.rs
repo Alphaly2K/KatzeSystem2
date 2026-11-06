@@ -640,6 +640,62 @@ fn send(
 }
 
 #[test]
+fn character_sets_keep_byte_removal_rules_and_survive_clear_and_reconfiguration() {
+    fn lines(object: &mut MessageObject, host: &mut TestHost, shift: u32) -> Vec<String> {
+        send(object, host, 460 + shift, 0, None);
+        let mut lines = std::collections::BTreeMap::<u32, String>::new();
+        for entry in &object.display().unwrap().page().layout().entries {
+            if let katze_system2::message::AtomKind::Character(character) = entry.kind {
+                lines.entry(entry.line).or_default().push(character);
+            }
+        }
+        lines.into_values().collect()
+    }
+    for (encoding, shift) in [(TextEncoding::Cp932, 0), (TextEncoding::Unicode, 21)] {
+        let mut host = TestHost {
+            drawings: Drawables::default(),
+            fonts: Fonts,
+            submissions: Vec::new(),
+            image: Vec::new(),
+        };
+        let mut object = MessageObject::new(1, encoding);
+        assert_eq!(
+            send(&mut object, &mut host, 471 + shift, 0, None),
+            0xdead_beef
+        );
+        let mut symbol = *b"C\0";
+        let mut text = *b"ABC\0";
+        let mut removal = *b"CZ\0";
+        let mut config = configuration(encoding, false);
+        set(&mut config, 8, 9);
+        set(&mut config, 0x6c, 1);
+        send(&mut object, &mut host, 456 + shift, 0, Some(&mut config));
+        send(&mut object, &mut host, 474 + shift, 0, None);
+        send(&mut object, &mut host, 471 + shift, 0, Some(&mut symbol));
+        send(&mut object, &mut host, 458 + shift, 0, Some(&mut text));
+        assert_eq!(lines(&mut object, &mut host, shift), ["A", "BC"]);
+
+        send(&mut object, &mut host, 468 + shift, 0, Some(&mut removal));
+        send(&mut object, &mut host, 457 + shift, 0, Some(&mut config));
+        assert_eq!(lines(&mut object, &mut host, shift), ["A", "BC"]);
+        send(&mut object, &mut host, 468 + shift, 0, Some(&mut symbol));
+        assert_eq!(lines(&mut object, &mut host, shift), ["A", "BC"]);
+        send(&mut object, &mut host, 457 + shift, 0, Some(&mut config));
+        assert_eq!(lines(&mut object, &mut host, shift), ["AB", "C"]);
+
+        send(&mut object, &mut host, 471 + shift, 0, Some(&mut symbol));
+        for reset in [459, 456] {
+            send(&mut object, &mut host, reset + shift, 0, Some(&mut config));
+            send(&mut object, &mut host, 458 + shift, 0, Some(&mut text));
+            assert_eq!(lines(&mut object, &mut host, shift), ["A", "BC"]);
+        }
+        send(&mut object, &mut host, 474 + shift, 0, None);
+        send(&mut object, &mut host, 457 + shift, 0, Some(&mut config));
+        assert_eq!(lines(&mut object, &mut host, shift), ["AB", "C"]);
+    }
+}
+
+#[test]
 fn task_keeps_snapshot_separate_from_completion_and_reconfigures_without_resetting_clock() {
     let mut host = TestHost {
         drawings: Drawables::default(),
