@@ -926,12 +926,14 @@ impl<F: ObjectFactory> Store<'_, F> {
                             return Ok(false);
                         }
                         scene.interpreter.resume();
-                    } else if scene.objects.dispatch_string_command(
-                        &mut scene.interpreter,
-                        &line,
-                        self.numbers,
-                        self.host.fes_message_frame_delay,
-                    )? || self.run_fes_draw(scene, &args, &line)?
+                    } else if self.fes_string_identifier(scene, &args, &line)?
+                        || scene.objects.dispatch_string_command(
+                            &mut scene.interpreter,
+                            &line,
+                            self.numbers,
+                            self.host.fes_message_frame_delay,
+                        )?
+                        || self.run_fes_draw(scene, &args, &line)?
                     {
                         scene.interpreter.resume();
                     } else if let Some(complete) = self.run_fes_stop(scene, &args, &line)? {
@@ -1384,12 +1386,14 @@ impl<F: ObjectFactory> Store<'_, F> {
                                 if !complete {
                                     return Ok(false);
                                 }
-                            } else if scene.objects.dispatch_string_command(
-                                &mut scene.interpreter,
-                                &line,
-                                self.numbers,
-                                self.host.fes_message_frame_delay,
-                            )? || self.run_fes_draw(scene, &args, &line)?
+                            } else if self.fes_string_identifier(scene, &args, &line)?
+                                || scene.objects.dispatch_string_command(
+                                    &mut scene.interpreter,
+                                    &line,
+                                    self.numbers,
+                                    self.host.fes_message_frame_delay,
+                                )?
+                                || self.run_fes_draw(scene, &args, &line)?
                             {
                             } else if let Some(complete) = self.run_fes_stop(scene, &args, &line)? {
                                 if !complete {

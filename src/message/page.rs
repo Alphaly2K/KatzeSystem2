@@ -35,6 +35,7 @@ impl Page {
             state: ParseState::new(&defaults),
             markup: Markup {
                 atoms: Vec::new(),
+                identifiers: std::collections::BTreeMap::new(),
                 final_style: defaults.style(),
                 restore_text_color: defaults.text_color,
             },
@@ -61,6 +62,11 @@ impl Page {
     /// 仅包含最近一次成功 prepare 的文字，来源区间指向整页 source。
     pub fn markup(&self) -> &Markup {
         &self.markup
+    }
+
+    /// 查询最近准备时登记的 id 值；缺失返回零，不解析待追加正文。
+    pub fn identifier(&self, key: i32) -> u32 {
+        self.markup.identifiers.get(&key).copied().unwrap_or(0)
     }
 
     pub fn layout(&self) -> &Layout {
@@ -316,6 +322,9 @@ impl Page {
         layout.arrange(layout_settings)?;
         let mut markup = self.markup.clone();
         markup.atoms.extend(incoming.atoms);
+        for (key, value) in incoming.identifiers {
+            markup.identifiers.entry(key).or_insert(value);
+        }
         markup.final_style = state.style;
         markup.restore_text_color = state.restore_color;
         let mut atom_times = self.atom_times.clone();

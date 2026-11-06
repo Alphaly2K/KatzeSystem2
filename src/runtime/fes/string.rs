@@ -405,6 +405,63 @@ pub(super) fn remainder(bytes: &[u8], count: usize) -> &[u8] {
 }
 
 impl<F: ObjectFactory> Store<'_, F> {
+    pub(super) fn fes_string_identifier(
+        &mut self,
+        scene: &mut super::Scene,
+        args: &[Vec<u8>],
+        line: &fes::Line,
+    ) -> Result<bool> {
+        if !args.get(1).is_some_and(|command| command == b"strid") {
+            return Ok(false);
+        }
+        let target = scene
+            .interpreter
+            .command_object_reference(&args[0], self.numbers)?;
+        if scene.objects.fallback_missing_target(
+            &mut scene.interpreter,
+            &target,
+            &line.bytes,
+            self.numbers,
+        )? {
+            return Ok(true);
+        }
+        let banks = if target.bank == -1 {
+            0..i64::from(scene.objects.count(&target.name))
+        } else {
+            i64::from(target.bank)..i64::from(target.bank) + 1
+        };
+        // -1 同时是未求值哨兵；表达式返回 -1 时，下一个文字银行会重新求值。
+        let (mut key, mut destination) = (-1, -1);
+        for bank in banks {
+            let Some(handle) = scene.objects.lookup(&target.name, bank as i32) else {
+                continue;
+            };
+            let object = scene.objects.get(handle).unwrap();
+            if !matches!(object.state, ObjectState::String(_)) {
+                continue;
+            }
+            let task = object.task_id;
+            if key == -1 {
+                if let Some(bytes) = args.get(2) {
+                    key = scene.interpreter.eval(bytes, self.numbers)?;
+                }
+            }
+            if destination == -1 {
+                if let Some(bytes) = args.get(3) {
+                    destination = scene.interpreter.eval(bytes, self.numbers)?;
+                }
+            }
+            let value = task
+                .and_then(|task| self.objects.get(&task))
+                .and_then(|object| object.message_page())
+                .map_or(0, |page| page.identifier(key));
+            if let Some(slot) = self.numbers.shared.get_mut(destination as usize) {
+                *slot = value as i32;
+            }
+        }
+        Ok(true)
+    }
+
     pub(super) fn update_fes_string(
         &mut self,
         owner: u32,

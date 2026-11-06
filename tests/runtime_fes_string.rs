@@ -277,6 +277,33 @@ fn character_layout_requests_accumulate_reorder_and_keep_bank_state_across_reset
 }
 
 #[test]
+fn string_identifiers_query_live_prepared_pages_and_preserve_minus_one_parameter_caches() {
+    for budget in [1, 4096] {
+        for (name, unicode) in [("STRING", false), ("STRING", true), ("STRING8", false)] {
+            let mut rt = engine(budget, unicode, Rc::new(Cell::new(false)));
+            let script = format!(
+                "#DEFINE\n{name} text[2]\n#OBJECT DISP\ntext[0] 1\ntext[1] 1\n#START\ntext strid 7 2\ntext layout view 24 12\ntext layout size 4\ntext[0] str \\id7:11;A\ntext[1] str \\id7:22;B\ntext strid 7 2\nwait 1\ntext strid ($0+=1)+6 ($1+=1)\n$3=$1\ntext[0] apend \\id8:33;C\ntext[0] strid 8 4\nwait 1\ntext[0] strid 8 4\ntext[0] strid 7 5\ntext[0] clear\ntext[0] strid 7 7\nwait 1\ntext[0] strid 7 5\ntext[1] strid 7 2\ntext strid ($0-=2) ($1-=23)\nwait 1000\n"
+            );
+            let mut scene = Scene::new(
+                fes::Program::from_text(script.as_bytes()).unwrap(),
+                rt.host().handle_allocator(),
+            )
+            .unwrap();
+            while !rt.prepare_fes_scene(0, &mut scene).unwrap() {}
+            for (now, expected) in [
+                (100, [0; 8]),
+                (101, [1, 22, 0, 22, 0, 0, 0, 0]),
+                (102, [1, 22, 0, 22, 33, 11, 0, 11]),
+                (103, [-3, -24, 22, 22, 33, 0, 0, 11]),
+            ] {
+                advance(&mut rt, &mut scene, now).unwrap();
+                assert_eq!(rt.numbers().shared[..8], expected);
+            }
+        }
+    }
+}
+
+#[test]
 fn string_waits_finish_the_first_busy_bank_and_resume_after_cached_counts_refresh() {
     for budget in [1, 4096] {
         for (name, unicode, encoding) in [

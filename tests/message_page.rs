@@ -80,6 +80,54 @@ fn deferred_append_keeps_styles_and_groups_until_clear() {
 }
 
 #[test]
+fn identifiers_keep_first_values_wait_for_prepare_and_clear_with_the_page() {
+    for encoding in [TextEncoding::Cp932, TextEncoding::Unicode] {
+        let (layout, timing) = settings(encoding);
+        let mut page = Page::new(defaults(), encoding);
+        page.append(r"A\id1:4;\ID1:9;B\id0xffffffff:4294967297;")
+            .unwrap();
+        assert_eq!(page.identifier(1), 0);
+        page.prepare(&layout, &timing, |_, _| Ok(10)).unwrap();
+        assert_eq!((page.identifier(1), page.identifier(-1)), (4, 1));
+        assert_eq!(page.schedule().deadlines, [0, 3]);
+        page.append(r"\id2:8;C").unwrap();
+        assert!(
+            page.prepare(&layout, &timing, |_, _| Err(Error::new(0, "度量失败")))
+                .is_err()
+        );
+        assert_eq!((page.identifier(1), page.identifier(2)), (4, 0));
+        page.prepare(&layout, &timing, |_, _| Ok(10)).unwrap();
+        assert_eq!(page.identifier(2), 8);
+        page.append(r"\id3").unwrap();
+        page.prepare(&layout, &timing, |_, _| Ok(10)).unwrap();
+        let characters: String = page
+            .markup()
+            .atoms
+            .iter()
+            .map(|atom| match atom.kind {
+                AtomKind::Character(c) => c,
+                _ => unreachable!(),
+            })
+            .collect();
+        assert_eq!(characters, "ABC3");
+        assert_eq!(page.markup().identifiers.get(&3), Some(&0));
+        page.invalidate_layout();
+        page.prepare(&layout, &timing, |_, _| Ok(10)).unwrap();
+        assert_eq!(page.identifier(1), 4);
+        page.clear();
+        assert!(page.markup().identifiers.is_empty());
+        page.append(r"\id:9;D\id0x:7;E\id7;").unwrap();
+        page.prepare(&layout, &timing, |_, _| Ok(10)).unwrap();
+        assert_eq!(page.identifier(0), 0);
+        assert_eq!(
+            page.markup().atoms.last().unwrap().kind,
+            AtomKind::Character(';')
+        );
+        assert!(page.markup().identifiers.contains_key(&7));
+    }
+}
+
+#[test]
 fn prepared_unclosed_group_ends_before_later_append() {
     let encoding = TextEncoding::Cp932;
     let (layout, timing) = settings(encoding);

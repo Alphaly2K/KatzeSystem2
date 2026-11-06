@@ -422,6 +422,8 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 
 `CanvasLayout::new(tile_size, grid, step)` 与 `triangulate(source)` 将已变换的源几何切成逐块画布三角形，保留原顺序、颜色及局部 UV。步长、整数裁剪门控和资源上限见[画布几何切割](graphics.md#画布几何切割)。`Drawable::from_canvas_source` 与平面命令 41 保留源和包装两套变换；源变化后通过 `prepare_canvas` 更新，帧提交自动准备可见对象。直接查询与属性选择契约见[画布纹理包装](graphics.md#画布纹理包装)。
 
+`TaskObject::message_page()` 返回已配置消息页的借用视图，缺省为 None，不触发页面准备或播放；消息任务提供此视图，FES `strid` 用它读取当前编号映射。
+
 对象实现 `runtime::TaskObject`：基类控制与时钟、可选 VM、创建上下文、主体、对象命令、排队与同步消息、删除通知和释放。默认空操作的 `begin_update()` 在时钟和子任务更新前执行，用于按钮的每轮响应重置。除对象命令外，返回 `false` 的方法表示本次预算耗尽，续跑由运行时完成；对象命令返回 `task::CommandOutcome`，完成状态与传播状态分开表达。库提供 `BaseObject`（只有控制与时钟）与 `OrdinaryObject`（可选的 `OrdinaryTask` 及未装载状态）。`ObjectFactory::create` 按类型编号创建对象；`KcsFactory` 经 `ProgramLoader` 按名称装载普通 KCS，`external` 指定所有新建普通任务和 FES 任务共用的 `SharedMemory` 视图。`graphics::GraphicsFactory { fallback }` 创建二维平面、图像列表、画布淡入淡出和二维相机任务，其他类型委托 fallback；基础平面提供基类控制、几何及查询、显示与输入绑定、事件响应、内部子任务传播及绘图登记清理，运动等缺失入口返回诊断，详见[二维任务对象](graphics.md#基础二维任务对象)。`input::InputFactory { fallback }` 创建类型 11 的 InputObject、类型 6 的 ButtonObject、类型 42 的 SliderObject 和类型 41 的 Scroll2Object，提供设备输入、矩形按钮及滑动控件事件；命令与约束见[输入接口](input.md)。文字类型由 `message::MessageFactory` 提供，声音类型由 `audio::SoundFactory` 提供；`kind` 保存基线类型编号。
 
 `GraphicsFactory` 另创建类型 65 的 `Camera2DObject`。`TaskObject::register_graphics` 在创建上下文验证后、任务进入树前调用，用于登记对象直接持有的绘图资源，默认无操作。相机通过 51／57／66 设置二维偏移、矩阵和比例，589 查询独立编号，590 重置；实际释放时回收记录。`Drawables` 提供 `create_camera`、`camera`、`camera_mut`、`release_camera` 和 `set_camera`，`Drawable::camera_id` 查询图元绑定。平面 591 向第二数据项指定的任务查询相机编号，592 恢复默认；渲染按图元选择坐标组，缺失记录使用传入的默认投影。完整缓冲区、编号及生命周期契约见[二维相机任务](graphics.md#二维相机任务)。
@@ -627,4 +629,4 @@ Runtime 的普通 294 创建独立控制器，使用与图像、集合共用且�
 
 ### FES 普通文字对象
 
-`runtime::fes::ObjectState::String` 的 `layout` 提供 `fes::StringState` 配置，其他访问器提供累计文本及最近更新的查询缓存。`Scene` 已路由普通文字声明、布局、绝对纵向移位、字符集合添加／移除／清空、替换／追加、段标记、清空／重置、播放／跳过和剩余数／行数查询；工厂组合 `MessageFactory` 并提供 `FontServices` 后，文字通过消息任务提交到共享画布。`Objects::configure_messages` 可显式提供全局上下文；Runtime 使用 `HostState` 中的消息默认值、编码开关、度量参数及 FES 缺省延时。用法、编码及剩余接口见 [FES 文字对象](fes-text.md)。
+`runtime::fes::ObjectState::String` 的 `layout` 提供 `fes::StringState` 配置，其他访问器提供累计文本及最近更新的查询缓存。`Scene` 已路由普通文字声明、布局、绝对纵向移位、字符集合添加／移除／清空、替换／追加、段标记、清空／重置、播放／跳过和编号／剩余数／行数查询；工厂组合 `MessageFactory` 并提供 `FontServices` 后，文字通过消息任务提交到共享画布。`Objects::configure_messages` 可显式提供全局上下文；Runtime 使用 `HostState` 中的消息默认值、编码开关、度量参数及 FES 缺省延时。用法、编码及剩余接口见 [FES 文字对象](fes-text.md)。

@@ -47,6 +47,11 @@ pub trait TaskObject {
         None
     }
 
+    /// 已配置的消息页；查询不触发准备或播放。
+    fn message_page(&self) -> Option<&crate::message::Page> {
+        None
+    }
+
     /// 支持执行中任务操作的对象提供队列视图，并在推进 VM 后消费宿主的 TaskEffects。
     fn queued_messages(&self) -> Option<&[[u32; 4]]> {
         None

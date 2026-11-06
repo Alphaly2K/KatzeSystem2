@@ -11,6 +11,7 @@ struct Parser<'a> {
     group: Option<TextGroup>,
     next_group: u32,
     atoms: Vec<Atom>,
+    identifiers: std::collections::BTreeMap<i32, u32>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -65,6 +66,7 @@ impl Markup {
             group: None,
             next_group: state.next_group,
             atoms: Vec::new(),
+            identifiers: std::collections::BTreeMap::new(),
         };
         parser.run()?;
         *state = ParseState {
@@ -76,6 +78,7 @@ impl Markup {
         };
         Ok(Self {
             atoms: parser.atoms,
+            identifiers: parser.identifiers,
             final_style: parser.style,
             restore_text_color: parser.restore_color,
         })
@@ -229,6 +232,26 @@ impl Parser<'_> {
                 if let Some(wait) = wait {
                     self.emit(start, AtomKind::Wait(wait), None);
                 }
+            }
+            'i' if self
+                .characters
+                .get(self.position)
+                .is_some_and(|&(_, c)| c.eq_ignore_ascii_case(&'d')) =>
+            {
+                self.position += 1;
+                let mut value = 0;
+                let key = if let Some(key) = self.number() {
+                    if self.take() == ':' {
+                        value = self.number().unwrap_or(0);
+                    } else {
+                        // 数值恰好结束输入时也回退，最后一个字符会再次解析。
+                        self.rewind();
+                    }
+                    key
+                } else {
+                    0
+                };
+                self.identifiers.entry(key as i32).or_insert(value);
             }
             '$' | 'i' | 'r' | 's' | 't' | 'u' | 'z' => {
                 return Err(Error::new(start, "消息标记尚未实现"));

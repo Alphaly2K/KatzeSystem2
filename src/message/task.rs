@@ -418,6 +418,10 @@ impl MessageObject {
 }
 
 impl TaskObject for MessageObject {
+    fn message_page(&self) -> Option<&super::Page> {
+        self.display.as_ref().map(Display::page)
+    }
+
     fn control(&self) -> &Control {
         self.plane.control()
     }

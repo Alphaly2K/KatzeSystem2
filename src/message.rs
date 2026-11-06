@@ -119,6 +119,8 @@ pub struct Atom {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Markup {
     pub atoms: Vec<Atom>,
+    /// id 标记登记的有符号编号与原始 DWORD 值；重复编号保留首值。
+    pub identifiers: std::collections::BTreeMap<i32, u32>,
     pub final_style: Style,
     /// cd 标记修改的正文恢复颜色。
     pub restore_text_color: u32,
