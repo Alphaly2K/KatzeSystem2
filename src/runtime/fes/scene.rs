@@ -1052,6 +1052,14 @@ impl<F: ObjectFactory> Store<'_, F> {
                         | super::ObjectState::Draw(_)
                         | super::ObjectState::Slider(_)
                         | super::ObjectState::Scroll2(_) => fes::SubcommandContext::default(),
+                        super::ObjectState::String(text) => {
+                            // 基线上下文查询的类型表只把 CP932 文字列入平面分支。
+                            if text.layout.encoding() == crate::message::TextEncoding::Cp932 {
+                                text.layout.base.subcommand_context()
+                            } else {
+                                fes::SubcommandContext::default()
+                            }
+                        }
                         super::ObjectState::CPlane(plane) => plane.subcommand_context(),
                         super::ObjectState::Plane(plane) => plane.subcommand_context(),
                         super::ObjectState::Sound(sound) => sound.subcommand_context(),
@@ -1478,6 +1486,93 @@ mod tests {
     impl ObjectFactory for NoObjects {
         fn create(&mut self, _: u32, _: u32, _: &[u8]) -> Result<Box<dyn TaskObject>> {
             Err(Error::new(0, "合成场景不创建任务"))
+        }
+    }
+
+    #[test]
+    fn text_subcommands_select_context_by_encoding_before_capturing_plane_motion() {
+        use std::io::Write;
+        struct MotionFile(Vec<u8>);
+        impl crate::kcs::ResourceServices for MotionFile {
+            fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+                assert_eq!(category, b"mot");
+                Ok(name.to_vec())
+            }
+            fn read(
+                &mut self,
+                _: &[u8],
+                _: crate::resource::ResourceMode,
+            ) -> Result<Option<Vec<u8>>> {
+                Ok(Some(self.0.clone()))
+            }
+        }
+        let mut program = b"KCS\0".to_vec();
+        program.extend(
+            [2u32, 0, 52, 1, 53, 0, 0, 4, 64, 53, 0, 1]
+                .into_iter()
+                .flat_map(u32::to_le_bytes),
+        );
+        let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), Default::default());
+        encoder.write_all(&[0x3b]).unwrap();
+        program.extend(encoder.finish().unwrap());
+        for budget in [1, 4096] {
+            for (kind, unicode) in [("STRING", false), ("STRING", true), ("STRING8", false)] {
+                let mut runtime = Runtime::new(
+                    0,
+                    kind::ROOT,
+                    Box::new(BaseObject::new()),
+                    crate::expression::State::new(0),
+                    NoObjects,
+                );
+                runtime.set_budget(budget, 10000);
+                runtime.set_resources(MotionFile(program.clone()));
+                let source = format!(
+                    "#DEFINE\n{kind} text[2]\n#OBJECT POS BASE VRAM COLOR PRI\ntext 4,1,2 3,2,9 11,12 0x80123456 7\n#SUBCOMMAND\noneshot probe motion PX[0] BX[0] BZ[0] VX[0] RZ[0] SX[0] CA[0] : [0] [1] [2] [3] [4] [5] [6]\n#START\ntext probe @ @ @ @ @ @ @\nwait 1000\n"
+                );
+                let mut scene = Scene::new(
+                    fes::Program::from_text(source.as_bytes()).unwrap(),
+                    runtime.host().handle_allocator(),
+                )
+                .unwrap();
+                scene
+                    .objects
+                    .configure_messages(unicode, &Default::default(), 0);
+                assert!(scene.prepare(runtime.numbers_mut(), 4096).unwrap());
+                let Step::Event(fes::Event::Subcommand(call)) =
+                    scene.interpreter.run(runtime.numbers_mut(), 4096).unwrap()
+                else {
+                    panic!()
+                };
+                let mut complete = false;
+                for _ in 0..8 {
+                    if runtime
+                        .store()
+                        .run_fes_subcommand(&mut scene, &call)
+                        .unwrap()
+                    {
+                        complete = true;
+                        break;
+                    }
+                }
+                assert!(complete);
+                let expected = if kind == "STRING" && !unicode {
+                    [4., 3., 9., 11., 0., 1., 128.]
+                } else {
+                    [0., 0., 0., 0., 0., 1., 0.]
+                };
+                for bank in 0..2 {
+                    let handle = scene.objects.lookup("text", bank).unwrap();
+                    let motions = scene.objects.get(handle).unwrap().motions();
+                    let motion = motions.task(1).unwrap();
+                    assert_eq!(
+                        motion.state().unwrap().parameters[..7],
+                        expected.map(f32::to_bits)
+                    );
+                    assert_eq!(motions.base_properties[5], ((7 + bank) as f32).to_bits());
+                    assert_eq!(motions.base_properties[6], 4f32.to_bits());
+                    assert_eq!(motions.base_properties[28], 0x80123456);
+                }
+            }
         }
     }
 
