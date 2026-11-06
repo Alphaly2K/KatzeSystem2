@@ -65,6 +65,7 @@ pub struct HostState {
     pub fes_message_frame_delay: i32,
     pub system_settings: Option<crate::settings::SystemSettings>,
     pub languages: crate::language::LanguageState,
+    pub script_replacements: BTreeMap<Vec<u8>, Vec<u8>>,
     pub save_services: Option<Box<dyn crate::save::SaveServices>>,
     /// 外层输入宿主提供的当前逻辑画布坐标；保留画布外的值。
     pub pointer_position: [i32; 2],
@@ -401,7 +402,7 @@ pub(crate) fn call_native(
     let count = match index {
         1 | 6 | 17 | 18 | 25 | 26 | 40 | 47 | 48 | 71 | 207 | 209 | 210 | 212 | 213 | 278 | 319
         | 75 | 393 | 420 | 421 | 516 | 898 | 899 => 1,
-        8 | 13..=16 | 19..=24 | 149 | 211 | 276 | 277 | 422 | 423 | 518 | 897 => 2,
+        8 | 13..=16 | 19..=24 | 149 | 211 | 276 | 277 | 422 | 423 | 518 | 897 | 1002 => 2,
         50..=58 | 60 | 62..=64 => 1,
         59 | 61 => 2,
         38 | 44 | 45 | 790 => 4,
@@ -763,22 +764,35 @@ pub(crate) fn call_native(
             }
             vm.write(args[0], &[0])?;
             let source = vm.read_string(args[1])?;
-            let mut output = Vec::new();
-            let mut p = 0;
-            while p < source.len() {
-                if source[p..].starts_with(&old) {
-                    output.extend(&replacement);
-                    p += old.len();
-                } else {
-                    output.push(source[p]);
-                    p += 1;
-                }
-                if output.len() > read::MAX_BYTES {
-                    return Err(Error::new(vm.pc, "KCS 字符串替换超过上限"));
-                }
-            }
+            let (output, terminators) = strings::replace(&source, &old, &replacement)
+                .map_err(|error| Error::new(vm.pc, error.message))?;
             drop(source);
-            write_string(vm, args[0], &output, 1)?;
+            write_string(vm, args[0], &output, terminators)?;
+            NativeReturn::Continue
+        }
+        1002 => {
+            let mut value = super::format_string(vm, args[1], 0)?;
+            value.truncate(
+                value
+                    .iter()
+                    .position(|&byte| byte == 0)
+                    .unwrap_or(value.len()),
+            );
+            write_string(vm, args[0], &value, 1)?;
+            for (find, replacement) in &host.script_replacements {
+                let find = &find[..find
+                    .iter()
+                    .position(|&byte| byte == 0)
+                    .unwrap_or(find.len())];
+                let replacement = &replacement[..replacement
+                    .iter()
+                    .position(|&byte| byte == 0)
+                    .unwrap_or(replacement.len())];
+                let (output, terminators) = strings::replace(&value, find, replacement)
+                    .map_err(|error| Error::new(vm.pc, error.message))?;
+                value = output;
+                write_string(vm, args[0], &value, terminators)?;
+            }
             NativeReturn::Continue
         }
         519 => {

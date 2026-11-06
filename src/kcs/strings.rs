@@ -347,6 +347,34 @@ pub(super) fn split(source: &[u8], separators: &[u8]) -> Vec<u8> {
     output
 }
 
+pub(super) fn replace(source: &[u8], find: &[u8], replacement: &[u8]) -> Result<(Vec<u8>, usize)> {
+    if source.is_empty() {
+        return Ok((Vec::new(), 2));
+    }
+    if find.is_empty() {
+        return Err(Error::new(0, "KCS 字符串替换的查找串为空"));
+    }
+    let mut output = Vec::new();
+    let mut position = 0;
+    let mut terminators = 1;
+    while position < source.len() {
+        if source[position..].starts_with(find) {
+            output.extend_from_slice(replacement);
+            position += find.len();
+            if position == source.len() {
+                terminators = 2;
+            }
+        } else {
+            output.push(source[position]);
+            position += 1;
+        }
+        if output.len() > read::MAX_BYTES {
+            return Err(Error::new(0, "KCS 字符串替换超过上限"));
+        }
+    }
+    Ok((output, terminators))
+}
+
 fn byte(vm: &Interpreter, address: u32) -> Result<u8> {
     Ok(vm.read(address, 1)?[0])
 }

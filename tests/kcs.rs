@@ -720,6 +720,82 @@ fn core_scalar_math_keeps_table_mapping_sse_angle_order_and_pow_nan_signs() {
 }
 
 #[test]
+fn script_replacements_chain_after_formatting_and_keep_intermediate_storage() {
+    use kcs::Host;
+
+    let mut state = katze_system2::expression::State::new(0);
+    let mut host = kcs::CoreHost::new(&mut state);
+    for external in [0, 0x8000_0000] {
+        let mut vm = kcs::Interpreter::new(
+            kcs::Program::from_code(&[], vec![0x55; 256], 0).unwrap(),
+            vec![0x55; 256],
+        )
+        .unwrap();
+        vm.write(32, &12u32.to_le_bytes()).unwrap();
+        vm.write(128, b"a%u[G32]\0").unwrap();
+        let args: Vec<_> = [external + 64, 128]
+            .into_iter()
+            .flat_map(u32::to_le_bytes)
+            .collect();
+        host.script_replacements.clear();
+        assert_eq!(
+            host.call(1002, &args, &mut vm).unwrap(),
+            kcs::NativeReturn::Continue
+        );
+        assert_eq!(vm.read(external + 64, 5).unwrap(), b"a12\0U");
+        host.script_replacements.extend([
+            (b"cc".to_vec(), Vec::new()),
+            (b"b".to_vec(), b"c".to_vec()),
+            (b"a".to_vec(), b"bbbb".to_vec()),
+        ]);
+        host.call(1002, &args, &mut vm).unwrap();
+        assert_eq!(vm.read(external + 64, 8).unwrap(), b"12\0c12\0U");
+        host.script_replacements.clear();
+        host.script_replacements
+            .insert(b"a\0unused".to_vec(), b"q\0unused".to_vec());
+        let args: Vec<_> = [128u32, 128]
+            .into_iter()
+            .flat_map(u32::to_le_bytes)
+            .collect();
+        host.call(1002, &args, &mut vm).unwrap();
+        assert_eq!(vm.read_string(128).unwrap(), b"q12");
+        host.script_replacements.clear();
+        host.script_replacements.insert(vec![0x82], b"X".to_vec());
+        vm.write(128, b"\x82\xa0\0").unwrap();
+        host.call(1002, &args, &mut vm).unwrap();
+        assert_eq!(vm.read_string(128).unwrap(), b"X\xa0");
+        for (find, replacement, source, expected) in [
+            (
+                b"a".as_slice(),
+                b"b".as_slice(),
+                b"a".as_slice(),
+                b"b\0\0U".as_slice(),
+            ),
+            (b"a", b"b", b"A", b"A\0UU"),
+            (b"a", b"b", b"", b"\0\0UU"),
+            (b"aa", b"bbbb", b"aaa", b"bbbba\0U"),
+        ] {
+            host.script_replacements.clear();
+            host.script_replacements
+                .insert(find.to_vec(), replacement.to_vec());
+            vm.write(160, &[find, &[0]].concat()).unwrap();
+            vm.write(176, &[replacement, &[0]].concat()).unwrap();
+            for native in [45, 1002] {
+                vm.write(128, &[source, &[0]].concat()).unwrap();
+                vm.write(external + 64, &[0x55; 8]).unwrap();
+                let mut words = vec![external + 64, 128];
+                if native == 45 {
+                    words.extend([160, 176]);
+                }
+                let args: Vec<_> = words.into_iter().flat_map(u32::to_le_bytes).collect();
+                host.call(native, &args, &mut vm).unwrap();
+                assert_eq!(vm.read(external + 64, expected.len()).unwrap(), expected);
+            }
+        }
+    }
+}
+
+#[test]
 fn parenthesized_words_keep_groups_and_observe_overlapping_writes() {
     use kcs::Host;
 
