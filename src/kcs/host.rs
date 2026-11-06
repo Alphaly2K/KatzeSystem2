@@ -405,7 +405,7 @@ pub(crate) fn call_native(
         50..=58 | 60 | 62..=64 => 1,
         59 | 61 => 2,
         38 | 44 | 45 | 790 => 4,
-        35..=37 | 41 | 42 | 517 | 519 | 896 | 902 => 3,
+        35..=37 | 41..=43 | 517 | 519 | 896 | 902 => 3,
         5 | 76 | 789 => 0,
         _ => return Err(Error::new(vm.pc, format!("未支持的 KCS native {index}"))),
     };
@@ -702,6 +702,12 @@ pub(crate) fn call_native(
             let value = strings::multi(vm, args[1], args[2] as i32)?.to_vec();
             write_string(vm, args[0], &value, 2)?;
             NativeReturn::Value((!value.is_empty()) as u32)
+        }
+        43 => {
+            if args.iter().all(|&address| vm.read(address, 1).is_ok()) {
+                strings::split_parenthesized(vm, args[0], args[1], args[2])?;
+            }
+            NativeReturn::Continue
         }
         44 => {
             vm.write(args[0], &[0])?;

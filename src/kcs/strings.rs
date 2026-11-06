@@ -338,15 +338,123 @@ pub(super) fn split(source: &[u8], separators: &[u8]) -> Vec<u8> {
             }
             p += 1;
         } else {
-            let width = if matches!(b, 0x81..=0x9f | 0xe0..=0xfc) && p + 1 < source.len() {
-                2
-            } else {
-                1
-            };
+            let width = character_width(&source[p..]);
             output.extend(&source[p..p + width]);
             p += width;
         }
     }
     output.extend([0, 0]);
     output
+}
+
+fn byte(vm: &Interpreter, address: u32) -> Result<u8> {
+    Ok(vm.read(address, 1)?[0])
+}
+
+fn copy_parentheses(vm: &mut Interpreter, destination: u32, source: u32) -> Result<u32> {
+    if byte(vm, source)? != b'(' {
+        return Ok(0);
+    }
+    vm.write(destination, b"(")?;
+    let mut frames = vec![(destination, source, 1u32)];
+    for _ in 0..read::MAX_ITEMS {
+        let (destination, source, offset) = *frames.last().unwrap();
+        let value = byte(vm, source.wrapping_add(offset))?;
+        if matches!(value, 0 | b')') {
+            let end = if value == b')' {
+                vm.write(destination.wrapping_add(offset), b")")?;
+                offset.wrapping_add(1)
+            } else {
+                offset
+            };
+            vm.write(destination.wrapping_add(end), &[0; 2])?;
+            frames.pop();
+            if let Some(frame) = frames.last_mut() {
+                frame.2 = frame.2.wrapping_add(end);
+            } else {
+                return Ok(end);
+            }
+        } else if value == b'(' {
+            let destination = destination.wrapping_add(offset);
+            let source = source.wrapping_add(offset);
+            vm.write(destination, b"(")?;
+            frames.push((destination, source, 1));
+        } else {
+            vm.write(destination.wrapping_add(offset), &[value])?;
+            frames.last_mut().unwrap().2 = offset.wrapping_add(1);
+        }
+    }
+    Err(Error::new(vm.pc, "KCS 括号复制超过上限"))
+}
+
+pub(super) fn split_parenthesized(
+    vm: &mut Interpreter,
+    destination: u32,
+    source: u32,
+    separators: u32,
+) -> Result<()> {
+    let mut input = 0u32;
+    let mut output = 0u32;
+    let mut separated = true;
+    let mut previous = 0u8;
+    for _ in 0..read::MAX_ITEMS {
+        let value = byte(vm, source.wrapping_add(input))?;
+        if value == 0 {
+            return vm.write(destination.wrapping_add(output), &[0; 2]);
+        }
+        if value == b'(' {
+            let marker = byte(vm, source.wrapping_add(input).wrapping_add(1))?;
+            if previous.is_ascii_alphabetic() && !separated {
+                vm.write(destination.wrapping_add(output), &[0])?;
+                output = output.wrapping_add(1);
+            }
+            let length = copy_parentheses(
+                vm,
+                destination.wrapping_add(output),
+                source.wrapping_add(input),
+            )?;
+            if marker == b':' {
+                if length > 3 {
+                    let content = vm
+                        .read(
+                            destination.wrapping_add(output).wrapping_add(2),
+                            (length - 3) as usize,
+                        )?
+                        .to_vec();
+                    vm.write(destination.wrapping_add(output), &content)?;
+                }
+                output = output.wrapping_add(length);
+                if length >= 2 {
+                    vm.write(destination.wrapping_add(output).wrapping_sub(3), &[0])?;
+                }
+                output = output.wrapping_sub(3);
+            } else {
+                output = output.wrapping_add(length);
+            }
+            separated = false;
+            input = input.wrapping_add(length);
+        } else {
+            let mut cursor = separators;
+            let separator = loop {
+                let separator = byte(vm, cursor)?;
+                if separator == 0 || separator == value {
+                    break separator != 0;
+                }
+                cursor = cursor.wrapping_add(1);
+            };
+            if !separator {
+                vm.write(destination.wrapping_add(output), &[value])?;
+                output = output.wrapping_add(1);
+                separated = false;
+                previous = value;
+            } else if !separated {
+                vm.write(destination.wrapping_add(output), &[0])?;
+                output = output.wrapping_add(1);
+                separated = true;
+                previous = 0;
+            }
+            input = input.wrapping_add(1);
+        }
+    }
+    Err(Error::new(vm.pc, "KCS 括号分词超过上限"))
 }

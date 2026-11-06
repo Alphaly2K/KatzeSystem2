@@ -720,6 +720,70 @@ fn core_scalar_math_keeps_table_mapping_sse_angle_order_and_pow_nan_signs() {
 }
 
 #[test]
+fn parenthesized_words_keep_groups_and_observe_overlapping_writes() {
+    use kcs::Host;
+
+    for external in [0, 0x8000_0000] {
+        for (source, separators, destination, start, expected) in [
+            (
+                b"a(x y)z".as_slice(),
+                b" ".as_slice(),
+                32,
+                32,
+                b"a\0(x y)z\0\0".as_slice(),
+            ),
+            (b"1(x y)z", b" ", 32, 32, b"1(x y)z\0\0"),
+            (b"a(:x y)z", b" ", 32, 32, b"a\0x yz\0\0"),
+            (b"a(a(b)c)z", b" ", 32, 32, b"a\0(a(b)c)z\0\0"),
+            (b"\x82\xa0 a", b"\xa0", 32, 32, b"\x82\0 a\0\0"),
+            (b"a(x y)z", b" ", 128, 128, b"a\0\0\0y)z\0"),
+            (b"a b", b" ", 192, 192, b"a b\0\0"),
+            (b"(:", b" ", 32, 31, b"\0\0:\0\0"),
+        ] {
+            let mut vm = kcs::Interpreter::new(
+                kcs::Program::from_code(&[], vec![0; 256], 0).unwrap(),
+                vec![0; 256],
+            )
+            .unwrap();
+            vm.write(external + 128, &[source, &[0]].concat()).unwrap();
+            vm.write(external + 192, &[separators, &[0]].concat())
+                .unwrap();
+            let mut state = katze_system2::expression::State::new(0);
+            let mut host = kcs::CoreHost::new(&mut state);
+            let args: Vec<_> = [external + destination, external + 128, external + 192]
+                .into_iter()
+                .flat_map(u32::to_le_bytes)
+                .collect();
+            assert_eq!(
+                host.call(43, &args, &mut vm).unwrap(),
+                kcs::NativeReturn::Continue
+            );
+            assert_eq!(vm.read(external + start, expected.len()).unwrap(), expected);
+        }
+    }
+    for invalid in 0..3 {
+        let mut vm = kcs::Interpreter::new(
+            kcs::Program::from_code(&[], vec![0x55; 256], 0).unwrap(),
+            vec![],
+        )
+        .unwrap();
+        vm.write(128, b"a b\0").unwrap();
+        vm.write(192, b" \0").unwrap();
+        let before = vm.read(0, 256).unwrap().to_vec();
+        let mut state = katze_system2::expression::State::new(0);
+        let mut host = kcs::CoreHost::new(&mut state);
+        let mut args = [32, 128, 192];
+        args[invalid] = u32::MAX;
+        let args: Vec<_> = args.into_iter().flat_map(u32::to_le_bytes).collect();
+        assert_eq!(
+            host.call(43, &args, &mut vm).unwrap(),
+            kcs::NativeReturn::Continue
+        );
+        assert_eq!(vm.read(0, 256).unwrap(), before);
+    }
+}
+
+#[test]
 fn byte_truncation_and_zero_separated_word_helpers_keep_boundaries() {
     use kcs::Host;
     let mut vm = kcs::Interpreter::new(
@@ -779,6 +843,24 @@ fn byte_truncation_and_zero_separated_word_helpers_keep_boundaries() {
         kcs::NativeReturn::Value(5)
     );
     assert_eq!(vm.read_string(400).unwrap(), b"alpha");
+    for (source, separators, expected) in [
+        (
+            b"\x82,a".as_slice(),
+            b",".as_slice(),
+            b"\x82\0a\0\0".as_slice(),
+        ),
+        (b"\xf0\xa0a", b"\xa0", b"\xf0\0a\0\0"),
+        (b"\x82\xa0a", b"\xa0", b"\x82\xa0a\0\0"),
+    ] {
+        vm.write(100, &[source, &[0]].concat()).unwrap();
+        vm.write(200, &[separators, &[0]].concat()).unwrap();
+        let args: Vec<_> = [400u32, 100, 200]
+            .into_iter()
+            .flat_map(u32::to_le_bytes)
+            .collect();
+        host.call(41, &args, &mut vm).unwrap();
+        assert_eq!(vm.read(400, expected.len()).unwrap(), expected);
+    }
 }
 
 #[test]
