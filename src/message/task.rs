@@ -279,7 +279,8 @@ impl MessageObject {
             )?;
             if !whole {
                 display.clear_dirty();
-                self.complete_snapshot = display.page().remaining(u32::MAX)? == 0;
+                self.complete_snapshot =
+                    !display.page().is_dirty() && display.page().remaining(u32::MAX)? == 0;
             }
         }
         Ok(())
@@ -314,6 +315,10 @@ impl MessageObject {
         budget: usize,
     ) -> Result<()> {
         config.layout.break_characters = self.character_sets.layout();
+        config.layout.offset = self
+            .configuration
+            .as_ref()
+            .map_or([0; 2], |previous| previous.layout.offset);
         fonts(host)?.validate(&config.font)?;
         self.user_fonts.reconfigure()?;
         let timing = config.timing(host.message_time_scale());
@@ -334,6 +339,9 @@ impl MessageObject {
             if let Some(speed) = speed {
                 display.set_speed(speed);
             }
+            display.prepare(&config.layout, &timing, |c, s| {
+                fonts.measure(&config.font, c, s)
+            })?;
             self.display = Some(display);
             self.time = 0;
         }
@@ -570,13 +578,12 @@ impl TaskObject for MessageObject {
                 if self.display.is_none() {
                     return Err(Error::new(0, "消息查询缺少已配置的显示对象"));
                 }
-                self.prepare(host)?;
-                *output = self
-                    .display
-                    .as_ref()
-                    .unwrap()
-                    .page()
-                    .remaining(if code == 460 { u32::MAX } else { self.segment })?;
+                let page = self.display.as_ref().unwrap().page();
+                *output = if page.is_dirty() {
+                    u32::MAX
+                } else {
+                    page.remaining(if code == 460 { u32::MAX } else { self.segment })?
+                };
             }
             461 if self.display.is_some() => {
                 if host.message_plane_display(self.plane.id())?.is_some() {
@@ -625,6 +632,22 @@ impl TaskObject for MessageObject {
                 self.configuration.as_mut().unwrap().layout.break_characters =
                     self.character_sets.layout();
             }
+            470 if self.display.is_some() => {
+                let config = self.configuration.as_mut().unwrap();
+                let y = command.data[1] as i32;
+                config.layout.offset = [0, y];
+                let fonts = fonts(host)?;
+                self.display.as_mut().unwrap().shift_glyphs(y, |c, s| {
+                    if let Some(glyph) = self.user_fonts.glyph(c, self.encoding) {
+                        Ok(glyph)
+                    } else {
+                        fonts
+                            .rasterize(&config.font, c, s)
+                            .map(super::userfont::Glyph::Mask)
+                    }
+                })?;
+                self.submit(false, host)?;
+            }
             466 if self.display.is_some() => {
                 let cursor = self
                     .display
@@ -668,7 +691,7 @@ impl TaskObject for MessageObject {
                     *output = lines - u32::from(newline);
                 }
             }
-            458 | 461 | 462 | 463 | 464 | 465 | 467 | 468 | 471 | 474 => (),
+            458 | 461 | 462 | 463 | 464 | 465 | 467 | 468 | 470 | 471 | 474 => (),
             466 | 475 => (),
             _ => {
                 return Err(Error::new(

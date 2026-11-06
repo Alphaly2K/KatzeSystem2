@@ -20,6 +20,7 @@
 |`color`|正文、阴影、注音各三个 RGB 分量；缺省零，各取低八位，Alpha 固定 255，同时更新恢复颜色|
 |`margin`|四项边距；缺省零|
 |`move`|字距、行距；缺省零|
+|`shift`|绝对纵向偏移；缺省零，单独排队到后续媒体更新，不请求重配置|
 |`ruby`|注音偏移；缺省零|
 |`frame`|一项延时同时用于字符和句末；缺省或 −1 使用传入的 frame_delay|
 |`shadow`|阴影和描边原始 DWORD；缺省零，关闭对应全局继承|
@@ -38,7 +39,9 @@
 
 `set_font(name, backend)` 接受 UTF-16 字体名和独立后端 DWORD，关闭字体名的全局继承并请求重配；遇到零单元时截断，容量不足返回诊断，保留旧配置。脚本 `layout font` 使用子命令后的完整剩余原文作为字体名，后端为零；`layout fontind [backend] [name...]` 先求值一个缺省为零的后端，再读取完整剩余字体名。字体原文为空时两者都使用当前全局默认名称。字体名保留引号，不求值其中的表达式，按 UTF-8 转为 UTF-16。原文入口逐个计数半角空格，连续空格也分别计数；不会重新按参数分词或去除尾部空白。
 
-普通 STRING／STRING8 对 `vcolor`／`acolor`／`vacolor`／`pcolor`／`vpcolor` 依次求值最多九项参数，保持当前颜色；这些扩展颜色分派给日志类型。`fontind_sub`／`profmode_sub`／`prof_enable_sub`／`c_prof_sub`／`prof_sub` 求值一项，`shift_sub` 求值两项，普通文字对象随后跳过且不请求重配。未知布局（包括 `vdraw`）直接继续，不求值数值参数。`shift` 与 `prof`／`d_prof`／`c_prof` 需要独立移位或专用替换服务，目前返回诊断。
+普通 STRING／STRING8 对 `vcolor`／`acolor`／`vacolor`／`pcolor`／`vpcolor` 依次求值最多九项参数，保持当前颜色；这些扩展颜色分派给日志类型。`fontind_sub`／`profmode_sub`／`prof_enable_sub`／`c_prof_sub`／`prof_sub` 求值一项，`shift_sub` 求值两项，普通文字对象随后跳过且不请求重配。未知布局（包括 `vdraw`）直接继续，不求值数值参数。`prof`／`d_prof`／`c_prof` 的专用替换服务目前返回诊断。
+
+`layout shift` 只求值一项，额外表达式不执行；数组广播共用一次求值。同轮多次设置保留最后值，`reset` 和文字清空保留请求。媒体更新在配置完成之后、文字及播放请求之前发送 470／491，每个银行消费一次；移位本身保留缓存光标，后续重新准备才更新光标。`shift()`、`shift_dirty()` 和 `clear_shift_dirty()` 分别查询保存的偏移、待提交标记及确认消费。下层绘制规则见[文字移位](message.md#文字移位)。
 
 ## 全局字体更新
 
@@ -97,7 +100,7 @@
 
 `endpos` 先依次求值至多两个目的编号，再按银行顺序写入 X、Y；同一目的编号由 Y 覆盖，越界编号跳过，查询不推进消息或重新排版。普通文字的 `getpos2` 查询平面位置，遵循 [对象位置查询](graphics.md#fes-对象控制命令) 的父级规则。`lineinfo line [string_index] [number_index]` 仅向日志文字取得行内容；普通对象求值前三项后继续，缺少行号时直接继续。日志行查询随 LOGSTRING／LOGSTRING8 接入。
 
-`LOGSTRING`／`NVSTRING`、文字移位、专用字体／文本替换服务及 `wait tag` 继续核实。页面引用、记录编辑等其余消息命令尚未接入。
+`LOGSTRING`／`NVSTRING`、专用字体／文本替换服务及 `wait tag` 继续核实。页面引用、记录编辑等其余消息命令尚未接入。
 
 ## 文字完成等待
 

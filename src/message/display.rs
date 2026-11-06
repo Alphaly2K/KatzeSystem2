@@ -134,6 +134,40 @@ impl Display {
         }
     }
 
+    pub(super) fn shift_glyphs(
+        &mut self,
+        y: i32,
+        mut glyph: impl FnMut(char, u32) -> Result<super::userfont::Glyph>,
+    ) -> Result<()> {
+        self.page.set_offset([0, y]);
+        self.clear_pixels();
+        let mut canvas = Surface::new([128; 2])?;
+        for entry in &self.page.layout().entries {
+            let Some(atom) = entry.atom else { continue };
+            if !entry.glyph() || self.page.playback.states[atom] != GlyphState::Complete {
+                continue;
+            }
+            if let Some(drawn) = draw(
+                entry,
+                self.page.markup().atoms[atom].style,
+                &mut self.surface,
+                &mut canvas,
+                &self.settings,
+                self.page.encoding,
+                &mut glyph,
+            )? {
+                self.bounds[atom] = drawn.bounds;
+            }
+        }
+        self.dirty = None;
+        record_dirty(
+            &mut self.dirty,
+            self.surface.bounds(),
+            self.surface.bounds(),
+        );
+        Ok(())
+    }
+
     pub fn prepare(
         &mut self,
         layout: &LayoutSettings,

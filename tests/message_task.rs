@@ -371,7 +371,7 @@ fn ordinary_text_calls_write_vm_configuration_and_render_segmented_messages() {
             rt.dispatch_command(0, command(text, 47, 1)).unwrap();
             rt.send_message(0, caller, [0; 4]).unwrap();
             let vm = rt.object(caller).unwrap().interpreter().unwrap();
-            for (at, value) in [(0, 2u32), (4, 1), (12, 1)] {
+            for (at, value) in [(0, u32::MAX), (4, 1), (12, 1)] {
                 assert_eq!(vm.read(at, 4).unwrap(), value.to_le_bytes());
             }
             assert_eq!(
@@ -390,7 +390,7 @@ fn ordinary_text_calls_write_vm_configuration_and_render_segmented_messages() {
             );
             rt.send_message(0, caller, [0; 4]).unwrap();
             let vm = rt.object(caller).unwrap().interpreter().unwrap();
-            for (at, value) in [(20, 0u32), (24, 1), (28, 0)] {
+            for (at, value) in [(20, u32::MAX), (24, u32::MAX), (28, 0)] {
                 assert_eq!(vm.read(at, 4).unwrap(), value.to_le_bytes());
             }
             assert_eq!(
@@ -414,7 +414,7 @@ fn ordinary_text_calls_write_vm_configuration_and_render_segmented_messages() {
             );
             rt.send_message(0, caller, [0; 4]).unwrap();
             let vm = rt.object(caller).unwrap().interpreter().unwrap();
-            assert_eq!(vm.read(36, 4).unwrap(), [0; 4]);
+            assert_eq!(vm.read(36, 4).unwrap(), u32::MAX.to_le_bytes());
             assert_eq!(vm.read(40, 4).unwrap(), 0xdeadbeefu32.to_le_bytes());
             assert!(vm.stack_bytes().is_empty());
             assert_eq!(rt.drawing().target.as_ref().unwrap().pixel(3, 4), Some(0));
@@ -484,13 +484,13 @@ fn runtime_routes_both_encodings_through_segment_playback_canvas_and_frame() {
         .unwrap();
         assert_eq!(
             rt.dispatch_command(0, command(id, 460 + shift, 0)).unwrap(),
-            2
+            u32::MAX
         );
         rt.drawing_mut().mode = 1;
         rt.dispatch_command(0, command(id, 463 + shift, 0)).unwrap();
         assert_eq!(
             rt.dispatch_command(0, command(id, 460 + shift, 0)).unwrap(),
-            2
+            u32::MAX
         );
         rt.drawing_mut().mode = 0;
         rt.dispatch_command(0, command(id, 463 + shift, 0)).unwrap();
@@ -545,11 +545,11 @@ fn runtime_routes_both_encodings_through_segment_playback_canvas_and_frame() {
         .unwrap();
         assert_eq!(
             rt.dispatch_command(0, command(id, 460 + shift, 0)).unwrap(),
-            1
+            u32::MAX
         );
         assert_eq!(
             rt.dispatch_command(0, command(id, 472 + shift, 0)).unwrap(),
-            0
+            u32::MAX
         );
         rt.dispatch_command(0, command(id, 463 + shift, 1)).unwrap();
         rt.dispatch_command(0, command(id, 461 + shift, 0)).unwrap();
@@ -642,7 +642,7 @@ fn send(
 #[test]
 fn character_sets_keep_byte_removal_rules_and_survive_clear_and_reconfiguration() {
     fn lines(object: &mut MessageObject, host: &mut TestHost, shift: u32) -> Vec<String> {
-        send(object, host, 460 + shift, 0, None);
+        send(object, host, 469 + shift, 0, None);
         let mut lines = std::collections::BTreeMap::<u32, String>::new();
         for entry in &object.display().unwrap().page().layout().entries {
             if let katze_system2::message::AtomKind::Character(character) = entry.kind {
@@ -692,6 +692,109 @@ fn character_sets_keep_byte_removal_rules_and_survive_clear_and_reconfiguration(
         send(&mut object, &mut host, 474 + shift, 0, None);
         send(&mut object, &mut host, 457 + shift, 0, Some(&mut config));
         assert_eq!(lines(&mut object, &mut host, shift), ["AB", "C"]);
+    }
+}
+
+#[test]
+fn shifts_redraw_completed_glyphs_preserve_pending_text_and_keep_absolute_offsets() {
+    use katze_system2::message::GlyphState;
+    for (encoding, shift, extra) in [
+        (TextEncoding::Cp932, 0, 0),
+        (TextEncoding::Unicode, 21, 0x40),
+    ] {
+        for reveal in [false, true] {
+            let mut host = TestHost {
+                drawings: Drawables::default(),
+                fonts: Fonts,
+                submissions: Vec::new(),
+                image: Vec::new(),
+            };
+            let mut object = MessageObject::new(1, encoding);
+            assert_eq!(
+                send(&mut object, &mut host, 470 + shift, 3, None),
+                0xdead_beef
+            );
+            let mut config = configuration(encoding, true);
+            set(&mut config, 4, u32::from(reveal));
+            set(&mut config, 0xd4 + extra, 8);
+            send(&mut object, &mut host, 456 + shift, 0, Some(&mut config));
+            assert_eq!(send(&mut object, &mut host, 460 + shift, 0, None), 0);
+            send(&mut object, &mut host, 47, 1, None);
+            let mut text = *b"ABC\0";
+            send(&mut object, &mut host, 458 + shift, 0, Some(&mut text));
+            for code in [460, 472] {
+                assert_eq!(
+                    send(&mut object, &mut host, code + shift, 0, None),
+                    u32::MAX
+                );
+            }
+            assert!(object.display().unwrap().page().layout().entries.is_empty());
+            send(&mut object, &mut host, 469 + shift, 0, None);
+            send(&mut object, &mut host, 463 + shift, u32::MAX, None);
+            if reveal {
+                for now in [20, 21] {
+                    object.state().1.update(now);
+                    object.update_body(&mut host, 0, 4096).unwrap();
+                }
+            }
+            let page = object.display().unwrap().page();
+            let states: Vec<_> = (0..3).map(|i| page.glyph_state(i).unwrap()).collect();
+            assert_eq!(states[0], GlyphState::Complete);
+            assert_eq!(states.contains(&GlyphState::Revealing), reveal);
+            let cursor = page.layout().cursor;
+            let positions: Vec<_> = page
+                .layout()
+                .entries
+                .iter()
+                .map(|entry| entry.position)
+                .collect();
+            let playback = (
+                object.playback_time(),
+                object.segment_limit(),
+                object.active(),
+            );
+            host.submissions.clear();
+            send(&mut object, &mut host, 470 + shift, 3, None);
+            let display = object.display().unwrap();
+            let page = display.page();
+            assert_eq!(page.layout().cursor, cursor);
+            for (i, position) in positions.iter().enumerate() {
+                assert_eq!(page.glyph_state(i), Some(states[i]));
+                assert_eq!(
+                    page.layout().entries[i].position,
+                    [position[0], position[1] + 3]
+                );
+            }
+            assert_eq!(
+                (
+                    object.playback_time(),
+                    object.segment_limit(),
+                    object.active()
+                ),
+                playback
+            );
+            assert_eq!(host.submissions, [Rect::from_xywh(0, 0, 24, 12)]);
+            assert_ne!(display.surface().pixel(1, 4), Some(0));
+            if let Some(source) = display.source_surface() {
+                assert!(source.pixels().iter().all(|&byte| byte == 0));
+            }
+            let mut pending = *b"D\0";
+            send(&mut object, &mut host, 458 + shift, 0, Some(&mut pending));
+            send(&mut object, &mut host, 470 + shift, 7, None);
+            assert!(object.display().unwrap().page().is_dirty());
+            assert_eq!(object.display().unwrap().page().layout().entries.len(), 3);
+            assert!(!object.complete_snapshot());
+            assert_eq!(send(&mut object, &mut host, 460 + shift, 0, None), u32::MAX);
+            for reset in [459, 456] {
+                send(&mut object, &mut host, reset + shift, 0, Some(&mut config));
+                send(&mut object, &mut host, 458 + shift, 0, Some(&mut pending));
+                send(&mut object, &mut host, 469 + shift, 0, None);
+                assert_eq!(
+                    object.display().unwrap().page().layout().entries[0].position[1],
+                    7
+                );
+            }
+        }
     }
 }
 
@@ -749,7 +852,7 @@ fn task_keeps_snapshot_separate_from_completion_and_reconfigures_without_resetti
     assert_eq!(object.playback_time(), 0);
     assert_eq!(object.segment_limit(), 0);
     assert!(!object.complete_snapshot());
-    assert_eq!(send(&mut object, &mut host, 460, 0, None), 0);
+    assert_eq!(send(&mut object, &mut host, 460, 0, None), u32::MAX);
 }
 
 #[test]

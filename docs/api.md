@@ -627,4 +627,4 @@ Runtime 的普通 294 创建独立控制器，使用与图像、集合共用且�
 
 ### FES 普通文字对象
 
-`runtime::fes::ObjectState::String` 的 `layout` 提供 `fes::StringState` 配置，其他访问器提供累计文本及最近更新的查询缓存。`Scene` 已路由普通文字声明、布局、替换／追加、段标记、清空／重置、播放／跳过和剩余数／行数查询；工厂组合 `MessageFactory` 并提供 `FontServices` 后，文字通过消息任务提交到共享画布。`Objects::configure_messages` 可显式提供全局上下文；Runtime 使用 `HostState` 中的消息默认值、编码开关、度量参数及 FES 缺省延时。用法、编码及剩余接口见 [FES 文字对象](fes-text.md)。
+`runtime::fes::ObjectState::String` 的 `layout` 提供 `fes::StringState` 配置，其他访问器提供累计文本及最近更新的查询缓存。`Scene` 已路由普通文字声明、布局、绝对纵向移位、替换／追加、段标记、清空／重置、播放／跳过和剩余数／行数查询；工厂组合 `MessageFactory` 并提供 `FontServices` 后，文字通过消息任务提交到共享画布。`Objects::configure_messages` 可显式提供全局上下文；Runtime 使用 `HostState` 中的消息默认值、编码开关、度量参数及 FES 缺省延时。用法、编码及剩余接口见 [FES 文字对象](fes-text.md)。

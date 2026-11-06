@@ -196,6 +196,44 @@ fn fes_string_creation_retry_and_reconfiguration_keep_text_and_task_identity() {
 }
 
 #[test]
+fn layout_shift_evaluates_once_updates_banks_and_survives_reset() {
+    for budget in [1, 4096] {
+        for (name, unicode) in [("STRING", false), ("STRING", true), ("STRING8", false)] {
+            let mut rt = engine(budget, unicode, Rc::new(Cell::new(false)));
+            let script = format!(
+                "#DEFINE\n{name} text[2]\n#OBJECT DISP\ntext[0] 1\ntext[1] 1\n#START\ntext layout view 24 12\ntext layout size 4\ntext layout color 255 255 255\ntext layout shift ($0+=3) ($1+=99)\ntext str AB\ntext draw -1\nwait 1\ntext layout shift 7\ntext endpos 2 3\nwait 1\ntext reset\ntext str C\ntext draw -1\nwait 1000\n"
+            );
+            let mut scene = Scene::new(
+                fes::Program::from_text(script.as_bytes()).unwrap(),
+                rt.host().handle_allocator(),
+            )
+            .unwrap();
+            while !rt.prepare_fes_scene(0, &mut scene).unwrap() {}
+            for (now, y) in [(100, 3), (101, 7), (102, 7)] {
+                advance(&mut rt, &mut scene, now).unwrap();
+                assert_eq!(rt.numbers().shared[..2], [3, 0]);
+                for bank in 0..2 {
+                    let handle = scene.objects().lookup("text", bank).unwrap();
+                    let ObjectState::String(state) = &scene.objects().get(handle).unwrap().state
+                    else {
+                        unreachable!()
+                    };
+                    assert_eq!(state.layout.shift(), y);
+                    assert!(!state.layout.shift_dirty());
+                    assert_eq!(state.cursor()[1], if now == 101 { 3 } else { y });
+                }
+                let surface = rt.drawing().target.as_ref().unwrap();
+                assert_ne!(surface.pixel(1, (y + 1) as u32), Some(0));
+                if now == 101 {
+                    assert_eq!(surface.pixel(1, 4), Some(0));
+                    assert_eq!(rt.numbers().shared[3], 3);
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn string_waits_finish_the_first_busy_bank_and_resume_after_cached_counts_refresh() {
     for budget in [1, 4096] {
         for (name, unicode, encoding) in [

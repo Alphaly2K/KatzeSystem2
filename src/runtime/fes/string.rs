@@ -288,14 +288,9 @@ impl Objects {
                             Ok(value)
                         },
                         frame_delay,
-                    )? && matches!(
-                        name.as_slice(),
-                        b"shift" | b"prof" | b"d_prof" | b"c_prof"
-                    ) {
-                        return Err(Error::new(
-                            line.offset,
-                            "FES 文字移位或专用替换服务尚未接入",
-                        ));
+                    )? && matches!(name.as_slice(), b"prof" | b"d_prof" | b"c_prof")
+                    {
+                        return Err(Error::new(line.offset, "FES 文字专用替换服务尚未接入"));
                     }
                 }
                 b"str" => state.set_text(remainder(&line.bytes, 2).to_vec()),
@@ -407,6 +402,11 @@ impl<F: ObjectFactory> Store<'_, F> {
             let state = objects.string_mut(handle);
             state.initial = false;
             state.layout.clear_configuration_dirty();
+        }
+        if objects.string(handle).layout.shift_dirty() {
+            let shift = objects.string(handle).layout.shift() as u32;
+            self.fes_command(owner, Some(task), 470 + extra, [0, shift, 1], None)?;
+            objects.string_mut(handle).layout.clear_shift_dirty();
         }
         self.update_fes_user_fonts(owner, objects, handle, task, extra)?;
         if objects.string(handle).clear {

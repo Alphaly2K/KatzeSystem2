@@ -9,6 +9,8 @@ pub struct StringState {
     encoding: TextEncoding,
     configuration: Vec<u8>,
     configuration_dirty: bool,
+    shift: i32,
+    shift_dirty: bool,
     restore_colors: [u32; 3],
     defaults: MessageDefaults,
     font_inheritance: [bool; 4],
@@ -26,6 +28,8 @@ impl StringState {
             encoding,
             configuration: defaults.configuration(encoding)?,
             configuration_dirty: false,
+            shift: 0,
+            shift_dirty: false,
             restore_colors: [u32::MAX, 0xff00_0000, u32::MAX],
             defaults: defaults.clone(),
             font_inheritance: [encoding == TextEncoding::Cp932, true, true, true],
@@ -55,6 +59,18 @@ impl StringState {
 
     pub fn clear_configuration_dirty(&mut self) {
         self.configuration_dirty = false;
+    }
+
+    pub fn shift(&self) -> i32 {
+        self.shift
+    }
+
+    pub fn shift_dirty(&self) -> bool {
+        self.shift_dirty
+    }
+
+    pub fn clear_shift_dirty(&mut self) {
+        self.shift_dirty = false;
     }
 
     pub fn reset_layout(&mut self, defaults: &MessageDefaults, measurement: u32) -> Result<()> {
@@ -137,6 +153,11 @@ impl StringState {
         frame_delay: i32,
     ) -> Result<bool> {
         let (offset, values) = match command {
+            b"shift" => {
+                self.shift = value(0, 0)?;
+                self.shift_dirty = true;
+                return Ok(true);
+            }
             b"view" => (4, vec![value(0, 800)?, value(1, 600)?]),
             b"color" => {
                 let mut colors = [0xff00_0000; 3];

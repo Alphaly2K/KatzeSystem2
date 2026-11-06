@@ -17,6 +17,7 @@ pub struct Page {
     state: ParseState,
     markup: Markup,
     layout: Layout,
+    offset: [i32; 2],
     atom_times: Vec<Option<u32>>,
     schedule: Schedule,
     pub(super) playback: Playback,
@@ -42,6 +43,7 @@ impl Page {
                 cursor: None,
                 bottom: 0,
             },
+            offset: [0; 2],
             atom_times: Vec::new(),
             schedule: Schedule {
                 deadlines: Vec::new(),
@@ -63,6 +65,16 @@ impl Page {
 
     pub fn layout(&self) -> &Layout {
         &self.layout
+    }
+
+    pub(super) fn set_offset(&mut self, offset: [i32; 2]) {
+        let delta: [i32; 2] = std::array::from_fn(|i| offset[i].wrapping_sub(self.offset[i]));
+        for entry in &mut self.layout.entries {
+            for (position, delta) in entry.position.iter_mut().zip(delta) {
+                *position = position.wrapping_add(delta);
+            }
+        }
+        self.offset = offset;
     }
 
     pub fn schedule(&self) -> &Schedule {
@@ -243,8 +255,10 @@ impl Page {
     /// 清空来源、记录、样式和累计计数，恢复创建时的配置，保留显示速度。
     pub fn clear(&mut self) {
         let speed = self.playback.speed();
+        let offset = self.offset;
         *self = Self::new(self.defaults, self.encoding);
         self.playback.set_speed(speed);
+        self.offset = offset;
     }
 
     /// 返回是否重新准备。失败时保留上次结果和待解析来源，可修正服务后重试。
@@ -315,6 +329,7 @@ impl Page {
 
         self.markup = markup;
         self.layout = layout;
+        self.offset = layout_settings.offset;
         self.atom_times = atom_times;
         self.schedule = Schedule {
             deadlines,
