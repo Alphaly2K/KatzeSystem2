@@ -19,7 +19,8 @@ struct CachedFont {
 }
 
 /// 服务内字体资源优先于系统同名字体。空名称选择 macOS 用户默认字体。
-/// 命名字体和缺字均不自动替换；CoreText 的度量及抗锯齿与 GDI 有平台差异。
+/// 默认字体缺字时使用系统级联选择；命名字体保持显式选择。
+/// CoreText 的字宽、字形和抗锯齿与 GDI 有平台差异。
 pub struct MacFonts {
     root: PathBuf,
     faces: Vec<Face>,
@@ -206,7 +207,10 @@ impl FontServices for MacFonts {
         if size == 0 {
             return Ok(0);
         }
-        let measured = measured_advance(font, glyph(font, character)?)?;
+        let (fallback, glyph) =
+            select_glyph(font, character, terminated(&request.name).is_empty())?;
+        let font = fallback.as_ref().unwrap_or(font);
+        let measured = measured_advance(font, glyph)?;
         request.character_advance(character, size, measured)
     }
 
@@ -220,7 +224,12 @@ impl FontServices for MacFonts {
         if size == 0 {
             return GlyphMask::new([0; 2], [0; 2], 0, Vec::new());
         }
-        let glyph = glyph(font, character)?;
+        // 级联只替换字形，行基线仍使用原字体的度量。
+        let baseline =
+            integer(unsafe { ffi::CTFontGetAscent(font.get()) }.round())?.min(size as i32);
+        let (fallback, glyph) =
+            select_glyph(font, character, terminated(&request.name).is_empty())?;
+        let font = fallback.as_ref().unwrap_or(font);
         let measured = measured_advance(font, glyph)?;
         let advance = request.character_advance(character, size, measured)?;
         // 原绘字入口直接跳过半角及全角空格。
@@ -264,8 +273,6 @@ impl FontServices for MacFonts {
                 &mut coverage,
             )?;
         }
-        let baseline =
-            integer(unsafe { ffi::CTFontGetAscent(font.get()) }.round())?.min(size as i32);
         let x = if request.measure_parameter != 0 && advance > measured {
             (advance - width) / 2 + 1
         } else {
@@ -410,6 +417,30 @@ fn glyph(font: &Owned, character: char) -> Result<u16> {
         ));
     }
     Ok(glyphs[0])
+}
+
+fn select_glyph(font: &Owned, character: char, default_font: bool) -> Result<(Option<Owned>, u16)> {
+    match glyph(font, character) {
+        Ok(glyph) => return Ok((None, glyph)),
+        Err(error) if !default_font => return Err(error),
+        _ => (),
+    }
+    let mut units = [0; 2];
+    let units = character.encode_utf16(&mut units);
+    let text = cf_string(units)?;
+    let fallback = unsafe {
+        Owned::new(ffi::CTFontCreateForString(
+            font.get(),
+            text.get(),
+            ffi::Range {
+                location: 0,
+                length: units.len() as isize,
+            },
+        ))?
+    };
+    // 系统也没有映射时保留所选字体的缺字符号。
+    let glyph = glyph(&fallback, character).unwrap_or(0);
+    Ok((Some(fallback), glyph))
 }
 
 fn integer(value: f64) -> Result<i32> {

@@ -257,11 +257,22 @@ Unicode 的 `word_wrap` 按半角空格确定单词边界，空间不足时回�
 
 macOS 10.13 及以上可通过 `Runtime::set_fonts(message::macos::MacFonts::new(resource_root))` 使用 CoreText 字体选择和 CoreGraphics 灰度字形，不要求窗口或显示设备。`add_resource` 按 CP932 直接文件名读取字体，反斜杠转换为平台分隔符，相对名称基于 `resource_root`；文件不存在或格式不被平台接受时返回 false。`add_data(bytes)` 装载字体或集合的全部成员并返回数量；失败保留已有字体。资源仅此服务可见，同一运行时的任务共享它们，释放服务时结束持有。
 
-选择优先使用已装载资源，再查询系统字体；支持族名、完整名称、PostScript 名及平台提供的本地化名称，比较不区分大小写。同名资源按装载次序选择，优先匹配字重和斜体样式，字重恰为 700 时选择粗体。空名称使用 macOS 用户默认字体；命名字体不接受系统悄然替换，缺字、缺少请求样式和垂直字体均返回诊断。当前支持后端零，以及低字节为 0／1／128 的字符集；这些请求通过所选字体的 Unicode 映射取字，其他字符集与后端明确诊断。
+选择优先使用已装载资源，再查询系统字体；支持族名、完整名称、PostScript 名及平台提供的本地化名称，比较不区分大小写。同名资源按装载次序选择，优先匹配字重和斜体样式，字重恰为 700 时选择粗体。空名称使用 macOS 用户默认字体，缺字时按系统级联选择覆盖该字符的字体；系统仍无映射时使用所选字体的缺字符号。命名字体不接受系统悄然替换，命名字体缺字、缺少请求样式和垂直字体均返回诊断。当前支持后端零，以及低字节为 0／1／128 的字符集；这些请求通过所选字体的 Unicode 映射取字，其他字符集与后端明确诊断。
 
-服务对字号零返回零字宽和空遮罩；其他字号使用平台整数度量及前述定宽规则，字形为顶端起始的 0～64 覆盖。轮廓、阴影及覆盖加倍仍由消息层处理。CoreText 的字体样式选择、字宽舍入和抗锯齿存在平台差异，当前未复现 GDI hinting、缺字回退或零高度字体映射。
+服务对字号零返回零字宽和空遮罩；其他字号使用平台整数度量及前述定宽规则，字形为顶端起始的 0～64 覆盖。级联字体同时提供字宽和轮廓，行基线沿用原默认字体。轮廓、阴影及覆盖加倍仍由消息层处理。系统字体集合、级联顺序、样式选择、字宽舍入和抗锯齿存在平台差异，GDI hinting、命名字体映射及零高度字体选择仍待适配。
 
 `enumerate` 当前接受 MAX 字符集：先提供服务内资源，再按平台返回次序提供系统字体，保留重复族名；零 `variable_pitch` 使用平台定宽标记筛选，名称最多 63 个 UTF-16 单元。具体 GDI 字符集筛选仍返回诊断。跨平台核心可继续使用显式 `Font` 或其他 `FontServices` 实现。
+
+默认字体的系统级联检查位于 `tools/check-macos-font-fallback.rs`，须在 macOS 上显式运行，并提供可覆盖日文的系统字体。它验证两条编码路径、常规／粗体／斜体、零及四档非零字号，共 400 组字宽与栅格化结果；日文字形须区别于缺字符号。此工具依赖平台字体，不加入常规测试发现范围。项目合成字体的原生装载与命名字体约束继续由常规回归覆盖。
+
+```sh
+cargo build --locked --release
+rustc --edition=2024 -O --crate-name check_macos_font_fallback \
+  tools/check-macos-font-fallback.rs \
+  --extern katze_system2=target/release/libkatze_system2.rlib \
+  -L dependency=target/release/deps -o target/check-macos-font-fallback
+target/check-macos-font-fallback
+```
 
 `HostState::message_time_scale` 提供生成消息时间的全局比例，初值 None；与任务时钟和外层帧增量分别保存。独立宿主提供 `Host::fonts`、`message_time_scale`、`message_plane_display` 和 `submit_message`。后者按顶部起算的源矩形直接复制 BGRA，目标位置已包含配置偏移和矩形起点；保留 Alpha 及透明 RGB。运行时使用 `DrawingContext::copy_surface` 提交到分块画布，并沿已有平面进入最终帧。
 

@@ -75,6 +75,7 @@ unsafe extern "C" {
     pub(super) fn CTFontCreateWithFontDescriptor(descriptor: Ref, size: f64, matrix: Ref) -> Ref;
     pub(super) fn CTFontCreateWithName(name: Ref, size: f64, matrix: Ref) -> Ref;
     pub(super) fn CTFontCreateUIFontForLanguage(ui_type: u32, size: f64, language: Ref) -> Ref;
+    pub(super) fn CTFontCreateForString(font: Ref, string: Ref, range: Range) -> Ref;
     pub(super) fn CTFontCreateCopyWithAttributes(
         font: Ref,
         size: f64,
