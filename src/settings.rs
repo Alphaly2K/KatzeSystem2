@@ -13,6 +13,8 @@ pub struct SystemSettings {
     pub global_flag_ranges: [[u32; 2]; 8],
     /// `GAME/autoselect` 的原始 DWORD。
     pub auto_select: u32,
+    /// `GAME/enable_scene_anm` 的原始 DWORD，供普通 1050 查询。
+    pub scene_animation_enabled: u32,
     /// 用户设置 `WINDOW/fullscreen` 的原始 DWORD。
     pub fullscreen: u32,
     /// 启动 `SCREEN/mw_pos`、用户 `FULL_SCREEN/mw_pos` 的原始 DWORD。
@@ -36,6 +38,7 @@ impl Default for SystemSettings {
             local_flag_ranges: [[u32::MAX; 2]; 8],
             global_flag_ranges: [[u32::MAX; 2]; 8],
             auto_select: 0,
+            scene_animation_enabled: 1,
             fullscreen: 0,
             fullscreen_mw_pos: 0,
             backlog: crate::backlog::Settings::default(),
@@ -135,6 +138,8 @@ impl SystemSettings {
     pub fn apply_xml(&mut self, input: &[u8]) -> crate::Result<()> {
         let xml = crate::resource::XmlDocument::parse(input)?;
         self.auto_select = xml.integer(b"GAME/autoselect", self.auto_select)?;
+        self.scene_animation_enabled =
+            xml.integer(b"GAME/enable_scene_anm", self.scene_animation_enabled)?;
         self.fullscreen = xml.integer(b"WINDOW/fullscreen", self.fullscreen)?;
         self.fullscreen_mw_pos = xml.integer(b"FULL_SCREEN/mw_pos", self.fullscreen_mw_pos)?;
         apply_words(

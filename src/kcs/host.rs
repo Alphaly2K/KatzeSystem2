@@ -367,13 +367,15 @@ pub(crate) fn call_native(
     if index == 938 {
         return Ok(NativeReturn::Value(host.sound_config_enabled));
     }
-    if matches!(index, 741 | 999) {
+    if matches!(index, 741 | 999 | 1050) {
         let settings = host
             .system_settings
             .as_ref()
             .ok_or_else(|| Error::new(vm.pc, "宿主未配置全局设置"))?;
         return Ok(NativeReturn::Value(if index == 999 {
             settings.auto_select
+        } else if index == 1050 {
+            settings.scene_animation_enabled
         } else if settings.fullscreen != 0 {
             settings.fullscreen_mw_pos
         } else {
