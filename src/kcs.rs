@@ -7,6 +7,7 @@ mod host;
 mod map_data;
 mod matrix;
 mod memory;
+mod message_text;
 mod messages;
 mod motion;
 mod name_table;

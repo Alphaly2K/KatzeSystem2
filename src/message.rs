@@ -24,6 +24,7 @@ pub use effects::GlyphEffects;
 pub use font::{Font, GlyphMask, GlyphPaint};
 pub use layout::{Layout, LayoutEntry, LayoutSettings, VerticalAlignment};
 pub use line_breaks::BreakCharacters;
+pub(crate) use markup::extract_codes;
 pub use page::Page;
 pub use playback::{DisplayUpdate, GlyphState};
 pub use reveal::{Reveal, RevealGlyph};

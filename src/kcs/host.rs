@@ -409,6 +409,7 @@ pub(crate) fn call_native(
         | 211
         | 276
         | 277
+        | 392
         | 422
         | 423
         | 518
@@ -416,6 +417,7 @@ pub(crate) fn call_native(
         | 1002
         | 1045
         | 1046
+        | 1049
         | 1051
         | 1063 => 2,
         50..=58 | 60 | 62..=64 => 1,
@@ -433,6 +435,7 @@ pub(crate) fn call_native(
         .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
         .collect();
     Ok(match index {
+        392 | 1049 => return super::message_text::call(index, &args, vm),
         207 => {
             let identity = std::array::from_fn(|i| if i % 5 == 0 { 1f32.to_bits() } else { 0 });
             if vm.read(args[0], 1).is_ok() {

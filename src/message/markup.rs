@@ -9,6 +9,7 @@ struct Parser<'a> {
     position: usize,
     defaults: &'a StyleDefaults,
     encoding: TextEncoding,
+    raw_cp932: bool,
     style: Style,
     restore_color: u32,
     group: Option<TextGroup>,
@@ -56,6 +57,16 @@ impl Markup {
         state: &mut ParseState,
         encoding: TextEncoding,
     ) -> Result<Self> {
+        Self::parse_from_mode(input, defaults, state, encoding, false)
+    }
+
+    fn parse_from_mode(
+        input: &str,
+        defaults: &StyleDefaults,
+        state: &mut ParseState,
+        encoding: TextEncoding,
+        raw_cp932: bool,
+    ) -> Result<Self> {
         if input.len() > read::MAX_BYTES {
             return Err(Error::new(0, "消息文本超过存储上限"));
         }
@@ -75,6 +86,7 @@ impl Markup {
             position: 0,
             defaults,
             encoding,
+            raw_cp932,
             style: state.style,
             restore_color: state.restore_color,
             group: None,
@@ -97,6 +109,38 @@ impl Markup {
             restore_text_color: parser.restore_color,
         })
     }
+}
+
+pub(crate) fn extract_codes(input: &str, encoding: TextEncoding) -> Result<Vec<u16>> {
+    let defaults = StyleDefaults {
+        text_sizes: [20; 5],
+        ruby_sizes: [10; 5],
+        text_color: u32::MAX,
+        ruby_color: 0xff00_0000,
+        shadow_color: u32::MAX,
+    };
+    // CP932 输入按原始双字节编号进入语法分析，避免编码往返改变输出字节。
+    let markup = Markup::parse_from_mode(
+        input,
+        &defaults,
+        &mut ParseState::new(&defaults),
+        encoding,
+        encoding == TextEncoding::Cp932,
+    )?;
+    Ok(markup
+        .atoms
+        .into_iter()
+        .filter_map(|atom| match atom.kind {
+            AtomKind::Character(c)
+                if c > '\u{9}'
+                    && c != '\u{ffff}'
+                    && !atom.group.is_some_and(|group| group.ruby) =>
+            {
+                Some(c as u16)
+            }
+            _ => None,
+        })
+        .collect())
 }
 
 impl Parser<'_> {
@@ -204,7 +248,8 @@ impl Parser<'_> {
                 self.emit(
                     start,
                     AtomKind::Character(match self.encoding {
-                        TextEncoding::Cp932 => '\u{3000}',
+                        TextEncoding::Cp932 if !self.raw_cp932 => '\u{3000}',
+                        TextEncoding::Cp932 => '\u{8140}',
                         // Unicode 入口保留旧字符常量，直接登记为 U+8140。
                         TextEncoding::Unicode => '\u{8140}',
                     }),
