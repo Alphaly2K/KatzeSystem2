@@ -492,6 +492,20 @@ impl Images {
         image: Image,
         has_alpha: Option<bool>,
     ) -> Result<u32> {
+        self.insert_for(Some(owner), image, has_alpha)
+    }
+
+    pub(crate) fn insert_unowned(&mut self, image: Image) -> Result<u32> {
+        let has_alpha = Some(image.info.reserved != 0);
+        self.insert_for(None, image, has_alpha)
+    }
+
+    fn insert_for(
+        &mut self,
+        owner: Option<u32>,
+        image: Image,
+        has_alpha: Option<bool>,
+    ) -> Result<u32> {
         if self.entries.len() == read::MAX_ITEMS {
             return Err(Error::new(0, "图像对象数量超过上限"));
         }
@@ -508,7 +522,7 @@ impl Images {
         self.entries.insert(
             handle,
             ImageEntry {
-                owner: Some(owner),
+                owner,
                 references: 1,
                 data: pixels,
             },

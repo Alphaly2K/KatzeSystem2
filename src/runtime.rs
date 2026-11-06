@@ -26,6 +26,7 @@ mod input;
 mod message;
 mod motion;
 pub use motion::MotionSnapshot;
+mod image_resources;
 mod object;
 mod ordinary;
 mod resources;
@@ -1416,6 +1417,7 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         }
     }
     fn load_kcs_program(&mut self, name: &[u8]) -> Result<Option<Program>> {
+        self.resources.release_image_resources(self.host.task_id)?;
         self.resources.images.release_owner(self.host.task_id);
         self.resources.raw.release_owner(self.host.task_id);
         self.factory.load_kcs_program(name)
@@ -1794,6 +1796,9 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         ) {
             return self.resources.call(self.host.task_id, index, arguments, vm);
         }
+        if matches!(index, 711 | 712 | 714 | 715 | 717 | 724 | 733) {
+            return self.image_resource_native(index, arguments, vm);
+        }
         call_native(
             &mut *self.numbers,
             &mut *self.host,
@@ -1869,6 +1874,7 @@ impl<F: ObjectFactory> Lifecycle for TaskLifecycle<'_, F> {
             .get_mut(&id)
             .ok_or_else(|| Error::new(0, "任务对象不存在"))?;
         object.release()?;
+        self.resources.release_image_resources(id)?;
         self.resources.images.release_owner(id);
         self.resources.raw.release_owner(id);
         self.resources.drawables.remove(id);

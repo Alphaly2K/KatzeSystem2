@@ -158,6 +158,8 @@ FES 内部执行宏声明，初始化按以下顺序交给宿主：
 
 `hg3::decode_frame(bytes, id)` 解码首个匹配 ID 的原生 32 位完整帧，缺失 ID 返回 `None`。`DecodedFrame` 包含 `id`、标准元数据 `info`、`attributes: BTreeMap<u16, [u32; 5]>` 和从上到下紧密排列的 BGRA8 `pixels`，Alpha 保持独立，不应用裁剪偏移或绘制基点。`Frame::attributes` 提供相同属性记录，`Image::attribute(id)` 查询编号低十六位，未命中返回 `None`。支持范围与约束见 [图像接口](graphics.md)。
 
+`Runtime::image_resource(handle)` 查询普通 733 创建的独立图像资源，句柄与普通图像包装、像素句柄分别检查类型。`retain_image_resource`／`release_image_resource_reference` 管理额外使用者的配对持有，最后释放后句柄失效；任务销毁和程序重装只回收仍有登记的任务引用。普通 711／712／714／715／717／724 的参数和零句柄规则见[独立图像资源](graphics.md#独立图像资源)。710 文件装载及 FES 资源引用尚未接入。
+
 `fes::CImageState` 保存 CIMAGE 的坐标、尺寸、颜色、平面引用和显示属性。宿主按具体银行调用 `apply(&attributes, bank)`；返回本次是否使显示属性失效，供宿主递归标记后代。此接口仅应用该类型的有效列，不用于 IMAGE 等其他对象。父子对象关系应由宿主先处理，资源查找和绘制也由宿主负责。
 
 `updates: ImageUpdates` 分别保存属性、来源和排序更新，构造时均为 false，可通过 `is_dirty()`、`needs_rebuild()`、`priority_changed()` 查询。尺寸实际变化才请求重建；颜色每次写入均请求重建，包括相同颜色。POS2 每次写入使属性失效；SIZE2 只保存引用，后续来源准备时读取。PRI 只请求排序更新。直接修改公开显示字段后调用 `updates.invalidate()`，修改颜色后调用 `updates.request_rebuild()`；后代失效由对象存储维护。
