@@ -738,8 +738,9 @@ impl Interpreter {
         self.execution_mode = mode;
         self.debug.step_over_return = None;
     }
+    /// 初始栈底之后的已用字节；SP 进入初始化数据区时返回空切片。
     pub fn stack_bytes(&self) -> &[u8] {
-        &self.memory[self.stack_start..self.sp]
+        &self.memory[self.stack_start.min(self.sp)..self.sp]
     }
     /// 替换为独立外部区并返回旧内容；其他绑定继续持有旧存储。
     pub fn replace_external(&mut self, external: Vec<u8>) -> Result<Vec<u8>> {
@@ -820,7 +821,8 @@ impl Interpreter {
         Ok(())
     }
     fn pop(&mut self) -> Result<u32> {
-        if self.sp < self.frame_top + 4 {
+        // 保存的帧顶同样可被栈来源操作数消费，弹栈只受整块存储的下界限制。
+        if self.sp < 4 {
             return Err(Error::new(self.pc, "KCS 操作栈下溢"));
         }
         self.sp -= 4;
@@ -1033,9 +1035,9 @@ impl Interpreter {
                     let base = read::u32_at(&self.memory, saved + 4)? as usize;
                     let top = read::u32_at(&self.memory, saved + 8)? as usize;
                     let destination = self.frame_base;
-                    if base < self.stack_start
-                        || base > top
-                        || top > destination
+                    // 保存的帧顶可以进入数据区，且不要求位于恢复的基址之后。
+                    if base > self.memory.len()
+                        || top > self.memory.len()
                         || destination + result_len > self.memory.len()
                     {
                         return Err(Error::new(ins.offset, "KCS 保存帧越界"));

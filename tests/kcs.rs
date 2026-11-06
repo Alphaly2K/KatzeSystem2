@@ -280,6 +280,82 @@ fn return_to_code_end_finishes_without_a_stop_marker() {
 }
 
 #[test]
+fn nested_returns_keep_cross_frame_pops_and_temporary_data_area_stack_writes() {
+    let mut code = vec![0; 256];
+    let mut put = |at: usize, op, operands: &[(u8, u32)]| {
+        let mut instruction = Vec::new();
+        ins(&mut instruction, op, operands);
+        code[at..at + instruction.len()].copy_from_slice(&instruction);
+    };
+    put(0, 0x25, &[(3, 0x55)]);
+    put(6, 0x2a, &[(3, 64), (3, 4)]);
+    put(17, 0x3b, &[]);
+    put(64, 0x31, &[(3, 4)]);
+    put(70, 0x3d, &[(3, 16)]);
+    put(76, 0x15, &[(0x73, 0), (0x33, 0x8000_0004)]);
+    put(87, 0x3c, &[]);
+    put(88, 0x2a, &[(3, 128), (3, 0)]);
+    put(99, 0x3c, &[]);
+    put(100, 0x3d, &[(3, 16)]);
+    put(106, 0x25, &[(0x73, 0)]);
+    put(112, 0x2c, &[(3, 4), (3, 4)]);
+    put(128, 0x14, &[(0x33, 0x8000_0000), (0xe1, 0)]);
+    put(139, 0x27, &[(3, 163)]);
+    put(145, 0x15, &[(3, 32), (3, 0x1122_3344)]);
+    put(156, 0x3c, &[]);
+    put(157, 0x29, &[(3, 163)]);
+    put(163, 0x2c, &[(3, 0), (3, 0)]);
+    for start in [64, 65] {
+        for equal in [false, true] {
+            for budget in [1, 4096] {
+                let value = 0x1234_5678u32;
+                let global = if equal { start as u32 + 20 } else { 0 };
+                let mut vm = kcs::Interpreter::new(
+                    kcs::Program::from_code(&code, vec![0xa5; start], 512 - start).unwrap(),
+                    [global.to_le_bytes(), value.to_le_bytes()].concat(),
+                )
+                .unwrap();
+                let mut halted = false;
+                let mut observed_data_stack = false;
+                for _ in 0..64 {
+                    let step = vm.run(&mut NoHost, budget).unwrap();
+                    if vm.pc == 100 {
+                        assert!(vm.stack_bytes().is_empty());
+                        observed_data_stack = true;
+                    }
+                    if step == Step::Halted {
+                        halted = true;
+                        break;
+                    }
+                    assert_eq!(step, Step::Yield);
+                }
+                assert!(halted);
+                assert!(budget != 1 || observed_data_stack);
+                assert_eq!(vm.stack_bytes(), value.to_le_bytes());
+                let mut prefix = [0xa5; 8];
+                let offset = usize::from(!equal);
+                prefix[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+                assert_eq!(vm.read(0, 8).unwrap(), prefix);
+                assert_eq!(
+                    vm.read(32, 4).unwrap(),
+                    if equal { 0xa5a5_a5a5u32 } else { 0x1122_3344 }.to_le_bytes()
+                );
+            }
+        }
+    }
+    let mut empty =
+        kcs::Interpreter::new(kcs::Program::from_code(&[0x2d], vec![], 8).unwrap(), vec![])
+            .unwrap();
+    assert!(
+        empty
+            .run(&mut NoHost, 1)
+            .unwrap_err()
+            .message
+            .contains("下溢")
+    );
+}
+
+#[test]
 fn string_expansion_and_argument_boundaries_match_native_words() {
     use kcs::Host;
     let mut vm = kcs::Interpreter::new(

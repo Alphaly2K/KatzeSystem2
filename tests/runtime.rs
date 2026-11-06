@@ -912,11 +912,17 @@ fn targets(commands: &Commands) -> Vec<u32> {
 }
 
 #[test]
-fn native_110_sends_two_words_as_command_97() {
+fn scalar_native_packets_keep_sender_data_and_the_callers_stack_value() {
     let mut asm = Asm::default();
-    asm.ins(0x25, &[1])
+    asm.ins(0x25, &[0xdead_beef])
+        .ins(0x25, &[1])
         .ins(0x25, &[0x1122_3344])
         .ins(0x2b, &[110, 8])
+        .ins(0x25, &[1])
+        .ins(0x2b, &[572, 4])
+        .ins(0x25, &[u32::MAX])
+        .ins(0x2b, &[572, 4])
+        .ins(0x26, &[0])
         .ins(0x3b, &[]);
     let mut source = Source::new();
     source.add(b"sender", asm.build(), data());
@@ -928,12 +934,24 @@ fn native_110_sends_two_words_as_command_97() {
     assert!(runtime.update(10, 0).unwrap());
     assert_eq!(
         commands.all(),
-        [Command {
-            target,
-            sender,
-            code: 97,
-            data: [0, 0x1122_3344, 0],
-        }]
+        [
+            Command {
+                target,
+                sender,
+                code: 97,
+                data: [0, 0x1122_3344, 0],
+            },
+            Command {
+                target,
+                sender,
+                code: 450,
+                data: [0; 3],
+            }
+        ]
+    );
+    assert_eq!(
+        words(runtime.object(sender).unwrap().interpreter().unwrap(), 0, 1),
+        [0xdead_beef]
     );
 }
 
