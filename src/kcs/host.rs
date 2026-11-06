@@ -314,6 +314,9 @@ pub(crate) fn call_native(
     if matches!(index, 863..=868) {
         return super::record_stack::call(host, index, arguments, vm);
     }
+    if matches!(index, 352..=358) {
+        return super::vectors::call(index, arguments, vm);
+    }
     if matches!(index, 359 | 360) {
         let count = if index == 359 { 4 } else { 3 };
         if arguments.len() != count * 4 {

@@ -27,6 +27,7 @@ mod system_host;
 mod task_host;
 mod triples;
 mod utf8;
+mod vectors;
 pub use crate::task::TaskClock;
 pub use host::{CoreHost, HostState, MenuItemRequest};
 pub(crate) use host::{call_native, hierarchy_query};
