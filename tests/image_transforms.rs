@@ -126,3 +126,82 @@ fn blur_keeps_transparent_colors_and_integer_rounding_between_passes() {
     assert_eq!(invalid, before);
     assert!(!Image::new([0, 3]).unwrap().blur([1, 1]).unwrap());
 }
+
+#[test]
+fn canvas_resize_keeps_bottom_sampling_and_distinct_metadata_conversions() {
+    let mut image = image();
+    assert!(image.resize_canvas([22, 39]).unwrap());
+    assert_eq!(image.info().size, [6, 6]);
+    assert_eq!(image.info().canvas_size, [22, 39]);
+    assert_eq!(image.info().offset, [0, 15]);
+    assert_eq!(image.info().base, [6, -11]);
+    assert_eq!(image.attribute(1), Some([14, 24, 18, 30, 11]));
+    assert_eq!(image.id(), 7);
+    assert_eq!(image.info().reserved, 1);
+    for (y, values) in [(0, [1, 1, 2, 2, 3, 3]), (5, [4, 4, 5, 5, 6, 6])] {
+        for (x, value) in values.into_iter().enumerate() {
+            assert_eq!(image.surface().pixel(x as u32, y), Some(64 << 24 | value));
+        }
+    }
+    assert_eq!(image.surface().pixel(0, 2), Some(64 << 24 | 1));
+    assert!(image.resize_canvas([0, 39]).unwrap());
+    assert_eq!(image.info().size, [0, 6]);
+    assert_eq!(image.info().base, [0, -10]);
+    let before = image.clone();
+    assert!(!image.resize_canvas([0, 39]).unwrap());
+    assert_eq!(image, before);
+
+    for (width, expected) in [(8, [0; 8]), (9, [2, 0, 0, 0, 6, 0, 0, 0])] {
+        let mut image = Image::from_frame(DecodedFrame {
+            id: 0,
+            info: StandardInfo {
+                size: [width, 1],
+                canvas_size: [width, 1],
+                offset: [0; 2],
+                base: [0; 2],
+                bit_depth: 32,
+                reserved: 1,
+            },
+            pixels: (1..=width)
+                .flat_map(|value| [value as u8, 0, 0, 0])
+                .collect(),
+            attributes: Default::default(),
+        })
+        .unwrap();
+        image.resize_canvas([2, 1]).unwrap();
+        assert_eq!(image.surface().pixels(), expected);
+    }
+}
+
+#[test]
+fn scaled_self_copy_uses_row_moves_and_immediate_resampling_reads() {
+    use katze_system2::graphics::Rect;
+
+    let mut image = Image::new([3, 2]).unwrap();
+    image.pixels_mut().copy_from_slice(
+        &(1..=6)
+            .flat_map(|value| [value, 0, 0, 255])
+            .collect::<Vec<_>>(),
+    );
+    image
+        .copy_scaled_within(Rect::from_xywh(0, 0, 2, 2), Rect::from_xywh(1, 0, 2, 2))
+        .unwrap();
+    assert_eq!(
+        image.surface().pixels(),
+        [1, 1, 2, 4, 4, 5]
+            .into_iter()
+            .flat_map(|value| [value, 0, 0, 255])
+            .collect::<Vec<_>>()
+    );
+    let mut image = Image::new([3, 1]).unwrap();
+    image
+        .pixels_mut()
+        .copy_from_slice(&[0, 0, 0, 255, 100, 0, 0, 255, 200, 0, 0, 255]);
+    image
+        .copy_scaled_within(Rect::from_xywh(0, 0, 3, 1), Rect::from_xywh(1, 0, 2, 1))
+        .unwrap();
+    assert_eq!(
+        image.surface().pixels(),
+        [0, 0, 0, 255, 0, 0, 0, 255, 100, 0, 0, 255]
+    );
+}

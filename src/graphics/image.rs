@@ -6,6 +6,7 @@ use crate::{Error, HandleAllocator, Result, hg3, read};
 use std::collections::BTreeMap;
 
 mod blur;
+mod resize;
 mod resource;
 mod transform;
 mod window;
@@ -756,6 +757,28 @@ impl Images {
                 true
             }
         });
+    }
+
+    pub(crate) fn copy_scaled(
+        &mut self,
+        target: u32,
+        source: u32,
+        from: Rect,
+        to: Rect,
+    ) -> Result<bool> {
+        let source_data = self.entry_mut(source)?.data;
+        let target_data = self.entry_mut(target)?.data;
+        self.pixel_image(source_data)?;
+        self.pixel_image(target_data)?;
+        if source_data == target_data {
+            return self.get_mut(target)?.copy_scaled_within(from, to);
+        }
+        let source = self.data.remove(&source_data).unwrap();
+        let result = self
+            .get_mut(target)
+            .and_then(|target| target.copy_scaled_from(&source.image, from, to));
+        self.data.insert(source_data, source);
+        result
     }
 
     pub(crate) fn draw_list_entry(

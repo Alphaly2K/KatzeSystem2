@@ -144,8 +144,58 @@ impl Images {
     }
 
     pub(crate) fn rebuild_resource_geometry(&mut self, handle: u32) -> Result<()> {
-        let geometry = ResourceGeometry::from_image(self.resource(handle)?);
+        let mut geometry = ResourceGeometry::from_image(self.resource(handle)?);
+        let bounds = geometry.bounds([0.; 2], [0.; 2]);
+        if bounds.left >= bounds.right || bounds.top >= bounds.bottom {
+            geometry.size = [0; 2];
+            geometry.offset = [0; 2];
+        }
+        if geometry.canvas_size.iter().any(|&value| value as i32 <= 0) {
+            geometry.canvas_size = [0; 2];
+        }
         self.resource_entry_mut(handle)?.geometry = geometry;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::graphics::{ImageList, ImageListProperties};
+
+    #[test]
+    fn rebuilt_resource_discards_empty_bounds_before_position_can_wrap_them_onscreen() {
+        let mut images = Images::default();
+        let mut image = Image::new([2, 1]).unwrap();
+        image.info_mut().offset = [5, 9];
+        image.info_mut().canvas_size = [2, 1];
+        image.info_mut().base = [7, 8];
+        image.resize_canvas([0, 2]).unwrap();
+        let handle = images.insert_resource(None, image, true).unwrap();
+        images.rebuild_resource_geometry(handle).unwrap();
+        let geometry = images.resource_entry(handle).unwrap().geometry;
+        assert_eq!(geometry.size, [0; 2]);
+        assert_eq!(geometry.offset, [0; 2]);
+        assert_eq!(geometry.canvas_size, [0; 2]);
+        assert_eq!(geometry.base, [0, 16]);
+
+        let mut image = Image::new([2, 1]).unwrap();
+        image.info_mut().offset = [i32::MAX, 0];
+        let handle = images.insert_resource(None, image, true).unwrap();
+        images.rebuild_resource_geometry(handle).unwrap();
+        let mut list = ImageList::new(99, [4, 2], &mut images).unwrap();
+        list.update(&mut images).unwrap();
+        list.set_resource(
+            0,
+            handle,
+            ImageListProperties {
+                position: [i32::MIN as f32, 0.],
+                ..Default::default()
+            },
+            &mut images,
+        )
+        .unwrap();
+        assert!(list.dirty_rectangles().next().is_none());
+        list.release(&mut images).unwrap();
     }
 }

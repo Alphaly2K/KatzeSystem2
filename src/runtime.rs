@@ -1798,7 +1798,7 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         }
         if matches!(
             index,
-            710..=715 | 717..=724 | 726..=728 | 733 | 736 | 737
+            710..=715 | 717..=724 | 726..=728 | 730 | 733 | 735..=737
         ) {
             return self.image_resource_native(index, arguments, vm);
         }

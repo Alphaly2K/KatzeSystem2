@@ -444,6 +444,7 @@ fn resource_transforms_keep_return_stack_and_shared_update_flag() {
         (723, vec![0]),
         (726, vec![1, 1]),
         (727, vec![0]),
+        (730, vec![1, 1]),
     ] {
         let mut code = Vec::new();
         call(&mut code, 733, &[1, 1]);
@@ -577,6 +578,164 @@ fn resource_blur_keeps_two_expansion_stages_and_the_first_geometry_cache() {
         runtime.update(3, 1).unwrap();
         assert!(!runtime.image_resource_updated(handle, true).unwrap());
     }
+}
+
+#[test]
+fn resource_resize_updates_pixels_metadata_cache_and_native_stack_together() {
+    use katze_system2::graphics::{ImageList, ImageListProperties, Rect};
+
+    for budget in [1, 4096] {
+        let mut code = Vec::new();
+        call(&mut code, 710, &[64]);
+        ins(&mut code, 0x26, &[0]);
+        ins(&mut code, 0x25, &[0xdead_beef]);
+        handle_call(&mut code, 718, &[1, 1]);
+        ins(&mut code, 0x2d, &[]);
+        handle_call(&mut code, 736, &[0, 0, 1, 1, 0x801e_64c8]);
+        call(&mut code, 65, &[]);
+        for size in [[3, 2], [0, 2], [0, 2]] {
+            handle_call(&mut code, 730, &size);
+            call(&mut code, 65, &[]);
+        }
+        call(&mut code, 730, &[0]);
+        call(&mut code, 65, &[]);
+        let mut runtime = runtime(&code, budget);
+        runtime.set_resources(Files(Requests::default()));
+        let task = runtime.create(0, kind::ORDINARY, b"resize", b"").unwrap();
+        runtime
+            .object_mut(task)
+            .unwrap()
+            .interpreter_mut()
+            .unwrap()
+            .write(64, b"art:7\0")
+            .unwrap();
+        runtime.update(0, 1).unwrap();
+        let handle = word(vm(&runtime, task), 0);
+        assert!(!runtime.image_resource_updated(handle, true).unwrap());
+        runtime.update(1, 1).unwrap();
+        let image = runtime.image_resource(handle).unwrap();
+        assert_eq!(image.info().size, [3, 2]);
+        assert_eq!(image.info().canvas_size, [3, 2]);
+        assert_eq!(image.info().offset, [0, 10]);
+        assert_eq!(image.info().base, [9, 8]);
+        assert_eq!(image.attribute(1), Some([27, 16, 21, 12, 5]));
+        assert_eq!(image.surface().pixels(), [200, 100, 30, 128].repeat(6));
+        assert!(runtime.image_resource_updated(handle, true).unwrap());
+        let mut list = ImageList::new(999, [32; 2], runtime.images_mut()).unwrap();
+        list.update(runtime.images_mut()).unwrap();
+        list.set_resource(
+            0,
+            handle,
+            ImageListProperties {
+                position: [16.; 2],
+                base_point: [9., 8.],
+                ..Default::default()
+            },
+            runtime.images_mut(),
+        )
+        .unwrap();
+        assert_eq!(
+            list.dirty_rectangles().collect::<Vec<_>>(),
+            [Rect::from_xywh(7, 18, 3, 2)]
+        );
+        list.release(runtime.images_mut()).unwrap();
+        runtime.update(2, 1).unwrap();
+        assert!(runtime.image_resource_updated(handle, true).unwrap());
+        let image = runtime.image_resource(handle).unwrap().clone();
+        assert_eq!(image.info().size, [0, 2]);
+        assert!(image.surface().pixels().is_empty());
+        runtime.update(3, 1).unwrap();
+        assert_eq!(runtime.image_resource(handle).unwrap(), &image);
+        assert!(runtime.image_resource_updated(handle, true).unwrap());
+        runtime.update(4, 1).unwrap();
+        assert!(!runtime.image_resource_updated(handle, true).unwrap());
+        assert_eq!(
+            vm(&runtime, task).stack_bytes(),
+            0xdead_beefu32.to_le_bytes()
+        );
+    }
+}
+
+#[test]
+fn resource_copy_preserves_transparent_bgra_direction_and_update_flags() {
+    for budget in [1, 4096] {
+        let mut code = Vec::new();
+        for (at, size, color) in [(0u32, [3, 2], 0x0011_2233), (4, [4, 3], 0xff44_5566)] {
+            call(&mut code, 733, &size);
+            ins(&mut code, 0x26, &[at]);
+            code.extend([0x25, 0x13]);
+            code.extend(at.to_le_bytes());
+            for value in [0, 0, size[0], size[1], color] {
+                ins(&mut code, 0x25, &[value]);
+            }
+            ins(&mut code, 0x2b, &[736, 24]);
+        }
+        ins(&mut code, 0x25, &[0xdead_beef]);
+        call(&mut code, 65, &[]);
+        for at in [0u32, 4] {
+            code.extend([0x25, 0x13]);
+            code.extend(at.to_le_bytes());
+            for value in [0, 0, 3, 2] {
+                ins(&mut code, 0x25, &[value]);
+            }
+        }
+        ins(&mut code, 0x2b, &[735, 40]);
+        call(&mut code, 65, &[]);
+        handle_call(&mut code, 735, &[u32::MAX, u32::MAX, u32::MAX, u32::MAX, 0]);
+        call(&mut code, 735, &[0; 6]);
+        call(&mut code, 65, &[]);
+        let mut runtime = runtime(&code, budget);
+        let task = runtime.create(0, kind::ORDINARY, b"copy", b"").unwrap();
+        runtime.update(0, 1).unwrap();
+        let source = word(vm(&runtime, task), 0);
+        let target = word(vm(&runtime, task), 4);
+        runtime.image_resource_updated(source, true).unwrap();
+        runtime.image_resource_updated(target, true).unwrap();
+        runtime.update(1, 1).unwrap();
+        assert_eq!(
+            runtime.image_resource(source).unwrap().surface().pixels(),
+            [0x33, 0x22, 0x11, 0].repeat(6)
+        );
+        for y in 0..3 {
+            for x in 0..4 {
+                assert_eq!(
+                    runtime
+                        .image_resource(target)
+                        .unwrap()
+                        .surface()
+                        .pixel(x, y),
+                    Some(if x < 3 && y >= 1 {
+                        0x0011_2233
+                    } else {
+                        0xff44_5566
+                    })
+                );
+            }
+        }
+        runtime.update(2, 1).unwrap();
+        for handle in [source, target] {
+            assert!(!runtime.image_resource_updated(handle, false).unwrap());
+        }
+        assert_eq!(
+            vm(&runtime, task).stack_bytes(),
+            0xdead_beefu32.to_le_bytes()
+        );
+    }
+    let mut code = Vec::new();
+    call(&mut code, 733, &[1, 1]);
+    ins(&mut code, 0x26, &[0]);
+    for value in [0, 0, 0, 1, 1] {
+        ins(&mut code, 0x25, &[value]);
+    }
+    code.extend([0x25, 0x13]);
+    code.extend(0u32.to_le_bytes());
+    for value in [0, 0, 1, 1] {
+        ins(&mut code, 0x25, &[value]);
+    }
+    ins(&mut code, 0x2b, &[735, 40]);
+    let mut runtime = runtime(&code, 1);
+    runtime.create(0, kind::ORDINARY, b"null", b"").unwrap();
+    assert!(runtime.update(0, 1).unwrap_err().message.contains("零来源"));
 }
 
 #[test]
