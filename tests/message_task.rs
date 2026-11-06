@@ -559,6 +559,41 @@ fn runtime_routes_both_encodings_through_segment_playback_canvas_and_frame() {
         );
         rt.dispatch_command(0, command(id, 459 + shift, 0)).unwrap();
         assert_eq!(rt.drawing().target.as_ref().unwrap().pixel(3, 4), Some(0));
+        let mut controls = b"A\\rB\\sCD\\i\0".to_vec();
+        rt.dispatch_command_with_buffers(
+            0,
+            command(id, 458 + shift, 0),
+            &mut CommandBuffers {
+                data1: Some(&mut controls),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let unicode = encoding == TextEncoding::Unicode;
+        assert_eq!(
+            rt.dispatch_command(0, command(id, 469 + shift, 0)).unwrap(),
+            if unicode { 3 } else { 2 }
+        );
+        assert_eq!(
+            rt.object(id)
+                .unwrap()
+                .message_page()
+                .unwrap()
+                .layout()
+                .cursor,
+            Some([8, if unicode { 8 } else { 4 }])
+        );
+        rt.dispatch_command(0, command(id, 463 + shift, u32::MAX))
+            .unwrap();
+        rt.dispatch_command(0, command(id, 461 + shift, 0)).unwrap();
+        assert_eq!(
+            rt.drawing()
+                .target
+                .as_ref()
+                .unwrap()
+                .pixel(7, if unicode { 12 } else { 8 }),
+            Some(0xff11_2233)
+        );
         rt.destroy(id).unwrap();
         assert!(rt.drawables().get(id).is_none());
         rt.update(13, 0).unwrap();

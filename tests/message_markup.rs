@@ -135,7 +135,7 @@ fn numbers_wrap_and_waits_remain_ordered_operations_with_precise_diagnostics() {
         ]
     );
     assert_eq!(
-        Markup::parse("猫\\u42;", &defaults()).unwrap_err().offset,
+        Markup::parse("猫\\z42;", &defaults()).unwrap_err().offset,
         3
     );
     assert_eq!(Markup::parse("a\0b", &defaults()).unwrap_err().offset, 1);

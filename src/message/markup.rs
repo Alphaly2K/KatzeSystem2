@@ -1,4 +1,6 @@
-use super::{Alignment, Atom, AtomKind, Markup, Style, StyleDefaults, TextGroup, Wait};
+use super::{
+    Alignment, Atom, AtomKind, Markup, Style, StyleDefaults, TextEncoding, TextGroup, Wait,
+};
 use crate::{Error, Result, read};
 
 struct Parser<'a> {
@@ -6,6 +8,7 @@ struct Parser<'a> {
     characters: Vec<(usize, char)>,
     position: usize,
     defaults: &'a StyleDefaults,
+    encoding: TextEncoding,
     style: Style,
     restore_color: u32,
     group: Option<TextGroup>,
@@ -32,16 +35,26 @@ impl ParseState {
 }
 
 impl Markup {
-    /// 解析正文标记，保留逐字符样式、不可断行组和原始等待操作。
+    /// 按 CP932 标记规则解析正文，保留逐字符样式、不可断行组和原始等待操作。
     /// 已识别但尚未实现的标记返回其反斜杠位置；未知转义显示其后字符。
     pub fn parse(input: &str, defaults: &StyleDefaults) -> Result<Self> {
-        Self::parse_from(input, defaults, &mut ParseState::new(defaults))
+        Self::parse_with_encoding(input, defaults, TextEncoding::Cp932)
+    }
+
+    /// 输入为 UTF-8；encoding 选择标记中保留的原编码行为。
+    pub fn parse_with_encoding(
+        input: &str,
+        defaults: &StyleDefaults,
+        encoding: TextEncoding,
+    ) -> Result<Self> {
+        Self::parse_from(input, defaults, &mut ParseState::new(defaults), encoding)
     }
 
     pub(super) fn parse_from(
         input: &str,
         defaults: &StyleDefaults,
         state: &mut ParseState,
+        encoding: TextEncoding,
     ) -> Result<Self> {
         if input.len() > read::MAX_BYTES {
             return Err(Error::new(0, "消息文本超过存储上限"));
@@ -61,6 +74,7 @@ impl Markup {
             characters,
             position: 0,
             defaults,
+            encoding,
             style: state.style,
             restore_color: state.restore_color,
             group: None,
@@ -184,6 +198,19 @@ impl Parser<'_> {
             'c' => self.color(),
             'f' => self.font(),
             'n' => self.emit(start, AtomKind::NewLine, None),
+            'r' => self.emit(start, AtomKind::Character('\u{8}'), None),
+            's' => {
+                self.emit(
+                    start,
+                    AtomKind::Character(match self.encoding {
+                        TextEncoding::Cp932 => '\u{3000}',
+                        // Unicode 入口保留旧字符常量，直接登记为 U+8140。
+                        TextEncoding::Unicode => '\u{8140}',
+                    }),
+                    None,
+                );
+                self.emit(start, AtomKind::NewLine, None);
+            }
             '@' => self.emit(start, AtomKind::Continue, None),
             'p' => {
                 let suffix = self.take().to_ascii_lowercase();
@@ -253,7 +280,18 @@ impl Parser<'_> {
                 };
                 self.identifiers.entry(key as i32).or_insert(value);
             }
-            '$' | 'i' | 'r' | 's' | 't' | 'u' | 'z' => {
+            'i' => self.emit(start, AtomKind::Character('\u{6}'), None),
+            'u' if self.encoding == TextEncoding::Unicode => {
+                if self
+                    .characters
+                    .get(self.position)
+                    .is_some_and(|&(_, c)| c.eq_ignore_ascii_case(&'i'))
+                {
+                    return Err(Error::new(start, "Unicode 用户字形标记尚未接入"));
+                }
+                self.emit(start, AtomKind::Character('\u{6}'), None);
+            }
+            '$' | 't' | 'z' => {
                 return Err(Error::new(start, "消息标记尚未实现"));
             }
             _ => self.character(start, c),

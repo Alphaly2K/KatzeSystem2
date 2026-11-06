@@ -200,7 +200,7 @@ impl Layout {
                     indented = true;
                 }
             }
-            let shift = if indented { indent } else { 0 };
+            let mut shift = if indented { indent } else { 0 };
             if last_size == 0 {
                 last_size = if self.entries[start].glyph() {
                     self.entries[start].size[1]
@@ -214,6 +214,7 @@ impl Layout {
             let mut x = left.wrapping_add(settings.offset[0]).wrapping_add(shift);
             let mut first_character = y != top;
             let mut wrapped = false;
+            let mut reset_alignment = false;
             while next < self.entries.len() {
                 let entry = &mut self.entries[next];
                 seen_glyph |= entry.glyph();
@@ -221,6 +222,13 @@ impl Layout {
                     _ if entry.line_break(settings.encoding) => {
                         end = next;
                         next += 1;
+                        break;
+                    }
+                    6 => {
+                        // 先结束扫描，随后由禁则调整决定是否消费当前记录。
+                        indented = false;
+                        shift = 0;
+                        reset_alignment = true;
                         break;
                     }
                     4 => x = entry.position[0].wrapping_add(settings.offset[0]),
@@ -246,6 +254,19 @@ impl Layout {
                 }
                 end = next;
                 next += 1;
+            }
+            if next > start
+                && self.entries[next - 1].line_break(settings.encoding)
+                && self
+                    .entries
+                    .get(next)
+                    .is_some_and(|entry| entry.code() == 6)
+            {
+                end = next;
+                next += 1;
+                indented = false;
+                shift = 0;
+                reset_alignment = true;
             }
             if settings.line_breaking {
                 end = self.adjust_break(start, end, settings.width.wrapping_sub(x), settings);
@@ -321,6 +342,9 @@ impl Layout {
             }
             for entry in &mut self.entries[start..=end] {
                 entry.line = line;
+            }
+            if reset_alignment {
+                alignment = Alignment::Left;
             }
             if wrapped {
                 if self.entries.len() == read::MAX_ITEMS {

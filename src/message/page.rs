@@ -285,6 +285,7 @@ impl Page {
             &self.source[self.parsed_bytes..],
             &self.defaults,
             &mut state,
+            self.encoding,
         )
         .map_err(|mut error| {
             error.offset += self.parsed_bytes;

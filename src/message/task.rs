@@ -681,15 +681,11 @@ impl TaskObject for MessageObject {
                     let mut lines = 1u32;
                     let mut newline = false;
                     for entry in &self.display.as_ref().unwrap().page().layout().entries {
-                        match entry.kind {
-                            super::AtomKind::NewLine => {
-                                lines += 1;
-                                newline = true;
-                            }
-                            super::AtomKind::Character(c) if c > '\t' && c != '\u{ffff}' => {
-                                newline = false
-                            }
-                            _ => (),
+                        if entry.line_break(self.encoding) {
+                            lines += 1;
+                            newline = true;
+                        } else if entry.glyph() {
+                            newline = false;
                         }
                     }
                     *output = lines - u32::from(newline);

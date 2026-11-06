@@ -1,7 +1,7 @@
 use katze_system2::{
     Error,
     message::{
-        AtomKind, BreakCharacters, LayoutSettings, Page, StyleDefaults, TextEncoding,
+        AtomKind, BreakCharacters, LayoutSettings, Markup, Page, StyleDefaults, TextEncoding,
         TimingSettings, VerticalAlignment,
     },
 };
@@ -128,6 +128,92 @@ fn identifiers_keep_first_values_wait_for_prepare_and_clear_with_the_page() {
 }
 
 #[test]
+fn control_escapes_keep_encoding_specific_records_groups_and_timing() {
+    for encoding in [TextEncoding::Cp932, TextEncoding::Unicode] {
+        let (layout, timing) = settings(encoding);
+        let mut page = Page::new(defaults(), encoding);
+        page.append(r"A\iB\rC\sD\u42;").unwrap();
+        page.prepare(&layout, &timing, |_, _| Ok(10)).unwrap();
+        let special = if encoding == TextEncoding::Cp932 {
+            '\u{3000}'
+        } else {
+            '\u{8140}'
+        };
+        let kinds: Vec<_> = page.markup().atoms.iter().map(|atom| atom.kind).collect();
+        assert_eq!(
+            kinds,
+            [
+                AtomKind::Character('A'),
+                AtomKind::Character('\u{6}'),
+                AtomKind::Character('B'),
+                AtomKind::Character('\u{8}'),
+                AtomKind::Character('C'),
+                AtomKind::Character(special),
+                AtomKind::NewLine,
+                AtomKind::Character('D'),
+                AtomKind::Character(if encoding == TextEncoding::Cp932 {
+                    'u'
+                } else {
+                    '\u{6}'
+                }),
+                AtomKind::Character('4'),
+                AtomKind::Character('2'),
+                AtomKind::Character(';'),
+            ]
+        );
+        assert_eq!(page.markup().atoms[5].source, 7..9);
+        assert_eq!(page.markup().atoms[6].source, 7..9);
+        assert_eq!(page.layout().cursor, Some([10, 0]));
+        assert_eq!(page.layout().entries[1].position, [0, 20]);
+        assert_eq!(page.layout().entries[2].position, [0; 2]);
+        assert_eq!(
+            page.schedule().deadlines,
+            if encoding == TextEncoding::Cp932 {
+                [0, 3, 3, 6, 6, 9, 12, 12, 15, 18, 21, 24]
+            } else {
+                [0, 3, 3, 6, 6, 9, 12, 12, 15, 15, 18, 21]
+            }
+        );
+        assert_eq!(
+            page.remaining(u32::MAX).unwrap(),
+            if encoding == TextEncoding::Cp932 {
+                9
+            } else {
+                8
+            }
+        );
+        assert!(page.advance(u32::MAX, u32::MAX).unwrap().complete);
+        assert_eq!(page.remaining(u32::MAX).unwrap(), 0);
+
+        let mut breaking = layout.clone();
+        breaking.line_breaking = true;
+        for text in [r"A\iB", r"\pcA\iB", r"\prA\iB"] {
+            let marked = Markup::parse_with_encoding(text, &defaults(), encoding).unwrap();
+            let positions = marked.layout(&breaking, |_, _| Ok(10)).unwrap();
+            assert_eq!(positions.cursor, Some([10, 20]));
+            assert_eq!(positions.entries.last().unwrap().position, [0, 20]);
+        }
+
+        let grouped =
+            Markup::parse_with_encoding(r"[A/\iB\rC\sD]\U", &defaults(), encoding).unwrap();
+        for index in [1, 3, 5, 6] {
+            assert!(grouped.atoms[index].group.is_none());
+        }
+        for index in [2, 4, 7] {
+            assert!(grouped.atoms[index].group.unwrap().ruby);
+        }
+        assert_eq!(
+            grouped.atoms.last().unwrap().kind,
+            AtomKind::Character(if encoding == TextEncoding::Cp932 {
+                'U'
+            } else {
+                '\u{6}'
+            })
+        );
+    }
+}
+
+#[test]
 fn prepared_unclosed_group_ends_before_later_append() {
     let encoding = TextEncoding::Cp932;
     let (layout, timing) = settings(encoding);
@@ -234,7 +320,7 @@ fn prepare_failure_keeps_previous_page_and_global_source_offsets() {
     let before = page.source().to_owned();
     assert_eq!(page.append("C\0").unwrap_err().offset, before.len() + 1);
     assert_eq!(page.source(), before);
-    page.append(r"\i").unwrap();
+    page.append(r"\z").unwrap();
     assert_eq!(
         page.prepare(&layout, &timing, |_, _| Ok(10))
             .unwrap_err()
