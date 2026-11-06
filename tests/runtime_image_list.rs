@@ -146,6 +146,27 @@ impl ProgramLoader for Programs {
         }
         let mut code = Vec::new();
         ins(&mut code, 0x25, &[0xdead_beef]);
+        if name == b"update gates" {
+            for (native, args) in [
+                (534, vec![1, 0]),
+                (65, vec![]),
+                (340, vec![1]),
+                (534, vec![1, 0]),
+                (341, vec![1]),
+                (534, vec![1, u32::MAX]),
+            ] {
+                for value in &args {
+                    ins(&mut code, 0x25, &[*value]);
+                }
+                ins(&mut code, 0x2b, &[native, args.len() as u32 * 4]);
+                if native != 65 {
+                    ins(&mut code, 0x2b, &[65, 0]);
+                }
+            }
+            ins(&mut code, 0x26, &[0]);
+            ins(&mut code, 0x3b, &[]);
+            return Ok(Some(Program::from_code(&code, vec![0; 4], 128)?));
+        }
         if name == b"controls" {
             for (native, args) in [
                 (256, vec![1, 5, 3]),
@@ -196,6 +217,102 @@ impl ProgramLoader for Programs {
         ins(&mut code, 0x26, &[0]);
         ins(&mut code, 0x3b, &[]);
         Ok(Some(Program::from_code(&code, vec![0; 4], 128)?))
+    }
+}
+
+#[test]
+fn ordinary_list_update_gates_keep_explicit_updates_clear_and_next_round_resume_distinct() {
+    for budget in [1, 4096] {
+        let mut runtime = Runtime::new(
+            0,
+            kind::ROOT,
+            Box::new(BaseObject::new()),
+            State::new(0),
+            GraphicsFactory {
+                fallback: KcsFactory::new(Programs),
+            },
+        );
+        runtime.set_budget(budget, 10000);
+        runtime.host_mut().surface_size = [1, 1];
+        runtime.drawing_mut().target = Some(RenderTarget::new([1, 1]).unwrap());
+        let list = runtime.create(0, kind::IMAGE_LIST, b"list", b"").unwrap();
+        assert_eq!(list, 1);
+        send(&mut runtime, list, 285, 1, 1);
+        let script = runtime
+            .create(0, kind::ORDINARY, b"update gates", b"")
+            .unwrap();
+        let output = output_image(&mut runtime, list);
+        let image = runtime.images_mut().create(99, [1, 1]).unwrap();
+        let pixels = runtime.images().pixel_handle(image).unwrap();
+        let mut record = [
+            pixels,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            1f32.to_bits(),
+            1f32.to_bits(),
+            255,
+            1,
+            0,
+            0,
+        ]
+        .into_iter()
+        .flat_map(u32::to_le_bytes)
+        .collect::<Vec<_>>();
+        runtime
+            .images_mut()
+            .get_mut(image)
+            .unwrap()
+            .pixels_mut()
+            .copy_from_slice(&0xff123456u32.to_le_bytes());
+        runtime.update(0, 1).unwrap();
+        buffer_command(&mut runtime, list, 286, &mut record);
+        let pixel = |runtime: &Runtime<GraphicsFactory<KcsFactory<Programs>>>| {
+            runtime
+                .images()
+                .get(output)
+                .unwrap()
+                .surface()
+                .pixel(0, 0)
+                .unwrap()
+        };
+        runtime.update(1, 1).unwrap();
+        assert_eq!(pixel(&runtime), 0);
+        runtime.update(2, 1).unwrap();
+        assert_eq!(pixel(&runtime), 0xff123456);
+        runtime
+            .images_mut()
+            .get_mut(image)
+            .unwrap()
+            .pixels_mut()
+            .copy_from_slice(&0xff654321u32.to_le_bytes());
+        buffer_command(&mut runtime, list, 286, &mut record);
+        runtime.update(3, 1).unwrap();
+        assert_eq!(pixel(&runtime), 0xff654321);
+        runtime.update(4, 1).unwrap();
+        assert_eq!(pixel(&runtime), 0);
+        assert_eq!(send(&mut runtime, list, 294, 0, 0), 0);
+        buffer_command(&mut runtime, list, 286, &mut record);
+        runtime.update(5, 1).unwrap();
+        assert_eq!(pixel(&runtime), 0);
+        runtime.update(6, 1).unwrap();
+        assert_eq!(pixel(&runtime), 0xff654321);
+        assert_eq!(
+            runtime
+                .object(script)
+                .unwrap()
+                .interpreter()
+                .unwrap()
+                .read(0, 4)
+                .unwrap()
+                .as_ref(),
+            0xdeadbeefu32.to_le_bytes()
+        );
     }
 }
 

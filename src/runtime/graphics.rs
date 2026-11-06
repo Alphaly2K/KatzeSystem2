@@ -55,9 +55,9 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         let count = match index {
             78 => 12,
             79 => 16,
-            80 | 83 | 89 | 91 | 98 | 99 | 107 | 342 | 572 | 1065 | 1067 | 1069 => 4,
+            80 | 83 | 89 | 91 | 98 | 99 | 107 | 340..=342 | 572 | 1065 | 1067 | 1069 => 4,
             82 | 88 | 92 | 94 | 95 | 97 | 102 | 103 | 105 | 106 | 258 | 262 | 402 | 455 | 462
-            | 464 | 466 | 653 | 848 | 849 | 1066 | 1068 => 8,
+            | 464 | 466 | 534 | 653 | 848 | 849 | 1066 | 1068 => 8,
             880 => 16,
             339 => 24,
             84 | 87 | 93 | 101 | 345 => 20,
@@ -71,8 +71,8 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         }
         let route_zero = matches!(
             index,
-            104 | 105 | 106 | 107 | 256 | 258 | 260 | 262 | 263 | 339 | 342 | 402 | 455 | 462
-                ..=464 | 572 | 625 | 653 | 663 | 848 | 849 | 880 | 1065..=1069
+            104 | 105 | 106 | 107 | 256 | 258 | 260 | 262 | 263 | 339..=342 | 402 | 455 | 462
+                ..=464 | 534 | 572 | 625 | 653 | 663 | 848 | 849 | 880 | 1065..=1069
         );
         if route_zero && arguments.len() != count {
             return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
@@ -365,11 +365,15 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             258 => {
                 self.command_target(target, 287, [word(1), 0, 0])?;
             }
-            262 => {
-                self.command_target(target, 292, [0, word(1), 0])?;
+            262 | 534 => {
+                self.command_target(
+                    target,
+                    if index == 262 { 292 } else { 310 },
+                    [0, word(1), 0],
+                )?;
             }
-            342 => {
-                self.command_target(target, 298, [0; 3])?;
+            340..=342 => {
+                self.command_target(target, 296 + index - 340, [0; 3])?;
             }
             339 => {
                 let mut rectangle = [0; 16];
