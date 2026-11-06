@@ -23,6 +23,163 @@ struct Record {
 
 type Records = Rc<RefCell<Vec<Record>>>;
 
+#[test]
+fn ordinary_input_wrappers_query_devices_and_update_regions_and_key_switches() -> Result<()> {
+    use katze_system2::{
+        graphics::Rect,
+        runtime::{KcsFactory, ProgramLoader, RootObject},
+    };
+
+    struct Source(Vec<u8>);
+    impl ProgramLoader for Source {
+        fn load(&mut self, _: &[u8]) -> Result<Option<Program>> {
+            let mut data = vec![0; 160];
+            for (i, value) in [1i32, 2, 5, 6].into_iter().enumerate() {
+                data[65 + i * 4..69 + i * 4].copy_from_slice(&value.to_le_bytes());
+            }
+            Ok(Some(Program::from_code(&self.0, data, 128)?))
+        }
+    }
+    let mut code = Vec::new();
+    let emit = |code: &mut Vec<u8>, opcode, words: &[u32]| {
+        code.push(opcode);
+        for word in words {
+            code.push(3);
+            code.extend(word.to_le_bytes());
+        }
+    };
+    let call = |code: &mut Vec<u8>, native, words: &[u32]| {
+        for word in words {
+            emit(code, 0x25, &[*word]);
+        }
+        emit(code, 0x2b, &[native, words.len() as u32 * 4]);
+    };
+    let wait = |code: &mut Vec<u8>| {
+        call(code, 71, &[128]);
+        emit(code, 0x26, &[124]);
+    };
+    emit(&mut code, 0x25, &[0xdead_beef]);
+    call(&mut code, 285, &[0]);
+    emit(&mut code, 0x26, &[0]);
+    for (native, args) in [
+        (146, [9, 77]),
+        (148, [9, 0x1234_5678]),
+        (147, [9, 65]),
+        (154, [0, 180]),
+        (403, [0, 0]),
+    ] {
+        call(&mut code, native, &args);
+    }
+    call(&mut code, 401, &[0]);
+    wait(&mut code);
+    call(&mut code, 285, &[0]);
+    emit(&mut code, 0x26, &[4]);
+    call(&mut code, 147, &[9, 0]);
+    call(&mut code, 286, &[u32::MAX]);
+    call(&mut code, 404, &[u32::MAX]);
+    wait(&mut code);
+    call(&mut code, 145, &[9]);
+    call(&mut code, 285, &[79]);
+    emit(&mut code, 0x26, &[8]);
+    emit(&mut code, 0x26, &[12]);
+    emit(&mut code, 0x3b, &[]);
+    for budget in [1, 4096] {
+        let mut rt = Runtime::new(
+            0,
+            kind::ROOT,
+            Box::new(RootObject::new(1, 0)),
+            expression::State::new(0),
+            InputFactory {
+                fallback: KcsFactory::new(Source(code.clone())),
+            },
+        );
+        rt.set_budget(budget, 1 << 20);
+        let input = rt.create(0, kind::INPUT, b"input", b"")?;
+        rt.input_state_mut(input).unwrap().set_update_rate(120);
+        let caller = rt.create(0, kind::ORDINARY, b"caller", b"")?;
+        let device = Rc::new(RefCell::new(DeviceState::new([20, 30])));
+        device.borrow_mut().key_mask = 2;
+        rt.set_input_device(Device(device.clone()))?;
+        rt.input_coordinates_mut().logical_size = [100, 100];
+        let mut bytes = region(9, [40, 40, 50, 50]);
+        rt.dispatch_command_with_buffers(
+            0,
+            Command {
+                sender: 0,
+                target: input,
+                code: 127,
+                data: [0; 3],
+            },
+            &mut CommandBuffers {
+                data1: Some(&mut bytes),
+                ..Default::default()
+            },
+        )?;
+        let mut bytes = region(caller, [0, 0, 1, 1]);
+        rt.dispatch_command_with_buffers(
+            0,
+            Command {
+                sender: 0,
+                target: input,
+                code: 127,
+                data: [0; 3],
+            },
+            &mut CommandBuffers {
+                data1: Some(&mut bytes),
+                ..Default::default()
+            },
+        )?;
+        rt.update(0, 0)?;
+        let current = rt.input_state(input).unwrap();
+        let entry = current.regions().get(9).unwrap();
+        assert_eq!(entry.priority(), 77);
+        assert_eq!(entry.event_mask(), 0x1234_5678);
+        assert_eq!(entry.bounds(), Rect::from_xywh(1, 2, 4, 4));
+        assert_eq!(current.keys().enabled()[0], 0);
+        assert_eq!(current.pointer().idle_limit, 360);
+        assert_eq!(current.pointer().cursor_requested, 0);
+        assert_eq!(
+            rt.object(caller)
+                .unwrap()
+                .interpreter()
+                .unwrap()
+                .read(0, 4)?,
+            2u32.to_le_bytes()
+        );
+        rt.send_message(0, caller, [0; 4])?;
+        let current = rt.input_state(input).unwrap();
+        assert_eq!(current.regions().get(9).unwrap().bounds(), Rect::default());
+        assert_eq!(current.keys().enabled(), &[1; 80]);
+        assert_eq!(current.pointer().position, [-1; 2]);
+        assert_eq!(current.pointer().forced, 1);
+        assert_eq!(
+            rt.object(caller)
+                .unwrap()
+                .interpreter()
+                .unwrap()
+                .read(4, 4)?,
+            2u32.to_le_bytes()
+        );
+        rt.send_message(0, caller, [0; 4])?;
+        let current = rt.input_state(input).unwrap();
+        assert!(current.regions().get(caller).is_none());
+        assert!(current.regions().get(9).is_some());
+        let vm = rt.object(caller).unwrap().interpreter().unwrap();
+        assert_eq!(vm.read(8, 4)?, 0u32.to_le_bytes());
+        assert_eq!(vm.read(12, 4)?, 0xdead_beefu32.to_le_bytes());
+        assert!(vm.stack_bytes().is_empty());
+        let queries = &device.borrow().queries;
+        assert!(queries.windows(4).any(|q| q
+            == [
+                (79, 0, false),
+                (79, 1, false),
+                (79, 2, false),
+                (79, 3, false)
+            ]));
+    }
+    Ok(())
+}
+
 struct Factory {
     mode: Rc<Cell<u32>>,
     records: Records,

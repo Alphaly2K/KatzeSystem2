@@ -22,6 +22,7 @@ mod emocon;
 pub mod fes;
 pub use cst::CstContext;
 mod graphics;
+mod input;
 mod message;
 mod motion;
 pub use motion::MotionSnapshot;
@@ -1736,10 +1737,8 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         if index == 400 {
             return self.load_sound_loop_table(arguments, vm);
         }
-        if index == 404 {
-            let input = self.command_target(0, 34, [0; 3])?;
-            self.command_target(input, 152, [0; 3])?;
-            return Ok(NativeReturn::Continue);
+        if matches!(index, 145..=148 | 154 | 285 | 286 | 401 | 403 | 404) {
+            return self.input_native(index, arguments, vm);
         }
         if matches!(index, 611..=621 | 695 | 884) {
             return self.message_native(index, arguments, vm);
