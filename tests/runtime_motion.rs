@@ -123,6 +123,100 @@ fn ordinary_motion_properties_preserve_groups_save_direction_and_handle_lifetime
 }
 
 #[test]
+fn native_finish_runs_every_task_and_preserves_controls_and_queue_entries() {
+    use katze_system2::kcs::{MotionState, MotionTask};
+
+    let mut code = Vec::new();
+    ins(&mut code, 0x25, &[(3, 0xdead_beef)]);
+    call(&mut code, 440, &[(3, 0)]);
+    store(&mut code, 8);
+    call(&mut code, 294, &[]);
+    store(&mut code, 0);
+    call(&mut code, 440, &[(0x13, 0)]);
+    store(&mut code, 12);
+    call(&mut code, 65, &[]);
+    for address in [16, 20] {
+        call(&mut code, 440, &[(0x13, 0)]);
+        store(&mut code, address);
+    }
+    call(&mut code, 65, &[]);
+    call(&mut code, 296, &[(0x13, 0)]);
+    call(&mut code, 440, &[(0x13, 0)]);
+    store(&mut code, 24);
+    code.push(0x3b);
+    let program = Program::from_code(&code, vec![0; 32], 128).unwrap();
+    let mut motion = Vec::new();
+    ins(&mut motion, 0x16, &[(3, 0)]);
+    motion.push(0x2d);
+    ins(
+        &mut motion,
+        1,
+        &[(0x14, 0x8000_0000), (4, 1.5f32.to_bits())],
+    );
+    for (address, flags, value) in [
+        (0x8000_0000, 0x44, 0),
+        (0x8000_0004, 0x13, 0x8000_0090),
+        (0x8000_0008, 0x13, 0x8000_0098),
+    ] {
+        ins(&mut motion, 0x15, &[(3, address), (flags, value)]);
+        motion.push(0x2d);
+    }
+    motion.push(0x3b);
+    let motion = Program::from_code(&motion, vec![0; 16], 128).unwrap();
+    for budget in [1, 4096] {
+        let mut rt = Runtime::new(
+            0,
+            kind::ROOT,
+            Box::new(BaseObject::new()),
+            State::new(0),
+            KcsFactory::new(Loader(program.clone())),
+        );
+        rt.set_budget(budget, 1 << 20);
+        let caller = rt.create(0, kind::ORDINARY, b"finish", b"").unwrap();
+        rt.update(0, 1).unwrap();
+        let queue = rt.motion_controller_mut(1).unwrap();
+        queue.base_properties[0] = 2.0f32.to_bits();
+        for _ in 0..2 {
+            queue
+                .insert(
+                    MotionTask::new(
+                        motion.clone(),
+                        MotionState {
+                            elapsed: 99,
+                            running: -2,
+                            finishing: 7,
+                            ..Default::default()
+                        },
+                        u32::MAX,
+                    )
+                    .unwrap(),
+                    0,
+                )
+                .unwrap();
+        }
+        rt.update(1, 1).unwrap();
+        let queue = rt.motion_controller(1).unwrap();
+        assert_eq!(queue.len(), 2);
+        assert_eq!(&queue.properties()[..3], &[5.0f32.to_bits(), u32::MAX, 1]);
+        for id in [1, 2] {
+            let task = queue.task(id).unwrap();
+            let state = task.state().unwrap();
+            assert_eq!((state.elapsed, state.running, state.finishing), (99, -2, 7));
+            assert_eq!(word(&task.interpreter, 0), 2);
+        }
+        rt.update(2, 1).unwrap();
+        let queue = rt.motion_controller(1).unwrap();
+        assert!(queue.is_empty());
+        assert_eq!(queue.properties(), &queue.base_properties);
+        let vm = rt.object(caller).unwrap().interpreter().unwrap();
+        for (address, expected) in [(8, 0), (12, 0), (16, 1), (20, 1), (24, 0)] {
+            assert_eq!(word(vm, address), expected);
+        }
+        assert_eq!(vm.stack_bytes(), 0xdead_beefu32.to_le_bytes());
+    }
+}
+
+#[test]
 fn snapshots_recapture_the_original_controller_and_keep_capacity_until_release() {
     use katze_system2::kcs::{MotionState, MotionTask};
 

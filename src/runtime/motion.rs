@@ -115,7 +115,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             return Ok(NativeReturn::Value(handle));
         }
         let handle = read::u32_at(arguments, 0)?;
-        let query = matches!(index, 307 | 309..=311);
+        let query = matches!(index, 307 | 309..=311 | 440);
         if handle == 0 {
             return Ok(if query {
                 NativeReturn::Value(0)
@@ -129,7 +129,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             .get_mut(&handle)
             .ok_or_else(|| Error::new(vm.pc, "运动控制器句柄无效"))?;
         let count = match index {
-            295 | 296 | 303 | 311 | 314 => 1,
+            295 | 296 | 303 | 311 | 314 | 440 => 1,
             297 | 298 | 308..=310 | 312 | 313 | 586 => 2,
             305 | 307 => 3,
             306 => 4,
@@ -208,18 +208,22 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     queue.set_parameters(args[1], &parameters)?;
                 }
             }
-            307 => {
+            307 | 440 => {
                 std::mem::swap(
                     &mut self.host.random,
                     &mut self.resources.motion_host.random,
                 );
                 let result = drain(self.budget, self.limit, || {
-                    queue.update(
-                        args[1],
-                        args[2] != 0,
-                        &mut self.resources.motion_host,
-                        self.budget,
-                    )
+                    if index == 440 {
+                        queue.finish(&mut self.resources.motion_host, self.budget)
+                    } else {
+                        queue.update(
+                            args[1],
+                            args[2] != 0,
+                            &mut self.resources.motion_host,
+                            self.budget,
+                        )
+                    }
                 });
                 std::mem::swap(
                     &mut self.host.random,
