@@ -65,6 +65,24 @@ fn styles_preserve_recovery_colors_relative_sizes_and_preset_terminators() {
     assert_eq!(reset.atoms[1].style.ruby_color, config.ruby_color);
     assert_eq!(reset.atoms[1].style.shadow_color, 9);
     assert_eq!(reset.final_style.shadow_color, config.shadow_color);
+
+    for encoding in [
+        katze_system2::message::TextEncoding::Cp932,
+        katze_system2::message::TextEncoding::Unicode,
+    ] {
+        let styled =
+            Markup::parse_with_encoding(r"\tBi;A\tbB\tiC\t;D\tib", &config, encoding).unwrap();
+        assert_eq!(characters(&styled), "ACDb");
+        assert_eq!(
+            styled
+                .atoms
+                .iter()
+                .map(|atom| (atom.style.bold, atom.style.italic))
+                .collect::<Vec<_>>(),
+            [(true, true), (false, true), (false, false), (true, true)]
+        );
+        assert_eq!(Markup::parse(r"\t", &config).unwrap().atoms[0].source, 1..2);
+    }
 }
 
 #[test]

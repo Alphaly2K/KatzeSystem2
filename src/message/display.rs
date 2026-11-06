@@ -137,7 +137,7 @@ impl Display {
     pub(super) fn shift_glyphs(
         &mut self,
         y: i32,
-        mut glyph: impl FnMut(char, u32) -> Result<super::userfont::Glyph>,
+        mut glyph: impl FnMut(char, u32, Style) -> Result<super::userfont::Glyph>,
     ) -> Result<()> {
         self.page.set_offset([0, y]);
         self.clear_pixels();
@@ -190,8 +190,18 @@ impl Display {
         segment_limit: u32,
         mut glyph: impl FnMut(char, u32) -> Result<GlyphMask>,
     ) -> Result<DisplayProgress> {
-        self.advance_glyphs(now, segment_limit, |c, s| {
-            glyph(c, s).map(super::userfont::Glyph::Mask)
+        self.advance_styled(now, segment_limit, |c, s, _| glyph(c, s))
+    }
+
+    /// 字形回调接收当前正文或注音记录的样式；样式不改变准备时的度量。
+    pub fn advance_styled(
+        &mut self,
+        now: u32,
+        segment_limit: u32,
+        mut glyph: impl FnMut(char, u32, Style) -> Result<GlyphMask>,
+    ) -> Result<DisplayProgress> {
+        self.advance_glyphs(now, segment_limit, |c, s, style| {
+            glyph(c, s, style).map(super::userfont::Glyph::Mask)
         })
     }
 
@@ -199,7 +209,7 @@ impl Display {
         &mut self,
         now: u32,
         segment_limit: u32,
-        mut glyph: impl FnMut(char, u32) -> Result<super::userfont::Glyph>,
+        mut glyph: impl FnMut(char, u32, Style) -> Result<super::userfont::Glyph>,
     ) -> Result<DisplayProgress> {
         self.page.require_prepared()?;
         let mut canvas = Surface::new([128; 2])?;
@@ -344,7 +354,7 @@ fn draw(
     canvas: &mut Surface,
     settings: &DisplaySettings,
     encoding: TextEncoding,
-    glyph: &mut impl FnMut(char, u32) -> Result<super::userfont::Glyph>,
+    glyph: &mut impl FnMut(char, u32, Style) -> Result<super::userfont::Glyph>,
 ) -> Result<Option<DrawnGlyph>> {
     if Rect::from_xywh(entry.position[0], entry.position[1], 128, 128)
         .intersect(target.bounds())
@@ -355,7 +365,7 @@ fn draw(
     let AtomKind::Character(character) = entry.kind else {
         unreachable!()
     };
-    let glyph = glyph(character, entry.size[1] as u32)?;
+    let glyph = glyph(character, entry.size[1] as u32, style)?;
     canvas.clear(0);
     let bounds = glyph.paint(
         canvas,

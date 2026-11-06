@@ -45,6 +45,8 @@ pub struct Style {
     pub text_color: u32,
     pub ruby_color: u32,
     pub shadow_color: u32,
+    pub bold: bool,
+    pub italic: bool,
 }
 
 /// 字号依次为最小、小、普通、大、最大，由消息对象配置提供。
@@ -65,6 +67,8 @@ impl StyleDefaults {
             text_color: self.text_color,
             ruby_color: self.ruby_color,
             shadow_color: self.shadow_color,
+            bold: false,
+            italic: false,
         }
     }
 }

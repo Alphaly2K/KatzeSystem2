@@ -1,5 +1,5 @@
 use super::{
-    BreakCharacters, Display, DisplaySettings, GlyphEffects, GlyphMask, LayoutSettings,
+    BreakCharacters, Display, DisplaySettings, GlyphEffects, GlyphMask, LayoutSettings, Style,
     StyleDefaults, TextEncoding, TimingSettings, VerticalAlignment,
 };
 use crate::graphics::PlaneObject;
@@ -11,12 +11,13 @@ use crate::{Error, Result, read, text};
 mod characters;
 use characters::CharacterSets;
 
-/// 字体服务接收原始字体选择参数；度量与绘字必须使用同一份请求。
+/// 字体服务接收字体选择参数；度量使用配置，绘字使用逐字样式。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FontRequest {
     pub encoding: TextEncoding,
     pub name: Vec<u16>,
     pub weight: u32,
+    pub italic: bool,
     pub backend: u32,
     /// GDI 字符集；原字体选择使用低八位。
     pub glyph_parameter: u32,
@@ -25,6 +26,14 @@ pub struct FontRequest {
 }
 
 impl FontRequest {
+    fn for_glyph(&self, style: Style) -> Self {
+        Self {
+            weight: if style.bold { 700 } else { 400 },
+            italic: style.italic,
+            ..self.clone()
+        }
+    }
+
     /// 将平台整数度量换算为布局字宽；两种编码均以 CP932 双字节映射区分全角。
     pub fn character_advance(&self, character: char, size: u32, measured: i32) -> Result<i32> {
         if size > i32::MAX as u32 {
@@ -148,6 +157,7 @@ impl Configuration {
                 encoding,
                 name,
                 weight: word(0xc0 + extra)?,
+                italic: false,
                 backend: word(0xd4 + extra)?,
                 glyph_parameter: word(0xcc + extra)?,
                 measure_parameter: word(0x7c)?,
@@ -244,12 +254,12 @@ impl MessageObject {
         let display = self.display.as_mut().unwrap();
         let fonts = fonts(host)?;
         Ok(display
-            .advance_glyphs(now, self.segment, |c, s| {
+            .advance_glyphs(now, self.segment, |c, s, style| {
                 if let Some(glyph) = self.user_fonts.glyph(c, self.encoding) {
                     Ok(glyph)
                 } else {
                     fonts
-                        .rasterize(&config.font, c, s)
+                        .rasterize(&config.font.for_glyph(style), c, s)
                         .map(super::userfont::Glyph::Mask)
                 }
             })?
@@ -641,15 +651,18 @@ impl TaskObject for MessageObject {
                 let y = command.data[1] as i32;
                 config.layout.offset = [0, y];
                 let fonts = fonts(host)?;
-                self.display.as_mut().unwrap().shift_glyphs(y, |c, s| {
-                    if let Some(glyph) = self.user_fonts.glyph(c, self.encoding) {
-                        Ok(glyph)
-                    } else {
-                        fonts
-                            .rasterize(&config.font, c, s)
-                            .map(super::userfont::Glyph::Mask)
-                    }
-                })?;
+                self.display
+                    .as_mut()
+                    .unwrap()
+                    .shift_glyphs(y, |c, s, style| {
+                        if let Some(glyph) = self.user_fonts.glyph(c, self.encoding) {
+                            Ok(glyph)
+                        } else {
+                            fonts
+                                .rasterize(&config.font.for_glyph(style), c, s)
+                                .map(super::userfont::Glyph::Mask)
+                        }
+                    })?;
                 self.submit(false, host)?;
             }
             466 if self.display.is_some() => {

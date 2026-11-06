@@ -2,6 +2,7 @@ use crate::{Error, Result};
 use std::{ffi::c_void, ptr::NonNull};
 
 type Ref = *const c_void;
+pub(super) const ITALIC: u32 = 1;
 pub(super) const BOLD: u32 = 1 << 1;
 pub(super) const MONOSPACE: u32 = 1 << 10;
 

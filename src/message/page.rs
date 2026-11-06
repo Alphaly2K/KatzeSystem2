@@ -152,6 +152,16 @@ impl Page {
         origin: [i32; 2],
         mut glyph: impl FnMut(char, u32) -> Result<GlyphMask>,
     ) -> Result<bool> {
+        self.paint_foreground_styled(target, origin, |c, s, _| glyph(c, s))
+    }
+
+    /// 前景绘字回调同时接收当前记录的粗体、斜体及颜色样式。
+    pub fn paint_foreground_styled(
+        &self,
+        target: &mut Surface,
+        origin: [i32; 2],
+        mut glyph: impl FnMut(char, u32, Style) -> Result<GlyphMask>,
+    ) -> Result<bool> {
         self.require_prepared()?;
         let mut changed = false;
         for entry in &self.layout.entries {
@@ -162,7 +172,7 @@ impl Page {
                 unreachable!()
             };
             let style = self.markup.atoms[entry.atom.unwrap()].style;
-            let mask = glyph(character, entry.size[1] as u32)?;
+            let mask = glyph(character, entry.size[1] as u32, style)?;
             let image = mask.colorize(
                 if entry.group.is_some_and(|group| group.ruby) {
                     style.ruby_color
@@ -190,6 +200,20 @@ impl Page {
         double_coverage: bool,
         mut glyph: impl FnMut(char, u32) -> Result<GlyphMask>,
     ) -> Result<bool> {
+        self.paint_styled(target, origin, effects, double_coverage, |c, s, _| {
+            glyph(c, s)
+        })
+    }
+
+    /// 字形效果与前景共用逐记录样式；度量仍由 prepare 的回调提供。
+    pub fn paint_styled(
+        &self,
+        target: &mut Surface,
+        origin: [i32; 2],
+        effects: &GlyphEffects,
+        double_coverage: bool,
+        mut glyph: impl FnMut(char, u32, Style) -> Result<GlyphMask>,
+    ) -> Result<bool> {
         self.require_prepared()?;
         let mut changed = false;
         let mut canvas = Surface::new([128; 2])?;
@@ -201,7 +225,7 @@ impl Page {
                 unreachable!()
             };
             let style = self.markup.atoms[entry.atom.unwrap()].style;
-            let mask = glyph(character, entry.size[1] as u32)?;
+            let mask = glyph(character, entry.size[1] as u32, style)?;
             if mask.coverage().is_empty() {
                 continue;
             }

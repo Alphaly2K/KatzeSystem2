@@ -86,6 +86,8 @@ impl MacFonts {
             return Ok(&self.cache[index].font);
         }
         let bold = request.weight == 700;
+        let traits =
+            if bold { ffi::BOLD } else { 0 } | if request.italic { ffi::ITALIC } else { 0 };
         let name = terminated(&request.name);
         let mut matching = self.faces.iter().filter(|face| {
             face.names
@@ -94,7 +96,7 @@ impl MacFonts {
         });
         let local = matching
             .clone()
-            .find(|face| is_bold(&face.font) == bold)
+            .find(|face| style_traits(&face.font) == traits)
             .or_else(|| matching.next());
         let font = if name.is_empty() {
             unsafe {
@@ -130,7 +132,7 @@ impl MacFonts {
             }
             font
         };
-        let font = if is_bold(&font) == bold {
+        let font = if style_traits(&font) == traits {
             font
         } else {
             unsafe {
@@ -138,11 +140,11 @@ impl MacFonts {
                     font.get(),
                     f64::from(size.max(1)),
                     ptr::null(),
-                    if bold { ffi::BOLD } else { 0 },
-                    ffi::BOLD,
+                    traits,
+                    ffi::BOLD | ffi::ITALIC,
                 ))
             }
-            .map_err(|_| Error::new(0, "字体没有请求的常规或粗体样式"))?
+            .map_err(|_| Error::new(0, "字体没有请求的字重或斜体样式"))?
         };
         self.cache.push(CachedFont {
             request: request.clone(),
@@ -385,8 +387,8 @@ fn enumerate_font(font: &Owned, variable_pitch: u32, names: &mut Vec<Vec<u16>>) 
     Ok(())
 }
 
-fn is_bold(font: &Owned) -> bool {
-    unsafe { ffi::CTFontGetSymbolicTraits(font.get()) & ffi::BOLD != 0 }
+fn style_traits(font: &Owned) -> u32 {
+    unsafe { ffi::CTFontGetSymbolicTraits(font.get()) & (ffi::BOLD | ffi::ITALIC) }
 }
 
 fn glyph(font: &Owned, character: char) -> Result<u16> {

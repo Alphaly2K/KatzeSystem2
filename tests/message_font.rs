@@ -17,6 +17,7 @@ fn fixed_pitch_uses_cp932_mapping_and_preserves_wide_platform_advances() {
             encoding,
             name: Vec::new(),
             weight: 400,
+            italic: false,
             backend: 0,
             glyph_parameter: 1,
             measure_parameter: 0,
@@ -106,7 +107,7 @@ fn prepared_page_paints_visible_text_and_ruby_with_their_respective_styles() {
         },
         TextEncoding::Unicode,
     );
-    page.append("A[A/A]").unwrap();
+    page.append(r"A\tb;[A/\ti;A]").unwrap();
     page.prepare(
         &LayoutSettings {
             encoding: TextEncoding::Unicode,
@@ -169,7 +170,8 @@ fn prepared_page_paints_visible_text_and_ruby_with_their_respective_styles() {
     );
     target.clear(0);
     requests.clear();
-    page.paint(
+    let mut styles = Vec::new();
+    page.paint_styled(
         &mut target,
         [0; 2],
         &GlyphEffects {
@@ -178,13 +180,15 @@ fn prepared_page_paints_visible_text_and_ruby_with_their_respective_styles() {
             ..Default::default()
         },
         false,
-        |c, size| {
+        |c, size, style| {
             requests.push((c, size));
+            styles.push((style.bold, style.italic));
             font.rasterize(c, size)
         },
     )
     .unwrap();
     assert_eq!(requests, [('A', 20), ('A', 20), ('A', 12)]);
+    assert_eq!(styles, [(false, false), (true, false), (false, true)]);
     assert!(
         target
             .pixels()
@@ -194,7 +198,8 @@ fn prepared_page_paints_visible_text_and_ruby_with_their_respective_styles() {
     target.clear(0);
     assert!(
         !page
-            .paint_foreground(&mut target, [-1000; 2], |c, size| font.rasterize(c, size))
+            .paint_foreground_styled(&mut target, [-1000; 2], |c, size, _| font
+                .rasterize(c, size))
             .unwrap()
     );
     page.append("A").unwrap();

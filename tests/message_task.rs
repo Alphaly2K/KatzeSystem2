@@ -601,6 +601,133 @@ fn runtime_routes_both_encodings_through_segment_playback_canvas_and_frame() {
     }
 }
 
+#[test]
+fn glyph_styles_preserve_measurement_and_survive_append_shift_and_reconfiguration() {
+    use std::{cell::RefCell, rc::Rc};
+
+    #[derive(Default)]
+    struct Requests {
+        measured: Vec<FontRequest>,
+        drawn: Vec<(char, FontRequest)>,
+    }
+    struct StyledFonts(Rc<RefCell<Requests>>);
+    impl FontServices for StyledFonts {
+        fn validate(&mut self, request: &FontRequest) -> Result<()> {
+            Fonts.validate(request)
+        }
+        fn measure(&mut self, request: &FontRequest, _: char, _: u32) -> Result<i32> {
+            self.0.borrow_mut().measured.push(request.clone());
+            Ok(4)
+        }
+        fn rasterize(&mut self, request: &FontRequest, c: char, _: u32) -> Result<GlyphMask> {
+            self.0.borrow_mut().drawn.push((c, request.clone()));
+            let coverage = 16 + u8::from(request.weight == 700) * 16 + u8::from(request.italic) * 8;
+            GlyphMask::new([1; 2], [1; 2], 4, vec![coverage])
+        }
+    }
+    for encoding in [TextEncoding::Cp932, TextEncoding::Unicode] {
+        for weight in [400, 700] {
+            for reveal in [false, true] {
+                let shift = if encoding == TextEncoding::Unicode {
+                    21
+                } else {
+                    0
+                };
+                let requests = Rc::new(RefCell::new(Requests::default()));
+                let mut rt = Runtime::new(
+                    0,
+                    kind::ROOT,
+                    Box::new(BaseObject::new()),
+                    State::new(0),
+                    MessageFactory {
+                        fallback: GraphicsFactory { fallback: Reject },
+                    },
+                );
+                rt.set_fonts(StyledFonts(requests.clone()));
+                rt.host_mut().message_time_scale = Some(10);
+                rt.drawing_mut().enabled = true;
+                rt.drawing_mut().active = true;
+                rt.drawing_mut().target = Some(RenderTarget::new([32, 24]).unwrap());
+                let object_kind = if shift == 0 {
+                    kind::STRING_PLANE
+                } else {
+                    kind::STRING_PLANE_UTF8
+                };
+                let id = rt.create(0, object_kind, b"styled", b"").unwrap();
+                let mut config = configuration(encoding, true);
+                let extra = if shift == 0 { 0 } else { 0x40 };
+                set(&mut config, 0xc4 + extra, weight);
+                set(&mut config, 4, u32::from(reveal));
+                set(&mut config, 0xd4 + extra, 4);
+                let send = |rt: &mut Runtime<_>, code, value, data: Option<&mut [u8]>| {
+                    rt.dispatch_command_with_buffers(
+                        0,
+                        command(id, code, value),
+                        &mut CommandBuffers {
+                            data1: data,
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap();
+                };
+                send(&mut rt, 456 + shift, 0, Some(&mut config));
+                send(&mut rt, 47, 1, None);
+                send(
+                    &mut rt,
+                    458 + shift,
+                    0,
+                    Some(&mut b"A\\tbi;B\\ti;G\0".to_vec()),
+                );
+                send(&mut rt, 461 + shift, 0, None);
+                send(&mut rt, 458 + shift, 0, Some(&mut b"C\0".to_vec()));
+                send(&mut rt, 461 + shift, 0, None);
+                let initial = [
+                    ('A', 400, false),
+                    ('B', 700, true),
+                    ('G', 400, true),
+                    ('C', 400, true),
+                ];
+                let drawn = || {
+                    requests
+                        .borrow()
+                        .drawn
+                        .iter()
+                        .map(|(c, request)| (*c, request.weight, request.italic))
+                        .collect::<Vec<_>>()
+                };
+                assert_eq!(drawn(), initial);
+                let alpha = if weight == 700 { 126 } else { 63 };
+                assert_eq!(
+                    rt.drawing().target.as_ref().unwrap().pixel(3, 4),
+                    Some((alpha << 24) | 0x0011_2233)
+                );
+                send(&mut rt, 470 + shift, 1, None);
+                assert_eq!(&drawn()[4..], initial);
+                assert_eq!(
+                    rt.drawing().target.as_ref().unwrap().pixel(3, 5),
+                    Some((alpha << 24) | 0x0011_2233)
+                );
+                send(&mut rt, 459 + shift, 0, None);
+                send(
+                    &mut rt,
+                    458 + shift,
+                    0,
+                    Some(&mut b"D\\tb;E\\t;F\0".to_vec()),
+                );
+                send(&mut rt, 461 + shift, 0, None);
+                let reset = [('D', 400, false), ('E', 700, false), ('F', 400, false)];
+                assert_eq!(&drawn()[8..], reset);
+                send(&mut rt, 457 + shift, 0, Some(&mut config));
+                send(&mut rt, 461 + shift, 0, None);
+                assert_eq!(&drawn()[11..], reset);
+                assert!(requests.borrow().measured.iter().all(|request| {
+                    request.encoding == encoding && request.weight == weight && !request.italic
+                }));
+            }
+        }
+    }
+}
+
 struct TestHost {
     drawings: Drawables,
     fonts: Fonts,

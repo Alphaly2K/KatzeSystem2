@@ -291,7 +291,24 @@ impl Parser<'_> {
                 }
                 self.emit(start, AtomKind::Character('\u{6}'), None);
             }
-            '$' | 't' | 'z' => {
+            't' => {
+                self.style.bold = false;
+                self.style.italic = false;
+                loop {
+                    let suffix = self.take();
+                    match suffix.to_ascii_lowercase() {
+                        'b' => self.style.bold = true,
+                        'i' => self.style.italic = true,
+                        ';' => break,
+                        _ => {
+                            // 输入末尾也回退，重放最后消费的标记字母。
+                            self.rewind();
+                            break;
+                        }
+                    }
+                }
+            }
+            '$' | 'z' => {
                 return Err(Error::new(start, "消息标记尚未实现"));
             }
             _ => self.character(start, c),

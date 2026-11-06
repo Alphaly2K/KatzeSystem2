@@ -7,6 +7,7 @@ fn request() -> FontRequest {
         encoding: TextEncoding::Unicode,
         name: "Katze Synthetic Triangle".encode_utf16().collect(),
         weight: 400,
+        italic: false,
         backend: 0,
         glyph_parameter: 1,
         measure_parameter: 0,
