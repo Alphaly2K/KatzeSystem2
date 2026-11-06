@@ -634,6 +634,91 @@ fn integer_sequences_read_live_delimiters_and_keep_partial_progress_on_errors() 
 }
 
 #[test]
+fn comma_names_expand_before_splitting_and_keep_the_destination_on_failure() {
+    use kcs::{Host, NativeReturn};
+    let mut vm = kcs::Interpreter::new(
+        kcs::Program::from_code(&[], vec![0; 768], 0).unwrap(),
+        vec![0; 768],
+    )
+    .unwrap();
+    let mut state = katze_system2::expression::State::new(0);
+    let mut host = kcs::CoreHost::new(&mut state);
+    let args = |source: u32, target: u32| [source, target].map(u32::to_le_bytes).concat();
+    for (source, name) in [
+        (b"".as_slice(), b"".as_slice()),
+        (b",,,", b""),
+        (b",,a,,b,", b"a"),
+        (b" a ,b", b" a "),
+        (b"\"a,b\",c", b"\"a"),
+        (b"(a,b),c", b"(a"),
+        (b"\x82\xa0,b", b"\x82\xa0"),
+        (b"\x82,b", b"\x82"),
+    ] {
+        vm.write(0, &[source, b"\0"].concat()).unwrap();
+        vm.write(64, &[0xa5; 8]).unwrap();
+        assert_eq!(
+            host.call(598, &args(0, 64), &mut vm).unwrap(),
+            NativeReturn::Value(u32::from(!name.is_empty()))
+        );
+        if name.is_empty() {
+            assert_eq!(vm.read(64, 8).unwrap(), [0xa5; 8]);
+        } else {
+            assert_eq!(vm.read(64, name.len() + 1).unwrap(), [name, b"\0"].concat());
+            assert_eq!(vm.read(65 + name.len() as u32, 1).unwrap(), [0xa5]);
+        }
+    }
+    vm.write(0, b",head%s[G32],tail\0").unwrap();
+    vm.write(32, b",other\0").unwrap();
+    assert_eq!(
+        host.call(598, &args(0, 1), &mut vm).unwrap(),
+        NativeReturn::Value(1)
+    );
+    assert_eq!(vm.read(1, 5).unwrap(), b"head\0");
+    let source = [vec![b','; 300], b"name\0".to_vec()].concat();
+    vm.write(0x8000_0000, &source).unwrap();
+    assert_eq!(
+        host.call(598, &args(0x8000_0000, 64), &mut vm).unwrap(),
+        NativeReturn::Value(1)
+    );
+    assert_eq!(vm.read(64, 5).unwrap(), b"name\0");
+    for source in [
+        [vec![b'x'; 255], vec![0]].concat(),
+        [b"name,".to_vec(), b"x,".repeat(65), vec![0]].concat(),
+    ] {
+        vm.write(0x8000_0000, &source).unwrap();
+        vm.write(64, &[0xa5; 8]).unwrap();
+        assert!(host.call(598, &args(0x8000_0000, 64), &mut vm).is_err());
+        assert_eq!(vm.read(64, 8).unwrap(), [0xa5; 8]);
+    }
+    vm.write(0, b",,\0").unwrap();
+    assert_eq!(
+        host.call(598, &args(0, u32::MAX), &mut vm).unwrap(),
+        NativeReturn::Value(0)
+    );
+    vm.write(0, b"a\0").unwrap();
+    vm.write(767, &[0xa5]).unwrap();
+    assert!(host.call(598, &args(0, 767), &mut vm).is_err());
+    assert_eq!(vm.read(767, 1).unwrap(), [0xa5]);
+
+    let mut code = Vec::new();
+    for value in [0xdead_beef, 0, 64] {
+        ins(&mut code, 0x25, &[(3, value)]);
+    }
+    ins(&mut code, 0x2b, &[(3, 598), (3, 8)]);
+    ins(&mut code, 0x26, &[(3, 32)]);
+    let mut data = vec![0; 96];
+    data[..12].copy_from_slice(b",,name,tail\0");
+    let program = kcs::Program::from_code(&code, data, 32).unwrap();
+    for budget in [1, 4096] {
+        let mut vm = kcs::Interpreter::new(program.clone(), vec![]).unwrap();
+        while vm.run(&mut host, budget).unwrap() != Step::Halted {}
+        assert_eq!(vm.read(32, 4).unwrap(), 1u32.to_le_bytes());
+        assert_eq!(vm.read_string(64).unwrap(), b"name");
+        assert_eq!(vm.stack_bytes(), 0xdead_beefu32.to_le_bytes());
+    }
+}
+
+#[test]
 fn formatted_strings_use_byte_addresses_and_recurse_through_string_fields() {
     use kcs::Host;
     let mut vm = kcs::Interpreter::new(

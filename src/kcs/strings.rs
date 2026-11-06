@@ -44,6 +44,23 @@ pub(super) fn word_offset(vm: &Interpreter, address: u32, count: u32) -> Result<
     Ok(at as u32)
 }
 
+pub(super) fn comma_name(vm: &Interpreter, address: u32) -> Result<Option<Vec<u8>>> {
+    let table = split(&format(vm, address, 0)?, b",");
+    if table.len() > 256 {
+        return Err(Error::new(vm.pc, "KCS 逗号词项表超过缓冲区上限"));
+    }
+    let mut parts = table
+        .split(|&byte| byte == 0)
+        .filter(|part| !part.is_empty());
+    let Some(name) = parts.next() else {
+        return Ok(None);
+    };
+    if parts.count() > 64 {
+        return Err(Error::new(vm.pc, "KCS 逗号分量超过缓冲区上限"));
+    }
+    Ok(Some(name.to_vec()))
+}
+
 pub(super) fn integer_sequence(
     vm: &mut Interpreter,
     state: &mut expression::State,

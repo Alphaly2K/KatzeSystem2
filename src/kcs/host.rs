@@ -416,6 +416,7 @@ pub(crate) fn call_native(
         | 423
         | 518
         | 540
+        | 598
         | 897
         | 1002
         | 1045
@@ -748,6 +749,14 @@ pub(crate) fn call_native(
             args[2] as i32,
         )?),
         540 => NativeReturn::Value(strings::word_offset(vm, args[0], args[1])?),
+        598 => {
+            if let Some(name) = strings::comma_name(vm, args[0])? {
+                write_string(vm, args[1], &name, 1)?;
+                NativeReturn::Value(1)
+            } else {
+                NativeReturn::Value(0)
+            }
+        }
         // 状态已经由调用者初始化，原入口在已有数值区时同样保留它。
         209 => NativeReturn::Continue,
         210 => NativeReturn::Value(state.shared.get(args[0] as usize).copied().unwrap_or(0) as u32),
