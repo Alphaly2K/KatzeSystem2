@@ -1712,7 +1712,10 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
                 self.host.unicode_text != 0,
             );
         }
-        if matches!(index, 323..=337 | 385 | 386 | 1033 | 1037 | 1038) {
+        if matches!(
+            index,
+            323..=337 | 385 | 386 | 991 | 992 | 994 | 1033 | 1037 | 1038
+        ) {
             return self.cst_native(index, arguments, vm);
         }
         if matches!(index, 294..=303 | 305..=317 | 440 | 586) {

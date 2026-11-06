@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 mod details;
 mod save;
+mod snapshot;
 
 /// 独立 CST 上下文，语言注册在构造时从全局前缀复制。
 pub struct CstContext {
@@ -206,6 +207,9 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         arguments: &[u8],
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
+        if matches!(index, 991 | 992 | 994) {
+            return self.cst_snapshot_native(index, arguments, vm);
+        }
         if matches!(index, 333..=337) {
             return self.cst_detail_native(index, arguments, vm);
         }
