@@ -501,6 +501,139 @@ fn word_offsets_preserve_space_runs_raw_bytes_and_native_stack_results() {
 }
 
 #[test]
+fn integer_sequences_preserve_evaluation_gates_ranges_and_native_results() {
+    use kcs::{Host, NativeReturn};
+    let cases: &[(&[u8], i32, &[i32], i32)] = &[
+        (b"$0+=1", 0, &[], 7),
+        (b"$0+=1", 1, &[8], 8),
+        (b"[$0+=1-$0+=4]", 0, &[], 12),
+        (b"[$0+=1-$0+=4]", -1, &[], 12),
+        (b"[$0+=1-$0+=4]", 2, &[8, 9], 12),
+        (b"[$0+=1,$0+=4]", 0, &[], 7),
+        (b"[$0+=1,$0+=4]", 1, &[8], 8),
+        (b"[$0+=1,$0+=4]", 2, &[8, 12], 12),
+        (b"[1,,2,]", 8, &[1, 0, 2], 7),
+        (b"[1,2", 8, &[1, 2], 7),
+        (b"[2-4],ignored", 8, &[-2], 7),
+        (b"[-3]", 8, &[0, 1, 2, 3], 7),
+        (b"[]", 8, &[0], 7),
+        (b"[3]", 8, &[], 7),
+        (
+            b"[2147483647-2147483647]",
+            3,
+            &[i32::MAX, i32::MIN, i32::MIN + 1],
+            7,
+        ),
+    ];
+    for &(source, maximum, expected, shared) in cases {
+        let mut vm = kcs::Interpreter::new(
+            kcs::Program::from_code(&[], vec![0xa5; 64], 0).unwrap(),
+            [source, b"\0"].concat(),
+        )
+        .unwrap();
+        let mut state = katze_system2::expression::State::new(1);
+        state.shared[0] = 7;
+        let mut host = kcs::CoreHost::new(&mut state);
+        let args = [0x8000_0000u32, 0, maximum as u32]
+            .map(u32::to_le_bytes)
+            .concat();
+        assert_eq!(
+            host.call(539, &args, &mut vm).unwrap(),
+            NativeReturn::Value(expected.len() as u32)
+        );
+        let bytes: Vec<_> = expected.iter().flat_map(|n| n.to_le_bytes()).collect();
+        assert_eq!(vm.read(0, bytes.len()).unwrap(), bytes);
+        assert_eq!(host.state.shared[0], shared);
+        assert_eq!(vm.read(bytes.len() as u32, 1).unwrap(), [0xa5]);
+    }
+
+    let mut code = Vec::new();
+    for value in [0x1234_5678, 0, 0x8000_0001, 3] {
+        ins(&mut code, 0x25, &[(3, value)]);
+    }
+    ins(&mut code, 0x2b, &[(3, 539), (3, 12)]);
+    ins(&mut code, 0x26, &[(3, 32)]);
+    let program = kcs::Program::from_code(&code, b"[$0+=1,\\0+=2,@]\0".to_vec(), 32).unwrap();
+    for budget in [1, 4096] {
+        let mut vm = kcs::Interpreter::new(program.clone(), vec![0xb6; 16]).unwrap();
+        let mut state = katze_system2::expression::State::new(1);
+        state.shared[0] = 7;
+        state.local[0] = -3;
+        state.current = 13;
+        let mut host = kcs::CoreHost::new(&mut state);
+        while vm.run(&mut host, budget).unwrap() != Step::Halted {}
+        assert_eq!(vm.read(32, 4).unwrap(), 3u32.to_le_bytes());
+        assert_eq!(vm.stack_bytes(), 0x1234_5678u32.to_le_bytes());
+        assert_eq!(
+            vm.read(0x8000_0001, 12).unwrap(),
+            [8i32, -1, 13].map(i32::to_le_bytes).concat()
+        );
+        assert_eq!(host.state.shared, [8]);
+        assert_eq!(host.state.local[0], -1);
+    }
+}
+
+#[test]
+fn integer_sequences_read_live_delimiters_and_keep_partial_progress_on_errors() {
+    use kcs::{Host, NativeReturn};
+    let mut vm = kcs::Interpreter::new(
+        kcs::Program::from_code(&[], vec![0xa5; 768], 0).unwrap(),
+        vec![0xb6; 768],
+    )
+    .unwrap();
+    let mut state = katze_system2::expression::State::new(1);
+    state.shared[0] = 7;
+    let mut host = kcs::CoreHost::new(&mut state);
+    let args = |source: u32, destination: u32, maximum: u32| {
+        [source, destination, maximum]
+            .map(u32::to_le_bytes)
+            .concat()
+    };
+    for source in [0, 0x8000_0000] {
+        vm.write(source, b"[32,7,8]\0").unwrap();
+        assert_eq!(
+            host.call(539, &args(source, source + 3, 4), &mut vm)
+                .unwrap(),
+            NativeReturn::Value(2)
+        );
+        assert_eq!(vm.read(source, 3).unwrap(), b"[32");
+        assert_eq!(
+            vm.read(source + 3, 8).unwrap(),
+            [32u32, 0].map(u32::to_le_bytes).concat()
+        );
+    }
+    vm.write(764, b"[1,x").unwrap();
+    assert_eq!(
+        host.call(539, &args(764, 0, 1), &mut vm).unwrap(),
+        NativeReturn::Value(1)
+    );
+    vm.write(767, b"1").unwrap();
+    assert_eq!(
+        host.call(539, &args(767, 0, 0), &mut vm).unwrap(),
+        NativeReturn::Value(0)
+    );
+    vm.write(0x8000_0000, b"[$0+=1,$0+=4]\0").unwrap();
+    for (source, destination) in [(768, 0), (0x8000_0000, 768)] {
+        assert_eq!(
+            host.call(539, &args(source, destination, 2), &mut vm)
+                .unwrap(),
+            NativeReturn::Value(0)
+        );
+        assert_eq!(host.state.shared[0], 7);
+    }
+    assert!(host.call(539, &args(0x8000_0000, 762, 2), &mut vm).is_err());
+    assert_eq!(vm.read(762, 4).unwrap(), 8u32.to_le_bytes());
+    assert_eq!(host.state.shared[0], 12);
+    for (length, succeeds) in [(259, true), (260, false)] {
+        let source = [b"[1,".as_slice(), vec![b' '; length].as_slice(), b"]\0"].concat();
+        vm.write(0x8000_0000, &source).unwrap();
+        let result = host.call(539, &args(0x8000_0000, 0, 8), &mut vm);
+        assert_eq!(result.is_ok(), succeeds);
+        assert_eq!(vm.read(0, 4).unwrap(), 1u32.to_le_bytes());
+    }
+}
+
+#[test]
 fn formatted_strings_use_byte_addresses_and_recurse_through_string_fields() {
     use kcs::Host;
     let mut vm = kcs::Interpreter::new(

@@ -426,7 +426,7 @@ pub(crate) fn call_native(
         50..=58 | 60 | 62..=64 => 1,
         59 | 61 => 2,
         38 | 44 | 45 | 790 => 4,
-        35..=37 | 41..=43 | 517 | 519 | 896 | 902 => 3,
+        35..=37 | 41..=43 | 517 | 519 | 539 | 896 | 902 => 3,
         5 | 76 | 789 => 0,
         _ => return Err(Error::new(vm.pc, format!("未支持的 KCS native {index}"))),
     };
@@ -740,6 +740,13 @@ pub(crate) fn call_native(
             write_string(vm, args[0], &value, 1)?;
             NativeReturn::Continue
         }
+        539 => NativeReturn::Value(strings::integer_sequence(
+            vm,
+            state,
+            args[0],
+            args[1],
+            args[2] as i32,
+        )?),
         540 => NativeReturn::Value(strings::word_offset(vm, args[0], args[1])?),
         // 状态已经由调用者初始化，原入口在已有数值区时同样保留它。
         209 => NativeReturn::Continue,

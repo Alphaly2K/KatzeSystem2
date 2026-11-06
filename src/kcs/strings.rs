@@ -1,5 +1,5 @@
 use super::Interpreter;
-use crate::{Error, Result, read, text};
+use crate::{Error, Result, expression, read, text};
 
 pub(super) fn character_width(source: &[u8]) -> usize {
     match source {
@@ -38,6 +38,80 @@ pub(super) fn word_offset(vm: &Interpreter, address: u32, count: u32) -> Result<
         }
     }
     Ok(at as u32)
+}
+
+pub(super) fn integer_sequence(
+    vm: &mut Interpreter,
+    state: &mut expression::State,
+    source: u32,
+    destination: u32,
+    maximum: i32,
+) -> Result<u32> {
+    if vm.read(source, 1).is_err() || vm.read(destination, 1).is_err() {
+        return Ok(0);
+    }
+    if sequence_byte(vm, source)? != b'[' {
+        if maximum <= 0 {
+            return Ok(0);
+        }
+        let value = expression::eval_fes_fallback(text::ascii(&vm.read_string(source)?)?, state)?;
+        vm.write(destination, &value.to_le_bytes())?;
+        return Ok(1);
+    }
+    let mut scan = source;
+    while !matches!(sequence_byte(vm, scan)?, 0 | b',') {
+        scan += 1;
+    }
+    let mut cursor = source + 1;
+    let mut written = 0;
+    if sequence_byte(vm, scan)? == b',' {
+        while (written as i32) < maximum && !matches!(sequence_byte(vm, cursor)?, 0 | b']') {
+            let value = sequence_expression(vm, state, &mut cursor, b",]")?;
+            vm.write(destination.wrapping_add(written * 4), &value.to_le_bytes())?;
+            written += 1;
+            // 输出可能覆盖分隔符，下一项的位置须在写入之后决定。
+            if sequence_byte(vm, cursor)? == b',' {
+                cursor += 1;
+            }
+        }
+    } else {
+        let mut first = sequence_expression(vm, state, &mut cursor, b"-]")?;
+        if sequence_byte(vm, cursor)? == b'-' {
+            cursor += 1;
+        }
+        let last = sequence_expression(vm, state, &mut cursor, b"]")?;
+        while first <= last && (written as i32) < maximum {
+            vm.write(destination.wrapping_add(written * 4), &first.to_le_bytes())?;
+            written += 1;
+            first = first.wrapping_add(1);
+        }
+    }
+    Ok(written)
+}
+
+fn sequence_byte(vm: &Interpreter, address: u32) -> Result<u8> {
+    Ok(vm.read(address, 1)?[0])
+}
+
+fn sequence_expression(
+    vm: &Interpreter,
+    state: &mut expression::State,
+    cursor: &mut u32,
+    separators: &[u8],
+) -> Result<i32> {
+    let mut source = Vec::new();
+    loop {
+        let byte = sequence_byte(vm, *cursor)?;
+        if byte == 0 || separators.contains(&byte) {
+            break;
+        }
+        if source.len() == 259 {
+            return Err(Error::new(vm.pc, "KCS 整数序列表达式过长"));
+        }
+        source.push(byte);
+        *cursor += 1;
+    }
+    expression::eval_fes_fallback(text::ascii(&source)?, state)
 }
 
 pub(super) fn float32(source: &[u8]) -> u32 {
