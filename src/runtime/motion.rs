@@ -1,6 +1,6 @@
 use super::{ObjectFactory, ObjectHost, drain};
-use crate::kcs::{Interpreter, MotionQueue, NativeReturn};
-use crate::{Error, Result, read};
+use crate::kcs::{Interpreter, MotionQueue, MotionState, MotionTask, NativeReturn, format_string};
+use crate::{Error, Result, read, text};
 
 const GROUPS: [(usize, usize); 9] = [
     (0, 3),
@@ -38,6 +38,85 @@ impl MotionSnapshot {
 }
 
 impl<F: ObjectFactory> ObjectHost<'_, F> {
+    fn motion_start_native(
+        &mut self,
+        index: u32,
+        arguments: &[u8],
+        vm: &Interpreter,
+    ) -> Result<NativeReturn> {
+        let handle = read::u32_at(arguments, 0)?;
+        if handle == 0 {
+            return Ok(NativeReturn::Value(0));
+        }
+        if !self.resources.motion_controllers.contains_key(&handle) {
+            return Err(Error::new(vm.pc, "运动控制器句柄无效"));
+        }
+        let count = if index == 535 { 8 } else { 7 };
+        if arguments.len() != count * 4 {
+            return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+        }
+        let mut args = [0; 8];
+        for (arg, bytes) in args.iter_mut().zip(arguments.chunks_exact(4)) {
+            *arg = u32::from_le_bytes(bytes.try_into().unwrap());
+        }
+        let name = format_string(vm, args[1], 0)?;
+        let name = self
+            .resources
+            .services
+            .as_deref_mut()
+            .ok_or_else(|| Error::new(vm.pc, "运行时未配置运动资源服务"))?
+            .resolve(b"mot", &name)?;
+        let name = &name[..name
+            .iter()
+            .position(|&byte| byte == 0)
+            .unwrap_or(name.len())];
+        if name.is_empty() {
+            return Ok(NativeReturn::Value(0));
+        }
+        if name.len() >= 260 {
+            return Err(Error::new(vm.pc, "运动资源名称超过缓冲区上限"));
+        }
+        let Some(program) = self.resources.load_motion(name)? else {
+            return Ok(NativeReturn::Value(0));
+        };
+        let mut state = MotionState::default();
+        if args[3] != 0 {
+            let parameters = vm.read(args[2], args[3].min(256) as usize * 4)?;
+            for (slot, bytes) in state.parameters.iter_mut().zip(parameters.chunks_exact(4)) {
+                *slot = u32::from_le_bytes(bytes.try_into().unwrap());
+            }
+        }
+        let mut task = MotionTask::new(program, state, 0)?;
+        let name: Vec<_> = text::cp932(name)?.encode_utf16().collect();
+        let basename = name
+            .iter()
+            .rposition(|&unit| matches!(unit, 47 | 92))
+            .filter(|&at| at != 0)
+            .map_or(0, |at| at + 1);
+        if name.len() - basename >= 32 {
+            return Err(Error::new(vm.pc, "运动快照名称超过缓冲区上限"));
+        }
+        task.snapshot_name = name[basename..].to_vec();
+        task.snapshot_flags = args[7];
+        if args[5] != 0 && vm.read(args[4], 1).is_ok() {
+            let data = vm.read(args[4], read::sized(args[5], vm.pc)?)?.to_vec();
+            let size = data.len();
+            let address = task.interpreter.allocate_bytes(data)?;
+            task.interpreter
+                .write(0x8000_049c, &address.to_le_bytes())?;
+            task.interpreter
+                .write(0x8000_04a0, &(size as u32).to_le_bytes())?;
+            task.snapshot_data = Some((address, size));
+        }
+        let id = self
+            .resources
+            .motion_controllers
+            .get_mut(&handle)
+            .unwrap()
+            .insert(task, args[6] as i32)?;
+        Ok(NativeReturn::Value(id))
+    }
+
     fn motion_snapshot_native(
         &mut self,
         index: u32,
@@ -104,6 +183,9 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         arguments: &[u8],
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
+        if matches!(index, 304 | 535) {
+            return self.motion_start_native(index, arguments, vm);
+        }
         if matches!(index, 315..=317) {
             return self.motion_snapshot_native(index, arguments, vm);
         }

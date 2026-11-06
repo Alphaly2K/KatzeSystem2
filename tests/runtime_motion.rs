@@ -83,12 +83,9 @@ fn ordinary_motion_properties_preserve_groups_save_direction_and_handle_lifetime
     call(&mut code, 295, &[(0x13, 1900)]);
     call(&mut code, 294, &[]);
     store(&mut code, 1924);
-    for index in 295..=314 {
-        if index == 304 {
-            continue;
-        }
+    for index in (295..=314).chain([535]) {
         call(&mut code, index, &[(3, 0)]);
-        if matches!(index, 307 | 309..=311) {
+        if matches!(index, 304 | 307 | 309..=311 | 535) {
             ins(&mut code, 0x2d, &[]);
         }
     }
@@ -119,6 +116,183 @@ fn ordinary_motion_properties_preserve_groups_save_direction_and_handle_lifetime
         assert_eq!(word(vm, 1904), 2);
         assert!(word(vm, 1924) > word(vm, 1904));
         assert_eq!(vm.stack_bytes(), 0xdead_beefu32.to_le_bytes());
+    }
+}
+
+#[test]
+fn motion_loading_copies_parameters_and_saved_data_and_reuses_programs() {
+    use katze_system2::{kcs::ResourceServices, resource::ResourceMode};
+    use std::{cell::RefCell, io::Write, rc::Rc};
+
+    struct Files(Vec<u8>, Rc<RefCell<Vec<Vec<u8>>>>);
+    impl ResourceServices for Files {
+        fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+            assert_eq!(category, b"mot");
+            Ok(name.to_vec())
+        }
+        fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
+            assert_eq!(mode, ResourceMode::LooseFirst);
+            self.1.borrow_mut().push(name.to_vec());
+            Ok((name != b"missing").then(|| self.0.clone()))
+        }
+    }
+
+    let mut movement = Vec::new();
+    ins(&mut movement, 0x25, &[(0x13, 0x8000_049c)]);
+    let branch = movement.len();
+    ins(&mut movement, 0x27, &[(3, 0)]);
+    ins(&mut movement, 0x25, &[(0x13, 0x8000_049c)]);
+    ins(&mut movement, 0x15, &[(0x43, 0), (3, 0x1122_3344)]);
+    movement.push(0x2d);
+    let end = movement.len() as u32;
+    movement[branch + 2..branch + 6].copy_from_slice(&end.to_le_bytes());
+    movement.push(0x3b);
+    let mut blob = Vec::new();
+    for value in [
+        0x0053_434b,
+        2,
+        0,
+        52,
+        movement.len() as u32,
+        52 + movement.len() as u32,
+        0,
+        0,
+        16,
+        64,
+        52 + movement.len() as u32,
+        0,
+        movement.len() as u32,
+    ] {
+        blob.extend(value.to_le_bytes());
+    }
+    let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder.write_all(&movement).unwrap();
+    blob.extend(encoder.finish().unwrap());
+
+    let mut data = vec![0; 1600];
+    data[48..52].copy_from_slice(&7u32.to_le_bytes());
+    data[64..81].copy_from_slice(b"path/move%d[G48]\0");
+    data[96..107].copy_from_slice(b"PATH/MOVE7\0");
+    let parameters = std::array::from_fn::<_, 256, _>(|i| 0x1122_0000 + i as u32);
+    for (bytes, value) in data[128..1152].chunks_exact_mut(4).zip(parameters) {
+        bytes.copy_from_slice(&value.to_le_bytes());
+    }
+    data[1152..1160].copy_from_slice(b"missing\0");
+    data[1200..1208].copy_from_slice(b"abcdefgh");
+    let mut code = Vec::new();
+    ins(&mut code, 0x25, &[(3, 0xdead_beef)]);
+    call(&mut code, 294, &[]);
+    store(&mut code, 0);
+    call(&mut code, 586, &[(3, 1), (3, 0x1234_5678)]);
+    call(
+        &mut code,
+        535,
+        &[
+            (3, 1),
+            (3, 1152),
+            (3, u32::MAX),
+            (3, 1),
+            (3, u32::MAX),
+            (3, 8),
+            (3, 0),
+            (3, 0),
+        ],
+    );
+    store(&mut code, 4);
+    call(
+        &mut code,
+        535,
+        &[
+            (3, 1),
+            (3, 64),
+            (3, 128),
+            (3, 257),
+            (3, 1200),
+            (3, 8),
+            (3, (-3i32) as u32),
+            (3, 0x8000_0000),
+        ],
+    );
+    store(&mut code, 8);
+    call(
+        &mut code,
+        304,
+        &[
+            (3, 1),
+            (3, 96),
+            (3, u32::MAX),
+            (3, 0),
+            (3, u32::MAX),
+            (3, 8),
+            (3, 7),
+        ],
+    );
+    store(&mut code, 12);
+    call(&mut code, 65, &[]);
+    call(&mut code, 36, &[(3, 1200), (3, 0xff), (3, 8)]);
+    call(&mut code, 307, &[(3, 1), (3, 100), (3, 0)]);
+    store(&mut code, 16);
+    call(&mut code, 315, &[(3, 1), (3, 100)]);
+    store(&mut code, 20);
+    call(&mut code, 65, &[]);
+    call(&mut code, 295, &[(3, 1)]);
+    call(&mut code, 317, &[(3, 2)]);
+    code.push(0x3b);
+    let program = Program::from_code(&code, data, 128).unwrap();
+
+    for budget in [1, 4096] {
+        let reads = Rc::new(RefCell::new(Vec::new()));
+        let mut runtime = Runtime::new(
+            0,
+            kind::ROOT,
+            Box::new(BaseObject::new()),
+            State::new(0),
+            KcsFactory::new(Loader(program.clone())),
+        );
+        runtime.set_resources(Files(blob.clone(), reads.clone()));
+        runtime.set_budget(budget, 1 << 20);
+        let task = runtime.create(0, kind::ORDINARY, b"motion", b"").unwrap();
+        runtime.update(0, 1).unwrap();
+        let queue = runtime.motion_controller(1).unwrap();
+        assert_eq!(
+            (queue.len(), queue.group(1), queue.group(2)),
+            (2, Some(-3), Some(7))
+        );
+        let first = queue.task(1).unwrap();
+        assert_eq!(first.state().unwrap().parameters, parameters);
+        assert_eq!(
+            first.snapshot_name,
+            "move7".encode_utf16().collect::<Vec<_>>()
+        );
+        assert_eq!(first.snapshot_flags, 0x8000_0000);
+        assert_eq!(first.snapshot_data, Some((80, 8)));
+        assert_eq!(first.interpreter.read(80, 8).unwrap(), b"abcdefgh");
+        assert_eq!(word(&first.interpreter, 0x8000_049c), 80);
+        assert_eq!(word(&first.interpreter, 0x8000_04a0), 8);
+        assert_eq!(word(&first.interpreter, 0x8000_04a4), 0x1234_5678);
+        let second = queue.task(2).unwrap();
+        assert_eq!(second.state().unwrap().parameters, [0; 256]);
+        assert_eq!(second.snapshot_flags, 0);
+        assert_eq!(second.snapshot_data, None);
+        assert_eq!(
+            *reads.borrow(),
+            [b"missing".to_vec(), b"path/move7".to_vec()]
+        );
+
+        runtime.update(1, 1).unwrap();
+        let bytes = runtime.motion_snapshot(2).unwrap().bytes();
+        assert_eq!(bytes.len(), 8 + 0x454 * 2 + 8);
+        assert_eq!(&bytes[8 + 0x454..8 + 0x45c], b"\x44\x33\x22\x11efgh");
+        let vm = runtime.object(task).unwrap().interpreter().unwrap();
+        assert_eq!(
+            (0..6).map(|i| word(vm, i * 4)).collect::<Vec<_>>(),
+            [1, 0, 1, 2, 1, 2]
+        );
+        assert_eq!(vm.read(1200, 8).unwrap(), [0xff; 8]);
+        assert_eq!(vm.stack_bytes(), 0xdead_beefu32.to_le_bytes());
+        runtime.update(2, 1).unwrap();
+        assert!(runtime.motion_controller(1).is_none());
+        assert!(runtime.motion_snapshot(2).is_none());
     }
 }
 

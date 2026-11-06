@@ -1,4 +1,4 @@
-use super::Interpreter;
+use super::{Interpreter, MemoryRead};
 use crate::{Error, Result, expression, read, text};
 
 pub(super) fn character_width(source: &[u8]) -> usize {
@@ -13,12 +13,16 @@ pub(super) fn word_offset(vm: &Interpreter, address: u32, count: u32) -> Result<
         return Ok(0);
     }
     let offset = (address & 0x7fff_ffff) as usize;
-    let size = if address & 0x8000_0000 != 0 {
-        vm.external.len()
+    let source = if address & 0x8000_0000 != 0 {
+        vm.read(address, vm.external.len().saturating_sub(offset))?
     } else {
-        vm.memory.len()
+        let (storage, offset) = vm.local_region(offset)?;
+        MemoryRead::Local(read::range(
+            storage,
+            offset,
+            storage.len().saturating_sub(offset),
+        )?)
     };
-    let source = vm.read(address, size.saturating_sub(offset))?;
     let byte = |at: usize| {
         source
             .get(at)

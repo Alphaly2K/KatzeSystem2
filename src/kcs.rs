@@ -684,6 +684,7 @@ pub struct Interpreter {
     boundaries: BTreeMap<usize, usize>,
     pub pc: usize,
     memory: Vec<u8>,
+    allocations: BTreeMap<usize, Vec<u8>>,
     external: SharedMemory,
     sp: usize,
     frame_top: usize,
@@ -717,6 +718,7 @@ impl Interpreter {
             boundaries,
             pc: 0,
             memory,
+            allocations: BTreeMap::new(),
             external: SharedMemory::new(external)?,
             sp: stack_start,
             frame_top: stack_start,
@@ -776,13 +778,39 @@ impl Interpreter {
         if address & 0x8000_0000 != 0 {
             Ok(MemoryRead::Shared(self.external.read(offset, length)?))
         } else {
-            Ok(MemoryRead::Local(read::range(
-                &self.memory,
-                offset,
-                length,
-            )?))
+            let (storage, offset) = self.local_region(offset)?;
+            Ok(MemoryRead::Local(read::range(storage, offset, length)?))
         }
     }
+
+    fn local_region(&self, offset: usize) -> Result<(&[u8], usize)> {
+        if offset < self.memory.len() || self.allocations.is_empty() {
+            return Ok((&self.memory, offset));
+        }
+        let (base, bytes) = self
+            .allocations
+            .range(..=offset)
+            .next_back()
+            .ok_or_else(|| Error::new(self.pc, "KCS 分配地址无效"))?;
+        Ok((bytes, offset - base))
+    }
+
+    pub(crate) fn allocate_bytes(&mut self, bytes: Vec<u8>) -> Result<u32> {
+        let base = self
+            .allocations
+            .last_key_value()
+            .map_or(self.memory.len(), |(base, bytes)| base + bytes.len());
+        if bytes.is_empty()
+            || base
+                .checked_add(bytes.len())
+                .is_none_or(|end| end > read::MAX_BYTES)
+        {
+            return Err(Error::new(self.pc, "KCS 分配大小无效"));
+        }
+        self.allocations.insert(base, bytes);
+        Ok(base as u32)
+    }
+
     pub fn read_string(&self, address: u32) -> Result<MemoryRead<'_>> {
         let offset = (address & 0x7fff_ffff) as usize;
         if address & 0x8000_0000 != 0 {
@@ -792,11 +820,12 @@ impl Interpreter {
                 &bytes[offset..offset + length]
             })))
         } else {
-            Ok(MemoryRead::Local(read::zstr(&self.memory, offset)?))
+            let (storage, offset) = self.local_region(offset)?;
+            Ok(MemoryRead::Local(read::zstr(storage, offset)?))
         }
     }
     pub fn write(&mut self, address: u32, bytes: &[u8]) -> Result<()> {
-        let p = (address & 0x7fff_ffff) as usize;
+        let mut p = (address & 0x7fff_ffff) as usize;
         if address & 0x8000_0000 != 0 {
             if p.checked_add(bytes.len())
                 .is_none_or(|end| end > self.external.len())
@@ -805,7 +834,17 @@ impl Interpreter {
             }
             return self.external.write(p, bytes);
         }
-        let storage = &mut self.memory;
+        let storage = if p < self.memory.len() || self.allocations.is_empty() {
+            &mut self.memory
+        } else {
+            let (base, storage) = self
+                .allocations
+                .range_mut(..=p)
+                .next_back()
+                .ok_or_else(|| Error::new(self.pc, "KCS 分配地址无效"))?;
+            p -= *base;
+            storage
+        };
         let end = p
             .checked_add(bytes.len())
             .filter(|&n| n <= storage.len())
@@ -1186,5 +1225,30 @@ fn width(flags: u8) -> Result<usize> {
         2 => Ok(2),
         3 | 4 => Ok(4),
         _ => Err(Error::new(0, "未支持的 KCS 存储类型")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Interpreter, Program, strings};
+
+    #[test]
+    fn allocated_regions_preserve_stack_limits_and_independent_boundaries() {
+        let mut vm =
+            Interpreter::new(Program::from_code(&[], vec![0; 8], 4).unwrap(), vec![]).unwrap();
+        let first = vm.allocate_bytes(b"a b\0".to_vec()).unwrap();
+        let second = vm.allocate_bytes(b"tail\0".to_vec()).unwrap();
+        assert_eq!((first, second), (12, 16));
+        assert!(vm.read(11, 2).is_err());
+        assert!(vm.read(first + 3, 2).is_err());
+        assert!(vm.write(first + 3, b"xy").is_err());
+        assert_eq!(strings::word_offset(&vm, first, 1).unwrap(), 2);
+        vm.write(first + 2, b"c").unwrap();
+        vm.push(1).unwrap();
+        assert!(vm.push(2).is_err());
+        vm.reset_execution();
+        assert!(vm.stack_bytes().is_empty());
+        assert_eq!(vm.read_string(first).unwrap(), b"a c");
+        assert_eq!(vm.read_string(second).unwrap(), b"tail");
     }
 }
