@@ -100,7 +100,6 @@ fn record(channel: u32, mode: i32, duration: i32, name: &[u8]) -> Vec<u8> {
     bytes[..4].copy_from_slice(&channel.to_le_bytes());
     bytes[12..12 + name.len()].copy_from_slice(name);
     bytes[0x110..0x114].copy_from_slice(&1u32.to_le_bytes());
-    bytes[0x114..0x118].copy_from_slice(&7u32.to_le_bytes());
     bytes[0x118..0x11c].copy_from_slice(&mode.to_le_bytes());
     bytes[0x11c..0x120].copy_from_slice(&duration.to_le_bytes());
     bytes
@@ -808,10 +807,9 @@ fn vorbis_channels_keep_both_sources_during_replacement_and_release_the_linked_p
         .unwrap();
     runtime.update(10, 1).unwrap();
     assert_eq!(audio(&runtime).channel_time(5).unwrap(), 10);
-    assert_eq!(
-        load(&mut runtime, &mut record(5, 0, 17, b"audio/tone.ogg")).unwrap(),
-        1
-    );
+    let mut first = record(5, 0, 17, b"audio/tone.ogg");
+    first[0x114..0x118].copy_from_slice(&7u32.to_le_bytes());
+    assert_eq!(load(&mut runtime, &mut first).unwrap(), 1);
     let channel = audio(&runtime).channel(5).unwrap();
     assert_eq!(channel.file(), b"audio/tone.ogg");
     assert_eq!(channel.pcm().unwrap().frames(), 1379);

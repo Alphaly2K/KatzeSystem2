@@ -295,7 +295,7 @@ impl SoundState {
         sound.pcm = None;
         sound.playback = Playback::default();
         if let Some(pcm) = channel::load_pcm(services, name)? {
-            let playback = Playback::new(&pcm, whole)?;
+            let playback = Playback::new(&pcm, whole, options)?;
             sound.file.extend_from_slice(name);
             sound.pcm_volume = 100;
             sound.pcm_pan = 0;

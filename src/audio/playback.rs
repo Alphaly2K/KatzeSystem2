@@ -1,5 +1,6 @@
 use super::Pcm;
 use crate::{Error, Result, read};
+use std::ops::Range;
 
 #[derive(Default)]
 pub(super) struct Playback {
@@ -8,16 +9,23 @@ pub(super) struct Playback {
     pub remaining: u32,
     pub completed: u64,
     ended: bool,
+    buffered: Buffered,
     stream: Option<Stream>,
 }
 
 impl Playback {
-    pub fn new(pcm: &Pcm, whole: bool) -> Result<Self> {
+    pub fn new(pcm: &Pcm, whole: bool, silence_ms: u32) -> Result<Self> {
         let frame_bytes = u32::from(pcm.channels()) * 2;
         let half_bytes = pcm.sample_rate().wrapping_mul(frame_bytes) / 2;
         let buffer_bytes = half_bytes.wrapping_mul(8);
+        let decoder = Decoder {
+            // 原入口把无符号乘积交给有符号的六十四位除法。
+            silence: (u64::from(pcm.sample_rate()) * u64::from(silence_ms)) as i64 / 1000,
+            ..Decoder::default()
+        };
+        let total_bytes = decoder.length_bytes(pcm);
         let mut playback = Self::default();
-        if !whole && pcm.samples().len() * 2 > buffer_bytes as usize {
+        if !whole && total_bytes > buffer_bytes {
             if !half_bytes.is_multiple_of(frame_bytes) {
                 return Err(Error::new(0, "流式声音的半秒缓冲块未对齐采样帧"));
             }
@@ -30,9 +38,7 @@ impl Playback {
             let mut stream = Stream {
                 samples: vec![0; buffer_bytes as usize / 2],
                 half_frames: (half_bytes / frame_bytes) as usize,
-                decoder_position: 0,
-                decoder_ready: true,
-                end: -1,
+                decoder,
                 loop_start: 0,
                 next_fill: 0,
                 previous_cursor: 0,
@@ -41,32 +47,44 @@ impl Playback {
             };
             stream.prefill(pcm)?;
             playback.stream = Some(stream);
+        } else {
+            playback.buffered.frames = (total_bytes / frame_bytes) as usize;
+            playback.buffered.decoder = decoder;
+            playback.buffered.prefill(pcm)?;
         }
         Ok(playback)
     }
 
     pub fn start(&mut self, pcm: &Pcm, count: u32, range: [i64; 2]) -> Result<()> {
         if let Some(stream) = &mut self.stream {
-            stream.end = range[1];
+            stream.decoder.end = range[1];
             if self.playing {
                 self.position = 0;
                 stream.reset(pcm)?;
             }
             stream.loop_start = range[0];
-        } else if self.playing || self.ended {
-            self.position = 0;
+        } else {
+            self.buffered.decoder.end = range[1];
+            if self.playing {
+                self.buffered.reset(pcm)?;
+            }
+            if self.playing || self.ended {
+                self.position = 0;
+            }
         }
         self.remaining = count;
         self.completed = 0;
         self.ended = false;
-        self.playing = pcm.frames() != 0;
+        self.playing = self.stream.is_some() || self.buffered.frames != 0;
         Ok(())
     }
 
     pub fn change_count(&mut self, count: u32, range: [i64; 2]) {
         if let Some(stream) = &mut self.stream {
-            stream.end = range[1];
+            stream.decoder.end = range[1];
             stream.loop_start = range[0];
+        } else {
+            self.buffered.decoder.end = range[1];
         }
         self.remaining = count;
         self.completed = 0;
@@ -83,6 +101,8 @@ impl Playback {
         self.ended = false;
         if let Some(stream) = &mut self.stream {
             stream.reset(pcm)?;
+        } else {
+            self.buffered.reset(pcm)?;
         }
         Ok(())
     }
@@ -111,17 +131,14 @@ impl Playback {
             return Ok(());
         }
         while self.playing && position < output.len() {
-            if self.position < pcm.frames() {
-                let frames =
-                    (pcm.frames() - self.position).min((output.len() - position) / channels);
-                let count = frames * channels;
-                let start = self.position * channels;
-                output[position..position + count]
-                    .copy_from_slice(&pcm.samples()[start..start + count]);
-                position += count;
-                self.position += frames;
-            }
-            if self.position >= pcm.frames() {
+            let frames =
+                (self.buffered.frames - self.position).min((output.len() - position) / channels);
+            let count = frames * channels;
+            self.buffered
+                .copy(pcm, self.position, &mut output[position..position + count]);
+            position += count;
+            self.position += frames;
+            if self.position >= self.buffered.frames {
                 self.completed = self.completed.saturating_add(1);
                 if self.remaining == 1 {
                     self.playing = false;
@@ -139,12 +156,99 @@ impl Playback {
     }
 }
 
+struct Decoder {
+    position: usize,
+    ready: bool,
+    end: i64,
+    silence: i64,
+}
+
+impl Default for Decoder {
+    fn default() -> Self {
+        Self {
+            position: 0,
+            ready: true,
+            end: -1,
+            silence: 0,
+        }
+    }
+}
+
+impl Decoder {
+    fn length_bytes(&self, pcm: &Pcm) -> u32 {
+        (pcm.samples().len() as u32 * 2)
+            .wrapping_add((self.silence * i64::from(pcm.channels()) * 2) as u32)
+    }
+
+    fn rewind(&mut self) {
+        // 解码重置保留尚未消耗的静音余量。
+        self.position = 0;
+        self.ready = true;
+    }
+
+    fn take(&mut self, pcm: &Pcm, frames: usize) -> Result<(usize, Range<usize>)> {
+        let silence = self.silence.max(0).min(frames as i64) as usize;
+        self.silence -= silence as i64;
+        if silence == frames {
+            return Ok((silence, self.position..self.position));
+        }
+        let frame_bytes = i64::from(pcm.channels()) * 2;
+        if self.end != -1
+            && (self.end < self.position as i64 || self.end.checked_mul(frame_bytes).is_none())
+        {
+            return Err(Error::new(0, "声音终点早于预取位置或超出字节范围"));
+        }
+        let limit = if self.end == -1 {
+            pcm.frames()
+        } else {
+            self.end.min(pcm.frames() as i64) as usize
+        };
+        let count = (frames - silence).min(limit - self.position);
+        let source = self.position..self.position + count;
+        self.position += count;
+        self.ready &= self.position < limit;
+        Ok((silence, source))
+    }
+}
+
+#[derive(Default)]
+struct Buffered {
+    frames: usize,
+    silence: usize,
+    source_frames: usize,
+    decoder: Decoder,
+}
+
+impl Buffered {
+    fn prefill(&mut self, pcm: &Pcm) -> Result<()> {
+        let (silence, source) = self.decoder.take(pcm, self.frames)?;
+        self.silence = silence;
+        self.source_frames = source.len();
+        Ok(())
+    }
+
+    fn reset(&mut self, pcm: &Pcm) -> Result<()> {
+        self.decoder.rewind();
+        self.prefill(pcm)
+    }
+
+    fn copy(&self, pcm: &Pcm, position: usize, output: &mut [i16]) {
+        // 整段缓冲区由静音、源 PCM 和尾零组成，区间表示无需复制长静音。
+        let channels = pcm.channels() as usize;
+        let first = position.max(self.silence);
+        let last = (position + output.len() / channels).min(self.silence + self.source_frames);
+        if first < last {
+            output[(first - position) * channels..(last - position) * channels].copy_from_slice(
+                &pcm.samples()[(first - self.silence) * channels..(last - self.silence) * channels],
+            );
+        }
+    }
+}
+
 struct Stream {
     samples: Vec<i16>,
     half_frames: usize,
-    decoder_position: usize,
-    decoder_ready: bool,
-    end: i64,
+    decoder: Decoder,
     loop_start: i64,
     next_fill: usize,
     previous_cursor: usize,
@@ -154,27 +258,13 @@ struct Stream {
 
 impl Stream {
     fn fill(&mut self, pcm: &Pcm, offset: usize, frames: usize) -> Result<usize> {
-        let frame_bytes = i64::from(pcm.channels()) * 2;
-        if self.end != -1
-            && (self.end < self.decoder_position as i64
-                || self.end.checked_mul(frame_bytes).is_none())
-        {
-            return Err(Error::new(0, "流式声音终点早于预取位置或超出字节范围"));
-        }
-        let limit = if self.end == -1 {
-            pcm.frames()
-        } else {
-            self.end.min(pcm.frames() as i64) as usize
-        };
-        let count = frames.min(limit - self.decoder_position);
         let channels = pcm.channels() as usize;
         let output = &mut self.samples[offset * channels..(offset + frames) * channels];
-        let start = self.decoder_position * channels;
-        output[..count * channels].copy_from_slice(&pcm.samples()[start..start + count * channels]);
-        output[count * channels..].fill(0);
-        self.decoder_position += count;
-        self.decoder_ready &= self.decoder_position < limit;
-        Ok(count)
+        output.fill(0);
+        let (silence, source) = self.decoder.take(pcm, frames)?;
+        output[silence * channels..(silence + source.len()) * channels]
+            .copy_from_slice(&pcm.samples()[source.start * channels..source.end * channels]);
+        Ok(silence + source.len())
     }
 
     fn prefill(&mut self, pcm: &Pcm) -> Result<()> {
@@ -187,8 +277,7 @@ impl Stream {
         self.previous_cursor = 0;
         self.accumulated = 0;
         self.prefetched_loops = 0;
-        self.decoder_position = 0;
-        self.decoder_ready = true;
+        self.decoder.rewind();
         self.prefill(pcm)
     }
 
@@ -212,16 +301,16 @@ impl Stream {
             if self.loop_start < 0 || self.loop_start > pcm.frames() as i64 {
                 return Err(Error::new(0, "流式声音循环起点超出来源范围"));
             }
-            let limit = if self.end == -1 {
+            let limit = if self.decoder.end == -1 {
                 pcm.frames() as i64
             } else {
-                self.end.min(pcm.frames() as i64)
+                self.decoder.end.min(pcm.frames() as i64)
             };
             if self.loop_start >= limit {
                 return Err(Error::new(0, "流式声音循环无法继续预取"));
             }
-            self.decoder_position = self.loop_start as usize;
-            self.decoder_ready = true;
+            self.decoder.position = self.loop_start as usize;
+            self.decoder.ready = true;
             self.prefetched_loops = self.prefetched_loops.wrapping_add(1);
         }
         self.next_fill = (self.next_fill + 1) % 8;
@@ -236,10 +325,10 @@ impl Stream {
         self.previous_cursor = cursor;
         if self.prefetched_loops != 0 {
             // 基线归一式把设备字节差与原始采样帧端点组合，且每次只归一一遍。
-            let limit = if self.end == -1 {
-                self.decoder_position as i64 * i64::from(frame_bytes)
+            let limit = if self.decoder.end == -1 {
+                self.decoder.position as i64 * i64::from(frame_bytes)
             } else {
-                self.end
+                self.decoder.end
             };
             if self.accumulated >= limit {
                 self.accumulated = self
@@ -248,10 +337,9 @@ impl Stream {
                 self.prefetched_loops -= 1;
             }
         }
-        if read_sum == 0 && self.accumulated >= pcm.samples().len() as i64 * 2 {
+        if read_sum == 0 && self.accumulated >= i64::from(self.decoder.length_bytes(pcm)) {
             self.next_fill = 0;
-            self.decoder_position = 0;
-            self.decoder_ready = true;
+            self.decoder.rewind();
             self.prefill(pcm)?;
             self.accumulated = 0;
             self.previous_cursor = 0;
@@ -266,9 +354,67 @@ mod tests {
     use super::*;
 
     #[test]
+    fn buffered_silence_repeats_with_cached_audio_and_is_consumed_by_explicit_refills() {
+        let pcm = Pcm::new(10, 2, vec![1, 2, 3, 4, 5, 6]).unwrap();
+        let mut voice = Playback::new(&pcm, false, 200).unwrap();
+        voice.start(&pcm, 2, [0, -1]).unwrap();
+        let mut output = [0; 20];
+        voice.read(&pcm, &mut output).unwrap();
+        assert_eq!(
+            output,
+            [0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 0, 0, 0, 0, 1, 2, 3, 4, 5, 6]
+        );
+        assert_eq!(voice.completed, 2);
+        assert!(!voice.playing);
+        voice.start(&pcm, 1, [0, -1]).unwrap();
+        voice.read(&pcm, &mut output[..2]).unwrap();
+        assert_eq!(&output[..2], [0, 0]);
+        voice.start(&pcm, 1, [0, -1]).unwrap();
+        voice.read(&pcm, &mut output[..10]).unwrap();
+        assert_eq!(&output[..10], [1, 2, 3, 4, 5, 6, 0, 0, 0, 0]);
+        voice.stop(&pcm).unwrap();
+        voice.start(&pcm, 1, [0, -1]).unwrap();
+        voice.read(&pcm, &mut output[..10]).unwrap();
+        assert_eq!(&output[..10], [1, 2, 3, 4, 5, 6, 0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn large_silence_uses_wrapped_lengths_and_signed_conversion_without_materializing_padding() {
+        let pcm = Pcm::new(44_100, 1, vec![7]).unwrap();
+        let mut voice = Playback::new(&pcm, true, u32::MAX).unwrap();
+        assert_eq!(voice.buffered.frames, 429_496_686);
+        voice.start(&pcm, 1, [0, -1]).unwrap();
+        let mut output = [1; 3];
+        voice.read(&pcm, &mut output).unwrap();
+        assert_eq!(output, [0; 3]);
+        let pcm = Pcm::new(u32::MAX, 1, vec![9]).unwrap();
+        let mut voice = Playback::new(&pcm, true, u32::MAX).unwrap();
+        voice.start(&pcm, 1, [0, -1]).unwrap();
+        voice.read(&pcm, &mut output).unwrap();
+        assert_eq!(output, [9, 0, 0]);
+    }
+
+    #[test]
+    fn silence_selects_streaming_and_stops_do_not_restore_consumed_padding() {
+        let short = Pcm::new(10, 1, (1..=23).collect()).unwrap();
+        assert!(Playback::new(&short, false, 1700).unwrap().stream.is_none());
+        assert!(Playback::new(&short, false, 1800).unwrap().stream.is_some());
+        let pcm = Pcm::new(10, 1, (1..=83).collect()).unwrap();
+        let mut voice = Playback::new(&pcm, false, 5000).unwrap();
+        voice.stop(&pcm).unwrap();
+        voice.start(&pcm, 1, [0, -1]).unwrap();
+        let mut output = [0; 12];
+        voice.read(&pcm, &mut output).unwrap();
+        assert_eq!(output, [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2]);
+        voice.start(&pcm, 1, [0, -1]).unwrap();
+        voice.read(&pcm, &mut output).unwrap();
+        assert_eq!(output, pcm.samples()[..12]);
+    }
+
+    #[test]
     fn buffered_stereo_repeats_the_whole_source_and_empty_pcm_terminates() {
         let pcm = Pcm::new(2, 2, (0..16).collect()).unwrap();
-        let mut voice = Playback::new(&pcm, false).unwrap();
+        let mut voice = Playback::new(&pcm, false, 0).unwrap();
         voice.start(&pcm, 2, [3, 5]).unwrap();
         let mut output = [0; 34];
         voice.read(&pcm, &mut output).unwrap();
@@ -286,7 +432,7 @@ mod tests {
         assert_eq!(&output[32..], [0, 1]);
         voice.stop(&pcm).unwrap();
         let empty = Pcm::new(2, 2, vec![]).unwrap();
-        voice = Playback::new(&empty, false).unwrap();
+        voice = Playback::new(&empty, false, 0).unwrap();
         voice.start(&empty, 0, [0, -1]).unwrap();
         voice.read(&empty, &mut output).unwrap();
         assert_eq!(output, [0; 34]);
@@ -296,7 +442,7 @@ mod tests {
     #[test]
     fn streaming_ends_on_buffer_consumption_after_the_partial_final_block() {
         let pcm = Pcm::new(10, 2, (1..=166).collect()).unwrap();
-        let mut voice = Playback::new(&pcm, false).unwrap();
+        let mut voice = Playback::new(&pcm, false, 0).unwrap();
         voice.start(&pcm, 1, [0, -1]).unwrap();
         let mut output = [0; 166];
         voice.read(&pcm, &mut output).unwrap();
@@ -319,7 +465,7 @@ mod tests {
     #[test]
     fn streaming_count_changes_and_pause_keep_the_prefetched_loop_samples() {
         let pcm = Pcm::new(10, 1, (1..=83).collect()).unwrap();
-        let mut voice = Playback::new(&pcm, false).unwrap();
+        let mut voice = Playback::new(&pcm, false, 0).unwrap();
         voice.start(&pcm, 2, [5, 60]).unwrap();
         let mut first = [0; 25];
         voice.read(&pcm, &mut first).unwrap();
@@ -351,9 +497,9 @@ mod tests {
     #[test]
     fn invalid_streaming_blocks_and_nonprogressing_ranges_return_diagnostics() {
         let unaligned = Pcm::new(3, 1, vec![1; 20]).unwrap();
-        assert!(Playback::new(&unaligned, false).is_err());
+        assert!(Playback::new(&unaligned, false, 0).is_err());
         let pcm = Pcm::new(10, 1, vec![1; 83]).unwrap();
-        let mut voice = Playback::new(&pcm, false).unwrap();
+        let mut voice = Playback::new(&pcm, false, 0).unwrap();
         voice.start(&pcm, 0, [0, 1]).unwrap();
         assert!(voice.read(&pcm, &mut [0; 5]).is_err());
         voice.stop(&pcm).unwrap();

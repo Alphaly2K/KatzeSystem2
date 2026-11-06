@@ -97,6 +97,7 @@ impl SoundChannel {
         self.parameters
     }
 
+    /// 装载时指定的原始前置静音毫秒数；不改变源 PCM 或时长查询。
     pub fn load_options(&self) -> u32 {
         self.load_options
     }

@@ -148,6 +148,34 @@ fn native_loads_preserve_unsigned_options_and_reach_all_four_group_variants() {
             let empty = sound.channel(7).unwrap();
             assert!(empty.pcm().is_none());
             assert_eq!(empty.load_options(), 16);
+            let source = sound.channel(5).unwrap().pcm().unwrap().samples()[..3].to_vec();
+            let play = Command {
+                target: 1,
+                sender: 0,
+                code: 183,
+                data: [5, 1, 0],
+            };
+            rt.dispatch_command(0, play).unwrap();
+            let output = rt
+                .object_mut(1)
+                .unwrap()
+                .audio_state_mut()
+                .unwrap()
+                .read_channel(5, 44_808)
+                .unwrap();
+            assert!(output.samples()[..44_805].iter().all(|sample| *sample == 0));
+            assert_eq!(&output.samples()[44_805..], source);
+            rt.dispatch_command(0, Command { code: 185, ..play })
+                .unwrap();
+            rt.dispatch_command(0, play).unwrap();
+            let output = rt
+                .object_mut(1)
+                .unwrap()
+                .audio_state_mut()
+                .unwrap()
+                .read_channel(5, 3)
+                .unwrap();
+            assert_eq!(output.samples(), source);
         }
     }
 }
