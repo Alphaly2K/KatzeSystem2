@@ -10,6 +10,52 @@ impl Scene {
         offset: usize,
         numbers: &mut State,
     ) -> Result<bool> {
+        if args.first().is_some_and(|name| name == b"strcmp") {
+            let Some(destination) = args.get(1) else {
+                return Ok(true);
+            };
+            let destination = if destination.is_empty() {
+                0
+            } else {
+                self.interpreter.eval(destination, numbers)?
+            };
+            let text = |index| {
+                let bytes = args.get(index).map_or(&[][..], Vec::as_slice);
+                let end = bytes
+                    .iter()
+                    .position(|&byte| byte == 0)
+                    .unwrap_or(bytes.len());
+                &bytes[..end]
+            };
+            let value = text(2).cmp(text(3)) as i32;
+            if let Some(slot) = numbers.shared.get_mut(destination as usize) {
+                *slot = value;
+            }
+            return Ok(true);
+        }
+        if args.first().is_some_and(|name| name == b"clearstrvar") {
+            let Some(first) = args.get(1) else {
+                return Ok(true);
+            };
+            let first = if first.is_empty() {
+                0
+            } else {
+                self.interpreter.eval(first, numbers)?
+            };
+            let last = match args.get(2) {
+                Some(bytes) if !bytes.is_empty() => self.interpreter.eval(bytes, numbers)?,
+                Some(_) => 0,
+                None => first,
+            };
+            if last == i32::MAX {
+                return Err(Error::new(offset, "FES 字符串清理结束编号会溢出"));
+            }
+            numbers.strings.retain(|&index, _| {
+                let index = index as i32;
+                index < first || index > last
+            });
+            return Ok(true);
+        }
         if args.first().is_none_or(|name| name != b"strvar") {
             return Ok(false);
         }

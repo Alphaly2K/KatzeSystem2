@@ -472,6 +472,8 @@ Scene 已连接全局 `baseimg [object]` 的图像背景与 PLANE 截图请求�
 
 FES `strvar index text [integer ...]` 已接入共享 `expression::State::strings`，支持原始字节、最多四个整数格式参数及省略文本时清空；`strvar get index source` 按编号复制，get 忽略 ASCII 大小写。主体、系统块和对象事件共用当前表达式上下文与字符串表。格式、容量、缺参及首零规则见[运行时字符串写入](fes.md#运行时字符串写入)。
 
+同一运行路径支持 `strcmp destination left right` 与 `clearstrvar first [last]`。比较按无符号原始字节顺序将 −1／0／1 写入共享数值槽，不对正文或额外参数求值；清理删除含两端的有符号编号范围，省略末项时只删除一项。缺参、空参数及循环溢出的约束见[字符串比较与清理](fes.md#字符串比较与清理)。
+
 `Runtime::dispatch_fes_event(owner, &mut scene, target, event)` 分派控制器输入事件。`target` 为可选 `ObjectReference`；事件编号为 0～21，其中 0／1／2／3／4／5／8／21 分别对应 FOCUS／UNFOCUS／PUSH_L／PUSH_R／RELEASE_L／RELEASE_R／SCRL_P／TOUCH，其余编号只更新系统输入命名值。命中目标时，系统按下、方向释放和触碰值使用对象句柄；无目标为 −1，缺失目标跳过写入，左右点击释放仍为零。返回 `None` 表示预算耗尽，须以相同目标和编号续跑；`Some(bool)` 表示完成，布尔值只取对象自身处理器是否存在，默认事件组单独执行时为 false。该入口执行对象命令并可加入运动，不在分派末尾自动刷新媒体，不修改任务时钟或系统帧。局部 wait／decode 结束当前处理片段，decode 的媒体提交请求留到普通更新；DEFAULT 片段结束后仍可进入对象自身处理器。exit 另将通知排队；主等待、调用及 next 规则与解释器一致。失败时保留游标，普通更新、系统块和其他对象事件须待本次完成。
 
 `Services::dispatch_control_event(scene, target, event, budget)` 接收滑动控件的同步通知，默认委托普通事件入口。运行时在媒体命令返回前完成事件脚本，并保留回调对当前场景的修改；`decode` 等待中的主流程位置及调用栈在处理器结束后恢复。该入口不会自动刷新媒体，也不开放事件处理器内部再次分派事件。公开 `Runtime::dispatch_fes_event` 继续要求当前推进已经完成。
