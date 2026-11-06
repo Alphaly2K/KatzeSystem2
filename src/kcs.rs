@@ -3,6 +3,7 @@ use crate::{Error, Result, Step, read};
 use std::collections::BTreeMap;
 
 mod data;
+mod debug;
 mod host;
 mod map_data;
 mod matrix;

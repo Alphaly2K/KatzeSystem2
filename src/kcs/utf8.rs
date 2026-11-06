@@ -2,6 +2,49 @@ use super::{Interpreter, NativeReturn};
 use crate::{Error, Result, read};
 use std::collections::BTreeMap;
 
+pub(super) fn decode_units(source: &[u8], terminal_sentinel: bool) -> Result<Vec<u16>> {
+    let mut units = Vec::new();
+    let mut position = 0;
+    while let Some(&byte) = source.get(position) {
+        if byte == 0 {
+            break;
+        }
+        // 消息入口还将末尾单个 FF 作为哨兵；普通转换只识别 FF FF。
+        if byte == 0xff
+            && (source.get(position + 1) == Some(&0xff)
+                || terminal_sentinel && position + 1 == source.len())
+        {
+            units.push(0xffff);
+            position += (source.len() - position).min(2);
+            continue;
+        }
+        let leading = byte.leading_ones();
+        if leading == 1 {
+            break;
+        }
+        let width = if leading >= 6 {
+            1
+        } else {
+            leading.max(1) as usize
+        };
+        if (1..width.saturating_sub(1)).any(|index| {
+            source
+                .get(position + index)
+                .is_none_or(|byte| byte & 0xc0 != 0x80)
+        }) {
+            break;
+        }
+        let bytes = source
+            .get(position..position + width)
+            .ok_or_else(|| Error::new(position, "UTF-8 字符超出输入范围"))?;
+        let character = String::from_utf8_lossy(bytes).chars().next().unwrap();
+        // 基线逐字符转换后只取第一个 UTF-16 单元，包括非 BMP 字符的高代理单元。
+        units.push(character.encode_utf16(&mut [0; 2])[0]);
+        position += width;
+    }
+    Ok(units)
+}
+
 fn byte(vm: &Interpreter, address: u32) -> Result<u8> {
     Ok(vm.read(address, 1)?[0])
 }

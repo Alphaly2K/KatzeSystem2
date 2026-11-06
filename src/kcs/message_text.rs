@@ -1,52 +1,23 @@
 use super::{Interpreter, NativeReturn, strings};
-use crate::{Error, Result, message::TextEncoding};
+use crate::{Result, message::TextEncoding};
 
 fn characters(source: &[u8], encoding: TextEncoding) -> Result<String> {
+    if encoding == TextEncoding::Unicode {
+        return Ok(super::utf8::decode_units(source, true)?
+            .into_iter()
+            .map(|unit| char::from_u32(u32::from(unit)).unwrap_or('\u{fffd}'))
+            .collect());
+    }
     let mut text = String::new();
     let mut position = 0;
     while let Some(&byte) = source.get(position) {
-        let (code, width) = if encoding == TextEncoding::Cp932 {
-            let width = strings::character_width(&source[position..]);
-            let code = if byte == 0xff {
-                0xffff
-            } else if width == 2 {
-                u32::from(u16::from_be_bytes([byte, source[position + 1]]))
-            } else {
-                u32::from(byte)
-            };
-            (code, width)
-        } else if byte == 0xff && (position + 1 == source.len() || source[position + 1] == 0xff) {
-            (0xffff, (source.len() - position).min(2))
+        let width = strings::character_width(&source[position..]);
+        let code = if byte == 0xff {
+            0xffff
+        } else if width == 2 {
+            u32::from(u16::from_be_bytes([byte, source[position + 1]]))
         } else {
-            let leading = byte.leading_ones();
-            if leading == 1 {
-                break;
-            }
-            let width = if leading >= 6 {
-                1
-            } else {
-                leading.max(1) as usize
-            };
-            if (1..width.saturating_sub(1)).any(|index| {
-                source
-                    .get(position + index)
-                    .is_none_or(|byte| byte & 0xc0 != 0x80)
-            }) {
-                break;
-            }
-            let bytes = source
-                .get(position..position + width)
-                .ok_or_else(|| Error::new(position, "UTF-8 消息字符超出输入范围"))?;
-            let character = String::from_utf8_lossy(bytes).chars().next().unwrap();
-            // 原入口只保留转换结果的第一个 UTF-16 单元，输出时独立代理单元成为替代字符。
-            (
-                if character.len_utf16() == 2 {
-                    0xfffd
-                } else {
-                    character as u32
-                },
-                width,
-            )
+            u32::from(byte)
         };
         text.push(char::from_u32(code).unwrap());
         position += width;

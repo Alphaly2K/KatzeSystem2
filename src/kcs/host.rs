@@ -41,6 +41,8 @@ pub struct MenuItemRequest {
 pub struct HostState {
     pub configured_shared_slots: u32,
     pub debug_messages: Vec<Vec<u8>>,
+    /// 普通 1040 输出的 UTF-16 调试文字，包含末尾换行。
+    pub unicode_debug_messages: Vec<Vec<u16>>,
     pub menu_item_requests: Vec<MenuItemRequest>,
     pub task_time: u32,
     pub task_origin: u32,
@@ -401,7 +403,7 @@ pub(crate) fn call_native(
     }
     let count = match index {
         1 | 6 | 17 | 18 | 25 | 26 | 40 | 47 | 48 | 71 | 207 | 209 | 210 | 212 | 213 | 278 | 319
-        | 75 | 393 | 420 | 421 | 516 | 898 | 899 => 1,
+        | 75 | 393 | 420 | 421 | 516 | 898 | 899 | 1040 => 1,
         8
         | 13..=16
         | 19..=24
@@ -449,10 +451,7 @@ pub(crate) fn call_native(
             }
             NativeReturn::Continue
         }
-        1 => {
-            host.debug_messages.push(strings::format(vm, args[0], 0)?);
-            NativeReturn::Continue
-        }
+        1 | 1040 => return super::debug::call(host, index, args[0], vm),
         6 => NativeReturn::Value(args[0]),
         393 => {
             if host.menu_item_requests.len() >= read::MAX_ITEMS {
