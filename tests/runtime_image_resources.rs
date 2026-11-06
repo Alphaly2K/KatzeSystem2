@@ -439,7 +439,12 @@ fn resource_transforms_keep_return_stack_and_shared_update_flag() {
         runtime.release_image_resource_reference(handle).unwrap();
         assert!(runtime.image_resource_updated(handle, false).is_err());
     }
-    for (native, args) in [(713, vec![50, 50, 50]), (723, vec![0]), (727, vec![0])] {
+    for (native, args) in [
+        (713, vec![50, 50, 50]),
+        (723, vec![0]),
+        (726, vec![1, 1]),
+        (727, vec![0]),
+    ] {
         let mut code = Vec::new();
         call(&mut code, 733, &[1, 1]);
         ins(&mut code, 0x26, &[0]);
@@ -469,6 +474,109 @@ fn resource_transforms_keep_return_stack_and_shared_update_flag() {
         runtime.image_resource(handle).unwrap().surface().pixels(),
         [255, 255, 255, 0]
     );
+}
+
+#[test]
+fn resource_blur_keeps_two_expansion_stages_and_the_first_geometry_cache() {
+    use katze_system2::graphics::{ImageList, ImageListProperties, Rect};
+
+    struct BlurSource;
+    impl ResourceServices for BlurSource {
+        fn resolve(&mut self, _: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+            Ok(name.to_vec())
+        }
+
+        fn read(&mut self, name: &[u8], _: ResourceMode) -> Result<Option<Vec<u8>>> {
+            if name != b"blur.hg3" {
+                return Ok(None);
+            }
+            let mut bytes = blob();
+            for (field, value) in [(3, 3u32), (4, 2), (5, 7), (6, 5)] {
+                bytes[36 + field * 4..40 + field * 4].copy_from_slice(&value.to_le_bytes());
+            }
+            Ok(Some(bytes))
+        }
+    }
+
+    for budget in [1, 4096] {
+        let mut code = Vec::new();
+        call(&mut code, 710, &[64]);
+        ins(&mut code, 0x26, &[0]);
+        ins(&mut code, 0x25, &[0xdead_beef]);
+        call(&mut code, 65, &[]);
+        handle_call(&mut code, 736, &[0, 0, 1, 1, 0xff1e_64c8]);
+        handle_call(&mut code, 726, &[1, 1]);
+        call(&mut code, 65, &[]);
+        handle_call(&mut code, 726, &[0, 0]);
+        call(&mut code, 65, &[]);
+        call(&mut code, 726, &[0]);
+        call(&mut code, 65, &[]);
+        let mut runtime = runtime(&code, budget);
+        runtime.set_resources(BlurSource);
+        let task = runtime.create(0, kind::ORDINARY, b"blur", b"").unwrap();
+        runtime
+            .object_mut(task)
+            .unwrap()
+            .interpreter_mut()
+            .unwrap()
+            .write(64, b"blur:7.hg3\0")
+            .unwrap();
+        runtime.update(0, 1).unwrap();
+        let handle = word(vm(&runtime, task), 0);
+        assert!(!runtime.image_resource_updated(handle, true).unwrap());
+        for (frame, bounds) in [
+            (1, Rect::from_xywh(9, 7, 3, 3)),
+            (2, Rect::from_xywh(8, 6, 5, 5)),
+        ] {
+            runtime.update(frame, 1).unwrap();
+            assert!(runtime.image_resource_updated(handle, true).unwrap());
+            assert_eq!(
+                vm(&runtime, task).stack_bytes(),
+                0xdead_beefu32.to_le_bytes()
+            );
+            let image = runtime.image_resource(handle).unwrap();
+            assert_eq!(image.info().size, [5; 2]);
+            assert_eq!(image.info().offset, [1, 0]);
+            assert_eq!(image.info().canvas_size, [7, 5]);
+            assert_eq!(image.info().base, [4, 5]);
+            assert_eq!(image.attribute(1), Some([9, 8, 7, 6, 5]));
+            for y in 0..5 {
+                for x in 0..5 {
+                    let alpha = match (x, y) {
+                        (2, 2) => 64,
+                        (1 | 3, 2) | (2, 1 | 3) => 32,
+                        (1 | 3, 1 | 3) => 16,
+                        _ => 0,
+                    };
+                    assert_eq!(
+                        image.surface().pixel(x, y),
+                        Some(if alpha == 0 {
+                            0
+                        } else {
+                            alpha << 24 | 0x1e_64c8
+                        })
+                    );
+                }
+            }
+            let mut list = ImageList::new(999, [32; 2], runtime.images_mut()).unwrap();
+            list.update(runtime.images_mut()).unwrap();
+            list.set_resource(
+                0,
+                handle,
+                ImageListProperties {
+                    position: [10.; 2],
+                    base_point: [3., 4.],
+                    ..Default::default()
+                },
+                runtime.images_mut(),
+            )
+            .unwrap();
+            assert_eq!(list.dirty_rectangles().collect::<Vec<_>>(), [bounds]);
+            list.release(runtime.images_mut()).unwrap();
+        }
+        runtime.update(3, 1).unwrap();
+        assert!(!runtime.image_resource_updated(handle, true).unwrap());
+    }
 }
 
 #[test]

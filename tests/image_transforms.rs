@@ -81,3 +81,48 @@ fn rgb_percentages_preserve_alpha_and_wrap_before_clamping() {
     image.adjust_rgb_percent([0x8000_0000, u32::MAX, 0x8000_0000]);
     assert_eq!(image.surface().pixels(), [0, 255, 0, 64, 0, 255, 0, 127]);
 }
+
+#[test]
+fn blur_keeps_transparent_colors_and_integer_rounding_between_passes() {
+    let make = |pixels| {
+        Image::from_frame(DecodedFrame {
+            id: 1,
+            info: StandardInfo {
+                size: [3, 1],
+                bit_depth: 32,
+                offset: [0; 2],
+                canvas_size: [3, 1],
+                reserved: 1,
+                base: [-4, 5],
+            },
+            pixels,
+            attributes: [(1, [1, 2, 3, 4, 5])].into(),
+        })
+        .unwrap()
+    };
+    let mut image = make(vec![20, 40, 60, 255, 200, 180, 160, 0, 100, 80, 60, 128]);
+    assert!(image.blur([1, 0]).unwrap());
+    assert_eq!(
+        image.surface().pixels(),
+        [20, 40, 60, 191, 55, 57, 60, 96, 99, 79, 59, 96]
+    );
+    assert_eq!(image.info().base, [-4, 5]);
+    assert_eq!(image.attribute(1), Some([1, 2, 3, 4, 5]));
+
+    let mut image = make(vec![100, 80, 60, 1, 200, 200, 200, 0, 0, 0, 0, 0]);
+    image.blur([1, 1]).unwrap();
+    assert_eq!(
+        image.surface().pixels(),
+        [98, 78, 58, 1, 100, 80, 60, 0, 0, 0, 0, 0]
+    );
+    let mut clamped = image.clone();
+    image.blur([300, i32::MIN]).unwrap();
+    clamped.blur([255, 0]).unwrap();
+    assert_eq!(image, clamped);
+
+    let mut invalid = self::image();
+    let before = invalid.clone();
+    assert!(invalid.blur([1, 1]).is_err());
+    assert_eq!(invalid, before);
+    assert!(!Image::new([0, 3]).unwrap().blur([1, 1]).unwrap());
+}

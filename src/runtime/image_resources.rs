@@ -160,7 +160,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             711 | 721 => 1,
             722 | 723 | 727 | 728 | 737 => 2,
             713 => 4,
-            712 | 714 | 715 | 717..=720 => 3,
+            712 | 714 | 715 | 717..=720 | 726 => 3,
             724 => 7,
             736 => 6,
             _ => unreachable!(),
@@ -200,6 +200,28 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         let resource = self.resources.images.resource_entry(handle)?;
         let image_handle = resource.image;
         let has_source_layer = resource.has_source_layer;
+        if index == 726 {
+            if !has_source_layer {
+                return Err(Error::new(
+                    vm.pc,
+                    "该图像资源操作需要来源图层，空白资源的原入口会访问空容器",
+                ));
+            }
+            let radius = [
+                read::u32_at(arguments, 4)? as i32,
+                read::u32_at(arguments, 8)? as i32,
+            ];
+            let image = self.resources.images.get_mut(image_handle)?;
+            image.expand_for_blur(radius)?;
+            let size = image.info().size;
+            let offset = image.info().offset;
+            image.blur(radius)?;
+            let geometry = &mut self.resources.images.resource_entry_mut(handle)?.geometry;
+            geometry.size = size;
+            geometry.offset = offset;
+            self.resources.images.resource_entry_mut(handle)?.updated = true;
+            return Ok(NativeReturn::Continue);
+        }
         if matches!(index, 713 | 723 | 727 | 737) {
             if index != 737 && !has_source_layer {
                 return Err(Error::new(

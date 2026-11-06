@@ -5,6 +5,7 @@ use crate::resource::ResourceMode;
 use crate::{Error, HandleAllocator, Result, hg3, read};
 use std::collections::BTreeMap;
 
+mod blur;
 mod resource;
 mod transform;
 mod window;
