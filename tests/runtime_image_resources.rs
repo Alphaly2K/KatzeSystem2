@@ -472,6 +472,97 @@ fn resource_transforms_keep_return_stack_and_shared_update_flag() {
 }
 
 #[test]
+fn difimage_references_hold_resources_copy_cached_base_and_query_current_attributes() {
+    use katze_system2::{
+        fes,
+        runtime::fes::{ObjectState, Objects},
+    };
+    let mut code = Vec::new();
+    call(&mut code, 710, &[64]);
+    ins(&mut code, 0x26, &[0]);
+    call(&mut code, 65, &[]);
+    handle_call(&mut code, 720, &[9, 10]);
+    ins(&mut code, 0x2d, &[]);
+    call(&mut code, 65, &[]);
+    handle_call(&mut code, 711, &[]);
+    call(&mut code, 65, &[]);
+    let mut runtime = runtime(&code, 1);
+    runtime.set_resources(Files(Requests::default()));
+    let task = runtime.create(0, kind::ORDINARY, b"source", b"").unwrap();
+    runtime
+        .object_mut(task)
+        .unwrap()
+        .interpreter_mut()
+        .unwrap()
+        .write(64, b"art:7\0")
+        .unwrap();
+    runtime.update(0, 1).unwrap();
+    let resource = word(vm(&runtime, task), 0);
+    let mut objects = Objects::new(runtime.host().handle_allocator()).unwrap();
+    runtime.numbers_mut().shared.resize(5, 0);
+    let handles = objects
+        .define(&fes::ObjectDefinition {
+            kind: "DIFIMAGE",
+            name: "item".into(),
+            banks: 2,
+        })
+        .unwrap();
+    let mut interpreter =
+        fes::Interpreter::new(fes::Program::from_text(b"#START\nwait 999\n").unwrap()).unwrap();
+    objects.publish_bindings(&mut interpreter);
+    let line = |text: String| fes::Line {
+        offset: 0,
+        bytes: text.into_bytes(),
+    };
+    for round in 0..2 {
+        if round == 1 {
+            runtime.update(1, 1).unwrap();
+        }
+        runtime
+            .dispatch_fes_reference(
+                &mut objects,
+                &mut interpreter,
+                &line(format!("item refex {resource}")),
+            )
+            .unwrap();
+        for &handle in &handles {
+            let object = objects.get(handle).unwrap();
+            let ObjectState::DifImage(state) = &object.state else {
+                panic!()
+            };
+            assert_eq!(state.resource_handle(), Some(resource));
+            assert_eq!(state.base.base_point, [3., 4.]);
+            assert!(runtime.images().get(object.image_handle().unwrap()).is_ok());
+        }
+    }
+    runtime
+        .dispatch_fes_image_attributes(
+            &objects,
+            &mut interpreter,
+            &line("item attr 1 0 1 2 3 4".into()),
+        )
+        .unwrap();
+    assert_eq!(&runtime.numbers().shared[..5], &[9, 8, 7, 6, 5]);
+    runtime.update(2, 1).unwrap();
+    runtime.destroy(task).unwrap();
+    assert!(runtime.image_resource(resource).is_ok());
+    runtime
+        .dispatch_fes_reference(&mut objects, &mut interpreter, &line("item refex".into()))
+        .unwrap();
+    assert!(runtime.image_resource(resource).is_err());
+    for &handle in &handles {
+        let object = objects.get(handle).unwrap();
+        let ObjectState::DifImage(state) = &object.state else {
+            panic!()
+        };
+        assert_eq!(state.resource_handle(), None);
+        assert_eq!(object.image_handle(), None);
+        assert_eq!(state.base.base_point, [3., 4.]);
+    }
+    runtime.release_fes_image_references(&mut objects).unwrap();
+}
+
+#[test]
 fn resource_controls_preserve_alpha_cache_geometry_pixel_origin_and_return_stack() {
     for budget in [1, 4096] {
         for width in [0, 2] {

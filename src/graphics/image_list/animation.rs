@@ -156,18 +156,18 @@ impl ImageList {
         }
         let mut pass = self.animation_pass.take().unwrap();
         while let Some(&key) = pass.keys.get(pass.index) {
+            let first = !pass.started;
+            if first {
+                self.refresh_resource(key, images)?;
+                pass.started = true;
+            }
             let entry = self.entries.get_mut(&key).unwrap();
             entry.history = accumulate(
                 entry.history,
-                images.list_bounds(
-                    entry.image,
-                    entry.properties.position,
-                    entry.properties.base_point,
-                )?,
+                entry.bounds(images, entry.properties.base_point)?,
                 entry.clip,
             );
-            let result = if pass.restart && !pass.started {
-                pass.started = true;
+            let result = if pass.restart && first {
                 match random.as_mut() {
                     Some(random) => entry.animation.restart_with_random(
                         budget,
@@ -206,11 +206,7 @@ impl ImageList {
                 let previous = entry.history;
                 entry.history = accumulate(
                     entry.history,
-                    images.list_bounds(
-                        entry.image,
-                        entry.properties.position,
-                        entry.properties.base_point,
-                    )?,
+                    entry.bounds(images, entry.properties.base_point)?,
                     entry.clip,
                 );
                 let next = entry.history;
@@ -218,6 +214,7 @@ impl ImageList {
                 self.mark(next);
             }
             pass.index += 1;
+            pass.started = false;
         }
         Ok(true)
     }

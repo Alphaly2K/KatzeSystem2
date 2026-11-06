@@ -115,6 +115,12 @@ fn capture_uses_saved_view_depth_bounds_crop_and_replaces_sources() {
     command(&mut rt, &mut objects, "item refcap 10 20");
     rt.update_fes_object(0, &mut objects, handle).unwrap();
     let source = objects.get(handle).unwrap().image_handle().unwrap();
+    let ObjectState::DifImage(state) = &objects.get(handle).unwrap().state else {
+        panic!()
+    };
+    let resource = state.resource_handle().unwrap();
+    assert!(rt.images().get(resource).is_err());
+    assert_eq!(rt.image_resource(resource).unwrap().info().size, [4, 3]);
     let snapshot = rt.images().get(source).unwrap();
     assert_eq!(snapshot.info().size, [4, 3]);
     assert_eq!(snapshot.info().canvas_size, [0; 2]);
@@ -146,6 +152,7 @@ fn capture_uses_saved_view_depth_bounds_crop_and_replaces_sources() {
     rt.update_fes_object(0, &mut objects, handle).unwrap();
     let second = objects.get(handle).unwrap().image_handle().unwrap();
     assert_ne!(source, second);
+    assert!(rt.image_resource(resource).is_err());
     assert!(rt.images().get(source).is_err());
     assert!(
         rt.images()
@@ -174,8 +181,8 @@ fn capture_uses_saved_view_depth_bounds_crop_and_replaces_sources() {
         )
         .unwrap()
     );
-    rt.update_fes_object(0, &mut objects, handle).unwrap();
     assert_eq!(objects.get(handle).unwrap().image_handle(), None);
+    assert!(rt.images().get(second).is_ok());
     rt.remove_fes_object(0, &mut objects, handle).unwrap();
     assert!(rt.images().get(second).is_err());
     rt.images_mut().release(held).unwrap();

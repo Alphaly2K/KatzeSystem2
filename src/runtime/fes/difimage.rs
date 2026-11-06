@@ -8,9 +8,14 @@ use crate::{Error, Result};
 pub struct DifImageState {
     pub base: crate::fes::CImageState,
     pub(super) capture: Option<[u32; 2]>,
+    pub(super) resource: Option<u32>,
 }
 
 impl DifImageState {
+    /// 当前持有的独立图像资源；与普通图像包装句柄分别使用。
+    pub fn resource_handle(&self) -> Option<u32> {
+        self.resource
+    }
     /// 原始无符号深度范围；多次请求覆盖前一组范围。
     pub fn pending_capture(&self) -> Option<[u32; 2]> {
         self.capture
@@ -29,28 +34,32 @@ impl<F: ObjectFactory> Store<'_, F> {
             unreachable!()
         };
         if let Some(range) = state.capture.take() {
-            if let Some(source) = self.capture_fes_image(owner, range)? {
+            if let Some(source) = self.capture_fes_image(range)? {
                 let object = objects.get_mut(handle).unwrap();
-                let previous = object.image.replace(source);
-                object.images.push(source);
+                let ObjectState::DifImage(state) = &mut object.state else {
+                    unreachable!()
+                };
+                let previous = state.resource.replace(source);
+                object.image = Some(self.resources.images.resource_entry(source)?.image);
                 object.image_offset = [0.; 2];
-                object.state.image_mut().unwrap().base_point = [0.; 2];
+                state.base.base_point = [0.; 2];
                 if let Some(previous) = previous {
-                    self.resources.images.release(previous)?;
-                    object.images.retain(|&image| image != previous);
-                    for record in &mut objects.update_order {
-                        if record.image == Some(previous) {
-                            record.image = None;
-                        }
-                    }
+                    self.resources.images.release_resource_reference(previous)?;
                 }
                 objects.invalidate(handle)?;
             }
         }
         let object = objects.get_mut(handle).unwrap();
         if let Some(filter) = object.state.image_mut().unwrap().take_filter() {
-            if let Some(source) = object.image {
+            let ObjectState::DifImage(state) = &object.state else {
+                unreachable!()
+            };
+            if let Some(resource) = state.resource {
+                let source = self.resources.images.resource_entry(resource)?.image;
                 filter.apply(self.resources.images.get_mut(source)?);
+                if filter != crate::graphics::ImageFilter::None {
+                    self.resources.images.resource_entry_mut(resource)?.updated = true;
+                }
             }
         }
         let source = objects.get(handle).unwrap().image.unwrap_or(0);
@@ -58,7 +67,7 @@ impl<F: ObjectFactory> Store<'_, F> {
         self.update_fes_image_priority(owner, objects, handle, list)
     }
 
-    fn capture_fes_image(&mut self, owner: u32, range: [u32; 2]) -> Result<Option<u32>> {
+    fn capture_fes_image(&mut self, range: [u32; 2]) -> Result<Option<u32>> {
         let drawing = &self.resources.drawing;
         if drawing.mode != 0 || !drawing.enabled {
             return Ok(None);
@@ -96,6 +105,9 @@ impl<F: ObjectFactory> Store<'_, F> {
         snapshot.copy_from(frame.tiles()[0].as_ref().unwrap(), rectangle, [0; 2]);
         let mut image = Image::new(snapshot.size())?;
         image.pixels_mut().copy_from_slice(snapshot.pixels());
-        self.resources.images.insert(owner, image, None).map(Some)
+        self.resources
+            .images
+            .insert_resource(None, image, false)
+            .map(Some)
     }
 }

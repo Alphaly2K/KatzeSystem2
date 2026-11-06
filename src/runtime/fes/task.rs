@@ -1276,7 +1276,10 @@ impl TaskObject for FesObject {
                 .objects
                 .objects
                 .values()
-                .any(|object| object.reference_image.is_some())
+                .any(|object| {
+                    object.reference_image.is_some()
+                        || matches!(&object.state, super::ObjectState::DifImage(state) if state.resource.is_some())
+                })
             {
                 let images = host
                     .images_mut()

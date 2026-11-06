@@ -7,7 +7,6 @@ pub(super) struct Resources {
     pub services: Option<Box<dyn ResourceServices>>,
     pub fonts: Option<Box<dyn crate::message::FontServices>>,
     pub images: Images,
-    pub image_resources: std::collections::BTreeMap<u32, super::image_resources::ImageResource>,
     pub drawing: DrawingContext,
     pub drawables: Drawables,
     pub frame_view: Option<(

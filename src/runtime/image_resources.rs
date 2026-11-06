@@ -4,56 +4,25 @@ use crate::kcs::{Interpreter, NativeReturn, format_string};
 use crate::resource::ResourceMode;
 use crate::{Error, Result, read};
 
-pub(super) struct ImageResource {
-    image: u32,
-    owner: Option<u32>,
-    references: usize,
-    has_source_layer: bool,
-    updated: bool,
-}
-
 impl<F: ObjectFactory> Runtime<F> {
     /// 借用独立图像资源当前的解码图像；句柄属于普通 710／733 资源表。
     pub fn image_resource(&self, handle: u32) -> Result<&Image> {
-        let resource = self
-            .resources
-            .image_resources
-            .get(&handle)
-            .ok_or_else(|| Error::new(0, "独立图像资源句柄无效"))?;
-        self.resources.images.get(resource.image)
+        self.resources.images.resource(handle)
     }
 
     /// 增加独立使用者的持有，所属任务释放后资源继续存活。
     pub fn retain_image_resource(&mut self, handle: u32) -> Result<()> {
-        let resource = self
-            .resources
-            .image_resources
-            .get_mut(&handle)
-            .ok_or_else(|| Error::new(0, "独立图像资源句柄无效"))?;
-        resource.references = resource
-            .references
-            .checked_add(1)
-            .ok_or_else(|| Error::new(0, "独立图像资源引用超过上限"))?;
-        Ok(())
+        self.resources.images.retain_resource(handle)
     }
 
     /// 释放独立使用者的持有，保留所属任务登记；零句柄跳过。
     pub fn release_image_resource_reference(&mut self, handle: u32) -> Result<()> {
-        self.resources.release_image_resource(handle, None)
+        self.resources.images.release_resource_reference(handle)
     }
 
     /// 读取资源的更新标记，可同时清零；清零会影响共享这一资源的全部使用者。
     pub fn image_resource_updated(&mut self, handle: u32, clear: bool) -> Result<bool> {
-        let resource = self
-            .resources
-            .image_resources
-            .get_mut(&handle)
-            .ok_or_else(|| Error::new(0, "独立图像资源句柄无效"))?;
-        let updated = resource.updated;
-        if clear {
-            resource.updated = false;
-        }
-        Ok(updated)
+        self.resources.images.resource_updated(handle, clear)
     }
 }
 
@@ -106,37 +75,6 @@ impl Resources {
             .map(Image::from_frame)
             .transpose()
     }
-
-    fn release_image_resource(&mut self, handle: u32, owner: Option<u32>) -> Result<()> {
-        if handle == 0 {
-            return Ok(());
-        }
-        let resource = self
-            .image_resources
-            .get_mut(&handle)
-            .ok_or_else(|| Error::new(0, "独立图像资源句柄无效"))?;
-        if owner.is_some() && resource.owner == owner {
-            resource.owner = None;
-        }
-        resource.references -= 1;
-        if resource.references == 0 {
-            let resource = self.image_resources.remove(&handle).unwrap();
-            self.images.release(resource.image)?;
-        }
-        Ok(())
-    }
-
-    pub(super) fn release_image_resources(&mut self, owner: u32) -> Result<()> {
-        let handles: Vec<_> = self
-            .image_resources
-            .iter()
-            .filter_map(|(&handle, resource)| (resource.owner == Some(owner)).then_some(handle))
-            .collect();
-        for handle in handles {
-            self.release_image_resource(handle, Some(owner))?;
-        }
-        Ok(())
-    }
 }
 
 impl<F: ObjectFactory> ObjectHost<'_, F> {
@@ -149,9 +87,6 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         if matches!(index, 710 | 733) {
             if arguments.len() != if index == 710 { 4 } else { 8 } {
                 return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
-            }
-            if self.resources.image_resources.len() >= read::MAX_ITEMS {
-                return Err(Error::new(vm.pc, "独立图像资源数量超过上限"));
             }
             let image = if index == 733 {
                 Image::new([read::u32_at(arguments, 0)?, read::u32_at(arguments, 4)?])?
@@ -190,19 +125,11 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                 };
                 image
             };
-            let handle = self.host.handle_allocator().allocate_at(vm.pc)?;
-            let has_alpha = (index == 710).then_some(image.info().reserved != 0);
-            let image = self.resources.images.insert_unowned(image, has_alpha)?;
-            self.resources.image_resources.insert(
-                handle,
-                ImageResource {
-                    image,
-                    owner: Some(self.host.task_id),
-                    references: 1,
-                    has_source_layer: index == 710,
-                    updated: index == 733,
-                },
-            );
+            let handle = self.resources.images.insert_resource(
+                Some(self.host.task_id),
+                image,
+                index == 710,
+            )?;
             return Ok(NativeReturn::Value(handle));
         }
         let handle = read::u32_at(arguments, 0)?;
@@ -243,7 +170,8 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         }
         if index == 711 {
             self.resources
-                .release_image_resource(handle, Some(self.host.task_id))?;
+                .images
+                .release_resource(handle, Some(self.host.task_id))?;
             return Ok(NativeReturn::Continue);
         }
         let filter = if index == 737 {
@@ -269,19 +197,17 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         } else {
             [100; 3]
         };
-        let resource = self
-            .resources
-            .image_resources
-            .get_mut(&handle)
-            .ok_or_else(|| Error::new(vm.pc, "独立图像资源句柄无效"))?;
+        let resource = self.resources.images.resource_entry(handle)?;
+        let image_handle = resource.image;
+        let has_source_layer = resource.has_source_layer;
         if matches!(index, 713 | 723 | 727 | 737) {
-            if index != 737 && !resource.has_source_layer {
+            if index != 737 && !has_source_layer {
                 return Err(Error::new(
                     vm.pc,
                     "该图像资源操作需要来源图层，空白资源的原入口会访问空容器",
                 ));
             }
-            let image = self.resources.images.get_mut(resource.image)?;
+            let image = self.resources.images.get_mut(image_handle)?;
             match index {
                 713 => image.adjust_rgb_percent(rgb),
                 723 => {
@@ -291,22 +217,25 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                 737 => filter.apply(image),
                 _ => unreachable!(),
             }
-            resource.updated = true;
+            if matches!(index, 723 | 727) {
+                self.resources.images.rebuild_resource_geometry(handle)?;
+            }
+            self.resources.images.resource_entry_mut(handle)?.updated = true;
             return Ok(NativeReturn::Continue);
         }
         if index == 721 {
             return Ok(NativeReturn::Value(u32::from(
-                self.resources.images.uses_alpha(resource.image)?,
+                self.resources.images.uses_alpha(image_handle)?,
             )));
         }
         if index == 722 {
             self.resources
                 .images
-                .set_uses_alpha(resource.image, read::u32_at(arguments, 4)? != 0)?;
+                .set_uses_alpha(image_handle, read::u32_at(arguments, 4)? != 0)?;
             return Ok(NativeReturn::Continue);
         }
         if matches!(index, 718..=720 | 728 | 736) {
-            let image = self.resources.images.get_mut(resource.image)?;
+            let image = self.resources.images.get_mut(image_handle)?;
             let a = read::u32_at(arguments, 4)?;
             if index == 728 {
                 image.auxiliary = a;
@@ -334,7 +263,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             }
             return Ok(NativeReturn::Value(1));
         }
-        let image = self.resources.images.get(resource.image)?;
+        let image = self.resources.images.get(image_handle)?;
         if index == 724 {
             let Some(values) = image.attribute(read::u32_at(arguments, 4)?) else {
                 return Ok(NativeReturn::Value(0));

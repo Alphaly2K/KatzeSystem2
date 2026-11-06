@@ -244,10 +244,7 @@ impl TaskObject for ImageListObject {
                             let frames = ImageList::decode_hg3(host.image_data(data[1])?)?;
                             list.set_frames(key, frames, properties, images(host)?)?;
                         } else {
-                            if command.code == 288 {
-                                return Err(Error::new(0, "图像列表捕获来源属性更新尚未接入"));
-                            }
-                            list.set_capture(key, data[3], properties, images(host)?)?;
+                            list.set_resource(key, data[3], properties, images(host)?)?;
                         }
                     } else if data[1..4].iter().any(|&value| value != 0) {
                         return Err(Error::new(0, "图像列表其他来源类型尚未接入"));
@@ -496,6 +493,13 @@ impl TaskObject for ImageListObject {
     }
     fn request_delete(&mut self, host: &mut dyn Host, budget: usize) -> Result<bool> {
         self.base.request_delete(host, budget)
+    }
+
+    fn prepare_release(&mut self, host: &mut dyn Host, _budget: usize) -> Result<bool> {
+        if let Some(mut list) = self.list.take() {
+            list.release(images(host)?)?;
+        }
+        Ok(true)
     }
 }
 

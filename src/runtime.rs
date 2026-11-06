@@ -1417,7 +1417,7 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         }
     }
     fn load_kcs_program(&mut self, name: &[u8]) -> Result<Option<Program>> {
-        self.resources.release_image_resources(self.host.task_id)?;
+        self.resources.images.release_resources(self.host.task_id)?;
         self.resources.images.release_owner(self.host.task_id);
         self.resources.raw.release_owner(self.host.task_id);
         self.factory.load_kcs_program(name)
@@ -1779,7 +1779,7 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
                 | 339..=342
                 | 343..=345
                 | 402
-                | 455
+                | 455 | 732
                 | 462..=464 | 466 | 534 | 542 | 572 | 625 | 653 | 663 | 739 | 848 | 849 | 880 | 1065..=1069
         ) {
             return self.graphics_native(index, arguments, vm);
@@ -1877,7 +1877,7 @@ impl<F: ObjectFactory> Lifecycle for TaskLifecycle<'_, F> {
             .get_mut(&id)
             .ok_or_else(|| Error::new(0, "任务对象不存在"))?;
         object.release()?;
-        self.resources.release_image_resources(id)?;
+        self.resources.images.release_resources(id)?;
         self.resources.images.release_owner(id);
         self.resources.raw.release_owner(id);
         self.resources.drawables.remove(id);

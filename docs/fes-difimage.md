@@ -21,7 +21,7 @@ snapshot filter mono
 
 请求在尝试捕获前消费；渲染目标不可用时保留旧来源，不自动重试。成功捕获创建独立来源并替换旧来源，已有使用者继续持有旧像素。来源存在且 PRI 不为 −1 时进入共享图像列表；无来源时清除对应槽。位置与裁剪复用 CIMAGE 的更新规则。
 
-`object refex` 或 `object refex 0` 在命令阶段清除旧捕获来源，使自身及后代等待重新登记，保持几何和待处理捕获请求。非零值属于独立图像资源类型，当前返回未接入诊断；普通图像包装的引用用于 CIMAGE／IMAGE，详见[共享图像引用](graphics.md#fes-共享图像引用)。
+`object refex` 或 `object refex 0` 在命令阶段清除旧来源，使自身及后代等待重新登记，保持几何和待处理捕获请求。非零值接收普通 710／733 使用的独立图像资源句柄，先持有并复制资源缓存中的基点，再释放旧资源；同一资源可以重复绑定。普通图像包装的引用用于 CIMAGE／IMAGE，详见[共享图像引用](graphics.md#fes-共享图像引用)。
 
 ## 颜色过滤
 
@@ -33,18 +33,18 @@ snapshot filter mono
 |`sepia`|使用相同灰度，B 减 35、G 加 5、R 加 30，分别饱和到 0～255|
 |`np`|B、G、R 逐字节取反|
 
-所有模式保留 Alpha。过滤完成后，引用该捕获像素的列表分别重绘受影响区域。普通 CIMAGE／IMAGE 的同名命令保存模式，基线中这条更新消费路径属于 DIFIMAGE。
+所有模式保留 Alpha，并设置资源的共享更新标记。列表在来源推进阶段消费此标记，但单独过滤不会产生脏区；重新登记或其他失效操作使新像素进入重绘。普通 CIMAGE／IMAGE 的同名命令保存模式，基线中这条更新消费路径属于 DIFIMAGE。
 
 ## 运行时使用
 
-`ObjectState::DifImage` 提供 `base` 和 `pending_capture()`。对象与所属媒体记录的 `image_handle()` 返回当前捕获包装；初始为 None。`Runtime::update_fes_object`、记录更新和 Scene 的媒体阶段共用相同处理。
+`ObjectState::DifImage` 提供 `base`、`pending_capture()` 和 `resource_handle()`。资源查询使用 `Runtime::image_resource`；对象的 `image_handle()` 借用当前普通包装标识，初始为 None。成功捕获建立真正的独立资源，替换和对象释放时解除持有，列表继续按自己的引用存活。清零来源后直接删除对象，也会移除尚未刷新媒体的旧列表项并释放其引用。`Runtime::update_fes_object`、记录更新和 Scene 的媒体阶段共用相同处理。
 
 宿主须先绑定共享图像列表、提供画布输入和逻辑 `surface_size`，并通过 `Runtime::set_frame_view(projection, parent, filter)` 设置与最终帧相同的视图。视图变化后须更新配置；未配置视图的有效捕获返回诊断。`set_frame_capture_rectangle(Some(rect))` 指定当前画面读取区域，None 使用完整逻辑画面。画布不可用时消费捕获请求并保留旧来源。
 
-`Drawables::render_depth_range` 提供相同的深度选择，`ImageFilter::apply` 提供独立像素处理；`ImageList::set_capture` 登记会随过滤变化重绘的捕获来源。286 的第四个 DWORD 接收此来源的图像包装句柄，与第一个 DWORD 使用的像素句柄分别处理。
+`Drawables::render_depth_range` 提供相同的深度选择，`ImageFilter::apply` 提供独立像素处理；`ImageList::set_resource` 持有捕获资源。286／288 的第四个 DWORD 接收独立资源句柄，与第一个 DWORD 使用的像素句柄分别处理。`ImageList::set_capture` 是普通包装的过滤重绘辅助接口，DIFIMAGE 的资源协议使用 `set_resource`。
 
 当前捕获使用 CPU 帧绘制，支持已有图元、相机选择与纹理过滤。设备特有的多 pass 回调、缩放和颜色格式量化继续接入。捕获文件装载没有已确认的脚本更新路径，不将 DIFIMAGE 当作 IMAGE 文件来源处理。
 
 ## 验证
 
-原入口集中核实十三组命令场景、三银行状态、二十六次媒体更新、七组深度边界及两种捕获矩形。三种颜色过滤的 196,608 个像素、786,432 字节与优化 Rust 实现一致。三项合成回归覆盖保存的视图、深度与裁剪、重复模式、来源替换／共享／回收、重复声明、预算一／常规预算、银行求值及多个列表的独立重绘；常规测试无外部文件或设备依赖。
+原入口集中核实十三组命令场景、三银行状态、二十六次媒体更新、七组深度边界及两种捕获矩形。三种颜色过滤的 196,608 个像素、786,432 字节与优化 Rust 实现一致。资源整合另核对 1,320 次引用转换和 480 份双列表快照，确认缓存基点、更新消费及延迟重绘。合成回归覆盖保存的视图、深度与裁剪、重复模式、资源与普通包装类型区分、来源替换／共享／回收、重复声明、预算一／常规预算和银行求值；常规测试无外部文件或设备依赖。

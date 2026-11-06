@@ -64,6 +64,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             85 | 86 => 16,
             96 | 100 | 256 | 260 | 263 | 343 | 344 | 463 | 625 | 663 => 12,
             104 => 28,
+            732 => 52,
             _ => unreachable!(),
         };
         if arguments.len() < 4 || arguments.len() > count || !arguments.len().is_multiple_of(4) {
@@ -71,7 +72,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         }
         let route_zero = matches!(
             index,
-            104 | 105 | 106 | 107 | 256 | 258 | 260 | 262 | 263 | 339..=342 | 402 | 455 | 462
+            104 | 105 | 106 | 107 | 256 | 258 | 260 | 262 | 263 | 339..=342 | 402 | 455 | 732 | 462
                 ..=464 | 534 | 572 | 625 | 653 | 663 | 848 | 849 | 880 | 1065..=1069
         );
         if route_zero && arguments.len() != count {
@@ -90,6 +91,23 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         }
         let word = |i: usize| u32::from_le_bytes(arguments[i * 4..i * 4 + 4].try_into().unwrap());
         match index {
+            732 => {
+                let mut record = [0; 60];
+                record[12..16].copy_from_slice(&arguments[8..12]);
+                record[16..44].copy_from_slice(&arguments[12..40]);
+                record[44..48].copy_from_slice(&word(10).min(255).to_le_bytes());
+                record[48..56].copy_from_slice(&arguments[44..52]);
+                self.command_target_with_buffers(
+                    target,
+                    288,
+                    [word(1), 0, 0],
+                    &mut CommandBuffers {
+                        data0: None,
+                        data1: Some(&mut record),
+                        external: None,
+                    },
+                )?;
+            }
             78 | 79 => {
                 let mut rectangle = [0; 32];
                 rectangle[12..20].copy_from_slice(&arguments[4..12]);

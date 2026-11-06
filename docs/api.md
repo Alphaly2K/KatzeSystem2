@@ -160,7 +160,7 @@ FES 内部执行宏声明，初始化按以下顺序交给宿主：
 
 `hg3::decode_frame(bytes, id)` 解码首个匹配 ID 的原生 32 位完整帧，缺失 ID 返回 `None`。`DecodedFrame` 包含 `id`、标准元数据 `info`、`attributes: BTreeMap<u16, [u32; 5]>` 和从上到下紧密排列的 BGRA8 `pixels`，Alpha 保持独立，不应用裁剪偏移或绘制基点。`Frame::attributes` 提供相同属性记录，`Image::attribute(id)` 查询编号低十六位，未命中返回 `None`。支持范围与约束见 [图像接口](graphics.md)。
 
-`Runtime::image_resource(handle)` 查询普通 710 静态装载或 733 创建的独立图像资源，句柄与普通图像包装、像素句柄分别检查类型。`retain_image_resource`／`release_image_resource_reference` 管理额外使用者的配对持有，最后释放后句柄失效；任务销毁和程序重装只回收仍有登记的任务引用。`image_resource_updated(handle, clear)` 读取更新标记，`clear=true` 同时为所有使用者清零。普通资源入口提供几何设置／查询、Alpha 分类、属性、附加值、矩形填充、RGB 百分比、直角旋转、翻转及颜色滤镜；`Image::auxiliary_value()` 查询 728 保存的 DWORD。参数和零句柄规则见[独立图像资源](graphics.md#独立图像资源)。动画／组合装载及 FES 资源引用尚未接入。
+`Runtime::image_resource(handle)` 查询普通 710 静态装载或 733 创建的独立图像资源，句柄与普通图像包装、像素句柄分别检查类型。`retain_image_resource`／`release_image_resource_reference` 管理额外使用者的配对持有，最后释放后句柄失效；任务销毁和程序重装只回收仍有登记的任务引用。`image_resource_updated(handle, clear)` 读取更新标记，`clear=true` 同时为所有使用者清零。普通资源入口提供几何设置／查询、Alpha 分类、属性、附加值、矩形填充、RGB 百分比、直角旋转、翻转及颜色滤镜；`Image::auxiliary_value()` 查询 728 保存的 DWORD。参数和零句柄规则见[独立图像资源](graphics.md#独立图像资源)。DIFIMAGE 捕获／引用与列表共用同一资源表；动画／组合装载尚未接入。
 
 `fes::CImageState` 保存 CIMAGE 的坐标、尺寸、颜色、平面引用和显示属性。宿主按具体银行调用 `apply(&attributes, bank)`；返回本次是否使显示属性失效，供宿主递归标记后代。此接口仅应用该类型的有效列，不用于 IMAGE 等其他对象。父子对象关系应由宿主先处理，资源查找和绘制也由宿主负责。
 
@@ -536,7 +536,7 @@ Scene 消费 `noact`／`lockactive` 并按主体时点处理通知。`preferred_
 
 `Objects::dispatch_image_animation(interpreter, line, state)` 消费 `Event::Command` 中的 IMAGE `setanm`／`anm` 请求；返回 true 后可确认事件，其他命令返回 false。`Object::image_animation_request()` 查询保存的名称、播放开关及待处理标记。命令阶段不装载，`update_fes_object` 在来源登记后、排序前消费请求；播放重新读取动画并启动，暂停只更新开关。完整参数、类型门控及失败契约见 [FES 动画请求](graphics.md#fes-image-动画请求)。
 
-`Runtime::dispatch_fes_reference(objects, interpreter, line)` 消费 `refex`。CIMAGE／IMAGE 在命令阶段持有普通图像包装，媒体更新时用该来源登记；零值清除引用并恢复自有来源。`Object::referenced_image_handle()` 查询这一共享覆盖，不改变 `image_handle()` 的自有包装。任务内场景随任务回收释放引用；独立对象存储在停用时调用 `Runtime::release_fes_image_references(objects)`，或逐对象调用 `remove_fes_object`。Scene 主体、系统块和对象事件自动分派；DIFIMAGE 当前接受零引用，非零图像资源尚待接入，完整类型和银行规则见[共享图像引用](graphics.md#fes-共享图像引用)。
+`Runtime::dispatch_fes_reference(objects, interpreter, line)` 消费 `refex`。CIMAGE／IMAGE 在命令阶段持有普通图像包装，媒体更新时用该来源登记；零值清除引用并恢复自有来源。`Object::referenced_image_handle()` 查询这一共享覆盖，不改变 `image_handle()` 的自有包装。任务内场景随任务回收释放引用；独立对象存储在停用时调用 `Runtime::release_fes_image_references(objects)`，或逐对象调用 `remove_fes_object`。Scene 主体、系统块和对象事件自动分派；DIFIMAGE 持有独立资源，并将其缓存基点复制到对象，零值清除引用并保留基点，完整类型和银行规则见[共享图像引用](graphics.md#fes-共享图像引用)。
 
 `Runtime::dispatch_fes_image_attributes(objects, interpreter, line)` 消费 `attr`，从当前图像来源查询五 DWORD 属性并依次写入共享数值槽。未命中保持输出，查询不刷新媒体；Scene 主体、系统块和对象事件自动分派。普通 536 接收图像包装、属性编号及五个输出 VM 地址，返回找到标记；命中后先检查全部输出再依序写入。来源、银行及省略参数规则见[图像属性查询](graphics.md#fes-图像属性查询)和 [KCS 图像属性](kcs.md#图像属性)。
 
@@ -544,7 +544,7 @@ Scene 消费 `noact`／`lockactive` 并按主体时点处理通知。`preferred_
 
 `Objects::set_image_list(task, clip)` 为 CIMAGE／IMAGE 绑定已初始化的共享列表和全局裁剪；列表必须是 owner 通过树路由可达的类型 15 任务。更新按来源重建、属性登记及排序分别消费标记，支持 POS2／SIZE2、CIMAGE／IMAGE 父级位置及 PLANE 裁剪；具体时序见 [CIMAGE](graphics.md#fes-cimage-更新) 与 [IMAGE](graphics.md#fes-image-文件更新) 更新。`Objects::invalidate(handle)` 在直接显示属性修改或运动回写后标记对象及后代；直接来源修改还需请求 rebuild。
 
-`ObjectState::DifImage` 使用同一列表与二维属性，来源通过 `refcap` 建立；`filter` 处理当前捕获像素。声明不创建包装或下层任务。内部捕获前须以 `Runtime::set_frame_view` 提供最终帧视图，`set_frame_capture_rectangle` 可指定读取区域；来源、失败与颜色处理契约见 [DIFIMAGE](fes-difimage.md)。
+`ObjectState::DifImage` 使用同一列表与二维属性，来源通过 `refcap` 建立独立资源或通过 `refex` 持有资源；`DifImageState::resource_handle()` 查询该资源，`filter` 处理其当前像素。声明不创建包装或下层任务。内部捕获前须以 `Runtime::set_frame_view` 提供最终帧视图，`set_frame_capture_rectangle` 可指定读取区域；来源、失败与颜色处理契约见 [DIFIMAGE](fes-difimage.md)。
 
 `Objects::start_motion(handle, program, parameters, delay)` 向对象加入分组零的运动，返回对象内的运动编号；当前支持 BASE、DRAW、CIMAGE、IMAGE、BUTTON、CPLANE、PLANE、SLIDER、SCROLL2 和 SOUND。目标及其后代都没有活动运动时，从对象当前属性捕获基准；有活动运动时沿用已有基准。`motion_active(handle)` 查询目标及其后代，`Object::motions()` 只读查询目标自身队列，`motion_delay()` 查询脚本为后续运动保存的原始开始偏移。`delay` 不改变已经插入的运动；`ismot` 包含尚未到开始时刻的活动条目。`update_motions(now, &mut host, budget_per_task)` 显式按先子后父的顺序推进根对象子树，并回写对象属性及后代失效标记；false 后继续调用，时间、已完成对象与当前队列均保留。续跑期间不得直接修改属性，创建、初始化、重挂、删除及加入运动会返回诊断。Scene 在等待或帧边界自动调用该入口，再按声明顺序刷新媒体；普通 decode 的中间提交先刷新媒体并继续脚本，运动每轮最终阶段执行一次。处理器只加入运动，后续普通更新才执行。失败重试保留已完成的运动阶段；运动与普通 KCS 共用随机序列和调试消息，详见[对象运动](graphics.md#fes-对象运动)。
 

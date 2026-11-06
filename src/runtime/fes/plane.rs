@@ -406,6 +406,31 @@ impl<F: ObjectFactory> Store<'_, F> {
                 self.resources.images.release_reference(image)?;
                 objects.get_mut(id).unwrap().reference_image = None;
             }
+            if let ObjectState::DifImage(state) = &objects.get(id).unwrap().state {
+                let resource = state.resource;
+                if objects.image_list.is_some() {
+                    let list = self.check_fes_image_list(owner, objects)?;
+                    let slot = objects
+                        .get(id)
+                        .unwrap()
+                        .state
+                        .image()
+                        .unwrap()
+                        .parent_priority;
+                    if slot != -1 {
+                        self.fes_command(owner, Some(list), 287, [slot as u32, 0, 0], None)?;
+                    }
+                }
+                if let Some(resource) = resource {
+                    self.resources.images.release_resource_reference(resource)?;
+                }
+                let object = objects.get_mut(id).unwrap();
+                let ObjectState::DifImage(state) = &mut object.state else {
+                    unreachable!()
+                };
+                state.resource = None;
+                object.image = None;
+            }
             let raw = objects.get(id).unwrap().raw_image;
             self.resources.raw.release_image(raw)?;
             objects.get_mut(id).unwrap().raw_image = 0;

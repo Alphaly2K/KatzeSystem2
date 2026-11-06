@@ -1,3 +1,4 @@
+use super::image::ResourceGeometry;
 use super::{Image, Images, Rect};
 use crate::anm::{DisplayState, ImageAnimation};
 use crate::{Error, Result, read};
@@ -31,6 +32,8 @@ struct Entry {
     frames: BTreeMap<u32, u32>,
     source_identity: u32,
     capture_revision: Option<u64>,
+    resource: Option<u32>,
+    resource_geometry: Option<ResourceGeometry>,
     animation: ImageAnimation,
     priority: i32,
     properties: ImageListProperties,
@@ -39,6 +42,13 @@ struct Entry {
 }
 
 impl Entry {
+    fn bounds(&self, images: &Images, base: [f32; 2]) -> Result<Rect> {
+        self.resource_geometry.map_or_else(
+            || images.list_bounds(self.image, self.properties.position, base),
+            |geometry| Ok(geometry.bounds(self.properties.position, base)),
+        )
+    }
+
     fn display(&self) -> DisplayState {
         let state = if self.animation.timeline.is_some() {
             self.animation.display()
@@ -62,6 +72,9 @@ impl Entry {
     }
 
     fn release(self, images: &mut Images) -> Result<()> {
+        if let Some(resource) = self.resource {
+            images.release_resource_reference(resource)?;
+        }
         if self.frames.is_empty() {
             images.release(self.image)?;
         }
@@ -203,6 +216,49 @@ impl ImageList {
         Ok(())
     }
 
+    /// 登记独立图像资源，额外持有资源引用；来源更新在动画推进阶段消费。
+    pub fn set_resource(
+        &mut self,
+        key: u32,
+        resource: u32,
+        properties: ImageListProperties,
+        images: &mut Images,
+    ) -> Result<()> {
+        let source = images.resource_entry(resource)?;
+        let image = source.image;
+        let geometry = source.geometry;
+        images.retain_resource(resource)?;
+        let pixels = images.pixel_handle(image)?;
+        if let Err(error) = self.set_pixels_inner(key, pixels, properties, Some(geometry), images) {
+            images.release_resource_reference(resource)?;
+            return Err(error);
+        }
+        let entry = self.entries.get_mut(&key).unwrap();
+        entry.resource = Some(resource);
+        // 可见条目在写入显示属性时先刷新资源的共享更新状态。
+        if entry.visible() {
+            images.resource_updated(resource, true)?;
+        }
+        Ok(())
+    }
+
+    fn refresh_resource(&mut self, key: u32, images: &mut Images) -> Result<()> {
+        let entry = self.entries.get_mut(&key).unwrap();
+        let Some(resource) = entry.resource else {
+            return Ok(());
+        };
+        if !images.resource_updated(resource, true)? {
+            return Ok(());
+        }
+        let source = images.resource_entry(resource)?;
+        let image = source.image;
+        let geometry = source.geometry;
+        images.bind_pixels(entry.image, images.pixel_handle(image)?)?;
+        entry.resource_geometry = Some(geometry);
+        entry.properties.base_point = geometry.base.map(|value| value as f32);
+        Ok(())
+    }
+
     /// 按底层像素句柄登记，持有独立包装；不接受普通图像包装或其他资源句柄。
     pub fn set_pixels(
         &mut self,
@@ -211,7 +267,22 @@ impl ImageList {
         properties: ImageListProperties,
         images: &mut Images,
     ) -> Result<()> {
-        let source_base = images.pixel_image(pixels)?.info().base.map(|v| v as f32);
+        self.set_pixels_inner(key, pixels, properties, None, images)
+    }
+
+    fn set_pixels_inner(
+        &mut self,
+        key: u32,
+        pixels: u32,
+        properties: ImageListProperties,
+        geometry: Option<ResourceGeometry>,
+        images: &mut Images,
+    ) -> Result<()> {
+        let source_base = geometry
+            .map_or(images.pixel_image(pixels)?.info().base, |geometry| {
+                geometry.base
+            })
+            .map(|v| v as f32);
         let (history, clip, priority) = self.source_history(key, images)?;
         let source_identity = self
             .entries
@@ -234,6 +305,13 @@ impl ImageList {
                 )
             })
             .unwrap_or_default();
+        if let Some(resource) = self
+            .entries
+            .get_mut(&key)
+            .and_then(|entry| entry.resource.take())
+        {
+            images.release_resource_reference(resource)?;
+        }
         self.finish_source(
             key,
             Entry {
@@ -242,6 +320,8 @@ impl ImageList {
                 animation,
                 source_identity,
                 capture_revision: None,
+                resource: None,
+                resource_geometry: geometry,
                 priority,
                 properties,
                 history,
@@ -333,6 +413,8 @@ impl ImageList {
                 animation,
                 source_identity,
                 capture_revision: None,
+                resource: None,
+                resource_geometry: None,
                 priority,
                 properties,
                 history,
@@ -402,11 +484,7 @@ impl ImageList {
             if entry.visible() {
                 history = accumulate(
                     history,
-                    images.list_bounds(
-                        entry.image,
-                        entry.properties.position,
-                        entry.properties.base_point,
-                    )?,
+                    entry.bounds(images, entry.properties.base_point)?,
                     clip,
                 );
                 self.mark(history);
@@ -427,17 +505,13 @@ impl ImageList {
         // 设置显示状态时先使用来源基点更新几何，再写入请求基点。
         entry.history = accumulate(
             entry.history,
-            images.list_bounds(entry.image, entry.properties.position, source_base)?,
+            entry.bounds(images, source_base)?,
             entry.clip,
         );
         if entry.visible() {
             entry.history = accumulate(
                 entry.history,
-                images.list_bounds(
-                    entry.image,
-                    entry.properties.position,
-                    entry.properties.base_point,
-                )?,
+                entry.bounds(images, entry.properties.base_point)?,
                 entry.clip,
             );
             self.mark(entry.history);
@@ -451,15 +525,10 @@ impl ImageList {
         let Some(entry) = self.entries.get(&key) else {
             return Ok(false);
         };
-        let image = entry.image;
         if entry.visible() {
             let history = accumulate(
                 entry.history,
-                images.list_bounds(
-                    image,
-                    entry.properties.position,
-                    entry.properties.base_point,
-                )?,
+                entry.bounds(images, entry.properties.base_point)?,
                 entry.clip,
             );
             self.mark(history);
@@ -497,11 +566,7 @@ impl ImageList {
             entry.properties.visible = visible;
             entry.history = accumulate(
                 entry.history,
-                images.list_bounds(
-                    entry.image,
-                    entry.properties.position,
-                    entry.properties.base_point,
-                )?,
+                entry.bounds(images, entry.properties.base_point)?,
                 entry.clip,
             );
             let history = entry.history;
@@ -618,7 +683,7 @@ impl ImageList {
                     };
                     images.draw_list_entry(
                         self.image,
-                        entry.image,
+                        (entry.image, entry.resource_geometry),
                         entry.properties.position,
                         p.base_point,
                         display.blend as u32,

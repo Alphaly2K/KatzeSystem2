@@ -27,6 +27,12 @@ impl Objects {
         images: &mut crate::graphics::Images,
     ) -> Result<()> {
         for object in self.objects.values_mut() {
+            if let ObjectState::DifImage(state) = &mut object.state {
+                if let Some(resource) = state.resource.take() {
+                    images.release_resource_reference(resource)?;
+                    object.image = None;
+                }
+            }
             if let Some(image) = object.reference_image {
                 images.release_reference(image)?;
                 object.reference_image = None;
@@ -86,23 +92,25 @@ impl<F: ObjectFactory> Store<'_, F> {
                     }
                     object.state.image_mut().unwrap().updates.dirty = true;
                 }
-                ObjectState::DifImage(_) if source != 0 => {
-                    return Err(Error::new(
-                        line.offset,
-                        "FES DIFIMAGE 的非零图像资源引用尚未接入",
-                    ));
-                }
                 ObjectState::DifImage(_) => {
-                    if let Some(previous) = object.image {
-                        self.resources.images.release(previous)?;
-                        object.image = None;
-                        object.images.retain(|&image| image != previous);
-                        for record in &mut objects.update_order {
-                            if record.image == Some(previous) {
-                                record.image = None;
-                            }
-                        }
+                    let next = if source != 0 {
+                        let resource = self.resources.images.resource_entry(source)?;
+                        let image = resource.image;
+                        let base = resource.geometry.base.map(|value| value as f32);
+                        self.resources.images.retain_resource(source)?;
+                        object.state.image_mut().unwrap().base_point = base;
+                        Some(image)
+                    } else {
+                        None
+                    };
+                    let ObjectState::DifImage(state) = &mut object.state else {
+                        unreachable!()
+                    };
+                    if let Some(previous) = state.resource.take() {
+                        self.resources.images.release_resource_reference(previous)?;
                     }
+                    state.resource = (source != 0).then_some(source);
+                    object.image = next;
                     objects.invalidate(handle)?;
                 }
                 _ => (),

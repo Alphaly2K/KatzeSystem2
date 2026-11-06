@@ -5,8 +5,10 @@ use crate::resource::ResourceMode;
 use crate::{Error, HandleAllocator, Result, hg3, read};
 use std::collections::BTreeMap;
 
+mod resource;
 mod transform;
 mod window;
+pub(crate) use resource::{ImageResource, ResourceGeometry};
 
 /// 普通 111 的单个图像名称；帧号位于冒号后，扩展名按原名称重新拼接。
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -299,6 +301,7 @@ struct ImageData {
 pub struct Images {
     entries: BTreeMap<u32, ImageEntry>,
     data: BTreeMap<u32, ImageData>,
+    resources: BTreeMap<u32, ImageResource>,
     handles: HandleAllocator,
 }
 
@@ -308,6 +311,7 @@ impl Images {
         Self {
             entries: BTreeMap::new(),
             data: BTreeMap::new(),
+            resources: BTreeMap::new(),
             handles,
         }
     }
@@ -756,13 +760,13 @@ impl Images {
     pub(crate) fn draw_list_entry(
         &mut self,
         target: u32,
-        source: u32,
+        source: (u32, Option<ResourceGeometry>),
         position: [f32; 2],
         base: [f32; 2],
         opacity: u32,
         clip: Rect,
     ) -> Result<()> {
-        let source_data = self.entry_mut(source)?.data;
+        let source_data = self.entry_mut(source.0)?.data;
         let target_data = self.entry_mut(target)?.data;
         self.pixel_image(source_data)?;
         self.pixel_image(target_data)?;
@@ -770,6 +774,10 @@ impl Images {
             return Err(Error::new(0, "图像列表自有图像不能同时用作绘制来源"));
         }
         let mut source_image = self.data.remove(&source_data).unwrap();
+        let original_info = source_image.image.info;
+        if let Some(geometry) = source.1 {
+            source_image.image.info.offset = geometry.offset;
+        }
         self.data
             .get_mut(&target_data)
             .unwrap()
@@ -782,6 +790,7 @@ impl Images {
                 clip,
                 &mut source_image.has_alpha,
             );
+        source_image.image.info = original_info;
         self.data.insert(source_data, source_image);
         Ok(())
     }

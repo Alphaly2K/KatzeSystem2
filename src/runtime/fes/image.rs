@@ -350,7 +350,11 @@ impl<F: ObjectFactory> Store<'_, F> {
                     pixels,
                     if pixels == 0 { raw } else { 0 },
                     0,
-                    if captured { wrapper } else { 0 },
+                    if let ObjectState::DifImage(state) = &objects.get(handle).unwrap().state {
+                        state.resource.unwrap_or(0)
+                    } else {
+                        0
+                    },
                     position[0].to_bits(),
                     position[1].to_bits(),
                     state.base_point[0].to_bits(),
