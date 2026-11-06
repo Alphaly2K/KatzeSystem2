@@ -55,6 +55,7 @@ pub struct Image {
     info: StandardInfo,
     surface: Surface,
     attributes: BTreeMap<u16, [u32; 5]>,
+    pub(crate) auxiliary: u32,
     pub(super) filter_revision: u64,
 }
 
@@ -73,6 +74,7 @@ impl Image {
             },
             surface: Surface::new(size)?,
             attributes: BTreeMap::new(),
+            auxiliary: 0,
             filter_revision: 0,
         })
     }
@@ -86,6 +88,7 @@ impl Image {
             info: frame.info,
             surface: Surface::from_bgra(frame.info.size, frame.pixels)?,
             attributes: frame.attributes,
+            auxiliary: 0,
             filter_revision: 0,
         })
     }
@@ -96,6 +99,15 @@ impl Image {
 
     pub fn info(&self) -> &StandardInfo {
         &self.info
+    }
+
+    pub(crate) fn info_mut(&mut self) -> &mut StandardInfo {
+        &mut self.info
+    }
+
+    /// 普通 728 保存的附加 DWORD，构造时为零。
+    pub fn auxiliary_value(&self) -> u32 {
+        self.auxiliary
     }
 
     /// 查询低十六位编号对应的五 DWORD 属性记录。
@@ -495,9 +507,33 @@ impl Images {
         self.insert_for(Some(owner), image, has_alpha)
     }
 
-    pub(crate) fn insert_unowned(&mut self, image: Image) -> Result<u32> {
-        let has_alpha = Some(image.info.reserved != 0);
+    pub(crate) fn insert_unowned(&mut self, image: Image, has_alpha: Option<bool>) -> Result<u32> {
         self.insert_for(None, image, has_alpha)
+    }
+
+    pub(crate) fn uses_alpha(&mut self, handle: u32) -> Result<bool> {
+        let pixels = self.entry_mut(handle)?.data;
+        let data = self
+            .data
+            .get_mut(&pixels)
+            .ok_or_else(|| Error::new(0, "图像对象尚未绑定像素"))?;
+        Ok(*data.has_alpha.get_or_insert_with(|| {
+            data.image
+                .surface()
+                .pixels()
+                .chunks_exact(4)
+                .any(|pixel| pixel[3] != 255)
+        }))
+    }
+
+    pub(crate) fn set_uses_alpha(&mut self, handle: u32, value: bool) -> Result<()> {
+        let pixels = self.entry_mut(handle)?.data;
+        let data = self
+            .data
+            .get_mut(&pixels)
+            .ok_or_else(|| Error::new(0, "图像对象尚未绑定像素"))?;
+        data.has_alpha = Some(value);
+        Ok(())
     }
 
     fn insert_for(

@@ -1,5 +1,5 @@
 use super::{ObjectFactory, ObjectHost, Resources, Runtime};
-use crate::graphics::{Image, ImageReference};
+use crate::graphics::{Image, ImageReference, Rect};
 use crate::kcs::{Interpreter, NativeReturn, format_string};
 use crate::resource::ResourceMode;
 use crate::{Error, Result, read};
@@ -175,7 +175,8 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                 image
             };
             let handle = self.host.handle_allocator().allocate_at(vm.pc)?;
-            let image = self.resources.images.insert_unowned(image)?;
+            let has_alpha = (index == 710).then_some(image.info().reserved != 0);
+            let image = self.resources.images.insert_unowned(image, has_alpha)?;
             self.resources.image_resources.insert(
                 handle,
                 ImageResource {
@@ -187,17 +188,35 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             return Ok(NativeReturn::Value(handle));
         }
         let handle = read::u32_at(arguments, 0)?;
+        if index == 736 && handle == 0 {
+            if !matches!(arguments.len(), 20 | 24) {
+                return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+            }
+            let rectangle = Rect::from_xywh(
+                read::u32_at(arguments, 4)? as i32,
+                read::u32_at(arguments, 8)? as i32,
+                read::u32_at(arguments, 12)? as i32,
+                read::u32_at(arguments, 16)? as i32,
+            );
+            self.resources.drawing.clear_rect(rectangle);
+            return Ok(NativeReturn::Continue);
+        }
         if handle == 0 {
-            return Ok(if matches!(index, 717 | 724) {
+            if index == 721 {
+                return Err(Error::new(vm.pc, "零图像资源的 Alpha 查询返回值未初始化"));
+            }
+            return Ok(if matches!(index, 717..=720 | 724) {
                 NativeReturn::Value(1)
             } else {
                 NativeReturn::Continue
             });
         }
         let count = match index {
-            711 => 1,
-            712 | 714 | 715 | 717 => 3,
+            711 | 721 => 1,
+            722 | 728 => 2,
+            712 | 714 | 715 | 717..=720 => 3,
             724 => 7,
+            736 => 6,
             _ => unreachable!(),
         };
         if arguments.len() != count * 4 {
@@ -213,6 +232,46 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             .image_resources
             .get(&handle)
             .ok_or_else(|| Error::new(vm.pc, "独立图像资源句柄无效"))?;
+        if index == 721 {
+            return Ok(NativeReturn::Value(u32::from(
+                self.resources.images.uses_alpha(resource.image)?,
+            )));
+        }
+        if index == 722 {
+            self.resources
+                .images
+                .set_uses_alpha(resource.image, read::u32_at(arguments, 4)? != 0)?;
+            return Ok(NativeReturn::Continue);
+        }
+        if matches!(index, 718..=720 | 728 | 736) {
+            let image = self.resources.images.get_mut(resource.image)?;
+            let a = read::u32_at(arguments, 4)?;
+            if index == 728 {
+                image.auxiliary = a;
+                return Ok(NativeReturn::Continue);
+            }
+            let b = read::u32_at(arguments, 8)?;
+            if index == 736 {
+                image.fill_rect_from_bottom(
+                    Rect::from_xywh(
+                        a as i32,
+                        b as i32,
+                        read::u32_at(arguments, 12)? as i32,
+                        read::u32_at(arguments, 16)? as i32,
+                    ),
+                    read::u32_at(arguments, 20)?,
+                );
+                return Ok(NativeReturn::Continue);
+            }
+            let info = image.info_mut();
+            match index {
+                718 => info.canvas_size = [a, b],
+                719 => info.offset = [a as i32, b as i32],
+                720 => info.base = [a as i32, b as i32],
+                _ => unreachable!(),
+            }
+            return Ok(NativeReturn::Value(1));
+        }
         let image = self.resources.images.get(resource.image)?;
         if index == 724 {
             let Some(values) = image.attribute(read::u32_at(arguments, 4)?) else {

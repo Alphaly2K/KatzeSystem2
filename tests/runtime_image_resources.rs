@@ -1,6 +1,7 @@
 use katze_system2::{
     Result,
     expression::State,
+    graphics::{RenderTarget, Surface},
     kcs::{Interpreter, Program, ResourceServices},
     resource::ResourceMode,
     runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, kind},
@@ -375,4 +376,136 @@ fn failed_loads_do_not_allocate_and_animation_or_layer_sources_report_their_miss
         assert!(runtime.update(0, 1).unwrap_err().message.contains(error));
         assert!(runtime.image_resource(1).is_err());
     }
+}
+
+#[test]
+fn resource_controls_preserve_alpha_cache_geometry_pixel_origin_and_return_stack() {
+    for budget in [1, 4096] {
+        for width in [0, 2] {
+            let mut code = Vec::new();
+            call(&mut code, 733, &[width, 2]);
+            ins(&mut code, 0x26, &[0]);
+            ins(&mut code, 0x25, &[0xdead_beef]);
+            for (operations, at) in [
+                (vec![], 64),
+                (vec![(736, vec![0, 0, width, 2, 0xff12_3456])], 68),
+                (vec![(722, vec![0])], 72),
+                (vec![(736, vec![0, 0, 1, 1, 0x8011_2233])], 76),
+                (vec![(722, vec![u32::MAX])], 80),
+            ] {
+                for (native, args) in operations {
+                    handle_call(&mut code, native, &args);
+                }
+                handle_call(&mut code, 721, &[]);
+                ins(&mut code, 0x26, &[at]);
+            }
+            handle_call(&mut code, 728, &[0xfedc_ba98]);
+            for (native, args) in [
+                (718, vec![0, 19]),
+                (719, vec![(-5i32) as u32, 6]),
+                (720, vec![(-3i32) as u32, 4]),
+            ] {
+                handle_call(&mut code, native, &args);
+                ins(&mut code, 0x26, &[4]);
+            }
+            for (native, a, b) in [(712, 8, 12), (714, 16, 20), (715, 24, 28), (717, 32, 36)] {
+                handle_call(&mut code, native, &[a, b]);
+            }
+            ins(&mut code, 0x26, &[40]);
+            for (native, at) in [(718, 44), (719, 48), (720, 52)] {
+                call(&mut code, native, &[0]);
+                ins(&mut code, 0x26, &[at]);
+            }
+            for native in [722, 728] {
+                call(&mut code, native, &[0]);
+            }
+            call(&mut code, 736, &[0, 1, u32::MAX, 2, 3]);
+            ins(&mut code, 0x26, &[56]);
+            call(&mut code, 65, &[]);
+            let mut runtime = runtime(&code, budget);
+            runtime.drawing_mut().enabled = true;
+            runtime.drawing_mut().active = true;
+            runtime.drawing_mut().target = Some(
+                RenderTarget::from_tiles(
+                    [4, 4],
+                    [1, 1],
+                    vec![Some(
+                        Surface::from_bgra([4, 4], 0xff44_5566u32.to_le_bytes().repeat(16))
+                            .unwrap(),
+                    )],
+                )
+                .unwrap(),
+            );
+            let task = runtime.create(0, kind::ORDINARY, b"controls", b"").unwrap();
+            runtime.update(0, 1).unwrap();
+            let vm = vm(&runtime, task);
+            assert_eq!(
+                vm.read(64, 20).unwrap(),
+                [u32::from(width != 0), u32::from(width != 0), 0, 0, 1]
+                    .into_iter()
+                    .flat_map(u32::to_le_bytes)
+                    .collect::<Vec<_>>()
+            );
+            assert_eq!(
+                vm.read(8, 32).unwrap(),
+                [width, 2, width, 19, (-5i32) as u32, 6, (-3i32) as u32, 4]
+                    .into_iter()
+                    .flat_map(u32::to_le_bytes)
+                    .collect::<Vec<_>>()
+            );
+            for at in [4, 40, 44, 48, 52] {
+                assert_eq!(word(vm, at), 1);
+            }
+            assert_eq!(word(vm, 56), 0xdead_beef);
+            assert!(vm.stack_bytes().is_empty());
+            let image = runtime.image_resource(word(vm, 0)).unwrap();
+            assert_eq!(image.auxiliary_value(), 0xfedc_ba98);
+            if width == 0 {
+                assert!(image.surface().pixels().is_empty());
+            } else {
+                assert_eq!(
+                    image.surface().pixels(),
+                    [0xff12_3456u32, 0xff12_3456, 0x8011_2233, 0xff12_3456]
+                        .into_iter()
+                        .flat_map(u32::to_le_bytes)
+                        .collect::<Vec<_>>()
+                );
+            }
+            let canvas = runtime.drawing().target.as_ref().unwrap();
+            for y in 0..4 {
+                for x in 0..4 {
+                    assert_eq!(
+                        canvas.pixel(x, y),
+                        Some(if (1..3).contains(&x) && y < 2 {
+                            0
+                        } else {
+                            0xff44_5566
+                        })
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn zero_resource_alpha_query_reports_undefined_result_before_pushing_a_value() {
+    let mut code = Vec::new();
+    ins(&mut code, 0x25, &[0xdead_beef]);
+    call(&mut code, 721, &[0]);
+    let mut runtime = runtime(&code, 1);
+    let task = runtime
+        .create(0, kind::ORDINARY, b"undefined", b"")
+        .unwrap();
+    assert!(
+        runtime
+            .update(0, 1)
+            .unwrap_err()
+            .message
+            .contains("未初始化")
+    );
+    assert_eq!(
+        vm(&runtime, task).stack_bytes(),
+        0xdead_beefu32.to_le_bytes()
+    );
 }
