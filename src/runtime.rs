@@ -1796,7 +1796,7 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         ) {
             return self.resources.call(self.host.task_id, index, arguments, vm);
         }
-        if matches!(index, 711 | 712 | 714 | 715 | 717 | 724 | 733) {
+        if matches!(index, 710 | 711 | 712 | 714 | 715 | 717 | 724 | 733) {
             return self.image_resource_native(index, arguments, vm);
         }
         call_native(

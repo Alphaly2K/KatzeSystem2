@@ -1,6 +1,7 @@
 use super::{ObjectFactory, ObjectHost, Resources, Runtime};
-use crate::graphics::Image;
-use crate::kcs::{Interpreter, NativeReturn};
+use crate::graphics::{Image, ImageReference};
+use crate::kcs::{Interpreter, NativeReturn, format_string};
+use crate::resource::ResourceMode;
 use crate::{Error, Result, read};
 
 pub(super) struct ImageResource {
@@ -10,7 +11,7 @@ pub(super) struct ImageResource {
 }
 
 impl<F: ObjectFactory> Runtime<F> {
-    /// 借用独立图像资源当前的解码图像；句柄属于普通 733 资源表。
+    /// 借用独立图像资源当前的解码图像；句柄属于普通 710／733 资源表。
     pub fn image_resource(&self, handle: u32) -> Result<&Image> {
         let resource = self
             .resources
@@ -41,6 +42,55 @@ impl<F: ObjectFactory> Runtime<F> {
 }
 
 impl Resources {
+    fn load_image_resource(&mut self, name: &[u8]) -> Result<Option<Image>> {
+        if name.len() >= 260 {
+            return Err(Error::new(0, "图像资源名超过基线缓冲区范围"));
+        }
+        let end = name
+            .iter()
+            .rposition(|byte| matches!(byte, b'.' | b'/' | b'\\'))
+            .filter(|&position| name[position] == b'.')
+            .unwrap_or(name.len());
+        let parts: Vec<_> = name[..end]
+            .split(|&byte| byte == b',')
+            .filter(|part| !part.is_empty())
+            .collect();
+        if parts.is_empty() {
+            return Ok(None);
+        }
+        let table_length = parts.iter().map(|part| part.len() + 1).sum::<usize>()
+            + 1
+            + usize::from(name[..end].last() == Some(&b','));
+        if table_length > 256 || parts.len() > 65 {
+            return Err(Error::new(0, "独立图像资源名称分量超过缓冲区上限"));
+        }
+        if parts.len() != 1 {
+            return Err(Error::new(0, "独立图像资源组合图层尚未接入"));
+        }
+        let services = self
+            .services
+            .as_deref_mut()
+            .ok_or_else(|| Error::new(0, "运行时未配置资源服务"))?;
+        let animation_name = [&name[..end], b".anm"].concat();
+        if let Some(animation) = services.read(&animation_name, ResourceMode::LooseFirst)? {
+            if animation.is_empty() {
+                return Ok(None);
+            }
+            return Err(Error::new(0, "独立图像资源的 ANM 来源尚未接入"));
+        }
+        // 单图装载使用补全后的完整名称，分词只决定是否进入组合图层路径。
+        let reference = ImageReference::parse(name)?;
+        let Some(bytes) = services.read(&reference.name, ResourceMode::LooseFirst)? else {
+            return Ok(None);
+        };
+        if bytes.is_empty() {
+            return Ok(None);
+        }
+        crate::hg3::decode_frame(&bytes, reference.frame)?
+            .map(Image::from_frame)
+            .transpose()
+    }
+
     fn release_image_resource(&mut self, handle: u32, owner: Option<u32>) -> Result<()> {
         if handle == 0 {
             return Ok(());
@@ -80,14 +130,50 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         arguments: &[u8],
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
-        if index == 733 {
-            if arguments.len() != 8 {
+        if matches!(index, 710 | 733) {
+            if arguments.len() != if index == 710 { 4 } else { 8 } {
                 return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
             }
             if self.resources.image_resources.len() >= read::MAX_ITEMS {
                 return Err(Error::new(vm.pc, "独立图像资源数量超过上限"));
             }
-            let image = Image::new([read::u32_at(arguments, 0)?, read::u32_at(arguments, 4)?])?;
+            let image = if index == 733 {
+                Image::new([read::u32_at(arguments, 0)?, read::u32_at(arguments, 4)?])?
+            } else {
+                let address = read::u32_at(arguments, 0)?;
+                if vm.read(address, 1).is_err() {
+                    return Ok(NativeReturn::Value(0));
+                }
+                let mut name = format_string(vm, address, 0)?;
+                name.truncate(
+                    name.iter()
+                        .position(|&byte| byte == 0)
+                        .unwrap_or(name.len()),
+                );
+                if name.len() >= 260 {
+                    return Err(Error::new(vm.pc, "图像资源名超过基线缓冲区范围"));
+                }
+                if self.host.unicode_text != 0 {
+                    let text = std::str::from_utf8(&name)
+                        .map_err(|_| Error::new(vm.pc, "图像资源名不是有效 UTF-8"))?;
+                    let (encoded, _, errors) = encoding_rs::SHIFT_JIS.encode(text);
+                    if errors {
+                        return Err(Error::new(vm.pc, "图像资源名无法转为 CP932"));
+                    }
+                    name = encoded.into_owned();
+                }
+                crate::text::cp932(&name)?;
+                let services = self
+                    .resources
+                    .services
+                    .as_deref_mut()
+                    .ok_or_else(|| Error::new(vm.pc, "运行时未配置资源服务"))?;
+                let name = services.resolve(b"image", &name)?;
+                let Some(image) = self.resources.load_image_resource(&name)? else {
+                    return Ok(NativeReturn::Value(0));
+                };
+                image
+            };
             let handle = self.host.handle_allocator().allocate_at(vm.pc)?;
             let image = self.resources.images.insert_unowned(image)?;
             self.resources.image_resources.insert(
