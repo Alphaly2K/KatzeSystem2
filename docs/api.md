@@ -11,7 +11,7 @@
 |`cstl`|FF 编码、UTF-8 表、姓名／正文片段及选项索引|语言切换、正文回退及历史刷新策略|
 |`message`|正文标记、颜色／字号、禁则／分组／注音布局、逐字时间与页状态、显式字形、轮廓／阴影及持久普通／渐显显示、消息任务、默认配置、普通文字调用及画布提交|设备字体适配、其余文字命令及宿主等待|
 |`backlog`|日志配置、文本追加／分行、CST 历史导入、姓名查询、段数限制、清空及存档序列化／恢复、普通日志 native|回看窗口呈现|
-|`audio`|声音任务、循环点、Vorbis 解码、通道装载／属性及整段／流式缓冲区播放|淡变、混音、设备及其他声音命令|
+|`audio`|声音任务、循环点、Vorbis 解码、通道装载／属性及整段／流式缓冲区播放|前置静音、淡变、混音、设备及其他声音命令|
 |`settings`|四块全局配置、基线初值、XML 字段覆盖、音量换算及普通 359／360 的 VM 读写|配置自动装载及媒体服务应用|
 |`language`|主语言／消息语言前缀、默认回退、普通 1036 查询／1062 字符串替换与 FES 图像文件刷新|语言配置自动装载、平台语言识别及切换命令|
 |`save`|CSS 加载、编号记录、容量／标签、嵌套快照、普通容器 native、240／250 共享值保存／恢复、任务目录读取及修改时间服务、FES 最新槽号查询|文件写入、其他数值分组与对象恢复及平台目录发现|
@@ -51,7 +51,7 @@ FES `fontcom add name` 调用同一字体服务的 `add_resource`，名称为已
 
 `audio::SoundConfig` 保存应用设置后的 `SoundPart` 分类树、可选主音量及主静音。节点分别保存分类名称、文件前缀、编号、音量、播放／系统语音开关、静音及有序子节点。`system_voice_candidates(paths)` 提供整树展开或显式路径筛选，`system_voice_enabled(path)` 查询原始开关，`volume(path)` 查询当前音量；`volume_by_name(name)` 按名称查首个分类，精确小写 master 使用显式主音量。宿主通过 `HostState::sound_config` 及 `sound_config_enabled` 提供配置和启用字段；FES `sysvoiceex` 已连接共享数值槽与共享整数随机流，用于选择配置编号，`getsndconfex` 已提供 `volume_id`／`sysplay_id` 两种编号路径查询，以及 `volume name` 的分类名称／主音量查询。配置装载、筛选与随机消耗规则见[声音接口](audio.md#系统语音配置选择)。
 
-`audio::SoundGroups` 独立保存 `SoundGroup { id, label, range }`，由 `HostState::sound_groups` 提供。210 通过 `Host::sound_group_id` 查询当前全局标签；Runtime 创建声音任务时捕获编号范围，同编号首项保留，后续标签修改不改变已有任务范围。`SoundState::set_groups`／`group_range` 提供显式配置和范围查询，`SoundChannel::is_grouped` 查询装载标记。206 从组内选择物理通道，成功返回通道编号，缺组或缺资源返回 u32::MAX；非零 mode 使用加 32 的物理通道并关联自身。名称、容量、回收与失败状态见[声音组与分组装载](audio.md#声音组与分组装载)。
+`audio::SoundGroups` 独立保存 `SoundGroup { key, id, label, range }`，由 `HostState::sound_groups` 提供。新配置使用 `key = id`；旧配置可将不同表键映射到同一分类编号。210 通过 `Host::sound_group_id` 查询当前全局标签；Runtime 创建声音任务时捕获表键、分类及范围，同键首项保留，后续标签修改不改变已有任务范围。`SoundState::set_groups`／`group_range` 提供显式配置和范围查询，`SoundChannel::is_grouped` 查询装载标记。206／207 按表键、208／209 按分类编号选择物理通道，成功返回通道编号，缺组或缺资源返回 u32::MAX；非零 mode 使用加 32 的物理通道并关联自身。奇数命令强制整段播放，207 重置循环范围，209 保留原范围。名称、容量、回收与失败状态见[声音组与分组装载](audio.md#声音组与分组装载)。
 
 `SoundConfig::file_part(name)` 按非空文件前缀、先父后子查首个匹配；`file_volume`／`file_play_enabled`／`file_system_voice`／`file_mute` 处理各字段的缺省值，`master_mute()` 查询主静音。`group_volume(name)` 单独按分类名称查询，master 在这里是普通名称。规则与缺省值见[文件分类与播放设置](audio.md#文件分类与播放设置)。`HostState::sound_settings_dirty` 保存外层管理的媒体属性刷新标记。
 
@@ -59,7 +59,7 @@ FES `fontcom add name` 调用同一字体服务的 `add_resource`，名称为已
 
 FES SOUND 文件请求通过 `Objects::set_sound_task` 的绑定发送 180／182／201／206／210，新配置下属性刷新依次发送 187 音量与 190 声像；未绑定的独立对象更新向根 35 查询。`fes::SoundState::channel_result()` 查询最近装载后的原始结果。场景媒体更新按文件播放／系统语音开关发送播放、停止及首次毫秒命令，同步执行对象自身 PLAY 处理器；`started_tick()` 查询对象首次毫秒。仅持有 Objects 的更新在需要回调时要求所属场景。缓冲区、请求消费及失败契约见[声音媒体提交](audio.md#文件请求的媒体提交)与[播放动作](audio.md#播放动作与-play-处理器)；组通道自动回收、淡变和设备继续接入。
 
-`audio::SoundFactory { enabled, fallback }` 创建类型 13 声音任务。`SoundObject::audio()` 及 `TaskObject::audio_state()` 查询 `SoundState`，其中 `loop_points()` 为循环范围，`channel_time(0..64)` 为原始空闲通道累计时刻，`channel(0..64)` 借用物理通道的 PCM、名称、装载参数和关联。180 装载单个 Ogg Vorbis 来源，非零 mode 使用加 32 的备用通道；182 按普通／分组状态处理自身及关联资源，187／188 设置及查询资源音量，190／191 设置及查询资源声像，201 查询时长毫秒。运行时普通 400 使用资源服务按 sound 类别补全／读取表，经根 35 查询目标并逐条发送 199；没有返回值。资源提供者负责声音分类配置，未接入的播放命令返回诊断。禁用、删除、缓冲区、附加资源和部分失败契约见[声音任务](audio.md#声音任务)及[普通装载](audio.md#普通-kcs-装载)。
+`audio::SoundFactory { enabled, fallback }` 创建类型 13 声音任务。`SoundObject::audio()` 及 `TaskObject::audio_state()` 查询 `SoundState`，其中 `loop_points()` 为循环范围，`channel_time(0..64)` 为原始空闲通道累计时刻，`channel(0..64)` 借用物理通道的 PCM、名称、装载参数和关联。180／181 装载单个 Ogg Vorbis 来源，非零 mode 使用加 32 的备用通道；181 强制整段播放并关联备用通道自身。182 按普通／分组状态处理自身及关联资源，187／188 设置及查询资源音量，190／191 设置及查询资源声像，201 查询时长毫秒。运行时普通 400 使用资源服务按 sound 类别补全／读取表，经根 35 查询目标并逐条发送 199；没有返回值。普通 935／936 格式展开名称并向声音任务发送相应装载命令，返回命令输出；资源提供者负责声音分类配置，未接入的播放命令返回诊断。禁用、删除、缓冲区、附加资源和部分失败契约见[声音任务](audio.md#声音任务)及[普通装载](audio.md#普通-kcs-装载)。
 
 `SoundChannel::requested_volume()` 查询任务保存的 f32 音量目标，`volume()`／`pan()` 返回物理通道已装载资源的原始属性，空资源为 None。`Host::sound_stereo()` 默认一，`HostState::sound_stereo` 可覆盖；此开关只门控声像应用，查询保持。命令的关联选择、范围和返回槽约束见[声音任务](audio.md#声音任务)。
 

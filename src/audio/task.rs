@@ -9,7 +9,12 @@ use std::collections::BTreeMap;
 pub struct SoundState {
     loops: LoopPoints,
     channels: [SoundChannel; 64],
-    groups: Option<BTreeMap<u32, [i32; 2]>>,
+    groups: Option<BTreeMap<u32, GroupRange>>,
+}
+
+struct GroupRange {
+    id: u32,
+    range: [i32; 2],
 }
 
 impl Default for SoundState {
@@ -23,21 +28,24 @@ impl Default for SoundState {
 }
 
 impl SoundState {
-    /// 捕获组范围；同一编号保留首次配置，之后的全局标签变化不修改此快照。
+    /// 捕获组范围；同一表键保留首次配置，之后的全局标签变化不修改此快照。
     pub fn set_groups(&mut self, groups: &SoundGroups) -> Result<()> {
         if groups.entries.len() > read::MAX_ITEMS {
             return Err(Error::new(0, "声音组数量超过上限"));
         }
         let mut ranges = BTreeMap::new();
         for group in &groups.entries {
-            ranges.entry(group.id).or_insert(group.range);
+            ranges.entry(group.key).or_insert(GroupRange {
+                id: group.id,
+                range: group.range,
+            });
         }
         self.groups = Some(ranges);
         Ok(())
     }
 
-    pub fn group_range(&self, id: u32) -> Option<[i32; 2]> {
-        self.groups.as_ref()?.get(&id).copied()
+    pub fn group_range(&self, key: u32) -> Option<[i32; 2]> {
+        self.groups.as_ref()?.get(&key).map(|group| group.range)
     }
 
     fn select_channel(&mut self, range: [i32; 2]) -> Result<u32> {
@@ -234,30 +242,45 @@ impl SoundState {
         record: &[u8],
         host: &mut dyn Host,
         output: &mut u32,
-        grouped: bool,
+        code: u32,
     ) -> Result<()> {
+        let grouped = code >= 206;
+        let whole = code & 1 != 0;
         let logical = if grouped {
             let groups = self
                 .groups
                 .as_ref()
                 .ok_or_else(|| Error::new(0, "声音任务尚未配置组范围"))?;
-            let id = u32::from_le_bytes(read::range(record, 4, 4)?.try_into().unwrap());
+            let id = read::u32_at(record, if code <= 207 { 4 } else { 8 })?;
             *output = u32::MAX;
-            let Some(range) = groups.get(&id).copied() else {
+            let group = if code <= 207 {
+                groups.get(&id)
+            } else {
+                groups.values().find(|group| group.id == id)
+            };
+            let Some(group) = group else {
                 return Ok(());
             };
-            self.select_channel(range)?
+            self.select_channel(group.range)?
         } else {
-            u32::from_le_bytes(read::range(record, 0, 4)?.try_into().unwrap())
+            let logical = read::u32_at(record, 0)?;
+            if code == 181 && logical as i32 >= 64 {
+                return Ok(());
+            }
+            logical
         };
         let record = read::range(record, 0, 0x120)?;
         let options = u32::from_le_bytes(record[0x114..0x118].try_into().unwrap());
         let mode = i32::from_le_bytes(record[0x118..0x11c].try_into().unwrap());
         let duration = i32::from_le_bytes(record[0x11c..0x120].try_into().unwrap());
-        let physical = logical
-            .checked_add(if mode == 0 { 0 } else { 32 })
-            .filter(|&index| index < 64)
-            .ok_or_else(|| Error::new(0, "声音装载通道或备用通道超出范围"))?;
+        let offset = if mode == 0 { 0 } else { 32 };
+        let physical = if code == 181 {
+            Some(logical.wrapping_add(offset))
+        } else {
+            logical.checked_add(offset)
+        }
+        .filter(|&index| index < 64)
+        .ok_or_else(|| Error::new(0, "声音装载通道或备用通道超出范围"))?;
         let name = &record[12..272];
         let length = name
             .iter()
@@ -272,7 +295,7 @@ impl SoundState {
         sound.pcm = None;
         sound.playback = Playback::default();
         if let Some(pcm) = channel::load_pcm(services, name)? {
-            let playback = Playback::new(&pcm)?;
+            let playback = Playback::new(&pcm, whole)?;
             sound.file.extend_from_slice(name);
             sound.pcm_volume = 100;
             sound.pcm_pan = 0;
@@ -288,10 +311,13 @@ impl SoundState {
             u32::from(sound.pcm.is_some())
         };
         sound.clock = channel::ChannelClock::default();
-        sound.loop_range = [0, -1];
-        if u32::from_le_bytes(record[0x110..0x114].try_into().unwrap()) != 0 {
-            if let Some(point) = self.loops.find(name) {
-                sound.loop_range = [point.start, point.end];
+        // 209 保留分配后的循环缓存，包括全忙回收只清起点的结果。
+        if code != 209 {
+            sound.loop_range = [0, -1];
+            if !whole && u32::from_le_bytes(record[0x110..0x114].try_into().unwrap()) != 0 {
+                if let Some(point) = self.loops.find(name) {
+                    sound.loop_range = [point.start, point.end];
+                }
             }
         }
         sound.parameters = [mode, duration];
@@ -300,7 +326,7 @@ impl SoundState {
         sound.linked = None;
         sound.grouped = grouped;
         sound.allocation_flags = [0; 2];
-        if mode != 0 && grouped {
+        if mode != 0 && (grouped || whole) {
             sound.linked = Some(physical);
         } else if mode != 0 {
             self.channels[logical as usize].linked = Some(physical);
@@ -408,22 +434,22 @@ impl TaskObject for SoundObject {
             return Ok(CommandOutcome::finished(false));
         }
         match command.code {
-            180 => {
-                if command.data[0] < 64 {
+            180 | 181 => {
+                if command.code == 181 || command.data[0] < 64 {
                     let bytes = buffers
                         .data1
                         .as_deref()
                         .ok_or_else(|| Error::new(0, "声音装载缺少记录缓冲区"))?;
-                    self.audio.load(bytes, host, output, false)?;
+                    self.audio.load(bytes, host, output, command.code)?;
                 }
                 return Ok(CommandOutcome::finished(false));
             }
-            206 => {
+            206..=209 => {
                 let bytes = buffers
                     .data1
                     .as_deref()
                     .ok_or_else(|| Error::new(0, "声音分组装载缺少记录缓冲区"))?;
-                self.audio.load(bytes, host, output, true)?;
+                self.audio.load(bytes, host, output, command.code)?;
                 return Ok(CommandOutcome::finished(false));
             }
             210 => {

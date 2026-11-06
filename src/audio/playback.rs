@@ -12,12 +12,12 @@ pub(super) struct Playback {
 }
 
 impl Playback {
-    pub fn new(pcm: &Pcm) -> Result<Self> {
+    pub fn new(pcm: &Pcm, whole: bool) -> Result<Self> {
         let frame_bytes = u32::from(pcm.channels()) * 2;
         let half_bytes = pcm.sample_rate().wrapping_mul(frame_bytes) / 2;
         let buffer_bytes = half_bytes.wrapping_mul(8);
         let mut playback = Self::default();
-        if pcm.samples().len() * 2 > buffer_bytes as usize {
+        if !whole && pcm.samples().len() * 2 > buffer_bytes as usize {
             if !half_bytes.is_multiple_of(frame_bytes) {
                 return Err(Error::new(0, "流式声音的半秒缓冲块未对齐采样帧"));
             }
@@ -268,7 +268,7 @@ mod tests {
     #[test]
     fn buffered_stereo_repeats_the_whole_source_and_empty_pcm_terminates() {
         let pcm = Pcm::new(2, 2, (0..16).collect()).unwrap();
-        let mut voice = Playback::new(&pcm).unwrap();
+        let mut voice = Playback::new(&pcm, false).unwrap();
         voice.start(&pcm, 2, [3, 5]).unwrap();
         let mut output = [0; 34];
         voice.read(&pcm, &mut output).unwrap();
@@ -286,7 +286,7 @@ mod tests {
         assert_eq!(&output[32..], [0, 1]);
         voice.stop(&pcm).unwrap();
         let empty = Pcm::new(2, 2, vec![]).unwrap();
-        voice = Playback::new(&empty).unwrap();
+        voice = Playback::new(&empty, false).unwrap();
         voice.start(&empty, 0, [0, -1]).unwrap();
         voice.read(&empty, &mut output).unwrap();
         assert_eq!(output, [0; 34]);
@@ -296,7 +296,7 @@ mod tests {
     #[test]
     fn streaming_ends_on_buffer_consumption_after_the_partial_final_block() {
         let pcm = Pcm::new(10, 2, (1..=166).collect()).unwrap();
-        let mut voice = Playback::new(&pcm).unwrap();
+        let mut voice = Playback::new(&pcm, false).unwrap();
         voice.start(&pcm, 1, [0, -1]).unwrap();
         let mut output = [0; 166];
         voice.read(&pcm, &mut output).unwrap();
@@ -319,7 +319,7 @@ mod tests {
     #[test]
     fn streaming_count_changes_and_pause_keep_the_prefetched_loop_samples() {
         let pcm = Pcm::new(10, 1, (1..=83).collect()).unwrap();
-        let mut voice = Playback::new(&pcm).unwrap();
+        let mut voice = Playback::new(&pcm, false).unwrap();
         voice.start(&pcm, 2, [5, 60]).unwrap();
         let mut first = [0; 25];
         voice.read(&pcm, &mut first).unwrap();
@@ -351,9 +351,9 @@ mod tests {
     #[test]
     fn invalid_streaming_blocks_and_nonprogressing_ranges_return_diagnostics() {
         let unaligned = Pcm::new(3, 1, vec![1; 20]).unwrap();
-        assert!(Playback::new(&unaligned).is_err());
+        assert!(Playback::new(&unaligned, false).is_err());
         let pcm = Pcm::new(10, 1, vec![1; 83]).unwrap();
-        let mut voice = Playback::new(&pcm).unwrap();
+        let mut voice = Playback::new(&pcm, false).unwrap();
         voice.start(&pcm, 0, [0, 1]).unwrap();
         assert!(voice.read(&pcm, &mut [0; 5]).is_err());
         voice.stop(&pcm).unwrap();

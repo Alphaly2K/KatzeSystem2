@@ -135,30 +135,143 @@ fn read_channel(
 }
 
 #[test]
+fn load_variants_select_group_keys_or_categories_and_keep_distinct_loop_rules() {
+    let groups = SoundGroups {
+        entries: [(7, 0, [4, 5]), (2, 0, [6, 6]), (0, 9, [7, 7])]
+            .into_iter()
+            .map(|(key, id, range)| SoundGroup {
+                key,
+                id,
+                label: vec![],
+                range,
+            })
+            .collect(),
+    };
+    let (mut runtime, _) = setup_with_groups(Some(groups));
+    let mut point = [0; 48];
+    point[..14].copy_from_slice(b"audio/tone.ogg");
+    point[32..40].copy_from_slice(&3i64.to_le_bytes());
+    point[40..48].copy_from_slice(&99i64.to_le_bytes());
+    runtime
+        .dispatch_command_with_buffers(
+            0,
+            command(199, 0),
+            &mut CommandBuffers {
+                data1: Some(&mut point),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    for (code, expected, range) in [
+        (206, 4, [3, 99]),
+        (207, 4, [0, -1]),
+        (208, 6, [3, 99]),
+        (209, 6, [3, 99]),
+    ] {
+        let mut bytes = record(55, 0, 17, b"audio/tone.ogg");
+        bytes[4..8].copy_from_slice(&7u32.to_le_bytes());
+        assert_eq!(
+            runtime
+                .dispatch_command_with_buffers(
+                    0,
+                    command(code, 0),
+                    &mut CommandBuffers {
+                        data1: Some(&mut bytes),
+                        ..Default::default()
+                    },
+                )
+                .unwrap(),
+            expected
+        );
+        let sound = audio(&runtime).channel(expected).unwrap();
+        assert!(sound.is_grouped());
+        assert_eq!(sound.loop_range(), range);
+    }
+    for (code, length) in [(207, 8), (208, 12), (209, 12)] {
+        let mut missing = vec![0xff; length];
+        assert_eq!(
+            runtime
+                .dispatch_command_with_buffers(
+                    0,
+                    command(code, 0),
+                    &mut CommandBuffers {
+                        data1: Some(&mut missing),
+                        ..Default::default()
+                    },
+                )
+                .unwrap(),
+            u32::MAX
+        );
+    }
+}
+
+#[test]
+fn alternate_direct_load_forces_whole_playback_and_links_its_own_spare_channel() {
+    let (mut runtime, _) = setup();
+    let pcm = katze_system2::audio::decode_vorbis(LONG_MONO).unwrap();
+    let mut bytes = record(5, 0, 0, b"audio/long.ogg");
+    let invoke = |runtime: &mut Runtime<SoundFactory<Reject>>, bytes: &mut [u8]| {
+        runtime.dispatch_command_with_buffers(
+            0,
+            command(181, 64),
+            &mut CommandBuffers {
+                data1: Some(bytes),
+                ..Default::default()
+            },
+        )
+    };
+    assert_eq!(invoke(&mut runtime, &mut bytes).unwrap(), 1);
+    let mut play = command(183, 5);
+    play.data[1] = 2;
+    runtime.dispatch_command(0, play).unwrap();
+    let output = read_channel(&mut runtime, pcm.frames() + 10);
+    assert_eq!(&output.samples()[..pcm.samples().len()], pcm.samples());
+    assert_eq!(
+        &output.samples()[pcm.samples().len()..],
+        &pcm.samples()[..10]
+    );
+    assert_eq!(audio(&runtime).channel(5).unwrap().completed_passes(), 1);
+    for (logical, expected) in [(5u32, 37), (u32::MAX, 31)] {
+        let mut bytes = record(logical, 1, 17, b"audio/tone.ogg");
+        assert_eq!(invoke(&mut runtime, &mut bytes).unwrap(), 1);
+        let sound = audio(&runtime).channel(expected).unwrap();
+        assert_eq!(sound.linked_channel(), Some(expected));
+        assert_eq!(sound.load_parameters(), [1, 17]);
+        assert!(!sound.is_grouped());
+    }
+    assert_eq!(audio(&runtime).channel(5).unwrap().linked_channel(), None);
+}
+
+#[test]
 fn group_names_follow_live_configuration_while_channel_ranges_keep_the_creation_snapshot() {
     let groups = SoundGroups {
         entries: vec![
             SoundGroup {
+                key: 7,
                 id: 7,
                 label: b"se".to_vec(),
                 range: [4, 5],
             },
             SoundGroup {
+                key: 7,
                 id: 7,
                 label: b"alias".to_vec(),
                 range: [10, 11],
             },
             SoundGroup {
+                key: 3,
                 id: 3,
                 label: b"SE".to_vec(),
                 range: [12, 15],
             },
             SoundGroup {
+                key: 19,
                 id: 19,
                 label: b"embedded\0suffix".to_vec(),
                 range: [20, 20],
             },
             SoundGroup {
+                key: 23,
                 id: 23,
                 label: vec![0x82, 0xa0],
                 range: [21, 21],
@@ -225,6 +338,7 @@ fn grouped_loads_allocate_physical_channels_recycle_busy_sources_and_preserve_fa
         ]
         .into_iter()
         .map(|(id, range)| SoundGroup {
+            key: id,
             id,
             range,
             label: vec![],

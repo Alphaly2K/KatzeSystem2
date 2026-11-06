@@ -271,6 +271,21 @@ fn sound_commands_gate_buffers_and_preserve_unwritten_return_slots() {
         .dispatch_command(kind::SOUND, &guarded_load, &mut output, &mut host, 1)
         .unwrap();
     assert_eq!(output, 0xdeadbeef);
+    let mut skipped = 64u32.to_le_bytes();
+    sound
+        .dispatch_command_with_buffers(
+            kind::SOUND,
+            &command(1, 181, 0),
+            &mut CommandBuffers {
+                data1: Some(&mut skipped),
+                ..Default::default()
+            },
+            &mut output,
+            &mut host,
+            1,
+        )
+        .unwrap();
+    assert_eq!(output, 0xdeadbeef);
     guarded_load.data[0] = 0;
     assert!(
         sound
@@ -281,7 +296,7 @@ fn sound_commands_gate_buffers_and_preserve_unwritten_return_slots() {
     );
     assert!(
         sound
-            .dispatch_command(kind::SOUND, &command(1, 181, 0), &mut output, &mut host, 1)
+            .dispatch_command(kind::SOUND, &command(1, 192, 0), &mut output, &mut host, 1)
             .unwrap_err()
             .message
             .contains("声音对象命令")
@@ -334,7 +349,7 @@ fn sound_commands_gate_buffers_and_preserve_unwritten_return_slots() {
             .is_err()
     );
     sound.state().0.deletion_requested = -1;
-    for code in [199, 206, 210] {
+    for code in [181, 199, 206, 207, 208, 209, 210] {
         sound
             .dispatch_command_with_buffers(
                 kind::SOUND,
@@ -351,7 +366,7 @@ fn sound_commands_gate_buffers_and_preserve_unwritten_return_slots() {
         assert_eq!(output, 0xdeadbeef);
     }
     let mut disabled = SoundObject::new(false);
-    for code in [199, 206, 210] {
+    for code in [181, 199, 206, 207, 208, 209, 210] {
         output = 0xdeadbeef;
         disabled
             .dispatch_command_with_buffers(

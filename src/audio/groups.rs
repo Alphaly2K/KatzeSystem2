@@ -1,8 +1,10 @@
 use super::terminated;
 
-/// 声音组的独立编号、原始标签及包含两端的物理通道范围。
+/// 声音组的表键、分类编号、原始标签及包含两端的物理通道范围。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SoundGroup {
+    /// 新配置与 id 相同；旧配置可以将多个键映射到同一分类。
+    pub key: u32,
     pub id: u32,
     pub label: Vec<u8>,
     pub range: [i32; 2],
