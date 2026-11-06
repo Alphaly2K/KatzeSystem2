@@ -14,7 +14,9 @@
 
 ## 系统语音配置选择
 
-宿主通过 `HostState::sound_config` 提供 `audio::SoundConfig`，其 `parts` 按配置声明顺序保存 `SoundPart { name, file_prefix, id, volume, play_enabled, system_voice, mute, children }`。name 与 file_prefix 分别为原始字节编码的分类名称和文件前缀，其余数值为应用设置后的当前原始值，节点默认两个名称为空，编号、音量和开关均为 −1。`master_volume: Option<i32>` 单独保存应用设置后的主音量；默认 None，主音量查询要求宿主显式提供。宿主负责读取配置、处理子节点的缺省继承及应用用户设置；此接口尚未自动装载声音配置。
+宿主通过 `HostState::sound_config` 提供 `audio::SoundConfig`，其 `parts` 按配置声明顺序保存 `SoundPart`。`name`、`type_name` 与 `file_prefix` 分别为原始字节编码的分类名称、配置的 type 名称和文件前缀；`id` 为编号，`master_volume` 为配置的 mastervol 倍率，`volume`、`voice_volume`、`skip_volume`、`play_enabled`、`system_voice`、`mute` 为应用设置后的当前值，`children` 为有序子分类。节点默认名称为空，编号、音量和开关均为 −1。
+
+配置的独立 `master_volume`、`master_play_enabled`、`master_system_voice` 均为 `Option<i32>`，默认 None，相应查询要求宿主显式提供；`master_mute` 默认零。宿主负责读取配置、处理子节点的缺省继承及应用用户设置；此接口尚未自动装载声音配置。构造配置或节点时可通过 `..Default::default()` 提供未使用字段。
 
 `SoundConfig::system_voice_candidates(paths)` 在 paths 为空时按先父后子顺序收集开关恰好为一的节点编号。显式路径则逐层查找第一个同编号节点；缺失分量使用开关一，后续分量继续在当前层查询。路径最后一次查询结果非零时，将最后一个输入编号加入候选。两种方式均保留重复编号。`system_voice_enabled(path)` 提供单条路径的原始查询结果，空路径返回一。
 
@@ -43,6 +45,30 @@ FES `getsndconfex output_index volume name` 将该结果写入共享槽，只读
 `file_volume(name)`、`file_play_enabled(name)`、`file_system_voice(name)` 读取匹配节点的当前值，缺失时分别返回 100、1、1，匹配节点的 −1 保留。`file_mute(name)` 将匹配节点的 −1 转为零，其他原值保留；未匹配时返回 100。`master_mute()` 同样仅将独立 master_mute 字段的 −1 转零；字段默认零，非零查询结果用于静音。
 
 `group_volume(name)` 按分类 name 精确匹配，沿用分类名称的大小写和遍历规则，缺失返回 100；此处小写 master 也是普通分类名称，与 volume_by_name 的独立主音量入口分别处理。上述值不裁剪到百分比或布尔范围。44 组原入口查询确认独立前缀、父级优先、缺失值、主静音及两种 master 查询；常规回归使用合成分类树。
+
+`group_part(name)` 与 `type_part(name)` 分别按 name／type_name 完整匹配，返回首个节点或 None；同样忽略 ASCII 大小写，保留 CP932 双字节。type_name 是独立名称，不拆分为数字路径。
+
+`effective_file_volume(name)` 先检查主静音，非零直接返回零。否则以 100 开始，按文件前缀找到首个节点后，先处理该节点，再向上处理它的各级祖先：节点 mute 非零则把当前值置零，为零则乘节点 volume 并除 100；随后乘该节点 master_volume 并除 100。最后乘独立主音量并除 100。每次乘法保留 i32 回绕，每次除法向零截断；命中父级前缀时不继续查询后代，未命中时返回独立主音量。节点 mute 的 −1 在这一入口中参与静音，与原始查询的 −1 转零规则分别保留。主静音分支跳过名称长度检查及主音量要求。
+
+### 普通 KCS 配置查询
+
+普通 939～964 已接入 `CoreHost` 及 Runtime，不检查新配置启用字段，也不修改配置刷新标记。939／940／941 分别查询独立主音量、主播放开关和主系统语音开关；942 查询主静音，原值 −1 返回零。这四项不读取参数。
+
+943～963 接受一个待格式展开的名称地址，允许普通区和外部区，额外参数忽略。按以下三种方式查首个分类，返回节点自身字段，不乘祖先或主音量；名称到首零结束，正文须短于 512 字节。
+
+|字段|文件前缀|type 名称|分类名称|缺失默认值|
+|:--|--:|--:|--:|:--|
+|volume|943|950|957|100|
+|play_enabled|944|951|958|type 为零，其他为一|
+|system_voice|945|952|959|type 为零，其他为一|
+|master_volume|946|953|960|100|
+|voice_volume|947|954|961|100|
+|skip_volume|948|955|962|−1|
+|mute|949|956|963|文件／type 为 100，分类为零；命中节点的 −1 返回零|
+
+964 同样先展开名称，再返回 `effective_file_volume`；主静音仍保留此前的格式展开。全部二十六项以状态一压入原始 DWORD，缺少所需宿主配置或无效地址时诊断，VM 来源和配置保留。
+
+26 个原包装的 24,192 次调用已核对状态、返回值及两块完整 VM 存储，全部一致。覆盖三种查找、声明顺序、空／缺失名称、CP932、格式展开、两种名称地址、额外参数、父子音量、静音、负数和整数溢出。两项新增常规纯内存回归分别固定逐级取整与回绕、以及 Runtime 中全部入口的返回栈和两种执行预算，不依赖参考引擎或设备。
 
 `HostState::sound_settings_dirty` 保存全局声音设置刷新标记，默认零。FES 的后续媒体属性更新读取该标记，清除由外层设置宿主负责。
 

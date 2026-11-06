@@ -317,6 +317,51 @@ pub(crate) fn call_native(
     if matches!(index, 352..=358) {
         return super::vectors::call(index, arguments, vm);
     }
+    if matches!(index, 939..=964) {
+        let name = if index >= 943 {
+            strings::format(vm, read::u32_at(arguments, 0)?, 0)?
+        } else {
+            Vec::new()
+        };
+        let config = host
+            .sound_config
+            .as_ref()
+            .ok_or_else(|| Error::new(vm.pc, "宿主未提供新声音分类配置"))?;
+        let value = match index {
+            939 => config
+                .master_volume
+                .ok_or_else(|| Error::new(vm.pc, "宿主未提供声音主音量"))?,
+            940 => config
+                .master_play_enabled
+                .ok_or_else(|| Error::new(vm.pc, "宿主未提供声音主播放开关"))?,
+            941 => config
+                .master_system_voice
+                .ok_or_else(|| Error::new(vm.pc, "宿主未提供声音主系统语音开关"))?,
+            942 => config.master_mute(),
+            964 => config.effective_file_volume(&name)?,
+            _ => {
+                let mode = (index - 943) / 7;
+                let field = (index - 943) % 7;
+                let part = match mode {
+                    0 => config.file_part(&name)?,
+                    1 => config.type_part(&name)?,
+                    _ => config.group_part(&name)?,
+                };
+                match field {
+                    0 => part.map_or(100, |p| p.volume),
+                    1 => part.map_or(i32::from(mode != 1), |p| p.play_enabled),
+                    2 => part.map_or(i32::from(mode != 1), |p| p.system_voice),
+                    3 => part.map_or(100, |p| p.master_volume),
+                    4 => part.map_or(100, |p| p.voice_volume),
+                    5 => part.map_or(-1, |p| p.skip_volume),
+                    _ => part.map_or(if mode == 2 { 0 } else { 100 }, |p| {
+                        if p.mute == -1 { 0 } else { p.mute }
+                    }),
+                }
+            }
+        };
+        return Ok(NativeReturn::Value(value as u32));
+    }
     if matches!(index, 359 | 360) {
         let count = if index == 359 { 4 } else { 3 };
         if arguments.len() != count * 4 {

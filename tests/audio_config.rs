@@ -165,3 +165,48 @@ fn file_policy_uses_separate_prefixes_parent_priority_and_raw_switches() {
         assert_eq!(config.master_mute(), expected);
     }
 }
+
+#[test]
+fn effective_volume_applies_the_matched_branch_inside_out_with_per_stage_wrapping() {
+    let mut config = SoundConfig {
+        master_volume: Some(47),
+        master_mute: -1,
+        parts: vec![SoundPart {
+            name: b"parent".to_vec(),
+            master_volume: 33,
+            volume: 37,
+            mute: 0,
+            children: vec![SoundPart {
+                file_prefix: b"AB".to_vec(),
+                master_volume: 65,
+                volume: 83,
+                mute: 0,
+                ..Default::default()
+            }],
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    assert_eq!(config.effective_file_volume(b"ab.ogg").unwrap(), 2);
+    assert_eq!(config.file_volume(b"ab.ogg").unwrap(), 83);
+    assert_eq!(config.effective_file_volume(b"missing").unwrap(), 47);
+    config.parts[0].file_prefix = b"AB".to_vec();
+    assert_eq!(config.effective_file_volume(b"ab.ogg").unwrap(), 5);
+    config.parts[0].file_prefix.clear();
+    config.parts[0].mute = 1;
+    assert_eq!(config.effective_file_volume(b"ab.ogg").unwrap(), 0);
+    config.parts[0].mute = 0;
+    config.parts[0].master_volume = 100;
+    config.parts[0].volume = 100;
+    config.master_volume = Some(100);
+    config.parts[0].children[0].master_volume = 9999;
+    config.parts[0].children[0].volume = i32::MAX;
+    assert_eq!(config.effective_file_volume(b"ab.ogg").unwrap(), -99);
+    config.parts[0].children[0].mute = -1;
+    assert_eq!(config.file_mute(b"ab.ogg").unwrap(), 0);
+    assert_eq!(config.effective_file_volume(b"ab.ogg").unwrap(), 0);
+    assert!(config.effective_file_volume(&[b'a'; 512]).is_err());
+    config.master_volume = None;
+    config.master_mute = 2;
+    assert_eq!(config.effective_file_volume(&[b'a'; 512]).unwrap(), 0);
+}

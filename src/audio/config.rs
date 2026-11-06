@@ -4,9 +4,14 @@ use crate::{Error, Result, read};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SoundPart {
     pub name: Vec<u8>,
+    pub type_name: Vec<u8>,
     pub file_prefix: Vec<u8>,
     pub id: i32,
+    /// 配置的 mastervol 倍率；与应用设置后的当前音量分别保存。
+    pub master_volume: i32,
     pub volume: i32,
+    pub voice_volume: i32,
+    pub skip_volume: i32,
     pub system_voice: i32,
     pub play_enabled: i32,
     pub mute: i32,
@@ -17,9 +22,13 @@ impl Default for SoundPart {
     fn default() -> Self {
         Self {
             name: Vec::new(),
+            type_name: Vec::new(),
             file_prefix: Vec::new(),
             id: -1,
+            master_volume: -1,
             volume: -1,
+            voice_volume: -1,
+            skip_volume: -1,
             system_voice: -1,
             play_enabled: -1,
             mute: -1,
@@ -34,6 +43,8 @@ pub struct SoundConfig {
     pub parts: Vec<SoundPart>,
     /// 应用设置后的独立主音量；未提供时对主音量查询返回诊断。
     pub master_volume: Option<i32>,
+    pub master_play_enabled: Option<i32>,
+    pub master_system_voice: Option<i32>,
     pub master_mute: i32,
 }
 
@@ -93,12 +104,20 @@ impl SoundConfig {
 
     /// GROUP 按分类名称查当前音量；master 在此处也是普通分类名称。
     pub fn group_volume(&self, name: &[u8]) -> Result<i32> {
-        Ok(self.find_part(name, false)?.map_or(100, |part| part.volume))
+        Ok(self.group_part(name)?.map_or(100, |part| part.volume))
+    }
+
+    pub fn group_part(&self, name: &[u8]) -> Result<Option<&SoundPart>> {
+        self.find_part(name, Match::Name)
+    }
+
+    pub fn type_part(&self, name: &[u8]) -> Result<Option<&SoundPart>> {
+        self.find_part(name, Match::Type)
     }
 
     /// 按非空文件前缀查首个分类；父级匹配时不再查找后代。
     pub fn file_part(&self, name: &[u8]) -> Result<Option<&SoundPart>> {
-        self.find_part(name, true)
+        self.find_part(name, Match::Prefix)
     }
 
     pub fn file_volume(&self, name: &[u8]) -> Result<i32> {
@@ -128,7 +147,31 @@ impl SoundConfig {
         }
     }
 
-    fn find_part(&self, name: &[u8], prefix: bool) -> Result<Option<&SoundPart>> {
+    /// 按文件前缀命中分支，自内向外应用分类音量与倍率，再应用独立主音量。
+    pub fn effective_file_volume(&self, name: &[u8]) -> Result<i32> {
+        if self.master_mute() != 0 {
+            return Ok(0);
+        }
+        let mut volume = 100i32;
+        for part in self.find_path(name, Match::Prefix)?.iter().rev() {
+            volume = if part.mute == 0 {
+                part.volume.wrapping_mul(volume) / 100
+            } else {
+                0
+            };
+            volume = part.master_volume.wrapping_mul(volume) / 100;
+        }
+        let master = self
+            .master_volume
+            .ok_or_else(|| Error::new(0, "运行时未提供新声音配置的当前主音量"))?;
+        Ok(master.wrapping_mul(volume) / 100)
+    }
+
+    fn find_part(&self, name: &[u8], mode: Match) -> Result<Option<&SoundPart>> {
+        Ok(self.find_path(name, mode)?.last().copied())
+    }
+
+    fn find_path(&self, name: &[u8], mode: Match) -> Result<Vec<&SoundPart>> {
         let name = &name[..name
             .iter()
             .position(|&byte| byte == 0)
@@ -137,28 +180,31 @@ impl SoundConfig {
             return Err(Error::new(0, "声音分类名称超过查询缓冲区容量"));
         }
         let name = normalized_name(name);
-        let mut stack: Vec<_> = self.parts.iter().rev().collect();
+        let mut stack: Vec<_> = self.parts.iter().rev().map(|part| (part, 0)).collect();
+        let mut path = Vec::new();
         let mut visited = 0;
-        while let Some(part) = stack.pop() {
+        while let Some((part, depth)) = stack.pop() {
             visited += 1;
             if visited > read::MAX_ITEMS {
                 return Err(Error::new(0, "声音配置节点数量超过上限"));
             }
-            let key = normalized_name(if prefix {
-                &part.file_prefix
-            } else {
-                &part.name
+            path.truncate(depth);
+            path.push(part);
+            let key = normalized_name(match mode {
+                Match::Name => &part.name,
+                Match::Type => &part.type_name,
+                Match::Prefix => &part.file_prefix,
             });
-            if if prefix {
+            if if matches!(mode, Match::Prefix) {
                 !key.is_empty() && name.starts_with(&key)
             } else {
                 name == key
             } {
-                return Ok(Some(part));
+                return Ok(path);
             }
-            stack.extend(part.children.iter().rev());
+            stack.extend(part.children.iter().rev().map(|part| (part, depth + 1)));
         }
-        Ok(None)
+        Ok(Vec::new())
     }
 
     fn path_value(&self, path: &[i32], default: i32, value: fn(&SoundPart) -> i32) -> Result<i32> {
@@ -176,6 +222,13 @@ impl SoundConfig {
         }
         Ok(result)
     }
+}
+
+#[derive(Clone, Copy)]
+enum Match {
+    Name,
+    Type,
+    Prefix,
 }
 
 fn normalized_name(name: &[u8]) -> Vec<u8> {
