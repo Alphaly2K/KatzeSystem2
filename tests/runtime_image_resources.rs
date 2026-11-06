@@ -379,6 +379,99 @@ fn failed_loads_do_not_allocate_and_animation_or_layer_sources_report_their_miss
 }
 
 #[test]
+fn resource_transforms_keep_return_stack_and_shared_update_flag() {
+    for budget in [1, 4096] {
+        let mut code = Vec::new();
+        call(&mut code, 710, &[64]);
+        ins(&mut code, 0x26, &[0]);
+        ins(&mut code, 0x25, &[0xdead_beef]);
+        call(&mut code, 65, &[]);
+        for (native, args) in [
+            (737, vec![3]),
+            (713, vec![50, 100, 200]),
+            (723, vec![90]),
+            (727, vec![1]),
+        ] {
+            handle_call(&mut code, native, &args);
+            call(&mut code, 65, &[]);
+        }
+        call(&mut code, 713, &[u32::MAX, 100, 100, 100]);
+        call(&mut code, 737, &[u32::MAX, 0]);
+        for native in [713, 723, 727, 737] {
+            call(&mut code, native, &[0]);
+        }
+        call(&mut code, 65, &[]);
+        let mut runtime = runtime(&code, budget);
+        runtime.set_resources(Files(Requests::default()));
+        let task = runtime
+            .create(0, kind::ORDINARY, b"transforms", b"")
+            .unwrap();
+        runtime
+            .object_mut(task)
+            .unwrap()
+            .interpreter_mut()
+            .unwrap()
+            .write(64, b"art:7\0")
+            .unwrap();
+        runtime.update(0, 1).unwrap();
+        let handle = word(vm(&runtime, task), 0);
+        assert!(!runtime.image_resource_updated(handle, true).unwrap());
+        runtime.retain_image_resource(handle).unwrap();
+        for frame in 1..=4 {
+            runtime.update(frame, 1).unwrap();
+            assert!(runtime.image_resource_updated(handle, false).unwrap());
+            assert!(runtime.image_resource_updated(handle, true).unwrap());
+            assert!(!runtime.image_resource_updated(handle, false).unwrap());
+            assert_eq!(
+                vm(&runtime, task).stack_bytes(),
+                0xdead_beefu32.to_le_bytes()
+            );
+        }
+        let image = runtime.image_resource(handle).unwrap();
+        assert_eq!(image.surface().pixels(), [255, 255, 127, 0]);
+        assert_eq!(image.info().offset, [5, -2]);
+        assert_eq!(image.info().base, [4, 3]);
+        assert_eq!(image.attribute(1), Some([8, 9, 7, 6, 5]));
+        runtime.update(5, 1).unwrap();
+        assert!(!runtime.image_resource_updated(handle, true).unwrap());
+        runtime.destroy(task).unwrap();
+        assert!(runtime.image_resource(handle).is_ok());
+        runtime.release_image_resource_reference(handle).unwrap();
+        assert!(runtime.image_resource_updated(handle, false).is_err());
+    }
+    for (native, args) in [(713, vec![50, 50, 50]), (723, vec![0]), (727, vec![0])] {
+        let mut code = Vec::new();
+        call(&mut code, 733, &[1, 1]);
+        ins(&mut code, 0x26, &[0]);
+        handle_call(&mut code, native, &args);
+        let mut runtime = runtime(&code, 1);
+        runtime.create(0, kind::ORDINARY, b"blank", b"").unwrap();
+        assert!(
+            runtime
+                .update(0, 1)
+                .unwrap_err()
+                .message
+                .contains("来源图层")
+        );
+    }
+    let mut code = Vec::new();
+    call(&mut code, 733, &[1, 1]);
+    ins(&mut code, 0x26, &[0]);
+    handle_call(&mut code, 737, &[3]);
+    call(&mut code, 65, &[]);
+    let mut runtime = runtime(&code, 1);
+    let task = runtime
+        .create(0, kind::ORDINARY, b"blank-filter", b"")
+        .unwrap();
+    runtime.update(0, 1).unwrap();
+    let handle = word(vm(&runtime, task), 0);
+    assert_eq!(
+        runtime.image_resource(handle).unwrap().surface().pixels(),
+        [255, 255, 255, 0]
+    );
+}
+
+#[test]
 fn resource_controls_preserve_alpha_cache_geometry_pixel_origin_and_return_stack() {
     for budget in [1, 4096] {
         for width in [0, 2] {

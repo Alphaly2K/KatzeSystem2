@@ -1,5 +1,5 @@
 use super::{ObjectFactory, ObjectHost, Resources, Runtime};
-use crate::graphics::{Image, ImageReference, Rect};
+use crate::graphics::{Image, ImageFilter, ImageReference, Rect};
 use crate::kcs::{Interpreter, NativeReturn, format_string};
 use crate::resource::ResourceMode;
 use crate::{Error, Result, read};
@@ -8,6 +8,8 @@ pub(super) struct ImageResource {
     image: u32,
     owner: Option<u32>,
     references: usize,
+    has_source_layer: bool,
+    updated: bool,
 }
 
 impl<F: ObjectFactory> Runtime<F> {
@@ -38,6 +40,20 @@ impl<F: ObjectFactory> Runtime<F> {
     /// 释放独立使用者的持有，保留所属任务登记；零句柄跳过。
     pub fn release_image_resource_reference(&mut self, handle: u32) -> Result<()> {
         self.resources.release_image_resource(handle, None)
+    }
+
+    /// 读取资源的更新标记，可同时清零；清零会影响共享这一资源的全部使用者。
+    pub fn image_resource_updated(&mut self, handle: u32, clear: bool) -> Result<bool> {
+        let resource = self
+            .resources
+            .image_resources
+            .get_mut(&handle)
+            .ok_or_else(|| Error::new(0, "独立图像资源句柄无效"))?;
+        let updated = resource.updated;
+        if clear {
+            resource.updated = false;
+        }
+        Ok(updated)
     }
 }
 
@@ -183,6 +199,8 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     image,
                     owner: Some(self.host.task_id),
                     references: 1,
+                    has_source_layer: index == 710,
+                    updated: index == 733,
                 },
             );
             return Ok(NativeReturn::Value(handle));
@@ -213,7 +231,8 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         }
         let count = match index {
             711 | 721 => 1,
-            722 | 728 => 2,
+            722 | 723 | 727 | 728 | 737 => 2,
+            713 => 4,
             712 | 714 | 715 | 717..=720 => 3,
             724 => 7,
             736 => 6,
@@ -227,11 +246,54 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                 .release_image_resource(handle, Some(self.host.task_id))?;
             return Ok(NativeReturn::Continue);
         }
+        let filter = if index == 737 {
+            match read::u32_at(arguments, 4)? {
+                1 => ImageFilter::Mono,
+                2 => ImageFilter::Sepia,
+                3 => ImageFilter::Negative,
+                _ => return Ok(NativeReturn::Continue),
+            }
+        } else {
+            ImageFilter::None
+        };
+        let rgb = if index == 713 {
+            let rgb = [
+                read::u32_at(arguments, 4)?,
+                read::u32_at(arguments, 8)?,
+                read::u32_at(arguments, 12)?,
+            ];
+            if rgb == [100; 3] {
+                return Ok(NativeReturn::Continue);
+            }
+            rgb
+        } else {
+            [100; 3]
+        };
         let resource = self
             .resources
             .image_resources
-            .get(&handle)
+            .get_mut(&handle)
             .ok_or_else(|| Error::new(vm.pc, "独立图像资源句柄无效"))?;
+        if matches!(index, 713 | 723 | 727 | 737) {
+            if index != 737 && !resource.has_source_layer {
+                return Err(Error::new(
+                    vm.pc,
+                    "该图像资源操作需要来源图层，空白资源的原入口会访问空容器",
+                ));
+            }
+            let image = self.resources.images.get_mut(resource.image)?;
+            match index {
+                713 => image.adjust_rgb_percent(rgb),
+                723 => {
+                    image.rotate_right_angle(read::u32_at(arguments, 4)? as i32)?;
+                }
+                727 => image.flip(read::u32_at(arguments, 4)? != 0),
+                737 => filter.apply(image),
+                _ => unreachable!(),
+            }
+            resource.updated = true;
+            return Ok(NativeReturn::Continue);
+        }
         if index == 721 {
             return Ok(NativeReturn::Value(u32::from(
                 self.resources.images.uses_alpha(resource.image)?,
