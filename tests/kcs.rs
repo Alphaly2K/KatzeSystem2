@@ -427,6 +427,80 @@ fn string_expansion_and_argument_boundaries_match_native_words() {
 }
 
 #[test]
+fn word_offsets_preserve_space_runs_raw_bytes_and_native_stack_results() {
+    use kcs::{Host, NativeReturn};
+    let source = b" \x82\xa0\tX  b \0";
+    let mut state = katze_system2::expression::State::new(0);
+    let mut host = kcs::CoreHost::new(&mut state);
+    let mut vm = kcs::Interpreter::new(
+        kcs::Program::from_code(&[], vec![0xa5; 64], 0).unwrap(),
+        vec![0xb6; 64],
+    )
+    .unwrap();
+    for address in [0u32, 0x8000_0001] {
+        vm.write(address, source).unwrap();
+        for (index, expected) in [
+            (0, 0),
+            (1, 1),
+            (2, 7),
+            (3, 9),
+            (4, u32::MAX),
+            (u32::MAX, u32::MAX),
+        ] {
+            let args = [address.to_le_bytes(), index.to_le_bytes()].concat();
+            assert_eq!(
+                host.call(540, &args, &mut vm).unwrap(),
+                NativeReturn::Value(expected)
+            );
+        }
+        assert_eq!(vm.read(address, source.len()).unwrap(), source);
+    }
+    assert_eq!(
+        host.call(
+            540,
+            &[u32::MAX.to_le_bytes(), 0u32.to_le_bytes()].concat(),
+            &mut vm
+        )
+        .unwrap(),
+        NativeReturn::Value(0)
+    );
+    vm.write(61, b"a b").unwrap();
+    assert_eq!(
+        host.call(
+            540,
+            &[61u32.to_le_bytes(), 1u32.to_le_bytes()].concat(),
+            &mut vm
+        )
+        .unwrap(),
+        NativeReturn::Value(2)
+    );
+    assert!(
+        host.call(
+            540,
+            &[61u32.to_le_bytes(), 2u32.to_le_bytes()].concat(),
+            &mut vm
+        )
+        .is_err()
+    );
+
+    let mut code = Vec::new();
+    for value in [0x1234_5678, 32, 2] {
+        ins(&mut code, 0x25, &[(3, value)]);
+    }
+    ins(&mut code, 0x2b, &[(3, 540), (3, 8)]);
+    ins(&mut code, 0x26, &[(3, 0)]);
+    let mut data = vec![0; 64];
+    data[32..32 + source.len()].copy_from_slice(source);
+    let program = kcs::Program::from_code(&code, data, 32).unwrap();
+    for budget in [1, 4096] {
+        let mut vm = kcs::Interpreter::new(program.clone(), vec![]).unwrap();
+        while vm.run(&mut host, budget).unwrap() != Step::Halted {}
+        assert_eq!(vm.read(0, 4).unwrap(), 7u32.to_le_bytes());
+        assert_eq!(vm.stack_bytes(), 0x1234_5678u32.to_le_bytes());
+    }
+}
+
+#[test]
 fn formatted_strings_use_byte_addresses_and_recurse_through_string_fields() {
     use kcs::Host;
     let mut vm = kcs::Interpreter::new(

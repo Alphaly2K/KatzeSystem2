@@ -8,6 +8,38 @@ pub(super) fn character_width(source: &[u8]) -> usize {
     }
 }
 
+pub(super) fn word_offset(vm: &Interpreter, address: u32, count: u32) -> Result<u32> {
+    if count == 0 {
+        return Ok(0);
+    }
+    let offset = (address & 0x7fff_ffff) as usize;
+    let size = if address & 0x8000_0000 != 0 {
+        vm.external.len()
+    } else {
+        vm.memory.len()
+    };
+    let source = vm.read(address, size.saturating_sub(offset))?;
+    let byte = |at: usize| {
+        source
+            .get(at)
+            .copied()
+            .ok_or_else(|| Error::new(vm.pc, "KCS 词项偏移读取越界"))
+    };
+    let mut at = 0;
+    for _ in 0..count {
+        while !matches!(byte(at)?, 0 | b' ') {
+            at += 1;
+        }
+        if byte(at)? == 0 {
+            return Ok(u32::MAX);
+        }
+        while byte(at)? == b' ' {
+            at += 1;
+        }
+    }
+    Ok(at as u32)
+}
+
 pub(super) fn float32(source: &[u8]) -> u32 {
     let start = source
         .iter()
