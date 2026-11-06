@@ -111,6 +111,8 @@ FES 可通过 `Program::from_text` 接受已解压字节。声明、文本参数
 
 `katze-script inspect` 读取文件或单层目录并汇总结果。CST 的 items 为记录数，CSTL 为消息条目数，ANM／KCS 为指令数，FES 为文档数。它只检查读取和结构。
 
+`katze-script native-calls <ordinary|motion|particle> <KCS 文件或目录>...` 批量汇总宿主调用点、参数字节数和未静态解析的索引数量。表类别由调用方按实际宿主指定，程序版本分别保存，不执行脚本；输入与输出契约见[宿主调用清单](native-calls.md)。
+
 ## 推进与宿主事件
 
 解释器的 `run` 接收本次指令预算，返回 `Step`：

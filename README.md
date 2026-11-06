@@ -8,9 +8,12 @@ CatSystem2 的开源重实现，当前适配基线为 Windows CatSystem2 2.6.1.9
 cargo test --locked
 cargo run --bin katze-script -- eval 2048 '1+2*3'
 cargo run --bin katze-script -- inspect demo.cst
+cargo run --bin katze-script -- native-calls ordinary scripts/
 ```
 
 `inspect` 接受一个或多个文件，也可检查目录中的文件；输出读取数量与结构诊断数量。
+
+`native-calls` 按指定宿主表批量统计 KCS 调用编号、参数字节数和调用点数量。
 
 [脚本参考](docs/README.md) · [接口使用与实现范围](docs/api.md) · [阶段进展](GOAL.md) · [依赖许可证](THIRD_PARTY.md)
 

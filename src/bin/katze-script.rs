@@ -40,9 +40,80 @@ fn main() -> std::process::ExitCode {
     }
 }
 
+fn native_calls(
+    table: &str,
+    paths: &[String],
+) -> std::result::Result<(), Box<dyn std::error::Error>> {
+    if !matches!(table, "ordinary" | "motion" | "particle") {
+        return Err("宿主表须为 ordinary、motion 或 particle".into());
+    }
+    let mut files = Vec::new();
+    for path in paths.iter().map(Path::new) {
+        if path.is_dir() {
+            for entry in std::fs::read_dir(path)? {
+                let entry = entry?;
+                if entry.file_type()?.is_file()
+                    && entry
+                        .path()
+                        .extension()
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("kcs"))
+                {
+                    files.push(entry.path());
+                }
+            }
+        } else {
+            files.push(path.to_owned());
+        }
+    }
+    files.sort();
+    files.dedup();
+    let mut sites = BTreeMap::<(u32, u32, Option<u32>), usize>::new();
+    let mut instructions = 0;
+    let mut calls = 0;
+    let mut unresolved_indices = 0;
+    for (number, path) in files.iter().enumerate() {
+        let program = (|| {
+            if std::fs::metadata(path)?.len() > 64 * 1024 * 1024 {
+                return Err("文件超过读取上限".into());
+            }
+            Ok::<_, Box<dyn std::error::Error>>(kcs::Program::parse(&std::fs::read(path)?)?)
+        })()
+        .map_err(|error| format!("输入 {}：{error}", number + 1))?;
+        instructions += program.instructions().len();
+        for instruction in program.instructions().iter().filter(|i| i.opcode == 0x2b) {
+            calls += 1;
+            let index = instruction.operands[0];
+            if index.flags != 3 {
+                unresolved_indices += 1;
+                continue;
+            }
+            let arguments = instruction.operands[1];
+            let bytes = (arguments.flags == 3).then_some(arguments.payload);
+            *sites
+                .entry((program.control, index.payload, bytes))
+                .or_default() += 1;
+        }
+    }
+    println!("table\tprogram_version\tindex\targument_bytes\tcall_sites");
+    for ((version, index, bytes), count) in sites {
+        let bytes = bytes.map_or_else(|| "?".into(), |n| n.to_string());
+        println!(
+            "{table}\t{}.{}\t{index}\t{bytes}\t{count}",
+            version & 0xffff,
+            version >> 16
+        );
+    }
+    println!(
+        "summary\ttable={table}\tprograms={}\tinstructions={instructions}\tcall_sites={calls}\tunresolved_indices={unresolved_indices}",
+        files.len()
+    );
+    Ok(())
+}
+
 fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
+        Some("native-calls") if args.len() > 2 => native_calls(&args[1], &args[2..])?,
         Some("eval") if args.len() == 3 => {
             let slots: usize = args[1].parse()?;
             if slots > 1_000_000 {
@@ -93,7 +164,7 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
         }
         _ => {
             return Err(
-                "用法：katze-script inspect <文件或目录>... | eval <共享变量槽数> <表达式>".into(),
+                "用法：katze-script inspect <文件或目录>... | native-calls <宿主表> <KCS 文件或目录>... | eval <共享变量槽数> <表达式>".into(),
             );
         }
     }
