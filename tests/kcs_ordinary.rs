@@ -155,12 +155,21 @@ fn shared_host_receives_each_task_id_and_keeps_system_milliseconds_independent()
         }
         ins(&mut code, 0x2b, &[(3, native), (3, 8)]);
     }
-    for (native, target) in [(68, 0), (5, 4), (4, 8), (465, 12), (938, 16), (1030, 20)] {
+    for (native, target) in [
+        (68, 0),
+        (5, 4),
+        (4, 8),
+        (465, 12),
+        (938, 16),
+        (1030, 20),
+        (565, 24),
+        (566, 28),
+    ] {
         ins(&mut code, 0x2b, &[(3, native), (3, 0)]);
         ins(&mut code, 0x26, &[(3, target)]);
     }
     code.push(0x3b);
-    let program = Program::from_code(&code, vec![0; 24], 64).unwrap();
+    let program = Program::from_code(&code, vec![0; 32], 64).unwrap();
     let mut state = State::new(8);
     let mut host = CoreHost::new(&mut state);
     for (task_id, origin, now, system_time_ms, elapsed) in [
@@ -174,6 +183,8 @@ fn shared_host_receives_each_task_id_and_keeps_system_milliseconds_independent()
         let debug_mode = system_time_ms ^ 0x1234_5678;
         host.debug_mode = debug_mode;
         host.sound_config_enabled = task_id;
+        host.frame_capture_enabled = task_id ^ debug_mode;
+        host.frame_capture_index = now;
         assert!(task.update(now, 1, &mut host, 100).unwrap());
         assert_eq!(
             values(&task),
@@ -181,6 +192,11 @@ fn shared_host_receives_each_task_id_and_keeps_system_milliseconds_independent()
         );
         assert_eq!(task.interpreter.read(16, 4).unwrap(), task_id.to_le_bytes());
         assert_eq!(task.interpreter.read(20, 4).unwrap(), [0; 4]);
+        assert_eq!(
+            task.interpreter.read(24, 4).unwrap(),
+            (task_id ^ debug_mode).to_le_bytes()
+        );
+        assert_eq!(task.interpreter.read(28, 4).unwrap(), now.to_le_bytes());
         assert_eq!(task.interpreter.stack_bytes(), 0x1357_9bdfu32.to_le_bytes());
         assert_eq!(task.running, 0);
     }

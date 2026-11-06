@@ -60,6 +60,10 @@ pub struct HostState {
     pub sound_stereo: Option<u32>,
     pub sequence_name_mode: u32,
     pub surface_size: [u32; 2],
+    /// 外层图形宿主维护的连续截图开关，保留原始 DWORD。
+    pub frame_capture_enabled: u32,
+    /// 下一次连续截图使用的序号；由外层捕获流程同步。
+    pub frame_capture_index: u32,
     /// 消息记录生成显示时间时使用的全局比例；None 表示尚无时间上下文。
     pub message_time_scale: Option<u32>,
     pub message_defaults: Option<crate::message::MessageDefaults>,
@@ -411,6 +415,13 @@ pub(crate) fn call_native(
     }
     if index == 465 {
         return Ok(NativeReturn::Value(host.debug_mode));
+    }
+    if matches!(index, 565 | 566) {
+        return Ok(NativeReturn::Value(if index == 565 {
+            host.frame_capture_enabled
+        } else {
+            host.frame_capture_index
+        }));
     }
     if index == 938 {
         return Ok(NativeReturn::Value(host.sound_config_enabled));
