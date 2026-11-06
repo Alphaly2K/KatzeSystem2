@@ -6,6 +6,63 @@ use crate::task::CommandBuffers;
 use crate::{Error, Result, read};
 
 impl<F: ObjectFactory> ObjectHost<'_, F> {
+    pub(super) fn control_sound_native(
+        &mut self,
+        index: u32,
+        arguments: &[u8],
+        vm: &mut Interpreter,
+    ) -> Result<NativeReturn> {
+        let sound = self.command_target(0, 35, [0; 3])?;
+        let channel = read::u32_at(arguments, 0)?;
+        let mut data = [channel, 0, 0];
+        let mut record = Vec::new();
+        match index {
+            157 | 161 | 164 => data[1] = read::u32_at(arguments, 4)?,
+            163 | 166 => {
+                let low = u16::from_le_bytes(read::range(arguments, 4, 2)?.try_into().unwrap());
+                let high = u16::from_le_bytes(read::range(arguments, 8, 2)?.try_into().unwrap());
+                data[1] = u32::from(low) | (u32::from(high) << 16);
+            }
+            167 | 168 => {
+                record.extend_from_slice(read::range(
+                    arguments,
+                    4,
+                    if index == 167 { 8 } else { 12 },
+                )?);
+            }
+            _ => {}
+        }
+        let query = matches!(index, 160 | 162 | 165);
+        if query {
+            let supported = self
+                .tree
+                .find_reachable(self.host.task_id, sound)
+                .is_some_and(|node| node.kind == super::kind::SOUND);
+            let deleted = self
+                .objects
+                .get(&sound)
+                .is_some_and(|object| object.control().deletion_requested != 0)
+                || self.running.get(&sound).is_some_and(|task| task.deleted);
+            if !supported || deleted {
+                return Err(Error::new(vm.pc, "声音查询目标不可达、已删除或类型未接入"));
+            }
+        }
+        let output = self.command_target_with_buffers(
+            sound,
+            182 + index - 156,
+            data,
+            &mut CommandBuffers {
+                data1: (!record.is_empty()).then_some(record.as_mut_slice()),
+                ..Default::default()
+            },
+        )?;
+        Ok(if query {
+            NativeReturn::Value(output)
+        } else {
+            NativeReturn::Continue
+        })
+    }
+
     pub(super) fn load_sound_native(
         &mut self,
         index: u32,

@@ -32,7 +32,9 @@ impl ProgramLoader for Source {
                 instruction(&mut code, 0x25, &[*arg]);
             }
             instruction(&mut code, 0x2b, &[*index, args.len() as u32 * 4]);
-            instruction(&mut code, 0x26, &[256 + i as u32 * 4]);
+            if matches!(index, 160 | 162 | 165 | 935 | 936) {
+                instruction(&mut code, 0x26, &[256 + i as u32 * 4]);
+            }
         }
         instruction(&mut code, 0x26, &[0]);
         instruction(&mut code, 0x3b, &[]);
@@ -201,6 +203,76 @@ fn native_loads_diagnose_uninitialized_results_and_short_arguments() {
                 .unwrap()
                 .pcm()
                 .is_none()
+        );
+    }
+}
+
+#[test]
+fn native_controls_reach_real_playback_and_keep_void_results_off_the_stack() {
+    for budget in [1, 4096] {
+        let mut rt = setup(vec![
+            (935, vec![5, 0, 64, 1, 0]),
+            (161, vec![5, (-69i32) as u32]),
+            (164, vec![5, 234]),
+            (162, vec![5]),
+            (165, vec![5]),
+            (157, vec![5, 1]),
+            (160, vec![5]),
+            (158, vec![5]),
+            (160, vec![5]),
+            (157, vec![5, 0]),
+            (160, vec![5]),
+            (162, vec![5]),
+            (159, vec![5]),
+            (160, vec![5]),
+            (156, vec![5]),
+            (160, vec![5]),
+            (162, vec![5]),
+            (165, vec![5]),
+        ]);
+        rt.set_budget(budget, 4096);
+        rt.update(0, 0).unwrap();
+        let vm = rt.object(2).unwrap().interpreter().unwrap();
+        assert!(vm.stack_bytes().is_empty());
+        assert_eq!(vm.read(0, 4).unwrap(), 0xdeadbeefu32.to_le_bytes());
+        for (slot, expected) in [
+            (0, 1),
+            (3, (-69i32) as u32),
+            (4, 100),
+            (6, 1),
+            (8, 0),
+            (10, 1),
+            (11, (-69i32) as u32),
+            (13, 0),
+            (15, 0),
+            (16, 0),
+            (17, 0),
+        ] {
+            assert_eq!(vm.read(256 + slot * 4, 4).unwrap(), expected.to_le_bytes());
+        }
+        assert!(
+            rt.object(1)
+                .unwrap()
+                .audio_state()
+                .unwrap()
+                .channel(5)
+                .unwrap()
+                .pcm()
+                .is_none()
+        );
+    }
+    for (index, args, code) in [
+        (163, vec![5, 1, 2], 189),
+        (166, vec![5, 1, 2], 192),
+        (167, vec![5, 1, 2], 193),
+        (168, vec![5, 1, 2, 3], 194),
+    ] {
+        let mut rt = setup(vec![(index, args)]);
+        assert!(
+            rt.update(0, 0)
+                .unwrap_err()
+                .message
+                .contains(&format!("声音对象命令 {code} 尚未接入"))
         );
     }
 }

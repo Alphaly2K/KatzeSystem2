@@ -1742,6 +1742,9 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         if index == 400 {
             return self.load_sound_loop_table(arguments, vm);
         }
+        if matches!(index, 156..=168) {
+            return self.control_sound_native(index, arguments, vm);
+        }
         if matches!(index, 935 | 936) {
             return self.load_sound_native(index, arguments, vm);
         }
