@@ -1,6 +1,6 @@
 use katze_system2::{
     graphics::{Rect, Surface},
-    message::{AtomKind, Layout, LayoutEntry, Reveal, RevealGlyph},
+    message::{AtomKind, Layout, LayoutEntry, Reveal, RevealGlyph, TextEncoding},
 };
 
 #[test]
@@ -75,6 +75,7 @@ fn entry(character: char, line: u32, x: i32, width: i32) -> LayoutEntry {
     LayoutEntry {
         atom: None,
         kind: AtomKind::Character(character),
+        encoding: TextEncoding::Cp932,
         position: [x, 0],
         size: [width, 20],
         line,

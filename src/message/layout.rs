@@ -32,6 +32,7 @@ pub struct LayoutEntry {
     /// 对应 Markup::atoms 的下标；自动插入的换行使用 None。
     pub atom: Option<usize>,
     pub kind: AtomKind,
+    pub encoding: TextEncoding,
     pub position: [i32; 2],
     pub size: [i32; 2],
     pub line: u32,
@@ -149,6 +150,7 @@ impl Markup {
             entries.push(LayoutEntry {
                 atom: Some(index),
                 kind: atom.kind,
+                encoding: atom.encoding,
                 position,
                 size,
                 line: 0,
@@ -355,6 +357,7 @@ impl Layout {
                     LayoutEntry {
                         atom: None,
                         kind: AtomKind::NewLine,
+                        encoding: settings.encoding,
                         position: [0; 2],
                         size: [0; 2],
                         line: 0,

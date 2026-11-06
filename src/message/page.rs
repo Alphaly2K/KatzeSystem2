@@ -298,6 +298,15 @@ impl Page {
         timing_settings: &TimingSettings,
         mut measure: impl FnMut(char, u32) -> Result<i32>,
     ) -> Result<bool> {
+        self.prepare_encoded(layout_settings, timing_settings, |c, s, _| measure(c, s))
+    }
+
+    pub(super) fn prepare_encoded(
+        &mut self,
+        layout_settings: &LayoutSettings,
+        timing_settings: &TimingSettings,
+        mut measure: impl FnMut(char, u32, TextEncoding) -> Result<i32>,
+    ) -> Result<bool> {
         if self.encoding != layout_settings.encoding || self.encoding != timing_settings.encoding {
             return Err(Error::new(0, "消息页、布局和时序的编码路径不一致"));
         }
@@ -341,7 +350,7 @@ impl Page {
                 let AtomKind::Character(c) = entry.kind else {
                     unreachable!()
                 };
-                entry.size[0] = measure(c, entry.size[1] as u32)?;
+                entry.size[0] = measure(c, entry.size[1] as u32, entry.encoding)?;
             }
         }
         layout.arrange(layout_settings)?;

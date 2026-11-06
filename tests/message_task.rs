@@ -602,12 +602,12 @@ fn runtime_routes_both_encodings_through_segment_playback_canvas_and_frame() {
 }
 
 #[test]
-fn glyph_styles_preserve_measurement_and_survive_append_shift_and_reconfiguration() {
+fn glyph_styles_and_encoding_survive_append_shift_and_reconfiguration() {
     use std::{cell::RefCell, rc::Rc};
 
     #[derive(Default)]
     struct Requests {
-        measured: Vec<FontRequest>,
+        measured: Vec<(char, FontRequest)>,
         drawn: Vec<(char, FontRequest)>,
     }
     struct StyledFonts(Rc<RefCell<Requests>>);
@@ -615,8 +615,8 @@ fn glyph_styles_preserve_measurement_and_survive_append_shift_and_reconfiguratio
         fn validate(&mut self, request: &FontRequest) -> Result<()> {
             Fonts.validate(request)
         }
-        fn measure(&mut self, request: &FontRequest, _: char, _: u32) -> Result<i32> {
-            self.0.borrow_mut().measured.push(request.clone());
+        fn measure(&mut self, request: &FontRequest, c: char, _: u32) -> Result<i32> {
+            self.0.borrow_mut().measured.push((c, request.clone()));
             Ok(4)
         }
         fn rasterize(&mut self, request: &FontRequest, c: char, _: u32) -> Result<GlyphMask> {
@@ -676,23 +676,23 @@ fn glyph_styles_preserve_measurement_and_survive_append_shift_and_reconfiguratio
                     &mut rt,
                     458 + shift,
                     0,
-                    Some(&mut b"A\\tbi;B\\ti;G\0".to_vec()),
+                    Some(&mut b"A\\tbi;\\$66;\\ti;G\0".to_vec()),
                 );
                 send(&mut rt, 461 + shift, 0, None);
                 send(&mut rt, 458 + shift, 0, Some(&mut b"C\0".to_vec()));
                 send(&mut rt, 461 + shift, 0, None);
                 let initial = [
-                    ('A', 400, false),
-                    ('B', 700, true),
-                    ('G', 400, true),
-                    ('C', 400, true),
+                    ('A', 400, false, encoding),
+                    ('B', 700, true, TextEncoding::Unicode),
+                    ('G', 400, true, encoding),
+                    ('C', 400, true, encoding),
                 ];
                 let drawn = || {
                     requests
                         .borrow()
                         .drawn
                         .iter()
-                        .map(|(c, request)| (*c, request.weight, request.italic))
+                        .map(|(c, request)| (*c, request.weight, request.italic, request.encoding))
                         .collect::<Vec<_>>()
                 };
                 assert_eq!(drawn(), initial);
@@ -712,16 +712,27 @@ fn glyph_styles_preserve_measurement_and_survive_append_shift_and_reconfiguratio
                     &mut rt,
                     458 + shift,
                     0,
-                    Some(&mut b"D\\tb;E\\t;F\0".to_vec()),
+                    Some(&mut b"D\\tb;\\$69;\\t;F\0".to_vec()),
                 );
                 send(&mut rt, 461 + shift, 0, None);
-                let reset = [('D', 400, false), ('E', 700, false), ('F', 400, false)];
+                let reset = [
+                    ('D', 400, false, encoding),
+                    ('E', 700, false, TextEncoding::Unicode),
+                    ('F', 400, false, encoding),
+                ];
                 assert_eq!(&drawn()[8..], reset);
                 send(&mut rt, 457 + shift, 0, Some(&mut config));
                 send(&mut rt, 461 + shift, 0, None);
                 assert_eq!(&drawn()[11..], reset);
-                assert!(requests.borrow().measured.iter().all(|request| {
-                    request.encoding == encoding && request.weight == weight && !request.italic
+                assert!(requests.borrow().measured.iter().all(|(c, request)| {
+                    request.encoding
+                        == if matches!(c, 'B' | 'E') {
+                            TextEncoding::Unicode
+                        } else {
+                            encoding
+                        }
+                        && request.weight == weight
+                        && !request.italic
                 }));
             }
         }
@@ -1059,6 +1070,7 @@ fn user_glyph_commands_retain_sources_across_clear_and_rebuild_mappings_on_confi
     }
     for (encoding, shift, text, key) in [
         (TextEncoding::Cp932, 0, vec![0x82, 0xa0, 0], 0x82a0),
+        (TextEncoding::Cp932, 0, b"\\$0x3042;\0".to_vec(), 0x3042),
         (
             TextEncoding::Unicode,
             21,

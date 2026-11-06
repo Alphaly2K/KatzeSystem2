@@ -26,8 +26,9 @@ pub struct FontRequest {
 }
 
 impl FontRequest {
-    fn for_glyph(&self, style: Style) -> Self {
+    fn for_glyph(&self, style: Style, encoding: TextEncoding) -> Self {
         Self {
+            encoding,
             weight: if style.bold { 700 } else { 400 },
             italic: style.italic,
             ..self.clone()
@@ -242,8 +243,8 @@ impl MessageObject {
         let config = self.configuration.as_ref().unwrap();
         let timing = config.timing(host.message_time_scale());
         let fonts = fonts(host)?;
-        display.prepare(&config.layout, &timing, |c, s| {
-            fonts.measure(&config.font, c, s)
+        display.prepare_encoded(&config.layout, &timing, |c, s, encoding| {
+            measure(fonts, &config.font, c, s, encoding)
         })?;
         Ok(())
     }
@@ -254,12 +255,12 @@ impl MessageObject {
         let display = self.display.as_mut().unwrap();
         let fonts = fonts(host)?;
         Ok(display
-            .advance_glyphs(now, self.segment, |c, s, style| {
-                if let Some(glyph) = self.user_fonts.glyph(c, self.encoding) {
+            .advance_glyphs(now, self.segment, |c, s, style, encoding| {
+                if let Some(glyph) = self.user_fonts.glyph(c, encoding) {
                     Ok(glyph)
                 } else {
                     fonts
-                        .rasterize(&config.font.for_glyph(style), c, s)
+                        .rasterize(&config.font.for_glyph(style, encoding), c, s)
                         .map(super::userfont::Glyph::Mask)
                 }
             })?
@@ -334,13 +335,13 @@ impl MessageObject {
         let timing = config.timing(host.message_time_scale());
         let fonts = fonts(host)?;
         if replace {
-            self.display.as_mut().unwrap().reconfigure(
+            self.display.as_mut().unwrap().reconfigure_encoded(
                 config.defaults,
                 config.size,
                 config.settings,
                 &config.layout,
                 &timing,
-                |c, s| fonts.measure(&config.font, c, s),
+                |c, s, encoding| measure(fonts, &config.font, c, s, encoding),
             )?;
         } else {
             let speed = self.display.as_ref().map(|d| d.page().speed());
@@ -349,8 +350,8 @@ impl MessageObject {
             if let Some(speed) = speed {
                 display.set_speed(speed);
             }
-            display.prepare(&config.layout, &timing, |c, s| {
-                fonts.measure(&config.font, c, s)
+            display.prepare_encoded(&config.layout, &timing, |c, s, encoding| {
+                measure(fonts, &config.font, c, s, encoding)
             })?;
             self.display = Some(display);
             self.time = 0;
@@ -654,12 +655,12 @@ impl TaskObject for MessageObject {
                 self.display
                     .as_mut()
                     .unwrap()
-                    .shift_glyphs(y, |c, s, style| {
-                        if let Some(glyph) = self.user_fonts.glyph(c, self.encoding) {
+                    .shift_glyphs(y, |c, s, style, encoding| {
+                        if let Some(glyph) = self.user_fonts.glyph(c, encoding) {
                             Ok(glyph)
                         } else {
                             fonts
-                                .rasterize(&config.font.for_glyph(style), c, s)
+                                .rasterize(&config.font.for_glyph(style, encoding), c, s)
                                 .map(super::userfont::Glyph::Mask)
                         }
                     })?;
@@ -729,6 +730,22 @@ impl TaskObject for MessageObject {
     }
     fn request_delete(&mut self, host: &mut dyn Host, budget: usize) -> Result<bool> {
         self.plane.request_delete(host, budget)
+    }
+}
+
+fn measure(
+    fonts: &mut dyn FontServices,
+    request: &FontRequest,
+    character: char,
+    size: u32,
+    encoding: TextEncoding,
+) -> Result<i32> {
+    if request.encoding == encoding {
+        fonts.measure(request, character, size)
+    } else {
+        let mut request = request.clone();
+        request.encoding = encoding;
+        fonts.measure(&request, character, size)
     }
 }
 

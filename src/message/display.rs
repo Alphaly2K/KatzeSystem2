@@ -108,12 +108,26 @@ impl Display {
         settings: DisplaySettings,
         layout: &LayoutSettings,
         timing: &TimingSettings,
-        measure: impl FnMut(char, u32) -> Result<i32>,
+        mut measure: impl FnMut(char, u32) -> Result<i32>,
+    ) -> Result<()> {
+        self.reconfigure_encoded(defaults, size, settings, layout, timing, |c, s, _| {
+            measure(c, s)
+        })
+    }
+
+    pub(super) fn reconfigure_encoded(
+        &mut self,
+        defaults: StyleDefaults,
+        size: [u32; 2],
+        settings: DisplaySettings,
+        layout: &LayoutSettings,
+        timing: &TimingSettings,
+        measure: impl FnMut(char, u32, TextEncoding) -> Result<i32>,
     ) -> Result<()> {
         let mut replacement = Self::new(defaults, self.page.encoding, size, settings)?;
         replacement.append(self.page.source())?;
         replacement.set_speed(self.page.speed());
-        replacement.prepare(layout, timing, measure)?;
+        replacement.prepare_encoded(layout, timing, measure)?;
         *self = replacement;
         Ok(())
     }
@@ -137,7 +151,7 @@ impl Display {
     pub(super) fn shift_glyphs(
         &mut self,
         y: i32,
-        mut glyph: impl FnMut(char, u32, Style) -> Result<super::userfont::Glyph>,
+        mut glyph: impl FnMut(char, u32, Style, TextEncoding) -> Result<super::userfont::Glyph>,
     ) -> Result<()> {
         self.page.set_offset([0, y]);
         self.clear_pixels();
@@ -172,9 +186,18 @@ impl Display {
         &mut self,
         layout: &LayoutSettings,
         timing: &TimingSettings,
-        measure: impl FnMut(char, u32) -> Result<i32>,
+        mut measure: impl FnMut(char, u32) -> Result<i32>,
     ) -> Result<bool> {
-        let changed = self.page.prepare(layout, timing, measure)?;
+        self.prepare_encoded(layout, timing, |c, s, _| measure(c, s))
+    }
+
+    pub(super) fn prepare_encoded(
+        &mut self,
+        layout: &LayoutSettings,
+        timing: &TimingSettings,
+        measure: impl FnMut(char, u32, TextEncoding) -> Result<i32>,
+    ) -> Result<bool> {
+        let changed = self.page.prepare_encoded(layout, timing, measure)?;
         if changed {
             self.bounds
                 .resize(self.page.markup().atoms.len(), Rect::default());
@@ -200,7 +223,7 @@ impl Display {
         segment_limit: u32,
         mut glyph: impl FnMut(char, u32, Style) -> Result<GlyphMask>,
     ) -> Result<DisplayProgress> {
-        self.advance_glyphs(now, segment_limit, |c, s, style| {
+        self.advance_glyphs(now, segment_limit, |c, s, style, _| {
             glyph(c, s, style).map(super::userfont::Glyph::Mask)
         })
     }
@@ -209,7 +232,7 @@ impl Display {
         &mut self,
         now: u32,
         segment_limit: u32,
-        mut glyph: impl FnMut(char, u32, Style) -> Result<super::userfont::Glyph>,
+        mut glyph: impl FnMut(char, u32, Style, TextEncoding) -> Result<super::userfont::Glyph>,
     ) -> Result<DisplayProgress> {
         self.page.require_prepared()?;
         let mut canvas = Surface::new([128; 2])?;
@@ -354,7 +377,7 @@ fn draw(
     canvas: &mut Surface,
     settings: &DisplaySettings,
     encoding: TextEncoding,
-    glyph: &mut impl FnMut(char, u32, Style) -> Result<super::userfont::Glyph>,
+    glyph: &mut impl FnMut(char, u32, Style, TextEncoding) -> Result<super::userfont::Glyph>,
 ) -> Result<Option<DrawnGlyph>> {
     if Rect::from_xywh(entry.position[0], entry.position[1], 128, 128)
         .intersect(target.bounds())
@@ -365,7 +388,7 @@ fn draw(
     let AtomKind::Character(character) = entry.kind else {
         unreachable!()
     };
-    let glyph = glyph(character, entry.size[1] as u32, style)?;
+    let glyph = glyph(character, entry.size[1] as u32, style, entry.encoding)?;
     canvas.clear(0);
     let bounds = glyph.paint(
         canvas,

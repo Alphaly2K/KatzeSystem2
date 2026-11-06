@@ -115,6 +115,8 @@ pub struct Atom {
     /// 当前输入字符串中的 UTF-8 字节区间，包含该片段消费的转义。
     pub source: Range<usize>,
     pub kind: AtomKind,
+    /// 此记录的字形编码；数值字符标记可覆盖消息页的编码路径。
+    pub encoding: TextEncoding,
     pub style: Style,
     pub group: Option<TextGroup>,
 }

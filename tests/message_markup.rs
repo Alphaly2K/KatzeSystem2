@@ -1,5 +1,5 @@
 use katze_system2::message::{
-    Alignment, AtomKind, Markup, StyleDefaults, TextGroup, Wait, message_color_argb,
+    Alignment, AtomKind, Markup, StyleDefaults, TextEncoding, TextGroup, Wait, message_color_argb,
 };
 
 fn defaults() -> StyleDefaults {
@@ -21,6 +21,49 @@ fn characters(markup: &Markup) -> String {
             _ => None,
         })
         .collect()
+}
+
+#[test]
+fn numeric_characters_keep_unicode_records_prefix_rules_and_source_ranges() {
+    for encoding in [TextEncoding::Cp932, TextEncoding::Unicode] {
+        for (source, expected) in [
+            (r"\$65;B", "AB"),
+            (r"\$+66;", "B"),
+            (r"\$0x3042;", "あ"),
+            (r"\$65537;", "\u{1}"),
+            (r"\$4294967361;", "A"),
+            (r"\$-1;", "\u{ffff}"),
+            (r"\$0x1f600;", "\u{f600}"),
+            (r"\$65tail", "A"),
+            (r"\$;A", "A"),
+            (r"\$", ""),
+        ] {
+            let parsed = Markup::parse_with_encoding(source, &defaults(), encoding).unwrap();
+            assert_eq!(characters(&parsed), expected, "{source}");
+            for atom in &parsed.atoms {
+                assert_eq!(
+                    atom.encoding,
+                    if source[atom.source.clone()].starts_with(r"\$") {
+                        TextEncoding::Unicode
+                    } else {
+                        encoding
+                    }
+                );
+            }
+        }
+        let source = r"[a\$66;/r]C\$65.0;";
+        let parsed = Markup::parse_with_encoding(source, &defaults(), encoding).unwrap();
+        assert_eq!(characters(&parsed), "aBrC");
+        assert_eq!(parsed.atoms[1].source, 2..7);
+        assert_eq!(parsed.atoms[1].group, parsed.atoms[0].group);
+        assert!(parsed.atoms[2].group.unwrap().ruby);
+        assert_eq!(parsed.atoms[3].group, None);
+        assert_eq!(parsed.atoms[4].kind, AtomKind::NewLine);
+        assert_eq!(parsed.atoms[4].encoding, TextEncoding::Unicode);
+        let error = Markup::parse_with_encoding("猫\\$0xd800;", &defaults(), encoding).unwrap_err();
+        assert_eq!(error.offset, 3);
+        assert!(error.message.contains("代理单元"));
+    }
 }
 
 #[test]

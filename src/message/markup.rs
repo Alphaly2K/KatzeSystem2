@@ -124,6 +124,7 @@ impl Parser<'_> {
         self.atoms.push(Atom {
             source: start..self.offset(),
             kind,
+            encoding: self.encoding,
             style: self.style,
             group,
         });
@@ -308,7 +309,27 @@ impl Parser<'_> {
                     }
                 }
             }
-            '$' | 'z' => {
+            '$' => {
+                let first = self.position;
+                while self.position < self.characters.len()
+                    && self.characters[self.position].1 != ';'
+                {
+                    self.position += 1;
+                }
+                let text = &self.input
+                    [self.characters.get(first).map_or(self.input.len(), |v| v.0)..self.offset()];
+                if self.position < self.characters.len() {
+                    self.position += 1;
+                }
+                if !text.is_empty() {
+                    let value = crate::text::integer_prefix(text.as_bytes()).map_or(0, |v| v.1);
+                    let character = char::from_u32(u32::from(value as u16))
+                        .ok_or_else(|| Error::new(start, "数值字符标记包含独立 UTF-16 代理单元"))?;
+                    self.character(start, character);
+                    self.atoms.last_mut().unwrap().encoding = TextEncoding::Unicode;
+                }
+            }
+            'z' => {
                 return Err(Error::new(start, "消息标记尚未实现"));
             }
             _ => self.character(start, c),
