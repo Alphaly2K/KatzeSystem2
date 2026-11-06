@@ -33,6 +33,9 @@ pub struct StringState {
     user_font_source: Option<u32>,
     user_fonts: Vec<(u16, u16)>,
     user_fonts_dirty: bool,
+    character_clears: [bool; 4],
+    character_remove: Option<(u32, Vec<u8>)>,
+    character_add: Option<(u32, Vec<u8>)>,
 }
 
 impl StringState {
@@ -67,6 +70,9 @@ impl StringState {
             user_font_source: None,
             user_fonts: Vec::new(),
             user_fonts_dirty: false,
+            character_clears: [false; 4],
+            character_remove: None,
+            character_add: None,
         })
     }
 
@@ -91,6 +97,22 @@ impl StringState {
 
     pub(super) fn request_skip(&mut self) {
         self.skip = true;
+    }
+
+    fn request_characters(&mut self, add: bool, index: u32, bytes: &[u8]) -> Result<()> {
+        let pending = if add {
+            &mut self.character_add
+        } else {
+            &mut self.character_remove
+        };
+        let size = pending.as_ref().map_or(0, |(_, text)| text.len());
+        if bytes.len() > crate::read::MAX_BYTES - size {
+            return Err(Error::new(0, "FES 字符集合累计超过存储上限"));
+        }
+        let (saved_index, text) = pending.get_or_insert_with(|| (index, Vec::new()));
+        *saved_index = index;
+        text.extend_from_slice(bytes);
+        Ok(())
     }
 
     pub(super) fn task_kind(&self) -> u32 {
@@ -238,6 +260,23 @@ impl Objects {
         {
             return Err(Error::new(line.offset, "FES 文字原文超过转换缓冲区容量"));
         }
+        let characters = if command == b"layout"
+            && args
+                .get(2)
+                .is_some_and(|name| matches!(name.as_slice(), b"prof" | b"d_prof" | b"c_prof"))
+        {
+            let index = args
+                .get(3)
+                .map_or(Ok(0), |bytes| interpreter.eval(bytes, numbers))?
+                as u32;
+            let bytes = remainder(&line.bytes, 4);
+            if args[2] != b"c_prof" && bytes.is_empty() {
+                return Err(Error::new(line.offset, "FES 字符集合缺少字符原文"));
+            }
+            Some((index, bytes))
+        } else {
+            None
+        };
         let mut layout_values = std::collections::BTreeMap::new();
         for handle in handles {
             if !matches!(self.get(handle).unwrap().state, ObjectState::String(_)) {
@@ -251,7 +290,15 @@ impl Objects {
             match command {
                 b"layout" => {
                     let Some(name) = args.get(2) else { continue };
-                    if matches!(name.as_slice(), b"font" | b"fontind") {
+                    if let Some((index, bytes)) = characters {
+                        if name == b"c_prof" {
+                            if let Some(clear) = state.character_clears.get_mut(index as usize) {
+                                *clear = true;
+                            }
+                        } else {
+                            state.request_characters(name == b"prof", index, bytes)?;
+                        }
+                    } else if matches!(name.as_slice(), b"font" | b"fontind") {
                         let backend = if name == b"fontind" {
                             if let Some(value) = layout_values.get(&0) {
                                 *value
@@ -275,22 +322,21 @@ impl Objects {
                                 .collect::<Vec<_>>()
                         };
                         state.layout.set_font(&name, backend as u32)?;
-                    } else if !state.layout.apply_layout(
-                        name,
-                        |index, default| {
-                            if let Some(value) = layout_values.get(&index) {
-                                return Ok(*value);
-                            }
-                            let value = args
-                                .get(index + 3)
-                                .map_or(Ok(default), |bytes| interpreter.eval(bytes, numbers))?;
-                            layout_values.insert(index, value);
-                            Ok(value)
-                        },
-                        frame_delay,
-                    )? && matches!(name.as_slice(), b"prof" | b"d_prof" | b"c_prof")
-                    {
-                        return Err(Error::new(line.offset, "FES 文字专用替换服务尚未接入"));
+                    } else {
+                        state.layout.apply_layout(
+                            name,
+                            |index, default| {
+                                if let Some(value) = layout_values.get(&index) {
+                                    return Ok(*value);
+                                }
+                                let value = args.get(index + 3).map_or(Ok(default), |bytes| {
+                                    interpreter.eval(bytes, numbers)
+                                })?;
+                                layout_values.insert(index, value);
+                                Ok(value)
+                            },
+                            frame_delay,
+                        )?;
                     }
                 }
                 b"str" => state.set_text(remainder(&line.bytes, 2).to_vec()),
@@ -407,6 +453,37 @@ impl<F: ObjectFactory> Store<'_, F> {
             let shift = objects.string(handle).layout.shift() as u32;
             self.fes_command(owner, Some(task), 470 + extra, [0, shift, 1], None)?;
             objects.string_mut(handle).layout.clear_shift_dirty();
+        }
+        for index in 0..4 {
+            if objects.string(handle).character_clears[index] {
+                self.fes_command(owner, Some(task), 474 + extra, [index as u32, 0, 1], None)?;
+                objects.string_mut(handle).character_clears[index] = false;
+            }
+        }
+        for add in [false, true] {
+            let state = objects.string(handle);
+            let pending = if add {
+                &state.character_add
+            } else {
+                &state.character_remove
+            };
+            if let Some((index, text)) = pending {
+                let mut bytes = text.clone();
+                bytes.push(0);
+                self.fes_command(
+                    owner,
+                    Some(task),
+                    if add { 471 } else { 468 } + extra,
+                    [*index, 0, 1],
+                    Some(&mut bytes),
+                )?;
+                let state = objects.string_mut(handle);
+                if add {
+                    state.character_add = None;
+                } else {
+                    state.character_remove = None;
+                }
+            }
         }
         self.update_fes_user_fonts(owner, objects, handle, task, extra)?;
         if objects.string(handle).clear {

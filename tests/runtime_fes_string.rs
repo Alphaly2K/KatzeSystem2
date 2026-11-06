@@ -234,6 +234,49 @@ fn layout_shift_evaluates_once_updates_banks_and_survives_reset() {
 }
 
 #[test]
+fn character_layout_requests_accumulate_reorder_and_keep_bank_state_across_resets() {
+    for budget in [1, 4096] {
+        for (name, unicode) in [("STRING", false), ("STRING", true), ("STRING8", false)] {
+            let mut rt = engine(budget, unicode, Rc::new(Cell::new(false)));
+            let script = format!(
+                "#DEFINE\n{name} text[2]\n#OBJECT DISP\ntext[0] 1\ntext[1] 1\n#START\ntext layout view 9 16\ntext layout size 4\ntext layout prof_enable 1\ntext layout color 255 255 255\ntext layout prof 1 C\ntext layout prof ($0+=1)-1 X\ntext layout d_prof 0 C\ntext layout c_prof\ntext str ABC\ntext draw -1\nwait 1\ntext layout d_prof 0 C\ntext str ABC\ntext draw -1\nwait 1\ntext str ABC\ntext draw -1\nwait 1\ntext[($1+=1)-1] layout prof 0 C\ntext reset\ntext layout size 4\ntext layout prof_enable 1\ntext str ABC\ntext draw -1\nwait 1\ntext clear\nwait 1\ntext str ABC\ntext draw -1\nwait 1000\n"
+            );
+            let mut scene = Scene::new(
+                fes::Program::from_text(script.as_bytes()).unwrap(),
+                rt.host().handle_allocator(),
+            )
+            .unwrap();
+            while !rt.prepare_fes_scene(0, &mut scene).unwrap() {}
+            for now in 100..=105 {
+                advance(&mut rt, &mut scene, now).unwrap();
+                assert_eq!(rt.numbers().shared[0], 1);
+                assert_eq!(rt.numbers().shared[1], i32::from(now >= 103));
+                for bank in 0..2 {
+                    let handle = scene.objects().lookup("text", bank).unwrap();
+                    let ObjectState::String(state) = &scene.objects().get(handle).unwrap().state
+                    else {
+                        unreachable!()
+                    };
+                    let expected = if now == 104 {
+                        [0, 0]
+                    } else if now == 100 || (now >= 103 && bank == 0) {
+                        [8, 4]
+                    } else {
+                        [4, 4]
+                    };
+                    assert_eq!(state.cursor(), expected, "time {now} bank {bank}");
+                }
+                let target = rt.drawing().target.as_ref().unwrap();
+                assert_eq!(target.pixel(1, 1).unwrap() != 0, now != 104);
+                if now != 104 {
+                    assert_ne!(target.pixel(1, 5), Some(0));
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn string_waits_finish_the_first_busy_bank_and_resume_after_cached_counts_refresh() {
     for budget in [1, 4096] {
         for (name, unicode, encoding) in [
