@@ -14,6 +14,7 @@ use katze_system2::{
 fn image(size: [u32; 2], canvas_size: [u32; 2], offset: [i32; 2], alpha: &[u8]) -> Image {
     Image::from_frame(DecodedFrame {
         id: 0,
+        attributes: Default::default(),
         info: StandardInfo {
             size,
             bit_depth: 32,

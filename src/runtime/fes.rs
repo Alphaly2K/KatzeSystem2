@@ -14,6 +14,7 @@ mod difimage;
 mod draw;
 mod fonts;
 mod image;
+mod image_attributes;
 mod input;
 mod motion;
 mod natives;

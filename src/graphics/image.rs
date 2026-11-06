@@ -54,6 +54,7 @@ pub struct Image {
     id: u32,
     info: StandardInfo,
     surface: Surface,
+    attributes: BTreeMap<u16, [u32; 5]>,
     pub(super) filter_revision: u64,
 }
 
@@ -71,6 +72,7 @@ impl Image {
                 base: [0; 2],
             },
             surface: Surface::new(size)?,
+            attributes: BTreeMap::new(),
             filter_revision: 0,
         })
     }
@@ -83,6 +85,7 @@ impl Image {
             id: frame.id,
             info: frame.info,
             surface: Surface::from_bgra(frame.info.size, frame.pixels)?,
+            attributes: frame.attributes,
             filter_revision: 0,
         })
     }
@@ -93,6 +96,11 @@ impl Image {
 
     pub fn info(&self) -> &StandardInfo {
         &self.info
+    }
+
+    /// 查询低十六位编号对应的五 DWORD 属性记录。
+    pub fn attribute(&self, id: u32) -> Option<[u32; 5]> {
+        self.attributes.get(&(id as u16)).copied()
     }
 
     pub(crate) fn use_pixel_canvas(&mut self) {

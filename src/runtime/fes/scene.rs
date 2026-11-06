@@ -939,6 +939,12 @@ impl<F: ObjectFactory> Store<'_, F> {
                             &args,
                             &line,
                         )?
+                        || self.fes_image_attributes(
+                            &scene.objects,
+                            &mut scene.interpreter,
+                            &args,
+                            &line,
+                        )?
                         || self.run_fes_draw(scene, &args, &line)?
                     {
                         scene.interpreter.resume();
@@ -1401,6 +1407,12 @@ impl<F: ObjectFactory> Store<'_, F> {
                                 )?
                                 || self.fes_reference_command(
                                     &mut scene.objects,
+                                    &mut scene.interpreter,
+                                    &args,
+                                    &line,
+                                )?
+                                || self.fes_image_attributes(
+                                    &scene.objects,
                                     &mut scene.interpreter,
                                     &args,
                                     &line,

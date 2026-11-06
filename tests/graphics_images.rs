@@ -13,6 +13,7 @@ use std::rc::Rc;
 fn frame(id: u32, size: [u32; 2], offset: [i32; 2], pixels: &[u32]) -> DecodedFrame {
     DecodedFrame {
         id,
+        attributes: Default::default(),
         info: StandardInfo {
             size,
             bit_depth: 32,
@@ -189,8 +190,216 @@ impl ResourceServices for Files {
             b"graphics/second.hg3" => Some(blob(0, 0xff12_3456)),
             b"graphics/empty.hg3" => Some(Vec::new()),
             b"graphics/bad.hg3" => Some(b"HG-3".to_vec()),
+            b"graphics/attrs.hg3" => {
+                let mut bytes = blob(0, 0xff123456);
+                let next = bytes.len() - 76;
+                bytes[84..88].copy_from_slice(&(next as u32).to_le_bytes());
+                bytes.extend(b"ats0001\0");
+                bytes.extend(
+                    [
+                        0u32,
+                        20,
+                        0x11223344,
+                        u32::MAX,
+                        0x80000000,
+                        0x12345678,
+                        0xabcdef01,
+                    ]
+                    .into_iter()
+                    .flat_map(u32::to_le_bytes),
+                );
+                Some(bytes)
+            }
             _ => None,
         })
+    }
+}
+
+struct AttributePrograms;
+impl ProgramLoader for AttributePrograms {
+    fn load(&mut self, name: &[u8]) -> Result<Option<Program>> {
+        let mut code = Vec::new();
+        ins(&mut code, 0x25, &[0xdeadbeef]);
+        for argument in name.chunks_exact(4) {
+            ins(
+                &mut code,
+                0x25,
+                &[u32::from_le_bytes(argument.try_into().unwrap())],
+            );
+        }
+        ins(&mut code, 0x2b, &[536, name.len() as u32]);
+        ins(&mut code, 0x26, &[64]);
+        ins(&mut code, 0x26, &[68]);
+        ins(&mut code, 0x3b, &[]);
+        Ok(Some(Program::from_code(&code, vec![0xa5; 256], 128)?))
+    }
+}
+
+#[test]
+fn attribute_native_preserves_misses_and_resolves_all_outputs_before_ordered_writes() {
+    use katze_system2::{expression::State, kcs::SharedMemory};
+    for budget in [1, 4096] {
+        for (source_kind, id, outputs, success) in [
+            (1, 65537, vec![0, 4, 8, 12, 16], true),
+            (
+                1,
+                1,
+                vec![0x80000001, 0x80000002, 0x80000003, 0x80000004, 0x80000005],
+                true,
+            ),
+            (1, 1, vec![32; 5], true),
+            (1, 7, vec![u32::MAX; 5], true),
+            (0, 1, Vec::new(), true),
+            (1, 1, vec![0, 4, u32::MAX, 12, 16], false),
+            (2, 1, vec![0, 4, 8, 12, 16], false),
+        ] {
+            let mut runtime = Runtime::new(
+                0,
+                kind::ROOT,
+                Box::new(BaseObject::new()),
+                State::new(0),
+                KcsFactory::new(AttributePrograms),
+            );
+            runtime.set_budget(budget, 10000);
+            let image = runtime
+                .images_mut()
+                .load(
+                    0,
+                    b"attrs",
+                    &mut Files {
+                        requests: Default::default(),
+                    },
+                )
+                .unwrap();
+            let source = match source_kind {
+                0 => 0,
+                1 => image,
+                _ => runtime.images_mut().create_empty(0).unwrap(),
+            };
+            let mut args = vec![source];
+            if source != 0 {
+                args.push(id);
+                args.extend(&outputs);
+            }
+            let name = args
+                .into_iter()
+                .flat_map(u32::to_le_bytes)
+                .collect::<Vec<_>>();
+            let task = runtime.create(0, kind::ORDINARY, &name, b"").unwrap();
+            let external = SharedMemory::new(vec![0xb6; 64]).unwrap();
+            runtime
+                .object_mut(task)
+                .unwrap()
+                .interpreter_mut()
+                .unwrap()
+                .bind_external(external.clone());
+            assert_eq!(runtime.update(0, 1).is_ok(), success);
+            let vm = runtime.object(task).unwrap().interpreter().unwrap();
+            let mut normal = vec![0xa5; 64];
+            let mut shared = vec![0xb6; 64];
+            let found = source == image && id != 7;
+            if success {
+                if found {
+                    let values = [0x11223344u32, u32::MAX, 0x80000000, 0x12345678, 0xabcdef01];
+                    for (&address, value) in outputs.iter().zip(values) {
+                        let target = if address & 0x80000000 == 0 {
+                            &mut normal
+                        } else {
+                            &mut shared
+                        };
+                        let at = (address & 0x7fffffff) as usize;
+                        target[at..at + 4].copy_from_slice(&value.to_le_bytes());
+                    }
+                }
+                assert_eq!(
+                    vm.read(64, 4).unwrap().as_ref(),
+                    u32::from(found).to_le_bytes()
+                );
+                assert_eq!(
+                    vm.read(68, 4).unwrap().as_ref(),
+                    0xdeadbeefu32.to_le_bytes()
+                );
+            }
+            assert_eq!(vm.read(0, 64).unwrap().as_ref(), normal);
+            assert_eq!(&*external.read(0, 64).unwrap(), &shared);
+        }
+    }
+}
+
+#[test]
+fn attribute_queries_run_in_scene_bodies_and_handlers_with_shared_image_sources() {
+    use katze_system2::{
+        expression::State, fes, graphics::GraphicsFactory, runtime::fes::Scene, task::Command,
+    };
+    for budget in [1, 4096] {
+        let mut runtime = Runtime::new(
+            0,
+            kind::ROOT,
+            Box::new(BaseObject::new()),
+            State::new(8),
+            GraphicsFactory {
+                fallback: KcsFactory::new(AttributePrograms),
+            },
+        );
+        runtime.set_budget(budget, 10000);
+        runtime.host_mut().surface_size = [2, 2];
+        runtime.drawing_mut().target = Some(RenderTarget::new([2, 2]).unwrap());
+
+        let image = runtime
+            .images_mut()
+            .load(
+                0,
+                b"attrs",
+                &mut Files {
+                    requests: Default::default(),
+                },
+            )
+            .unwrap();
+        runtime.numbers_mut().shared[7] = image as i32;
+        let list = runtime.create(0, kind::IMAGE_LIST, b"list", b"").unwrap();
+        runtime
+            .dispatch_command(
+                0,
+                Command {
+                    target: list,
+                    sender: 0,
+                    code: 285,
+                    data: [2, 2, 0],
+                },
+            )
+            .unwrap();
+        let mut scene = Scene::new(fes::Program::from_text(b"#DEFINE\nCIMAGE item[2]\n#START\nitem refex $7\nitem attr 1 0 1 2 3 4\nwait 999\n#_FES_SLEEP_\nitem attr 65537 0 0 0 0 0\n").unwrap(), runtime.host().handle_allocator()).unwrap();
+        scene
+            .objects_mut()
+            .unwrap()
+            .set_image_list(list, Rect::from_xywh(0, 0, 2, 2));
+        let mut completed = false;
+        for _ in 0..128 {
+            if runtime.update_fes_scene(0, &mut scene, 100).unwrap() {
+                completed = true;
+                break;
+            }
+        }
+        assert!(completed);
+        assert_eq!(
+            runtime.numbers().shared[..5],
+            [0x11223344, -1, i32::MIN, 0x12345678, 0xabcdef01u32 as i32]
+        );
+        let mut completed = false;
+        for _ in 0..128 {
+            if runtime
+                .dispatch_fes_system_block(0, &mut scene, "_FES_SLEEP_")
+                .unwrap()
+            {
+                completed = true;
+                break;
+            }
+        }
+        assert!(completed);
+        assert_eq!(runtime.numbers().shared[0], 0xabcdef01u32 as i32);
+        runtime
+            .release_fes_image_references(scene.objects_mut().unwrap())
+            .unwrap();
     }
 }
 

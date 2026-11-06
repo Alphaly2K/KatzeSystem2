@@ -95,6 +95,7 @@ fn frames() -> BTreeMap<u32, Image> {
                 id,
                 Image::from_frame(DecodedFrame {
                     id,
+                    attributes: Default::default(),
                     info: StandardInfo {
                         size: [width as u32, height as u32],
                         bit_depth: 32,

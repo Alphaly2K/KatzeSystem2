@@ -7,6 +7,7 @@ pub struct DecodedFrame {
     pub id: u32,
     pub info: StandardInfo,
     pub pixels: Vec<u8>,
+    pub attributes: std::collections::BTreeMap<u16, [u32; 5]>,
 }
 
 /// 解码首个匹配 ID 的原生 32 位完整帧；缺失 ID 返回 None。
@@ -100,6 +101,7 @@ pub fn decode_frame(data: &[u8], id: i32) -> Result<Option<DecodedFrame>> {
         id: frame.id,
         info,
         pixels,
+        attributes: frame.attributes.clone(),
     }))
 }
 

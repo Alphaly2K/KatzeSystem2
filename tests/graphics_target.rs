@@ -185,6 +185,7 @@ fn runtime_clear_uses_the_shared_target_and_preserves_stack_and_configured_size(
 fn target_image_copy_uses_global_source_coordinates_reverses_rows_and_overwrites_alpha() {
     let source = Image::from_frame(DecodedFrame {
         id: 7,
+        attributes: Default::default(),
         info: StandardInfo {
             size: [3, 2],
             bit_depth: 32,

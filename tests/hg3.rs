@@ -137,6 +137,58 @@ fn native_pixels_restore_bit_planes_signed_deltas_and_top_down_bgra() {
 }
 
 #[test]
+fn attributes_keep_integer_prefix_ids_last_values_and_decoded_image_records() {
+    let mut bytes = pixel_image([1, 1], &[], &[0x08, 0x01]);
+    let next = bytes.len() - 76;
+    bytes[84..88].copy_from_slice(&(next as u32).to_le_bytes());
+    let names = [
+        *b"ats-1\0\0\0",
+        *b"ats0x1\0\0",
+        *b"ats0001\0",
+        *b"ATS0001\0",
+        *b"ats1.5\0\0",
+        *b"ats 1\0\0\0",
+        *b"ats\0\0\0\0\0",
+        *b"ats12345",
+    ];
+    for (index, name) in names.into_iter().enumerate() {
+        bytes.extend(name);
+        bytes.extend((if index == names.len() - 1 { 0u32 } else { 40 }).to_le_bytes());
+        bytes.extend(24u32.to_le_bytes());
+        bytes.extend(
+            [index as u32, u32::MAX, 0x80000000, 3, 4, 0xdeadbeef]
+                .into_iter()
+                .flat_map(u32::to_le_bytes),
+        );
+    }
+    let metadata = hg3::Metadata::parse(&bytes).unwrap();
+    let records = &metadata.frames[0].attributes;
+    assert_eq!(records.len(), 3);
+    assert_eq!(records[&1], [2, u32::MAX, 0x80000000, 3, 4]);
+    assert_eq!(records[&65535][0], 0);
+    assert_eq!(records[&12345][0], 7);
+    let frame = hg3::decode_frame(&bytes, 0x80000001u32 as i32)
+        .unwrap()
+        .unwrap();
+    assert_eq!(&frame.attributes, records);
+    let image = katze_system2::graphics::Image::from_frame(frame).unwrap();
+    assert_eq!(image.attribute(65537), Some(records[&1]));
+    assert_eq!(image.attribute(u32::MAX), Some(records[&65535]));
+    assert_eq!(image.attribute(7), None);
+    let last = bytes.len() - 40;
+    let mut continued = bytes.clone();
+    continued[last + 8..last + 12].copy_from_slice(&48u32.to_le_bytes());
+    continued.extend([0; 8]);
+    continued.extend(b"unknown\0");
+    continued.extend([0; 8]);
+    let metadata = hg3::Metadata::parse(&continued).unwrap();
+    assert_eq!(metadata.frames[0].attributes[&(123450u32 as u16)][0], 7);
+    assert!(!metadata.frames[0].attributes.contains_key(&12345));
+    bytes[last + 12..last + 16].copy_from_slice(&19u32.to_le_bytes());
+    assert!(hg3::Metadata::parse(&bytes).is_err());
+}
+
+#[test]
 fn padded_run_buffers_keep_the_full_plane_stride_and_return_only_visible_pixels() {
     let bytes = pixel_image([1, 1], LITERALS, COMMANDS);
     let frame = hg3::decode_frame(&bytes, 0x8000_0001u32 as i32)

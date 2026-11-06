@@ -130,6 +130,7 @@ impl Resources {
                         && arguments[20..24] == [0; 4])
             }
             117 => length == 24 || (length == 20 && arguments.starts_with(&[0; 4])),
+            536 => length == 28 || (length == 4 && arguments == [0; 4]),
             _ => unreachable!(),
         };
         if !valid {
@@ -138,6 +139,21 @@ impl Resources {
         let mut args = [0; 10];
         for (arg, bytes) in args.iter_mut().zip(arguments.chunks_exact(4)) {
             *arg = u32::from_le_bytes(bytes.try_into().unwrap());
+        }
+        if index == 536 {
+            if args[0] == 0 {
+                return Ok(NativeReturn::Value(0));
+            }
+            let Some(values) = self.images.get(args[0])?.attribute(args[1]) else {
+                return Ok(NativeReturn::Value(0));
+            };
+            for &address in &args[2..7] {
+                vm.read(address, 4)?;
+            }
+            for (&address, value) in args[2..7].iter().zip(values) {
+                vm.write(address, &value.to_le_bytes())?;
+            }
+            return Ok(NativeReturn::Value(1));
         }
         if index == 112 {
             return Ok(NativeReturn::Value(

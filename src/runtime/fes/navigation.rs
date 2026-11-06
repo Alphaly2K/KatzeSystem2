@@ -361,6 +361,7 @@ mod tests {
         let host = Pixels(
             Image::from_frame(DecodedFrame {
                 id: 0,
+                attributes: Default::default(),
                 info: StandardInfo {
                     size: [3, 2],
                     offset: [2, 1],

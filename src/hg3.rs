@@ -1,4 +1,5 @@
 use crate::{Error, Result, read};
+use std::collections::BTreeMap;
 
 mod pixels;
 pub use pixels::{DecodedFrame, decode_frame};
@@ -19,9 +20,10 @@ pub struct Frame {
     pub offset: usize,
     pub id: u32,
     pub info: Option<StandardInfo>,
+    pub attributes: BTreeMap<u16, [u32; 5]>,
 }
 
-/// HG-3 0x300 的帧目录和标准元数据，不解码像素。
+/// HG-3 0x300 的帧目录、标准元数据与属性记录，不解码像素。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Metadata {
     pub frames: Vec<Frame>,
@@ -56,6 +58,7 @@ impl Metadata {
                 offset: position,
                 id: read::u32_at(data, position + 4)?,
                 info: None,
+                attributes: BTreeMap::new(),
             };
             let mut tag = position + 8;
             loop {
@@ -83,6 +86,18 @@ impl Metadata {
                             read::u32_at(payload, 36)? as i32,
                         ],
                     });
+                }
+                if header[..3] == *b"ats" {
+                    // 未终止的编号可继续读取标签头后续字节。
+                    if let Some((_, id)) = crate::text::integer_prefix(&data[tag + 3..end]) {
+                        let bytes = read::range(payload, 0, 20)?;
+                        frame.attributes.insert(
+                            id as u16,
+                            std::array::from_fn(|i| {
+                                u32::from_le_bytes(bytes[i * 4..i * 4 + 4].try_into().unwrap())
+                            }),
+                        );
+                    }
                 }
                 if next_tag == 0 {
                     break;
