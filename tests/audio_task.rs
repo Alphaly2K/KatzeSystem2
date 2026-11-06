@@ -296,12 +296,12 @@ fn sound_commands_gate_buffers_and_preserve_unwritten_return_slots() {
     );
     assert!(
         sound
-            .dispatch_command(kind::SOUND, &command(1, 196, 0), &mut output, &mut host, 1)
+            .dispatch_command(kind::SOUND, &command(1, 195, 0), &mut output, &mut host, 1)
             .unwrap_err()
             .message
             .contains("声音对象命令")
     );
-    for (code, length) in [(193, 8), (194, 12)] {
+    for (code, length) in [(193, 8), (194, 12), (196, 12), (197, 4)] {
         sound
             .dispatch_command(kind::SOUND, &command(1, code, 0), &mut output, &mut host, 1)
             .unwrap();
@@ -335,6 +335,51 @@ fn sound_commands_gate_buffers_and_preserve_unwritten_return_slots() {
                 .message
                 .contains("范围")
         );
+        assert_eq!(output, 0xdeadbeef);
+    }
+    for channel in [0, 64, u32::MAX] {
+        let mut query = command(1, 198, 0);
+        query.data[0] = channel;
+        assert!(
+            sound
+                .dispatch_command(kind::SOUND, &query, &mut output, &mut host, 1)
+                .unwrap_err()
+                .message
+                .contains("结果缓冲区")
+        );
+        let mut short = [0xa5; 3];
+        assert!(
+            sound
+                .dispatch_command_with_buffers(
+                    kind::SOUND,
+                    &query,
+                    &mut CommandBuffers {
+                        data1: Some(&mut short),
+                        ..Default::default()
+                    },
+                    &mut output,
+                    &mut host,
+                    1,
+                )
+                .is_err()
+        );
+        assert_eq!(short, [0xa5; 3]);
+        let mut bytes = [0xa5; 8];
+        sound
+            .dispatch_command_with_buffers(
+                kind::SOUND,
+                &query,
+                &mut CommandBuffers {
+                    data1: Some(&mut bytes),
+                    ..Default::default()
+                },
+                &mut output,
+                &mut host,
+                1,
+            )
+            .unwrap();
+        assert_eq!(&bytes[..4], &[0; 4]);
+        assert_eq!(&bytes[4..], &[0xa5; 4]);
         assert_eq!(output, 0xdeadbeef);
     }
     let mut record = [b'A'; 48];

@@ -330,6 +330,8 @@ impl SoundState {
             sound.pcm_pan = 0;
             sound.distance_range = [100.0; 2];
             sound.position = [0.0; 3];
+            sound.velocity = [0.0; 3];
+            sound.doppler_factor = 1.0;
             sound.pcm = Some(pcm);
             sound.playback = playback;
         }
@@ -541,27 +543,53 @@ impl TaskObject for SoundObject {
                 )?;
                 return Ok(CommandOutcome::finished(false));
             }
-            193 | 194 => {
+            193 | 194 | 196 | 197 => {
                 if let Some(index) = self.audio.property_channel(command.data[0]) {
                     if let Some(bytes) = buffers.data1.as_deref() {
-                        let bytes =
-                            read::range(bytes, 0, if command.code == 193 { 8 } else { 12 })?;
+                        let bytes = read::range(
+                            bytes,
+                            0,
+                            match command.code {
+                                193 => 8,
+                                197 => 4,
+                                _ => 12,
+                            },
+                        )?;
                         let values: Vec<_> = bytes
                             .chunks_exact(4)
                             .map(|word| f32::from_le_bytes(word.try_into().unwrap()))
                             .collect();
                         let sound = &mut self.audio.channels[index];
                         if sound.pcm.is_some() {
-                            if command.code == 193 {
-                                sound.distance_range[1] = values[1];
-                            } else if host.sound_stereo() != 0 {
-                                sound.set_position([values[0], values[1], values[2]]);
+                            match command.code {
+                                193 => sound.distance_range[1] = values[1],
+                                194 if host.sound_stereo() != 0 => {
+                                    sound.set_position([values[0], values[1], values[2]]);
+                                }
+                                196 => sound.velocity = [values[0], values[1], values[2]],
+                                197 => sound.doppler_factor = values[0],
+                                _ => {}
                             }
                         }
                     } else if command.data[1] != 0 {
                         return Err(Error::new(0, "声音空间设置缺少记录缓冲区"));
                     }
                 }
+                return Ok(CommandOutcome::finished(false));
+            }
+            198 => {
+                let bytes = buffers
+                    .data1
+                    .as_deref_mut()
+                    .ok_or_else(|| Error::new(0, "声音渐变查询缺少结果缓冲区"))?;
+                read::range(bytes, 0, 4)?;
+                let value = self
+                    .audio
+                    .property_channel(command.data[0])
+                    .map_or(0, |index| {
+                        u32::from(self.audio.channels[index].ramps.active & 1)
+                    });
+                bytes[..4].copy_from_slice(&value.to_le_bytes());
                 return Ok(CommandOutcome::finished(false));
             }
             188 | 191 => {

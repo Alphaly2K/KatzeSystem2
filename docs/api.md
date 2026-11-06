@@ -63,6 +63,8 @@ FES SOUND 文件请求通过 `Objects::set_sound_task` 的绑定发送 180／182
 
 `SoundChannel::requested_volume()` 查询任务保存的 f32 音量目标，`volume()`／`pan()` 返回物理通道已装载资源的原始属性，空资源为 None。`Host::sound_stereo()` 默认一，`HostState::sound_stereo` 可覆盖；此开关只门控声像应用，查询保持。命令的关联选择、范围和返回槽约束见[声音任务](audio.md#声音任务)。
 
+`SoundChannel::velocity()`／`doppler_factor()` 查询当前物理资源保存的三维速度及 Doppler 系数，空资源为 None。Runtime 的普通 347／348 原样转发这些浮点属性，349 从声音命令 198 的 data1 缓冲区返回音量渐变活动位；它独立于普通命令输出。字段生命周期、缓冲区及查询约束见[声音控制](audio.md#普通-kcs-通道控制)。三维设备应用及 Doppler 声音效果继续待办。
+
 `SoundChannel::load_options()` 返回装载时的原始前置静音毫秒数。播放读取已包含静音，`pcm()` 仍返回原始解码来源，201 查询原音频时长；静音参与缓冲区选择及首次填充，停止、重启和循环按[播放规则](audio.md#整段缓冲区播放与采样推进)处理已有缓存及剩余静音。
 
 声音任务 183 开始整段或流式缓冲区播放，184 暂停、185 停止、186 查询播放开关，218 登记首次系统毫秒，219 修改播放次数。`SoundState::read_channel(channel, frames)` 按源格式读取物理通道 PCM 并推进播放位置；`TaskObject::audio_state_mut()` 提供可变存储。`SoundChannel::is_playing`／`position_frames`／`remaining_plays`／`completed_passes`／`started_tick` 提供相应查询，`Host::system_time_ms()` 读取共享毫秒时刻。关联、次数、输入范围、结束与未接入路径见[整段缓冲区播放](audio.md#整段缓冲区播放与采样推进)及[流式预取与循环](audio.md#流式预取与循环)。流式位置为环形缓冲内的采样帧位置，次数在预取时扣减。淡变、混音及设备输出继续接入。

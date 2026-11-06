@@ -133,6 +133,25 @@ fn read_channel(
         .unwrap()
 }
 
+fn ramp_status(runtime: &mut Runtime<SoundFactory<Reject>>, channel: u32) -> u32 {
+    let mut bytes = [0xa5; 8];
+    assert_eq!(
+        runtime
+            .dispatch_command_with_buffers(
+                0,
+                command(198, channel),
+                &mut CommandBuffers {
+                    data1: Some(&mut bytes),
+                    ..Default::default()
+                },
+            )
+            .unwrap(),
+        0
+    );
+    assert_eq!(&bytes[4..], &[0xa5; 4]);
+    u32::from_le_bytes(bytes[..4].try_into().unwrap())
+}
+
 #[test]
 fn volume_and_pan_ramps_share_time_and_immediate_settings_cancel_their_own_ramp() {
     let (mut runtime, _) = setup();
@@ -150,15 +169,18 @@ fn volume_and_pan_ramps_share_time_and_immediate_settings_cancel_their_own_ramp(
     };
     set(&mut runtime, 189, 40 | (4 << 16));
     set(&mut runtime, 192, 80 | (4 << 16));
+    assert_eq!(ramp_status(&mut runtime, 5), 1);
     for (now, volume, pan) in [(1, 80, 20), (2, 60, 35), (4, 40, 57), (6, 40, 80)] {
         runtime.update(now, 1).unwrap();
         let sound = audio(&runtime).channel(5).unwrap();
         assert_eq!((sound.volume(), sound.pan()), (Some(volume), Some(pan)));
         assert_eq!(sound.requested_volume(), 0.0);
+        assert_eq!(ramp_status(&mut runtime, 5), u32::from(now < 4));
     }
     set(&mut runtime, 189, 90 | (20 << 16));
     set(&mut runtime, 192, (-80i16 as u16 as u32) | (20 << 16));
     set(&mut runtime, 187, 17);
+    assert_eq!(ramp_status(&mut runtime, 5), 0);
     runtime.host_mut().sound_stereo = Some(0);
     set(&mut runtime, 190, 100);
     runtime.update(100, 1).unwrap();
@@ -184,6 +206,69 @@ fn volume_and_pan_ramps_share_time_and_immediate_settings_cancel_their_own_ramp(
     );
     runtime.update(211, 1).unwrap();
     assert_eq!(audio(&runtime).channel(5).unwrap().volume(), Some(100));
+    assert_eq!(ramp_status(&mut runtime, 5), 0);
+    assert_eq!(ramp_status(&mut runtime, u32::MAX), 0);
+    runtime
+        .dispatch_command(
+            0,
+            Command {
+                data: [31, 10 << 16, 0],
+                ..command(189, 31)
+            },
+        )
+        .unwrap();
+    assert_eq!(ramp_status(&mut runtime, 31), 1);
+}
+
+#[test]
+fn velocity_and_doppler_preserve_bits_ignore_stereo_and_follow_resource_lifetime() {
+    let (mut rt, _) = setup();
+    let set = |rt: &mut Runtime<SoundFactory<Reject>>, code, bits: &[u32]| {
+        let mut bytes = bits
+            .iter()
+            .flat_map(|v| v.to_le_bytes())
+            .collect::<Vec<_>>();
+        rt.dispatch_command_with_buffers(
+            0,
+            command(code, 5),
+            &mut CommandBuffers {
+                data1: Some(&mut bytes),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            bytes,
+            bits.iter()
+                .flat_map(|v| v.to_le_bytes())
+                .collect::<Vec<_>>()
+        );
+    };
+    set(&mut rt, 196, &[1, 2, 3]);
+    set(&mut rt, 197, &[4]);
+    assert_eq!(audio(&rt).channel(5).unwrap().velocity(), None);
+    assert_eq!(audio(&rt).channel(5).unwrap().doppler_factor(), None);
+    load(&mut rt, &mut record(5, 0, 17, b"audio/tone.ogg")).unwrap();
+    assert_eq!(audio(&rt).channel(5).unwrap().velocity(), Some([0.0; 3]));
+    assert_eq!(audio(&rt).channel(5).unwrap().doppler_factor(), Some(1.0));
+    load(&mut rt, &mut record(5, 1, 17, b"audio/tone.ogg")).unwrap();
+    rt.host_mut().sound_stereo = Some(0);
+    set(&mut rt, 196, &[0x80000000, 0x7fa12345, 0xff800000]);
+    set(&mut rt, 197, &[0xffa23456]);
+    let sound = audio(&rt).channel(37).unwrap();
+    assert_eq!(
+        sound.velocity().unwrap().map(f32::to_bits),
+        [0x80000000, 0x7fa12345, 0xff800000]
+    );
+    assert_eq!(sound.doppler_factor().unwrap().to_bits(), 0xffa23456);
+    assert_eq!(sound.pan(), Some(0));
+    assert_eq!(audio(&rt).channel(5).unwrap().velocity(), Some([0.0; 3]));
+    load(&mut rt, &mut record(37, 0, 17, b"audio/tone.ogg")).unwrap();
+    assert_eq!(audio(&rt).channel(37).unwrap().velocity(), Some([0.0; 3]));
+    assert_eq!(audio(&rt).channel(37).unwrap().doppler_factor(), Some(1.0));
+    rt.dispatch_command(0, command(182, 5)).unwrap();
+    assert_eq!(audio(&rt).channel(37).unwrap().velocity(), None);
+    assert_eq!(audio(&rt).channel(37).unwrap().doppler_factor(), None);
 }
 
 #[test]

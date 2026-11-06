@@ -23,16 +23,21 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                 let high = u16::from_le_bytes(read::range(arguments, 8, 2)?.try_into().unwrap());
                 data[1] = u32::from(low) | (u32::from(high) << 16);
             }
-            167 | 168 => {
+            167 | 168 | 347 | 348 => {
                 record.extend_from_slice(read::range(
                     arguments,
                     4,
-                    if index == 167 { 8 } else { 12 },
+                    match index {
+                        167 => 8,
+                        348 => 4,
+                        _ => 12,
+                    },
                 )?);
             }
+            349 => record.resize(4, 0xcc),
             _ => {}
         }
-        let query = matches!(index, 160 | 162 | 165);
+        let query = matches!(index, 160 | 162 | 165 | 349);
         if query {
             let supported = self
                 .tree
@@ -49,13 +54,25 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         }
         let output = self.command_target_with_buffers(
             sound,
-            182 + index - 156,
+            match index {
+                156..=168 => 182 + index - 156,
+                347..=349 => 196 + index - 347,
+                _ => unreachable!(),
+            },
             data,
             &mut CommandBuffers {
                 data1: (!record.is_empty()).then_some(record.as_mut_slice()),
                 ..Default::default()
             },
         )?;
+        if index == 349 {
+            // 该查询写入 data1 的临时记录，普通命令输出槽不是返回来源。
+            let value = u32::from_le_bytes(record[..4].try_into().unwrap());
+            if value == 0xcccccccc {
+                return Err(Error::new(vm.pc, "声音渐变查询未写入结果缓冲区"));
+            }
+            return Ok(NativeReturn::Value(value));
+        }
         Ok(if query {
             NativeReturn::Value(output)
         } else {

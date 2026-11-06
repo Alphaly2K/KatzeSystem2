@@ -50,6 +50,8 @@ struct Trace {
     events: Vec<Event>,
     output: u32,
     sound_target: u32,
+    buffer_output: u32,
+    write_buffer: bool,
 }
 
 struct Factory {
@@ -116,13 +118,20 @@ impl TaskObject for Receiver {
         host: &mut dyn Host,
         budget: usize,
     ) -> Result<CommandOutcome> {
-        if command.code != 35 && !(182..=194).contains(&command.code) {
+        if command.code != 35
+            && !(182..=194).contains(&command.code)
+            && !(196..=198).contains(&command.code)
+        {
             return self.0.dispatch_command(kind, command, output, host, budget);
         }
         let mut trace = self.1.borrow_mut();
         trace.events.push(Event(
             *command,
-            buffers.data1.as_deref().unwrap_or_default().to_vec(),
+            if command.code == 198 {
+                vec![]
+            } else {
+                buffers.data1.as_deref().unwrap_or_default().to_vec()
+            },
         ));
         *output = if command.code == 35 {
             trace.sound_target
@@ -130,7 +139,11 @@ impl TaskObject for Receiver {
             trace.output
         };
         if let Some(buffer) = buffers.data1.as_deref_mut() {
-            buffer.fill(0xff);
+            if command.code == 198 && trace.write_buffer {
+                buffer[..4].copy_from_slice(&trace.buffer_output.to_le_bytes());
+            } else if command.code != 198 {
+                buffer.fill(0xff);
+            }
         }
         Ok(CommandOutcome::finished(false))
     }
@@ -156,6 +169,8 @@ fn setup(program: Program, output: u32) -> (Runtime<Factory>, Rc<RefCell<Trace>>
         events: vec![],
         output,
         sound_target: 1,
+        buffer_output: 0x734512ab,
+        write_buffer: true,
     }));
     let mut scripts = KcsFactory::new(Source(program));
     scripts.external = katze_system2::memory::SharedMemory::new(vec![0x6b; 512]).unwrap();
@@ -200,6 +215,14 @@ fn control_wrappers_route_words_and_raw_float_buffers_without_changing_sources()
             0,
             vec![0x7f800000, 0xffa23456, 0x80000000],
         ),
+        (
+            347,
+            vec![5, 0xffa23456, 0x80000000, 0x7f800000],
+            0,
+            vec![0xffa23456, 0x80000000, 0x7f800000],
+        ),
+        (348, vec![5, 0xffa23456], 0, vec![0xffa23456]),
+        (349, vec![5], 0, vec![]),
     ];
     for budget in [1, 4096] {
         for (index, words, data1, buffer) in &cases {
@@ -231,7 +254,11 @@ fn control_wrappers_route_words_and_raw_float_buffers_without_changing_sources()
                             Command {
                                 target: 1,
                                 sender: 2,
-                                code: 182 + index - 156,
+                                code: if *index >= 347 {
+                                    196 + index - 347
+                                } else {
+                                    182 + index - 156
+                                },
                                 data: [words[0], *data1, 0]
                             },
                             arguments(buffer)
@@ -243,6 +270,8 @@ fn control_wrappers_route_words_and_raw_float_buffers_without_changing_sources()
                 expected.extend(vec![0xa5; (4 - args.len() % 4) % 4]);
                 if matches!(index, 160 | 162 | 165) {
                     expected.extend(0x81234567u32.to_le_bytes());
+                } else if *index == 349 {
+                    expected.extend(0x734512abu32.to_le_bytes());
                 }
                 assert_eq!(vm.stack_bytes(), expected, "native {index}");
                 assert_eq!(vm.read(0, 1024).unwrap(), vec![0x5a; 1024]);
@@ -261,6 +290,9 @@ fn invalid_queries_and_short_arguments_diagnose_after_the_root_lookup() {
         (166, 10),
         (167, 12),
         (168, 16),
+        (347, 16),
+        (348, 8),
+        (349, 4),
     ] {
         let (mut rt, trace) = setup(program(index, &vec![0; length - 1]), 0);
         trace.borrow_mut().events.clear();
@@ -268,7 +300,7 @@ fn invalid_queries_and_short_arguments_diagnose_after_the_root_lookup() {
         assert_eq!(trace.borrow().events.len(), 1);
         assert_eq!(trace.borrow().events[0].0.code, 35);
     }
-    for index in [160, 162, 165] {
+    for index in [160, 162, 165, 349] {
         for target in [2, u32::MAX] {
             let (mut rt, trace) = setup(program(index, &arguments(&[0])), 0);
             trace.borrow_mut().events.clear();
@@ -282,6 +314,9 @@ fn invalid_queries_and_short_arguments_diagnose_after_the_root_lookup() {
             assert_eq!(trace.borrow().events.len(), 1);
         }
     }
+    let (mut rt, trace) = setup(program(349, &arguments(&[0])), 0);
+    trace.borrow_mut().write_buffer = false;
+    assert!(rt.update(0, 0).unwrap_err().message.contains("结果缓冲区"));
     let (mut rt, trace) = setup(program(161, &arguments(&[0, 100])), 0);
     trace.borrow_mut().sound_target = u32::MAX;
     rt.update(0, 0).unwrap();

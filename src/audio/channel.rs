@@ -20,6 +20,8 @@ pub struct SoundChannel {
     pub(super) pcm_pan: i32,
     pub(super) distance_range: [f32; 2],
     pub(super) position: [f32; 3],
+    pub(super) velocity: [f32; 3],
+    pub(super) doppler_factor: f32,
     pub(super) ramps: super::control::Ramps,
     pub(super) playback: Playback,
     pub(super) started_tick: u32,
@@ -42,6 +44,8 @@ impl Default for SoundChannel {
             pcm_pan: 0,
             distance_range: [100.0; 2],
             position: [0.0; 3],
+            velocity: [0.0; 3],
+            doppler_factor: 1.0,
             ramps: super::control::Ramps::default(),
             playback: Playback::default(),
             started_tick: u32::MAX,
@@ -85,6 +89,16 @@ impl SoundChannel {
     /// 当前资源的三维位置；二维播放使用其 X／Z 分量计算声像。
     pub fn position(&self) -> Option<[f32; 3]> {
         self.pcm.as_ref().map(|_| self.position)
+    }
+
+    /// 当前资源的三维速度，保留原始浮点位模式。
+    pub fn velocity(&self) -> Option<[f32; 3]> {
+        self.pcm.as_ref().map(|_| self.velocity)
+    }
+
+    /// 当前资源保存的 Doppler 系数；设备应用由播放后端负责。
+    pub fn doppler_factor(&self) -> Option<f32> {
+        self.pcm.as_ref().map(|_| self.doppler_factor)
     }
 
     pub fn is_playing(&self) -> bool {

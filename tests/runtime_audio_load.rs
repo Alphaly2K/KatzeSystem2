@@ -32,7 +32,7 @@ impl ProgramLoader for Source {
                 instruction(&mut code, 0x25, &[*arg]);
             }
             instruction(&mut code, 0x2b, &[*index, args.len() as u32 * 4]);
-            if matches!(index, 160 | 162 | 165 | 935 | 936) {
+            if matches!(index, 160 | 162 | 165 | 349 | 935 | 936) {
                 instruction(&mut code, 0x26, &[256 + i as u32 * 4]);
             }
         }
@@ -273,6 +273,9 @@ fn native_spatial_and_ramp_controls_preserve_float_bits_and_reach_real_channels(
             (165, vec![5]),
             (163, vec![5, 20, 5]),
             (166, vec![5, 100, 5]),
+            (347, vec![5, 0x80000000, 0x7fa12345, 0x7f800000]),
+            (348, vec![5, 0xffa23456]),
+            (349, vec![5]),
         ]);
         rt.set_budget(budget, 4096);
         rt.update(0, 0).unwrap();
@@ -292,10 +295,16 @@ fn native_spatial_and_ramp_controls_preserve_float_bits_and_reach_real_channels(
             [(-1.0f32).to_bits(), 0x7fa45678, 0x80000000]
         );
         assert_eq!(sound.pan(), Some(-100));
+        assert_eq!(
+            sound.velocity().unwrap().map(f32::to_bits),
+            [0x80000000, 0x7fa12345, 0x7f800000]
+        );
+        assert_eq!(sound.doppler_factor().unwrap().to_bits(), 0xffa23456);
         let vm = rt.object(2).unwrap().interpreter().unwrap();
         assert!(vm.stack_bytes().is_empty());
         assert_eq!(vm.read(0, 4).unwrap(), 0xdeadbeefu32.to_le_bytes());
         assert_eq!(vm.read(268, 4).unwrap(), (-100i32).to_le_bytes());
+        assert_eq!(vm.read(288, 4).unwrap(), 1u32.to_le_bytes());
         rt.update(1, 1).unwrap();
         let sound = rt
             .object(1)
