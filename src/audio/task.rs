@@ -110,8 +110,9 @@ impl SoundState {
         Pcm::new(pcm.sample_rate(), pcm.channels(), output)
     }
 
-    fn update_idle(&mut self, now: u32) {
+    fn update_idle(&mut self, now: u32, stereo: bool) {
         for channel in &mut self.channels {
+            channel.update_controls(now, stereo);
             let clock = &mut channel.clock;
             let previous = if clock.previous == u32::MAX {
                 now.wrapping_sub(1)
@@ -158,6 +159,7 @@ impl SoundState {
     fn set_volume(&mut self, channel: u32, volume: i32) {
         if let Some(index) = self.property_channel(channel) {
             let sound = &mut self.channels[index];
+            sound.ramps.active &= !1;
             sound.requested_volume = volume as f32;
             if sound.pcm.is_some() {
                 sound.pcm_volume = volume;
@@ -165,10 +167,38 @@ impl SoundState {
         }
     }
 
-    fn set_pan(&mut self, channel: u32, pan: i32) {
+    fn set_pan(&mut self, channel: u32, pan: i32, stereo: bool) {
         if let Some(index) = self.property_channel(channel) {
-            self.channels[index].pcm_pan = pan.clamp(-100, 100);
+            let sound = &mut self.channels[index];
+            sound.ramps.active &= !2;
+            if stereo {
+                sound.pcm_pan = pan.clamp(-100, 100);
+            }
         }
+    }
+
+    fn start_ramp(&mut self, channel: u32, packed: u32, pan: bool, now: u32) -> Result<()> {
+        if let Some(index) = self.property_channel(channel) {
+            let sound = &mut self.channels[index];
+            if !pan && sound.parameters[0] != 0 {
+                return Err(Error::new(0, "声音备用通道淡变完成与延迟释放尚未接入"));
+            }
+            let slot = usize::from(pan);
+            sound.ramps.active |= 1 << slot;
+            sound.ramps.target[slot] = if pan {
+                packed as i16 as f32
+            } else {
+                packed as u16 as f32
+            };
+            sound.ramps.current[slot] = if pan {
+                sound.pan().unwrap_or(0) as f32
+            } else {
+                sound.volume().unwrap_or(0) as u32 as f32
+            };
+            sound.ramps.remaining[slot] = (packed >> 16) as f32;
+            sound.ramps.previous = now;
+        }
+        Ok(())
     }
 
     fn start(&mut self, channel: u32, count: u32, tick: u32) -> Result<()> {
@@ -177,16 +207,12 @@ impl SoundState {
             if sound.parameters[0] != 0 {
                 return Err(Error::new(0, "声音淡变播放尚未接入"));
             }
+            sound.ramps.active = 0;
             if let Some(pcm) = &sound.pcm {
                 sound
                     .playback
                     .start(pcm, count, playback_range(sound, count))?;
-                let volume = sound.requested_volume;
-                sound.pcm_volume = if (-2147483648.0..2147483648.0).contains(&volume) {
-                    volume as i32
-                } else {
-                    i32::MIN
-                };
+                sound.pcm_volume = super::control::truncate(sound.requested_volume);
             }
             if sound.started_tick == u32::MAX {
                 sound.started_tick = tick;
@@ -202,6 +228,9 @@ impl SoundState {
         let linked = sound.linked;
         for index in [Some(channel), linked].into_iter().flatten() {
             let sound = &mut self.channels[index as usize];
+            if matches!(command, 184 | 185) {
+                sound.ramps.active = 0;
+            }
             match command {
                 184 => sound.playback.pause(),
                 185 => {
@@ -299,6 +328,8 @@ impl SoundState {
             sound.file.extend_from_slice(name);
             sound.pcm_volume = 100;
             sound.pcm_pan = 0;
+            sound.distance_range = [100.0; 2];
+            sound.position = [0.0; 3];
             sound.pcm = Some(pcm);
             sound.playback = playback;
         }
@@ -310,7 +341,8 @@ impl SoundState {
         } else {
             u32::from(sound.pcm.is_some())
         };
-        sound.clock = channel::ChannelClock::default();
+        sound.clock.elapsed = 0;
+        sound.ramps.active = 0;
         // 209 保留分配后的循环缓存，包括全忙回收只清起点的结果。
         if code != 209 {
             sound.loop_range = [0, -1];
@@ -394,9 +426,10 @@ impl TaskObject for SoundObject {
     fn set_creation_context(&mut self, context: &[u8]) -> Result<()> {
         self.base.set_creation_context(context)
     }
-    fn update_body(&mut self, _: &mut dyn Host, _: u32, _: usize) -> Result<bool> {
+    fn update_body(&mut self, host: &mut dyn Host, _: u32, _: usize) -> Result<bool> {
         if self.base.control.deletion_requested == 0 && self.enabled {
-            self.audio.update_idle(self.base.clock.previous_time);
+            self.audio
+                .update_idle(self.base.clock.previous_time, host.sound_stereo() != 0);
         }
         Ok(true)
     }
@@ -492,8 +525,42 @@ impl TaskObject for SoundObject {
                 return Ok(CommandOutcome::finished(false));
             }
             190 => {
-                if host.sound_stereo() != 0 {
-                    self.audio.set_pan(command.data[0], command.data[1] as i32);
+                self.audio.set_pan(
+                    command.data[0],
+                    command.data[1] as i32,
+                    host.sound_stereo() != 0,
+                );
+                return Ok(CommandOutcome::finished(false));
+            }
+            189 | 192 => {
+                self.audio.start_ramp(
+                    command.data[0],
+                    command.data[1],
+                    command.code == 192,
+                    self.base.clock.elapsed(),
+                )?;
+                return Ok(CommandOutcome::finished(false));
+            }
+            193 | 194 => {
+                if let Some(index) = self.audio.property_channel(command.data[0]) {
+                    if let Some(bytes) = buffers.data1.as_deref() {
+                        let bytes =
+                            read::range(bytes, 0, if command.code == 193 { 8 } else { 12 })?;
+                        let values: Vec<_> = bytes
+                            .chunks_exact(4)
+                            .map(|word| f32::from_le_bytes(word.try_into().unwrap()))
+                            .collect();
+                        let sound = &mut self.audio.channels[index];
+                        if sound.pcm.is_some() {
+                            if command.code == 193 {
+                                sound.distance_range[1] = values[1];
+                            } else if host.sound_stereo() != 0 {
+                                sound.set_position([values[0], values[1], values[2]]);
+                            }
+                        }
+                    } else if command.data[1] != 0 {
+                        return Err(Error::new(0, "声音空间设置缺少记录缓冲区"));
+                    }
                 }
                 return Ok(CommandOutcome::finished(false));
             }

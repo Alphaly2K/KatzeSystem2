@@ -261,18 +261,49 @@ fn native_controls_reach_real_playback_and_keep_void_results_off_the_stack() {
                 .is_none()
         );
     }
-    for (index, args, code) in [
-        (163, vec![5, 1, 2], 189),
-        (166, vec![5, 1, 2], 192),
-        (167, vec![5, 1, 2], 193),
-        (168, vec![5, 1, 2, 3], 194),
-    ] {
-        let mut rt = setup(vec![(index, args)]);
-        assert!(
-            rt.update(0, 0)
-                .unwrap_err()
-                .message
-                .contains(&format!("声音对象命令 {code} 尚未接入"))
+}
+
+#[test]
+fn native_spatial_and_ramp_controls_preserve_float_bits_and_reach_real_channels() {
+    for budget in [1, 4096] {
+        let mut rt = setup(vec![
+            (935, vec![5, 0, 64, 1, 0]),
+            (167, vec![5, 1.0f32.to_bits(), 0x7fa12345]),
+            (168, vec![5, (-1.0f32).to_bits(), 0x7fa45678, 0x80000000]),
+            (165, vec![5]),
+            (163, vec![5, 20, 5]),
+            (166, vec![5, 100, 5]),
+        ]);
+        rt.set_budget(budget, 4096);
+        rt.update(0, 0).unwrap();
+        let sound = rt
+            .object(1)
+            .unwrap()
+            .audio_state()
+            .unwrap()
+            .channel(5)
+            .unwrap();
+        assert_eq!(
+            sound.distance_range().unwrap().map(f32::to_bits),
+            [100.0f32.to_bits(), 0x7fa12345]
         );
+        assert_eq!(
+            sound.position().unwrap().map(f32::to_bits),
+            [(-1.0f32).to_bits(), 0x7fa45678, 0x80000000]
+        );
+        assert_eq!(sound.pan(), Some(-100));
+        let vm = rt.object(2).unwrap().interpreter().unwrap();
+        assert!(vm.stack_bytes().is_empty());
+        assert_eq!(vm.read(0, 4).unwrap(), 0xdeadbeefu32.to_le_bytes());
+        assert_eq!(vm.read(268, 4).unwrap(), (-100i32).to_le_bytes());
+        rt.update(1, 1).unwrap();
+        let sound = rt
+            .object(1)
+            .unwrap()
+            .audio_state()
+            .unwrap()
+            .channel(5)
+            .unwrap();
+        assert_eq!((sound.volume(), sound.pan()), (Some(80), Some(-60)));
     }
 }

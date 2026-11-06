@@ -2,6 +2,7 @@ use crate::{Error, Result, read};
 
 mod channel;
 mod config;
+mod control;
 mod groups;
 mod pcm;
 mod playback;

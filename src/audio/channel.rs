@@ -18,6 +18,9 @@ pub struct SoundChannel {
     pub(super) requested_volume: f32,
     pub(super) pcm_volume: i32,
     pub(super) pcm_pan: i32,
+    pub(super) distance_range: [f32; 2],
+    pub(super) position: [f32; 3],
+    pub(super) ramps: super::control::Ramps,
     pub(super) playback: Playback,
     pub(super) started_tick: u32,
     pub(super) parameters: [i32; 2],
@@ -37,6 +40,9 @@ impl Default for SoundChannel {
             requested_volume: 0.0,
             pcm_volume: 100,
             pcm_pan: 0,
+            distance_range: [100.0; 2],
+            position: [0.0; 3],
+            ramps: super::control::Ramps::default(),
             playback: Playback::default(),
             started_tick: u32::MAX,
             parameters: [0; 2],
@@ -69,6 +75,16 @@ impl SoundChannel {
 
     pub fn pan(&self) -> Option<i32> {
         self.pcm.as_ref().map(|_| self.pcm_pan)
+    }
+
+    /// 当前资源的最小／最大声音距离，保留原始浮点位模式。
+    pub fn distance_range(&self) -> Option<[f32; 2]> {
+        self.pcm.as_ref().map(|_| self.distance_range)
+    }
+
+    /// 当前资源的三维位置；二维播放使用其 X／Z 分量计算声像。
+    pub fn position(&self) -> Option<[f32; 3]> {
+        self.pcm.as_ref().map(|_| self.position)
     }
 
     pub fn is_playing(&self) -> bool {
@@ -125,6 +141,7 @@ impl SoundChannel {
         self.file.clear();
         self.pcm = None;
         self.playback = Playback::default();
+        self.ramps.active = 0;
         self.started_tick = u32::MAX;
         self.clock = ChannelClock::default();
         self.loop_range[0] = 0;

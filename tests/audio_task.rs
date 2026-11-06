@@ -296,11 +296,47 @@ fn sound_commands_gate_buffers_and_preserve_unwritten_return_slots() {
     );
     assert!(
         sound
-            .dispatch_command(kind::SOUND, &command(1, 192, 0), &mut output, &mut host, 1)
+            .dispatch_command(kind::SOUND, &command(1, 196, 0), &mut output, &mut host, 1)
             .unwrap_err()
             .message
             .contains("声音对象命令")
     );
+    for (code, length) in [(193, 8), (194, 12)] {
+        sound
+            .dispatch_command(kind::SOUND, &command(1, code, 0), &mut output, &mut host, 1)
+            .unwrap();
+        let mut request = command(1, code, 1);
+        assert!(
+            sound
+                .dispatch_command(kind::SOUND, &request, &mut output, &mut host, 1)
+                .unwrap_err()
+                .message
+                .contains("记录缓冲区")
+        );
+        request.data[0] = 64;
+        sound
+            .dispatch_command(kind::SOUND, &request, &mut output, &mut host, 1)
+            .unwrap();
+        request.data[0] = 0;
+        assert!(
+            sound
+                .dispatch_command_with_buffers(
+                    kind::SOUND,
+                    &request,
+                    &mut CommandBuffers {
+                        data1: Some(&mut vec![0; length - 1]),
+                        ..Default::default()
+                    },
+                    &mut output,
+                    &mut host,
+                    1
+                )
+                .unwrap_err()
+                .message
+                .contains("范围")
+        );
+        assert_eq!(output, 0xdeadbeef);
+    }
     let mut record = [b'A'; 48];
     record[32..48].fill(0);
     sound

@@ -134,6 +134,59 @@ fn read_channel(
 }
 
 #[test]
+fn volume_and_pan_ramps_share_time_and_immediate_settings_cancel_their_own_ramp() {
+    let (mut runtime, _) = setup();
+    load(&mut runtime, &mut record(5, 0, 0, b"audio/tone.ogg")).unwrap();
+    let set = |runtime: &mut Runtime<SoundFactory<Reject>>, code, value| {
+        runtime
+            .dispatch_command(
+                0,
+                Command {
+                    data: [5, value, 0],
+                    ..command(code, 5)
+                },
+            )
+            .unwrap();
+    };
+    set(&mut runtime, 189, 40 | (4 << 16));
+    set(&mut runtime, 192, 80 | (4 << 16));
+    for (now, volume, pan) in [(1, 80, 20), (2, 60, 35), (4, 40, 57), (6, 40, 80)] {
+        runtime.update(now, 1).unwrap();
+        let sound = audio(&runtime).channel(5).unwrap();
+        assert_eq!((sound.volume(), sound.pan()), (Some(volume), Some(pan)));
+        assert_eq!(sound.requested_volume(), 0.0);
+    }
+    set(&mut runtime, 189, 90 | (20 << 16));
+    set(&mut runtime, 192, (-80i16 as u16 as u32) | (20 << 16));
+    set(&mut runtime, 187, 17);
+    runtime.host_mut().sound_stereo = Some(0);
+    set(&mut runtime, 190, 100);
+    runtime.update(100, 1).unwrap();
+    runtime.host_mut().sound_stereo = Some(1);
+    runtime.update(101, 1).unwrap();
+    let sound = audio(&runtime).channel(5).unwrap();
+    assert_eq!((sound.volume(), sound.pan()), (Some(17), Some(80)));
+    assert_eq!(sound.requested_volume(), 17.0);
+
+    set(&mut runtime, 189, 80 | (50 << 16));
+    set(&mut runtime, 192, 50 << 16);
+    set(&mut runtime, 184, 0);
+    runtime.update(200, 1).unwrap();
+    let sound = audio(&runtime).channel(5).unwrap();
+    assert_eq!((sound.volume(), sound.pan()), (Some(17), Some(80)));
+
+    set(&mut runtime, 187, (-17i32) as u32);
+    set(&mut runtime, 189, 100 | (10 << 16));
+    runtime.update(201, 1).unwrap();
+    assert_eq!(
+        audio(&runtime).channel(5).unwrap().volume(),
+        Some(-477_218_560)
+    );
+    runtime.update(211, 1).unwrap();
+    assert_eq!(audio(&runtime).channel(5).unwrap().volume(), Some(100));
+}
+
+#[test]
 fn load_variants_select_group_keys_or_categories_and_keep_distinct_loop_rules() {
     let groups = SoundGroups {
         entries: [(7, 0, [4, 5]), (2, 0, [6, 6]), (0, 9, [7, 7])]
@@ -411,7 +464,7 @@ fn grouped_loads_allocate_physical_channels_recycle_busy_sources_and_preserve_fa
     assert_eq!(channel.started_tick(), 321);
     assert_eq!(channel.load_parameters(), [0, 17]);
     assert_eq!(channel.loop_range(), [3, 99]);
-    assert_eq!(audio(&runtime).channel_time(4).unwrap(), 20);
+    assert_eq!(audio(&runtime).channel_time(4).unwrap(), 10);
     assert_eq!(
         source.borrow().events,
         [Event::Read(b"audio/missing.ogg".to_vec())]
@@ -675,6 +728,19 @@ fn buffered_playback_consumes_pcm_and_keeps_pause_stop_repeat_and_tick_semantics
             .contains("淡变")
     );
     assert!(!audio(&runtime).channel(37).unwrap().is_playing());
+    assert!(
+        runtime
+            .dispatch_command(
+                0,
+                Command {
+                    data: [5, 100 | (10 << 16), 0],
+                    ..command(189, 5)
+                }
+            )
+            .unwrap_err()
+            .message
+            .contains("延迟释放")
+    );
     set(&mut runtime, 185, 0);
     assert_eq!(runtime.dispatch_command(0, command(186, 5)).unwrap(), 0);
     set(&mut runtime, 182, 0);
