@@ -241,6 +241,7 @@ pub struct FesObject {
     loaded: bool,
     started: bool,
     scene: Option<Scene>,
+    named_values: std::collections::BTreeMap<Vec<u8>, u32>,
     external: crate::memory::SharedMemory,
     pending: Option<Command>,
     name: Vec<u8>,
@@ -309,6 +310,7 @@ impl FesObject {
             loaded: false,
             started: false,
             scene: None,
+            named_values: std::collections::BTreeMap::new(),
             external,
             pending: None,
             name: Vec::new(),
@@ -1181,12 +1183,40 @@ impl TaskObject for FesObject {
                     *output = values.get(index).copied().unwrap_or(0) as u32;
                 }
             }
+            357 | 358 => {
+                if self.initialized {
+                    let key = name(
+                        buffers
+                            .data0
+                            .as_deref()
+                            .ok_or_else(|| Error::new(0, "FES 名称输入缓冲区缺失"))?,
+                        usize::MAX,
+                    )?;
+                    if command.code == 358 {
+                        self.named_values.insert(key.to_vec(), b);
+                    } else {
+                        let target = buffers
+                            .data1
+                            .as_deref_mut()
+                            .filter(|bytes| bytes.len() >= 4)
+                            .ok_or_else(|| Error::new(0, "FES 名称查询输出缓冲区不足"))?;
+                        target[..4].copy_from_slice(
+                            &self
+                                .named_values
+                                .get(key)
+                                .copied()
+                                .unwrap_or(0)
+                                .to_le_bytes(),
+                        );
+                    }
+                }
+            }
             177 => super::super::save::query_shared_numbers_available(
                 self.initialized,
                 false,
                 buffers,
             )?,
-            19 | 178 | 341 | 342 | 344 | 345 | 349..=358 => {
+            19 | 178 | 341 | 342 | 344 | 345 | 349..=356 => {
                 return Err(Error::new(0, "FES 专属命令尚未接入"));
             }
             _ => {

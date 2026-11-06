@@ -68,6 +68,13 @@ impl ObjectFactory for Factory {
             for (native, args) in [
                 (449, vec![3, 4]),
                 (447, vec![3, 64]),
+                (882, vec![3, 160, 0xdead_beef]),
+                (882, vec![3, 160, 0x8000_0001]),
+                (882, vec![3, 192, 9]),
+                (882, vec![3, 200, 19]),
+                (882, vec![3, 208, 33]),
+                (882, vec![0, 160, 77]),
+                (882, vec![u32::MAX, 160, 77]),
                 (645, vec![3, 2, 17]),
                 (645, vec![3, 511, 0x8000_0001]),
                 (645, vec![3, 512, 0x1234_5678]),
@@ -96,14 +103,24 @@ impl ObjectFactory for Factory {
                 ins(&mut code, 0x2b, &[646, 8]);
                 ins(&mut code, 0x26, &[address]);
             }
+            for (key, address) in [(160, 36), (192, 40), (200, 44), (208, 48), (220, 52)] {
+                ins(&mut code, 0x25, &[3]);
+                ins(&mut code, 0x25, &[key]);
+                ins(&mut code, 0x2b, &[883, 8]);
+                ins(&mut code, 0x26, &[address]);
+            }
             ins(&mut code, 0x26, &[0]);
             ins(&mut code, 0x3b, &[]);
-            let mut data = vec![0; 160];
+            let mut data = vec![0; 240];
             data[32..36].copy_from_slice(&7u32.to_le_bytes());
             let format = b"complete_%d[G32]\0";
             data[64..64 + format.len()].copy_from_slice(format);
             data[112..125].copy_from_slice(b"BLOCK%d[G32]\0");
             data[144..151].copy_from_slice(b"sprite\0");
+            data[160..171].copy_from_slice(b"key%d[G32]\0");
+            data[192..197].copy_from_slice(b"KEY7\0");
+            data[200..203].copy_from_slice(b"\x82\xa0\0");
+            data[220..228].copy_from_slice(b"missing\0");
             let mut task = katze_system2::kcs::OrdinaryTask::new(
                 Program::from_code(&code, data, 128)?,
                 Vec::new(),
@@ -491,6 +508,10 @@ fn ordinary_natives_bind_load_and_start_fes_with_shared_values_and_pixels() {
             for (address, expected) in [(16, 17u32), (20, 0x8000_0001), (24, 0), (28, 0)] {
                 assert_eq!(vm.read(address, 4).unwrap(), expected.to_le_bytes());
             }
+            for (address, expected) in [(36, 0x8000_0001u32), (40, 9), (44, 19), (48, 33), (52, 0)]
+            {
+                assert_eq!(vm.read(address, 4).unwrap(), expected.to_le_bytes());
+            }
             assert!(vm.stack_bytes().is_empty());
             runtime.update(1, 1).unwrap();
             let mut output = RenderTarget::new([8, 6]).unwrap();
@@ -505,6 +526,61 @@ fn ordinary_natives_bind_load_and_start_fes_with_shared_values_and_pixels() {
             assert_eq!(output.pixel(1, 1), Some(0xff123456));
             assert_eq!(runtime.numbers().shared[0], 1);
         }
+    }
+}
+
+#[test]
+fn named_values_preserve_raw_keys_and_survive_script_loading() {
+    fn value(rt: &mut TestRuntime, target: u32, key: &[u8], value: Option<u32>) -> u32 {
+        let mut key = key.to_vec();
+        key.push(0);
+        let mut result = [0x55; 8];
+        assert_eq!(
+            rt.dispatch_command_with_buffers(
+                0,
+                command(
+                    target,
+                    if value.is_some() { 358 } else { 357 },
+                    0,
+                    value.unwrap_or(0)
+                ),
+                &mut CommandBuffers {
+                    data0: Some(&mut key),
+                    data1: Some(&mut result),
+                    external: None,
+                },
+            )
+            .unwrap(),
+            0,
+        );
+        assert_eq!(&result[4..], &[0x55; 4]);
+        u32::from_le_bytes(result[..4].try_into().unwrap())
+    }
+
+    for budget in [1, 4096] {
+        let mut setup = setup(budget, b"#START\nexit 3\n");
+        let rt = &mut setup.runtime;
+        let target = rt.create(0, kind::FES, b"values", b"").unwrap();
+        assert_eq!(send(rt, target, 357, 1, 1), 0);
+        assert_eq!(send(rt, target, 358, 1, 77), 0);
+        send(rt, target, 337, 0, 0);
+        for (key, n) in [
+            (b"".as_slice(), 17),
+            (b"raw\xff", 0x8000_0001),
+            (b"RAW\xff", 39),
+        ] {
+            value(rt, target, key, Some(n));
+            assert_eq!(value(rt, target, key, None), n);
+        }
+        value(rt, target, b"raw\xff\0ignored", Some(79));
+        file(rt, target, b"complete.fes\0").unwrap();
+        assert_eq!(value(rt, target, b"raw\xff", None), 79);
+        assert_eq!(value(rt, target, b"RAW\xff", None), 39);
+        assert_eq!(value(rt, target, b"", None), 17);
+        assert_eq!(value(rt, target, b"missing", None), 0);
+        let other = rt.create(0, kind::FES, b"other", b"").unwrap();
+        send(rt, other, 337, 0, 0);
+        assert_eq!(value(rt, other, b"raw\xff", None), 0);
     }
 }
 

@@ -1743,7 +1743,7 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         if matches!(index, 611..=621 | 695 | 884) {
             return self.message_native(index, arguments, vm);
         }
-        if matches!(index, 447..=449 | 630 | 645 | 646) {
+        if matches!(index, 447..=449 | 630 | 645 | 646 | 882 | 883) {
             return self.fes_native(index, arguments, vm);
         }
         if index == 149 {

@@ -13,7 +13,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         let length = match index {
             448 => 4,
             630 => 16,
-            645 => 12,
+            645 | 882 => 12,
             _ => 8,
         };
         if arguments.len() != length {
@@ -105,6 +105,50 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     347,
                     [read::u32_at(arguments, 4)?, 0, 0],
                 )?));
+            }
+            882 | 883 => {
+                let mut name = format_string(vm, read::u32_at(arguments, 4)?, 0)?;
+                name.truncate(
+                    name.iter()
+                        .position(|&byte| byte == 0)
+                        .unwrap_or(name.len()),
+                );
+                name.push(0);
+                if index == 882 {
+                    self.command_target_with_buffers(
+                        target,
+                        358,
+                        [0, read::u32_at(arguments, 8)?, 0],
+                        &mut CommandBuffers {
+                            data0: Some(&mut name),
+                            ..CommandBuffers::default()
+                        },
+                    )?;
+                } else {
+                    let supported = self
+                        .tree
+                        .find_reachable(self.host.task_id, target)
+                        .is_some_and(|node| node.kind == crate::runtime::kind::FES);
+                    let active = self.objects.get(&target).is_some_and(|object| {
+                        object.control().deletion_requested == 0
+                            && object.shared_numbers_available() == Some(true)
+                    });
+                    if !supported || !active {
+                        return Err(Error::new(vm.pc, "FES 名称查询需要可达且已初始化的目标"));
+                    }
+                    let mut value = [0; 4];
+                    self.command_target_with_buffers(
+                        target,
+                        357,
+                        [0; 3],
+                        &mut CommandBuffers {
+                            data0: Some(&mut name),
+                            data1: Some(&mut value),
+                            external: None,
+                        },
+                    )?;
+                    return Ok(NativeReturn::Value(u32::from_le_bytes(value)));
+                }
             }
             _ => unreachable!(),
         }
