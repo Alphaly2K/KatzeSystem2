@@ -78,6 +78,7 @@ fn guess_name(raw: &[u8]) -> String {
 
 struct Entry {
     name: String,
+    raw: Vec<u8>,
     offset: u32,
     length: u32,
 }
@@ -121,6 +122,7 @@ impl Archive {
                 let offset = u32::from_le_bytes(block[..4].try_into().unwrap());
                 entries.push(Entry {
                     name: guess_name(&directory[base..base + 64]),
+                    raw: directory[base..base + 64].to_vec(),
                     offset,
                     length: u32::from_le_bytes(block[4..].try_into().unwrap()),
                 });
@@ -131,6 +133,7 @@ impl Archive {
                 let base = i * 72;
                 entries.push(Entry {
                     name: guess_name(&directory[base..base + 64]),
+                    raw: directory[base..base + 64].to_vec(),
                     offset: u32::from_le_bytes(directory[base + 64..base + 68].try_into().unwrap()),
                     length: u32::from_le_bytes(directory[base + 68..base + 72].try_into().unwrap()),
                 });
@@ -149,8 +152,31 @@ impl Archive {
         })
     }
 
+    /// 精确名称优先；未命中时逐条目尝试全部位移，按请求名称反查。
+    ///
+    /// 样本的校验码不可得，条目名称的位移只能猜测；反查只服务本机探针。
+    fn locate(&self, name: &str) -> Option<usize> {
+        if let Some(&position) = self.index.get(&name.to_ascii_uppercase()) {
+            return Some(position);
+        }
+        for (position, entry) in self.entries.iter().enumerate() {
+            let end = entry
+                .raw
+                .iter()
+                .position(|&byte| byte == 0)
+                .unwrap_or(entry.raw.len());
+            for shift in 0..52 {
+                let decoded = decode(&entry.raw[..end], shift);
+                if String::from_utf8_lossy(&decoded).eq_ignore_ascii_case(name) {
+                    return Some(position);
+                }
+            }
+        }
+        None
+    }
+
     fn read(&mut self, name: &str) -> Result<Option<Vec<u8>>> {
-        let Some(&position) = self.index.get(&name.to_ascii_uppercase()) else {
+        let Some(position) = self.locate(name) else {
             return Ok(None);
         };
         let entry = &self.entries[position];
@@ -178,7 +204,29 @@ struct Router {
 
 impl ResourceServices for Router {
     fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
-        self.config.resolve(category, name)
+        let value = self.config.resolve(category, name);
+        if std::env::var_os("KATZE_PROBE_TRACE").is_some() {
+            eprintln!(
+                "解析 类别={:?} 名称={:?} -> {:?}",
+                String::from_utf8_lossy(category),
+                String::from_utf8_lossy(name),
+                value
+                    .as_ref()
+                    .map(|v| String::from_utf8_lossy(v).into_owned())
+            );
+        }
+        if value.is_err() && std::env::var_os("KATZE_PROBE_TRACE").is_some() {
+            eprintln!(
+                "解析失败 类别={:?} 名称={:?}",
+                String::from_utf8_lossy(category),
+                String::from_utf8_lossy(name)
+            );
+        }
+        value
+    }
+
+    fn resolve_slot(&mut self, slot: u32, name: &[u8]) -> Result<Vec<u8>> {
+        self.config.resolve_slot(slot, name)
     }
 
     fn read(&mut self, name: &[u8], _: ResourceMode) -> Result<Option<Vec<u8>>> {
@@ -310,6 +358,36 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         }
     }
     println!("归档 {}", router.archives.len());
+    if let Some(name) = std::env::var_os("KATZE_PROBE_LIST") {
+        let name = name.to_string_lossy().into_owned();
+        if let Some(archive) = router.archives.get(&name) {
+            for entry in archive.entries.iter() {
+                let end = entry
+                    .raw
+                    .iter()
+                    .position(|&b| b == 0)
+                    .unwrap_or(entry.raw.len());
+                println!(
+                    "{} raw={:?} {} {}",
+                    entry.name,
+                    String::from_utf8_lossy(&entry.raw[..end]),
+                    entry.offset,
+                    entry.length
+                );
+            }
+        }
+    }
+    if let Some(name) = std::env::var_os("KATZE_PROBE_PRINT") {
+        let name = name.to_string_lossy().into_owned();
+        let data = router.read(name.as_bytes(), ResourceMode::LooseFirst)?;
+        match data {
+            Some(data) => {
+                println!("打印 {name} 共 {} 字节", data.len());
+                println!("{}", String::from_utf8_lossy(&data[..data.len().min(600)]));
+            }
+            None => println!("打印 {name} 未找到"),
+        }
+    }
 
     let start = startup
         .split("<start>")
@@ -338,6 +416,53 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         }
     }
     println!("脚本 {}", programs.len());
+    if std::env::var_os("KATZE_PROBE_SCAN").is_some() {
+        for (name, program) in &programs {
+            if !name.ends_with(".kcs") {
+                continue;
+            }
+            let instructions = program.instructions();
+            for (position, instruction) in instructions.iter().enumerate() {
+                if instruction.opcode == 0x2b
+                    && instruction
+                        .operands
+                        .first()
+                        .is_some_and(|operand| matches!(operand.payload, 400 | 935 | 936 | 9))
+                {
+                    let first = instruction.operands.first().unwrap().payload;
+                    let start = position.saturating_sub(6);
+                    let context: Vec<String> = instructions[start..position]
+                        .iter()
+                        .map(|item| {
+                            format!(
+                                "{}:{:02x}{:?}",
+                                item.offset,
+                                item.opcode,
+                                item.operands
+                                    .iter()
+                                    .map(|operand| operand.payload)
+                                    .collect::<Vec<_>>()
+                            )
+                        })
+                        .collect();
+                    println!("{name} -> {first} @ {} {context:?}", instruction.offset);
+                }
+            }
+        }
+    }
+    let start_file = start
+        .rsplit('/')
+        .next()
+        .unwrap_or(&start)
+        .to_ascii_lowercase();
+    let start_instructions = programs
+        .get(&start_file)
+        .or_else(|| {
+            let stem = start_file.trim_end_matches(".kcs").to_string();
+            programs.get(&stem)
+        })
+        .map(|program| program.instructions().to_vec())
+        .unwrap_or_default();
 
     let mut runtime = Runtime::new(
         0,
@@ -382,6 +507,32 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             for id in 0..64 {
                 if let Some(vm) = runtime.object(id).and_then(|object| object.interpreter()) {
                     println!("  任务 {id} pc {}", vm.pc);
+                    if id == task && std::env::var_os("KATZE_PROBE_DUMP").is_some() {
+                        if let Ok(bytes) = vm.read(2200, 300) {
+                            for (offset, chunk) in bytes.chunks(64).enumerate() {
+                                println!(
+                                    "    {:4}: {:?}",
+                                    2200 + offset * 64,
+                                    String::from_utf8_lossy(chunk)
+                                );
+                            }
+                        }
+                        for instruction in start_instructions.iter().filter(|instruction| {
+                            instruction.offset + 8 >= vm.pc.saturating_sub(400)
+                                && instruction.offset <= vm.pc + 140
+                        }) {
+                            println!(
+                                "    {} {:02x} {:?}",
+                                instruction.offset,
+                                instruction.opcode,
+                                instruction
+                                    .operands
+                                    .iter()
+                                    .map(|operand| (operand.flags, operand.payload))
+                                    .collect::<Vec<_>>()
+                            );
+                        }
+                    }
                 }
             }
             break;

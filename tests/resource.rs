@@ -70,6 +70,19 @@ fn archive_config_merges_paths_and_resolves_labels_using_archive_prefixes() {
         b"folder/sample"
     );
     assert!(config.resolve(b"unknown", b"/sample").is_err());
+    assert_eq!(
+        config.resolve_slot(0, b"sample").unwrap(),
+        b"archive/sample.kcs"
+    );
+    assert_eq!(
+        config.resolve_slot(1, b"sample").unwrap(),
+        b"second/sample."
+    );
+    assert_eq!(
+        config.resolve_slot(0, b"folder/sample").unwrap(),
+        b"folder/sample"
+    );
+    assert!(config.resolve_slot(128, b"sample").is_err());
 }
 
 #[test]

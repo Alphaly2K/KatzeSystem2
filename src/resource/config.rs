@@ -72,4 +72,19 @@ impl ArchiveConfig {
             .ok_or_else(|| Error::new(0, "未注册的资源类别"))?;
         self.entries[index].category.resolve(name)
     }
+
+    /// 按槽位编号补全名称。
+    ///
+    /// 声音装载等入口携带 INT 槽位而非类别名；带目录的名称与按名称查询
+    /// 一样直接返回，槽位超出 128 项时诊断。
+    pub fn resolve_slot(&self, slot: u32, name: &[u8]) -> Result<Vec<u8>> {
+        if has_directory(terminated(name)) {
+            return Category::default().resolve(name);
+        }
+        let entry = self
+            .entries
+            .get(slot as usize)
+            .ok_or_else(|| Error::new(0, "资源槽位超出配置容量"))?;
+        entry.category.resolve(name)
+    }
 }

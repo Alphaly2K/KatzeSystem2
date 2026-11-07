@@ -289,7 +289,7 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 
 594～597 提供独立的三整数分组表：594 以格式化资源名称装载，595 释放，596 按组名、597 按条目名查询。596／597 接受句柄、格式化名称地址及三个输出地址，找到时依序写入原始 DWORD 并返回一；未找到或零句柄返回零，保持输出。读取同样采用 `LooseFirst`；成功打开的空文件仍返回有效空表句柄。分组、注释、首次定义及不完整头部的规则见[资源格式](resources.md#三整数分组表)。
 
-`kcs::CachedResources<S>` 为已有同步资源服务增加共享的原始字节缓存，保留 `inner` 及对底层服务的访问；克隆包装时沿用同一 `ResourceCache`。程序装载器和 Runtime 可使用同一包装的克隆，共用预读结果。`ResourceServices::resource_cache()` 默认返回 None，包装提供共享缓存句柄。`ResourceHost::new` 和 `Runtime::set_resources` 自动包装输入服务，输入已有缓存时继续沿用。
+`kcs::CachedResources<S>` 为已有同步资源服务增加共享的原始字节缓存，保留 `inner` 及对底层服务的访问；克隆包装时沿用同一 `ResourceCache`。程序装载器和 Runtime 可使用同一包装的克隆，共用预读结果。`ResourceServices::resource_cache()` 默认返回 None，包装提供共享缓存句柄。`ResourceServices::resolve_slot(slot, name)` 默认退回 `resolve(b"sound", name)`，包装与 `&mut S` 转发到底层服务，`ArchiveConfig::resolve_slot` 提供按 INT 槽位补全的实现。`ResourceHost::new` 和 `Runtime::set_resources` 自动包装输入服务，输入已有缓存时继续沿用。
 
 `ResourceCache` 的 `enqueue(full_name, life)` 登记完整名称；`start()` 排序并重置完成等级，`advance(&mut services)` 推进一个工作段，返回 true 表示遍历至末尾。`is_ready(priority)` 查询等级，`len()`／`is_empty()` 查询保留条目数量，`read_cached(name)` 返回成功预读的独立副本。`age()` 推进寿命，`clear()` 撤销缓存持有；`with_enabled(false)` 创建关闭预读的配置。普通 434～438 使用这一缓存；当前同步宿主的 436 完成全部读取后返回。名称、寿命及失败重试契约见 [资源预读](kcs.md#资源预读与缓存)。
 

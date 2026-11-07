@@ -16,7 +16,7 @@ let category = Category {
 assert_eq!(category.resolve(b"sample").unwrap(), b"mot/sample.kcs");
 ```
 
-`ArchiveConfig::from_xml` 读取已解码为 UTF-8 的启动 XML，`find(name)` 返回类别槽位，`resolve(category, name)` 完成类别查找及名称补全。资源宿主提供已装载的归档、列表和补丁顺序，`ResourceRouter` 按下述规则查找。`Category` 只处理名称；不检查文件是否存在，不访问文件系统，也不规范化目录或大小写。
+`ArchiveConfig::from_xml` 读取已解码为 UTF-8 的启动 XML，`find(name)` 返回类别槽位，`resolve(category, name)` 完成类别查找及名称补全。`resolve_slot(slot, name)` 直接按 INT 槽位补全，声音装载等只携带槽位的入口使用它；带目录的名称与按名称查询一样直接返回，槽位越界诊断。资源宿主提供已装载的归档、列表和补丁顺序，`ResourceRouter` 按下述规则查找。`Category` 只处理名称；不检查文件是否存在，不访问文件系统，也不规范化目录或大小写。
 
 ## 已确认的补全规则
 

@@ -213,6 +213,10 @@ impl<S: ResourceServices> ResourceServices for CachedResources<S> {
         self.inner.resolve(category, name)
     }
 
+    fn resolve_slot(&mut self, slot: u32, name: &[u8]) -> Result<Vec<u8>> {
+        self.inner.resolve_slot(slot, name)
+    }
+
     fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
         if let Some(bytes) = self.cache.read_cached(name)? {
             return Ok(Some(bytes));

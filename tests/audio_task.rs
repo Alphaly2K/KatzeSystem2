@@ -471,3 +471,89 @@ fn sound_commands_gate_buffers_and_preserve_unwritten_return_slots() {
         .unwrap();
     assert_eq!(output, 0);
 }
+
+struct SlotSource;
+
+impl ProgramLoader for SlotSource {
+    fn load(&mut self, _: &[u8]) -> Result<Option<Program>> {
+        fn ins(code: &mut Vec<u8>, op: u8, words: &[u32]) {
+            code.push(op);
+            for word in words {
+                code.push(3);
+                code.extend(word.to_le_bytes());
+            }
+        }
+        let mut code = vec![];
+        ins(&mut code, 0x25, &[0xdeadbeef]);
+        ins(&mut code, 0x25, &[19]);
+        ins(&mut code, 0x25, &[64]);
+        ins(&mut code, 0x2b, &[400, 8]);
+        ins(&mut code, 0x26, &[0]);
+        ins(&mut code, 0x3b, &[]);
+        let mut data = vec![0; 256];
+        data[64..76].copy_from_slice(b"loops_7.tbl\0");
+        Ok(Some(Program::from_code(&code, data, 128)?))
+    }
+}
+
+type SlotCalls = Rc<RefCell<Vec<(u32, Vec<u8>)>>>;
+
+struct SlotResources {
+    calls: SlotCalls,
+}
+
+impl ResourceServices for SlotResources {
+    fn resolve_slot(&mut self, slot: u32, name: &[u8]) -> Result<Vec<u8>> {
+        self.calls.borrow_mut().push((slot, name.to_vec()));
+        let mut resolved = b"bgm.int/".to_vec();
+        resolved.extend_from_slice(name);
+        Ok(resolved)
+    }
+
+    fn read(&mut self, _: &[u8], _: ResourceMode) -> Result<Option<Vec<u8>>> {
+        Ok(Some(b"\"bgm01.ogg\" 1 20\n\"bgm02.ogg\" 5 -1".to_vec()))
+    }
+}
+
+#[test]
+fn loop_tables_resolve_entries_through_the_category_slot() {
+    let mut kcs = KcsFactory::new(SlotSource);
+    kcs.external = katze_system2::memory::SharedMemory::new(vec![0; 256]).unwrap();
+    let mut rt = Runtime::new(
+        0,
+        kind::ROOT,
+        Box::new(RootObject::new(1, 1)),
+        State::new(0),
+        SoundFactory {
+            enabled: true,
+            fallback: kcs,
+        },
+    );
+    assert_eq!(rt.create(0, kind::SOUND, b"sound", b"").unwrap(), 1);
+    let caller = rt.create(0, kind::ORDINARY, b"caller", b"").unwrap();
+    let calls = Rc::new(RefCell::new(vec![]));
+    rt.set_resources(SlotResources {
+        calls: calls.clone(),
+    });
+    rt.update(10, 3).unwrap();
+    let audio = rt.object(1).unwrap().audio_state().unwrap();
+    assert_eq!(audio.loop_points().entries().len(), 2);
+    assert_eq!(audio.loop_points().entries()[0].name, b"bgm.int/bgm01.ogg");
+    assert_eq!(audio.loop_points().entries()[1].name, b"bgm.int/bgm02.ogg");
+    assert_eq!(
+        *calls.borrow(),
+        [
+            (19, b"loops_7.tbl".to_vec()),
+            (19, b"bgm01.ogg".to_vec()),
+            (19, b"bgm02.ogg".to_vec()),
+        ]
+    );
+    assert!(
+        rt.object(caller)
+            .unwrap()
+            .interpreter()
+            .unwrap()
+            .stack_bytes()
+            .is_empty()
+    );
+}

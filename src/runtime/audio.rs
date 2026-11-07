@@ -154,13 +154,14 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         if arguments.len() != 8 {
             return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
         }
+        let slot = read::u32_at(arguments, 0)?;
         let name = format_string(vm, read::u32_at(arguments, 4)?, 0)?;
         let name = self
             .resources
             .services
             .as_deref_mut()
             .ok_or_else(|| Error::new(vm.pc, "运行时未配置声音资源服务"))?
-            .resolve(b"sound", &name)?;
+            .resolve_slot(slot, &name)?;
         let name = terminated(&name);
         if name.len() >= 260 {
             return Err(Error::new(vm.pc, "声音循环点表名称超过配置容量"));
@@ -181,7 +182,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                 .services
                 .as_deref_mut()
                 .ok_or_else(|| Error::new(vm.pc, "运行时未配置声音资源服务"))?
-                .resolve(b"sound", &point.name)?;
+                .resolve_slot(slot, &point.name)?;
             let name = terminated(&name);
             if name.len() >= 32 {
                 return Err(Error::new(vm.pc, "声音循环点名称超过配置容量"));

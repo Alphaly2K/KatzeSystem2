@@ -10,6 +10,14 @@ pub trait ResourceServices {
         Err(Error::new(0, "资源服务未提供类别名称补全"))
     }
 
+    /// 按启动配置的类别槽位补全名称。
+    ///
+    /// 声音装载携带 INT 槽位而非类别名；只提供名称服务的宿主沿用 ``sound``
+    /// 类别，保持既有实现可用。
+    fn resolve_slot(&mut self, _slot: u32, name: &[u8]) -> Result<Vec<u8>> {
+        self.resolve(b"sound", name)
+    }
+
     fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>>;
 
     /// 返回与普通读取共用的预读缓存；默认由 CachedResources 提供。
@@ -21,6 +29,9 @@ pub trait ResourceServices {
 impl<S: ResourceServices + ?Sized> ResourceServices for &mut S {
     fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
         (**self).resolve(category, name)
+    }
+    fn resolve_slot(&mut self, slot: u32, name: &[u8]) -> Result<Vec<u8>> {
+        (**self).resolve_slot(slot, name)
     }
     fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
         (**self).read(name, mode)
