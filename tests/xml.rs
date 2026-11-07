@@ -37,6 +37,8 @@ fn fields_merge_duplicate_paths_and_keep_raw_text_and_literal_names() {
 
 #[test]
 fn parsing_requires_baseline_declaration_and_rejects_unsupported_structure() {
+    let lower = b"<?xml version=\"1.0\" encoding=\"utf-8\"?><document/>";
+    assert!(XmlDocument::parse(lower).is_ok());
     assert!(xml("<document/>").text(b"document").unwrap().is_none());
     for body in [
         "<document><a/></document>",

@@ -24,7 +24,10 @@ impl XmlDocument {
         let header = format!("<xml {}/>", declaration.0);
         let header = Document::parse(&header).map_err(xml_error)?;
         if header.root_element().attribute("version") != Some("1.0")
-            || header.root_element().attribute("encoding") != Some("UTF-8")
+            || !header
+                .root_element()
+                .attribute("encoding")
+                .is_some_and(|encoding| encoding.eq_ignore_ascii_case("UTF-8"))
         {
             return Err(Error::new(0, "XML 需要 1.0 和 UTF-8 声明"));
         }
