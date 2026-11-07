@@ -80,6 +80,52 @@ fn css_retains_decompressed_records_outside_declared_usage_and_ignores_zlib_erro
 }
 
 #[test]
+fn serialization_keeps_records_beyond_declared_usage_and_restores_the_tag() {
+    let mut data = DataContainer::new(0x1234_5678);
+    data.append(1, b"alpha").unwrap();
+    data.append(2, b"").unwrap();
+    data.append(1, b"beta").unwrap();
+    assert!(data.remove(1).unwrap());
+    let file = data.to_css().unwrap();
+    assert_eq!(&file[..4], b"CSS\0");
+    let compressed = u32::from_le_bytes(file[4..8].try_into().unwrap()) as usize;
+    assert_eq!(compressed, file.len() - 16);
+    assert_eq!(
+        u32::from_le_bytes(file[8..12].try_into().unwrap()),
+        data.used_len()
+    );
+    assert_eq!(
+        u32::from_le_bytes(file[12..16].try_into().unwrap()),
+        0x1234_5678
+    );
+    let loaded = DataContainer::from_css(&file).unwrap().unwrap();
+    assert_eq!(loaded.tag(), 0x1234_5678);
+    assert_eq!(loaded.used_len(), data.used_len());
+    assert_eq!(loaded.used_bytes().unwrap(), data.used_bytes().unwrap());
+    assert_eq!(loaded.record(1).unwrap(), Some(b"beta".as_slice()));
+    assert_eq!(loaded.record(2).unwrap(), Some(b"".as_slice()));
+    // 删除缩短的逻辑容量不进入文件头，重新加载按声明用量取整。
+    assert_eq!(loaded.capacity(), 0x80000);
+
+    let records = [7u32.to_le_bytes().as_slice(), &3u32.to_le_bytes(), b"abc"].concat();
+    let beyond = DataContainer::from_css(&css(&records, 0, 9))
+        .unwrap()
+        .unwrap();
+    let reloaded = DataContainer::from_css(&beyond.to_css().unwrap())
+        .unwrap()
+        .unwrap();
+    assert_eq!(reloaded.used_len(), 0);
+    assert_eq!(reloaded.record(7).unwrap(), Some(b"abc".as_slice()));
+
+    let empty = DataContainer::new(0);
+    let reloaded = DataContainer::from_css(&empty.to_css().unwrap())
+        .unwrap()
+        .unwrap();
+    assert_eq!((reloaded.capacity(), reloaded.used_len()), (0x80000, 0));
+    assert_eq!(reloaded.record(0).unwrap(), empty.record(0).unwrap());
+}
+
+#[test]
 fn deletion_keeps_an_exact_capacity_record_and_malformed_payloads_are_bounded() {
     let mut records = [7u32.to_le_bytes(), (0x80000u32 - 8).to_le_bytes()].concat();
     records.resize(0x80000, 0xa5);

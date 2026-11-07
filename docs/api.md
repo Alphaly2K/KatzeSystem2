@@ -81,7 +81,7 @@ FES SOUND 文件请求通过 `Objects::set_sound_task` 的绑定发送 180／182
 
 ## CSS 数据容器
 
-`save::DataContainer` 提供 CSS 加载及编号记录的追加、首项读取／删除与清空，`snapshot`／`from_snapshot` 交换独立的嵌套快照。`Runtime::set_save_services` 或 `CoreHost::save_services` 提供按任务存档目录读取文件的服务；247 展开文件名后调用该服务。238／242／244／246／248／252／254／389／469 操作同一份持久容器存储，任务销毁和服务替换不回收容器；246 显式释放，失效或类型错误的句柄诊断。接口及 CSS 长度／解压约束见[CSS 数据容器](save.md)。
+`save::DataContainer` 提供 CSS 加载与写出及编号记录的追加、首项读取／删除与清空，`snapshot`／`from_snapshot` 交换独立的嵌套快照。`Runtime::set_save_services` 或 `CoreHost::save_services` 提供按任务存档目录读取文件的服务；247 展开文件名后调用该服务。238／242／244／246／248／252／254／389／469 操作同一份持久容器存储，任务销毁和服务替换不回收容器；246 显式释放，失效或类型错误的句柄诊断。接口及 CSS 长度／解压约束见[CSS 数据容器](save.md)。
 
 普通 833～836 和释放别名 290 接入独立原始缓冲区。`HostState::raw_buffer(address, length)`／`raw_buffer_mut` 接收原始地址及块内偏移，返回受检字节视图；地址不自动登记为 VM 存储。缓冲区存活至显式释放或宿主销毁，不依赖创建任务及数据容器。普通 900／901 通过这些地址保存和合并恢复整数字典，保留对齐填充及现有键的值。参数和零长度规则见[原始缓冲区](save.md#原始缓冲区与容器交换)。
 

@@ -1,6 +1,7 @@
 //! CSS 文件与带编号的数据记录；文件位置和读取由外层存档服务提供。
 
 use crate::{Error, Result, read};
+use std::io::Write;
 
 const BLOCK: usize = 0x80000;
 
@@ -71,6 +72,34 @@ impl DataContainer {
 
     pub fn tag(&self) -> u32 {
         self.tag
+    }
+
+    /// 按逻辑容量写出 CSS 文件：四个头部 DWORD 后接 zlib 流。
+    /// 未使用容量以零写出，因此声明用量之外已经解压出的记录仍可再次加载。
+    pub fn to_css(&self) -> Result<Vec<u8>> {
+        if self.used as usize > self.capacity || self.bytes.len() < self.capacity {
+            return Err(Error::new(0, "CSS 声明用量超过逻辑容量"));
+        }
+        let mut encoder =
+            flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder
+            .write_all(&self.bytes[..self.capacity])
+            .map_err(|error| Error::new(0, format!("Zlib 压缩失败：{error}")))?;
+        let compressed = encoder
+            .finish()
+            .map_err(|error| Error::new(0, format!("Zlib 压缩失败：{error}")))?;
+        let length =
+            u32::try_from(compressed.len()).map_err(|_| Error::new(0, "CSS 压缩区超过长度上限"))?;
+        if compressed.len() > read::MAX_BYTES - 16 {
+            return Err(Error::new(0, "CSS 文件超过读取上限"));
+        }
+        let mut file = Vec::with_capacity(16 + compressed.len());
+        file.extend_from_slice(b"CSS\0");
+        for value in [length, self.used, self.tag] {
+            file.extend_from_slice(&value.to_le_bytes());
+        }
+        file.extend_from_slice(&compressed);
+        Ok(file)
     }
 
     pub fn used_len(&self) -> u32 {
