@@ -1037,3 +1037,72 @@ fn list_resize_and_animation_variables_preserve_entries_plane_and_deferred_updat
         [2, u32::MAX]
     );
 }
+
+fn push(code: &mut Vec<u8>, value: u32) {
+    code.extend([0x25, 3]);
+    code.extend(value.to_le_bytes());
+}
+
+fn call(code: &mut Vec<u8>, native: u32, bytes: u32) {
+    code.extend([0x2b, 3]);
+    code.extend(native.to_le_bytes());
+    code.extend([3]);
+    code.extend(bytes.to_le_bytes());
+}
+
+struct Forwarding;
+
+impl ProgramLoader for Forwarding {
+    fn load(&mut self, _: &[u8]) -> Result<Option<Program>> {
+        let mut code = Vec::new();
+        for value in [1, 4, 3] {
+            push(&mut code, value);
+        }
+        call(&mut code, 663, 12);
+        for value in [1, 99, 0, 7] {
+            push(&mut code, value);
+        }
+        call(&mut code, 880, 16);
+        code.push(0x3b);
+        Ok(Some(Program::from_code(&code, vec![0; 16], 128)?))
+    }
+}
+
+#[test]
+fn resize_native_rebuilds_the_target_output_and_unknown_animation_slots_are_skipped() {
+    let mut runtime = Runtime::new(
+        0,
+        kind::ROOT,
+        Box::new(BaseObject::new()),
+        State::new(0),
+        GraphicsFactory {
+            fallback: KcsFactory::new(Forwarding),
+        },
+    );
+    runtime.host_mut().surface_size = [8, 6];
+    runtime.drawing_mut().target = Some(RenderTarget::new([8, 6]).unwrap());
+    let list = runtime.create(0, kind::IMAGE_LIST, b"list", b"").unwrap();
+    assert_eq!(list, 1);
+    send(&mut runtime, list, 285, 8, 6);
+    let before = output_image(&mut runtime, list);
+    assert_eq!(runtime.images().get(before).unwrap().info().size, [8, 6]);
+    let script = runtime.create(0, kind::ORDINARY, b"run", b"").unwrap();
+    assert!(script > list);
+    runtime.update(1, 1).unwrap();
+    assert!(
+        runtime
+            .object(script)
+            .unwrap()
+            .interpreter()
+            .unwrap()
+            .stack_bytes()
+            .is_empty()
+    );
+    let after = output_image(&mut runtime, list);
+    assert_ne!(after, before);
+    assert_eq!(runtime.images().get(after).unwrap().info().size, [4, 3]);
+    assert_eq!(
+        runtime.images().get(after).unwrap().info().canvas_size,
+        [0, 0]
+    );
+}
