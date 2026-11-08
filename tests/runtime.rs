@@ -1285,3 +1285,68 @@ fn queueing_for_deleted_tasks_reports_the_uninitialized_native_result() {
         );
     }
 }
+
+type OpenCall = (u32, Vec<u8>, Vec<u8>, Vec<u8>);
+
+struct Opens {
+    calls: Rc<RefCell<Vec<OpenCall>>>,
+}
+
+impl katze_system2::kcs::SystemServices for Opens {
+    fn open(
+        &mut self,
+        task_id: u32,
+        target: &[u8],
+        parameters: &[u8],
+        directory: &[u8],
+    ) -> Result<()> {
+        self.calls.borrow_mut().push((
+            task_id,
+            target.to_vec(),
+            parameters.to_vec(),
+            directory.to_vec(),
+        ));
+        Ok(())
+    }
+}
+
+#[test]
+fn system_open_routes_through_runtime_services_and_requires_configuration() {
+    let mut data = data();
+    for (offset, bytes) in [
+        (64, b"target\0".as_slice()),
+        (128, b"-v x\0".as_slice()),
+        (192, b"dir\0".as_slice()),
+    ] {
+        data[offset..offset + bytes.len()].copy_from_slice(bytes);
+    }
+    let mut asm = Asm::default();
+    asm.ins(0x25, &[64])
+        .ins(0x25, &[128])
+        .ins(0x25, &[192])
+        .ins(0x2b, &[629, 12])
+        .ins(0x3b, &[]);
+    let mut source = Source::new();
+    source.add(b"main", asm.build(), data);
+
+    let calls = Rc::new(RefCell::new(Vec::new()));
+    let mut configured = runtime(source);
+    configured.set_system_services(Opens {
+        calls: calls.clone(),
+    });
+    let task = configured.create(0, kind::ORDINARY, b"main", b"").unwrap();
+    assert!(configured.update(10, 0).unwrap());
+    assert_eq!(
+        *calls.borrow(),
+        vec![(task, b"target".to_vec(), b"-v x".to_vec(), b"dir".to_vec())]
+    );
+
+    let mut source = Source::new();
+    source.add(b"main", asm.build(), vec![0; DATA]);
+    let mut unconfigured = runtime(source);
+    unconfigured
+        .create(0, kind::ORDINARY, b"main", b"")
+        .unwrap();
+    let error = unconfigured.update(10, 0).unwrap_err();
+    assert!(error.message.contains("系统打开服务"));
+}

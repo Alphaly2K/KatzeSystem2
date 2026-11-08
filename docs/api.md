@@ -297,7 +297,7 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 
 368 可从已装载的 HG-3 0x300 数据读取帧元数据，向目标写九个 DWORD；字段顺序见 [KCS 文档](kcs.md)。它返回找到状态，零句柄不写目标，正常查询先清零目标字段。目标需能容纳 36 字节；HG-2／JPEG 查询及未支持的 HG-3 版本返回诊断。
 
-`kcs::SystemHost::new(&mut inner, &mut services)` 为已有 Host 接入普通表 629。服务实现 `SystemServices::open(task_id, target, parameters, directory) -> Result<()>`，接收依次格式展开后的三个字节串。服务返回后 native 才以状态 2 继续，不压值；服务错误返回解释器诊断，当前推进立即结束。平台打开 API 的成功／失败返回值均不作为 VM 返回值。
+`kcs::SystemHost::new(&mut inner, &mut services)` 为已有 Host 接入普通表 629；`Runtime` 通过 `set_system_services` 提供同一服务，未配置时返回诊断。服务实现 `SystemServices::open(task_id, target, parameters, directory) -> Result<()>`，接收依次格式展开后的三个字节串。服务返回后 native 才以状态 2 继续，不压值；服务错误返回解释器诊断，当前推进立即结束。平台打开 API 的成功／失败返回值均不作为 VM 返回值。
 
 包装层把时钟、编号、创建上下文及其他 native 委托给 inner，可与 TaskHost 组合。初始编号为零，直接使用 VM 时通过 `Host::set_task_id` 设置；OrdinaryTask 自动同步。平台服务按编号查找相应窗口或环境，并负责处理字节路径、参数和目录，具体 Windows 调用契约见 [KCS](kcs.md)。
 
@@ -596,7 +596,7 @@ Scene 消费 `noact`／`lockactive` 并按主体时点处理通知。`preferred_
 
 主体、命令和消息在返回前完成预算续跑。`DEFAULT_BUDGET` 为单次推进预算，零预算按一处理；连续耗尽预算时，`DEFAULT_LIMIT` 按续跑累计额度触发同步执行诊断。与库的其他执行错误一样，出现该错误后应丢弃解释器状态。不结束的普通指令循环因此会返回诊断。
 
-当前运行时接入普通表任务 native 66／67／69／70／72／73／75／76／108／109／110／143／452 和已核实的普通表接口；108／110 接受目标编号和值两个 DWORD。外部区由调用方通过受检 `SharedMemory` 提供，默认空区。629 仍由 `SystemHost` 单独包装，尚未并入；367 尚未实现。`Runtime::create` 配合 `KcsFactory` 保留按名称预先装载的便利入口；`Runtime::create_unloaded_ordinary(parent, context)` 构造无 VM 的普通对象。工厂包装需转发 `external_storage`、`create_unloaded_ordinary` 和 `load_kcs_program`，宿主包装需转发程序装载及共享数值绑定状态。命令 161 从 `CommandBuffers.data1` 读取完整名称；首参非零时立即初始化，零时只装载。缺失程序会移除旧 VM，保留任务编号、控制、时钟和队列，随后仍继承父级数值区及上下文；程序读取服务错误保留装载阶段，沿用同一命令重试。172 仅在 VM 存在时更新对象保存的外部区及 VM 绑定，不执行脚本；长度零清空，非零长度从 `CommandBuffers.external` 的起点取对应长度的共享视图，缓冲区缺失或长度不足返回诊断。装载失败后对象仍保留该描述，后续重载继续共享同一份字节。
+当前运行时接入普通表任务 native 66／67／69／70／72／73／75／76／108／109／110／143／452 和已核实的普通表接口；108／110 接受目标编号和值两个 DWORD。外部区由调用方通过受检 `SharedMemory` 提供，默认空区。629 已由 `Runtime::set_system_services` 并入宿主状态，独立 `SystemHost` 包装仍可用；367 尚未实现。`Runtime::create` 配合 `KcsFactory` 保留按名称预先装载的便利入口；`Runtime::create_unloaded_ordinary(parent, context)` 构造无 VM 的普通对象。工厂包装需转发 `external_storage`、`create_unloaded_ordinary` 和 `load_kcs_program`，宿主包装需转发程序装载及共享数值绑定状态。命令 161 从 `CommandBuffers.data1` 读取完整名称；首参非零时立即初始化，零时只装载。缺失程序会移除旧 VM，保留任务编号、控制、时钟和队列，随后仍继承父级数值区及上下文；程序读取服务错误保留装载阶段，沿用同一命令重试。172 仅在 VM 存在时更新对象保存的外部区及 VM 绑定，不执行脚本；长度零清空，非零长度从 `CommandBuffers.external` 的起点取对应长度的共享视图，缓冲区缺失或长度不足返回诊断。装载失败后对象仍保留该描述，后续重载继续共享同一份字节。
 
 普通 143 接收目标、名称格式地址及初始化 DWORD。通过资源服务的 `kcs` 类别补全名称后，依序发送 161 和 172，后者绑定调用对象保存的外部区。目标零仍路由；初始化零以状态二继续，非零以状态四让出，均保持 native 返回槽。`TaskObject::external_storage()` 提供该对象描述，默认从 VM 查询；普通对象独立保存，直接重绑其 VM 不会修改对象保存的描述。 FES 在构造时保存工厂的共享视图，`execkcs` 在初始化子任务后转交此视图；子任务被重绑不改变 FES 或工厂保存的描述。`FesObject::with_external` 用于自定义工厂的显式构造。
 

@@ -73,6 +73,8 @@ pub struct HostState {
     pub languages: crate::language::LanguageState,
     pub script_replacements: BTreeMap<Vec<u8>, Vec<u8>>,
     pub save_services: Option<Box<dyn crate::save::SaveServices>>,
+    /// 普通 629 使用的同步平台打开服务；未配置时该入口返回诊断。
+    pub system_services: Option<Box<dyn super::SystemServices>>,
     /// 外层输入宿主提供的当前逻辑画布坐标；保留画布外的值。
     pub pointer_position: [i32; 2],
     pub memory_copy_mode: MemoryCopyMode,
@@ -304,6 +306,24 @@ pub(crate) fn call_native(
             let bytes = host.languages.expand(&vm.read_string(address)?, mode)?;
             write_string(vm, address, &bytes, 1)?;
         }
+        return Ok(NativeReturn::Continue);
+    }
+    if index == 629 {
+        if arguments.len() != 12 {
+            return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+        }
+        let mut text = Vec::with_capacity(3);
+        for bytes in arguments.chunks_exact(4) {
+            text.push(strings::format(
+                vm,
+                u32::from_le_bytes(bytes.try_into().unwrap()),
+                0,
+            )?);
+        }
+        host.system_services
+            .as_mut()
+            .ok_or_else(|| Error::new(vm.pc, "宿主未配置系统打开服务"))?
+            .open(host.task_id, &text[0], &text[1], &text[2])?;
         return Ok(NativeReturn::Continue);
     }
     if matches!(index, 238 | 242 | 244 | 246..=248 | 252 | 254 | 290 | 389 | 469 | 833..=836) {
