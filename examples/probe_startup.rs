@@ -1,290 +1,18 @@
 //! 用本机游戏目录跑启动脚本，报告首个未接入的宿主入口。
 //!
-//! 归档内部名称按逐条目位移猜测还原：样本归档的校验码不可得时，仍需按名称读取资源。
-//! 该猜测只服务于本地探针，不进入库接口。用法：`cargo run --example probe_startup -- <游戏目录>`。
+//! 用法：`cargo run --example probe_startup -- <游戏目录>`。
 
-use blowfish::{
-    BlowfishLE,
-    cipher::{BlockDecrypt, KeyInit},
-};
+mod support;
+
 use katze_system2::{
-    Error, Result,
-    audio::SoundFactory,
-    expression::State,
-    graphics::{DrawingContext, GraphicsFactory, RenderTarget},
-    input::{InputDevice, InputFactory, KeySample, PointerSample},
-    kcs::{Program, ResourceServices},
-    memory::SharedMemory,
-    resource::{ArchiveConfig, ResourceMode},
-    runtime::{KcsFactory, ProgramLoader, RootObject, Runtime, fes::FesFactory, kind},
-    save::SaveServices,
+    Result,
+    input::{InputDevice, KeySample, PointerSample},
+    kcs::ResourceServices,
+    resource::ResourceMode,
+    runtime::kind,
 };
 use std::collections::BTreeMap;
-use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
-
-const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-
-fn decode(name: &[u8], position_shift: usize) -> Vec<u8> {
-    name.iter()
-        .enumerate()
-        .map(|(i, &b)| match ALPHABET.iter().position(|c| *c == b) {
-            Some(index) => ALPHABET[51 - (index + position_shift + i) % 52],
-            None => b,
-        })
-        .collect()
-}
-
-fn name_score(name: &[u8]) -> i32 {
-    let mut score = 0;
-    for &b in name {
-        if b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'.' | b'_' | b'/' | b'\\') {
-            score += 2;
-        } else if b.is_ascii_uppercase() {
-            score -= 2;
-        } else {
-            score -= 8;
-        }
-    }
-    for extension in [
-        b".kcs".as_slice(),
-        b".cst",
-        b".hg3",
-        b".ogg",
-        b".xml",
-        b".dat",
-        b".anm",
-    ] {
-        if name.ends_with(extension) {
-            score += 6;
-        }
-    }
-    score
-}
-
-fn guess_name(raw: &[u8]) -> String {
-    let end = raw.iter().position(|&b| b == 0).unwrap_or(raw.len());
-    let raw = &raw[..end];
-    let mut best = (i32::MIN, Vec::new());
-    for position in 0..52 {
-        let name = decode(raw, position);
-        let score = name_score(&name);
-        if score > best.0 {
-            best = (score, name);
-        }
-    }
-    String::from_utf8_lossy(&best.1).into_owned()
-}
-
-struct Entry {
-    name: String,
-    raw: Vec<u8>,
-    offset: u32,
-    length: u32,
-}
-
-struct Archive {
-    file: File,
-    cipher: Option<BlowfishLE>,
-    entries: Vec<Entry>,
-    index: BTreeMap<String, usize>,
-}
-
-impl Archive {
-    fn open(path: &str) -> std::result::Result<Self, Box<dyn std::error::Error>> {
-        let mut file = File::open(path)?;
-        let mut head = vec![0; 8];
-        file.read_exact(&mut head)?;
-        if &head[..4] != b"KIF\0" {
-            return Err("KIF 签名无效".into());
-        }
-        let count = u32::from_le_bytes(head[4..8].try_into().unwrap()) as usize;
-        let mut directory = vec![0; count * 72];
-        file.read_exact(&mut directory)?;
-        let encrypted = directory[..64].split(|&b| b == 0).next() == Some(b"__key__.dat");
-        let mut entries = Vec::new();
-        let mut cipher = None;
-        if encrypted {
-            let length = u32::from_le_bytes(directory[68..72].try_into().unwrap());
-            let key = katze_system2::kcs::ScriptRandom::seeded(length)
-                .next_integer()
-                .to_le_bytes();
-            let value = BlowfishLE::new_from_slice(&key).unwrap();
-            for i in 1..count {
-                let base = i * 72;
-                let mut block = [0; 8];
-                let offset =
-                    u32::from_le_bytes(directory[base + 64..base + 68].try_into().unwrap())
-                        .wrapping_add(i as u32);
-                block[..4].copy_from_slice(&offset.to_le_bytes());
-                block[4..].copy_from_slice(&directory[base + 68..base + 72]);
-                value.decrypt_block((&mut block).into());
-                let offset = u32::from_le_bytes(block[..4].try_into().unwrap());
-                entries.push(Entry {
-                    name: guess_name(&directory[base..base + 64]),
-                    raw: directory[base..base + 64].to_vec(),
-                    offset,
-                    length: u32::from_le_bytes(block[4..].try_into().unwrap()),
-                });
-            }
-            cipher = Some(value);
-        } else {
-            for i in 0..count {
-                let base = i * 72;
-                entries.push(Entry {
-                    name: guess_name(&directory[base..base + 64]),
-                    raw: directory[base..base + 64].to_vec(),
-                    offset: u32::from_le_bytes(directory[base + 64..base + 68].try_into().unwrap()),
-                    length: u32::from_le_bytes(directory[base + 68..base + 72].try_into().unwrap()),
-                });
-            }
-        }
-        let index = entries
-            .iter()
-            .enumerate()
-            .map(|(i, entry)| (entry.name.to_ascii_uppercase(), i))
-            .collect();
-        Ok(Self {
-            file,
-            cipher,
-            entries,
-            index,
-        })
-    }
-
-    /// 精确名称优先；未命中时逐条目尝试全部位移，按请求名称反查。
-    ///
-    /// 样本的校验码不可得，条目名称的位移只能猜测；反查只服务本机探针。
-    fn locate(&self, name: &str) -> Option<usize> {
-        if let Some(&position) = self.index.get(&name.to_ascii_uppercase()) {
-            return Some(position);
-        }
-        for (position, entry) in self.entries.iter().enumerate() {
-            let end = entry
-                .raw
-                .iter()
-                .position(|&byte| byte == 0)
-                .unwrap_or(entry.raw.len());
-            for shift in 0..52 {
-                let decoded = decode(&entry.raw[..end], shift);
-                if String::from_utf8_lossy(&decoded).eq_ignore_ascii_case(name) {
-                    return Some(position);
-                }
-            }
-        }
-        None
-    }
-
-    fn read(&mut self, name: &str) -> Result<Option<Vec<u8>>> {
-        let Some(position) = self.locate(name) else {
-            return Ok(None);
-        };
-        let entry = &self.entries[position];
-        self.file
-            .seek(SeekFrom::Start(entry.offset as u64))
-            .map_err(|error| Error::new(0, format!("归档读取失败：{error}")))?;
-        let mut data = vec![0; entry.length as usize];
-        self.file
-            .read_exact(&mut data)
-            .map_err(|error| Error::new(0, format!("归档读取失败：{error}")))?;
-        if let Some(cipher) = &self.cipher {
-            for block in data.chunks_mut(8).filter(|block| block.len() == 8) {
-                cipher.decrypt_block((&mut *block).into());
-            }
-        }
-        Ok(Some(data))
-    }
-}
-
-struct Router {
-    root: String,
-    config: ArchiveConfig,
-    sound_config: Option<katze_system2::audio::SoundConfig>,
-    archives: BTreeMap<String, Archive>,
-}
-
-impl Router {
-    /// 新声音配置：文件名先按分类树的 `<head>` 前缀找节点，再取其 `<int>` 归档类别。
-    fn sound_archive(&self, name: &[u8]) -> Option<Vec<u8>> {
-        let part = self.sound_config.as_ref()?.file_part(name).ok().flatten()?;
-        if part.archive.is_empty() {
-            None
-        } else {
-            Some(part.archive.clone())
-        }
-    }
-}
-
-impl ResourceServices for Router {
-    fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
-        let value = if category == b"sound" {
-            match self.sound_archive(name) {
-                Some(archive) => self.config.resolve(&archive, name),
-                // 未命中分类节点时名称原样传递，读取结果按缺失资源处理。
-                None => katze_system2::resource::Category::default().resolve(name),
-            }
-        } else {
-            self.config.resolve(category, name)
-        };
-        if std::env::var_os("KATZE_PROBE_TRACE").is_some() {
-            eprintln!(
-                "解析 类别={:?} 名称={:?} -> {:?}",
-                String::from_utf8_lossy(category),
-                String::from_utf8_lossy(name),
-                value
-                    .as_ref()
-                    .map(|v| String::from_utf8_lossy(v).into_owned())
-            );
-        }
-        value
-    }
-
-    fn resolve_slot(&mut self, slot: u32, name: &[u8]) -> Result<Vec<u8>> {
-        self.config.resolve_slot(slot, name)
-    }
-
-    fn read(&mut self, name: &[u8], _: ResourceMode) -> Result<Option<Vec<u8>>> {
-        let name = String::from_utf8_lossy(name).into_owned();
-        if std::env::var_os("KATZE_PROBE_READS").is_some() {
-            let result = if let Some((prefix, inner)) = name.split_once('/') {
-                if let Some(archive) = self.archives.get_mut(prefix) {
-                    archive.read(inner)
-                } else {
-                    Ok(std::fs::read(format!("{}/{}", self.root, name)).ok())
-                }
-            } else {
-                Ok(std::fs::read(format!("{}/{}", self.root, name)).ok())
-            };
-            eprintln!(
-                "读取 {name} -> {:?}",
-                result.as_ref().map(|value| value.as_ref().map(Vec::len))
-            );
-            return result;
-        }
-        if let Some((prefix, inner)) = name.split_once('/') {
-            if let Some(archive) = self.archives.get_mut(prefix) {
-                return archive.read(inner);
-            }
-        }
-        Ok(std::fs::read(format!("{}/{}", self.root, name)).ok())
-    }
-}
-
-struct Programs {
-    programs: BTreeMap<String, Program>,
-}
-
-impl ProgramLoader for Programs {
-    fn load(&mut self, name: &[u8]) -> Result<Option<Program>> {
-        // 装载命令收到补全后的归档名；先按原名再按末段查预载脚本。
-        let full = String::from_utf8_lossy(name).to_ascii_lowercase();
-        if let Some(program) = self.programs.get(&full) {
-            return Ok(Some(program.clone()));
-        }
-        let key = full.rsplit(['/', '\\']).next().unwrap_or(&full).to_string();
-        Ok(self.programs.get(&key).cloned())
-    }
-}
+use support::{Game, build_runtime, load_game};
 
 /// 按轮次产生点击的设备；`KATZE_PROBE_CLICKS` 为逗号分隔的 `轮次@x:y` 项。
 struct ScriptedDevice {
@@ -377,38 +105,6 @@ impl InputDevice for ScriptedDevice {
     }
 }
 
-struct Saves {
-    root: String,
-}
-
-impl SaveServices for Saves {
-    fn read(&mut self, _: u32, name: &[u8]) -> Result<Option<Vec<u8>>> {
-        let name = String::from_utf8_lossy(name).into_owned();
-        for directory in ["save", ""] {
-            if let Ok(bytes) = std::fs::read(format!("{}/{directory}/{name}", self.root)) {
-                return Ok(Some(bytes));
-            }
-        }
-        Ok(None)
-    }
-
-    fn modified_time(&mut self, _: u32, name: &[u8]) -> Result<Option<u64>> {
-        let name = String::from_utf8_lossy(name).into_owned();
-        let Ok(metadata) = std::fs::metadata(format!("{}/save/{name}", self.root)) else {
-            return Ok(None);
-        };
-        let Ok(modified) = metadata.modified() else {
-            return Ok(None);
-        };
-        let Ok(elapsed) = modified.duration_since(std::time::UNIX_EPOCH) else {
-            return Ok(None);
-        };
-        Ok(Some(
-            elapsed.as_nanos() as u64 / 100 + 116_444_736_000_000_000,
-        ))
-    }
-}
-
 fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let root = std::env::args()
         .nth(1)
@@ -416,50 +112,26 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let frames: u32 = std::env::args()
         .nth(2)
         .map_or(Ok(600), |value| value.parse())?;
-    let startup = std::fs::read_to_string(format!("{root}/config/startup.xml"))?;
-    let config = ArchiveConfig::from_xml(&startup)?;
-    let mut router = Router {
-        root: root.clone(),
-        config: config.clone(),
-        sound_config: None,
-        archives: BTreeMap::new(),
-    };
-    for entry in config.entries.iter() {
-        let prefix = String::from_utf8_lossy(&entry.category.prefix).into_owned();
-        let path = format!("{root}/{prefix}");
-        if prefix.is_empty() || !std::path::Path::new(&path).exists() {
-            continue;
-        }
-        match Archive::open(&path) {
-            Ok(archive) => {
-                router.archives.insert(prefix, archive);
-            }
-            Err(error) => eprintln!("跳过 {prefix}：{error}"),
-        }
-    }
-    println!("归档 {}", router.archives.len());
+    let mut game = load_game(&root)?;
     if let Some(name) = std::env::var_os("KATZE_PROBE_LIST") {
         let name = name.to_string_lossy().into_owned();
-        if let Some(archive) = router.archives.get(&name) {
-            for entry in archive.entries.iter() {
-                let end = entry
-                    .raw
-                    .iter()
-                    .position(|&b| b == 0)
-                    .unwrap_or(entry.raw.len());
+        if let Some(archive) = game.router.archives.get(&name) {
+            for (name, raw, offset, length) in archive.entries() {
                 println!(
                     "{} raw={:?} {} {}",
-                    entry.name,
-                    String::from_utf8_lossy(&entry.raw[..end]),
-                    entry.offset,
-                    entry.length
+                    name,
+                    String::from_utf8_lossy(raw),
+                    offset,
+                    length
                 );
             }
         }
     }
     if let Some(name) = std::env::var_os("KATZE_PROBE_PRINT") {
         let name = name.to_string_lossy().into_owned();
-        let data = router.read(name.as_bytes(), ResourceMode::LooseFirst)?;
+        let data = game
+            .router
+            .read(name.as_bytes(), ResourceMode::LooseFirst)?;
         match data {
             Some(data) => {
                 println!("打印 {name} 共 {} 字节", data.len());
@@ -479,16 +151,15 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 .flat_map(u16::to_le_bytes)
                 .collect::<Vec<u8>>(),
         );
-        let keys: Vec<String> = router.archives.keys().cloned().collect();
+        let keys: Vec<String> = game.router.archives.keys().cloned().collect();
         for key in keys {
             if !prefix.is_empty() && key != prefix {
                 continue;
             }
-            let archive = router.archives.get_mut(&key).unwrap();
+            let archive = game.router.archives.get_mut(&key).unwrap();
             let names: Vec<String> = archive
-                .entries
-                .iter()
-                .map(|entry| entry.name.clone())
+                .entries()
+                .map(|(name, _, _, _)| name.to_string())
                 .collect();
             for name in names {
                 let Some(data) = archive.read(&name)? else {
@@ -513,37 +184,12 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
-
-    let start = startup
-        .split("<start>")
-        .nth(1)
-        .and_then(|rest| rest.split("</start>").next())
-        .ok_or("缺少启动脚本")?
-        .trim()
-        .to_string();
-    println!("启动脚本 {start}");
-    let mut programs = BTreeMap::new();
-    if let Some(archive) = router.archives.get_mut("kcs.int") {
-        let names: Vec<String> = archive
-            .entries
-            .iter()
-            .map(|entry| entry.name.clone())
-            .collect();
-        for name in names {
-            let Some(data) = archive.read(&name)? else {
-                continue;
-            };
-            let Ok(program) = Program::parse(&data) else {
-                continue;
-            };
-            programs.insert(name.to_ascii_lowercase(), program.clone());
-            programs.insert(name.trim_end_matches(".kcs").to_ascii_lowercase(), program);
-        }
-    }
-    println!("脚本 {}", programs.len());
+    let programs = std::mem::take(&mut game.programs);
     if let Some(spec) = std::env::var_os("KATZE_PROBE_FES") {
         let spec = spec.to_string_lossy().into_owned();
-        let data = router.read(spec.as_bytes(), ResourceMode::LooseFirst)?;
+        let data = game
+            .router
+            .read(spec.as_bytes(), ResourceMode::LooseFirst)?;
         if let Some(data) = data {
             let program = katze_system2::fes::Program::parse(&data)?;
             for declaration in &program.declarations {
@@ -633,10 +279,11 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
-    let start_file = start
+    let start_file = game
+        .start
         .rsplit('/')
         .next()
-        .unwrap_or(&start)
+        .unwrap_or(&game.start)
         .to_ascii_lowercase();
     let start_instructions = programs
         .get(&start_file)
@@ -654,50 +301,17 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             .map(|instruction| instruction.offset)
     );
 
-    let mut runtime = Runtime::new(
-        0,
-        kind::ROOT,
-        Box::new(RootObject::new(1, 2)),
-        State::new(1 << 20),
-        SoundFactory {
-            enabled: true,
-            fallback: FesFactory {
-                fallback: GraphicsFactory {
-                    fallback: katze_system2::message::MessageFactory {
-                        fallback: InputFactory {
-                            fallback: KcsFactory {
-                                programs: Programs { programs },
-                                external: SharedMemory::new(vec![0; 16 << 20])?,
-                            },
-                        },
-                    },
-                },
-            },
+    let mut runtime = build_runtime(
+        Game {
+            root: game.root,
+            router: game.router,
+            startup: game.startup,
+            start: game.start,
+            programs,
         },
-    );
-    if let Ok(bytes) = std::fs::read(format!("{root}/config/soundconf.xml")) {
-        router.sound_config = Some(katze_system2::audio::SoundConfig::from_xml(&bytes)?);
-        runtime.host_mut().sound_config = router.sound_config.clone();
-        runtime.host_mut().sound_groups =
-            Some(katze_system2::audio::SoundGroups::from_xml(&bytes)?);
-        runtime.host_mut().sound_config_enabled = 1;
-    }
-    runtime.host_mut().languages =
-        katze_system2::language::LanguageState::from_xml(startup.as_bytes())?;
-    runtime.set_resources(router);
+        [1280, 720],
+    )?;
     runtime.set_input_device(ScriptedDevice::new())?;
-    runtime.set_save_services(Saves { root: root.clone() });
-    runtime.host_mut().message_defaults = Some(Default::default());
-    #[cfg(target_os = "macos")]
-    runtime.set_fonts(katze_system2::message::macos::MacFonts::new(&root));
-    runtime.host_mut().system_settings = Some(Default::default());
-    runtime.host_mut().surface_size = [1280, 720];
-    *runtime.drawing_mut() = DrawingContext {
-        mode: 0,
-        enabled: true,
-        active: true,
-        target: Some(RenderTarget::new([1280, 720])?),
-    };
     let input = runtime.create(0, kind::INPUT, b"input", b"")?;
     let sound = runtime.create(0, kind::SOUND, b"sound", b"")?;
     println!("输入 {input} 声音 {sound}");
@@ -739,7 +353,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 instruction
                     .operands
                     .iter()
-                    .map(|operand| (operand.flags, operand.payload))
+                    .map(|operand| operand.payload)
                     .collect::<Vec<_>>()
             );
         }
