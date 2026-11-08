@@ -129,12 +129,14 @@ impl CstContext {
         Ok(loaded)
     }
 
+    /// `utf8` 请求转码输出；UTF-8 模式下脚本区文本为 UTF-8，记录同样转码产出。
     pub(super) fn record_text(
         &self,
         input: i32,
         record: i32,
         language: Option<&[u8]>,
         utf8: bool,
+        unicode: bool,
     ) -> Result<Option<Vec<u8>>> {
         let Some(script) = self.script.as_ref() else {
             return Ok(None);
@@ -171,7 +173,7 @@ impl CstContext {
                 }
             }
         }
-        Ok(Some(if utf8 {
+        Ok(Some(if utf8 || unicode {
             crate::text::cp932(&line.bytes)?.into_bytes()
         } else {
             line.bytes.clone()
@@ -287,6 +289,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                 read::u32_at(arguments, 12)? as i32,
                 language.as_deref(),
                 matches!(index, 1037 | 1038),
+                self.host.unicode_text != 0,
             )?
             else {
                 return Ok(NativeReturn::Value(0));

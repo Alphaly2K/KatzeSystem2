@@ -204,7 +204,13 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     // 本段已有声音标记时，后续命令仍使用最近一次读取的文本缓冲。
                     if matches!(line.kind, 0x20 | 0x21) || (line.kind == 0x30 && !flag) {
                         buffer = scene
-                            .record_text(input, record as i32, language.as_deref(), index == 1034)?
+                            .record_text(
+                                input,
+                                record as i32,
+                                language.as_deref(),
+                                index == 1034,
+                                self.host.unicode_text != 0,
+                            )?
                             .unwrap_or_default();
                         check_capacity(&buffer, 4096)?;
                     }
