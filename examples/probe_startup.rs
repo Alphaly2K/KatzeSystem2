@@ -129,13 +129,18 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     }
     if let Some(name) = std::env::var_os("KATZE_PROBE_PRINT") {
         let name = name.to_string_lossy().into_owned();
+        let (resource, _) = name.split_once('@').unwrap_or((&name, ""));
         let data = game
             .router
-            .read(name.as_bytes(), ResourceMode::LooseFirst)?;
+            .read(resource.as_bytes(), ResourceMode::LooseFirst)?;
         match data {
             Some(data) => {
                 println!("打印 {name} 共 {} 字节", data.len());
                 println!("{}", String::from_utf8_lossy(&data[..data.len().min(600)]));
+                // `name@路径` 形式把完整资源写到指定文件。
+                if let Some((_, target)) = name.split_once('@') {
+                    std::fs::write(target, &data)?;
+                }
             }
             None => println!("打印 {name} 未找到"),
         }
@@ -369,6 +374,26 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                     if id == task && std::env::var_os("KATZE_PROBE_DUMP").is_some() {
                         dump(vm);
                     }
+                    // `KATZE_PROBE_MEM=地址:长度,...` 转储失败任务各 VM 的普通区。
+                    if let Ok(spec) = std::env::var("KATZE_PROBE_MEM") {
+                        for item in spec.split(',') {
+                            let Some((address, length)) = item.split_once(':') else {
+                                continue;
+                            };
+                            let (Ok(address), Ok(length)) =
+                                (address.parse::<u32>(), length.parse::<u32>())
+                            else {
+                                continue;
+                            };
+                            if let Ok(bytes) = vm.read(address, length as usize) {
+                                println!(
+                                    "  任务 {id} @{address}: {:?} {:?}",
+                                    String::from_utf8_lossy(&bytes),
+                                    &bytes[..bytes.len().min(64)]
+                                );
+                            }
+                        }
+                    }
                 }
             }
             break;
@@ -380,19 +405,55 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         if frame == dump_frame && std::env::var_os("KATZE_PROBE_DUMP").is_some() {
             for id in 0..64 {
                 if let Some(node) = runtime.tree().node(id) {
-                    let pc = runtime
-                        .object(id)
+                    let object = runtime.object(id);
+                    let pc = object
                         .and_then(|object| object.interpreter())
                         .map(|vm| vm.pc);
+                    let elapsed = object.map(|object| object.clock().elapsed());
+                    let paused = object.map(|object| object.clock().paused);
                     println!(
-                        "  节点 {id} 类型 {} 父 {:?} pc {:?}",
-                        node.kind, node.parent, pc
+                        "  节点 {id} 类型 {} 父 {:?} pc {:?} 时钟 {:?} 暂停 {:?}",
+                        node.kind, node.parent, pc, elapsed, paused
                     );
                 }
             }
             if let Some(vm) = runtime.object(task).and_then(|object| object.interpreter()) {
                 println!("第 {frame} 帧任务 {task} pc {}", vm.pc);
                 dump(vm);
+            }
+            {
+                let drawables = runtime.drawables();
+                let mut count = 0;
+                let mut detail = Vec::new();
+                for id in 0..256 {
+                    let Some(entry) = drawables.get(id) else {
+                        continue;
+                    };
+                    count += 1;
+                    detail.push(format!(
+                        "{id} 显示 {} 三角形 {} 画布 {:?} 界限 {:?} 色 {:08x}/{:08x} 混合 {} 裁剪 {:?}",
+                        entry.display(),
+                        entry.triangles().len(),
+                        entry.canvas_triangles().map(|t| t.len()),
+                        entry.bounds(),
+                        entry.color().0,
+                        entry.color().1,
+                        entry.blend_mode(),
+                        entry.clip(),
+                    ));
+                    for (index, triangle) in entry.triangles().iter().take(2).enumerate() {
+                        for (vertex_index, vertex) in triangle.iter().enumerate() {
+                            detail.push(format!(
+                                "      三角形 {index} 点 {vertex_index} {:?}",
+                                vertex
+                            ));
+                        }
+                    }
+                }
+                println!("  绘图 {count} 项");
+                for line in detail.iter().take(24) {
+                    println!("    {line}");
+                }
             }
             if let Some(state) = runtime
                 .object(input)
@@ -416,7 +477,25 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         }
     }
     if let Some(path) = std::env::var_os("KATZE_PROBE_SHOT") {
-        let target = runtime.drawing().target.as_ref().ok_or("缺少渲染目标")?;
+        let mut output = katze_system2::graphics::RenderTarget::new([1280, 720])?;
+        runtime.render_frame(
+            &mut output,
+            &katze_system2::graphics::Projection::default(),
+            [
+                1., 0., 0., 0., //
+                0., 1., 0., 0., //
+                0., 0., 1., 0., //
+                0., 0., 0., 1.,
+            ],
+            katze_system2::graphics::TextureFilter::Point,
+        )?;
+        // `KATZE_PROBE_SHOT` 以 "@canvas" 结尾时转储蓄布而非合成帧。
+        let path_str = path.to_string_lossy().into_owned();
+        let target = if path_str.ends_with("@canvas") {
+            runtime.drawing().target.as_ref().ok_or("缺少渲染目标")?
+        } else {
+            &output
+        };
         let [width, height] = target.size();
         let mut pixels = Vec::with_capacity((width * height * 3) as usize);
         let mut colors = BTreeMap::new();

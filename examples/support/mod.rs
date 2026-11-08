@@ -450,6 +450,9 @@ pub fn build_runtime(
     }
     runtime.host_mut().languages =
         katze_system2::language::LanguageState::from_xml(startup.as_bytes())?;
+    runtime.host_mut().unicode_text =
+        katze_system2::resource::XmlDocument::parse(startup.as_bytes())?
+            .integer(b"APP/utfmode", 0)?;
     runtime.set_resources(router);
     #[cfg(target_os = "macos")]
     runtime.set_fonts(katze_system2::message::macos::MacFonts::new(&root));
@@ -463,5 +466,15 @@ pub fn build_runtime(
         active: true,
         target: Some(RenderTarget::new(surface)?),
     };
+    runtime.set_frame_view(
+        Default::default(),
+        [
+            1., 0., 0., 0., //
+            0., 1., 0., 0., //
+            0., 0., 1., 0., //
+            0., 0., 0., 1.,
+        ],
+        katze_system2::graphics::TextureFilter::Point,
+    );
     Ok(runtime)
 }
