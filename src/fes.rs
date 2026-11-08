@@ -99,9 +99,10 @@ impl Program {
                     lines: Vec::new(),
                 });
             } else if !line.is_empty() {
-                let section = sections
-                    .last_mut()
-                    .ok_or_else(|| Error::new(offset, "FES 语句缺少头块"))?;
+                // 首个头块前的语句不入块；已见样本以一行版本号起始。
+                let Some(section) = sections.last_mut() else {
+                    continue;
+                };
                 let leading = raw.len() - raw.trim_ascii_start().len();
                 section.lines.push(Line {
                     offset: offset + leading,
@@ -191,10 +192,9 @@ impl Program {
                     }
                 }
             }
+            // 原始装载器把块末尾视为缺失 endif 的闭合点：条件为假跳到块结尾。
             for (i, _) in stack {
-                program
-                    .diagnostics
-                    .push(Error::new(block.lines[i].offset, "if 缺少 endif"));
+                block.false_jump[i] = Some(block.lines.len());
             }
         }
         Ok(program)
