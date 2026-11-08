@@ -132,8 +132,12 @@ impl SoundState {
         for index in [Some(channel), linked].into_iter().flatten() {
             let sound = &mut self.channels[index as usize];
             if sound.grouped {
-                if sound.is_playing() && sound.allocation_flags[0] == 0 {
-                    return Err(Error::new(0, "声音分组延迟释放尚未接入"));
+                if sound.is_playing() {
+                    // 播放中置第一类分配标记即启动延迟释放；已有标记跳过新请求。
+                    if sound.allocation_flags[0] == 0 {
+                        sound.allocation_flags[0] = 1;
+                    }
+                    continue;
                 }
                 sound.started_tick = u32::MAX;
                 sound.clock.previous = 0;

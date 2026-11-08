@@ -586,14 +586,24 @@ fn grouped_loads_allocate_physical_channels_recycle_busy_sources_and_preserve_fa
         audio(&runtime).channel(38).unwrap().started_tick(),
         u32::MAX
     );
-    assert!(
-        runtime
-            .dispatch_command(0, command(182, 5))
-            .unwrap_err()
-            .message
-            .contains("分组延迟释放")
+    // 播放中的组通道置第一类分配标记即启动延迟释放，通道保持播放；
+    // 已有标记时新请求不再修改。
+    assert_eq!(
+        load_group(&mut runtime, 7, 0, b"audio/tone.ogg").unwrap(),
+        4
     );
+    play(&mut runtime, 4);
+    assert!(audio(&runtime).channel(4).unwrap().is_playing());
+    runtime.dispatch_command(0, command(182, 5)).unwrap();
     assert!(audio(&runtime).channel(5).unwrap().is_playing());
+    runtime.dispatch_command(0, command(182, 5)).unwrap();
+    assert!(audio(&runtime).channel(5).unwrap().is_playing());
+    // 全忙回收优先选择带释放标记的通道。
+    assert_eq!(
+        load_group(&mut runtime, 7, 0, b"audio/stereo.ogg").unwrap(),
+        5
+    );
+    assert!(!audio(&runtime).channel(5).unwrap().is_playing());
     assert_eq!(
         load_group(&mut runtime, 11, 0, b"audio/tone.ogg").unwrap(),
         7
