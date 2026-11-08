@@ -239,6 +239,29 @@ pub struct Interpreter {
 }
 
 impl Interpreter {
+    /// 诊断用：按声明顺序列出全部块的原始文本行及偏移。
+    pub fn debug_all_blocks(&self) -> Vec<(String, Vec<(usize, String)>)> {
+        self.program
+            .blocks
+            .iter()
+            .map(|block| {
+                (
+                    block.name.clone(),
+                    block
+                        .lines
+                        .iter()
+                        .map(|line| {
+                            (
+                                line.offset,
+                                String::from_utf8_lossy(&line.bytes).into_owned(),
+                            )
+                        })
+                        .collect(),
+                )
+            })
+            .collect()
+    }
+
     pub fn new(mut program: Program) -> Result<Self> {
         let block = program
             .blocks

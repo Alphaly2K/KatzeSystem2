@@ -199,12 +199,33 @@ impl Archive {
 struct Router {
     root: String,
     config: ArchiveConfig,
+    sound_config: Option<katze_system2::audio::SoundConfig>,
     archives: BTreeMap<String, Archive>,
+}
+
+impl Router {
+    /// 新声音配置：文件名先按分类树的 `<head>` 前缀找节点，再取其 `<int>` 归档类别。
+    fn sound_archive(&self, name: &[u8]) -> Option<Vec<u8>> {
+        let part = self.sound_config.as_ref()?.file_part(name).ok().flatten()?;
+        if part.archive.is_empty() {
+            None
+        } else {
+            Some(part.archive.clone())
+        }
+    }
 }
 
 impl ResourceServices for Router {
     fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
-        let value = self.config.resolve(category, name);
+        let value = if category == b"sound" {
+            match self.sound_archive(name) {
+                Some(archive) => self.config.resolve(&archive, name),
+                // 未命中分类节点时名称原样传递，读取结果按缺失资源处理。
+                None => katze_system2::resource::Category::default().resolve(name),
+            }
+        } else {
+            self.config.resolve(category, name)
+        };
         if std::env::var_os("KATZE_PROBE_TRACE").is_some() {
             eprintln!(
                 "解析 类别={:?} 名称={:?} -> {:?}",
@@ -213,13 +234,6 @@ impl ResourceServices for Router {
                 value
                     .as_ref()
                     .map(|v| String::from_utf8_lossy(v).into_owned())
-            );
-        }
-        if value.is_err() && std::env::var_os("KATZE_PROBE_TRACE").is_some() {
-            eprintln!(
-                "解析失败 类别={:?} 名称={:?}",
-                String::from_utf8_lossy(category),
-                String::from_utf8_lossy(name)
             );
         }
         value
@@ -231,6 +245,22 @@ impl ResourceServices for Router {
 
     fn read(&mut self, name: &[u8], _: ResourceMode) -> Result<Option<Vec<u8>>> {
         let name = String::from_utf8_lossy(name).into_owned();
+        if std::env::var_os("KATZE_PROBE_READS").is_some() {
+            let result = if let Some((prefix, inner)) = name.split_once('/') {
+                if let Some(archive) = self.archives.get_mut(prefix) {
+                    archive.read(inner)
+                } else {
+                    Ok(std::fs::read(format!("{}/{}", self.root, name)).ok())
+                }
+            } else {
+                Ok(std::fs::read(format!("{}/{}", self.root, name)).ok())
+            };
+            eprintln!(
+                "读取 {name} -> {:?}",
+                result.as_ref().map(|value| value.as_ref().map(Vec::len))
+            );
+            return result;
+        }
         if let Some((prefix, inner)) = name.split_once('/') {
             if let Some(archive) = self.archives.get_mut(prefix) {
                 return archive.read(inner);
@@ -246,25 +276,74 @@ struct Programs {
 
 impl ProgramLoader for Programs {
     fn load(&mut self, name: &[u8]) -> Result<Option<Program>> {
-        let key = String::from_utf8_lossy(name).to_ascii_lowercase();
+        // 装载命令收到补全后的归档名；先按原名再按末段查预载脚本。
+        let full = String::from_utf8_lossy(name).to_ascii_lowercase();
+        if let Some(program) = self.programs.get(&full) {
+            return Ok(Some(program.clone()));
+        }
+        let key = full.rsplit(['/', '\\']).next().unwrap_or(&full).to_string();
         Ok(self.programs.get(&key).cloned())
     }
 }
 
-struct NullDevice;
+/// 按轮次产生点击的设备；`KATZE_PROBE_CLICKS` 为逗号分隔的 `轮次@x:y` 项。
+struct ScriptedDevice {
+    polls: u32,
+    clicks: Vec<(u32, [i32; 2])>,
+}
 
-impl InputDevice for NullDevice {
+impl ScriptedDevice {
+    fn new() -> Self {
+        let clicks = std::env::var("KATZE_PROBE_CLICKS").map_or_else(
+            |_| Vec::new(),
+            |value| {
+                value
+                    .split(',')
+                    .filter_map(|item| {
+                        let (round, position) = item
+                            .split_once('@')
+                            .map_or((item, "640:360"), |(round, at)| (round, at));
+                        let (x, y) = position.split_once(':')?;
+                        Some((
+                            round.trim().parse().ok()?,
+                            [x.trim().parse().ok()?, y.trim().parse().ok()?],
+                        ))
+                    })
+                    .collect()
+            },
+        );
+        Self { polls: 0, clicks }
+    }
+}
+
+impl InputDevice for ScriptedDevice {
     fn poll(&mut self) -> Result<()> {
+        self.polls = self.polls.wrapping_add(1);
         Ok(())
     }
     fn pointer(&mut self) -> Result<PointerSample> {
+        // 按下持续两轮，位置再保持两轮，使释放入轮也落在同一区域内。
+        let click = self
+            .clicks
+            .iter()
+            .find(|(round, _)| self.polls >= *round && self.polls < round + 4);
         Ok(PointerSample {
-            position: [0, 0],
-            active: 0,
+            position: click.map_or([640, 360], |(_, position)| *position),
+            active: u32::from(click.is_some_and(|(round, _)| self.polls < round + 2)),
         })
     }
-    fn key(&mut self, _: u32, _: u32, _: bool) -> Result<KeySample> {
-        Ok(KeySample { mask: 0, repeat: 0 })
+    fn key(&mut self, key: u32, group: u32, _: bool) -> Result<KeySample> {
+        // 鼠标左键以键零组零掩码位 2 报告。
+        let pressed = key == 0
+            && group == 0
+            && self
+                .clicks
+                .iter()
+                .any(|(round, _)| self.polls >= *round && self.polls < round + 2);
+        Ok(KeySample {
+            mask: if pressed { 2 } else { 0 },
+            repeat: 0,
+        })
     }
     fn take_wheel(&mut self) -> Result<u32> {
         Ok(0)
@@ -342,6 +421,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let mut router = Router {
         root: root.clone(),
         config: config.clone(),
+        sound_config: None,
         archives: BTreeMap::new(),
     };
     for entry in config.entries.iter() {
@@ -389,6 +469,51 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    if let Some(spec) = std::env::var_os("KATZE_PROBE_FIND") {
+        let spec = spec.to_string_lossy().into_owned();
+        let (prefix, needle) = spec.split_once('|').unwrap_or(("", spec.as_str()));
+        let mut needles = vec![needle.as_bytes().to_vec()];
+        needles.push(
+            needle
+                .encode_utf16()
+                .flat_map(u16::to_le_bytes)
+                .collect::<Vec<u8>>(),
+        );
+        let keys: Vec<String> = router.archives.keys().cloned().collect();
+        for key in keys {
+            if !prefix.is_empty() && key != prefix {
+                continue;
+            }
+            let archive = router.archives.get_mut(&key).unwrap();
+            let names: Vec<String> = archive
+                .entries
+                .iter()
+                .map(|entry| entry.name.clone())
+                .collect();
+            for name in names {
+                let Some(data) = archive.read(&name)? else {
+                    continue;
+                };
+                for needle in &needles {
+                    let mut from = 0;
+                    while let Some(position) = data[from..]
+                        .windows(needle.len())
+                        .position(|window| window == needle)
+                    {
+                        let at = from + position;
+                        let start = at.saturating_sub(80);
+                        let end = (at + needle.len() + 160).min(data.len());
+                        println!(
+                            "{key}/{name} @{at}: {:?}",
+                            String::from_utf8_lossy(&data[start..end])
+                        );
+                        from = at + needle.len();
+                    }
+                }
+            }
+        }
+    }
+
     let start = startup
         .split("<start>")
         .nth(1)
@@ -416,7 +541,65 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         }
     }
     println!("脚本 {}", programs.len());
+    if let Some(spec) = std::env::var_os("KATZE_PROBE_FES") {
+        let spec = spec.to_string_lossy().into_owned();
+        let data = router.read(spec.as_bytes(), ResourceMode::LooseFirst)?;
+        if let Some(data) = data {
+            let program = katze_system2::fes::Program::parse(&data)?;
+            for declaration in &program.declarations {
+                println!("-- {} --", String::from_utf8_lossy(&declaration.header));
+                for line in &declaration.lines {
+                    println!("{}: {}", line.offset, String::from_utf8_lossy(&line.bytes));
+                }
+            }
+            let interpreter = katze_system2::fes::Interpreter::new(program)?;
+            for (name, lines) in interpreter.debug_all_blocks() {
+                println!("== {name}");
+                for (offset, text) in lines {
+                    println!("{offset}: {text}");
+                }
+            }
+        } else {
+            println!("FES {spec} 未找到");
+        }
+    }
+    if let Some(spec) = std::env::var_os("KATZE_PROBE_INS") {
+        let spec = spec.to_string_lossy().into_owned();
+        let (name, range) = spec.split_once('@').unwrap_or((spec.as_str(), "0"));
+        let (from, to) = range
+            .split_once('-')
+            .map_or((range, range), |(from, to)| (from, to));
+        let (from, to): (usize, usize) =
+            (from.parse().unwrap_or(0), to.parse().unwrap_or(usize::MAX));
+        if let Some(program) = programs.get(&name.to_ascii_lowercase()) {
+            for instruction in program
+                .instructions()
+                .iter()
+                .filter(|instruction| instruction.offset >= from && instruction.offset <= to)
+            {
+                println!(
+                    "    {} {:02x} {:?}",
+                    instruction.offset,
+                    instruction.opcode,
+                    instruction
+                        .operands
+                        .iter()
+                        .map(|operand| (operand.flags, operand.payload))
+                        .collect::<Vec<_>>()
+                );
+            }
+        }
+    }
     if std::env::var_os("KATZE_PROBE_SCAN").is_some() {
+        let wanted: Vec<u32> = std::env::var("KATZE_PROBE_SCAN").map_or_else(
+            |_| vec![400, 935, 936, 9],
+            |value| {
+                value
+                    .split(',')
+                    .filter_map(|item| item.trim().parse().ok())
+                    .collect()
+            },
+        );
         for (name, program) in &programs {
             if !name.ends_with(".kcs") {
                 continue;
@@ -427,7 +610,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                     && instruction
                         .operands
                         .first()
-                        .is_some_and(|operand| matches!(operand.payload, 400 | 935 | 936 | 9))
+                        .is_some_and(|operand| wanted.contains(&operand.payload))
                 {
                     let first = instruction.operands.first().unwrap().payload;
                     let start = position.saturating_sub(6);
@@ -463,6 +646,13 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         })
         .map(|program| program.instructions().to_vec())
         .unwrap_or_default();
+    println!(
+        "启动指令 {} 末偏移 {:?}",
+        start_instructions.len(),
+        start_instructions
+            .last()
+            .map(|instruction| instruction.offset)
+    );
 
     let mut runtime = Runtime::new(
         0,
@@ -473,19 +663,33 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             enabled: true,
             fallback: FesFactory {
                 fallback: GraphicsFactory {
-                    fallback: InputFactory {
-                        fallback: KcsFactory {
-                            programs: Programs { programs },
-                            external: SharedMemory::new(vec![0; 16 << 20])?,
+                    fallback: katze_system2::message::MessageFactory {
+                        fallback: InputFactory {
+                            fallback: KcsFactory {
+                                programs: Programs { programs },
+                                external: SharedMemory::new(vec![0; 16 << 20])?,
+                            },
                         },
                     },
                 },
             },
         },
     );
+    if let Ok(bytes) = std::fs::read(format!("{root}/config/soundconf.xml")) {
+        router.sound_config = Some(katze_system2::audio::SoundConfig::from_xml(&bytes)?);
+        runtime.host_mut().sound_config = router.sound_config.clone();
+        runtime.host_mut().sound_groups =
+            Some(katze_system2::audio::SoundGroups::from_xml(&bytes)?);
+        runtime.host_mut().sound_config_enabled = 1;
+    }
+    runtime.host_mut().languages =
+        katze_system2::language::LanguageState::from_xml(startup.as_bytes())?;
     runtime.set_resources(router);
-    runtime.set_input_device(NullDevice)?;
+    runtime.set_input_device(ScriptedDevice::new())?;
     runtime.set_save_services(Saves { root: root.clone() });
+    runtime.host_mut().message_defaults = Some(Default::default());
+    #[cfg(target_os = "macos")]
+    runtime.set_fonts(katze_system2::message::macos::MacFonts::new(&root));
     runtime.host_mut().system_settings = Some(Default::default());
     runtime.host_mut().surface_size = [1280, 720];
     *runtime.drawing_mut() = DrawingContext {
@@ -499,6 +703,47 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     println!("输入 {input} 声音 {sound}");
     let task = runtime.create(0, kind::ORDINARY, b"main", b"")?;
     println!("主任务 {task}");
+    let dump = |vm: &katze_system2::kcs::Interpreter| {
+        if let Ok(bytes) = vm.read(2200, 300) {
+            for (offset, chunk) in bytes.chunks(64).enumerate() {
+                println!(
+                    "    {:4}: {:?}",
+                    2200 + offset * 64,
+                    String::from_utf8_lossy(chunk)
+                );
+            }
+        }
+        for instruction in start_instructions.iter().filter(|instruction| {
+            instruction.offset + 8 >= vm.pc.saturating_sub(400) && instruction.offset <= vm.pc + 140
+        }) {
+            println!(
+                "    {} {:02x} {:?}",
+                instruction.offset,
+                instruction.opcode,
+                instruction
+                    .operands
+                    .iter()
+                    .map(|operand| (operand.flags, operand.payload))
+                    .collect::<Vec<_>>()
+            );
+        }
+        let position = start_instructions.partition_point(|item| item.offset < vm.pc);
+        println!("    pc 索引 {position}");
+        for instruction in &start_instructions
+            [position.saturating_sub(2)..(position + 3).min(start_instructions.len())]
+        {
+            println!(
+                "   *{} {:02x} {:?}",
+                instruction.offset,
+                instruction.opcode,
+                instruction
+                    .operands
+                    .iter()
+                    .map(|operand| (operand.flags, operand.payload))
+                    .collect::<Vec<_>>()
+            );
+        }
+    };
     let mut now = 0;
     for frame in 0..frames {
         now += 16;
@@ -508,40 +753,81 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 if let Some(vm) = runtime.object(id).and_then(|object| object.interpreter()) {
                     println!("  任务 {id} pc {}", vm.pc);
                     if id == task && std::env::var_os("KATZE_PROBE_DUMP").is_some() {
-                        if let Ok(bytes) = vm.read(2200, 300) {
-                            for (offset, chunk) in bytes.chunks(64).enumerate() {
-                                println!(
-                                    "    {:4}: {:?}",
-                                    2200 + offset * 64,
-                                    String::from_utf8_lossy(chunk)
-                                );
-                            }
-                        }
-                        for instruction in start_instructions.iter().filter(|instruction| {
-                            instruction.offset + 8 >= vm.pc.saturating_sub(400)
-                                && instruction.offset <= vm.pc + 140
-                        }) {
-                            println!(
-                                "    {} {:02x} {:?}",
-                                instruction.offset,
-                                instruction.opcode,
-                                instruction
-                                    .operands
-                                    .iter()
-                                    .map(|operand| (operand.flags, operand.payload))
-                                    .collect::<Vec<_>>()
-                            );
-                        }
+                        dump(vm);
                     }
                 }
             }
             break;
+        }
+        let dump_frame = std::env::var("KATZE_PROBE_DUMP")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(200);
+        if frame == dump_frame && std::env::var_os("KATZE_PROBE_DUMP").is_some() {
+            for id in 0..64 {
+                if let Some(node) = runtime.tree().node(id) {
+                    let pc = runtime
+                        .object(id)
+                        .and_then(|object| object.interpreter())
+                        .map(|vm| vm.pc);
+                    println!(
+                        "  节点 {id} 类型 {} 父 {:?} pc {:?}",
+                        node.kind, node.parent, pc
+                    );
+                }
+            }
+            if let Some(vm) = runtime.object(task).and_then(|object| object.interpreter()) {
+                println!("第 {frame} 帧任务 {task} pc {}", vm.pc);
+                dump(vm);
+            }
+            if let Some(state) = runtime
+                .object(input)
+                .and_then(|object| object.input_state())
+            {
+                for region in state.regions().records().iter().take(24) {
+                    println!(
+                        "  区域 {} 范围 {:?} 启用 {} 选择 {}",
+                        region.id(),
+                        region.bounds(),
+                        region.enabled(),
+                        region.selection_enabled()
+                    );
+                }
+            }
         }
         if frame % 120 == 0 {
             if let Some(vm) = runtime.object(task).and_then(|object| object.interpreter()) {
                 println!("第 {frame} 帧 pc {} 栈 {}", vm.pc, vm.stack_bytes().len());
             }
         }
+    }
+    if let Some(path) = std::env::var_os("KATZE_PROBE_SHOT") {
+        let target = runtime.drawing().target.as_ref().ok_or("缺少渲染目标")?;
+        let [width, height] = target.size();
+        let mut pixels = Vec::with_capacity((width * height * 3) as usize);
+        let mut colors = BTreeMap::new();
+        for y in 0..height {
+            for x in 0..width {
+                let value = target.pixel(x, y).unwrap_or(0);
+                *colors.entry(value).or_insert(0usize) += 1;
+                pixels.extend([
+                    ((value >> 16) & 0xff) as u8,
+                    ((value >> 8) & 0xff) as u8,
+                    (value & 0xff) as u8,
+                ]);
+            }
+        }
+        let mut file = std::fs::File::create(&path)?;
+        use std::io::Write;
+        write!(file, "P6\n{width} {height}\n255\n")?;
+        file.write_all(&pixels)?;
+        let mut top: Vec<_> = colors.into_iter().collect();
+        top.sort_by_key(|entry| std::cmp::Reverse(entry.1));
+        println!(
+            "画面 {width}x{height} 颜色 {} 主色 {:?}",
+            top.len(),
+            &top[..top.len().min(5)]
+        );
     }
     Ok(())
 }
