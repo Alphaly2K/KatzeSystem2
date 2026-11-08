@@ -120,3 +120,38 @@ fn prefix_query_keeps_cp932_fallback_empty_values_and_ordered_overlapping_output
     assert_eq!(vm.read_string(0).unwrap(), b"keep");
     assert!(host.call(1036, &[0; 4], &mut vm).is_err());
 }
+
+#[test]
+fn startup_language_block_restores_ordered_prefixes_and_default_selection() {
+    let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<document>
+  <language>
+    <default>1</default>
+    <L00><code>1028</code><prefix>cn</prefix><lang>甲</lang><accel>C</accel></L00>
+    <L01><code>1033</code><prefix>en</prefix></L01>
+    <L02><prefix></prefix></L02>
+    <L04><prefix>late</prefix></L04>
+  </language>
+</document>"#;
+    let state = LanguageState::from_xml(xml.as_bytes()).unwrap();
+    assert_eq!(state.prefixes, [b"cn".as_slice(), b"en", b""]);
+    assert_eq!(state.default_index, 1);
+    assert_eq!(state.primary_index, 1);
+    assert_eq!(state.message_index, 1);
+    assert_eq!(state.expand(b"a/%LANG%/b\0tail", 0).unwrap(), b"a/en/b");
+
+    // 无 language 段保留空表与零编号。
+    let state = LanguageState::from_xml(
+        b"<?xml version=\"1.0\" encoding=\"UTF-8\"?><document><other></other></document>",
+    )
+    .unwrap();
+    assert!(state.prefixes.is_empty());
+    assert_eq!(state.default_index, 0);
+    assert_eq!(state.expand(b"%LANG%", 0).unwrap(), b"%LANG%");
+
+    assert!(LanguageState::from_xml(b"not xml").is_err());
+    assert!(LanguageState::from_xml(
+        b"<?xml version=\"1.0\" encoding=\"UTF-8\"?><document><language><L00></L00></language></document>"
+    )
+    .is_ok());
+}

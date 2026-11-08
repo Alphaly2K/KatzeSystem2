@@ -13,7 +13,7 @@
 |`backlog`|日志配置、文本追加／分行、CST 历史导入、姓名查询、段数限制、清空及存档序列化／恢复、普通日志 native|回看窗口呈现|
 |`audio`|声音任务、循环点、Vorbis 解码、通道装载／属性、前置静音及整段／流式缓冲区播放|淡变、混音、设备及其他声音命令|
 |`settings`|四块全局配置、基线初值、XML 字段覆盖、音量换算及普通 359／360 的 VM 读写|配置自动装载及媒体服务应用|
-|`language`|主语言／消息语言前缀、默认回退、普通 1036 查询／1062 字符串替换与 FES 图像文件刷新|语言配置自动装载、平台语言识别及切换命令|
+|`language`|主语言／消息语言前缀、默认回退、普通 1036 查询／1062 字符串替换与 FES 图像文件刷新|平台语言识别及切换命令|
 |`save`|CSS 加载、编号记录、容量／标签、嵌套快照、普通容器 native、240／250 共享值保存／恢复、任务目录读取及修改时间服务、FES 最新槽号查询|文件写入、其他数值分组与对象恢复及平台目录发现|
 |`fes`|容器、混合编码字节保留、注释、重复块、条件、调用、数值赋值、帧等待／重启、宏、对象创建与初始化请求、CIMAGE／IMAGE／CPLANE／PLANE 状态应用、文字布局配置核心、事件分派、声明、子命令绑定／换算／调用事件|其他类型的对象属性、对象操作、其他事件入口、运动资源装载及子任务协议|
 |`anm`|容器、全部 18 种指令、随机源、时间调度、重启、图像动画装载及属性组合|资源名称请求、图像选帧及主循环衔接|
@@ -75,7 +75,7 @@ FES SOUND 文件请求通过 `Objects::set_sound_task` 的绑定发送 180／182
 
 `settings::SystemSettings` 保存 sound／message／effects／window 四块基线配置，以及两组各八项的局部／全局变量范围、`auto_select`、`scene_animation_enabled`、`fullscreen` 和 `fullscreen_mw_pos`。`Default` 提供构造初值，`apply_xml(bytes)` 覆盖已有用户设置字段，`apply_startup_xml(bytes)` 覆盖 `GAME/flag` 中的范围；两者均覆盖 `GAME/autoselect` 并保留缺失值，应按启动、游戏默认、用户设置的顺序应用。`refresh_sound_volumes()` 显式重算四路有效音量。准备后设置 `CoreHost::system_settings` 或 `Runtime::host_mut().system_settings`。普通 359 依序复制四块到 VM，360 从 VM 写回前三块；两者不压值。359／360 的地址零有效，起点在区外的地址跳过，合法起点的容量不足继续诊断。790 按组和项索引查询变量范围，依序写入起始编号及数量，返回是否找到。999 忽略参数并返回 `auto_select` 的原始 DWORD。1050 同样忽略参数，返回 `scene_animation_enabled`，默认一，游戏默认与用户 XML 通过 `GAME/enable_scene_anm` 覆盖。741 在 `fullscreen` 非零时返回 `fullscreen_mw_pos`，为零时返回零；启动读取 `SCREEN/mw_pos`，用户设置读取 `WINDOW/fullscreen` 和 `FULL_SCREEN/mw_pos`。自动装载和媒体应用尚待接入，具体大小、XML 范围与部分失败契约见[全局设置](settings.md)。
 
-`language::LanguageState` 保存 CP932 字节前缀表、默认编号和两套选择，通过 `CoreHost::languages` 或 `Runtime::host_mut().languages` 提供。`prefix(mode)` 按 mode 零选择主语言、一选择消息语言，越界时回退默认编号；无有效项或 mode 无效时返回 None，有效空前缀返回空切片。`expand(input, mode)` 按 mode 零替换 `%LANG%`、一替换 `%LANG_M%`；其他值保留输入。选择越界时使用默认编号，默认也越界时保留标记。替换区分大小写、覆盖全部匹配，输入及前缀在首零结束。前缀最多 255 字节，有效替换的输出最多 2047 字节，超限返回诊断。普通 1036 接受两个输出 VM 地址，先检查两处起点，再依次写主语言和消息语言前缀，均以单零结束；没有有效项时写空串，重叠输出按此顺序覆盖。输出保持 CP932，不受 unicode_text 开关影响；前缀最多 4095 字节，空间不足返回诊断。该查询以状态二保留返回槽。普通 1062 接受 mode 和 VM 字符串地址，原地写回并保留返回槽；无效 mode 不访问地址。宿主负责把配置中的 Unicode 前缀转为 CP932，自动装载及平台语言选择尚未接入。
+`language::LanguageState` 保存 CP932 字节前缀表、默认编号和两套选择，通过 `CoreHost::languages` 或 `Runtime::host_mut().languages` 提供。`prefix(mode)` 按 mode 零选择主语言、一选择消息语言，越界时回退默认编号；无有效项或 mode 无效时返回 None，有效空前缀返回空切片。`expand(input, mode)` 按 mode 零替换 `%LANG%`、一替换 `%LANG_M%`；其他值保留输入。选择越界时使用默认编号，默认也越界时保留标记。替换区分大小写、覆盖全部匹配，输入及前缀在首零结束。前缀最多 255 字节，有效替换的输出最多 2047 字节，超限返回诊断。普通 1036 接受两个输出 VM 地址，先检查两处起点，再依次写主语言和消息语言前缀，均以单零结束；没有有效项时写空串，重叠输出按此顺序覆盖。输出保持 CP932，不受 unicode_text 开关影响；前缀最多 4095 字节，空间不足返回诊断。该查询以状态二保留返回槽。普通 1062 接受 mode 和 VM 字符串地址，原地写回并保留返回槽；无效 mode 不访问地址。`LanguageState::from_xml` 读取启动 XML 的 `language` 段：`default` 为初始默认编号，`L%02d` 的子节点 `<prefix>` 按序组成前缀表，首个缺失前缀的块结束扫描，主语言和消息语言的初始选择均取默认编号；`<code>`、`<lang>`、`<accel>`、`<enable_sub>` 与 `<OPTTABLE>` 不进入前缀选择。前缀为原始字节；需要 CP932 时宿主负责转换，平台语言识别及运行时切换尚未接入。
 
 `expand_image(input)` 先替换主语言，再替换消息语言。运行时的 FES 初始化使用此规则，语言状态改变后在下一次媒体更新前刷新该场景的 IMAGE／BUTTON 来源；只有转换后文件名变化才请求重建。类别名称补全、预加载名称及其他资源读取不自动替换语言标记。
 

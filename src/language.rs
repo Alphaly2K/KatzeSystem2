@@ -10,6 +10,31 @@ pub struct LanguageState {
 }
 
 impl LanguageState {
+    /// 读取启动 XML 的 `language` 段。
+    ///
+    /// 还原默认编号和 `L%02d` 声明的有序前缀表，首个缺失 `<prefix>` 的
+    /// 块结束扫描；主语言和消息语言的初始选择均取默认编号。`<code>`、
+    /// `<lang>`、`<accel>`、`<enable_sub>` 与 `<OPTTABLE>` 不进入前缀
+    /// 选择，平台语言识别和运行时切换继续由调用方处理。
+    pub fn from_xml(input: &[u8]) -> Result<Self> {
+        let xml = crate::resource::XmlDocument::parse(input)?;
+        let default_index = xml.integer(b"language/default", 0)?;
+        let mut prefixes = Vec::new();
+        for index in 0..crate::read::MAX_ITEMS {
+            let path = format!("language/L{index:02}/prefix");
+            let Some(prefix) = xml.text(path.as_bytes())? else {
+                break;
+            };
+            prefixes.push(prefix.to_vec());
+        }
+        Ok(Self {
+            prefixes,
+            default_index,
+            primary_index: default_index,
+            message_index: default_index,
+        })
+    }
+
     /// mode 零选择主语言，一选择消息语言；选择越界时回退到默认编号。
     pub fn prefix(&self, mode: u32) -> Option<&[u8]> {
         let index = match mode {
