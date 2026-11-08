@@ -37,6 +37,17 @@ pub struct MenuItemRequest {
 
 /// 普通任务表的持久宿主状态；数值区由 `CoreHost::state` 单独提供，
 /// 以便同一份状态在多次 native 调用之间保留集合句柄、随机序列和请求队列。
+/// 普通 869～875 的文本记录对象；0x5C 字节内部布局与后续命令语义待原入口核实。
+#[derive(Default)]
+pub(super) struct TextRecord {
+    /// 869 装入的四个格式展开字符串。
+    pub strings: [Vec<u8>; 4],
+    /// 873 装入的原始记录数据。
+    pub payload: Vec<u8>,
+    /// 870／872／874／875 每次调用的编号及原始参数字节。
+    pub calls: Vec<(u32, Vec<u8>)>,
+}
+
 #[derive(Default)]
 pub struct HostState {
     pub configured_shared_slots: u32,
@@ -85,6 +96,9 @@ pub struct HostState {
     pub(super) sequence_maps: BTreeMap<u32, super::sequences::SequenceMap>,
     pub(super) record_stacks: BTreeMap<u32, super::record_stack::RecordStack>,
     pub(super) containers: BTreeMap<u32, crate::save::DataContainer>,
+    /// 普通 869 创建的四字符串记录；原入口装入 0x5C 字节对象。
+    /// 873 装入原始数据，870／872／874／875 的调用仅记录参数，副作用待原入口核实。
+    pub(super) text_records: BTreeMap<u32, TextRecord>,
     pub(super) raw_buffers: BTreeMap<u32, Vec<u8>>,
     handles: HandleAllocator,
 }
@@ -324,6 +338,47 @@ pub(crate) fn call_native(
             .as_mut()
             .ok_or_else(|| Error::new(vm.pc, "宿主未配置系统打开服务"))?
             .open(host.task_id, &text[0], &text[1], &text[2])?;
+        return Ok(NativeReturn::Continue);
+    }
+    if index == 869 {
+        if arguments.len() != 16 {
+            return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+        }
+        let mut record = TextRecord::default();
+        for (position, bytes) in arguments.chunks_exact(4).enumerate() {
+            record.strings[position] =
+                strings::format(vm, u32::from_le_bytes(bytes.try_into().unwrap()), 0)?;
+        }
+        let handle = host.handle_allocator().allocate()?;
+        host.text_records.insert(handle, record);
+        return Ok(NativeReturn::Value(handle));
+    }
+    if index == 873 {
+        if arguments.len() != 8 {
+            return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+        }
+        let handle = read::u32_at(arguments, 0)?;
+        let address = read::u32_at(arguments, 4)?;
+        let data = host.raw_buffer_rest(address)?.to_vec();
+        host.text_records
+            .get_mut(&handle)
+            .ok_or_else(|| Error::new(vm.pc, "KCS 文本记录句柄无效"))?
+            .payload = data;
+        return Ok(NativeReturn::Continue);
+    }
+    if matches!(index, 870 | 872 | 874 | 875) {
+        let count = match index {
+            870 => 1,
+            872 | 874 => 2,
+            _ => 3,
+        };
+        if arguments.len() != count * 4 {
+            return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+        }
+        let handle = read::u32_at(arguments, 0)?;
+        if let Some(record) = host.text_records.get_mut(&handle) {
+            record.calls.push((index, arguments.to_vec()));
+        }
         return Ok(NativeReturn::Continue);
     }
     if matches!(index, 238 | 242 | 244 | 246..=248 | 252 | 254 | 290 | 389 | 469 | 833..=836) {
