@@ -905,6 +905,10 @@ impl TaskObject for FesObject {
         self.scene.as_ref()
     }
 
+    fn paused_fes(&self) -> Option<u32> {
+        Some(self.paused)
+    }
+
     fn interpreter_mut(&mut self) -> Option<&mut Interpreter> {
         None
     }

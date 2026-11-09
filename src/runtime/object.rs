@@ -21,6 +21,11 @@ pub trait TaskObject {
         None
     }
 
+    /// 探针读取的 FES 暂停标记。
+    fn paused_fes(&self) -> Option<u32> {
+        None
+    }
+
     /// 对象保存的外部区描述；普通装载转发使用此视图。
     fn external_storage(&self) -> Option<crate::memory::SharedMemory> {
         self.interpreter().map(Interpreter::external_storage)

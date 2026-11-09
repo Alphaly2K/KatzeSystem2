@@ -444,7 +444,20 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                             block,
                             pc
                         );
+                        println!(
+                            "    FES {id} 期限 {:?} 暂停 {}",
+                            scene.deadline(),
+                            object.map(|o| o.paused_fes()).flatten().unwrap_or(u32::MAX)
+                        );
                     }
+                }
+            }
+            for id in 0..160 {
+                if let Some(page) = runtime
+                    .object(id)
+                    .and_then(|o| o.message_page())
+                {
+                    println!("    消息页 {id}: 文本 {:?} 字符数 {}", page.source(), page.source().chars().count());
                 }
             }
             for handle in runtime.cst_handles() {
