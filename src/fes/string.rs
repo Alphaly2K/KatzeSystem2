@@ -61,6 +61,13 @@ impl StringState {
         self.configuration_dirty = false;
     }
 
+    pub(crate) fn set_view_size(&mut self, size: [i32; 2]) {
+        self.base.base.size = size;
+        self.set(4, size[0] as u32);
+        self.set(8, size[1] as u32);
+        self.configuration_dirty = true;
+    }
+
     pub fn shift(&self) -> i32 {
         self.shift
     }

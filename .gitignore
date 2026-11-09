@@ -27,3 +27,5 @@ rustc-ice-*.txt
 
 __pycache__/
 *.pyc
+
+.workbuddy/

@@ -458,16 +458,31 @@ pub fn build_runtime(
     runtime.set_fonts(katze_system2::message::macos::MacFonts::new(&root));
     runtime.set_save_services(Saves { root });
     runtime.host_mut().message_defaults = Some(Default::default());
-    runtime.host_mut().system_settings = Some(Default::default());
+    runtime.host_mut().message_time_scale = Some(10);
+    let mut settings = katze_system2::settings::SystemSettings::default();
+    settings.apply_startup_xml(startup.as_bytes())?;
+    let target = if settings.texture_grid.contains(&0) {
+        RenderTarget::new(surface)?
+    } else {
+        let count = u64::from(settings.texture_grid[0]) * u64::from(settings.texture_grid[1]);
+        if count > 1_000_000 {
+            return Err("画布面块数量超过上限".into());
+        }
+        let mut target = RenderTarget::from_tiles(
+            settings.texture_size,
+            settings.texture_grid,
+            vec![None; count as usize],
+        )?;
+        target.prepare_tiles(&settings.texture_areas, settings.texture_16bit_row)?;
+        target
+    };
+    runtime.host_mut().system_settings = Some(settings);
     runtime.host_mut().surface_size = surface;
-    // 共享画布是独立于屏幕的 VRAM 空间：FES 对象按 VRAM 坐标把窗口与文字写入
-    // 画布，再由画布取样的平面显示到屏幕。当前样本使用的最大坐标约为
-    // x=2318、y=6100，故分配 2560×6144。
     *runtime.drawing_mut() = DrawingContext {
         mode: 0,
         enabled: true,
         active: true,
-        target: Some(RenderTarget::new([2560, 6144])?),
+        target: Some(target),
     };
     runtime.set_frame_view(
         Default::default(),

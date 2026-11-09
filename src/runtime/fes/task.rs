@@ -35,6 +35,8 @@ pub trait Services {
     ) -> Result<bool>;
     /// 刷新当前媒体属性后隐藏或恢复显示，唤醒时强制提交共享列表。
     fn set_media_sleep(&mut self, scene: &mut Scene, sleeping: bool) -> Result<()>;
+    /// 释放场景登记到共享列表的来源及其图像引用；列表可能已随子树释放。
+    fn release_media(&mut self, scene: &mut Scene) -> Result<()>;
     /// 推进输入事件；None 表示预算耗尽，完成值表示对象自身处理器存在。
     fn dispatch_event(
         &mut self,
@@ -101,6 +103,11 @@ impl<F: ObjectFactory> Services for ObjectHost<'_, F> {
     fn set_media_sleep(&mut self, scene: &mut Scene, sleeping: bool) -> Result<()> {
         let owner = self.host.task_id;
         self.store().set_fes_media_sleep(owner, scene, sleeping)
+    }
+
+    fn release_media(&mut self, scene: &mut Scene) -> Result<()> {
+        let owner = self.host.task_id;
+        self.store().release_fes_media(owner, &mut scene.objects)
     }
 
     fn dispatch_block(
@@ -241,6 +248,8 @@ pub struct FesObject {
     loaded: bool,
     started: bool,
     scene: Option<Scene>,
+    // 脚本标识符使用 ASCII，宿主命令还接受任意原始字节键。
+    raw_named_values: std::collections::BTreeMap<Vec<u8>, u32>,
     external: crate::memory::SharedMemory,
     pending: Option<Command>,
     name: Vec<u8>,
@@ -309,6 +318,7 @@ impl FesObject {
             loaded: false,
             started: false,
             scene: None,
+            raw_named_values: std::collections::BTreeMap::new(),
             external,
             pending: None,
             name: Vec::new(),
@@ -1208,31 +1218,38 @@ impl TaskObject for FesObject {
                             .ok_or_else(|| Error::new(0, "FES 名称输入缓冲区缺失"))?,
                         usize::MAX,
                     )?;
-                    let key = crate::text::ascii(key)?.to_owned();
                     let scene = self
                         .scene
                         .as_mut()
                         .ok_or_else(|| Error::new(0, "FES 名称访问需要已装载脚本"))?;
                     if command.code == 358 {
-                        scene
-                            .interpreter
-                            .named
-                            .entry(key)
-                            .or_default()
-                            .insert(0, b as i32);
+                        if key.is_ascii() {
+                            scene
+                                .interpreter
+                                .named
+                                .entry(crate::text::ascii(key)?.to_owned())
+                                .or_default()
+                                .insert(0, b as i32);
+                        } else {
+                            self.raw_named_values.insert(key.to_vec(), b);
+                        }
                     } else {
                         let target = buffers
                             .data1
                             .as_deref_mut()
                             .filter(|bytes| bytes.len() >= 4)
                             .ok_or_else(|| Error::new(0, "FES 名称查询输出缓冲区不足"))?;
-                        let value = scene
-                            .interpreter
-                            .named
-                            .get(&key)
-                            .and_then(|banks| banks.get(&0))
-                            .copied()
-                            .unwrap_or(0) as u32;
+                        let value = if key.is_ascii() {
+                            scene
+                                .interpreter
+                                .named
+                                .get(crate::text::ascii(key)?)
+                                .and_then(|banks| banks.get(&0))
+                                .copied()
+                                .unwrap_or(0) as u32
+                        } else {
+                            self.raw_named_values.get(key).copied().unwrap_or(0)
+                        };
                         target[..4].copy_from_slice(&value.to_le_bytes());
                     }
                 }
@@ -1303,14 +1320,13 @@ impl TaskObject for FesObject {
                 .objects
                 .values()
                 .any(|object| {
-                    object.reference_image.is_some()
+                    !object.images.is_empty()
+                        || object.reference_image.is_some()
+                        || object.raw_image != 0
                         || matches!(&object.state, super::ObjectState::DifImage(state) if state.resource.is_some())
                 })
             {
-                let images = host
-                    .images_mut()
-                    .ok_or_else(|| Error::new(0, "FES 引用释放需要图像服务"))?;
-                scene.objects.release_image_references(images)?;
+                services(host)?.release_media(scene)?;
             }
         }
         Ok(true)

@@ -487,6 +487,14 @@ impl<F: ObjectFactory> Store<'_, F> {
             0
         };
         let cache = objects.preloaded_images.clone();
+        if state.layout.base.base.rebuild {
+            let size = match &state.layout.base.base.size_resource {
+                Some(resource) => self.fes_image_geometry(&cache, resource, true)?,
+                None => state.layout.base.base.size,
+            };
+            objects.string_mut(handle).layout.set_view_size(size);
+        }
+        let state = objects.string(handle);
         let vram = state.layout.base.vram();
         let offset = [vram[0], vram[1]].map(super::plane::integer_position);
         if !state.initial {
@@ -571,17 +579,7 @@ impl<F: ObjectFactory> Store<'_, F> {
             state.lines_dirty = false;
         }
         if objects.string(handle).layout.base.base.rebuild {
-            let resource = objects
-                .string(handle)
-                .layout
-                .base
-                .base
-                .size_resource
-                .clone();
-            let size = match &resource {
-                Some(resource) => self.fes_image_geometry(&cache, resource, true)?,
-                None => objects.string(handle).layout.base.base.size,
-            };
+            let size = objects.string(handle).layout.base.base.size;
             {
                 let base = &mut objects.string_mut(handle).layout.base.base;
                 base.size = size;

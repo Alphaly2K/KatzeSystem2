@@ -434,7 +434,7 @@ fn shared_image_references_switch_in_handlers_and_release_with_the_fes_task() {
 }
 
 #[test]
-fn destroying_a_fes_during_draw_restores_the_surviving_shared_canvas() {
+fn destroying_a_fes_during_draw_restores_submission_and_releases_its_sources() {
     let source = b"#DEFINE\nCIMAGE sprite\nPLANE panel\n#OBJECT SIZE COLOR PRI DISP\nsprite 8,6 0xff123456 0 1\n#OBJECT SIZE DISP VRAM\npanel 8,6 0 0,0\n#START\npanel draw\nwait 1000\n";
     for budget in [1, 4096] {
         let Setup { mut runtime, .. } = setup(budget, source);
@@ -464,8 +464,9 @@ fn destroying_a_fes_during_draw_restores_the_surviving_shared_canvas() {
         runtime.update(101, 1).unwrap();
         assert_eq!(
             runtime.drawing().target.as_ref().unwrap().pixel(0, 0),
-            Some(0xff123456)
+            Some(0)
         );
+        assert_eq!(send(&mut runtime, list, 294, 0, 0), 0);
     }
 }
 
@@ -543,6 +544,44 @@ fn fes_tasks_load_without_starting_then_drive_pixels_and_keep_exit_properties() 
         assert!(runtime.object(list).is_none());
         assert_eq!(runtime.drawables_mut().order().len(), 0);
         assert!(runtime.update(104, 1).unwrap());
+    }
+}
+
+#[test]
+fn fes_release_removes_only_its_entries_from_an_ancestor_image_list() {
+    let source = b"#DEFINE\nCIMAGE sprite\n#OBJECT SIZE COLOR PRI POS DISP\nsprite 2,2 0xff123456 5 1,1 1\n#START\nwait 1000\n";
+    for budget in [1, 4096] {
+        let mut runtime = setup(budget, source).runtime;
+        let list = runtime
+            .create(0, kind::IMAGE_LIST, b"shared list", b"")
+            .unwrap();
+        send(&mut runtime, list, 285, 8, 6);
+        send(&mut runtime, list, 292, 0, 1);
+        let mut scenes = Vec::new();
+        for _ in 0..2 {
+            let fes = runtime.create(0, kind::FES, b"scene", b"").unwrap();
+            send(&mut runtime, fes, 337, 0, 0);
+            send(&mut runtime, fes, 340, 0, list);
+            file(&mut runtime, fes, b"complete.fes").unwrap();
+            send(&mut runtime, fes, 339, 0, 0);
+            scenes.push(fes);
+        }
+        runtime.update(100, 1).unwrap();
+        assert_eq!(send(&mut runtime, list, 294, 0, 0), 2);
+        runtime.destroy(scenes[0]).unwrap();
+        assert_eq!(send(&mut runtime, list, 294, 0, 0), 1);
+        runtime.update(101, 1).unwrap();
+        assert_eq!(
+            runtime.drawing().target.as_ref().unwrap().pixel(1, 1),
+            Some(0xff123456)
+        );
+        runtime.destroy(scenes[1]).unwrap();
+        assert_eq!(send(&mut runtime, list, 294, 0, 0), 0);
+        runtime.update(102, 1).unwrap();
+        assert_eq!(
+            runtime.drawing().target.as_ref().unwrap().pixel(1, 1),
+            Some(0)
+        );
     }
 }
 

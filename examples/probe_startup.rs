@@ -439,11 +439,18 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             }
             break;
         }
-        let dump_frame = std::env::var("KATZE_PROBE_DUMP")
-            .ok()
-            .and_then(|value| value.parse().ok())
-            .unwrap_or(200);
-        if frame == dump_frame && std::env::var_os("KATZE_PROBE_DUMP").is_some() {
+        let dump_frame = std::env::var("KATZE_PROBE_DUMP").ok().is_some_and(|value| {
+            let frames: Vec<u32> = value
+                .split(',')
+                .filter_map(|item| item.trim().parse().ok())
+                .collect();
+            if frames.is_empty() {
+                frame == 200
+            } else {
+                frames.contains(&frame)
+            }
+        });
+        if dump_frame {
             for id in 0..160 {
                 if let Some(node) = runtime.tree().node(id) {
                     let object = runtime.object(id);
@@ -473,9 +480,10 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                             pc
                         );
                         println!(
-                            "    FES {id} 期限 {:?} 暂停 {}",
+                            "    FES {id} 期限 {:?} 暂停 {} 画布偏移 {:?}",
                             scene.deadline(),
-                            object.and_then(|o| o.paused_fes()).unwrap_or(u32::MAX)
+                            object.and_then(|o| o.paused_fes()).unwrap_or(u32::MAX),
+                            scene.objects().canvas_offset()
                         );
                         if let Some(fes_names) = std::env::var_os("KATZE_PROBE_FESNAMED") {
                             let names = &scene.interpreter().named;
@@ -548,9 +556,10 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             for id in 0..160 {
                 if let Some(page) = runtime.object(id).and_then(|o| o.message_page()) {
                     println!(
-                        "    消息页 {id}: 文本 {:?} 字符数 {}",
+                        "    消息页 {id}: 文本 {:?} 字符数 {} 剩余 {:?}",
                         page.source(),
-                        page.source().chars().count()
+                        page.source().chars().count(),
+                        page.remaining(u32::MAX)
                     );
                 }
             }

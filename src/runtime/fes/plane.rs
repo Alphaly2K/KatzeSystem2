@@ -271,7 +271,11 @@ impl<F: ObjectFactory> Store<'_, F> {
             _ => None,
         };
         if let Some(vram) = vram {
-            let offset = objects.canvas_offset;
+            let offset = if matches!(object.state, ObjectState::String(_)) {
+                [0; 2]
+            } else {
+                objects.canvas_offset
+            };
             vectors.push((
                 51,
                 1,
@@ -356,96 +360,120 @@ impl<F: ObjectFactory> Store<'_, F> {
                     self.fes_command(owner, Some(task), 3, [0; 3], None)?;
                 }
             }
-            for image in objects.get(id).unwrap().images.clone() {
-                if objects.image_list.is_some() {
-                    let list = self.check_fes_image_list(owner, objects)?;
-                    let pixels = self.resources.images.pixel_handle(image)?;
-                    let mut slot = [0; 4];
-                    let found = route_with_buffers(
-                        self.reborrow(),
-                        owner,
-                        Command {
-                            target: list,
-                            sender: owner,
-                            code: if pixels == 0 { 308 } else { 307 },
-                            data: [if pixels == 0 { image } else { pixels }, 0, 0],
-                        },
-                        &mut CommandBuffers {
-                            data0: None,
-                            data1: Some(&mut slot),
-                            external: None,
-                        },
-                    )?;
-                    if found != 0 {
-                        self.fes_command(
-                            owner,
-                            Some(list),
-                            287,
-                            [u32::from_le_bytes(slot), 0, 0],
-                            None,
-                        )?;
-                    }
-                }
-                self.resources.images.release(image)?;
-                let object = objects.get_mut(id).unwrap();
-                object.images.retain(|&candidate| candidate != image);
-                if object.image == Some(image) {
-                    object.image = None;
-                }
-                for record in &mut objects.update_order {
-                    if record.image == Some(image) {
-                        record.image = None;
-                        record.prepared = false;
-                    }
-                }
-            }
-            if let Some(image) = objects.get(id).unwrap().reference_image {
-                if objects.image_list.is_some() {
-                    let list = self.check_fes_image_list(owner, objects)?;
-                    let slot = objects
-                        .get(id)
-                        .unwrap()
-                        .state
-                        .image()
-                        .unwrap()
-                        .parent_priority;
-                    if slot != -1 {
-                        self.fes_command(owner, Some(list), 287, [slot as u32, 0, 0], None)?;
-                    }
-                }
-                self.resources.images.release_reference(image)?;
-                objects.get_mut(id).unwrap().reference_image = None;
-            }
-            if let ObjectState::DifImage(state) = &objects.get(id).unwrap().state {
-                let resource = state.resource;
-                if objects.image_list.is_some() {
-                    let list = self.check_fes_image_list(owner, objects)?;
-                    let slot = objects
-                        .get(id)
-                        .unwrap()
-                        .state
-                        .image()
-                        .unwrap()
-                        .parent_priority;
-                    if slot != -1 {
-                        self.fes_command(owner, Some(list), 287, [slot as u32, 0, 0], None)?;
-                    }
-                }
-                if let Some(resource) = resource {
-                    self.resources.images.release_resource_reference(resource)?;
-                }
-                let object = objects.get_mut(id).unwrap();
-                let ObjectState::DifImage(state) = &mut object.state else {
-                    unreachable!()
-                };
-                state.resource = None;
-                object.image = None;
-            }
-            let raw = objects.get(id).unwrap().raw_image;
-            self.resources.raw.release_image(raw)?;
-            objects.get_mut(id).unwrap().raw_image = 0;
+            let list = objects
+                .image_list
+                .map(|_| self.check_fes_image_list(owner, objects))
+                .transpose()?;
+            self.release_fes_object_images(owner, objects, id, list)?;
         }
         objects.remove(handle)?;
+        Ok(())
+    }
+
+    pub(super) fn release_fes_media(&mut self, owner: u32, objects: &mut Objects) -> Result<()> {
+        let list = objects.image_list.filter(|&list| {
+            self.tree
+                .find_reachable(owner, list)
+                .is_some_and(|node| node.kind == kind::IMAGE_LIST)
+        });
+        for id in objects.objects.keys().copied().collect::<Vec<_>>() {
+            self.release_fes_object_images(owner, objects, id, list)?;
+        }
+        Ok(())
+    }
+
+    fn release_fes_object_images(
+        &mut self,
+        owner: u32,
+        objects: &mut Objects,
+        id: u32,
+        list: Option<u32>,
+    ) -> Result<()> {
+        for image in objects.get(id).unwrap().images.clone() {
+            if let Some(list) = list {
+                let pixels = self.resources.images.pixel_handle(image)?;
+                let mut slot = [0; 4];
+                let found = route_with_buffers(
+                    self.reborrow(),
+                    owner,
+                    Command {
+                        target: list,
+                        sender: owner,
+                        code: if pixels == 0 { 308 } else { 307 },
+                        data: [if pixels == 0 { image } else { pixels }, 0, 0],
+                    },
+                    &mut CommandBuffers {
+                        data0: None,
+                        data1: Some(&mut slot),
+                        external: None,
+                    },
+                )?;
+                if found != 0 {
+                    self.fes_command(
+                        owner,
+                        Some(list),
+                        287,
+                        [u32::from_le_bytes(slot), 0, 0],
+                        None,
+                    )?;
+                }
+            }
+            self.resources.images.release(image)?;
+            let object = objects.get_mut(id).unwrap();
+            object.images.retain(|&candidate| candidate != image);
+            if object.image == Some(image) {
+                object.image = None;
+            }
+            for record in &mut objects.update_order {
+                if record.image == Some(image) {
+                    record.image = None;
+                    record.prepared = false;
+                }
+            }
+        }
+        if let Some(image) = objects.get(id).unwrap().reference_image {
+            if let Some(list) = list {
+                let slot = objects
+                    .get(id)
+                    .unwrap()
+                    .state
+                    .image()
+                    .unwrap()
+                    .parent_priority;
+                if slot != -1 {
+                    self.fes_command(owner, Some(list), 287, [slot as u32, 0, 0], None)?;
+                }
+            }
+            self.resources.images.release_reference(image)?;
+            objects.get_mut(id).unwrap().reference_image = None;
+        }
+        if let ObjectState::DifImage(state) = &objects.get(id).unwrap().state {
+            let resource = state.resource;
+            if let Some(list) = list {
+                let slot = objects
+                    .get(id)
+                    .unwrap()
+                    .state
+                    .image()
+                    .unwrap()
+                    .parent_priority;
+                if slot != -1 {
+                    self.fes_command(owner, Some(list), 287, [slot as u32, 0, 0], None)?;
+                }
+            }
+            if let Some(resource) = resource {
+                self.resources.images.release_resource_reference(resource)?;
+            }
+            let object = objects.get_mut(id).unwrap();
+            let ObjectState::DifImage(state) = &mut object.state else {
+                unreachable!()
+            };
+            state.resource = None;
+            object.image = None;
+        }
+        let raw = objects.get(id).unwrap().raw_image;
+        self.resources.raw.release_image(raw)?;
+        objects.get_mut(id).unwrap().raw_image = 0;
         Ok(())
     }
 

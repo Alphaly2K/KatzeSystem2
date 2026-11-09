@@ -2,7 +2,7 @@ use katze_system2::{
     Error, Result,
     expression::State,
     fes,
-    graphics::{GraphicsFactory, RenderTarget},
+    graphics::{GraphicsFactory, Projection, RenderTarget, TextureFilter, Transform},
     message::{
         FontRequest, FontServices, GlyphMask, MessageDefaults, MessageFactory, TextEncoding,
     },
@@ -89,6 +89,45 @@ fn remaining(rt: &mut Engine, task: u32, encoding: TextEncoding) -> u32 {
         },
     )
     .unwrap()
+}
+
+#[test]
+fn strings_keep_independent_page_sizes_and_sample_absolute_vram_with_a_list_offset() {
+    for budget in [1, 4096] {
+        for kind in ["STRING", "STRING8"] {
+            let mut rt = engine(budget, false, Rc::new(Cell::new(false)));
+            let source = format!(
+                "#DEFINE\n{kind} text\n{kind} name\n#OBJECT SIZE VRAM POS PRI DISP\ntext 12,6 1,10 2,14 1 1\nname 8,6 1,2 2,4 2 1\n#START\ntext layout size 4\ntext layout margin 0 0 0 0\ntext layout color 255 255 255\nname layout size 4\nname layout margin 0 0 0 0\nname layout color 255 255 255\ntext str AB\ntext draw -1\ntext skip\nname str N\nname draw -1\nname skip\nwait 1000\n"
+            );
+            let mut scene = Scene::new(
+                fes::Program::from_text(source.as_bytes()).unwrap(),
+                rt.host().handle_allocator(),
+            )
+            .unwrap();
+            scene.objects_mut().unwrap().set_canvas_offset([0, 16]);
+            while !rt.prepare_fes_scene(0, &mut scene).unwrap() {}
+            advance(&mut rt, &mut scene, 0).unwrap();
+            let mut output = RenderTarget::new([32, 24]).unwrap();
+            rt.render_frame(
+                &mut output,
+                &Projection::default(),
+                *Transform::default().matrix(),
+                TextureFilter::Point,
+            )
+            .unwrap();
+            let painted = |target: &RenderTarget, x, y, width, height| {
+                (y..y + height)
+                    .flat_map(|y| (x..x + width).map(move |x| (x, y)))
+                    .filter(|&(x, y)| target.pixel(x, y).unwrap() != 0)
+                    .count()
+            };
+            let canvas = rt.drawing().target.as_ref().unwrap();
+            assert!(painted(canvas, 1, 10, 12, 6) > 0);
+            assert!(painted(canvas, 1, 2, 8, 6) > 0);
+            assert!(painted(&output, 2, 14, 12, 6) > 0);
+            assert!(painted(&output, 2, 4, 8, 6) > 0);
+        }
+    }
 }
 
 #[test]
