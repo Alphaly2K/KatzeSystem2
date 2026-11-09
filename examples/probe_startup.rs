@@ -521,6 +521,19 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                                             state.kind(),
                                             display
                                         );
+                                        if let katze_system2::runtime::fes::ObjectState::Image(
+                                            image,
+                                        ) = state
+                                        {
+                                            println!(
+                                                "      文件 {:?} 帧 {} 透明度 {} 掩码 {} 图像 {:?}",
+                                                String::from_utf8_lossy(&image.file),
+                                                image.image_number,
+                                                image.base.blend,
+                                                image.base.mask,
+                                                object.image_handle(),
+                                            );
+                                        }
                                         break;
                                     }
                                 }
@@ -556,10 +569,11 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             for id in 0..160 {
                 if let Some(page) = runtime.object(id).and_then(|o| o.message_page()) {
                     println!(
-                        "    消息页 {id}: 文本 {:?} 字符数 {} 剩余 {:?}",
+                        "    消息页 {id}: 文本 {:?} 字符数 {} 剩余 {:?} 显示时间 {:?}",
                         page.source(),
                         page.source().chars().count(),
-                        page.remaining(u32::MAX)
+                        page.remaining(u32::MAX),
+                        page.schedule().deadlines
                     );
                 }
             }

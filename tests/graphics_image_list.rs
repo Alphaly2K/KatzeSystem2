@@ -11,6 +11,54 @@ use katze_system2::{
 };
 
 #[test]
+fn alpha_masks_preserve_destination_colors_and_select_bgra_channels() {
+    let mut images = Images::default();
+    let background = images.create(1, [2, 1]).unwrap();
+    images
+        .get_mut(background)
+        .unwrap()
+        .pixels_mut()
+        .copy_from_slice(&[0x80123456u32, 0xffabcdef].map(u32::to_le_bytes).concat());
+    let mask = images.create(1, [2, 1]).unwrap();
+    images
+        .get_mut(mask)
+        .unwrap()
+        .pixels_mut()
+        .copy_from_slice(&[0xff800000u32, 0x007fffff].map(u32::to_le_bytes).concat());
+    let mut list = ImageList::new(2, [2, 1], &mut images).unwrap();
+    list.set(0, background, ImageListProperties::default(), &mut images)
+        .unwrap();
+    list.set(
+        1 << 16,
+        mask,
+        ImageListProperties {
+            opacity: 1,
+            ..Default::default()
+        },
+        &mut images,
+    )
+    .unwrap();
+    for (channel, expected) in [
+        (1, [0x00123456u32, 0xffabcdef]),
+        (2, [0x00123456, 0xffabcdef]),
+        (3, [0x41123456, 0x7fabcdef]),
+        (4, [0x80123456, 0x00abcdef]),
+    ] {
+        images
+            .get_mut(mask)
+            .unwrap()
+            .set_alpha_mask(channel)
+            .unwrap();
+        list.redraw(&mut images).unwrap();
+        assert_eq!(
+            images.get(list.image()).unwrap().surface().pixels(),
+            expected.map(u32::to_le_bytes).concat()
+        );
+    }
+    assert!(images.get_mut(mask).unwrap().set_alpha_mask(5).is_err());
+}
+
+#[test]
 fn list_redraw_clips_relative_to_the_source_and_keeps_separate_wrapper_lifetimes() {
     let mut images = Images::default();
     let source = images.create(1, [3, 2]).unwrap();

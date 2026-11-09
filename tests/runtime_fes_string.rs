@@ -351,8 +351,11 @@ fn string_waits_finish_the_first_busy_bank_and_resume_after_cached_counts_refres
             ("STRING8", false, TextEncoding::Unicode),
         ] {
             let mut rt = engine(budget, unicode, Rc::new(Cell::new(false)));
+            let mut settings = katze_system2::settings::SystemSettings::default();
+            settings.message[..4].copy_from_slice(&1000u32.to_le_bytes());
+            rt.host_mut().system_settings = Some(settings);
             let script = format!(
-                "#DEFINE\n{name} text[2]\n#OBJECT DISP\ntext[0] 1\ntext[1] 1\n#START\ntext layout view 24 12\ntext layout size 4\ntext layout frame 1000\ntext layout color 255 255 255\ntext str AB\ntext draw -1\nwait string text[($0+=1)-1]\n$1+=1\nwait string text\n$2+=1\nwait 1000\n"
+                "#DEFINE\n{name} text[2]\n#OBJECT DISP\ntext[0] 1\ntext[1] 1\n#START\ngetconf 7 messpd\ntext layout view 24 12\ntext layout size 4\ntext layout frame $7\ntext layout color 255 255 255\ntext str AB\ntext draw -1\nwait string text[($0+=1)-1]\n$1+=1\nwait string text\n$2+=1\nwait 1000\n"
             );
             let mut scene = Scene::new(
                 fes::Program::from_text(script.as_bytes()).unwrap(),

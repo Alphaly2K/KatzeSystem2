@@ -60,6 +60,7 @@ pub struct Image {
     info: StandardInfo,
     surface: Surface,
     attributes: BTreeMap<u16, [u32; 5]>,
+    alpha_mask: u32,
     pub(crate) auxiliary: u32,
     pub(super) filter_revision: u64,
 }
@@ -79,6 +80,7 @@ impl Image {
             },
             surface: Surface::new(size)?,
             attributes: BTreeMap::new(),
+            alpha_mask: 0,
             auxiliary: 0,
             filter_revision: 0,
         })
@@ -93,6 +95,7 @@ impl Image {
             info: frame.info,
             surface: Surface::from_bgra(frame.info.size, frame.pixels)?,
             attributes: frame.attributes,
+            alpha_mask: 0,
             auxiliary: 0,
             filter_revision: 0,
         })
@@ -104,6 +107,15 @@ impl Image {
 
     pub fn info(&self) -> &StandardInfo {
         &self.info
+    }
+
+    /// 零为普通合成；一至四分别以 B、G、R、A 通道乘目标 Alpha，保持目标 RGB。
+    pub fn set_alpha_mask(&mut self, channel: u32) -> Result<()> {
+        if channel > 4 {
+            return Err(Error::new(0, "图像 Alpha 掩码通道须为零至四"));
+        }
+        self.alpha_mask = channel;
+        Ok(())
     }
 
     pub(crate) fn info_mut(&mut self) -> &mut StandardInfo {
@@ -215,6 +227,23 @@ impl Image {
         let Some(region) = self.list_region(source, position, base, clip) else {
             return;
         };
+        if source.alpha_mask != 0 {
+            let channel = source.alpha_mask as usize - 1;
+            let stride = self.surface.stride();
+            let source_stride = source.surface.stride();
+            for row in 0..region.height {
+                for column in 0..region.width {
+                    let target = (region.y + row) * stride + (region.x + column) * 4 + 3;
+                    let mask = (region.source_y + row) * source_stride
+                        + (region.source_x + column) * 4
+                        + channel;
+                    let alpha = u32::from(self.surface.pixels()[target]) + 1;
+                    let weight = u32::from(source.surface.pixels()[mask]) + 1;
+                    self.surface.pixels_mut()[target] = ((alpha * weight - 1) >> 8) as u8;
+                }
+            }
+            return;
+        }
         let has_alpha = *has_alpha.get_or_insert_with(|| {
             source
                 .surface

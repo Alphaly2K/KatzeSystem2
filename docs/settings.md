@@ -29,7 +29,9 @@
 
 `refresh_sound_volumes()` 将主音量分别乘以四类音量，先作 u32 回绕，再按无符号数除以一百，写入声音块前四个 DWORD；静音字段保持独立。XML 覆盖和普通 360 写回均不隐式调用此方法。启动宿主在加载游戏默认设置、覆盖用户设置后显式调用，再开始任务执行。此处的 48 份旧配置与声音任务的 64 个运行通道分别保存。
 
-`apply_startup_xml(bytes)` 读取 `GAME/autoselect`、`SCREEN/mw_pos` 以及 `GAME/flag/local0`～`local7`、`global0`～`global7` 的 `start`、`count`。四块用户设置保持原值。默认局部首项为 `[0, 512]`，全局首项为 `[512, 512]`，其余十四项均为 `[u32::MAX, u32::MAX]`。缺失字段保留，整数解析沿用原始 DWORD 规则；超出八项的节点不读取，XML 解析失败时保留整份配置。两组值表示变量编号范围，并非画面坐标。
+`apply_startup_xml(bytes)` 读取 `GAME/autoselect`、`SCREEN/mw_pos` 以及 `GAME/flag/local0`～`local7`、`global0`～`global7` 的 `start`、`count`。默认局部首项为 `[0, 512]`，全局首项为 `[512, 512]`，其余十四项均为 `[u32::MAX, u32::MAX]`。缺失字段保留，整数解析沿用原始 DWORD 规则；超出八项的节点不读取，XML 解析失败时保留整份配置。两组值表示变量编号范围，并非画面坐标。
+
+启动覆盖还读取 `GAME/wndcolor/r`、`g`、`b`、`a`，各分量缺省取已有颜色的相应字节。`CONFIG_B/wnd_alpha` 缺省为一；非零时，Alpha 按有符号 DWORD 回绕乘一百再除以 255，转换为百分比。随后将 A、R、G、B 逐次移位并 OR 合成窗口颜色；分量不先截断。该转换在每次启动覆盖时执行。声音、消息及效果块保持原值。
 
 启动覆盖同时读取上表的 TEXTURE 字段，保留原始 DWORD 和缺失值。区域单位为面块，依次为起始列、起始行、列数、行数；普通 542 使用八组区域及 `texture_16bit_row` 补建当前画布。`texture_32bit_row` 独立保存，542 使用当前画布的其余行作为 32 位区域。配置覆盖不创建或调整已有画布，宿主按尺寸和网格创建存储后显式准备面块。
 
@@ -47,9 +49,25 @@
 
 999 不读取参数，返回 `auto_select` 的原始 DWORD，状态一。它与启动及用户 XML 的 `GAME/autoselect` 共用同一字段，359／360 不读取或写回该值。宿主未提供全局设置时返回诊断。
 
-1050 不读取参数，返回 `scene_animation_enabled` 的原始 DWORD，状态一；非零值不归一化为一。构造及重置初值为一，游戏默认与用户设置通过 `GAME/enable_scene_anm` 覆盖，启动 XML 不读取该字段。359／360 不复制或写回该值。查询不改变 VM 存储，宿主未提供全局设置时返回诊断。命名系统参数 `enable_sceneanm` 指向同一状态，其通用读写命令仍待接入。
+1050 不读取参数，返回 `scene_animation_enabled` 的原始 DWORD，状态一；非零值不归一化为一。构造及重置初值为一，游戏默认与用户设置通过 `GAME/enable_scene_anm` 覆盖，启动 XML 不读取该字段。359／360 不复制或写回该值。查询不改变 VM 存储，宿主未提供全局设置时返回诊断。FES `getconf` 的 `enable_sceneanm` 读取同一字段。
 
 741 不读取参数，`fullscreen` 为零时返回零，任何非零开关值均返回 `fullscreen_mw_pos` 的原始 DWORD，状态一。它读取全屏配置，与绘图 enabled／active 开关分别保存。宿主未配置全局设置时返回诊断；359／360 不复制或写回这两个字段。配置覆盖只更新查询状态，平台切换全屏仍由宿主实现。
+
+## FES 配置读取
+
+`getconf destination name [index [extra]]` 向共享数值槽写入配置的原始 DWORD。依次求值目标、index、extra；后两项缺省为零，`play` 使用二者回绕相加后的通道编号。名称区分大小写，未知名称保留目标槽，超出共享槽范围时跳过写入。主体、系统块及对象事件处理器使用同一宿主状态。
+
+|名称|来源|
+|:--|:--|
+|`messpd`、`autospd`、`autoind`、`autospd_b`、`autospd_c`、`stillread`、`contauto`、`waitpcm`、`fullskip`、`enable_readcol`、`readcol`、`skip_speed`、`contskip`、`strscroll`、`ctrlmode`、`autoleft`、`enable_readselcol`|消息块中的对应选项|
+|`effspd`、`effcut`、`autocur`、`autodel`、`dorama`、`motcut`|效果块中的对应选项|
+|`wndcolor`、`dragwnd`、`wndframe`|窗口颜色、拖动及显示选项|
+|`vol_`、`mute_` 加 `master`／`bgm`／`se`／`voice`／`play`|声音块中的原始音量及静音字段|
+|`contvoice`、`play`|连续语音及旧通道启用值；通道编号不在 0～47 时返回零|
+|`lang_ui`、`lang_text_main`、`lang_text_sub`|`LanguageState` 的 `primary_index`、`message_index`、`subtitle_index`；副文字初值为 `u32::MAX`|
+|`enable_sceneanm`|场景动画开关|
+
+`sysplay`、字体与阴影、平台窗口状态及扩展功能查询仍返回未接入诊断。`setconf` 写回尚未接入。配置读取不触发对应设备或对象更新。
 
 ## 核实范围与待办
 
@@ -67,4 +85,4 @@
 
 场景动画查询已对照 258 个 DWORD、三种参数与指针组合，共 774 次原入口调用，状态、返回值及完整 VM 两区一致。84 组两阶段配置覆盖的 168 份读取及查询结果也全部一致，包含默认值、缺失保留、键名差异、重复节点、非法前缀和整数回绕。既有三项合成回归扩展默认值、XML 覆盖、忽略参数及两种预算下的真实 `2B` 查询，无外部输入依赖。
 
-启动配置对自动预设等初值的修改、默认设置资源的自动装载、用户配置文件发现，以及配置与实际音频／文字／窗口服务的应用仍需接入。当前基线启动使用已核实的构造初值和游戏默认 XML。
+启动配置对自动预设等初值的修改、用户配置文件发现，以及配置与设备服务的应用仍需接入。启动示例已按启动 XML、`config` 类别的 `gamedef` 默认资源顺序装载设置，并刷新有效音量；FES 的文字与消息窗配置读取这些状态。

@@ -152,6 +152,51 @@ fn assert_rectangle(target: &RenderTarget, rectangle: Rect, color: u32) {
 }
 
 #[test]
+fn fes_image_mask_changes_alpha_without_painting_mask_colors() {
+    let (mut runtime, mut objects, list) = setup();
+    for (name, color, priority, mask) in [
+        ("background", 0xff123456u32, 0, 0),
+        ("mask", 0x80ff0000, 1, 4),
+    ] {
+        let handle = define(&mut objects, "CIMAGE", name);
+        initialize(
+            &mut objects,
+            name,
+            ObjectAttributes {
+                size: Some([2, 1]),
+                color: Some(color as i32),
+                priority: Some(priority),
+                display: Some(1),
+                mask: Some(mask),
+                ..Default::default()
+            },
+        );
+        runtime.update_fes_object(0, &mut objects, handle).unwrap();
+    }
+    send(&mut runtime, list, 298, 0, 0);
+    assert_eq!(
+        runtime.drawing().target.as_ref().unwrap().pixel(0, 0),
+        Some(0x80123456)
+    );
+    initialize(
+        &mut objects,
+        "mask",
+        ObjectAttributes {
+            mask: Some(0),
+            blend: Some(254),
+            ..Default::default()
+        },
+    );
+    let handle = objects.lookup("mask", 0).unwrap();
+    runtime.update_fes_object(0, &mut objects, handle).unwrap();
+    send(&mut runtime, list, 298, 0, 0);
+    assert_ne!(
+        runtime.drawing().target.as_ref().unwrap().pixel(0, 0),
+        Some(0x80123456)
+    );
+}
+
+#[test]
 fn fes_cimage_events_reach_shared_canvas_final_frame_and_subtree_cleanup() {
     for budget in [1, 100] {
         let (mut runtime, mut objects, list) = setup();

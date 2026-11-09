@@ -355,6 +355,44 @@ fn setup(budget: usize, source: &[u8]) -> Setup {
 }
 
 #[test]
+fn configuration_reads_share_host_settings_in_body_and_event_handlers() {
+    let source = b"#START\ngetconf ($7+=1)-1 messpd\ngetconf 1 wndcolor\ngetconf 2 lang_text_main\ngetconf 3 lang_text_sub\ngetconf 4 missing ($7+=1) ($7+=1)\ngetconf -1 wndframe\ngetconf 5 play 47 1\nwait 999\n#READ\ngetconf 0 messpd\ngetconf 1 dragwnd\ngetconf 2 wndframe\ngetconf 3 lang_ui\ngetconf 5 play 46 1\n";
+    for budget in [1, 4096] {
+        let Setup { mut runtime, .. } = setup(budget, source);
+        let mut settings = katze_system2::settings::SystemSettings::default();
+        settings.message[..4].copy_from_slice(&37u32.to_le_bytes());
+        settings.window[..4].copy_from_slice(&0x80123456u32.to_le_bytes());
+        runtime.host_mut().system_settings = Some(settings);
+        runtime.host_mut().languages.message_index = 9;
+        runtime.host_mut().languages.primary_index = 3;
+        runtime.numbers_mut().shared[4] = 71;
+        let fes = runtime.create(0, kind::FES, b"configuration", b"").unwrap();
+        send(&mut runtime, fes, 337, 0, 0);
+        file(&mut runtime, fes, b"complete.fes").unwrap();
+        send(&mut runtime, fes, 339, 0, 0);
+        runtime.update(100, 1).unwrap();
+        assert_eq!(
+            runtime.numbers().shared[..8],
+            [37, 0x80123456u32 as i32, 9, -1, 71, 0, 0, 3]
+        );
+        runtime.host_mut().system_settings.as_mut().unwrap().message[..4]
+            .copy_from_slice(&11u32.to_le_bytes());
+        let mut block = b"READ\0".to_vec();
+        runtime
+            .dispatch_command_with_buffers(
+                0,
+                command(fes, 343, 0, 0),
+                &mut CommandBuffers {
+                    data1: Some(&mut block),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(runtime.numbers().shared[..8], [11, 1, 1, 3, 71, 1, 0, 3]);
+    }
+}
+
+#[test]
 fn shared_image_references_switch_in_handlers_and_release_with_the_fes_task() {
     for image_kind in ["CIMAGE", "IMAGE"] {
         let source = format!(

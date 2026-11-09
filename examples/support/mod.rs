@@ -448,6 +448,13 @@ pub fn build_runtime(
             Some(katze_system2::audio::SoundGroups::from_xml(&bytes)?);
         runtime.host_mut().sound_config_enabled = 1;
     }
+    let mut settings = katze_system2::settings::SystemSettings::default();
+    settings.apply_startup_xml(startup.as_bytes())?;
+    let defaults = router.resolve(b"config", b"gamedef")?;
+    if let Some(bytes) = router.read(&defaults, ResourceMode::ArchiveFirst)? {
+        settings.apply_xml(&bytes)?;
+    }
+    settings.refresh_sound_volumes();
     runtime.host_mut().languages =
         katze_system2::language::LanguageState::from_xml(startup.as_bytes())?;
     runtime.host_mut().unicode_text =
@@ -459,8 +466,6 @@ pub fn build_runtime(
     runtime.set_save_services(Saves { root });
     runtime.host_mut().message_defaults = Some(Default::default());
     runtime.host_mut().message_time_scale = Some(10);
-    let mut settings = katze_system2::settings::SystemSettings::default();
-    settings.apply_startup_xml(startup.as_bytes())?;
     let target = if settings.texture_grid.contains(&0) {
         RenderTarget::new(surface)?
     } else {

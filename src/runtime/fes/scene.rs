@@ -6,6 +6,7 @@ use crate::{
 use std::collections::{BTreeMap, VecDeque};
 
 mod background;
+mod config;
 mod save;
 mod scripts;
 mod strings;
@@ -947,6 +948,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                             scene.interpreter.finish_event_handler()?;
                         }
                     } else if scene.string_command(&args, line.offset, self.numbers)?
+                        || self.fes_config_command(scene, &args, line.offset)?
                         || self.fes_debug_command(scene, &args)?
                         || self.fes_font_command(scene, &args, &line)?
                         || self.fes_sound_command(scene, &args, line.offset)?
@@ -1504,6 +1506,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                                 continue;
                             }
                             if scene.string_command(&args, line.offset, self.numbers)?
+                                || self.fes_config_command(scene, &args, line.offset)?
                                 || self.fes_debug_command(scene, &args)?
                                 || self.fes_font_command(scene, &args, &line)?
                                 || self.fes_sound_command(scene, &args, line.offset)?

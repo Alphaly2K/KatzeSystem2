@@ -13,6 +13,7 @@ fn language_native_preserves_mode_fallback_cascade_and_atomic_vm_writes() {
         default_index: 2,
         primary_index: 1,
         message_index: u32::MAX,
+        ..Default::default()
     };
     assert_eq!(
         host.languages
@@ -77,6 +78,7 @@ fn prefix_query_keeps_cp932_fallback_empty_values_and_ordered_overlapping_output
         default_index: 2,
         primary_index: 0,
         message_index: 1,
+        ..Default::default()
     };
     let mut vm = Interpreter::new(
         Program::from_code(&[], vec![0xcc; 64], 0).unwrap(),

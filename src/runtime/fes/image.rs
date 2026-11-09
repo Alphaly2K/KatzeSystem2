@@ -363,6 +363,13 @@ impl<F: ObjectFactory> Store<'_, F> {
             } else {
                 self.resources.images.pixel_handle(wrapper)?
             };
+            if wrapper != 0 && self.resources.images.pixel_handle(wrapper)? != 0 {
+                let mask = objects.get(handle).unwrap().state.image().unwrap().mask as u32;
+                self.resources
+                    .images
+                    .get_mut(wrapper)?
+                    .set_alpha_mask(mask)?;
+            }
             let raw = objects.get(handle).unwrap().raw_image;
             let state = objects.get(handle).unwrap().state.image().unwrap();
             let slot = state.parent_priority as u32;

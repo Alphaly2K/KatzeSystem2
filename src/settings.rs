@@ -96,12 +96,26 @@ impl Default for SystemSettings {
 }
 
 impl SystemSettings {
-    /// 覆盖启动 XML 的变量范围、自动选择、全屏及纹理布局配置；缺失字段保留。
+    /// 覆盖启动 XML 的变量范围、窗口颜色及纹理布局等配置。
     pub fn apply_startup_xml(&mut self, input: &[u8]) -> crate::Result<()> {
         let xml = crate::resource::XmlDocument::parse(input)?;
         self.auto_select = xml.integer(b"GAME/autoselect", self.auto_select)?;
         self.fullscreen_mw_pos = xml.integer(b"SCREEN/mw_pos", self.fullscreen_mw_pos)?;
         self.backlog.apply(&xml)?;
+        let color = word(&self.window, 0);
+        let mut components = [16, 8, 0, 24].map(|shift| (color >> shift) & 255);
+        for (name, value) in ["r", "g", "b", "a"].into_iter().zip(&mut components) {
+            *value = xml.integer(format!("GAME/wndcolor/{name}").as_bytes(), *value)?;
+        }
+        if xml.integer(b"CONFIG_B/wnd_alpha", 1)? != 0 {
+            components[3] = (components[3] as i32).wrapping_mul(100).wrapping_div(255) as u32;
+        }
+        let [red, green, blue, alpha] = components;
+        put(
+            &mut self.window,
+            0,
+            (((alpha << 8) | red) << 8 | green) << 8 | blue,
+        );
         for (name, values) in [
             ("size", &mut self.texture_size),
             ("vt", &mut self.texture_grid),

@@ -49,7 +49,7 @@ fn defaults_and_xml_overlays_keep_missing_values_raw_flags_and_volume_update_ord
     assert_eq!(word(&state.message, 16), 5);
     assert_eq!(word(&state.message, 44), u32::MAX);
     assert_eq!(word(&state.effects, 20), 5);
-    assert_eq!(word(&state.window, 0), u32::MAX);
+    assert_eq!(word(&state.window, 0), 0x64ffffff);
     assert_eq!(&state.sound[..16], [0; 16]);
     assert_eq!(word(&state.sound, 20), 1);
     assert_eq!(word(&state.sound, 20 + 47 * 116 + 80), 100);
@@ -135,6 +135,10 @@ fn defaults_and_xml_overlays_keep_missing_values_raw_flags_and_volume_update_ord
         .unwrap();
     assert_eq!(state.local_flag_ranges[0], [9, 0]);
     assert_eq!(state.auto_select, u32::MAX);
+    state.apply_startup_xml(br#"<?xml version="1.0" encoding="UTF-8"?><document><GAME><wndcolor><r>17</r><g>34</g><b>51</b><a>204</a></wndcolor></GAME></document>"#).unwrap();
+    assert_eq!(word(&state.window, 0), 0x50112233);
+    state.apply_startup_xml(br#"<?xml version="1.0" encoding="UTF-8"?><document><CONFIG_B><wnd_alpha>0</wnd_alpha></CONFIG_B><GAME><wndcolor><a>73</a></wndcolor></GAME></document>"#).unwrap();
+    assert_eq!(word(&state.window, 0), 0x49112233);
     let snapshot = state.clone();
     assert!(state.apply_startup_xml(b"<document>").is_err());
     assert_eq!(state, snapshot);

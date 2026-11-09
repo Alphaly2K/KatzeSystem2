@@ -1,12 +1,26 @@
 use crate::{Error, Result};
 
 /// 图像与普通语言接口共用的前缀和选择。前缀由宿主转为 CP932 字节。
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LanguageState {
     pub prefixes: Vec<Vec<u8>>,
     pub default_index: u32,
     pub primary_index: u32,
     pub message_index: u32,
+    /// 副文字语言的原始编号；全一表示关闭。
+    pub subtitle_index: u32,
+}
+
+impl Default for LanguageState {
+    fn default() -> Self {
+        Self {
+            prefixes: Vec::new(),
+            default_index: 0,
+            primary_index: 0,
+            message_index: 0,
+            subtitle_index: u32::MAX,
+        }
+    }
 }
 
 impl LanguageState {
@@ -32,6 +46,7 @@ impl LanguageState {
             default_index,
             primary_index: default_index,
             message_index: default_index,
+            subtitle_index: u32::MAX,
         })
     }
 
