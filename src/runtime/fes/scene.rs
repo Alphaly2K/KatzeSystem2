@@ -45,6 +45,8 @@ pub struct Scene {
     pub(super) property_call: Option<super::properties::PropertyCall>,
     pub(super) preload: super::preload::Preload,
     save_query: Option<save::SaveQuery>,
+    /// FES `react` 请求：待发往父任务的对象编号。
+    react: Option<i32>,
 }
 
 struct Invocation {
@@ -145,6 +147,7 @@ impl Scene {
             property_call: None,
             preload,
             save_query: None,
+            react: None,
         })
     }
 
@@ -378,6 +381,15 @@ impl Scene {
             .entry(name.to_owned())
             .or_default()
             .insert(0, value);
+    }
+
+    /// `react` 把当前对象编号交给父任务；宿主在下一次命令完成点发送。
+    pub(super) fn request_react(&mut self, bank: i32) {
+        self.react = Some(bank);
+    }
+
+    pub(super) fn take_react(&mut self) -> Option<i32> {
+        self.react.take()
     }
 
     pub fn is_pending(&self) -> bool {
@@ -794,6 +806,19 @@ impl<F: ObjectFactory> Store<'_, F> {
         event: u32,
         host_boundary: bool,
     ) -> Result<Option<bool>> {
+        if std::env::var_os("KATZE_TRACE_FES").is_some() {
+            eprintln!(
+                "[fes-event] owner={} target={:?} event={} boundary={}",
+                owner,
+                target.map(|t| format!(
+                    "{}[{}]",
+                    String::from_utf8_lossy(t.name.as_bytes()),
+                    t.bank
+                )),
+                event,
+                host_boundary
+            );
+        }
         if event > 21 {
             return Err(Error::new(0, "FES 输入事件编号无效"));
         }
@@ -876,8 +901,37 @@ impl<F: ObjectFactory> Store<'_, F> {
         Ok(Some(scene.object_event.take().unwrap().handled))
     }
 
+    /// 把 FES `react` 的对象编号作为一次点击消息排入父任务。
+    pub(super) fn flush_fes_react(&mut self, scene: &mut Scene) -> Result<()> {
+        let Some(bank) = scene.take_react() else {
+            return Ok(());
+        };
+        let Some(owner) = scene.owner else {
+            return Ok(());
+        };
+        let Some(parent) = self.tree.node(owner).and_then(|node| node.parent) else {
+            return Ok(());
+        };
+        let message = [owner, 0xffff_0003, bank as u32, 0];
+        if let Some(object) = self.objects.get_mut(&parent) {
+            object.enqueue_message(message)?;
+        }
+        Ok(())
+    }
+
     pub(super) fn run_fes_handler(&mut self, scene: &mut Scene) -> Result<bool> {
         for _ in 0..self.budget.max(1) {
+            if std::env::var_os("KATZE_TRACE_FES").is_some() {
+                let (pending, block, pc) = scene.interpreter.pending_pc();
+                eprintln!(
+                    "[fes-run] owner={} pending={} block={} name={} pc={}",
+                    scene.owner.unwrap_or(u32::MAX),
+                    pending,
+                    block,
+                    scene.interpreter.current_block_name().unwrap_or("?"),
+                    pc
+                );
+            }
             match scene.interpreter.run(self.numbers, 1)? {
                 Step::Yield => (),
                 Step::Event(fes::Event::Wait(_)) => scene.interpreter.finish_event_handler()?,
@@ -886,6 +940,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                     if let Some(disposition) =
                         scene.script_command(&args, line.offset, self.numbers)?
                     {
+                        self.flush_fes_react(scene)?;
                         if matches!(disposition, ScriptDisposition::Continue) {
                             scene.interpreter.resume();
                         } else {
@@ -1402,6 +1457,18 @@ impl<F: ObjectFactory> Store<'_, F> {
                 }
                 continue;
             }
+            if std::env::var_os("KATZE_TRACE_FES_STEP").is_some() {
+                let (pending, block, pc) = scene.interpreter.pending_pc();
+                eprintln!(
+                    "[fes-step] id={} pending={} block={} name={} pc={} deadline={:?}",
+                    owner,
+                    pending,
+                    block,
+                    scene.interpreter.current_block_name().unwrap_or("?"),
+                    pc,
+                    scene.deadline
+                );
+            }
             match scene.interpreter.run(self.numbers, 1)? {
                 Step::Yield => (),
                 Step::Paused | Step::Halted => {
@@ -1421,6 +1488,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                             if let Some(disposition) =
                                 scene.script_command(&args, line.offset, self.numbers)?
                             {
+                                self.flush_fes_react(scene)?;
                                 scene.interpreter.resume();
                                 match disposition {
                                     ScriptDisposition::Continue => (),

@@ -122,6 +122,14 @@ impl Scene {
                 }))?;
                 Ok(Some(ScriptDisposition::Flush))
             }
+            Some(b"react") => {
+                let bank = self
+                    .interpreter
+                    .event_context()
+                    .map_or(0, |context| context.bank);
+                self.request_react(bank);
+                Ok(Some(ScriptDisposition::Continue))
+            }
             _ => Ok(None),
         }
     }

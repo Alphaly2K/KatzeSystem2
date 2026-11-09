@@ -22,7 +22,10 @@ impl Interpreter {
 
     /// 等待中的消息缓冲区地址；未在等待时为空。
     pub fn waiting_message_address(&self) -> Option<u32> {
-        self.messages.waiting.then_some(()).and(self.messages.address)
+        self.messages
+            .waiting
+            .then_some(())
+            .and(self.messages.address)
     }
 
     /// 普通任务的一次无消息推进；预算续跑继续使用本入口。

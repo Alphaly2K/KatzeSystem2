@@ -1199,6 +1199,14 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
     }
 
     fn message_target(&mut self, target: u32, message: &mut [u32; 4]) -> Result<u32> {
+        if std::env::var_os("KATZE_TRACE_MSG").is_some() {
+            eprintln!(
+                "[msg] sender={} target={} data={:?}",
+                self.host.task_id,
+                target,
+                [message[1], message[2], message[3]]
+            );
+        }
         if !self.require_reachable(target) {
             return Err(Error::new(0, "任务消息目标不存在"));
         }

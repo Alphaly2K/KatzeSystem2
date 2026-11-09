@@ -830,6 +830,16 @@ impl FesObject {
     fn run_body(&mut self, host: &mut dyn Host, budget: usize) -> Result<bool> {
         self.synchronize(host);
         self.effects(host);
+        if std::env::var_os("KATZE_TRACE_FES_BODY").is_some() {
+            eprintln!(
+                "[fes-body] id={} name={} started={} paused={} deleting={}",
+                self.id,
+                String::from_utf8_lossy(&self.name),
+                self.started,
+                self.paused,
+                self.base.control.deletion_requested
+            );
+        }
         if self.base.control.deletion_requested != 0 || self.paused != 0 {
             return Ok(true);
         }

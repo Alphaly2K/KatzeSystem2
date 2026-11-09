@@ -181,8 +181,16 @@ impl Events {
             let Some(region) = candidate.filter(|region| accepts(region, event)) else {
                 return Ok(false);
             };
-            let command = packet(sender, region.id(), event);
-            return Ok(route(self, regions, command)? == Some(0));
+            let region_id = region.id();
+            let command = packet(sender, region_id, event);
+            let outcome = route(self, regions, command)?;
+            if std::env::var_os("KATZE_TRACE_INPUT").is_some() {
+                eprintln!(
+                    "[input-repeat] region={} key={} mask={:08x} point={:?} outcome={:?}",
+                    region_id, event.key, event.mask, event.point, outcome
+                );
+            }
+            return Ok(outcome == Some(0));
         }
         if event.pressed != 0 {
             self.captures[key] = 0;
@@ -205,8 +213,16 @@ impl Events {
                 continue;
             }
             let instance = region.instance;
-            let command = packet(sender, region.id(), event);
-            if route(self, regions, command)? == Some(0) {
+            let region_id = region.id();
+            let command = packet(sender, region_id, event);
+            let outcome = route(self, regions, command)?;
+            if std::env::var_os("KATZE_TRACE_INPUT").is_some() {
+                eprintln!(
+                    "[input-key] region={} key={} mask={:08x} point={:?} pressed={} outcome={:?}",
+                    region_id, event.key, event.mask, event.point, event.pressed, outcome
+                );
+            }
+            if outcome == Some(0) {
                 self.captures[key] = if event.pressed != 0 {
                     regions.current(index, instance)?.1.id()
                 } else {
@@ -232,10 +248,11 @@ fn accepts(region: &Region, event: KeyEvent) -> bool {
     }
     let rect = region.bounds();
     let [x, y] = event.point;
-    if rect.left < rect.right
-        && rect.top < rect.bottom
-        && (x < rect.left || y < rect.top || x >= rect.right || y >= rect.bottom)
-    {
+    if rect.left >= rect.right || rect.top >= rect.bottom {
+        // 空矩形（未配置或退化）不参与指针命中；全屏接受用大范围矩形表达。
+        return false;
+    }
+    if x < rect.left || y < rect.top || x >= rect.right || y >= rect.bottom {
         return false;
     }
     region

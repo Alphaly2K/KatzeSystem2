@@ -486,6 +486,7 @@ impl<F: ObjectFactory> Store<'_, F> {
         } else {
             0
         };
+        let cache = objects.preloaded_images.clone();
         let vram = state.layout.base.vram();
         let offset = [vram[0], vram[1]].map(super::plane::integer_position);
         if !state.initial {
@@ -568,6 +569,42 @@ impl<F: ObjectFactory> Store<'_, F> {
             let state = objects.string_mut(handle);
             state.lines = lines;
             state.lines_dirty = false;
+        }
+        if objects.string(handle).layout.base.base.rebuild {
+            let resource = objects
+                .string(handle)
+                .layout
+                .base
+                .base
+                .size_resource
+                .clone();
+            let size = match &resource {
+                Some(resource) => self.fes_image_geometry(&cache, resource, true)?,
+                None => objects.string(handle).layout.base.base.size,
+            };
+            {
+                let base = &mut objects.string_mut(handle).layout.base.base;
+                base.size = size;
+                base.rebuild = false;
+                base.dirty = true;
+            }
+            let mut rectangle = [0; 32];
+            for (i, value) in [
+                0,
+                0,
+                0,
+                (size[0] as f32).to_bits(),
+                (size[1] as f32).to_bits(),
+                4,
+                1,
+                u32::MAX,
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                rectangle[i * 4..i * 4 + 4].copy_from_slice(&value.to_le_bytes());
+            }
+            self.fes_command(owner, Some(task), 41, [0; 3], Some(&mut rectangle))?;
         }
         self.update_fes_plane_properties(owner, objects, handle, Some(task))?;
         self.fes_command(owner, Some(task), 467 + extra, [0, 10, 1], None)?;

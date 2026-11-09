@@ -156,6 +156,16 @@ impl<F: ObjectFactory> Store<'_, F> {
                 let mut registration = bytes.clone();
                 registration.extend(priority.to_le_bytes());
                 registration.extend(0u32.to_le_bytes());
+                if std::env::var_os("KATZE_TRACE_NATIVE").is_some() {
+                    let name = objects
+                        .get(handle)
+                        .map(|object| format!("{}[{}]", object.name(), object.bank()))
+                        .unwrap_or_default();
+                    eprintln!(
+                        "[fes-button] owner={} handle={} name={} task={} rect={:?}",
+                        owner, handle, name, task, rectangle
+                    );
+                }
                 if self.button_command(owner, task, 90, [0; 3], Some(&mut registration))? == 0
                     && !locked
                 {
@@ -221,6 +231,15 @@ impl<F: ObjectFactory> Store<'_, F> {
         }
         let state = objects.get(handle).unwrap().state.image().unwrap();
         let mut size = state.size;
+        if std::env::var_os("KATZE_TRACE_NATIVE").is_some() {
+            eprintln!(
+                "[btnrect] handle={handle} size={:?} resource={:?} wrapper={wrapper}",
+                size,
+                state.size_resource.as_ref().map(|r| {
+                    String::from_utf8_lossy(&r.name).into_owned() + ":" + &r.frame.to_string()
+                })
+            );
+        }
         if size.iter().any(|&axis| axis < 0) && self.resources.images.pixel_handle(wrapper)? != 0 {
             size = self
                 .resources

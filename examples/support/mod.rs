@@ -460,11 +460,14 @@ pub fn build_runtime(
     runtime.host_mut().message_defaults = Some(Default::default());
     runtime.host_mut().system_settings = Some(Default::default());
     runtime.host_mut().surface_size = surface;
+    // 共享画布是独立于屏幕的 VRAM 空间：FES 对象按 VRAM 坐标把窗口与文字写入
+    // 画布，再由画布取样的平面显示到屏幕。当前样本使用的最大坐标约为
+    // x=2318、y=6100，故分配 2560×6144。
     *runtime.drawing_mut() = DrawingContext {
         mode: 0,
         enabled: true,
         active: true,
-        target: Some(RenderTarget::new(surface)?),
+        target: Some(RenderTarget::new([2560, 6144])?),
     };
     runtime.set_frame_view(
         Default::default(),

@@ -154,6 +154,12 @@ impl<F: ObjectFactory> Store<'_, F> {
                     state.size = self.fes_image_geometry(&cache, resource, true)?;
                 }
             }
+            if std::env::var_os("KATZE_TRACE_NATIVE").is_some() {
+                eprintln!(
+                    "[fes-plane] handle={} size={:?} creation={} canvas={} resource={:?}",
+                    handle, state.size, state.creation_type, canvas, state.size_resource
+                );
+            }
             let mut rectangle = [0; 32];
             for (i, value) in [
                 0,
@@ -259,8 +265,12 @@ impl<F: ObjectFactory> Store<'_, F> {
             (51, 0, [position[0], position[1], position[2]]),
             (49, 0, [base[0], base[1], state.priority as f32]),
         ];
-        if let ObjectState::Plane(plane) = &object.state {
-            let vram = plane.vram();
+        let vram = match &object.state {
+            ObjectState::Plane(plane) => Some(plane.vram()),
+            ObjectState::String(text) => Some(text.layout.base.vram()),
+            _ => None,
+        };
+        if let Some(vram) = vram {
             let offset = objects.canvas_offset;
             vectors.push((
                 51,
@@ -493,15 +503,42 @@ impl<F: ObjectFactory> Store<'_, F> {
             .services
             .as_mut()
             .ok_or_else(|| Error::new(0, "运行时未配置 FES 图像元数据服务"))?;
+        let expanded = self.host.languages.expand_image(&reference.name)?;
         let mut services = super::preload::ImageServices::new(cache, services.as_mut());
-        let name = services.resolve(b"image", &reference.name)?;
+        let name = services.resolve(b"image", &expanded)?;
         let Some(data) = services.read(&name, crate::resource::ResourceMode::LooseFirst)? else {
+            if std::env::var_os("KATZE_TRACE_NATIVE").is_some() {
+                eprintln!(
+                    "[imgref] name={:?} frame={} resolved={:?} 读取失败",
+                    String::from_utf8_lossy(&reference.name),
+                    reference.frame,
+                    String::from_utf8_lossy(&name)
+                );
+            }
             return Ok([0; 2]);
         };
         let metadata = crate::hg3::Metadata::parse(&data)?;
         let Some(info) = metadata.frame(reference.frame).and_then(|frame| frame.info) else {
+            if std::env::var_os("KATZE_TRACE_NATIVE").is_some() {
+                eprintln!(
+                    "[imgref] name={:?} frame={} resolved={:?} 无帧",
+                    String::from_utf8_lossy(&reference.name),
+                    reference.frame,
+                    String::from_utf8_lossy(&name)
+                );
+            }
             return Ok([0; 2]);
         };
+        if std::env::var_os("KATZE_TRACE_NATIVE").is_some() {
+            eprintln!(
+                "[imgref] name={:?} frame={} resolved={:?} size={:?} offset={:?}",
+                String::from_utf8_lossy(&reference.name),
+                reference.frame,
+                String::from_utf8_lossy(&name),
+                info.size,
+                info.offset
+            );
+        }
         Ok(if size {
             info.size.map(|v| v as i32)
         } else {

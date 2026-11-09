@@ -167,6 +167,9 @@ impl TaskObject for Camera2DObject {
                 .drawables()
                 .ok_or_else(|| Error::new(0, "宿主未提供绘图对象服务"))?;
             if let Some(camera) = self.camera.and_then(|id| drawings.camera_mut(id)) {
+                if std::env::var_os("KATZE_TRACE_NATIVE").is_some() && command.code == 51 {
+                    eprintln!("[camera] id={:?} offset={:?}", self.camera, vector);
+                }
                 match command.code {
                     51 => camera.offset = vector.unwrap(),
                     57 => camera.matrix = values::<16>(buffers.data1.as_deref())?,

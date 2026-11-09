@@ -342,6 +342,14 @@ impl Interpreter {
         (self.pending.is_some(), self.block, self.pc)
     }
 
+    /// 诊断用：当前块的名称。
+    pub fn current_block_name(&self) -> Option<&str> {
+        self.program
+            .blocks
+            .get(self.block)
+            .map(|block| block.name.as_str())
+    }
+
     pub fn resume(&mut self) {
         self.pending = None;
     }

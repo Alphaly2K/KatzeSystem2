@@ -47,6 +47,9 @@ impl ScriptedDevice {
 impl InputDevice for ScriptedDevice {
     fn poll(&mut self) -> Result<()> {
         self.polls = self.polls.wrapping_add(1);
+        if std::env::var_os("KATZE_TRACE_INPUT").is_some() && self.polls < 320 {
+            eprintln!("[input-poll] polls={}", self.polls);
+        }
         Ok(())
     }
     fn pointer(&mut self) -> Result<PointerSample> {
@@ -228,6 +231,25 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             }
         } else {
             println!("FES {spec} 未找到");
+        }
+    }
+    if let Some(spec) = std::env::var_os("KATZE_PROBE_HG3") {
+        let spec = spec.to_string_lossy().into_owned();
+        if let Some(data) = game
+            .router
+            .read(spec.as_bytes(), ResourceMode::LooseFirst)?
+        {
+            let metadata = katze_system2::hg3::Metadata::parse(&data)?;
+            println!("HG3 {spec} 共 {} 帧", metadata.frames.len());
+            for frame in &metadata.frames {
+                let size = frame
+                    .info
+                    .as_ref()
+                    .map(|info| (info.size, info.offset, info.canvas_size));
+                println!("  帧 {} 大小 {:?}", frame.id, size);
+            }
+        } else {
+            println!("HG3 {spec} 未找到");
         }
     }
     if let Some(spec) = std::env::var_os("KATZE_PROBE_INS") {
@@ -532,6 +554,26 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                     );
                 }
             }
+            if std::env::var_os("KATZE_PROBE_REGIONS").is_some() {
+                for id in 0..160 {
+                    if let Some(state) = runtime.input_state(id) {
+                        for region in state.regions().records() {
+                            let b = region.bounds();
+                            println!(
+                                "    区域 任务 {id} 编号 {} 启用 {} 选择 {} 事件 {:08x} 范围 {}..{}, {}..{}",
+                                region.id(),
+                                region.enabled(),
+                                region.selection_enabled(),
+                                region.event_mask(),
+                                b.left,
+                                b.right,
+                                b.top,
+                                b.bottom
+                            );
+                        }
+                    }
+                }
+            }
             for handle in runtime.cst_handles() {
                 if let Some(ctx) = runtime.cst_context(handle) {
                     println!("    CST {handle} 位置 {:?}", ctx.position());
@@ -577,11 +619,12 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                     };
                     count += 1;
                     detail.push(format!(
-                        "{id} 显示 {} 三角形 {} 画布 {:?} 界限 {:?} 色 {:08x}/{:08x} 混合 {} 裁剪 {:?}",
+                        "{id} 显示 {} 三角形 {} 画布 {:?} 界限 {:?} 位置 {:?} 色 {:08x}/{:08x} 混合 {} 裁剪 {:?}",
                         entry.display(),
                         entry.triangles().len(),
                         entry.canvas_triangles().map(|t| t.len()),
                         entry.bounds(),
+                        entry.transform().position(),
                         entry.color().0,
                         entry.color().1,
                         entry.blend_mode(),
@@ -633,6 +676,14 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         }
     }
     if let Some(path) = std::env::var_os("KATZE_PROBE_SHOT") {
+        if let Ok(spec) = std::env::var("KATZE_PROBE_HIDE") {
+            for id in spec
+                .split(',')
+                .filter_map(|value| value.parse::<u32>().ok())
+            {
+                runtime.drawables_mut().set_display(id, 0);
+            }
+        }
         let mut output = katze_system2::graphics::RenderTarget::new([1280, 720])?;
         runtime.render_frame(
             &mut output,

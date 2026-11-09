@@ -193,9 +193,40 @@ impl<F: ObjectFactory> Store<'_, F> {
                         .raw
                         .load_fes_image(name, &mut services, owner, 0)?
                 };
+                let loaded_name = String::from_utf8_lossy(name).into_owned();
+                let object_name = objects.get(handle).unwrap().name.clone();
                 let object = objects.get_mut(handle).unwrap();
                 self.resources.raw.release_image(object.raw_image)?;
                 object.raw_image = raw;
+                // 脚本用 -1 表示"整张图像"：按钮命中区需要首帧尺寸。
+                if std::env::var_os("KATZE_TRACE_NATIVE").is_some() {
+                    eprintln!(
+                        "[img-raw] object={object_name} handle={handle} name={loaded_name:?} raw={raw}"
+                    );
+                }
+                if raw != 0 {
+                    let size = {
+                        let bytes = self.resources.raw.image_data(raw)?;
+                        crate::hg3::Metadata::parse(bytes)
+                            .ok()
+                            .and_then(|metadata| {
+                                metadata
+                                    .frames
+                                    .first()
+                                    .and_then(|frame| frame.info)
+                                    .map(|info| info.size)
+                            })
+                    };
+                    if let Some(size) = size {
+                        objects
+                            .get_mut(handle)
+                            .unwrap()
+                            .state
+                            .image_mut()
+                            .unwrap()
+                            .set_size(size.map(|v| v as i32));
+                    }
+                }
                 false
             } else if name.is_empty() || (!direct && name.iter().all(|&b| b == b' ')) {
                 if !direct {
