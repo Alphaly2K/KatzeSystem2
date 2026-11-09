@@ -19,6 +19,16 @@ pub trait Lifecycle {
     /// 子任务已收到请求；按对象类型处理自身通知并标记删除。
     fn mark_destroying(&mut self, tree: &mut TaskTree, id: u32) -> Result<()>;
 
+    /// 已删除子任务的完成通知送达其父级。
+    fn notify_child_finished(
+        &mut self,
+        _tree: &mut TaskTree,
+        _parent: u32,
+        _id: u32,
+    ) -> Result<()> {
+        Ok(())
+    }
+
     /// 子树已释放，释放当前对象的资源及执行状态。
     fn prepare_release(&mut self, _tree: &mut TaskTree, _id: u32) -> Result<()> {
         Ok(())
@@ -169,12 +179,15 @@ impl TaskTree {
                     lifecycle.prepare_release(self, id)?;
                     lifecycle.release(id)?;
                     if let Some(node) = self.nodes.remove(&(id as i32)) {
-                        if let Some(parent) =
-                            node.parent.and_then(|id| self.nodes.get_mut(&(id as i32)))
+                        let parent = node.parent;
+                        if let Some(parent) = parent.and_then(|id| self.nodes.get_mut(&(id as i32)))
                         {
                             parent.children.remove(&(id as i32));
                         }
                         self.unregistered.remove(&(id as i32));
+                        if let Some(parent) = parent {
+                            lifecycle.notify_child_finished(self, parent, id)?;
+                        }
                     }
                     if id == self.root_id {
                         self.reserved.clear();

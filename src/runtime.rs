@@ -1948,6 +1948,29 @@ impl<F: ObjectFactory> Lifecycle for TaskLifecycle<'_, F> {
         run_nested(self.store(tree), id, Execution::MarkDestroying)
     }
 
+    /// 销毁完成后向父级发送子任务结束通知；普通对象把它转为等待消息。
+    fn notify_child_finished(&mut self, tree: &mut TaskTree, parent: u32, id: u32) -> Result<()> {
+        let kind = tree.node(parent).map(|node| node.kind).unwrap_or(0);
+        let mut propagate = true;
+        let mut output = 0;
+        run_nested(
+            self.store(tree),
+            parent,
+            Execution::Command {
+                kind,
+                command: &Command {
+                    target: parent,
+                    sender: id,
+                    code: 20,
+                    data: [0; 3],
+                },
+                buffers: &mut CommandBuffers::default(),
+                output: &mut output,
+                propagate: &mut propagate,
+            },
+        )
+    }
+
     fn release(&mut self, id: u32) -> Result<()> {
         let object = self
             .objects

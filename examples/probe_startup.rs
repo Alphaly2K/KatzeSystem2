@@ -384,7 +384,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         now += 16;
         if let Err(error) = runtime.update(now, 16) {
             println!("第 {frame} 帧 pc {}：{}", error.offset, error.message);
-            for id in 0..64 {
+            for id in 0..160 {
                 if let Some(vm) = runtime.object(id).and_then(|object| object.interpreter()) {
                     println!("  任务 {id} pc {}", vm.pc);
                     if (id == task
@@ -422,7 +422,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             .and_then(|value| value.parse().ok())
             .unwrap_or(200);
         if frame == dump_frame && std::env::var_os("KATZE_PROBE_DUMP").is_some() {
-            for id in 0..64 {
+            for id in 0..160 {
                 if let Some(node) = runtime.tree().node(id) {
                     let object = runtime.object(id);
                     let pc = object
@@ -439,6 +439,32 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             if let Some(vm) = runtime.object(task).and_then(|object| object.interpreter()) {
                 println!("第 {frame} 帧任务 {task} pc {}", vm.pc);
                 dump(vm);
+            }
+            if let Ok(spec) = std::env::var("KATZE_PROBE_MEM") {
+                for id in 0..160 {
+                    let Some(vm) = runtime.object(id).and_then(|object| object.interpreter())
+                    else {
+                        continue;
+                    };
+                    for item in spec.split(',') {
+                        let Some((address, length)) = item.split_once(':') else {
+                            continue;
+                        };
+                        let (Ok(address), Ok(length)) =
+                            (address.parse::<u32>(), length.parse::<u32>())
+                        else {
+                            continue;
+                        };
+                        if let Ok(bytes) = vm.read(address, length as usize) {
+                            println!(
+                                "  任务 {id} pc {} @{address}: {:?} {:?}",
+                                vm.pc,
+                                String::from_utf8_lossy(&bytes),
+                                &bytes[..bytes.len().min(64)]
+                            );
+                        }
+                    }
+                }
             }
             {
                 let drawables = runtime.drawables();
@@ -492,6 +518,14 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         if frame % 120 == 0 {
             if let Some(vm) = runtime.object(task).and_then(|object| object.interpreter()) {
                 println!("第 {frame} 帧 pc {} 栈 {}", vm.pc, vm.stack_bytes().len());
+                for id in 0..160 {
+                    if let Some(other) = runtime.object(id).and_then(|object| object.interpreter())
+                    {
+                        if id != task {
+                            println!("    任务 {id} pc {}", other.pc);
+                        }
+                    }
+                }
             }
         }
     }
