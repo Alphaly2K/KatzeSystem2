@@ -146,6 +146,22 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    if let Some(spec) = std::env::var_os("KATZE_PROBE_LIST") {
+        let spec = spec.to_string_lossy().into_owned();
+        let (prefix, needle) = spec.split_once('|').unwrap_or((&spec, ""));
+        let keys: Vec<String> = game.router.archives.keys().cloned().collect();
+        for key in keys {
+            if !prefix.is_empty() && key != prefix {
+                continue;
+            }
+            let archive = game.router.archives.get_mut(&key).unwrap();
+            for (name, _, _, _) in archive.entries() {
+                if needle.is_empty() || name.contains(needle) {
+                    println!("{key}/{name}");
+                }
+            }
+        }
+    }
     if let Some(spec) = std::env::var_os("KATZE_PROBE_FIND") {
         let spec = spec.to_string_lossy().into_owned();
         let (prefix, needle) = spec.split_once('|').unwrap_or(("", spec.as_str()));
@@ -371,7 +387,10 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             for id in 0..64 {
                 if let Some(vm) = runtime.object(id).and_then(|object| object.interpreter()) {
                     println!("  任务 {id} pc {}", vm.pc);
-                    if id == task && std::env::var_os("KATZE_PROBE_DUMP").is_some() {
+                    if (id == task
+                        || std::env::var_os("KATZE_PROBE_DUMP").is_some_and(|v| v == "all"))
+                        && std::env::var_os("KATZE_PROBE_DUMP").is_some()
+                    {
                         dump(vm);
                     }
                     // `KATZE_PROBE_MEM=地址:长度,...` 转储失败任务各 VM 的普通区。

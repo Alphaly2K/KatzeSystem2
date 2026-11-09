@@ -1021,6 +1021,7 @@ impl<F: ObjectFactory> ObjectFactory for GraphicsFactory<F> {
             kind::PLANE => Ok(Box::new(PlaneObject::new(id))),
             kind::IMAGE_LIST => Ok(Box::new(super::ImageListObject::new(id))),
             kind::FADE => Ok(Box::new(super::FadeObject::new())),
+            kind::RWIPE => Ok(Box::new(super::RWipeObject::new())),
             kind::CAMERA_2D => Ok(Box::new(super::Camera2DObject::new())),
             _ => self.fallback.create(id, object_kind, name),
         }

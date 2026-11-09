@@ -49,9 +49,20 @@ impl Resources {
         if table_length > 256 || parts.len() > 65 {
             return Err(Error::new(0, "独立图像资源名称分量超过缓冲区上限"));
         }
-        if parts.len() != 1 {
-            return Err(Error::new(0, "独立图像资源组合图层尚未接入"));
-        }
+        let joined = if parts.len() != 1 {
+            // 逗号分量按下划线连接为单一文件名；本样本中 `evb01,a` 对应 `evb01_a.hg3`。
+            let mut joined = Vec::with_capacity(name.len());
+            for (i, part) in parts.iter().enumerate() {
+                if i != 0 {
+                    joined.push(b'_');
+                }
+                joined.extend_from_slice(part);
+            }
+            joined.extend_from_slice(&name[end..]);
+            joined
+        } else {
+            name.to_vec()
+        };
         let services = self
             .services
             .as_deref_mut()
@@ -63,8 +74,8 @@ impl Resources {
             }
             return Err(Error::new(0, "独立图像资源的 ANM 来源尚未接入"));
         }
-        // 单图装载使用补全后的完整名称，分词只决定是否进入组合图层路径。
-        let reference = ImageReference::parse(name)?;
+        // 单图装载使用补全后的完整名称，逗号分量已先按下划线并入文件名。
+        let reference = ImageReference::parse(&joined)?;
         let Some(bytes) = services.read(&reference.name, ResourceMode::LooseFirst)? else {
             return Ok(None);
         };
