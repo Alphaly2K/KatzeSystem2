@@ -86,6 +86,7 @@ pub enum ObjectState {
     Sound(Box<SoundState>),
     Draw(Box<DrawState>),
     String(Box<StringState>),
+    SavePanel(Box<crate::fes::SavePanelState>),
 }
 
 impl ObjectState {
@@ -105,6 +106,7 @@ impl ObjectState {
             Self::Sound(_) => "SOUND",
             Self::Draw(_) => "DRAW",
             Self::String(state) => state.kind(),
+            Self::SavePanel(_) => "SAVEPANEL",
         }
     }
 
@@ -124,6 +126,7 @@ impl ObjectState {
             "SOUND" => Self::Sound(Box::default()),
             "DRAW" => Self::Draw(Box::default()),
             "STRING" | "STRING8" => Self::String(Box::new(StringState::new(kind, text)?)),
+            "SAVEPANEL" => Self::SavePanel(Box::default()),
             _ => return Err(Error::new(0, format!("FES 对象类型 {kind} 尚未接入"))),
         })
     }
@@ -133,6 +136,7 @@ impl ObjectState {
             Self::CPlane(state) => Some(state),
             Self::Plane(state) => Some(&state.base),
             Self::String(state) => Some(&state.layout.base.base),
+            Self::SavePanel(state) => Some(&state.plane),
             _ => None,
         }
     }
@@ -142,6 +146,7 @@ impl ObjectState {
             Self::CPlane(state) => Some(state),
             Self::Plane(state) => Some(&mut state.base),
             Self::String(state) => Some(&mut state.layout.base.base),
+            Self::SavePanel(state) => Some(&mut state.plane),
             _ => None,
         }
     }
@@ -621,6 +626,9 @@ impl Objects {
                 ObjectState::Scroll2(state) => state
                     .control
                     .apply(&initialization.attributes, bank as u32)?,
+                ObjectState::SavePanel(state) => {
+                    state.plane.apply(&initialization.attributes, bank as u32)
+                }
                 ObjectState::Sound(state) => {
                     let before = [state.sound_type, state.channel];
                     let result = state.apply(&initialization.attributes);

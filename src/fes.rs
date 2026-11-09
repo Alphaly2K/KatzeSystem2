@@ -14,6 +14,7 @@ mod objects;
 mod params;
 mod plane;
 mod resources;
+mod save_panel;
 mod scroll2;
 mod slider;
 mod sound;
@@ -29,6 +30,7 @@ pub use objects::ObjectDefinition;
 pub use params::parse as parameters;
 pub use plane::{CPlaneState, PlaneState};
 pub use resources::ImageReference;
+pub use save_panel::SavePanelState;
 pub use scroll2::Scroll2State;
 pub use slider::{SliderState, SliderUpdates};
 pub use sound::SoundState;
@@ -179,16 +181,13 @@ impl Program {
                             .push(Error::new(line.offset, "孤立或重复 else"));
                     }
                 } else if bytes == b"endif" {
+                    // 原始引擎容忍块内多余的 endif；执行路径本来就跳过该行。
                     if let Some((start, alt)) = stack.pop() {
                         if let Some(alt) = alt {
                             block.end_jump[alt] = Some(i + 1);
                         } else {
                             block.false_jump[start] = Some(i + 1);
                         }
-                    } else {
-                        program
-                            .diagnostics
-                            .push(Error::new(line.offset, "孤立 endif"));
                     }
                 }
             }

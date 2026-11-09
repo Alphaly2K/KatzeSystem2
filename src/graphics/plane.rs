@@ -1023,6 +1023,7 @@ impl<F: ObjectFactory> ObjectFactory for GraphicsFactory<F> {
             kind::FADE => Ok(Box::new(super::FadeObject::new())),
             kind::RWIPE => Ok(Box::new(super::RWipeObject::new())),
             kind::CAMERA_2D => Ok(Box::new(super::Camera2DObject::new())),
+            kind::PARTICLE => Ok(Box::new(super::ParticleObject::new(id))),
             _ => self.fallback.create(id, object_kind, name),
         }
     }

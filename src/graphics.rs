@@ -29,6 +29,8 @@ mod projection;
 pub use projection::{ProjectedVertex, Projection};
 mod camera;
 pub use camera::{Camera2D, Camera2DObject};
+mod particle;
+pub use particle::ParticleObject;
 mod raster;
 pub use raster::TextureFilter;
 mod resample;

@@ -1,4 +1,4 @@
-use super::Objects;
+use super::{ObjectState, Objects};
 use crate::{
     Error, HandleAllocator, Result, Step, fes,
     runtime::{ObjectFactory, Runtime, Store},
@@ -1122,6 +1122,9 @@ impl<F: ObjectFactory> Store<'_, F> {
             return Ok(true);
         }
         if let Some(name) = args.get(1) {
+            if self.save_panel_command(scene, &target, args, line)? {
+                return Ok(true);
+            }
             if fes::Interpreter::is_builtin_object_command(name)
                 || scene
                     .interpreter
@@ -1136,6 +1139,74 @@ impl<F: ObjectFactory> Store<'_, F> {
             message.extend_from_slice(&line.bytes);
             self.host.debug_messages.push(message);
         }
+        Ok(true)
+    }
+
+    /// `SAVEPANEL` 目标的专用命令：`ptype/dispid/setnum/setsave/getflag/datasave`
+    /// 目前按最小契约记录到面板状态；`getflag` 将槽位标志写回共享槽。
+    fn save_panel_command(
+        &mut self,
+        scene: &mut Scene,
+        target: &fes::ObjectReference,
+        args: &[Vec<u8>],
+        line: &fes::Line,
+    ) -> Result<bool> {
+        let Some(name) = args.get(1).map(Vec::as_slice) else {
+            return Ok(false);
+        };
+        if !matches!(
+            name,
+            b"ptype" | b"dispid" | b"setnum" | b"setsave" | b"getflag" | b"datasave"
+        ) {
+            return Ok(false);
+        }
+        let bank = if target.bank == -1 { 0 } else { target.bank };
+        let Some(handle) = scene.objects.lookup(&target.name, bank) else {
+            return Ok(true);
+        };
+        let mut eval = |index: usize| -> Result<i32> {
+            scene
+                .interpreter
+                .eval(&args[index], self.numbers)
+                .map_err(|error| Error::new(line.offset + error.offset, error.message))
+        };
+        match name {
+            b"getflag" => {
+                let index = eval(3)? as usize;
+                if let Some(slot) = self.numbers.shared.get_mut(index) {
+                    *slot = 0;
+                }
+            }
+            b"ptype" => {
+                let kind: &[u8] = args.get(2).map_or(b"", Vec::as_slice);
+                let mut values = Vec::with_capacity(args.len());
+                for arg in args.iter().skip(3) {
+                    values.push(
+                        scene
+                            .interpreter
+                            .eval(arg, self.numbers)
+                            .unwrap_or_default(),
+                    );
+                }
+                let tag = match kind {
+                    b"NORM" => 0,
+                    b"SIMAGE" => 1,
+                    b"NUM_O" => 2,
+                    b"SSTR" => 3,
+                    _ => 4,
+                };
+                let object = scene.objects.get_mut(handle).unwrap();
+                if let ObjectState::SavePanel(panel) = &mut object.state {
+                    let mut cell = Vec::with_capacity(values.len() + 2);
+                    cell.push(tag);
+                    cell.push(values.len() as i32);
+                    cell.extend(values);
+                    panel.cells.push(cell);
+                }
+            }
+            _ => {}
+        }
+        let _ = args;
         Ok(true)
     }
 

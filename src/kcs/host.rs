@@ -468,7 +468,7 @@ pub(crate) fn call_native(
     if matches!(
         index,
         0 | 2 | 3 | 141 | 169 | 170 | 172 | 173 | 180 | 182 | 184 | 185 | 187..=191
-            | 429 | 439 | 543..=548 | 550 | 552 | 553 | 556 | 559..=563 | 573 | 574
+            | 399 | 429 | 439 | 543..=548 | 550 | 552 | 553 | 556 | 559..=563 | 573 | 574
             | 578 | 579 | 581 | 626 | 627 | 642..=644 | 652 | 656 | 660 | 661
             | 670..=673 | 686 | 687 | 906..=908 | 910..=924 | 926..=933 | 965 | 966
             | 974..=976 | 1006 | 1025 | 1047 | 1048
@@ -537,7 +537,19 @@ pub(crate) fn call_native(
         }
         return Ok(NativeReturn::Value(handle));
     }
+    if index == 284 {
+        // 参数个数因版本而异；至少读名称与输出地址。
+        let args: Vec<_> = arguments
+            .chunks_exact(4)
+            .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
+            .collect();
+        if let Some(out) = args.get(args.len().saturating_sub(1)) {
+            vm.write(*out, &0u32.to_le_bytes())?;
+        }
+        return Ok(NativeReturn::Value(0));
+    }
     let count = match index {
+        399 => 5,
         1 | 6 | 17 | 18 | 25 | 26 | 40 | 47 | 48 | 71 | 207 | 209 | 210 | 212 | 213 | 278 | 319
         | 75 | 393 | 420 | 421 | 516 | 898 | 899 | 1040 => 1,
         8
@@ -576,6 +588,7 @@ pub(crate) fn call_native(
         .collect();
     Ok(match index {
         392 | 1049 => return super::message_text::call(index, &args, vm),
+
         207 => {
             let identity = std::array::from_fn(|i| if i % 5 == 0 { 1f32.to_bits() } else { 0 });
             if vm.read(args[0], 1).is_ok() {

@@ -447,8 +447,41 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                         println!(
                             "    FES {id} 期限 {:?} 暂停 {}",
                             scene.deadline(),
-                            object.map(|o| o.paused_fes()).flatten().unwrap_or(u32::MAX)
+                            object.and_then(|o| o.paused_fes()).unwrap_or(u32::MAX)
                         );
+                        if let Some(fes_names) = std::env::var_os("KATZE_PROBE_FESNAMED") {
+                            let names = &scene.interpreter().named;
+                            for (name, slots) in names {
+                                let name = std::str::from_utf8(name.as_bytes()).unwrap_or("");
+                                if fes_names.to_string_lossy().split(',').any(|f| name == f) {
+                                    println!("    FES {id} 命名 {name} = {slots:?}");
+                                }
+                            }
+                        }
+                        if std::env::var_os("KATZE_PROBE_FESBTN").is_some() {
+                            for (name, kind) in [
+                                ("btn1", 5),
+                                ("btn2", 5),
+                                ("btn3", 2),
+                                ("btn4", 3),
+                                ("btn5", 4),
+                            ] {
+                                for bank in 0..kind {
+                                    if let Some(handle) = scene.objects().lookup(name, bank) {
+                                        let object = scene.objects().get(handle).unwrap();
+                                        if let katze_system2::runtime::fes::ObjectState::Button(
+                                            button,
+                                        ) = &object.state
+                                        {
+                                            println!(
+                                                "    FES {id} {name}[{bank}] 启用 {}",
+                                                button.enabled
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }

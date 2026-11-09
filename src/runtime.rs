@@ -57,6 +57,8 @@ pub mod kind {
     pub const STRING_PLANE: u32 = 48;
     pub const STRING_PLANE_UTF8: u32 = 63;
     pub const CAMERA_2D: u32 = 65;
+    /// 粒子任务（`kcTaskParticle`）；绘制接入前按占位对象创建。
+    pub const PARTICLE: u32 = 38;
 }
 
 /// 默认的单次推进预算；预算耗尽时同步入口继续推进到完成。
