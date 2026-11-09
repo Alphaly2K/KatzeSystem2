@@ -241,7 +241,6 @@ pub struct FesObject {
     loaded: bool,
     started: bool,
     scene: Option<Scene>,
-    named_values: std::collections::BTreeMap<Vec<u8>, u32>,
     external: crate::memory::SharedMemory,
     pending: Option<Command>,
     name: Vec<u8>,
@@ -310,7 +309,6 @@ impl FesObject {
             loaded: false,
             started: false,
             scene: None,
-            named_values: std::collections::BTreeMap::new(),
             external,
             pending: None,
             name: Vec::new(),
@@ -1200,22 +1198,32 @@ impl TaskObject for FesObject {
                             .ok_or_else(|| Error::new(0, "FES 名称输入缓冲区缺失"))?,
                         usize::MAX,
                     )?;
+                    let key = crate::text::ascii(key)?.to_owned();
+                    let scene = self
+                        .scene
+                        .as_mut()
+                        .ok_or_else(|| Error::new(0, "FES 名称访问需要已装载脚本"))?;
                     if command.code == 358 {
-                        self.named_values.insert(key.to_vec(), b);
+                        scene
+                            .interpreter
+                            .named
+                            .entry(key)
+                            .or_default()
+                            .insert(0, b as i32);
                     } else {
                         let target = buffers
                             .data1
                             .as_deref_mut()
                             .filter(|bytes| bytes.len() >= 4)
                             .ok_or_else(|| Error::new(0, "FES 名称查询输出缓冲区不足"))?;
-                        target[..4].copy_from_slice(
-                            &self
-                                .named_values
-                                .get(key)
-                                .copied()
-                                .unwrap_or(0)
-                                .to_le_bytes(),
-                        );
+                        let value = scene
+                            .interpreter
+                            .named
+                            .get(&key)
+                            .and_then(|banks| banks.get(&0))
+                            .copied()
+                            .unwrap_or(0) as u32;
+                        target[..4].copy_from_slice(&value.to_le_bytes());
                     }
                 }
             }
@@ -1580,6 +1588,71 @@ mod tests {
             self.0.push(command);
             Ok(true)
         }
+    }
+
+    #[test]
+    fn named_values_are_written_to_the_scene_interpreter() {
+        use crate::task::CommandBuffers;
+
+        let mut task = FesObject::new(3);
+        let mut scene = Scene::new(
+            fes::Program::from_text(b"#START\nwait 1\n").unwrap(),
+            crate::HandleAllocator::default(),
+        )
+        .unwrap();
+        scene.set_system_value("_EXITCODE_", -1);
+        task.scene = Some(scene);
+        task.initialized = true;
+        let mut host = InputHost(Vec::new());
+        let mut name = b"STILL_READ\0".to_vec();
+        let mut value = [0xcc; 4];
+        let mut output = 0;
+        assert_eq!(
+            task.dispatch_command_with_buffers(
+                kind::FES,
+                &Command {
+                    target: 3,
+                    sender: 9,
+                    code: 358,
+                    data: [0, 1, 0],
+                },
+                &mut CommandBuffers {
+                    data0: Some(&mut name),
+                    ..CommandBuffers::default()
+                },
+                &mut output,
+                &mut host,
+                1,
+            )
+            .unwrap(),
+            CommandOutcome::finished(false)
+        );
+        assert_eq!(
+            task.scene().unwrap().interpreter().named["STILL_READ"][&0],
+            1
+        );
+        assert_eq!(
+            task.dispatch_command_with_buffers(
+                kind::FES,
+                &Command {
+                    target: 3,
+                    sender: 9,
+                    code: 357,
+                    data: [0, 0, 0],
+                },
+                &mut CommandBuffers {
+                    data0: Some(&mut name),
+                    data1: Some(&mut value),
+                    ..CommandBuffers::default()
+                },
+                &mut output,
+                &mut host,
+                1,
+            )
+            .unwrap(),
+            CommandOutcome::finished(false)
+        );
+        assert_eq!(u32::from_le_bytes(value), 1);
     }
 
     #[test]

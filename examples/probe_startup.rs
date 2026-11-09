@@ -464,6 +464,38 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                                 }
                             }
                         }
+                        if let Some(spec) = std::env::var_os("KATZE_PROBE_FESOBJ") {
+                            for name in spec.to_string_lossy().split(',') {
+                                for bank in 0..8 {
+                                    if let Some(handle) = scene.objects().lookup(name, bank) {
+                                        let object = scene.objects().get(handle).unwrap();
+                                        let state = &object.state;
+                                        let display = match state {
+                                            katze_system2::runtime::fes::ObjectState::Plane(p) => {
+                                                Some(p.base.display())
+                                            }
+                                            katze_system2::runtime::fes::ObjectState::CPlane(p) => {
+                                                Some(p.display())
+                                            }
+                                            katze_system2::runtime::fes::ObjectState::String(s) => {
+                                                Some(s.layout.base.base.display())
+                                            }
+                                            katze_system2::runtime::fes::ObjectState::Image(i) => {
+                                                Some(i.base.display)
+                                            }
+                                            _ => None,
+                                        };
+                                        println!(
+                                            "    FES {id} {name}[{bank}] 句柄 {} 状态 {} 显示 {:?}",
+                                            object.handle(),
+                                            state.kind(),
+                                            display
+                                        );
+                                        break;
+                                    }
+                                }
+                            }
+                        }
                         if std::env::var_os("KATZE_PROBE_FESBTN").is_some() {
                             for (name, kind) in [
                                 ("btn1", 5),
@@ -555,17 +587,19 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                         entry.blend_mode(),
                         entry.clip(),
                     ));
-                    for (index, triangle) in entry.triangles().iter().take(2).enumerate() {
-                        for (vertex_index, vertex) in triangle.iter().enumerate() {
-                            detail.push(format!(
-                                "      三角形 {index} 点 {vertex_index} {:?}",
-                                vertex
-                            ));
+                    if std::env::var_os("KATZE_PROBE_TRIANGLES").is_some() {
+                        for (index, triangle) in entry.triangles().iter().take(2).enumerate() {
+                            for (vertex_index, vertex) in triangle.iter().enumerate() {
+                                detail.push(format!(
+                                    "      三角形 {index} 点 {vertex_index} {:?}",
+                                    vertex
+                                ));
+                            }
                         }
                     }
                 }
                 println!("  绘图 {count} 项");
-                for line in detail.iter().take(24) {
+                for line in detail.iter().take(120) {
                     println!("    {line}");
                 }
             }
