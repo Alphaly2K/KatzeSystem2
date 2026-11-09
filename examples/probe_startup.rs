@@ -434,6 +434,12 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                         "  节点 {id} 类型 {} 父 {:?} pc {:?} 时钟 {:?} 暂停 {:?}",
                         node.kind, node.parent, pc, elapsed, paused
                     );
+                    if let Some(addr) = object
+                        .and_then(|o| o.interpreter())
+                        .and_then(|vm| vm.waiting_message_address())
+                    {
+                        println!("    任务 {id} 等待消息缓冲 {addr}");
+                    }
                     if let Some(scene) = object.and_then(|o| o.fes_scene()) {
                         let (pending, block, pc) = scene.interpreter().pending_pc();
                         println!(
