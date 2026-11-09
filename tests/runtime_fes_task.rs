@@ -393,6 +393,97 @@ fn configuration_reads_share_host_settings_in_body_and_event_handlers() {
 }
 
 #[test]
+fn configuration_writes_apply_presets_raw_values_and_volumes_in_body_and_handlers() {
+    let source = b"#START\nsetconf ($6+=1)*10 messpd ($6+=1) ($6+=1)\nsetconf 7 autospd\nsetconf 50 vol_master\nsetconf 30 vol_bgm\nsetconf 0x81223344 wndcolor\nsetconf -7 waitpcm\nsetconf -3 effcut\nsetconf 9 play 46 1\nsetconf 0 enable_sceneanm\nsetconf 1 lang_text_sub\ngetconf 0 messpd\nwait 999\n#WRITE\nsetconf -1 contauto\nsetconf 8 autospd\nsetconf 1 autospd_b\nsetconf 0 vol_master\nsetconf 2 lang_text_sub\ngetconf 1 lang_text_sub\ngetconf 2 autospd_b\ngetconf 3 autospd_c\ngetconf 4 contauto\n";
+    for budget in [1, 4096] {
+        let Setup { mut runtime, .. } = setup(budget, source);
+        let mut settings = katze_system2::settings::SystemSettings::default();
+        settings.auto_wait_presets[7] = [31, 9];
+        settings.auto_wait_presets[8] = [37, 11];
+        runtime.host_mut().system_settings = Some(settings);
+        runtime.host_mut().languages.prefixes = vec![b"a".to_vec(), b"b".to_vec()];
+        let fes = runtime.create(0, kind::FES, b"configuration", b"").unwrap();
+        send(&mut runtime, fes, 337, 0, 0);
+        file(&mut runtime, fes, b"complete.fes").unwrap();
+        send(&mut runtime, fes, 339, 0, 0);
+        runtime.update(100, 1).unwrap();
+        let word = |bytes: &[u8], offset| {
+            u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap())
+        };
+        let settings = runtime.host().system_settings.as_ref().unwrap();
+        assert_eq!(runtime.numbers().shared[0], 10);
+        assert_eq!(runtime.numbers().shared[6], 3);
+        assert_eq!(word(&settings.message, 4), 7);
+        assert_eq!(word(&settings.message, 12), 31);
+        assert_eq!(word(&settings.message, 16), 9);
+        assert_eq!(word(&settings.message, 28), (-7i32) as u32);
+        assert_eq!(word(&settings.effects, 4), (-3i32) as u32);
+        assert_eq!(word(&settings.window, 0), 0x81223344);
+        assert_eq!(word(&settings.sound, 20 + 47 * 116), 9);
+        assert_eq!(word(&settings.sound, 0), 15);
+        assert_eq!(word(&settings.sound, 4), 50);
+        assert_eq!(settings.scene_animation_enabled, 0);
+        assert_eq!(runtime.host().languages.subtitle_index, 1);
+        assert_eq!(runtime.host().system_settings_dirty, 1);
+        runtime.host_mut().system_settings_dirty = 0;
+        let mut block = b"WRITE\0".to_vec();
+        runtime
+            .dispatch_command_with_buffers(
+                0,
+                command(fes, 343, 0, 0),
+                &mut CommandBuffers {
+                    data1: Some(&mut block),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(runtime.numbers().shared[..5], [10, -1, 1, 11, -1]);
+        let settings = runtime.host().system_settings.as_ref().unwrap();
+        assert_eq!(&settings.sound[..16], [0; 16]);
+        assert_eq!(word(&settings.message, 4), 8);
+        assert_eq!(runtime.host().system_settings_dirty, 1);
+    }
+}
+
+#[test]
+fn configuration_write_validation_keeps_argument_effects_and_refresh_boundaries() {
+    for budget in [1, 4096] {
+        for (line, effects, dirty, error) in [
+            ("setconf", 0, 0, None),
+            ("setconf ($7+=1)", 1, 0, None),
+            ("setconf ($7+=1) unknown ($7+=1) ($7+=1)", 3, 1, None),
+            ("setconf ($7+=1) MESSPD ($7+=1) ($7+=1)", 3, 1, None),
+            ("setconf ($7+=1) play 47 1", 1, 1, None),
+            ("setconf 32 autospd ($7+=1)", 1, 0, Some("预设编号")),
+            ("setconf ($7+=1) lang_ui ($7+=1)", 2, 0, Some("切换通知")),
+        ] {
+            let source = format!("#START\n{line}\nwait 999\n");
+            let Setup { mut runtime, .. } = setup(budget, source.as_bytes());
+            let settings = katze_system2::settings::SystemSettings::default();
+            runtime.host_mut().system_settings = Some(settings.clone());
+            let fes = runtime.create(0, kind::FES, b"configuration", b"").unwrap();
+            send(&mut runtime, fes, 337, 0, 0);
+            file(&mut runtime, fes, b"complete.fes").unwrap();
+            let result = runtime
+                .dispatch_command(0, command(fes, 339, 0, 0))
+                .and_then(|_| runtime.update(100, 1));
+            if let Some(error) = error {
+                assert!(result.unwrap_err().message.contains(error));
+            } else {
+                result.unwrap();
+            }
+            let mut expected = settings;
+            if dirty != 0 {
+                expected.refresh_sound_volumes();
+            }
+            assert_eq!(runtime.host().system_settings.as_ref().unwrap(), &expected);
+            assert_eq!(runtime.numbers().shared[7], effects);
+            assert_eq!(runtime.host().system_settings_dirty, dirty);
+        }
+    }
+}
+
+#[test]
 fn shared_image_references_switch_in_handlers_and_release_with_the_fes_task() {
     for image_kind in ["CIMAGE", "IMAGE"] {
         let source = format!(

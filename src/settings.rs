@@ -15,6 +15,8 @@ pub struct SystemSettings {
     pub auto_select: u32,
     /// `GAME/enable_scene_anm` 的原始 DWORD，供普通 1050 查询。
     pub scene_animation_enabled: u32,
+    /// 自动推进预设，每项依次为基础等待与逐字等待。
+    pub auto_wait_presets: [[u32; 2]; 32],
     /// 用户设置 `WINDOW/fullscreen` 的原始 DWORD。
     pub fullscreen: u32,
     /// 启动 `SCREEN/mw_pos`、用户 `FULL_SCREEN/mw_pos` 的原始 DWORD。
@@ -39,6 +41,7 @@ impl Default for SystemSettings {
             global_flag_ranges: [[u32::MAX; 2]; 8],
             auto_select: 0,
             scene_animation_enabled: 1,
+            auto_wait_presets: [[0; 2]; 32],
             fullscreen: 0,
             fullscreen_mw_pos: 0,
             backlog: crate::backlog::Settings::default(),
@@ -50,6 +53,18 @@ impl Default for SystemSettings {
         };
         settings.local_flag_ranges[0] = [0, 512];
         settings.global_flag_ranges[0] = [512, 512];
+        settings.auto_wait_presets[..10].copy_from_slice(&[
+            [5, 7],
+            [7, 8],
+            [8, 8],
+            [12, 7],
+            [15, 5],
+            [16, 9],
+            [17, 12],
+            [21, 11],
+            [25, 10],
+            [29, 10],
+        ]);
         put(&mut settings.sound, 0x10, 1);
         for channel in 0..48 {
             let offset = 20 + channel * 116;
@@ -100,6 +115,15 @@ impl SystemSettings {
     pub fn apply_startup_xml(&mut self, input: &[u8]) -> crate::Result<()> {
         let xml = crate::resource::XmlDocument::parse(input)?;
         self.auto_select = xml.integer(b"GAME/autoselect", self.auto_select)?;
+        for (index, preset) in self.auto_wait_presets.iter_mut().enumerate() {
+            for (field, value) in ["base", "char"].into_iter().zip(preset) {
+                *value = xml.integer(
+                    format!("GAME/autopriset/p{index:02}/{field}").as_bytes(),
+                    *value,
+                )?;
+            }
+        }
+        self.select_auto_wait_preset(word(&self.message, 4))?;
         self.fullscreen_mw_pos = xml.integer(b"SCREEN/mw_pos", self.fullscreen_mw_pos)?;
         self.backlog.apply(&xml)?;
         let color = word(&self.window, 0);
@@ -241,6 +265,17 @@ impl SystemSettings {
                 volume.wrapping_mul(master) / 100,
             );
         }
+    }
+
+    pub(crate) fn select_auto_wait_preset(&mut self, index: u32) -> crate::Result<()> {
+        let [base, character] = *self
+            .auto_wait_presets
+            .get(index as usize)
+            .ok_or_else(|| crate::Error::new(0, "自动推进预设编号超出 0～31"))?;
+        put(&mut self.message, 4, index);
+        put(&mut self.message, 12, base);
+        put(&mut self.message, 16, character);
+        Ok(())
     }
 
     pub(crate) fn block_mut(&mut self, index: usize) -> &mut [u8] {

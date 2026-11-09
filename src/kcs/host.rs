@@ -81,6 +81,8 @@ pub struct HostState {
     pub message_measurement_parameter: u32,
     pub fes_message_frame_delay: i32,
     pub system_settings: Option<crate::settings::SystemSettings>,
+    /// FES 配置写回后的保存请求标记；宿主完成持久化后清除。
+    pub system_settings_dirty: u32,
     pub languages: crate::language::LanguageState,
     pub script_replacements: BTreeMap<Vec<u8>, Vec<u8>>,
     pub save_services: Option<Box<dyn crate::save::SaveServices>>,

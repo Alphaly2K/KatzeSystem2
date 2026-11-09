@@ -35,6 +35,8 @@ fn defaults_and_xml_overlays_keep_missing_values_raw_flags_and_volume_update_ord
     let mut state = SystemSettings::default();
     assert_eq!(state.auto_select, 0);
     assert_eq!(state.scene_animation_enabled, 1);
+    assert_eq!(state.auto_wait_presets[4], [15, 5]);
+    assert_eq!(state.auto_wait_presets[10..], [[0; 2]; 22]);
     assert_eq!((state.fullscreen, state.fullscreen_mw_pos), (0, 0));
     assert_eq!(state.texture_size, [256; 2]);
     assert_eq!(state.texture_grid, [0; 2]);
@@ -124,7 +126,10 @@ fn defaults_and_xml_overlays_keep_missing_values_raw_flags_and_volume_update_ord
     assert_eq!(state.local_flag_ranges[1..], [[u32::MAX; 2]; 7]);
     assert_eq!(state.global_flag_ranges[7], [0x80000000, (-2i32) as u32]);
     assert_eq!(state.sound, snapshot.sound);
-    assert_eq!(state.message, snapshot.message);
+    let mut expected_message = snapshot.message;
+    expected_message[12..16].copy_from_slice(&15u32.to_le_bytes());
+    expected_message[16..20].copy_from_slice(&5u32.to_le_bytes());
+    assert_eq!(state.message, expected_message);
     assert_eq!(state.auto_select, snapshot.auto_select);
     state
         .apply_startup_xml(
@@ -142,6 +147,21 @@ fn defaults_and_xml_overlays_keep_missing_values_raw_flags_and_volume_update_ord
     let snapshot = state.clone();
     assert!(state.apply_startup_xml(b"<document>").is_err());
     assert_eq!(state, snapshot);
+}
+
+#[test]
+fn startup_auto_wait_presets_keep_raw_pairs_and_reselect_the_current_speed() {
+    let mut settings = SystemSettings::default();
+    settings.message[4..8].copy_from_slice(&31u32.to_le_bytes());
+    settings.apply_startup_xml(br#"<?xml version="1.0" encoding="UTF-8"?><document><GAME><autopriset><p31><base>0x80000000</base><char>-2</char></p31><p04><base>7</base></p04><p32><base>99</base></p32></autopriset></GAME></document>"#).unwrap();
+    assert_eq!(settings.auto_wait_presets[31], [0x80000000, (-2i32) as u32]);
+    assert_eq!(settings.auto_wait_presets[4], [7, 5]);
+    assert_eq!(&settings.message[12..16], 0x80000000u32.to_le_bytes());
+    assert_eq!(&settings.message[16..20], (-2i32).to_le_bytes());
+    settings
+        .apply_startup_xml(br#"<?xml version="1.0" encoding="UTF-8"?><document/>"#)
+        .unwrap();
+    assert_eq!(settings.auto_wait_presets[31], [0x80000000, (-2i32) as u32]);
 }
 
 #[test]

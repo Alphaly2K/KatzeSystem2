@@ -11,9 +11,11 @@ impl<F: ObjectFactory> Store<'_, F> {
         args: &[Vec<u8>],
         offset: usize,
     ) -> Result<bool> {
-        if args.first().is_none_or(|name| name != b"getconf") {
-            return Ok(false);
-        }
+        let write = match args.first().map(Vec::as_slice) {
+            Some(b"getconf") => false,
+            Some(b"setconf") => true,
+            _ => return Ok(false),
+        };
         let Some(destination) = args.get(1) else {
             return Ok(true);
         };
@@ -26,6 +28,9 @@ impl<F: ObjectFactory> Store<'_, F> {
         let Some(name) = args.get(2) else {
             return Ok(true);
         };
+        if write && self.host.system_settings.is_none() {
+            return Err(Error::new(offset, "运行时未配置全局设置"));
+        }
         let language = match name.as_slice() {
             b"lang_ui" => Some(self.host.languages.primary_index),
             b"lang_text_main" => Some(self.host.languages.message_index),
@@ -33,6 +38,19 @@ impl<F: ObjectFactory> Store<'_, F> {
             _ => None,
         };
         let value = if let Some(value) = language {
+            if write {
+                if name != b"lang_text_sub" {
+                    return Err(Error::new(offset, "FES 主语言切换通知尚未接入"));
+                }
+                self.host.languages.subtitle_index =
+                    if (destination as u32 as usize) < self.host.languages.prefixes.len() {
+                        destination as u32
+                    } else {
+                        u32::MAX
+                    };
+                self.finish_fes_config_write(offset)?;
+                return Ok(true);
+            }
             value
         } else {
             let (block, word): (u8, usize) = match name.as_slice() {
@@ -74,7 +92,9 @@ impl<F: ObjectFactory> Store<'_, F> {
                 b"mute_play" => (3, 0x15f8 / 4),
                 b"play" if (index as u32) < 48 => (3, (20 + index as usize * 116) / 4),
                 b"play" => {
-                    if let Some(slot) = self.numbers.shared.get_mut(destination as usize) {
+                    if write {
+                        self.finish_fes_config_write(offset)?;
+                    } else if let Some(slot) = self.numbers.shared.get_mut(destination as usize) {
                         *slot = 0;
                     }
                     return Ok(true);
@@ -84,10 +104,47 @@ impl<F: ObjectFactory> Store<'_, F> {
                 b"sysplay" | b"fshadow" | b"screen" | b"iswindow" | b"font" | b"ruby"
                 | b"fontweight" | b"fontfix" | b"fontprop" | b"activewindow" | b"use_sceneskip"
                 | b"use_jtalk" => {
-                    return Err(Error::new(offset, "FES 配置查询尚未接入"));
+                    return Err(Error::new(
+                        offset,
+                        if write {
+                            "FES 配置写回尚未接入"
+                        } else {
+                            "FES 配置查询尚未接入"
+                        },
+                    ));
                 }
-                _ => return Ok(true),
+                _ => {
+                    if write {
+                        self.finish_fes_config_write(offset)?;
+                    }
+                    return Ok(true);
+                }
             };
+            if write {
+                let settings = self
+                    .host
+                    .system_settings
+                    .as_mut()
+                    .ok_or_else(|| Error::new(offset, "运行时未配置全局设置"))?;
+                if name == b"autospd" {
+                    settings
+                        .select_auto_wait_preset(destination as u32)
+                        .map_err(|error| Error::new(offset, error.message))?;
+                } else if block == 4 {
+                    settings.scene_animation_enabled = destination as u32;
+                } else {
+                    let bytes: &mut [u8] = match block {
+                        0 => &mut settings.message,
+                        1 => &mut settings.effects,
+                        2 => &mut settings.window,
+                        _ => &mut settings.sound,
+                    };
+                    bytes[word * 4..word * 4 + 4]
+                        .copy_from_slice(&(destination as u32).to_le_bytes());
+                }
+                self.finish_fes_config_write(offset)?;
+                return Ok(true);
+            }
             let settings = self
                 .host
                 .system_settings
@@ -106,5 +163,15 @@ impl<F: ObjectFactory> Store<'_, F> {
             *slot = value as i32;
         }
         Ok(true)
+    }
+
+    fn finish_fes_config_write(&mut self, offset: usize) -> Result<()> {
+        self.host
+            .system_settings
+            .as_mut()
+            .ok_or_else(|| Error::new(offset, "运行时未配置全局设置"))?
+            .refresh_sound_volumes();
+        self.host.system_settings_dirty = 1;
+        Ok(())
     }
 }
