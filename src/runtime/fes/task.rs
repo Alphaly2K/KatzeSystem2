@@ -901,6 +901,10 @@ impl TaskObject for FesObject {
         None
     }
 
+    fn fes_scene(&self) -> Option<&Scene> {
+        self.scene.as_ref()
+    }
+
     fn interpreter_mut(&mut self) -> Option<&mut Interpreter> {
         None
     }

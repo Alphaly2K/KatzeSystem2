@@ -338,6 +338,11 @@ impl Interpreter {
             registered_subcommands: None,
         })
     }
+    /// 探针读取的停放状态与当前指令位置。
+    pub fn pending_pc(&self) -> (bool, usize, usize) {
+        (self.pending.is_some(), self.block, self.pc)
+    }
+
     pub fn resume(&mut self) {
         self.pending = None;
     }

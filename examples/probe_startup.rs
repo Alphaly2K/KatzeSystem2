@@ -434,6 +434,22 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                         "  节点 {id} 类型 {} 父 {:?} pc {:?} 时钟 {:?} 暂停 {:?}",
                         node.kind, node.parent, pc, elapsed, paused
                     );
+                    if let Some(scene) = object.and_then(|o| o.fes_scene()) {
+                        let (pending, block, pc) = scene.interpreter().pending_pc();
+                        println!(
+                            "    FES {id} pending {:?} 退出 {:?} 事件停放 {} 块 {} 指令 {}",
+                            scene.is_pending(),
+                            scene.exit_code(),
+                            pending,
+                            block,
+                            pc
+                        );
+                    }
+                }
+            }
+            for handle in runtime.cst_handles() {
+                if let Some(ctx) = runtime.cst_context(handle) {
+                    println!("    CST {handle} 位置 {:?}", ctx.position());
                 }
             }
             if let Some(vm) = runtime.object(task).and_then(|object| object.interpreter()) {

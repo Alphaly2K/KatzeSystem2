@@ -16,6 +16,11 @@ pub trait TaskObject {
     fn interpreter(&self) -> Option<&Interpreter>;
     fn interpreter_mut(&mut self) -> Option<&mut Interpreter>;
 
+    /// 探针读取 FES 场景；非 FES 对象返回 `None`。
+    fn fes_scene(&self) -> Option<&crate::runtime::fes::Scene> {
+        None
+    }
+
     /// 对象保存的外部区描述；普通装载转发使用此视图。
     fn external_storage(&self) -> Option<crate::memory::SharedMemory> {
         self.interpreter().map(Interpreter::external_storage)

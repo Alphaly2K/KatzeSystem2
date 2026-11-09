@@ -308,6 +308,11 @@ impl<F: ObjectFactory> Runtime<F> {
         self.resources.backlogs.get(&handle)
     }
 
+    /// 探针枚举已存在的 CST 上下文。
+    pub fn cst_handles(&self) -> Vec<u32> {
+        self.resources.cst_contexts.keys().copied().collect()
+    }
+
     pub fn cst_context(&self, handle: u32) -> Option<&CstContext> {
         self.resources.cst_contexts.get(&handle)
     }
