@@ -457,15 +457,16 @@ pub fn build_runtime(
     settings.refresh_sound_volumes();
     runtime.host_mut().languages =
         katze_system2::language::LanguageState::from_xml(startup.as_bytes())?;
-    runtime.host_mut().unicode_text =
-        katze_system2::resource::XmlDocument::parse(startup.as_bytes())?
-            .integer(b"APP/utfmode", 0)?;
+    let startup_xml = katze_system2::resource::XmlDocument::parse(startup.as_bytes())?;
+    runtime.host_mut().unicode_text = startup_xml.integer(b"APP/utfmode", 0)?;
     runtime.set_resources(router);
     #[cfg(target_os = "macos")]
     runtime.set_fonts(katze_system2::message::macos::MacFonts::new(&root));
-    runtime.set_save_services(Saves { root });
+    runtime.set_save_services(Saves {
+        root: std::env::var("KATZE_SAVE_ROOT").unwrap_or(root),
+    });
     runtime.host_mut().message_defaults = Some(Default::default());
-    runtime.host_mut().message_time_scale = Some(10);
+    runtime.host_mut().message_time_scale = Some(startup_xml.integer(b"GAME/strframe_frame", 0)?);
     let target = if settings.texture_grid.contains(&0) {
         RenderTarget::new(surface)?
     } else {
@@ -500,4 +501,14 @@ pub fn build_runtime(
         katze_system2::graphics::TextureFilter::Point,
     );
     Ok(runtime)
+}
+
+/// 每轮推进一个 1/60 秒逻辑帧，系统毫秒时钟由调用方独立提供。
+pub fn advance_frame(
+    runtime: &mut Runtime<Factory>,
+    frame: u32,
+    system_time_ms: u32,
+) -> Result<bool> {
+    runtime.host_mut().system_time_ms = system_time_ms;
+    runtime.update(frame, 1)
 }

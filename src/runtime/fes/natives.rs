@@ -55,6 +55,14 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             }
             630 => {
                 let mut name = format_string(vm, read::u32_at(arguments, 4)?, 0)?;
+                if std::env::var_os("KATZE_TRACE_NATIVE").is_some() {
+                    eprintln!(
+                        "[fes-call] caller={} pc={} target={target} block={:?}",
+                        self.host.task_id,
+                        vm.pc,
+                        String::from_utf8_lossy(&name),
+                    );
+                }
                 name.push(0);
                 let prefix = format_string(vm, read::u32_at(arguments, 8)?, 0)?;
                 let mut context = [0; 36];

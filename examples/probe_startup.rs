@@ -12,7 +12,7 @@ use katze_system2::{
     runtime::kind,
 };
 use std::collections::BTreeMap;
-use support::{Game, build_runtime, load_game};
+use support::{Game, advance_frame, build_runtime, load_game};
 
 /// 按轮次产生点击的设备；`KATZE_PROBE_CLICKS` 为逗号分隔的 `轮次@x:y` 项。
 struct ScriptedDevice {
@@ -403,8 +403,9 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     };
     let mut now = 0;
     for frame in 0..frames {
-        now += 16;
-        if let Err(error) = runtime.update(now, 16) {
+        now += 1;
+        let system_time_ms = (u64::from(now) * 1000 / 60) as u32;
+        if let Err(error) = advance_frame(&mut runtime, now, system_time_ms) {
             println!("第 {frame} 帧 pc {}：{}", error.offset, error.message);
             for id in 0..160 {
                 if let Some(vm) = runtime.object(id).and_then(|object| object.interpreter()) {

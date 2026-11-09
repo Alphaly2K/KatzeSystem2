@@ -274,7 +274,7 @@ rustc --edition=2024 -O --crate-name check_macos_font_fallback \
 target/check-macos-font-fallback
 ```
 
-`HostState::message_time_scale` 提供生成消息时间的全局比例，初值 None；与任务时钟和外层帧增量分别保存。独立宿主提供 `Host::fonts`、`message_time_scale`、`message_plane_display` 和 `submit_message`。后者按顶部起算的源矩形直接复制 BGRA，目标位置已包含配置偏移和矩形起点；保留 Alpha 及透明 RGB。运行时使用 `DrawingContext::copy_surface` 提交到分块画布，并沿已有平面进入最终帧。
+`HostState::message_time_scale` 提供生成消息时间的全局比例，初值 None；与任务时钟和外层帧增量分别保存。启动示例从 `GAME/strframe_frame` 读取该比例，缺失时取零；任务时钟每轮推进一个 1/60 秒逻辑帧，系统毫秒时钟独立提供。独立宿主提供 `Host::fonts`、`message_time_scale`、`message_plane_display` 和 `submit_message`。后者按顶部起算的源矩形直接复制 BGRA，目标位置已包含配置偏移和矩形起点；保留 Alpha 及透明 RGB。运行时使用 `DrawingContext::copy_surface` 提交到分块画布，并沿已有平面进入最终帧。
 
 命令通过 `CommandBuffers.data1` 传入配置或以零结尾的文字；标量继续使用 `Command.data`，不将 DWORD 解释为宿主指针。两条路径使用下列独立编号，已处理命令消费当前分支并保留未写入的返回槽。
 

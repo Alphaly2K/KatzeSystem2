@@ -13,7 +13,7 @@ use katze_system2::{
 use minifb::{Key, MouseButton, MouseMode, Window, WindowOptions};
 use std::cell::RefCell;
 use std::rc::Rc;
-use support::{build_runtime, load_game};
+use support::{advance_frame, build_runtime, load_game};
 
 /// minifb 键到 Windows 虚拟键码的映射；键槽绑定按 VK 低八位匹配。
 const KEY_VK: &[(Key, u8)] = &[
@@ -261,7 +261,8 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
     let mut window = Window::new("katze-system2", 1280, 720, WindowOptions::default())?;
     window.set_target_fps(60);
-    let mut now = 0;
+    let mut now = 0u32;
+    let started = std::time::Instant::now();
     while window.is_open() && !window.is_key_down(Key::Escape) {
         {
             let mut shared = shared.borrow_mut();
@@ -296,8 +297,8 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             shared.foreground = window.is_active();
             window.set_cursor_visibility(shared.cursor != 0);
         }
-        now += 16;
-        if let Err(error) = runtime.update(now, 16) {
+        now = now.wrapping_add(1);
+        if let Err(error) = advance_frame(&mut runtime, now, started.elapsed().as_millis() as u32) {
             eprintln!("pc {}：{}", error.offset, error.message);
             for id in 0..64 {
                 if let Some(vm) = runtime.object(id).and_then(|object| object.interpreter()) {
