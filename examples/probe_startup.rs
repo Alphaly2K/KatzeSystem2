@@ -453,11 +453,12 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 }
             }
             for id in 0..160 {
-                if let Some(page) = runtime
-                    .object(id)
-                    .and_then(|o| o.message_page())
-                {
-                    println!("    消息页 {id}: 文本 {:?} 字符数 {}", page.source(), page.source().chars().count());
+                if let Some(page) = runtime.object(id).and_then(|o| o.message_page()) {
+                    println!(
+                        "    消息页 {id}: 文本 {:?} 字符数 {}",
+                        page.source(),
+                        page.source().chars().count()
+                    );
                 }
             }
             for handle in runtime.cst_handles() {
