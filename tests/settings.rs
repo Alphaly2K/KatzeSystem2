@@ -172,6 +172,30 @@ fn platform_overlay_checks_fullscreen_candidates_before_truncation_and_keeps_inh
         })
         .unwrap();
     assert_eq!(platform.fullscreen_size, [1, 480]);
+
+    let startup = br#"<?xml version="1.0" encoding="UTF-8"?><document>
+        <SCREEN><width>65537</width><height>480</height><full_width>66816</full_width><full_height>66256</full_height><fps>75</fps></SCREEN>
+        <WINDOW><fps>99</fps></WINDOW><TEXTURE><filter_min>-1</filter_min><min>99</min></TEXTURE>
+        <SOUND><stereo>99</stereo><use3d>7</use3d></SOUND></document>"#;
+    platform.etc_cache = 17;
+    platform
+        .apply_startup_xml(startup, |candidate| {
+            assert_eq!(candidate, [1280, 720]);
+            [1920, 1080]
+        })
+        .unwrap();
+    assert_eq!(platform.window_size, [1, 480]);
+    assert_eq!(platform.fullscreen_size, [1920, 1080]);
+    assert_eq!(
+        [
+            platform.window_fps,
+            platform.texture_min,
+            platform.sound_ds3d,
+            platform.sound_stereo,
+            platform.etc_cache
+        ],
+        [75, u32::MAX, 7, 1, 1]
+    );
 }
 
 #[test]

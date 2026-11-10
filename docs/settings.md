@@ -41,6 +41,8 @@
 
 `apply_user_xml(bytes, supports_fullscreen)` 覆盖平台用户字段。窗口尺寸保存低十六位；全屏候选缺省取覆盖后的窗口尺寸，由回调检查原始 DWORD 候选，接受后才保存低十六位，拒绝时保留当前全屏尺寸。调用方应按平台当前可用模式实现回调。缺失字段保留原值，但 `ETC/disablemovie` 缺失时归零。`WINDOW/full_wide`、`ETC/cache`、`DEPEND/z32`、`DEPEND/use_z` 只写出，不从用户文档覆盖。浮点及宽字符沿用 [XML 字段契约](resources.md#脚本-xml-字段)。
 
+`apply_startup_xml(bytes, adjust_fullscreen)` 使用启动字段路径：尺寸、帧率、限制及全屏选项在 `SCREEN` 下，屏保／伪装在 `GENERAL` 下，纹理过滤使用 `filter_min`／`filter_mag`，三维声音使用 `SOUND/use3d`，图像缓存及双核使用 `APP/imgcache`／`dualcore`，指针模式为 `CURSOR/mode`。全屏候选缺省取窗口尺寸，先保存低十六位再交给宿主调整，返回值同样保存低十六位；无显示设备时可直接返回候选。`ETC/cache` 缺失时取一。全屏窗口位置由 `SystemSettings::apply_startup_xml` 的 `SCREEN/mw_pos` 读取。
+
 `settings::write_configuration(xml, system, platform, languages, keys)` 把主平台配置和用户选项写入同一文档。窗口全屏开关及位置从 `SystemSettings` 读取，语言从 `LanguageState` 读取；用户选项中同时写入配置类型、字体、手柄开关及启用按键槽。它与各模型的独立写出接口共用当前值。文件保存及装载后的设备应用由宿主执行。
 
 普通 361 无参数，以状态二继续，不修改返回槽或配置变更标记。宿主需提供 `system_settings`、`platform_settings`、按键配置及 `ConfigurationServices`。独立宿主从 `HostState::configuration_keys` 读取按键；运行时优先使用输入设备的 `key_configuration()` 当前值，无设备配置时再取该字段。读取绑定不采集或提交输入状态。

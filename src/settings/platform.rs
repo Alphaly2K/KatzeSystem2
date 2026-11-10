@@ -110,6 +110,50 @@ impl Default for PlatformSettings {
 }
 
 impl PlatformSettings {
+    /// 读取启动文档的 SCREEN、GENERAL、APP 等平台字段。
+    /// 全屏候选先取低十六位，再交由宿主按可用显示模式调整。
+    pub fn apply_startup_xml(
+        &mut self,
+        input: &[u8],
+        mut adjust_fullscreen: impl FnMut([u32; 2]) -> [u32; 2],
+    ) -> Result<()> {
+        let xml = XmlDocument::parse(input)?;
+        self.window_screensaver = xml.integer(b"GENERAL/screensaver", self.window_screensaver)?;
+        self.window_camouflage = xml.integer(b"GENERAL/camouflage", self.window_camouflage)?;
+        for (axis, value) in ["width", "height"].into_iter().zip(&mut self.window_size) {
+            *value = xml.integer(format!("SCREEN/{axis}").as_bytes(), u32::from(*value))? as u16;
+        }
+        let mut candidate = self.window_size.map(u32::from);
+        for (axis, value) in ["full_width", "full_height"]
+            .into_iter()
+            .zip(&mut candidate)
+        {
+            *value = u32::from(xml.integer(format!("SCREEN/{axis}").as_bytes(), *value)? as u16);
+        }
+        self.fullscreen_size = adjust_fullscreen(candidate).map(|value| value as u16);
+        for (path, value) in [
+            (b"SCREEN/limit".as_slice(), &mut self.window_limit),
+            (b"SCREEN/fps", &mut self.window_fps),
+            (b"TEXTURE/bpp", &mut self.texture_bpp),
+            (b"TEXTURE/filter_min", &mut self.texture_min),
+            (b"TEXTURE/filter_mag", &mut self.texture_mag),
+            (b"TEXTURE/dither", &mut self.texture_dither),
+            (b"SOUND/use3d", &mut self.sound_ds3d),
+            (b"SOUND/sticky", &mut self.sound_sticky),
+            (b"APP/imgcache", &mut self.etc_imgcache),
+            (b"APP/dualcore", &mut self.etc_dualcore),
+            (b"SCREEN/full_size", &mut self.full_screen_full_size),
+            (b"SCREEN/full_pos", &mut self.full_screen_full_pos),
+            (b"SCREEN/wall", &mut self.full_screen_wall),
+            (b"SCREEN/no_full_res", &mut self.full_screen_no_full_res),
+            (b"CURSOR/mode", &mut self.window_cursor_mode),
+        ] {
+            *value = xml.integer(path, *value)?;
+        }
+        self.etc_cache = xml.integer(b"ETC/cache", 1)?;
+        Ok(())
+    }
+
     /// 覆盖用户配置；全屏候选尺寸只有被宿主接受才写入，否则保留原值。
     /// 候选缺省取覆盖后的窗口尺寸，检查在截取低十六位之前进行。
     pub fn apply_user_xml(
