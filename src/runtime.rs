@@ -1701,6 +1701,13 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         self.host.sound_config_enabled
     }
 
+    fn jtalk_enabled(&self) -> u32 {
+        self.host
+            .system_settings
+            .as_ref()
+            .map_or(0, |settings| settings.jtalk_enabled)
+    }
+
     fn sound_group_id(&self, name: &[u8]) -> Result<u32> {
         self.host.sound_group_id(name)
     }

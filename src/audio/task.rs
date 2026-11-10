@@ -494,7 +494,7 @@ impl TaskObject for SoundObject {
         }
         match command.code {
             19 => {
-                if host.sound_config_enabled() == 0 {
+                if host.jtalk_enabled() == 0 {
                     self.audio.configuration_changed();
                 }
                 *output = 1;
@@ -738,8 +738,15 @@ mod tests {
             code: 19,
             data: [u32::MAX; 3],
         };
-        for enabled in [1, 0x8000_0000, 0] {
-            host.host.sound_config_enabled = enabled;
+        host.host.system_settings = Some(crate::settings::SystemSettings::default());
+        for (modern, enabled) in [0, 1, 0x8000_0000]
+            .into_iter()
+            .flat_map(|modern| [1, 0x8000_0000, 0].map(|enabled| (modern, enabled)))
+        {
+            host.host.sound_config_enabled = modern;
+            host.host.system_settings.as_mut().unwrap().jtalk_enabled = enabled;
+            object.audio.channels[0].allocation_flags = [37, 41];
+            object.audio.channels[0].ramps.remaining = [17.0, 19.0];
             let mut output = 99;
             let result = object
                 .dispatch_command(kind::SOUND, &command, &mut output, &mut host, 1)
@@ -763,6 +770,7 @@ mod tests {
             assert!(object.audio.channels[7].is_playing());
             assert!(!object.audio.channels[11].is_playing());
         }
+        host.host.system_settings = None;
         object.audio.channels[7].grouped = false;
         object.audio.channels[63].grouped = true;
         object.audio.channels[63].linked = Some(63);

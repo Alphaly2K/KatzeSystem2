@@ -341,6 +341,11 @@ pub trait Host {
         0
     }
 
+    /// GAME/use_jtalk 的原始开关；缺省使用配置构造值零。
+    fn jtalk_enabled(&self) -> u32 {
+        0
+    }
+
     fn sound_group_id(&self, name: &[u8]) -> Result<u32> {
         Ok(crate::audio::SoundGroups::legacy_id(name))
     }
@@ -542,6 +547,10 @@ impl<T: Host + ?Sized> Host for &mut T {
 
     fn sound_config_enabled(&self) -> u32 {
         (**self).sound_config_enabled()
+    }
+
+    fn jtalk_enabled(&self) -> u32 {
+        (**self).jtalk_enabled()
     }
 
     fn sound_group_id(&self, name: &[u8]) -> Result<u32> {
