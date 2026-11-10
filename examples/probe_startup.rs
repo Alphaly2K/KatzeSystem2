@@ -6,7 +6,7 @@ mod support;
 
 use katze_system2::{
     Result,
-    input::{InputDevice, KeySample, PointerSample},
+    input::{ButtonSource, DeviceKeys, InputDevice, KeySample, PointerSample},
     kcs::ResourceServices,
     resource::ResourceMode,
     runtime::kind,
@@ -18,10 +18,11 @@ use support::{Game, advance_frame, build_runtime, load_game};
 struct ScriptedDevice {
     polls: u32,
     clicks: Vec<(u32, [i32; 2])>,
+    keys: DeviceKeys,
 }
 
 impl ScriptedDevice {
-    fn new() -> Self {
+    fn new(config: &[u8]) -> Result<Self> {
         let clicks = std::env::var("KATZE_PROBE_CLICKS").map_or_else(
             |_| Vec::new(),
             |value| {
@@ -40,13 +41,22 @@ impl ScriptedDevice {
                     .collect()
             },
         );
-        Self { polls: 0, clicks }
+        Ok(Self {
+            polls: 0,
+            clicks,
+            keys: support::input_keys(config)?,
+        })
     }
 }
 
 impl InputDevice for ScriptedDevice {
     fn poll(&mut self) -> Result<()> {
         self.polls = self.polls.wrapping_add(1);
+        let pressed = self
+            .clicks
+            .iter()
+            .any(|(round, _)| self.polls >= *round && self.polls < round + 2);
+        self.keys.button(ButtonSource::Mouse, 1, u32::from(pressed));
         if std::env::var_os("KATZE_TRACE_INPUT").is_some() && self.polls < 320 {
             eprintln!("[input-poll] polls={}", self.polls);
         }
@@ -63,18 +73,8 @@ impl InputDevice for ScriptedDevice {
             active: u32::from(click.is_some_and(|(round, _)| self.polls < round + 2)),
         })
     }
-    fn key(&mut self, key: u32, group: u32, _: bool) -> Result<KeySample> {
-        // 鼠标左键以键零组零掩码位 2 报告。
-        let pressed = key == 0
-            && group == 0
-            && self
-                .clicks
-                .iter()
-                .any(|(round, _)| self.polls >= *round && self.polls < round + 2);
-        Ok(KeySample {
-            mask: if pressed { 2 } else { 0 },
-            repeat: 0,
-        })
+    fn key(&mut self, key: u32, group: u32, repeat: bool) -> Result<KeySample> {
+        self.keys.sample(key, group, repeat)
     }
     fn take_wheel(&mut self) -> Result<u32> {
         Ok(0)
@@ -86,6 +86,7 @@ impl InputDevice for ScriptedDevice {
         Ok(())
     }
     fn commit(&mut self) -> Result<()> {
+        self.keys.commit();
         Ok(())
     }
     fn history(&mut self) -> Result<[u8; 32]> {
@@ -101,6 +102,7 @@ impl InputDevice for ScriptedDevice {
         Ok(())
     }
     fn clear_keys(&mut self) -> Result<()> {
+        self.keys.clear_pressed();
         Ok(())
     }
     fn clear_touches(&mut self) -> Result<()> {
@@ -344,6 +346,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             .map(|instruction| instruction.offset)
     );
 
+    let device = ScriptedDevice::new(game.startup.as_bytes())?;
     let mut runtime = build_runtime(
         Game {
             root: game.root,
@@ -354,7 +357,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         },
         [1280, 720],
     )?;
-    runtime.set_input_device(ScriptedDevice::new())?;
+    runtime.set_input_device(device)?;
     let input = runtime.create(0, kind::INPUT, b"input", b"")?;
     let sound = runtime.create(0, kind::SOUND, b"sound", b"")?;
     println!("输入 {input} 声音 {sound}");

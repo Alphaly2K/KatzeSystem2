@@ -12,7 +12,7 @@ use katze_system2::{
     audio::SoundFactory,
     expression::State,
     graphics::{DrawingContext, GraphicsFactory, RenderTarget},
-    input::InputFactory,
+    input::{ButtonSource, DeviceBinding, DeviceKeys, InputFactory},
     kcs::{Program, ResourceServices},
     memory::SharedMemory,
     resource::{ArchiveConfig, ResourceMode},
@@ -24,6 +24,19 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 
 const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+
+pub fn input_keys(config: &[u8]) -> Result<DeviceKeys> {
+    let mut keys = DeviceKeys::from_xml(config)?;
+    if keys.bindings().iter().all(|binding| binding.enabled == 0) {
+        let mut binding = DeviceBinding {
+            enabled: 1,
+            ..Default::default()
+        };
+        binding.codes[ButtonSource::Mouse as usize][0] = 1;
+        keys.set_binding(0, binding)?;
+    }
+    Ok(keys)
+}
 
 fn decode(name: &[u8], position_shift: usize) -> Vec<u8> {
     name.iter()

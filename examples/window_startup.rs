@@ -7,7 +7,7 @@ mod support;
 
 use katze_system2::{
     Result,
-    input::{ButtonSource, DeviceBinding, DeviceKeys, InputDevice, KeySample, PointerSample},
+    input::{ButtonSource, DeviceKeys, InputDevice, KeySample, PointerSample},
     runtime::kind,
 };
 use minifb::{Key, MouseButton, MouseMode, Window, WindowOptions};
@@ -155,16 +155,7 @@ struct WindowDevice {
 
 impl WindowDevice {
     fn new(config: &[u8], shared: Rc<RefCell<Shared>>) -> Result<Self> {
-        let mut keys = DeviceKeys::from_xml(config).unwrap_or_default();
-        // 启动配置未提供 KEYCUSTOMIZE 时登记鼠标左键为槽零组零。
-        if keys.bindings().iter().all(|binding| binding.enabled == 0) {
-            let mut binding = DeviceBinding {
-                enabled: 1,
-                ..Default::default()
-            };
-            binding.codes[ButtonSource::Mouse as usize][0] = 0;
-            keys.set_binding(0, binding)?;
-        }
+        let keys = support::input_keys(config)?;
         Ok(Self { shared, keys })
     }
 }
@@ -272,8 +263,8 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             shared.position = [x as i32, y as i32];
             shared.active = u32::from(window.get_mouse_down(MouseButton::Left));
             for (button, code) in [
-                (MouseButton::Left, 0),
-                (MouseButton::Right, 1),
+                (MouseButton::Left, 1),
+                (MouseButton::Right, 3),
                 (MouseButton::Middle, 2),
             ] {
                 shared.events.push((
