@@ -1,4 +1,41 @@
-use katze_system2::resource::XmlDocument;
+use katze_system2::resource::{XmlDocument, XmlWriter};
+
+#[test]
+fn writing_keeps_native_order_literal_text_and_container_value_rules() {
+    let mut writer = XmlWriter::new();
+    assert_eq!(
+        writer.to_bytes().unwrap(),
+        b"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<document></document>\r\n"
+    );
+    writer.write(&[], b"root text").unwrap();
+    writer.write(&["group"], b"parent text").unwrap();
+    writer.write(&["group", "first"], b"old").unwrap();
+    writer.write(&["group", "second"], b"second").unwrap();
+    writer
+        .write(&["group", "first"], b" \t&entity; <literal>\r\n")
+        .unwrap();
+    writer.write_integer(&["number"], 0x8000_0000).unwrap();
+    writer.write(&["number\0tail"], b"-1\0tail").unwrap();
+    writer.write(&["empty"], b"").unwrap();
+    assert_eq!(writer.to_bytes().unwrap(), b"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<document>\r\n  <empty></empty>\r\n  <number>-1</number>\r\n  <group>\r\n    <second>second</second>\r\n    <first> \t&entity; <literal>\r\n</first>\r\n  </group>\r\n</document>\r\n");
+}
+
+#[test]
+fn writing_wide_text_preserves_unit_conversion_and_failed_replacements() {
+    let mut writer = XmlWriter::new();
+    writer.write_integer(&["signed"], 0x8000_0000).unwrap();
+    writer
+        .write_wide(&["wide"], &[0x41, 0x3a9, 0xd83d, 0xde00, 0xffff, 0, 0x42])
+        .unwrap();
+    let mut expected = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<document>\r\n  <wide>AΩ��"
+        .as_bytes()
+        .to_vec();
+    expected.extend(b"\xff\xff</wide>\r\n  <signed>-2147483648</signed>\r\n</document>\r\n");
+    assert_eq!(writer.to_bytes().unwrap(), expected);
+    assert!(writer.write_wide(&["wide"], &vec![0x41; 4096]).is_err());
+    assert_eq!(writer.to_bytes().unwrap(), expected);
+    writer.write_wide(&["wide"], &vec![0x41; 4095]).unwrap();
+}
 
 fn xml(body: &str) -> XmlDocument {
     XmlDocument::parse(format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?>{body}").as_bytes())

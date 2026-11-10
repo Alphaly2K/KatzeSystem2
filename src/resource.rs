@@ -12,7 +12,7 @@ pub use router::{
     ArchiveMount, ResourceData, ResourceGroup, ResourceMember, ResourceMode, ResourceRouter,
     ResourceSlot, ResourceSource,
 };
-pub use xml::XmlDocument;
+pub use xml::{XmlDocument, XmlWriter};
 
 /// 由资源配置提供的虚拟名前缀和缺省扩展名；目录扫描使用基线 CP932 范围。
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

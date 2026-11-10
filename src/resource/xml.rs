@@ -3,6 +3,9 @@ use crate::{Error, Result, read, text};
 use roxmltree::Document;
 use std::collections::BTreeMap;
 
+mod write;
+pub use write::XmlWriter;
+
 /// 基线 XML 的只读字段表；重复路径合并，文本保留 UTF-8 和字面实体。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct XmlDocument {
