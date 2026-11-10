@@ -75,6 +75,9 @@ pub trait TaskObject {
     /// 时钟和子任务更新前执行的主体前置处理。
     fn begin_update(&mut self) {}
 
+    /// 构造后保存全局语言选择，供后续配置通知比较。
+    fn initialize_language(&mut self, _selection: [u32; 3]) {}
+
     /// 接收创建命令 26 传递的原始上下文；对象类型不支持时返回诊断。
     fn set_creation_context(&mut self, context: &[u8]) -> Result<()>;
 

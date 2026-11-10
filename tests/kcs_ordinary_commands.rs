@@ -145,6 +145,56 @@ fn control_notifications_translate_messages_without_changing_the_task_clock() {
 }
 
 #[test]
+fn configuration_notification_queues_before_language_change_without_running_the_vm() {
+    for changed in [None, Some(0), Some(1), Some(2)] {
+        let mut state = State::new(8);
+        let mut host = CoreHost::new(&mut state);
+        let mut task = receiver(&[0x3b]);
+        task.update(100, 3, &mut host, 100).unwrap();
+        task.running = 0;
+        let clock = task.clock.clone();
+        let pc = task.interpreter.pc;
+        let mut selection = [0, 0, u32::MAX];
+        if let Some(index) = changed {
+            selection[index] = 0x8000_0000;
+        }
+        host.host.languages.primary_index = selection[0];
+        host.host.languages.message_index = selection[1];
+        host.host.languages.subtitle_index = selection[2];
+        let command = Command {
+            target: 42,
+            sender: 37,
+            code: 19,
+            data: [12, 34, u32::MAX],
+        };
+        let mut output = 99;
+        let result = task
+            .dispatch_control(12, &command, &mut output, &mut host, 1)
+            .unwrap();
+        assert!(result.done && !result.propagate);
+        assert_eq!(output, 1);
+        let mut expected = vec![[37, 0xffff_0011, 0, 0]];
+        if changed.is_some() {
+            expected.push([37, 0xffff_001a, 0, 0]);
+        }
+        assert_eq!(task.queued_messages(), expected);
+        assert_eq!(task.language_selection, selection);
+        task.dispatch_control(12, &command, &mut output, &mut host, 1)
+            .unwrap();
+        expected.push([37, 0xffff_0011, 0, 0]);
+        assert_eq!(task.queued_messages(), expected);
+        assert_eq!((task.interpreter.pc, &task.clock), (pc, &clock));
+        assert_eq!((task.running, task.accumulated_increment), (0, 3));
+        task.control.deletion_requested = -1;
+        output = 99;
+        task.dispatch_control(12, &command, &mut output, &mut host, 1)
+            .unwrap();
+        assert_eq!(output, 99);
+        assert_eq!(task.queued_messages(), expected);
+    }
+}
+
+#[test]
 fn synchronous_delivery_keeps_task_state_and_defers_output_until_completion() {
     for (ending, expected) in [(&[][..], 1), (&[0x3b][..], 0)] {
         let mut state = State::new(8);

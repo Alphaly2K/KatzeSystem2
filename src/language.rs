@@ -43,6 +43,11 @@ impl Default for LanguageState {
 }
 
 impl LanguageState {
+    /// 界面、主文字、副文字的原始选择；不应用前缀回退。
+    pub fn selection(&self) -> [u32; 3] {
+        [self.primary_index, self.message_index, self.subtitle_index]
+    }
+
     /// 读取启动 XML 的 `language` 段。
     ///
     /// 还原默认编号和 `L%02d` 声明的有序前缀表，首个缺失 `<prefix>` 的

@@ -32,6 +32,10 @@ impl<'a, H: Host, S: SystemServices> SystemHost<'a, H, S> {
 }
 
 impl<H: Host, S: SystemServices> Host for SystemHost<'_, H, S> {
+    fn language_selection(&self) -> [u32; 3] {
+        self.inner.language_selection()
+    }
+
     fn load_sequence_data(&mut self, handle: u32, bytes: Vec<u8>) -> Result<()> {
         self.inner.load_sequence_data(handle, bytes)
     }

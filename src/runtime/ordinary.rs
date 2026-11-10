@@ -10,6 +10,7 @@ struct Unloaded {
     running: i32,
     accumulated_increment: u32,
     messages: Vec<[u32; 4]>,
+    language_selection: [u32; 3],
 }
 
 struct Loading {
@@ -104,7 +105,10 @@ impl OrdinaryObject {
         Self {
             id,
             task: None,
-            unloaded: Unloaded::default(),
+            unloaded: Unloaded {
+                language_selection: [0, 0, u32::MAX],
+                ..Unloaded::default()
+            },
             shared_numbers: false,
             loading: None,
             external,
@@ -157,6 +161,7 @@ impl OrdinaryObject {
                 running: task.running,
                 accumulated_increment: task.accumulated_increment,
                 messages: task.queued_messages().to_vec(),
+                language_selection: task.language_selection,
             };
         }
     }
@@ -206,6 +211,7 @@ impl OrdinaryObject {
                         task.clock = self.unloaded.base.clock.clone();
                         task.creation_context = self.unloaded.context.clone();
                         task.accumulated_increment = self.unloaded.accumulated_increment;
+                        task.language_selection = self.unloaded.language_selection;
                         for message in &self.unloaded.messages {
                             task.enqueue_message(*message)?;
                         }
@@ -271,6 +277,14 @@ impl OrdinaryObject {
 }
 
 impl TaskObject for OrdinaryObject {
+    fn initialize_language(&mut self, selection: [u32; 3]) {
+        if let Some(task) = &mut self.task {
+            task.language_selection = selection;
+        } else {
+            self.unloaded.language_selection = selection;
+        }
+    }
+
     fn shared_numbers_available(&self) -> Option<bool> {
         Some(self.shared_numbers)
     }
@@ -419,10 +433,14 @@ impl TaskObject for OrdinaryObject {
                     return task.dispatch_control(kind, command, output, &mut host, budget);
                 }
                 match command.code {
+                    19 => {
+                        self.unloaded.language_selection = host.language_selection();
+                        *output = 1;
+                    }
                     4 | 18 | 22 | 25 | 26 | 30 | 31 | 64 | 162 | 163 => (),
                     9 | 10 => *output = 0,
                     20 | 21 | 65 => *output = 1,
-                    6 | 19 | 164..=179 | 336 | 452 => {
+                    6 | 164..=179 | 336 | 452 => {
                         return Err(Error::new(
                             0,
                             format!("未支持的未装载普通任务命令 {}", command.code),

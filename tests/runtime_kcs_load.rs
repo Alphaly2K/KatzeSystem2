@@ -182,6 +182,65 @@ fn load_initialization_preserves_task_state_and_missing_program_removes_the_vm()
     }
 }
 
+#[test]
+fn configuration_language_snapshot_survives_missing_and_replaced_programs() {
+    for budget in [1, 4096] {
+        let mut runtime = Runtime::new(
+            0,
+            kind::ROOT,
+            Box::new(RootObject::new(0, 0)),
+            State::new(8),
+            KcsFactory::new(Loader {
+                fail: Rc::new(Cell::new(false)),
+                loads: Rc::default(),
+            }),
+        );
+        runtime.set_budget(budget, 10000);
+        runtime.host_mut().languages.primary_index = 37;
+        let id = runtime.create_unloaded_ordinary(0, &[]).unwrap();
+        load(&mut runtime, id, 0, b"child.kcs").unwrap();
+        let notify = command(id, 19, [12, 34, u32::MAX]);
+        assert_eq!(runtime.dispatch_command(0, notify).unwrap(), 1);
+        assert_eq!(
+            runtime.object(id).unwrap().queued_messages().unwrap(),
+            [[0, 0xffff_0011, 0, 0]]
+        );
+        load(&mut runtime, id, 0, b"missing.kcs").unwrap();
+        runtime.host_mut().languages.message_index = u32::MAX;
+        assert_eq!(runtime.dispatch_command(0, notify).unwrap(), 1);
+        // 未装载时只更新快照，保留旧队列。
+        assert_eq!(
+            runtime.object(id).unwrap().queued_messages().unwrap(),
+            [[0, 0xffff_0011, 0, 0]]
+        );
+        load(&mut runtime, id, 0, b"child.kcs").unwrap();
+        runtime.host_mut().languages.subtitle_index = 0x8000_0000;
+        load(&mut runtime, id, 0, b"child.kcs").unwrap();
+        runtime.dispatch_command(0, notify).unwrap();
+        runtime.dispatch_command(0, notify).unwrap();
+        assert_eq!(counter(&runtime, id), 0);
+        assert_eq!(
+            runtime.object(id).unwrap().queued_messages().unwrap(),
+            [
+                [0, 0xffff_0011, 0, 0],
+                [0, 0xffff_0011, 0, 0],
+                [0, 0xffff_001a, 0, 0],
+                [0, 0xffff_0011, 0, 0],
+            ]
+        );
+        let loaded = runtime
+            .create(0, kind::ORDINARY, b"other.kcs", &[])
+            .unwrap();
+        runtime
+            .dispatch_command(0, command(loaded, 19, [0; 3]))
+            .unwrap();
+        assert_eq!(
+            runtime.object(loaded).unwrap().queued_messages().unwrap(),
+            [[0, 0xffff_0011, 0, 0]]
+        );
+    }
+}
+
 struct Files(Vec<u8>);
 impl ResourceServices for Files {
     fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {

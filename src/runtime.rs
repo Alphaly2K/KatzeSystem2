@@ -156,13 +156,14 @@ impl<F: ObjectFactory> Runtime<F> {
     pub fn new(
         root_id: u32,
         root_kind: u32,
-        root: Box<dyn TaskObject>,
+        mut root: Box<dyn TaskObject>,
         numbers: expression::State,
         factory: F,
     ) -> Self {
         let mut host = HostState::default();
         host.configured_shared_slots = numbers.shared.len() as u32;
         let resources = Resources::with_handles(host.handle_allocator());
+        root.initialize_language(host.languages.selection());
         Self {
             tree: TaskTree::new(root_id, root_kind),
             objects: BTreeMap::from([(root_id, root)]),
@@ -655,6 +656,7 @@ fn create_object_impl<F: ObjectFactory>(
     } else {
         factory.create(id, kind, name)?
     };
+    object.initialize_language(host.languages.selection());
     object.set_creation_context(context)?;
     if let (Some(audio), Some(groups)) = (object.audio_state_mut(), host.sound_groups.as_ref()) {
         audio.set_groups(groups)?;
@@ -1576,6 +1578,10 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
 }
 
 impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
+    fn language_selection(&self) -> [u32; 3] {
+        self.host.languages.selection()
+    }
+
     fn load_sequence_data(&mut self, handle: u32, bytes: Vec<u8>) -> Result<()> {
         self.host.load_sequence_data(handle, bytes)
     }

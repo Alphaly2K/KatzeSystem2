@@ -241,6 +241,11 @@ pub struct TaskEffects {
 }
 
 pub trait Host {
+    /// 配置通知比较的界面、主文字、副文字原始选择。
+    fn language_selection(&self) -> [u32; 3] {
+        [0, 0, u32::MAX]
+    }
+
     /// 名称表装载时使用的全局 Unicode 模式；默认保留 CP932 主姓名。
     fn unicode_text(&self) -> bool {
         false
@@ -464,6 +469,10 @@ pub trait Host {
 }
 
 impl<T: Host + ?Sized> Host for &mut T {
+    fn language_selection(&self) -> [u32; 3] {
+        (**self).language_selection()
+    }
+
     fn load_sequence_data(&mut self, handle: u32, bytes: Vec<u8>) -> Result<()> {
         (**self).load_sequence_data(handle, bytes)
     }

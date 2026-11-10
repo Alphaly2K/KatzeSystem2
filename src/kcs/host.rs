@@ -210,6 +210,10 @@ impl std::ops::DerefMut for CoreHost<'_> {
 }
 
 impl Host for CoreHost<'_> {
+    fn language_selection(&self) -> [u32; 3] {
+        self.host.languages.selection()
+    }
+
     fn unicode_text(&self) -> bool {
         self.host.unicode_text != 0
     }

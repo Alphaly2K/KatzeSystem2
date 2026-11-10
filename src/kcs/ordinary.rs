@@ -23,6 +23,8 @@ pub struct OrdinaryTask {
     pub running: i32,
     pub task_id: u32,
     pub accumulated_increment: u32,
+    /// 构造时的语言选择，随后由命令 19 更新。
+    pub language_selection: [u32; 3],
     messages: Vec<[u32; 4]>,
     phase: Option<UpdatePhase>,
     command_phase: Option<CommandPhase>,
@@ -38,6 +40,7 @@ impl OrdinaryTask {
             running: 1,
             task_id: 0,
             accumulated_increment: 0,
+            language_selection: [0, 0, u32::MAX],
             messages: Vec::new(),
             phase: None,
             command_phase: None,
@@ -208,6 +211,15 @@ impl OrdinaryTask {
             return Ok(CommandOutcome::finished(false));
         }
         match command.code {
+            19 => {
+                let selection = host.language_selection();
+                self.enqueue_message([command.sender, 0xffff_0011, 0, 0])?;
+                if self.language_selection != selection {
+                    self.enqueue_message([command.sender, 0xffff_001a, 0, 0])?;
+                }
+                self.language_selection = selection;
+                *output = 1;
+            }
             20 | 21 => {
                 self.enqueue_message([
                     command.sender,
@@ -239,7 +251,7 @@ impl OrdinaryTask {
                     self.set_creation_context(Some(&context))?;
                 }
             }
-            6 | 19 | 161 | 164..=179 | 336 => {
+            6 | 161 | 164..=179 | 336 => {
                 return Err(Error::new(
                     self.interpreter.pc,
                     format!("未支持的普通任务控制命令 {}", command.code),
