@@ -1,3 +1,6 @@
+mod persistence;
+use persistence::{EFFECTS_FIELDS, MESSAGE_FIELDS, SOUND_FIELDS, WINDOW_FIELDS};
+
 /// 全局配置及普通脚本可查询的变量范围。
 ///
 /// 配置覆盖和脚本写回只修改数据，不触发设备或消息对象更新。
@@ -242,23 +245,7 @@ impl SystemSettings {
         }
         self.fullscreen = xml.integer(b"WINDOW/fullscreen", self.fullscreen)?;
         self.fullscreen_mw_pos = xml.integer(b"FULL_SCREEN/mw_pos", self.fullscreen_mw_pos)?;
-        apply_words(
-            &mut self.sound,
-            &[
-                (0x15d8, b"VOICE/vol_bgm"),
-                (0x15dc, b"VOICE/vol_se"),
-                (0x15e0, b"VOICE/vol_voice"),
-                (0x15e4, b"VOICE/vol_play"),
-                (0x15d4, b"VOICE/vol_master"),
-                (0x10, b"VOICE/cont_voice"),
-                (0x15e8, b"VOICE/mute_master"),
-                (0x15ec, b"VOICE/mute_bgm"),
-                (0x15f0, b"VOICE/mute_se"),
-                (0x15f4, b"VOICE/mute_voice"),
-                (0x15f8, b"VOICE/mute_play"),
-            ],
-            &xml,
-        )?;
+        apply_words(&mut self.sound, SOUND_FIELDS, &xml)?;
         for channel in 0..48 {
             let offset = 20 + channel * 116;
             let value = xml.integer(
@@ -267,53 +254,9 @@ impl SystemSettings {
             )?;
             put(&mut self.sound, offset, value);
         }
-        apply_words(
-            &mut self.message,
-            &[
-                (0, b"MESSAGE/speed"),
-                (4, b"MESSAGE/auto_p"),
-                (12, b"MESSAGE/base"),
-                (16, b"MESSAGE/CHAR"),
-                (8, b"MESSAGE/ind"),
-                (24, b"MESSAGE/cont"),
-                (20, b"MESSAGE/still"),
-                (28, b"MESSAGE/waitpcm"),
-                (32, b"MESSAGE/skip_full"),
-                (36, b"MESSAGE/log_limit"),
-                (40, b"MESSAGE/enable_read"),
-                (44, b"MESSAGE/read_color"),
-                (48, b"MESSAGE/skipspeed"),
-                (52, b"MESSAGE/contskip"),
-                (56, b"MESSAGE/wipe"),
-                (60, b"MESSAGE/ctrlmode"),
-                (64, b"MESSAGE/autoleft"),
-                (68, b"MESSAGE/enable_read_sel"),
-            ],
-            &xml,
-        )?;
-        apply_words(
-            &mut self.effects,
-            &[
-                (0, b"EFFECT/speed"),
-                (8, b"EFFECT/help"),
-                (12, b"EFFECT/auto_c"),
-                (16, b"EFFECT/auto_cd"),
-                (20, b"EFFECT/auto_cds"),
-                (24, b"EFFECT/dramatic"),
-                (4, b"EFFECT/skipdraw"),
-                (28, b"EFFECT/skipmot"),
-            ],
-            &xml,
-        )?;
-        apply_words(
-            &mut self.window,
-            &[
-                (0, b"GAME/wndcolor"),
-                (4, b"GAME/enabledrag"),
-                (8, b"GAME/drawwnd"),
-            ],
-            &xml,
-        )
+        apply_words(&mut self.message, MESSAGE_FIELDS, &xml)?;
+        apply_words(&mut self.effects, EFFECTS_FIELDS, &xml)?;
+        apply_words(&mut self.window, WINDOW_FIELDS, &xml)
     }
 
     /// 用主音量乘四类音量，保留 DWORD 乘法回绕后除以一百的顺序。
@@ -353,11 +296,15 @@ impl SystemSettings {
 
 fn apply_words(
     block: &mut [u8],
-    fields: &[(usize, &[u8])],
+    fields: &[(usize, &str)],
     xml: &crate::resource::XmlDocument,
 ) -> crate::Result<()> {
     for &(offset, path) in fields {
-        put(block, offset, xml.integer(path, word(block, offset))?);
+        put(
+            block,
+            offset,
+            xml.integer(path.as_bytes(), word(block, offset))?,
+        );
     }
     Ok(())
 }

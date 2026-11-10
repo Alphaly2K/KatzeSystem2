@@ -2,6 +2,7 @@ use katze_system2::{
     Result,
     expression::State,
     kcs::{CoreHost, Host, Interpreter, NativeReturn, Program},
+    resource::{XmlDocument, XmlWriter},
     runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, kind},
     settings::SystemSettings,
 };
@@ -25,6 +26,102 @@ fn arguments(values: &[u32]) -> Vec<u8> {
         .iter()
         .flat_map(|value| value.to_le_bytes())
         .collect()
+}
+
+#[test]
+fn user_settings_round_trip_raw_fields_and_keep_startup_data_and_inherited_fonts() {
+    let mut source = settings();
+    let mut value = 1u32;
+    for block in [
+        &mut source.sound[..],
+        &mut source.message[..],
+        &mut source.effects[..],
+        &mut source.window[..],
+    ] {
+        for bytes in block.chunks_exact_mut(4) {
+            bytes.copy_from_slice(&(value ^ 0x8000_0000).to_le_bytes());
+            value += 17;
+        }
+    }
+    source.font_controls = [7, 9, 3, u32::MAX, 17];
+    source.font_names = [
+        Some("Primary & Demo Ω".encode_utf16().collect()),
+        Some("Ruby 資料".encode_utf16().collect()),
+    ];
+    source.system_voice_play = std::array::from_fn(|i| 0x8000_0000 + i as u32);
+    source.always_active = 9;
+    source.scene_skip_enabled = 33;
+    source.jtalk_enabled = u32::MAX;
+    source.texture_size = [16, 32];
+    source.auto_wait_presets[4] = [777, 888];
+    source.local_flag_ranges[2] = [11, 19];
+    let mut writer = XmlWriter::new();
+    source.write_xml(&mut writer).unwrap();
+    let bytes = writer.to_bytes().unwrap();
+    let voice = std::str::from_utf8(&bytes)
+        .unwrap()
+        .split_once("<VOICE>")
+        .unwrap()
+        .1
+        .split_once("</VOICE>")
+        .unwrap()
+        .0
+        .as_bytes();
+    let position = |name: &[u8]| {
+        voice
+            .windows(name.len())
+            .position(|part| part == name)
+            .unwrap()
+    };
+    assert!(position(b"<cont_voice>") < position(b"<play47>"));
+    assert!(position(b"<play00>") < position(b"<vol_master>"));
+    let baseline = SystemSettings::default();
+    let mut restored = baseline.clone();
+    restored.apply_xml(&bytes).unwrap();
+    assert_eq!(restored.message, source.message);
+    assert_eq!(restored.effects, source.effects);
+    assert_eq!(restored.window, source.window);
+    assert_eq!(restored.font_names, source.font_names);
+    assert_eq!(restored.font_controls, source.font_controls);
+    assert_eq!(restored.system_voice_play, source.system_voice_play);
+    assert_eq!(
+        [
+            restored.auto_select,
+            restored.always_active,
+            restored.scene_animation_enabled,
+            restored.scene_skip_enabled,
+            restored.jtalk_enabled,
+            restored.fullscreen,
+            restored.fullscreen_mw_pos
+        ],
+        [
+            source.auto_select,
+            source.always_active,
+            source.scene_animation_enabled,
+            source.scene_skip_enabled,
+            source.jtalk_enabled,
+            source.fullscreen,
+            source.fullscreen_mw_pos
+        ]
+    );
+    let word = |block: &[u8], offset: usize| {
+        u32::from_le_bytes(block[offset..offset + 4].try_into().unwrap())
+    };
+    for offset in std::iter::once(16)
+        .chain((0..48).map(|i| 20 + i * 116))
+        .chain((0x15d4..0x15fc).step_by(4))
+    {
+        assert_eq!(word(&restored.sound, offset), word(&source.sound, offset));
+    }
+    assert_eq!(&restored.sound[..16], &baseline.sound[..16]);
+    assert_eq!(restored.texture_size, baseline.texture_size);
+    assert_eq!(restored.auto_wait_presets, baseline.auto_wait_presets);
+    assert_eq!(restored.local_flag_ranges, baseline.local_flag_ranges);
+    let mut writer = XmlWriter::new();
+    baseline.write_xml(&mut writer).unwrap();
+    let xml = XmlDocument::parse(&writer.to_bytes().unwrap()).unwrap();
+    assert_eq!(xml.text(b"FONT/face").unwrap(), None);
+    assert_eq!(xml.text(b"FONT/faceruby").unwrap(), None);
 }
 
 #[test]
