@@ -922,6 +922,15 @@ fn scalar_native_packets_keep_sender_data_and_the_callers_stack_value() {
         .ins(0x2b, &[572, 4])
         .ins(0x25, &[u32::MAX])
         .ins(0x2b, &[572, 4])
+        .ins(0x25, &[1])
+        .ins(0x25, &[255])
+        .ins(0x2b, &[426, 8])
+        .ins(0x25, &[0])
+        .ins(0x25, &[u32::MAX])
+        .ins(0x2b, &[427, 8])
+        .ins(0x25, &[u32::MAX])
+        .ins(0x25, &[1])
+        .ins(0x2b, &[426, 8])
         .ins(0x26, &[0])
         .ins(0x3b, &[]);
     let mut source = Source::new();
@@ -946,7 +955,19 @@ fn scalar_native_packets_keep_sender_data_and_the_callers_stack_value() {
                 sender,
                 code: 450,
                 data: [0; 3],
-            }
+            },
+            Command {
+                target,
+                sender,
+                code: 326,
+                data: [0, 255, 0],
+            },
+            Command {
+                target: 0,
+                sender,
+                code: 327,
+                data: [0, u32::MAX, 0],
+            },
         ]
     );
     assert_eq!(

@@ -1,22 +1,34 @@
-use crate::Result;
 use crate::kcs::{Host, Interpreter};
 use crate::runtime::{BaseObject, TaskObject};
 use crate::task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock};
+use crate::{Error, Result};
 
-/// 粒子任务对象（类型 38）：目前仅保存创建上下文并消化命令，
-/// 粒子绘制接入后由该状态驱动。
+/// 类型 38 的粒子控制状态；粒子装载、播放及绘制尚未接入。
 pub struct ParticleObject {
     base: BaseObject,
     context: Vec<u8>,
+    opacity: u32,
+    transform_source: u32,
 }
 
 impl ParticleObject {
-    pub fn new(id: u32) -> Self {
-        let _ = id;
+    pub fn new(_id: u32) -> Self {
         Self {
             base: BaseObject::new(),
             context: Vec::new(),
+            opacity: 256,
+            transform_source: u32::MAX,
         }
+    }
+
+    /// 不透明度保留有符号输入，255 及更大正值转换为 256。
+    pub fn opacity(&self) -> u32 {
+        self.opacity
+    }
+
+    /// 变换来源编号；u32::MAX 表示关闭外部变换来源。
+    pub fn transform_source(&self) -> u32 {
+        self.transform_source
     }
 }
 
@@ -58,8 +70,14 @@ impl TaskObject for ParticleObject {
         host: &mut dyn Host,
         budget: usize,
     ) -> Result<CommandOutcome> {
-        self.base
-            .dispatch_command(kind, command, output, host, budget)
+        self.dispatch_command_with_buffers(
+            kind,
+            command,
+            &mut CommandBuffers::default(),
+            output,
+            host,
+            budget,
+        )
     }
 
     fn dispatch_command_with_buffers(
@@ -71,8 +89,28 @@ impl TaskObject for ParticleObject {
         host: &mut dyn Host,
         budget: usize,
     ) -> Result<CommandOutcome> {
-        self.base
-            .dispatch_command(kind, command, output, host, budget)
+        if self.base.control.deletion_requested != 0 {
+            return Ok(CommandOutcome::finished(false));
+        }
+        match command.code {
+            326 => {
+                let value = command.data[1];
+                self.opacity = if (value as i32) < 255 { value } else { 256 };
+            }
+            327 => {
+                let value = command.data[1];
+                self.transform_source = if value == 0 { u32::MAX } else { value };
+            }
+            320..=325 | 591 | 592 => {
+                return Err(Error::new(0, "粒子装载、播放及绘制命令尚未接入"));
+            }
+            _ => {
+                return self
+                    .base
+                    .dispatch_command(kind, command, output, host, budget);
+            }
+        }
+        Ok(CommandOutcome::finished(false))
     }
 
     fn enqueue_message(&mut self, message: [u32; 4]) -> Result<()> {

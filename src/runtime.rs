@@ -57,7 +57,7 @@ pub mod kind {
     pub const STRING_PLANE: u32 = 48;
     pub const STRING_PLANE_UTF8: u32 = 63;
     pub const CAMERA_2D: u32 = 65;
-    /// 粒子任务（`kcTaskParticle`）；绘制接入前按占位对象创建。
+    /// 粒子任务（`kcTaskParticle`）；控制属性已接入，装载、播放及绘制待接入。
     pub const PARTICLE: u32 = 38;
 }
 
@@ -1263,7 +1263,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         let count = match index {
             66 => 12,
             67 | 75 | 109 | 452 | 520 => 4,
-            108 | 110 | 528 | 531 => 8,
+            108 | 110 | 426 | 427 | 528 | 531 => 8,
             69 | 70 | 72 | 73 | 527 => 16,
             530 | 905 => 20,
             76 => 0,
@@ -1277,6 +1277,10 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             *arg = u32::from_le_bytes(bytes.try_into().unwrap());
         }
         match index {
+            426 | 427 => {
+                self.command_target(args[0], index - 100, [0, args[1], 0])?;
+                Ok(NativeReturn::Continue)
+            }
             452 => {
                 let sender = self.host.task_id;
                 let mut output = u32::MAX;
@@ -1878,7 +1882,7 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         if matches!(
             index,
             66 | 67 | 69 | 70 | 72 | 73 | 75 | 76 | 108
-                ..=110 | 452 | 520 | 527 | 528 | 530 | 531 | 905
+                ..=110 | 426 | 427 | 452 | 520 | 527 | 528 | 530 | 531 | 905
         ) {
             return self.task_native(index, arguments, vm);
         }
