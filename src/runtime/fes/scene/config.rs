@@ -1,4 +1,5 @@
 use super::Scene;
+use crate::runtime::fes::fonts::{font_name, font_name_bytes};
 use crate::{
     Error, Result,
     runtime::{ObjectFactory, Store},
@@ -31,6 +32,42 @@ impl<F: ObjectFactory> Store<'_, F> {
         };
         if write && self.host.system_settings.is_none() {
             return Err(Error::new(offset, "运行时未配置全局设置"));
+        }
+        if matches!(name.as_slice(), b"font" | b"ruby") {
+            let settings = self
+                .host
+                .system_settings
+                .as_mut()
+                .ok_or_else(|| Error::new(offset, "运行时未配置全局设置"))?;
+            let selected = usize::from(name == b"ruby");
+            if write {
+                let bytes = self
+                    .numbers
+                    .strings
+                    .get(&(destination as u32))
+                    .map_or(&[][..], Vec::as_slice);
+                let name = font_name(bytes, offset)?;
+                if selected == 0 {
+                    self.host
+                        .message_defaults
+                        .get_or_insert_default()
+                        .font_name
+                        .clone_from(&name);
+                }
+                settings.font_names[selected] = Some(name);
+                self.finish_fes_config_write(offset)?;
+            } else {
+                let name = settings.font_names[selected].as_deref().unwrap_or_else(|| {
+                    self.host
+                        .message_defaults
+                        .as_ref()
+                        .map_or(&[][..], |defaults| defaults.font_name.as_slice())
+                });
+                self.numbers
+                    .strings
+                    .insert(destination as u32, font_name_bytes(name));
+            }
+            return Ok(true);
         }
         let language = match name.as_slice() {
             b"lang_ui" => Some(self.host.languages.primary_index),
@@ -120,7 +157,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                 b"fontweight" => (9, 2),
                 b"fontprop" => (9, 3),
                 b"fontfix" => (9, 4),
-                b"screen" | b"iswindow" | b"font" | b"ruby" => {
+                b"screen" | b"iswindow" => {
                     return Err(Error::new(
                         offset,
                         if write {

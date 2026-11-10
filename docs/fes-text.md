@@ -83,7 +83,7 @@
 |`fontcom count index`|把列表数量写入共享数值槽|
 |`fontcom get font_index string_index`|依次求值两个参数，将字体名按 UTF-8 写入共享字符串；字体编号越界写空串|
 |`fontcom search index name...`|先求值共享数值槽编号，再按完整剩余 UTF-8 原文查询首个同名字体；区分大小写，缺失返回 −1|
-|`fontcom default string_index`|把当前全局默认字体名按 UTF-8 写入共享字符串|
+|`fontcom default string_index`|把当前全局默认字体名按基线 UTF-8 转换规则写入共享字符串|
 |`fontcom add name`|将单个 CP932 直接文件名交给共享字体服务注册|
 
 除 init／add 外，列表未初始化时跳过命令及数值求值；成功初始化的空列表仍执行查询。get 在缺少第二项时保留第一项的表达式副作用，search 在缺少剩余原文时也保留槽编号的求值。子命令区分大小写，未知子命令不求值。search 的原文沿用半角空格计数规则，保留引号与额外空白。

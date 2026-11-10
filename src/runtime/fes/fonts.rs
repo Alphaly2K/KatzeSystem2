@@ -91,9 +91,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                     b"default" => {
                         let defaults = self.host.message_defaults.clone().unwrap_or_default();
                         let name = defaults.font_name.split(|&unit| unit == 0).next().unwrap();
-                        let text = String::from_utf16(name)
-                            .map_err(|_| Error::new(offset, "全局字体名称不是有效 UTF-16"))?;
-                        self.numbers.strings.insert(index, text.into_bytes());
+                        self.numbers.strings.insert(index, font_name_bytes(name));
                     }
                     _ => unreachable!(),
                 }
@@ -102,4 +100,58 @@ impl<F: ObjectFactory> Store<'_, F> {
         }
         Ok(true)
     }
+}
+
+pub(super) fn font_name(bytes: &[u8], offset: usize) -> Result<Vec<u16>> {
+    let bytes = bytes.split(|&byte| byte == 0).next().unwrap();
+    let mut name = Vec::new();
+    let mut cursor = 0;
+    while bytes.get(cursor).copied().unwrap_or(0) != 0 {
+        let byte = bytes[cursor];
+        let (unit, length) = if bytes.get(cursor..cursor + 2) == Some(&[255, 255]) {
+            (u16::MAX, 2)
+        } else {
+            // 原读取器只核对中间续字节，逐项转换后保留首个 UTF-16 单元。
+            let leading = byte.leading_ones();
+            if leading == 1 {
+                break;
+            }
+            let length = if leading >= 6 { 1 } else { leading.max(1) } as usize;
+            if (1..length.saturating_sub(1))
+                .any(|i| bytes.get(cursor + i).copied().unwrap_or(0) & 0xc0 != 0x80)
+            {
+                break;
+            }
+            if cursor + length > bytes.len() {
+                return Err(Error::new(offset, "FES 字体名 UTF-8 字符被截断"));
+            }
+            let mut chunk = [0; 5];
+            for (i, value) in chunk[..length].iter_mut().enumerate() {
+                *value = bytes.get(cursor + i).copied().unwrap_or(0);
+            }
+            let text = String::from_utf8_lossy(&chunk[..length]);
+            let unit = text.encode_utf16().next().unwrap_or(0);
+            (unit, length)
+        };
+        if name.len() == 63 {
+            return Err(Error::new(offset, "FES 字体名超过 63 个 UTF-16 单元"));
+        }
+        name.push(unit);
+        cursor += length;
+    }
+    Ok(name)
+}
+
+pub(super) fn font_name_bytes(name: &[u16]) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    for &unit in name.iter().take_while(|&&unit| unit != 0) {
+        if unit == u16::MAX {
+            bytes.extend([255, 255]);
+        } else {
+            let character = char::from_u32(u32::from(unit)).unwrap_or(char::REPLACEMENT_CHARACTER);
+            let mut buffer = [0; 4];
+            bytes.extend_from_slice(character.encode_utf8(&mut buffer).as_bytes());
+        }
+    }
+    bytes
 }

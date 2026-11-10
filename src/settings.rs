@@ -22,6 +22,8 @@ pub struct SystemSettings {
     pub jtalk_enabled: u32,
     /// 字体原始开关：轮廓、阴影、粗体、比例字宽、固定字宽。
     pub font_controls: [u32; 5],
+    /// 主文字、注音字体名；None 沿用宿主提供的默认字体名。
+    pub font_names: [Option<Vec<u16>>; 2],
     /// 自动推进预设，每项依次为基础等待与逐字等待。
     pub auto_wait_presets: [[u32; 2]; 32],
     /// 用户设置 `WINDOW/fullscreen` 的原始 DWORD。
@@ -53,6 +55,7 @@ impl Default for SystemSettings {
             scene_skip_enabled: 0,
             jtalk_enabled: 0,
             font_controls: [1, 1, 0, 1, 0],
+            font_names: [None, None],
             auto_wait_presets: [[0; 2]; 32],
             fullscreen: 0,
             fullscreen_mw_pos: 0,
@@ -123,8 +126,11 @@ impl Default for SystemSettings {
 }
 
 impl SystemSettings {
-    /// 将全局字形样式应用到消息默认值，保留宿主选择的字体名和其他显示选项。
+    /// 将已配置的字体名和全局字形样式应用到消息默认值，未指定名称时沿用宿主选择。
     pub fn apply_message_defaults(&self, defaults: &mut crate::message::MessageDefaults) {
+        if let Some(name) = &self.font_names[0] {
+            defaults.font_name.clone_from(name);
+        }
         defaults.outline = self.font_controls[0];
         defaults.shadow = self.font_controls[1];
         defaults.bold = self.font_controls[2] != 0;

@@ -256,3 +256,125 @@ fn font_commands_keep_scene_lists_raw_names_evaluation_order_and_failed_initiali
         assert_eq!(*calls.borrow(), [(128, 7), (777, 7), (555, 7)]);
     }
 }
+
+#[test]
+fn configured_font_names_use_string_slots_and_keep_native_code_units() {
+    let cases = [
+        (
+            b"Alpha Face".to_vec(),
+            "Alpha Face".encode_utf16().collect::<Vec<_>>(),
+            b"Alpha Face".to_vec(),
+        ),
+        (
+            "あい Face".as_bytes().to_vec(),
+            "あい Face".encode_utf16().collect(),
+            "あい Face".as_bytes().to_vec(),
+        ),
+        (
+            b"A\xff\xffZ".to_vec(),
+            vec![65, 65535, 90],
+            b"A\xff\xffZ".to_vec(),
+        ),
+        (
+            b"A\xf1\x80\x80\x80Z".to_vec(),
+            vec![65, 0xd8c0, 90],
+            "A�Z".as_bytes().to_vec(),
+        ),
+        (b"A\x80Z".to_vec(), vec![65], b"A".to_vec()),
+        (b"A\xe3\x41\x80Z".to_vec(), vec![65], b"A".to_vec()),
+        (
+            b"A\xc2\xa2".to_vec(),
+            vec![65, 162],
+            "A¢".as_bytes().to_vec(),
+        ),
+        (b"A\0ignored".to_vec(), vec![65], b"A".to_vec()),
+        (vec![b'X'; 63], vec![88; 63], vec![b'X'; 63]),
+    ];
+    for budget in [1, 4096] {
+        for (input, units, returned) in &cases {
+            let mut rt = runtime(budget);
+            rt.set_fonts(EnumerationFonts(Rc::new(RefCell::new(Vec::new()))));
+            rt.host_mut().system_settings = Some(katze_system2::settings::SystemSettings {
+                font_names: [Some(vec![80]), Some(vec![82])],
+                ..Default::default()
+            });
+            rt.host_mut().message_defaults = Some(MessageDefaults {
+                font_name: vec![80],
+                ..Default::default()
+            });
+            rt.numbers_mut().shared.fill(73);
+            rt.numbers_mut().strings.insert(1, input.clone());
+            let mut scene = Scene::new(
+                Program::from_text(b"#START\nfontcom init\nsetconf 1 font\ngetconf 20 font\ngetconf 21 ruby\nfontcom default 22\nwait 999\n#_FES_WAKE_\nsetconf 99 ruby\ngetconf -1 ruby\n").unwrap(),
+                rt.host().handle_allocator(),
+            ).unwrap();
+            update(&mut rt, &mut scene).unwrap();
+            assert_eq!(rt.numbers().strings[&20], *returned);
+            assert_eq!(rt.numbers().strings[&21], b"R");
+            assert_eq!(rt.numbers().strings[&22], *returned);
+            assert_eq!(rt.numbers().shared, [73; 8]);
+            assert_eq!(
+                rt.host().message_defaults.as_ref().unwrap().font_name,
+                *units
+            );
+            assert_eq!(
+                rt.host().system_settings.as_ref().unwrap().font_names,
+                [Some(units.clone()), Some(vec![82])]
+            );
+            assert_eq!(rt.host().system_settings_dirty, 1);
+            rt.host_mut().system_settings_dirty = 0;
+            while !rt
+                .dispatch_fes_system_block(0, &mut scene, "_FES_WAKE_")
+                .unwrap()
+            {}
+            assert_eq!(rt.numbers().strings[&u32::MAX], b"");
+            assert_eq!(
+                rt.host().system_settings.as_ref().unwrap().font_names,
+                [Some(units.clone()), Some(Vec::new())]
+            );
+            assert_eq!(
+                rt.host().message_defaults.as_ref().unwrap().font_name,
+                *units
+            );
+            assert_eq!(rt.host().system_settings_dirty, 1);
+        }
+    }
+}
+
+#[test]
+fn invalid_font_name_boundaries_preserve_the_previous_name_and_argument_effects() {
+    for (input, error) in [
+        (vec![b'X'; 64], "63"),
+        (b"A\xc2".to_vec(), "截断"),
+        (b"A\xe3\x80".to_vec(), "截断"),
+    ] {
+        let mut rt = runtime(1);
+        rt.host_mut().system_settings = Some(Default::default());
+        rt.host_mut().message_defaults = Some(MessageDefaults {
+            font_name: vec![80],
+            ..Default::default()
+        });
+        rt.numbers_mut().strings.insert(1, input.clone());
+        let mut scene = Scene::new(
+            Program::from_text(b"#START\ngetconf 20 font\nsetconf ($0+=1) font ($0+=1) ($0+=1)\n")
+                .unwrap(),
+            rt.host().handle_allocator(),
+        )
+        .unwrap();
+        assert!(
+            update(&mut rt, &mut scene)
+                .unwrap_err()
+                .message
+                .contains(error)
+        );
+        assert_eq!(rt.numbers().strings[&20], b"P");
+        assert_eq!(rt.numbers().strings[&1], input);
+        assert_eq!(rt.numbers().shared[0], 3);
+        assert_eq!(rt.host().system_settings_dirty, 0);
+        assert_eq!(
+            rt.host().system_settings.as_ref().unwrap().font_names,
+            [None, None]
+        );
+        assert_eq!(rt.host().message_defaults.as_ref().unwrap().font_name, [80]);
+    }
+}
