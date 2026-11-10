@@ -3,6 +3,8 @@ use crate::{Error, Result, read};
 /// 新声音配置中的原始编码名称、编号、当前值与有序子分类。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SoundPart {
+    /// 定义 XML 中的节点键名；与可继承的分类名称分别保存。
+    pub xml_key: Vec<u8>,
     pub name: Vec<u8>,
     pub type_name: Vec<u8>,
     pub file_prefix: Vec<u8>,
@@ -19,12 +21,14 @@ pub struct SoundPart {
     pub system_voice: i32,
     pub play_enabled: i32,
     pub mute: i32,
+    pub voice_mute: i32,
     pub children: Vec<SoundPart>,
 }
 
 impl Default for SoundPart {
     fn default() -> Self {
         Self {
+            xml_key: Vec::new(),
             name: Vec::new(),
             type_name: Vec::new(),
             file_prefix: Vec::new(),
@@ -37,7 +41,8 @@ impl Default for SoundPart {
             skip_volume: -1,
             system_voice: -1,
             play_enabled: -1,
-            mute: -1,
+            mute: 0,
+            voice_mute: 0,
             children: Vec::new(),
         }
     }
@@ -51,7 +56,10 @@ pub struct SoundConfig {
     pub master_volume: Option<i32>,
     pub master_play_enabled: Option<i32>,
     pub master_system_voice: Option<i32>,
+    pub master_voice_volume: Option<i32>,
+    pub master_skip_volume: Option<i32>,
     pub master_mute: i32,
+    pub master_voice_mute: i32,
 }
 
 impl SoundConfig {

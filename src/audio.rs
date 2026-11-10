@@ -6,6 +6,7 @@ mod control;
 mod groups;
 mod pcm;
 mod playback;
+mod settings;
 mod soundconf;
 mod task;
 pub use channel::SoundChannel;

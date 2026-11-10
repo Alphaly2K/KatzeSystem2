@@ -14,11 +14,15 @@
 
 ## 系统语音配置选择
 
-宿主通过 `HostState::sound_config` 提供 `audio::SoundConfig`，其 `parts` 按配置声明顺序保存 `SoundPart`。`name`、`type_name` 与 `file_prefix` 分别为原始字节编码的分类名称、配置的 type 名称和文件前缀；`id` 为编号，`master_volume` 为配置的 mastervol 倍率，`volume`、`voice_volume`、`skip_volume`、`play_enabled`、`system_voice`、`mute` 为应用设置后的当前值，`children` 为有序子分类。`same_id` 保存独立的 sameid 原值，缺失时为零且不沿用父分类。节点默认名称为空，编号、音量和其他开关均为 −1。
+宿主通过 `HostState::sound_config` 提供 `audio::SoundConfig`。`SoundPart` 的 `xml_key` 是独立的节点键名，`name`、`type_name`、`file_prefix` 和 `archive` 分别为分类名称、type 名称、文件前缀和归档类别；`id` 为编号，`master_volume` 为 mastervol 倍率。`volume`、`voice_volume`、`skip_volume`、`play_enabled`、`system_voice`、`mute`、`voice_mute` 保存当前设置，`children` 保存子分类。`same_id` 独立保存 sameid，缺省零。节点缺省名称为空，编号、音量和播放开关为 −1，两项静音为零。
 
-配置的独立 `master_volume`、`master_play_enabled`、`master_system_voice` 均为 `Option<i32>`，默认 None，相应查询要求宿主显式提供；`master_mute` 默认零。宿主负责应用用户设置；构造配置或节点时可通过 `..Default::default()` 提供未使用字段。
+独立主设置包括可选的 `master_volume`、`master_play_enabled`、`master_system_voice`、`master_voice_volume`、`master_skip_volume`，缺省 None；`master_mute` 和 `master_voice_mute` 缺省零。构造配置或节点时可通过 `..Default::default()` 提供未使用字段。
 
-`SoundConfig::from_xml` 与 `SoundGroups::from_xml` 读取 `soundconf.xml`：MASTER 提供独立主设置；PART 的每个子节点为一个分类，`<head>` 保存为 `file_prefix`、`<int>` 保存为 `archive`（前缀命中后决定资源类别），`<part>` 子节点递归为有序子分类；子分类未给出的字段逐字段沿用父级值，`sameid`、`group`、`comment` 不进入树。SOUNDGROUP 的每个子节点给出 `id`、`label` 与包含两端的通道 `range`，新配置的 `key` 与 `id` 相同。文本字段保留原始字节，整数缺失或非法按缺省值处理。
+`SoundConfig::from_xml` 读取分类定义的 MASTER 与 PART 段，保留节点键名并将其中单字节 ASCII 字母归一为小写。分类及子分类按 XML 同级节点的逆序保存。子分类缺失的名称、资源信息、编号、倍率、音量和播放开关沿用父级值；sameid 与两项静音独立读取，缺省零。存在但为空或非法的整数正文为零。`SoundGroups::from_xml` 同样按 XML 同级逆序读取 SOUNDGROUP 中的 `id`、`label` 及包含两端的通道范围，`key` 与 `id` 相同。
+
+`SoundConfig::from_xml_with_user_settings(definition, user)` 从定义构造当前配置，再覆盖用户 XML 中的七项声音设置；user 为 None 时应用缺省用户设置。缺失的音量和播放字段取对应定义值，两项静音均取该节点定义中的 sysplay。用户覆盖不改变分类键名、名称、编号、路由、倍率、顺序或分类数量，父级的用户值也不传给子分类。
+
+`SoundConfig::write_xml(&mut XmlWriter)` 写出当前 MASTER 和完整 PART 树的七项声音设置，包括 mute 与 voicemute；定义元数据及声音组范围不进入用户文件。宿主通过 `XmlWriter::to_bytes()` 取得文档并保存，重新装载时使用同一分类定义与保存的用户文档。
 
 `SoundConfig::system_voice_candidates(paths)` 在 paths 为空时按先父后子顺序收集开关恰好为一的节点编号。显式路径则逐层查找第一个同编号节点；缺失分量使用开关一，后续分量继续在当前层查询。路径最后一次查询结果非零时，将最后一个输入编号加入候选。两种方式均保留重复编号。`system_voice_enabled(path)` 提供单条路径的原始查询结果，空路径返回一。
 
@@ -34,7 +38,7 @@ FES `getsndconfex output_index volume_id [id ...]` 依次求值输出槽和每�
 
 ## 分类名称与主音量查询
 
-`SoundConfig::volume_by_name(name)` 先按精确的小写 `master` 选择独立主音量，其他名称按先父后子及声明顺序查首个匹配分类，缺失返回 100。普通名称比较忽略单字节 ASCII 大小写，保留 CP932 双字节字符；输入到首个零字节结束，不将斜杠或逗号解释为层级分隔符。`MASTER` 等其他写法进入分类查找，可与独立主音量返回不同结果。查询返回分类自身原始音量，不乘祖先或主音量。
+`SoundConfig::volume_by_name(name)` 先按精确的小写 `master` 选择独立主音量，其他名称按先父后子及存储顺序查首个匹配分类，缺失返回 100。普通名称比较忽略单字节 ASCII 大小写，保留 CP932 双字节字符；输入到首个零字节结束，不将斜杠或逗号解释为层级分隔符。`MASTER` 等其他写法进入分类查找，可与独立主音量返回不同结果。查询返回分类自身原始音量，不乘祖先或主音量。
 
 FES `getsndconfex output_index volume name` 将该结果写入共享槽，只读取一个名称参数，不计算名称中的表达式或额外参数。缺少名称或名称为空时仍求值输出槽，但不写入；配置缺失或精确 master 所需的主音量未提供时，在表达式副作用之前诊断，补配置后可续跑。该查询不读取配置启用值、不消耗随机数，三类 FES 执行入口保持同一契约。
 
@@ -42,7 +46,7 @@ FES `getsndconfex output_index volume name` 将该结果写入共享槽，只读
 
 ## 文件分类与播放设置
 
-`file_part(name)` 按独立的 file_prefix 查找分类，不使用分类 name。输入和配置前缀到首个零字节结束；单字节 ASCII 大小写等同，CP932 双字节保持原值。按声明顺序先检查父节点，再递归子节点；非空前缀匹配文件名开头即返回，不选择最长前缀，不拆分目录。空前缀跳过自身，继续查子节点。输入正文须短于 512 字节。
+`file_part(name)` 按独立的 file_prefix 查找分类，不使用分类 name。输入和配置前缀到首个零字节结束；单字节 ASCII 大小写等同，CP932 双字节保持原值。按存储顺序先检查父节点，再递归子节点；非空前缀匹配文件名开头即返回，不选择最长前缀，不拆分目录。空前缀跳过自身，继续查子节点。输入正文须短于 512 字节。
 
 `file_volume(name)`、`file_play_enabled(name)`、`file_system_voice(name)` 读取匹配节点的当前值，缺失时分别返回 100、1、1，匹配节点的 −1 保留。`file_mute(name)` 将匹配节点的 −1 转为零，其他原值保留；未匹配时返回 100。`master_mute()` 同样仅将独立 master_mute 字段的 −1 转零；字段默认零，非零查询结果用于静音。
 

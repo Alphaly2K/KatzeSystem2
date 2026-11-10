@@ -1,14 +1,14 @@
 //! `soundconf.xml` 的 SOUNDGROUP、MASTER 与 PART 段读取。
 //!
 //! 该文件与启动 XML 分开：声音分类树、声音组范围和主音量都在此声明。
-//! 读取只还原配置字段，不合并用户设置，也不判断分类范围是否可用。
+//! 定义读取只还原配置字段；用户覆盖由独立构造入口合并。
 
 use super::{SoundConfig, SoundGroup, SoundGroups, SoundPart};
 use crate::{Error, Result, read, text};
 use roxmltree::{Document, Node, ParsingOptions};
 
 /// 分类树的最大嵌套深度；正常配置不超过四层。
-const MAX_DEPTH: usize = 32;
+pub(super) const MAX_DEPTH: usize = 32;
 
 impl SoundConfig {
     /// 读取 `soundconf.xml` 的 MASTER 与 PART 段。
@@ -17,7 +17,9 @@ impl SoundConfig {
     /// 其 `<part>` 子节点的子节点递归为有序子分类。`<head>` 保存为
     /// `file_prefix`，`<int>` 保存为 `archive`；顶层分类缺失字段保留
     /// `SoundPart` 的未设置值，子分类缺失字段逐字段沿用父级值。
-    /// `sameid` 独立读取，缺失时为零；`comment` 与 `group` 不进入分类树。
+    /// `sameid`、`mute` 和 `voicemute` 独立读取，缺失时为零。
+    /// 分类及声音组按 XML 同级逆序保存，分类节点键名单独归一为小写；
+    /// `comment` 与 `group` 不进入分类树。
     pub fn from_xml(bytes: &[u8]) -> Result<Self> {
         let input = prepare(bytes, "声音配置")?;
         let document = Document::parse_with_options(
@@ -32,7 +34,7 @@ impl SoundConfig {
         let master = element_child(root, "MASTER");
         let mut parts = Vec::new();
         if let Some(container) = element_child(root, "PART") {
-            for node in element_children(container) {
+            for node in element_children(container).rev() {
                 parts.push(parse_part(node, 0, None)?);
             }
         }
@@ -40,16 +42,25 @@ impl SoundConfig {
             parts,
             master_volume: master
                 .and_then(|node| element_child(node, "volume"))
-                .map(|node| integer(node, -1)),
+                .map(integer),
             master_play_enabled: master
                 .and_then(|node| element_child(node, "play"))
-                .map(|node| integer(node, -1)),
+                .map(integer),
             master_system_voice: master
                 .and_then(|node| element_child(node, "sysplay"))
-                .map(|node| integer(node, -1)),
+                .map(integer),
+            master_voice_volume: master
+                .and_then(|node| element_child(node, "voicevol"))
+                .map(integer),
+            master_skip_volume: master
+                .and_then(|node| element_child(node, "skipvol"))
+                .map(integer),
             master_mute: master
                 .and_then(|node| element_child(node, "mute"))
-                .map_or(-1, |node| integer(node, -1)),
+                .map_or(0, integer),
+            master_voice_mute: master
+                .and_then(|node| element_child(node, "voicemute"))
+                .map_or(0, integer),
         })
     }
 }
@@ -59,7 +70,7 @@ impl SoundGroups {
     ///
     /// 每个子节点的 `<id>`、`<label>`、`<min>`、`<max>` 分别给出分类编号、
     /// 原始标签和包含两端的物理通道范围；新配置的表键与分类编号相同。
-    /// `<id>` 缺失按零处理，编号重复的条目按文件顺序保留。
+    /// `<id>` 缺失按零处理，编号重复的条目分别保留。
     pub fn from_xml(bytes: &[u8]) -> Result<Self> {
         let input = prepare(bytes, "声音配置")?;
         let document = Document::parse_with_options(
@@ -72,15 +83,15 @@ impl SoundGroups {
         .map_err(|error| Error::new(0, format!("声音配置 XML 无效：{error}")))?;
         let mut entries = Vec::new();
         if let Some(container) = element_child(document.root_element(), "SOUNDGROUP") {
-            for node in element_children(container) {
-                let id = element_child(node, "id").map_or(0, |field| integer(field, 0)) as u32;
+            for node in element_children(container).rev() {
+                let id = element_child(node, "id").map_or(0, integer) as u32;
                 entries.push(SoundGroup {
                     key: id,
                     id,
                     label: field_bytes(node, "label"),
                     range: [
-                        element_child(node, "min").map_or(0, |field| integer(field, 0)),
-                        element_child(node, "max").map_or(0, |field| integer(field, 0)),
+                        element_child(node, "min").map_or(0, integer),
+                        element_child(node, "max").map_or(0, integer),
                     ],
                 });
             }
@@ -94,26 +105,28 @@ fn parse_part(node: Node<'_, '_>, depth: usize, parent: Option<&SoundPart>) -> R
         return Err(Error::new(0, "声音分类嵌套超过上限"));
     }
     let mut part = SoundPart {
+        xml_key: normalized_key(node.tag_name().name().as_bytes()),
         name: field_bytes(node, "name"),
         type_name: field_bytes(node, "type"),
         file_prefix: field_bytes(node, "head"),
         archive: field_bytes(node, "int"),
         id: field_integer(node, "id"),
-        same_id: element_child(node, "sameid").map_or(0, |field| integer(field, 0)),
+        same_id: element_child(node, "sameid").map_or(0, integer),
         master_volume: field_integer(node, "mastervol"),
         volume: field_integer(node, "volume"),
         voice_volume: field_integer(node, "voicevol"),
         skip_volume: field_integer(node, "skipvol"),
         system_voice: field_integer(node, "sysplay"),
         play_enabled: field_integer(node, "play"),
-        mute: field_integer(node, "mute"),
+        mute: element_child(node, "mute").map_or(0, integer),
+        voice_mute: element_child(node, "voicemute").map_or(0, integer),
         children: Vec::new(),
     };
     if let Some(parent) = parent {
         inherit(&mut part, parent);
     }
     if let Some(container) = element_child(node, "part") {
-        for child in element_children(container) {
+        for child in element_children(container).rev() {
             let parsed = parse_part(child, depth + 1, Some(&part))?;
             part.children.push(parsed);
         }
@@ -141,7 +154,6 @@ fn inherit(part: &mut SoundPart, parent: &SoundPart) {
         (&mut part.skip_volume, parent.skip_volume),
         (&mut part.system_voice, parent.system_voice),
         (&mut part.play_enabled, parent.play_enabled),
-        (&mut part.mute, parent.mute),
     ] {
         if *value == -1 {
             *value = parent_value;
@@ -186,7 +198,7 @@ fn element_child<'a>(node: Node<'a, 'a>, name: &str) -> Option<Node<'a, 'a>> {
         .find(|child| child.is_element() && child.tag_name().name() == name)
 }
 
-fn element_children<'a>(node: Node<'a, 'a>) -> impl Iterator<Item = Node<'a, 'a>> {
+fn element_children<'a>(node: Node<'a, 'a>) -> impl DoubleEndedIterator<Item = Node<'a, 'a>> {
     node.children().filter(Node::is_element)
 }
 
@@ -214,20 +226,30 @@ fn field_bytes(node: Node<'_, '_>, name: &str) -> Vec<u8> {
 }
 
 fn field_integer(node: Node<'_, '_>, name: &str) -> i32 {
-    element_child(node, name).map_or(-1, |field| integer(field, -1))
+    element_child(node, name).map_or(-1, integer)
 }
 
 /// 缺失或非法正文按零处理；负号按 DWORD 回绕保存。
-fn integer(node: Node<'_, '_>, default: i32) -> i32 {
+fn integer(node: Node<'_, '_>) -> i32 {
     let bytes: Vec<u8> = node
         .children()
         .filter(Node::is_text)
         .filter_map(|child| child.text())
         .flat_map(str::bytes)
-        .filter(|byte| !byte.is_ascii_whitespace())
         .collect();
-    if bytes.is_empty() {
-        return default;
+    text::integer_prefix(bytes.trim_ascii_start()).map_or(0, |(_, value)| value as i32)
+}
+
+fn normalized_key(name: &[u8]) -> Vec<u8> {
+    let mut key = name.to_vec();
+    let mut position = 0;
+    while position < key.len() {
+        if matches!(key[position], 0x81..=0x9f | 0xe0..=0xfc) && position + 1 < key.len() {
+            position += 2;
+        } else {
+            key[position].make_ascii_lowercase();
+            position += 1;
+        }
     }
-    text::integer_prefix(&bytes).map_or(0, |(_, value)| value as i32)
+    key
 }
