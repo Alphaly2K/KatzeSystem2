@@ -367,6 +367,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let task = runtime.create(0, kind::ORDINARY, b"main", b"")?;
     println!("主任务 {task}");
     let dump = |vm: &katze_system2::kcs::Interpreter| {
+        let instructions = vm.program().instructions();
         if let Ok(bytes) = vm.read(2200, 300) {
             for (offset, chunk) in bytes.chunks(64).enumerate() {
                 println!(
@@ -376,7 +377,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 );
             }
         }
-        for instruction in start_instructions.iter().filter(|instruction| {
+        for instruction in instructions.iter().filter(|instruction| {
             instruction.offset + 8 >= vm.pc.saturating_sub(400) && instruction.offset <= vm.pc + 140
         }) {
             println!(
@@ -390,10 +391,10 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                     .collect::<Vec<_>>()
             );
         }
-        let position = start_instructions.partition_point(|item| item.offset < vm.pc);
+        let position = instructions.partition_point(|item| item.offset < vm.pc);
         println!("    pc 索引 {position}");
-        for instruction in &start_instructions
-            [position.saturating_sub(2)..(position + 3).min(start_instructions.len())]
+        for instruction in
+            &instructions[position.saturating_sub(2)..(position + 3).min(instructions.len())]
         {
             println!(
                 "   *{} {:02x} {:?}",
@@ -606,7 +607,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             }
             for handle in runtime.cst_handles() {
                 if let Some(ctx) = runtime.cst_context(handle) {
-                    println!("    CST {handle} 位置 {:?}", ctx.position());
+                    println!("    CST {handle} 默认读取位置 {:?}", ctx.position());
                 }
             }
             if let Some(vm) = runtime.object(task).and_then(|object| object.interpreter()) {

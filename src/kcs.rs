@@ -734,6 +734,11 @@ impl Interpreter {
             native_arguments: None,
         })
     }
+    /// 当前解释器执行的程序。
+    pub fn program(&self) -> &Program {
+        &self.program
+    }
+
     pub fn debug(&self) -> &DebugState {
         &self.debug
     }
