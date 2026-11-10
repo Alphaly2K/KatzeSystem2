@@ -174,7 +174,7 @@ FES 参数入口以半角空格分隔词项，Tab 保留；圆括号可包含空
 
 ### 配置读取
 
-运行时 `getconf` 的配置来源及支持键见[配置读取](settings.md#fes-配置读取)，`setconf` 的预设选择、写回和保存标记见[配置写回](settings.md#fes-配置写回)。
+运行时 `getconf` 的配置来源及支持键见[配置读取](settings.md#fes-配置读取)，`setconf` 的预设选择、写回和配置变更标记见[配置写回](settings.md#fes-配置写回)。
 
 ### 字符串比较与清理
 
