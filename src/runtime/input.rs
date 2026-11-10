@@ -21,6 +21,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             401 => (150, 4),
             403 => (151, 8),
             404 => (152, 0),
+            937 => (158, 0),
             _ => unreachable!(),
         };
         if length != 0 && arguments.len() != length {

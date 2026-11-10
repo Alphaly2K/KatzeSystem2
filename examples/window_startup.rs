@@ -219,6 +219,9 @@ impl InputDevice for WindowDevice {
         self.keys.clear_pressed();
         Ok(())
     }
+    fn cancel_wheel_repeat(&mut self) -> Result<()> {
+        Ok(())
+    }
     fn clear_touches(&mut self) -> Result<()> {
         Ok(())
     }

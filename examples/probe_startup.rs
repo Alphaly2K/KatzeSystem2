@@ -108,6 +108,9 @@ impl InputDevice for ScriptedDevice {
     fn clear_touches(&mut self) -> Result<()> {
         Ok(())
     }
+    fn cancel_wheel_repeat(&mut self) -> Result<()> {
+        Ok(())
+    }
 }
 
 fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {

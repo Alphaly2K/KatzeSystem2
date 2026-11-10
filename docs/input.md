@@ -79,6 +79,7 @@ Runtime 的下列 native 均先以调用任务为 sender 向根目标零发送�
 |150|调用设备 show_cursor(data[1])，随后读取 cursor_visible 到 cursor_requested；不改 cursor_shown|
 |153|将最近一次主体查询的 active 是否为零写 output|
 |156|调用设备 clear_touches，清空触摸接触点映射和活动计数；保留输入任务状态及 output，忽略数据项|
+|158|取消设备的延迟滚轮重复，保留输入任务状态及 output，忽略数据项|
 |159|auto_hide 与 cursor_requested 均非零时显示光标并广播 22，随后将 idle_count 清零；门控不满足时也清计数，保留 output|
 |160|将最近完成更新保存的三十二字节 history 写 data1 缓冲区，保留尾部及 output；空指针跳过|
 
@@ -147,7 +148,7 @@ device_units_per_logical 初值为一，与 logical_scale 分别保存，调用�
 
 `force(key, queries)` 设置强制按下的查询次数。计数非零时 sample 返回掩码一并递减计数，四组及额外查询共用同一计数，单位为查询次数。`commit()` 用持有态替换本轮状态，消费短按脉冲；`clear_pressed()` 仅清两份掩码，保留配置、repeat 及强制计数。键槽限于 0～79，组限于 0～3，越界返回诊断。
 
-平台 `InputDevice` 可在 poll 中调用 button，在 key 中调用 sample，在 commit 中调用同名方法。窗口事件采集、物理代码换算、配置自动装载及真实设备尚未接入。
+平台 `InputDevice` 可在 poll 中调用 button，在 key 中调用 sample，在 commit 中调用同名方法。鼠标左／中／右键的代码为 1／2／3，滚轮上／下为 6／7。两个启动示例从启动配置建立绑定，无窗口点击使用相同映射；窗口示例提供键鼠采集。
 
 ## 设备按键扫描
 
@@ -185,7 +186,7 @@ device_units_per_logical 初值为一，与 logical_scale 分别保存，调用�
 
 ## 同步设备更新
 
-`InputDevice` 提供 poll、pointer、key、take_wheel、is_foreground、finish、commit、history、show_cursor、cursor_visible、set_pointer 和 clear_keys；每次调用返回 Result，错误停止当前推进，先前已发生的状态和回调修改保留。pointer 返回 `PointerSample { position, active }`，位置为物理设备整数。key 的 repeat 参数表示是否需要首次重复开关元数据，false 时仍须查询掩码。take_wheel 返回本轮待处理的原始非零标记，平台后端负责消费设备积累值。history 返回三十二个原始字节。set_pointer 请求设备移动到物理点，不自动替换本轮已保存位置；clear_keys 清理设备键状态，后续查询继续由设备提供。
+`InputDevice` 提供 poll、pointer、key、take_wheel、is_foreground、finish、commit、history、show_cursor、cursor_visible、set_pointer、clear_keys 和 cancel_wheel_repeat；每次调用返回 Result，错误停止当前推进，先前已发生的状态和回调修改保留。pointer 返回 `PointerSample { position, active }`，位置为物理设备整数。key 的 repeat 参数表示是否需要首次重复开关元数据，false 时仍须查询掩码。take_wheel 返回本轮待处理的原始非零标记，平台后端负责消费设备积累值。history 返回三十二个原始字节。set_pointer 请求设备移动到物理点，不自动替换本轮已保存位置；clear_keys 清理设备键状态，后续查询继续由设备提供。
 
 `InputState::pointer()`／`pointer_mut()` 提供 `PointerState`。position 保存本轮位置，origin 保存按下／滚轮时额外查询的物理起点，移动通知结束后更新为 position；两者不能合并。active 保存帧首查询的原始值。cursor_requested 是手动显示意愿的设备读回，cursor_shown 是任务维护的自动显示状态，二者初值均为一；auto_hide、idle_limit、idle_count 和 forced 初值为零，drag_threshold 初值为二，history 初始清零。forced 是命令 146 的强制重算标记，定位字段见下文。
 
@@ -260,6 +261,10 @@ Runtime 在处理输入回调的直接命令时切换到输入任务的宿主编
 事件 4 按第二数据项向接收者发送 9 或 10，5 发送 65，6 原样借用两个移动缓冲区发送 6。前三类在同步回调完成后返回保存的响应并清零；接收者可通过 95 即时回写，并通过仍在执行的按钮命令 96 查询同一输入状态。错误保留已经回写的响应。7／8 发送 64，传递自身编号及选择 1／0，不消费响应或外层返回槽。每轮通过 `TaskObject::begin_update` 在时钟及子任务更新前清响应，子任务随后写入的值保留至事件消费。
 
 独立宿主须提供任务命令、父级查询和需要时的绘图服务；同步回写复用 `Host::dispatch_graphics_event` 的响应槽。普通 KCS 队列及同步 VM 消息不适用于该对象，非空创建上下文返回诊断。合成核对范围见[矩形按钮验证](runtime-probes.md#矩形按钮任务)。
+
+输入命令 158 调用设备的 `cancel_wheel_repeat()`，取消尚未重放的滚轮重复。它保留已到达的滚轮事件、普通按键、区域、捕获及指针状态，不产生额外设备查询或通知，不改写返回槽。设备缺失、接口未提供或取消失败时返回诊断。
+
+普通 937 忽略参数，经根命令 34 查询输入对象，再以调用任务为 sender 发送 158，三个数据项均为零；返回状态二，保留 VM 返回槽。两次路由沿用任务可达性和删除门控，输入对象正在分派时取消同一设备的重复状态。
 
 ## 普通 KCS 按钮调用
 

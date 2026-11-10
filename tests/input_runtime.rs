@@ -77,6 +77,7 @@ fn ordinary_input_wrappers_query_devices_and_update_regions_and_key_switches() -
     call(&mut code, 147, &[9, 0]);
     call(&mut code, 286, &[u32::MAX]);
     call(&mut code, 404, &[u32::MAX]);
+    call(&mut code, 937, &[u32::MAX]);
     wait(&mut code);
     call(&mut code, 145, &[9]);
     call(&mut code, 285, &[79]);
@@ -99,6 +100,7 @@ fn ordinary_input_wrappers_query_devices_and_update_regions_and_key_switches() -
         let caller = rt.create(0, kind::ORDINARY, b"caller", b"")?;
         let device = Rc::new(RefCell::new(DeviceState::new([20, 30])));
         device.borrow_mut().key_mask = 2;
+        device.borrow_mut().wheel_repeats = 7;
         rt.set_input_device(Device(device.clone()))?;
         rt.input_coordinates_mut().logical_size = [100, 100];
         let mut bytes = region(9, [40, 40, 50, 50]);
@@ -152,6 +154,8 @@ fn ordinary_input_wrappers_query_devices_and_update_regions_and_key_switches() -
         assert_eq!(current.keys().enabled(), &[1; 80]);
         assert_eq!(current.pointer().position, [-1; 2]);
         assert_eq!(current.pointer().forced, 1);
+        assert_eq!(device.borrow().wheel_repeats, 0);
+        assert_eq!(device.borrow().key_mask, 2);
         assert_eq!(
             rt.object(caller)
                 .unwrap()
@@ -659,6 +663,8 @@ struct DeviceState {
     key_mask: u32,
     queries: Vec<(u32, u32, bool)>,
     wheel: u32,
+    wheel_repeats: u32,
+    fail_wheel_cancel: bool,
     cursor: u32,
     shows: Vec<u32>,
     calls: Vec<&'static str>,
@@ -681,6 +687,8 @@ impl DeviceState {
             key_mask: 0,
             queries: Vec::new(),
             wheel: 0,
+            wheel_repeats: 0,
+            fail_wheel_cancel: false,
             cursor: 1,
             shows: Vec::new(),
             calls: Vec::new(),
@@ -774,6 +782,15 @@ impl InputDevice for Device {
     }
     fn clear_touches(&mut self) -> Result<()> {
         self.0.borrow_mut().calls.push("clear_touches");
+        Ok(())
+    }
+    fn cancel_wheel_repeat(&mut self) -> Result<()> {
+        let mut state = self.0.borrow_mut();
+        state.calls.push("cancel_wheel_repeat");
+        if state.fail_wheel_cancel {
+            return Err(Error::new(0, "合成滚轮取消失败"));
+        }
+        state.wheel_repeats = 0;
         Ok(())
     }
 }
@@ -967,6 +984,21 @@ fn wheel_ignores_event_masks_and_snapshot_commands_preserve_buffer_tails() -> Re
     input_command(&mut runtime, 156, [0x1234, 0x5678, 0])?;
     assert_eq!(&state.borrow().calls[calls..], &["clear_touches"]);
     assert_eq!(runtime.input_state(1).unwrap().pointer(), &cached);
+    let keys = *runtime.input_state(1).unwrap().keys().records();
+    let captures = *runtime.input_state(1).unwrap().events().captures();
+    state.borrow_mut().wheel_repeats = 9;
+    state.borrow_mut().fail_wheel_cancel = true;
+    assert!(input_command(&mut runtime, 158, [u32::MAX; 3]).is_err());
+    assert_eq!(state.borrow().wheel_repeats, 9);
+    state.borrow_mut().fail_wheel_cancel = false;
+    input_command(&mut runtime, 158, [u32::MAX; 3])?;
+    assert_eq!(state.borrow().wheel_repeats, 0);
+    assert_eq!(runtime.input_state(1).unwrap().pointer(), &cached);
+    assert_eq!(runtime.input_state(1).unwrap().keys().records(), &keys);
+    assert_eq!(
+        runtime.input_state(1).unwrap().events().captures(),
+        &captures
+    );
     input_command(&mut runtime, 160, [0; 3])?;
     assert_eq!(input_command(&mut runtime, 153, [0; 3])?, 0);
     state.borrow_mut().sample.active = 0;

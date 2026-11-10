@@ -22,6 +22,10 @@ pub trait InputDevice {
     fn cursor_visible(&mut self) -> Result<u32>;
     fn set_pointer(&mut self, position: [i32; 2]) -> Result<()>;
     fn clear_keys(&mut self) -> Result<()>;
+    /// 取消滚轮的延迟重复，保留已到达的按钮事件及按键状态。
+    fn cancel_wheel_repeat(&mut self) -> Result<()> {
+        Err(crate::Error::new(0, "输入设备未提供滚轮重复取消"))
+    }
     /// 清空触摸接触点映射和活动计数，保留鼠标及按键状态。
     fn clear_touches(&mut self) -> Result<()> {
         Err(crate::Error::new(0, "输入设备未提供触摸重置"))

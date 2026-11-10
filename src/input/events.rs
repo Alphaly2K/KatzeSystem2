@@ -248,11 +248,10 @@ fn accepts(region: &Region, event: KeyEvent) -> bool {
     }
     let rect = region.bounds();
     let [x, y] = event.point;
-    if rect.left >= rect.right || rect.top >= rect.bottom {
-        // 空矩形（未配置或退化）不参与指针命中；全屏接受用大范围矩形表达。
-        return false;
-    }
-    if x < rect.left || y < rect.top || x >= rect.right || y >= rect.bottom {
+    if rect.left < rect.right
+        && rect.top < rect.bottom
+        && (x < rect.left || y < rect.top || x >= rect.right || y >= rect.bottom)
+    {
         return false;
     }
     region
