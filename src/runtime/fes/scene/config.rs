@@ -81,7 +81,14 @@ impl<F: ObjectFactory> Store<'_, F> {
                 let selected = destination as u32;
                 let valid = (selected as usize) < self.host.languages.prefixes.len();
                 if valid && (name == b"lang_text_main" || name == b"lang_ui" && selected != value) {
-                    return Err(Error::new(offset, "FES 主语言切换通知尚未接入"));
+                    let target = if name == b"lang_ui" {
+                        self.host.languages.primary_index = selected;
+                        crate::language::LanguageTarget::Interface
+                    } else {
+                        self.host.languages.message_index = selected;
+                        crate::language::LanguageTarget::MainText
+                    };
+                    scene.notify(super::Notification::LanguageChanged(target))?;
                 }
                 if name == b"lang_text_sub" {
                     self.host.languages.subtitle_index = if valid { selected } else { u32::MAX };

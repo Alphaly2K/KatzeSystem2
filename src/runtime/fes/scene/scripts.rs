@@ -136,7 +136,7 @@ impl Scene {
 }
 
 impl<F: ObjectFactory> Store<'_, F> {
-    pub(super) fn process_fes_script_requests(
+    pub(super) fn process_fes_notifications(
         &mut self,
         owner: u32,
         scene: &mut Scene,
@@ -144,6 +144,19 @@ impl<F: ObjectFactory> Store<'_, F> {
         for _ in 0..self.budget.max(1) {
             if scene.scripts.active.is_none() {
                 scene.publish_notifications();
+                if let Some(Notification::LanguageChanged(target)) = scene.notifications.front() {
+                    if self.host.language_change_requests.len() >= crate::read::MAX_ITEMS {
+                        return Err(Error::new(0, "语言刷新请求数量超过上限"));
+                    }
+                    self.host.language_change_requests.push(
+                        crate::language::LanguageChangeRequest {
+                            task_id: owner,
+                            target: *target,
+                        },
+                    );
+                    scene.notifications.pop_front();
+                    continue;
+                }
                 let Some(Notification::Script(_)) = scene.notifications.front() else {
                     return Ok(true);
                 };
@@ -166,7 +179,10 @@ impl<F: ObjectFactory> Store<'_, F> {
             scene.publish_notifications();
         }
         Ok(scene.scripts.active.is_none()
-            && !matches!(scene.notifications.front(), Some(Notification::Script(_))))
+            && !matches!(
+                scene.notifications.front(),
+                Some(Notification::Script(_) | Notification::LanguageChanged(_))
+            ))
     }
 
     fn advance_fes_script_request(

@@ -447,7 +447,7 @@ fn configuration_writes_apply_presets_raw_values_and_volumes_in_body_and_handler
 
 #[test]
 fn language_writes_complete_without_notifications_for_unchanged_ui_and_invalid_indices() {
-    let source = b"#START\nsetconf ($7+=1) lang_ui ($7+=1) ($7+=1)\nsetconf 3 lang_text_main\nsetconf -1 lang_ui\nsetconf 0x80000000 lang_text_main\ngetconf 0 lang_ui\ngetconf 1 lang_text_main\nwait 999\n#WRITE\nsetconf 1 lang_ui\nsetconf -1 lang_text_main\n#NOTIFY\nsetconf 1 lang_text_main\n";
+    let source = b"#START\nsetconf ($7+=1) lang_ui ($7+=1) ($7+=1)\nsetconf 3 lang_text_main\nsetconf -1 lang_ui\nsetconf 0x80000000 lang_text_main\ngetconf 0 lang_ui\ngetconf 1 lang_text_main\nwait 999\n#WRITE\nsetconf 1 lang_ui\nsetconf -1 lang_text_main\n";
     for budget in [1, 4096] {
         let Setup { mut runtime, .. } = setup(budget, source);
         runtime.host_mut().system_settings = Some(Default::default());
@@ -465,26 +465,76 @@ fn language_writes_complete_without_notifications_for_unchanged_ui_and_invalid_i
         assert_eq!(runtime.host().languages, languages);
         assert_eq!(runtime.host().system_settings_dirty, 1);
         let settings = runtime.host().system_settings.clone();
-        for (name, success) in [(b"WRITE\0".as_slice(), true), (b"NOTIFY\0", false)] {
-            runtime.host_mut().system_settings_dirty = 0;
-            let mut block = name.to_vec();
-            let result = runtime.dispatch_command_with_buffers(
+        runtime.host_mut().system_settings_dirty = 0;
+        let mut block = b"WRITE\0".to_vec();
+        runtime
+            .dispatch_command_with_buffers(
                 0,
                 command(fes, 343, 0, 0),
                 &mut CommandBuffers {
                     data1: Some(&mut block),
                     ..Default::default()
                 },
-            );
-            if success {
-                result.unwrap();
-            } else {
-                assert!(result.unwrap_err().message.contains("切换通知"));
-            }
-            assert_eq!(runtime.host().languages, languages);
-            assert_eq!(runtime.host().system_settings, settings);
-            assert_eq!(runtime.host().system_settings_dirty, u32::from(success));
-        }
+            )
+            .unwrap();
+        runtime.update(101, 1).unwrap();
+        assert_eq!(runtime.host().languages, languages);
+        assert_eq!(runtime.host().system_settings, settings);
+        assert_eq!(runtime.host().system_settings_dirty, 1);
+        assert!(runtime.host().language_change_requests.is_empty());
+    }
+}
+
+#[test]
+fn language_configuration_changes_publish_ordered_requests_after_body_and_handlers() {
+    use katze_system2::language::{LanguageChangeRequest, LanguageTarget::*};
+    let source = b"#START\nsetconf 1 lang_ui\ngetconf 0 lang_ui\nsetconf 2 lang_text_main\ngetconf 1 lang_text_main\nsetconf 1 lang_ui\nsetconf 1 lang_text_main\ngetconf 2 lang_text_main\nsetconf 0 lang_ui\ngetconf 3 lang_ui\nwait 999\n#WRITE\nsetconf 2 lang_ui\nsetconf 1 lang_text_main\nsetconf 0 lang_text_main\n";
+    for budget in [1, 4096] {
+        let Setup { mut runtime, .. } = setup(budget, source);
+        runtime.host_mut().system_settings = Some(Default::default());
+        runtime.host_mut().languages.prefixes = vec![b"a".to_vec(), b"b".to_vec(), b"c".to_vec()];
+        let fes = runtime.create(0, kind::FES, b"configuration", b"").unwrap();
+        send(&mut runtime, fes, 337, 0, 0);
+        file(&mut runtime, fes, b"complete.fes").unwrap();
+        send(&mut runtime, fes, 339, 0, 0);
+        runtime.update(100, 1).unwrap();
+        assert_eq!(runtime.numbers().shared[..4], [1, 2, 1, 0]);
+        let expected = |targets: &[katze_system2::language::LanguageTarget]| {
+            targets
+                .iter()
+                .map(|&target| LanguageChangeRequest {
+                    task_id: fes,
+                    target,
+                })
+                .collect::<Vec<_>>()
+        };
+        let first = expected(&[Interface, MainText, MainText, Interface]);
+        assert_eq!(runtime.host().language_change_requests, first);
+        runtime.host_mut().system_settings_dirty = 0;
+        let mut block = b"WRITE\0".to_vec();
+        runtime
+            .dispatch_command_with_buffers(
+                0,
+                command(fes, 343, 0, 0),
+                &mut CommandBuffers {
+                    data1: Some(&mut block),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(runtime.host().languages.primary_index, 2);
+        assert_eq!(runtime.host().languages.message_index, 0);
+        assert_eq!(runtime.host().system_settings_dirty, 1);
+        assert_eq!(runtime.host().language_change_requests, first);
+        runtime.update(101, 1).unwrap();
+        assert_eq!(
+            runtime.host().language_change_requests,
+            expected(&[
+                Interface, MainText, MainText, Interface, Interface, MainText, MainText
+            ])
+        );
+        runtime.update(102, 1).unwrap();
+        assert_eq!(runtime.host().language_change_requests.len(), 7);
     }
 }
 

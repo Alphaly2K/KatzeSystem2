@@ -1380,11 +1380,21 @@ fn language_changes_reload_image_pixels_without_losing_requested_names_or_empty_
         message_index: 1,
         ..Default::default()
     };
+    runtime.host_mut().system_settings = Some(Default::default());
+    let select = |runtime: &mut TestRuntime, commands: &[u8]| {
+        let mut scene = katze_system2::runtime::fes::Scene::new(
+            fes::Program::from_text(commands).unwrap(),
+            runtime.host().handle_allocator(),
+        )
+        .unwrap();
+        assert!(runtime.update_fes_scene(0, &mut scene, 100).unwrap());
+    };
     let reads = Rc::new(RefCell::new(Vec::new()));
     runtime.set_resources(PixelFiles {
         files: BTreeMap::from([
             (b"sprite_aa_bb".to_vec(), pixel_file(0xff12_3456)),
             (b"sprite_bb_bb".to_vec(), pixel_file(0xffab_cdef)),
+            (b"sprite_bb_aa".to_vec(), pixel_file(0xff55_6677)),
         ]),
         reads: reads.clone(),
     });
@@ -1413,7 +1423,7 @@ fn language_changes_reload_image_pixels_without_losing_requested_names_or_empty_
         first_pixels
     );
     assert_eq!(reads.borrow().as_slice(), [b"sprite_aa_bb".to_vec()]);
-    runtime.host_mut().languages.primary_index = 1;
+    select(&mut runtime, b"#START\nsetconf 1 lang_ui\nwait 999\n");
     runtime.update_fes_object(0, &mut objects, sprite).unwrap();
     assert_eq!(objects.get(sprite).unwrap().image_handle(), Some(wrapper));
     assert_eq!(
@@ -1425,6 +1435,16 @@ fn language_changes_reload_image_pixels_without_losing_requested_names_or_empty_
     };
     assert_eq!(state.requested_file, b"sprite_%LANG%_%LANG_M%");
     assert_eq!(state.file, b"sprite_bb_bb");
+    select(
+        &mut runtime,
+        b"#START\nsetconf 0 lang_text_main\nwait 999\n",
+    );
+    runtime.update_fes_object(0, &mut objects, sprite).unwrap();
+    assert_eq!(objects.get(sprite).unwrap().image_handle(), Some(wrapper));
+    assert_eq!(
+        runtime.images().get(wrapper).unwrap().surface().pixel(0, 0),
+        Some(0xff55_6677)
+    );
     initialize(
         &mut objects,
         "sprite",
@@ -1433,13 +1453,13 @@ fn language_changes_reload_image_pixels_without_losing_requested_names_or_empty_
             ..Default::default()
         },
     );
-    runtime.host_mut().languages.primary_index = 0;
+    select(&mut runtime, b"#START\nsetconf 0 lang_ui\nwait 999\n");
     runtime.update_fes_object(0, &mut objects, sprite).unwrap();
     assert_eq!(
         runtime.images().get(wrapper).unwrap().surface().pixel(0, 0),
-        Some(0xffab_cdef)
+        Some(0xff55_6677)
     );
-    assert_eq!(reads.borrow().len(), 2);
+    assert_eq!(reads.borrow().len(), 3);
 }
 
 #[test]

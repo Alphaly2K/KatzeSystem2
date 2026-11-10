@@ -84,6 +84,7 @@ pub struct HostState {
     /// FES 配置写回后的保存请求标记；宿主完成持久化后清除。
     pub system_settings_dirty: u32,
     pub languages: crate::language::LanguageState,
+    pub language_change_requests: Vec<crate::language::LanguageChangeRequest>,
     pub script_replacements: BTreeMap<Vec<u8>, Vec<u8>>,
     pub save_services: Option<Box<dyn crate::save::SaveServices>>,
     /// 普通 629 使用的同步平台打开服务；未配置时该入口返回诊断。

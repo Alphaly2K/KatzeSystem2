@@ -1,5 +1,18 @@
 use crate::{Error, Result};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LanguageTarget {
+    Interface,
+    MainText,
+}
+
+/// 交给平台宿主的异步语言刷新；处理时读取当前全局选择，不保存入队时的编号。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LanguageChangeRequest {
+    pub task_id: u32,
+    pub target: LanguageTarget,
+}
+
 /// 图像与普通语言接口共用的前缀和选择。前缀由宿主转为 CP932 字节。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LanguageState {
@@ -29,7 +42,7 @@ impl LanguageState {
     /// 还原默认编号和 `L%02d` 声明的有序前缀表，首个缺失 `<prefix>` 的
     /// 块结束扫描；主语言和消息语言的初始选择均取默认编号。`<code>`、
     /// `<lang>`、`<accel>`、`<enable_sub>` 与 `<OPTTABLE>` 不进入前缀
-    /// 选择，平台语言识别和运行时切换继续由调用方处理。
+    /// 选择，平台语言识别继续由调用方处理。
     pub fn from_xml(input: &[u8]) -> Result<Self> {
         let xml = crate::resource::XmlDocument::parse(input)?;
         let default_index = xml.integer(b"language/default", 0)?;

@@ -92,6 +92,7 @@ enum Notification {
     Exit(i32),
     PreferredFocus(fes::ObjectReference),
     FocusLock(i32),
+    LanguageChanged(crate::language::LanguageTarget),
     Script(ScriptRequest),
 }
 
@@ -299,7 +300,10 @@ impl Scene {
 
     fn publish_notifications(&mut self) {
         if self.scripts.active.is_some()
-            || matches!(self.notifications.front(), Some(Notification::Script(_)))
+            || matches!(
+                self.notifications.front(),
+                Some(Notification::Script(_) | Notification::LanguageChanged(_))
+            )
         {
             return;
         }
@@ -308,8 +312,8 @@ impl Scene {
                 Notification::Exit(code) => self.publish_exit(code),
                 Notification::PreferredFocus(target) => self.preferred_focus = Some(target),
                 Notification::FocusLock(value) => self.focus_lock = value,
-                Notification::Script(request) => {
-                    self.notifications.push_front(Notification::Script(request));
+                notification @ (Notification::Script(_) | Notification::LanguageChanged(_)) => {
+                    self.notifications.push_front(notification);
                     break;
                 }
             }
@@ -1402,7 +1406,7 @@ impl<F: ObjectFactory> Store<'_, F> {
         }
         for _ in 0..self.budget {
             if scene.invocation.as_ref().unwrap().flush_scripts {
-                if !self.process_fes_script_requests(owner, scene)? {
+                if !self.process_fes_notifications(owner, scene)? {
                     return Ok(false);
                 }
                 scene.invocation.as_mut().unwrap().flush_scripts = false;
@@ -1424,7 +1428,7 @@ impl<F: ObjectFactory> Store<'_, F> {
             }
             if let Some((count, cursor)) = scene.invocation.as_ref().unwrap().updates {
                 if !scene.invocation.as_ref().unwrap().notifications_done {
-                    if !self.process_fes_script_requests(owner, scene)? {
+                    if !self.process_fes_notifications(owner, scene)? {
                         return Ok(false);
                     }
                     if !scene.invocation.as_ref().unwrap().resume_script {
