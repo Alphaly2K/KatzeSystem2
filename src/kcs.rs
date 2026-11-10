@@ -336,6 +336,11 @@ pub trait Host {
         1
     }
 
+    /// 声音分类配置的原始启用值；零使用旧分类模式。
+    fn sound_config_enabled(&self) -> u32 {
+        0
+    }
+
     fn sound_group_id(&self, name: &[u8]) -> Result<u32> {
         Ok(crate::audio::SoundGroups::legacy_id(name))
     }
@@ -533,6 +538,10 @@ impl<T: Host + ?Sized> Host for &mut T {
 
     fn sound_stereo(&self) -> u32 {
         (**self).sound_stereo()
+    }
+
+    fn sound_config_enabled(&self) -> u32 {
+        (**self).sound_config_enabled()
     }
 
     fn sound_group_id(&self, name: &[u8]) -> Result<u32> {

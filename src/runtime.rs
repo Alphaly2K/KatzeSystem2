@@ -1647,6 +1647,10 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         self.host.sound_stereo.unwrap_or(1)
     }
 
+    fn sound_config_enabled(&self) -> u32 {
+        self.host.sound_config_enabled
+    }
+
     fn sound_group_id(&self, name: &[u8]) -> Result<u32> {
         self.host.sound_group_id(name)
     }

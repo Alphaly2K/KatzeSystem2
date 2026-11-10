@@ -124,6 +124,26 @@ impl SoundState {
         }
     }
 
+    fn configuration_changed(&mut self) {
+        for logical in 0..self.channels.len() {
+            if !self.channels[logical].grouped {
+                continue;
+            }
+            let linked = self.channels[logical].linked;
+            for (slot, index) in [Some(logical as u32), linked]
+                .into_iter()
+                .flatten()
+                .enumerate()
+            {
+                if self.channels[index as usize].is_playing() {
+                    // 基线写回位置由关联对中的查询序号决定。
+                    self.channels[slot].allocation_flags[0] = 1;
+                    self.channels[slot].ramps.remaining[0] = 0.0;
+                }
+            }
+        }
+    }
+
     fn unload(&mut self, channel: u32) -> Result<()> {
         let Some(sound) = self.channels.get(channel as usize) else {
             return Ok(());
@@ -473,6 +493,13 @@ impl TaskObject for SoundObject {
             return Ok(CommandOutcome::finished(false));
         }
         match command.code {
+            19 => {
+                if host.sound_config_enabled() == 0 {
+                    self.audio.configuration_changed();
+                }
+                *output = 1;
+                return Ok(CommandOutcome::finished(false));
+            }
             180 | 181 => {
                 if command.code == 181 || command.data[0] < 64 {
                     let bytes = buffers
@@ -626,7 +653,7 @@ impl TaskObject for SoundObject {
             }
             return Ok(CommandOutcome::finished(false));
         }
-        if matches!(command.code, 19 | 180..=229) {
+        if matches!(command.code, 180..=229) {
             return Err(Error::new(
                 0,
                 format!("声音对象命令 {} 尚未接入", command.code),
@@ -679,5 +706,84 @@ impl<F: ObjectFactory> ObjectFactory for SoundFactory<F> {
         } else {
             self.fallback.create(id, object_kind, name)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{expression::State, kcs::CoreHost};
+
+    #[test]
+    fn configuration_notification_preserves_playback_and_marks_query_positions() {
+        let mut numbers = State::new(0);
+        let mut host = CoreHost::new(&mut numbers);
+        let mut object = SoundObject::new(true);
+        for index in [7, 11, 63] {
+            let channel = &mut object.audio.channels[index];
+            channel.pcm = Some(Pcm::new(8000, 1, vec![1, 2]).unwrap());
+            channel.playback.playing = true;
+        }
+        object.audio.channels[7].grouped = true;
+        object.audio.channels[7].linked = Some(11);
+        object.audio.channels[11].playback.playing = false;
+        for channel in &mut object.audio.channels {
+            channel.allocation_flags = [37, 41];
+            channel.ramps.remaining = [17.0, 19.0];
+            channel.ramps.active = 3;
+        }
+        let command = Command {
+            target: 1,
+            sender: 37,
+            code: 19,
+            data: [u32::MAX; 3],
+        };
+        for enabled in [1, 0x8000_0000, 0] {
+            host.host.sound_config_enabled = enabled;
+            let mut output = 99;
+            let result = object
+                .dispatch_command(kind::SOUND, &command, &mut output, &mut host, 1)
+                .unwrap();
+            assert!(result.done && !result.propagate);
+            assert_eq!(output, 1);
+            let first = &object.audio.channels[0];
+            assert_eq!(
+                first.allocation_flags,
+                [if enabled == 0 { 1 } else { 37 }, 41]
+            );
+            assert_eq!(
+                first.ramps.remaining,
+                [if enabled == 0 { 0.0 } else { 17.0 }, 19.0]
+            );
+            for channel in &object.audio.channels[1..] {
+                assert_eq!(channel.allocation_flags, [37, 41]);
+                assert_eq!(channel.ramps.remaining, [17.0, 19.0]);
+                assert_eq!(channel.ramps.active, 3);
+            }
+            assert!(object.audio.channels[7].is_playing());
+            assert!(!object.audio.channels[11].is_playing());
+        }
+        object.audio.channels[7].grouped = false;
+        object.audio.channels[63].grouped = true;
+        object.audio.channels[63].linked = Some(63);
+        for _ in 0..2 {
+            object
+                .dispatch_command(kind::SOUND, &command, &mut 99, &mut host, 1)
+                .unwrap();
+            assert_eq!(object.audio.channels[1].allocation_flags, [1, 41]);
+            assert_eq!(object.audio.channels[1].ramps.remaining, [0.0, 19.0]);
+            assert!(object.audio.channels[63].is_playing());
+        }
+        object.base.control.deletion_requested = -1;
+        let mut output = 99;
+        object
+            .dispatch_command(kind::SOUND, &command, &mut output, &mut host, 1)
+            .unwrap();
+        assert_eq!(output, 99);
+        let mut disabled = SoundObject::new(false);
+        disabled
+            .dispatch_command(kind::SOUND, &command, &mut output, &mut host, 1)
+            .unwrap();
+        assert_eq!(output, 0);
     }
 }

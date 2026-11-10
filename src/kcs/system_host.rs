@@ -92,6 +92,10 @@ impl<H: Host, S: SystemServices> Host for SystemHost<'_, H, S> {
         self.inner.sound_stereo()
     }
 
+    fn sound_config_enabled(&self) -> u32 {
+        self.inner.sound_config_enabled()
+    }
+
     fn sound_group_id(&self, name: &[u8]) -> Result<u32> {
         self.inner.sound_group_id(name)
     }
