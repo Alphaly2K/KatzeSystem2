@@ -7,7 +7,7 @@ mod support;
 
 use katze_system2::{
     Result,
-    input::{ButtonSource, DeviceKeys, InputDevice, KeySample, PointerSample},
+    input::{ButtonSource, DeviceKeys, InputDevice, KeySample, PointerSample, WheelButtons},
     runtime::kind,
 };
 use minifb::{Key, MouseButton, MouseMode, Window, WindowOptions};
@@ -151,12 +151,17 @@ impl Default for Shared {
 struct WindowDevice {
     shared: Rc<RefCell<Shared>>,
     keys: DeviceKeys,
+    wheel: WheelButtons,
 }
 
 impl WindowDevice {
     fn new(config: &[u8], shared: Rc<RefCell<Shared>>) -> Result<Self> {
         let keys = support::input_keys(config)?;
-        Ok(Self { shared, keys })
+        Ok(Self {
+            shared,
+            keys,
+            wheel: WheelButtons::default(),
+        })
     }
 }
 
@@ -164,7 +169,13 @@ impl InputDevice for WindowDevice {
     fn poll(&mut self) -> Result<()> {
         let mut shared = self.shared.borrow_mut();
         for (source, code, pressed) in shared.events.drain(..) {
-            self.keys.button(source, code, pressed);
+            if source == ButtonSource::Mouse && matches!(code, 6 | 7) && pressed != 0 {
+                self.wheel.scroll(code == 6, |code, pressed| {
+                    self.keys.button(ButtonSource::Mouse, code, pressed);
+                });
+            } else {
+                self.keys.button(source, code, pressed);
+            }
         }
         if shared
             .forced_origin
@@ -193,6 +204,9 @@ impl InputDevice for WindowDevice {
         Ok(self.shared.borrow().foreground)
     }
     fn finish(&mut self) -> Result<()> {
+        self.wheel.finish(|code, pressed| {
+            self.keys.button(ButtonSource::Mouse, code, pressed);
+        });
         Ok(())
     }
     fn commit(&mut self) -> Result<()> {
@@ -220,6 +234,7 @@ impl InputDevice for WindowDevice {
         Ok(())
     }
     fn cancel_wheel_repeat(&mut self) -> Result<()> {
+        self.wheel.cancel_repeat();
         Ok(())
     }
     fn clear_touches(&mut self) -> Result<()> {
@@ -286,6 +301,11 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             if let Some((x, y)) = window.get_scroll_wheel() {
                 if x != 0. || y != 0. {
                     shared.wheel = shared.wheel.wrapping_add(1);
+                }
+                if y != 0. {
+                    shared
+                        .events
+                        .push((ButtonSource::Mouse, if y > 0. { 6 } else { 7 }, 1));
                 }
             }
             shared.foreground = window.is_active();
