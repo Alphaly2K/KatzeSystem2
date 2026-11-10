@@ -301,7 +301,7 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 
 普通 1045／1046 原地按字节容量／字符数量截断 UTF-8 串，写双零并返回原始字节偏移。1051 将 CP932 查询串转换后搜索 UTF-8 源串，未命中返回源串字节长度。1063 将 CP932 源串转换到目标，容量固定为含结束零的 256 字节，容量不足保留目标，不压返回值。四个入口各接受两个 VM 地址或数值参数，不展开格式；调用者须提供输出空间。旧式步长、负偏移及查询长度约束见 [UTF-8 字符串入口](kcs.md#utf-8-字符串入口)。
 
-`resource::XmlWriter` 提供配置 XML 写出：`write` 接收名称分段与字面文本，`write_integer` 保存 DWORD，`write_wide` 接收 UTF-16；`to_bytes` 返回完整文档供宿主保存。根节点、节点顺序、字面实体及转换容量契约见 [XML 字段](resources.md#脚本-xml-字段)。
+`resource::XmlWriter` 提供配置 XML 写出：`write` 接收名称分段与字面文本，`write_integer` 保存 DWORD，`write_float` 保存浮点数，`write_wide` 接收 UTF-16；`to_bytes` 返回完整文档供宿主保存。根节点、节点顺序、字面实体及转换容量契约见 [XML 字段](resources.md#脚本-xml-字段)。
 
 ### 同步系统服务
 
@@ -687,7 +687,7 @@ Runtime 的普通 294 创建独立控制器，使用与图像、集合共用且�
 
 ## 资源配置
 
-`resource::XmlDocument::parse(bytes)` 读取基线 UTF-8 XML，`root_name()` 提供根节点的字面名称。`text(path)` 返回可选借用字节，`integer(path, default)` 在缺失时采用默认值；路径和输入约束见[资源文档](resources.md#脚本-xml-字段)。读取器不访问文件系统。
+`resource::XmlDocument::parse(bytes)` 读取基线 UTF-8 XML，`root_name()` 提供根节点的字面名称。`text(path)` 返回可选借用字节，`integer(path, default)` 和 `float(path, default)` 在缺失时采用默认值；路径和输入约束见[资源文档](resources.md#脚本-xml-字段)。读取器不访问文件系统。
 
 `resource::ArchiveConfig::from_xml(&str)` 读取启动 XML 的类别及必需归档列表。`entries` 固定包含 128 个槽位，`required` 包含 64 个原始整数编号。`find` 按标识返回第一个匹配槽位；`resolve` 接受类别标识和资源名字节，返回虚拟名称，查找失败返回诊断。`Category::resolve` 也可独立用于显式前缀与扩展名。接口不读取文件系统。具体输入约束见[资源名称与类别](resources.md)，XML 诊断的 offset 使用零。
 

@@ -43,6 +43,69 @@ fn xml(body: &str) -> XmlDocument {
 }
 
 #[test]
+fn floats_keep_configuration_prefix_rules_rounding_and_signed_output() {
+    for (source, expected) in [
+        ("", 0),
+        (" +3.5", 0),
+        (".5", 0),
+        ("-.5", (-0.5f32).to_bits()),
+        ("-nan(ind)", 0x8000_0000),
+        ("-0", 0x8000_0000),
+        ("1.25tail", 1.25f32.to_bits()),
+        ("1e3", 1.0f32.to_bits()),
+        ("1.e3", 1000.0f32.to_bits()),
+        ("1.e-3", 1.0f32.to_bits()),
+        ("1.2e3", 1.2f32.to_bits()),
+        ("1.f23", 1.0f32.to_bits()),
+        ("1.0000000596046448", 1.0f32.to_bits()),
+        ("0x10", 0),
+    ] {
+        let document = xml(&format!("<document><v>{source}</v></document>"));
+        assert_eq!(
+            document.float(b"v", 9.0).unwrap().to_bits(),
+            expected,
+            "{source}"
+        );
+        let default = f32::from_bits(0xffc0_1234);
+        assert_eq!(
+            document.float(b"missing", default).unwrap().to_bits(),
+            default.to_bits()
+        );
+    }
+    for (source, accepted) in [
+        ("9".repeat(1023), true),
+        ("0".repeat(1024), false),
+        (format!("{}.", "0".repeat(1021)), true),
+        (format!("{}.", "0".repeat(1022)), false),
+    ] {
+        let document = xml(&format!("<document><v>{source}</v></document>"));
+        assert_eq!(document.float(b"v", 0.0).is_ok(), accepted);
+    }
+    let mut writer = XmlWriter::new();
+    for (bits, expected) in [
+        (0x8000_0000, "-0.000000"),
+        (0x3eaa_aaab, "0.333333"),
+        (
+            0x7f7f_ffff,
+            "340282346638528859811704183484516925440.000000",
+        ),
+        (0x7f80_0000, "inf"),
+        (0xff80_0000, "-inf"),
+        (0x7f80_0001, "nan"),
+        (0xffc0_1234, "-nan(ind)"),
+    ] {
+        writer.write_float(&["v"], f32::from_bits(bits)).unwrap();
+        assert_eq!(
+            XmlDocument::parse(&writer.to_bytes().unwrap())
+                .unwrap()
+                .text(b"v")
+                .unwrap(),
+            Some(expected.as_bytes())
+        );
+    }
+}
+
+#[test]
 fn fields_merge_duplicate_paths_and_keep_raw_text_and_literal_names() {
     let document = xml("<document><a>old<b>7</b></a><a>1<c>4</c>3<!--skip-->5</a>
          <v></v><ns:x><ns:y>資料&amp;&#65;</ns:y></ns:x>

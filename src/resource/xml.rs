@@ -133,10 +133,44 @@ impl XmlDocument {
         }))
     }
 
+    /// 缺失时保留默认值；存在时按配置数值规则截取，拒绝前导空白和加号。
+    pub fn float(&self, path: &[u8], default: f32) -> Result<f32> {
+        self.text(path)?.map_or(Ok(default), config_float)
+    }
+
     /// 宽字符配置入口；每个 UTF-8 字符块保留首个 UTF-16 单元，缺失为 None。
     pub fn wide_text(&self, path: &[u8]) -> Result<Option<Vec<u16>>> {
         self.text(path)?.map(text::wide_config).transpose()
     }
+}
+
+fn config_float(value: &[u8]) -> Result<f32> {
+    let value = terminated(value);
+    if !matches!(value.first(), Some(b'-' | b'0'..=b'9')) {
+        return Ok(0.0);
+    }
+    let negative = value.first() == Some(&b'-');
+    let value = &value[usize::from(negative)..];
+    let digits = value.iter().take_while(|b| b.is_ascii_digit()).count();
+    let mut end = digits;
+    if value.get(end) == Some(&b'.') {
+        end += 1;
+        if !matches!(value.get(end), Some(b'f' | b'F')) {
+            // 小数点后先复制一字节，再复制后续数字；该字节也可能是指数标记或零。
+            end += 1;
+            end += value
+                .get(end..)
+                .unwrap_or_default()
+                .iter()
+                .take_while(|b| b.is_ascii_digit())
+                .count();
+        }
+    }
+    if end >= 1024 {
+        return Err(Error::new(0, "XML 浮点文本超出转换缓冲范围"));
+    }
+    let bits = text::float32(&value[..end.min(value.len())]);
+    Ok(f32::from_bits(bits ^ (u32::from(negative) << 31)))
 }
 
 fn xml_error(error: roxmltree::Error) -> Error {

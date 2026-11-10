@@ -86,6 +86,11 @@ impl XmlWriter {
         self.write(path, (value as i32).to_string().as_bytes())
     }
 
+    /// float 提升到 double 后以六位小数写出，保留负零与非有限值的符号。
+    pub fn write_float(&mut self, path: &[&str], value: f32) -> Result<()> {
+        self.write(path, &crate::text::format_float(value, 6))
+    }
+
     /// 逐 UTF-16 单元转换，代理单元各自替换为 U+FFFD，FFFF 写两个 FF 字节。
     /// 首零截止；超过原转换缓冲容量时返回诊断，保留字段原值。
     pub fn write_wide(&mut self, path: &[&str], value: &[u16]) -> Result<()> {

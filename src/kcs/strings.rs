@@ -135,112 +135,7 @@ fn sequence_expression(
     expression::eval_fes_fallback(text::ascii(&source)?, state)
 }
 
-pub(super) fn float32(source: &[u8]) -> u32 {
-    let start = source
-        .iter()
-        .position(|&b| !matches!(b, b' ' | b'\t'..=b'\r'))
-        .unwrap_or(source.len());
-    let source = &source[start..];
-    let (negative, source) = match source.first() {
-        Some(b'-') => (true, &source[1..]),
-        Some(b'+') => (false, &source[1..]),
-        _ => (false, source),
-    };
-    let sign = if negative { 0x8000_0000 } else { 0 };
-    if source
-        .get(..3)
-        .is_some_and(|s| s.eq_ignore_ascii_case(b"inf"))
-    {
-        return sign | f32::INFINITY.to_bits();
-    }
-    if source
-        .get(..3)
-        .is_some_and(|s| s.eq_ignore_ascii_case(b"nan"))
-    {
-        return sign | 0x7fff_ffff;
-    }
-    let hexadecimal = source.starts_with(b"0x") || source.starts_with(b"0X");
-    let mut p = if hexadecimal { 2 } else { 0 };
-    let start = p;
-    let mut digits = 0;
-    let mut fraction = 0i64;
-    let mut dot = false;
-    let mut mantissa = 0u64;
-    let mut stored = 0;
-    let mut dropped = 0i64;
-    let mut sticky = false;
-    while let Some(&b) = source.get(p) {
-        if b == b'.' && !dot {
-            dot = true;
-        } else if let Some(n) = (b as char)
-            .to_digit(if hexadecimal { 16 } else { 10 })
-            .filter(|_| b.is_ascii())
-        {
-            digits += 1;
-            if dot {
-                fraction += 1;
-            }
-            if hexadecimal && (stored > 0 || n != 0) {
-                if stored < 16 {
-                    mantissa = (mantissa << 4) | n as u64;
-                    stored += 1;
-                } else {
-                    dropped += 1;
-                    sticky |= n != 0;
-                }
-            }
-        } else {
-            break;
-        }
-        p += 1;
-    }
-    if digits == 0 {
-        return 0;
-    }
-    let number_end = p;
-    let mut exponent = 0i64;
-    let marker = if hexadecimal { b'p' } else { b'e' };
-    if source
-        .get(p)
-        .is_some_and(|b| b.to_ascii_lowercase() == marker)
-    {
-        p += 1;
-        let minus = source.get(p) == Some(&b'-');
-        if matches!(source.get(p), Some(b'+' | b'-')) {
-            p += 1;
-        }
-        let first = p;
-        while let Some(&b) = source.get(p).filter(|b| b.is_ascii_digit()) {
-            exponent = (exponent * 10 + (b - b'0') as i64).min(1_000_000_000);
-            p += 1;
-        }
-        if first == p {
-            p = number_end;
-        }
-        if minus {
-            exponent = -exponent;
-        }
-    }
-    let value = if hexadecimal {
-        let scale = exponent + 4 * (dropped - fraction);
-        let high_bit = 63 - mantissa.leading_zeros() as i64;
-        if mantissa == 0 || scale + high_bit < -160 {
-            0.0
-        } else if scale + high_bit > 128 {
-            f64::INFINITY
-        } else {
-            // 保留舍入位之后的非零信息，再按原 CRT 的 double → float 路径转换。
-            let n = (mantissa | u64::from(sticky)) as f64;
-            n * 2.0f64.powi(scale as i32)
-        }
-    } else {
-        std::str::from_utf8(&source[start..p])
-            .ok()
-            .and_then(|s| s.parse::<f64>().ok())
-            .unwrap_or(0.0)
-    };
-    (value as f32).to_bits() | sign
-}
+pub(super) use crate::text::float32;
 
 pub(crate) fn format(vm: &Interpreter, address: u32, depth: usize) -> Result<Vec<u8>> {
     if depth >= 32 {
@@ -309,22 +204,7 @@ pub(crate) fn format(vm: &Interpreter, address: u32, depth: usize) -> Result<Vec
                                 .map(|(_, p)| field(p))
                                 .transpose()?
                                 .unwrap_or(6);
-                            let f = f32::from_bits(n);
-                            if f.is_nan() {
-                                if f.is_sign_negative() {
-                                    b"-nan(ind)".to_vec()
-                                } else {
-                                    b"nan".to_vec()
-                                }
-                            } else if f.is_infinite() {
-                                if f.is_sign_negative() {
-                                    b"-inf".to_vec()
-                                } else {
-                                    b"inf".to_vec()
-                                }
-                            } else {
-                                format!("{:.precision$}", f as f64).into_bytes()
-                            }
+                            text::format_float(f32::from_bits(n), precision)
                         }
                         _ => return Err(Error::new(vm.pc, "未支持的 KCS 格式转换")),
                     }
