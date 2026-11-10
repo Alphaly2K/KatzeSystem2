@@ -20,7 +20,7 @@
 
 `SoundConfig::from_xml` 读取分类定义的 MASTER 与 PART 段，保留节点键名并将其中单字节 ASCII 字母归一为小写。分类及子分类按 XML 同级节点的逆序保存。子分类缺失的名称、资源信息、编号、倍率、音量和播放开关沿用父级值；sameid 与两项静音独立读取，缺省零。存在但为空或非法的整数正文为零。`SoundGroups::from_xml` 同样按 XML 同级逆序读取 SOUNDGROUP 中的 `id`、`label` 及包含两端的通道范围，`key` 与 `id` 相同。
 
-`SoundConfig::from_xml_with_user_settings(definition, user)` 从定义构造当前配置，再覆盖用户 XML 中的七项声音设置；user 为 None 时应用缺省用户设置。缺失的音量和播放字段取对应定义值，两项静音均取该节点定义中的 sysplay。用户覆盖不改变分类键名、名称、编号、路由、倍率、顺序或分类数量，父级的用户值也不传给子分类。
+`SoundConfig::from_xml_with_user_settings(definition, user)` 从定义构造当前配置，user 为 None 时保留定义初值。提供用户文档时覆盖七项声音设置：缺失的音量和播放字段取对应定义值，两项静音均取该节点定义中的 sysplay，因此存在的空文档仍会应用这一缺省规则。用户覆盖不改变分类键名、名称、编号、路由、倍率、顺序或分类数量，父级的用户值也不传给子分类。
 
 `SoundConfig::write_xml(&mut XmlWriter)` 写出当前 MASTER 和完整 PART 树的七项声音设置，包括 mute 与 voicemute；定义元数据及声音组范围不进入用户文件。宿主通过 `XmlWriter::to_bytes()` 取得文档并保存，重新装载时使用同一分类定义与保存的用户文档。
 

@@ -7,11 +7,11 @@ use crate::{
 impl SoundConfig {
     /// 从分类定义构造当前配置，再应用用户设置；缺失字段使用定义中的默认值。
     /// 用户设置不创建分类，也不改变分类名称、编号、资源路由或顺序。
+    /// None 保留定义初值；已提供的空文档仍应用用户字段的缺省规则。
     pub fn from_xml_with_user_settings(definition: &[u8], user: Option<&[u8]>) -> Result<Self> {
         let mut config = Self::from_xml(definition)?;
-        let xml = XmlDocument::parse(
-            user.unwrap_or(b"<?xml version=\"1.0\" encoding=\"UTF-8\"?><document></document>"),
-        )?;
+        let Some(user) = user else { return Ok(config) };
+        let xml = XmlDocument::parse(user)?;
         let system_voice = config.master_system_voice.unwrap_or(-1);
         for (field, name) in [
             (&mut config.master_volume, "volume"),

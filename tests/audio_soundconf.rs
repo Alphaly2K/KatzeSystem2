@@ -229,6 +229,9 @@ fn user_sound_settings_preserve_definition_defaults_and_persist_current_tree() {
         (0, 0)
     );
     let current = SoundConfig::from_xml_with_user_settings(definition, None).unwrap();
+    assert_eq!(current, defaults);
+    let empty = br#"<?xml version="1.0" encoding="UTF-8"?><document/>"#;
+    let current = SoundConfig::from_xml_with_user_settings(definition, Some(empty)).unwrap();
     assert_eq!((current.master_mute, current.master_voice_mute), (5, 5));
     assert_eq!(
         (current.parts[0].mute, current.parts[0].voice_mute),
