@@ -48,6 +48,36 @@ impl LanguageState {
         [self.primary_index, self.message_index, self.subtitle_index]
     }
 
+    /// 覆盖三项用户选择并按前缀表范围回退默认编号；副文字的关闭值保持。
+    /// 不发布平台刷新请求，也不修改前缀表或默认编号。
+    pub fn apply_user_xml(&mut self, bytes: &[u8]) -> Result<()> {
+        let xml = crate::resource::XmlDocument::parse(bytes)?;
+        for (name, value) in [
+            ("UI", &mut self.primary_index),
+            ("main", &mut self.message_index),
+            ("sub", &mut self.subtitle_index),
+        ] {
+            *value = xml.integer(format!("language/id/{name}").as_bytes(), *value)?;
+        }
+        for value in [&mut self.primary_index, &mut self.message_index] {
+            if *value as usize >= self.prefixes.len() {
+                *value = self.default_index;
+            }
+        }
+        if self.subtitle_index != u32::MAX && self.subtitle_index as usize >= self.prefixes.len() {
+            self.subtitle_index = self.default_index;
+        }
+        Ok(())
+    }
+
+    /// 写入原始语言编号，不应用运行时的前缀回退或副文字归一。
+    pub fn write_xml(&self, xml: &mut crate::resource::XmlWriter) -> Result<()> {
+        for (name, value) in ["UI", "main", "sub"].into_iter().zip(self.selection()) {
+            xml.write_integer(&["language", "id", name], value)?;
+        }
+        Ok(())
+    }
+
     /// 读取启动 XML 的 `language` 段。
     ///
     /// 还原默认编号和 `L%02d` 声明的有序前缀表，首个缺失 `<prefix>` 的

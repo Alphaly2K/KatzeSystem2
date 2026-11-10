@@ -140,6 +140,9 @@ device_units_per_logical 初值为一，与 logical_scale 分别保存，调用�
 
 `DeviceKeys::from_xml(bytes)` 读取 `KEYCUSTOMIZE/key00`～`key79`。非空 name 启用对应槽，缺失或空 name 禁用；缺失数值取零。keyboard1～4、mouse1～4、joypad1～4、touch1～4 为四个绑定，rep_keyboard1～4 等为对应重复字段。XML 中的代码和重复值均截取低八位。`DeviceKeys::new([DeviceBinding; 80])` 接受显式配置，repeat 在这个接口保留完整 u32。`Default` 创建全部禁用的配置。
 
+`DeviceKeys::apply_user_xml(bytes)` 在现有启用槽位上读取用户 KEY 段：`kb1_00`～`kb4_79`、`ms1_00`～`ms4_79`、`jp1_00`～`jp4_79` 为三类设备代码，对应的 `kb1r_00` 等字段为重复值。缺失字段沿用原字段的低八位，提供的值同样截取低八位。槽位启用值、触摸绑定、已采集的按键、重复元数据和强制查询次数保持。`write_xml(&mut XmlWriter)` 保存全部八十槽中启用项的三类设备代码与重复值；宿主重新读取启动定义后再应用该用户文档。
+
+
 `DeviceBinding` 的 codes 和 repeat 第一维按 `ButtonSource` 的 Keyboard、Mouse、Joypad、Touch 排列，第二维为第一至第四个绑定。扫描中的四组对应绑定编号，事件来源由掩码表示。`bindings()` 只读查询配置；`set_binding(key, binding)` 替换单槽，并清空该槽的按键掩码、重复元数据及强制查询计数。
 
 `button(source, code, pressed)` 接收平台按钮事件。code 截取低八位，pressed 非零视为按下。来源掩码分别为 1、2、4、16；Keyboard、Joypad 各自匹配对应来源的代码，Mouse 和 Touch 均匹配两类代码，同组同时匹配时优先取 Mouse 的重复值。掩码始终使用事件实际来源。同一事件按绑定组再按键槽更新，debug_mode 为零只更新前 32 槽，非零更新全部 80 槽；跳过的高槽保留旧状态且仍可查询。

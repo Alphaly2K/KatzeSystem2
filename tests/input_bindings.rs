@@ -152,3 +152,62 @@ fn short_button_pulses_reach_scanning_and_extra_queries_consume_forcing() -> Res
     assert!(services.events.is_empty());
     Ok(())
 }
+
+#[test]
+fn user_key_overrides_preserve_definitions_touch_and_pending_samples() -> Result<()> {
+    use katze_system2::resource::{XmlDocument, XmlWriter};
+    let mut bindings = [DeviceBinding::default(); 80];
+    bindings[0] = DeviceBinding {
+        enabled: 0x8000_0000,
+        codes: [[7, 8, 9, 10]; 4],
+        repeat: [[300, 301, 302, 303]; 4],
+    };
+    bindings[79] = DeviceBinding {
+        enabled: 1,
+        ..bindings[0]
+    };
+    let mut keys = DeviceKeys::new(bindings);
+    keys.button(ButtonSource::Keyboard, 7, 1);
+    keys.apply_user_xml(
+        br#"<?xml version="1.0" encoding="UTF-8"?><document><KEY>
+      <kb1_00>257</kb1_00><ms4_00>-1</ms4_00><jp2r_00>258</jp2r_00>
+      <kb1_01>99</kb1_01><touch1_00>88</touch1_00><kb4_79>259</kb4_79>
+    </KEY></document>"#,
+    )?;
+    assert_eq!(keys.bindings()[0].enabled, 0x8000_0000);
+    assert_eq!(keys.bindings()[0].codes[0], [1, 8, 9, 10]);
+    assert_eq!(keys.bindings()[0].codes[1][3], 255);
+    assert_eq!(keys.bindings()[0].repeat[2], [44, 2, 46, 47]);
+    assert_eq!(keys.bindings()[0].codes[3], bindings[0].codes[3]);
+    assert_eq!(keys.bindings()[0].repeat[3], bindings[0].repeat[3]);
+    assert_eq!(keys.bindings()[1], bindings[1]);
+    assert_eq!(keys.bindings()[79].codes[0][3], 3);
+    assert_eq!(
+        keys.sample(0, 0, true)?,
+        KeySample {
+            mask: 1,
+            repeat: 300
+        }
+    );
+    keys.commit();
+    assert_eq!(
+        keys.sample(0, 0, true)?,
+        KeySample {
+            mask: 1,
+            repeat: 300
+        }
+    );
+    let mut writer = XmlWriter::new();
+    keys.write_xml(&mut writer)?;
+    let bytes = writer.to_bytes()?;
+    let xml = XmlDocument::parse(&bytes)?;
+    assert_eq!(xml.integer(b"KEY/jp2r_00", 0)?, 2);
+    assert_eq!(xml.text(b"KEY/kb1_01")?, None);
+    assert_eq!(xml.text(b"KEY/touch1_00")?, None);
+    let text = std::str::from_utf8(&bytes).unwrap();
+    assert!(text.find("<jp1r_00>").unwrap() < text.find("<jp1_00>").unwrap());
+    let mut restored = DeviceKeys::new(bindings);
+    restored.apply_user_xml(&bytes)?;
+    assert_eq!(restored.bindings(), keys.bindings());
+    Ok(())
+}

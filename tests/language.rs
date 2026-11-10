@@ -241,3 +241,48 @@ fn startup_language_block_restores_ordered_prefixes_and_default_selection() {
     )
     .is_ok());
 }
+
+#[test]
+fn user_language_settings_normalize_on_load_and_export_raw_selections() {
+    use katze_system2::resource::{XmlDocument, XmlWriter};
+    let mut state = LanguageState {
+        prefixes: vec![b"first".to_vec(), b"second".to_vec(), vec![]],
+        default_index: 1,
+        primary_index: 0,
+        message_index: 1,
+        subtitle_index: u32::MAX,
+    };
+    let prefixes = state.prefixes.clone();
+    state
+        .apply_user_xml(
+            br#"<?xml version="1.0" encoding="UTF-8"?><document>
+      <language><id><UI>-2147483648</UI><main>2</main><sub>7</sub></id></language>
+    </document>"#,
+        )
+        .unwrap();
+    assert_eq!(state.selection(), [1, 2, 1]);
+    state.primary_index = 0x8000_0000;
+    state.message_index = u32::MAX;
+    state.subtitle_index = u32::MAX;
+    let mut writer = XmlWriter::new();
+    state.write_xml(&mut writer).unwrap();
+    let bytes = writer.to_bytes().unwrap();
+    let xml = XmlDocument::parse(&bytes).unwrap();
+    assert_eq!(
+        xml.text(b"language/id/UI").unwrap(),
+        Some(&b"-2147483648"[..])
+    );
+    assert_eq!(state.selection(), [0x8000_0000, u32::MAX, u32::MAX]);
+    state.apply_user_xml(&bytes).unwrap();
+    assert_eq!(state.selection(), [1, 1, u32::MAX]);
+    state.default_index = 0x8000_0001;
+    state.primary_index = 99;
+    state.message_index = 99;
+    state.subtitle_index = 99;
+    state
+        .apply_user_xml(b"<?xml version=\"1.0\" encoding=\"UTF-8\"?><document></document>")
+        .unwrap();
+    assert_eq!(state.selection(), [0x8000_0001; 3]);
+    assert_eq!(state.prefixes, prefixes);
+    assert_eq!(state.default_index, 0x8000_0001);
+}

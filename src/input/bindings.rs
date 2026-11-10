@@ -80,6 +80,53 @@ impl DeviceKeys {
         &self.bindings
     }
 
+    /// 覆盖启用槽位的键盘、鼠标和手柄绑定；数值截取低八位。
+    /// 缺失字段沿用原字段的低八位，触摸绑定和已采集的按键状态保持。
+    pub fn apply_user_xml(&mut self, bytes: &[u8]) -> Result<()> {
+        let xml = XmlDocument::parse(bytes)?;
+        for (key, binding) in self.bindings.iter_mut().enumerate() {
+            if binding.enabled == 0 {
+                continue;
+            }
+            for group in 0..4 {
+                for (source, name) in ["kb", "ms", "jp"].into_iter().enumerate() {
+                    let path = format!("KEY/{name}{}_{key:02}", group + 1);
+                    binding.codes[source][group] =
+                        xml.integer(path.as_bytes(), binding.codes[source][group] as u32)? as u8;
+                    let path = format!("KEY/{name}{}r_{key:02}", group + 1);
+                    binding.repeat[source][group] = xml
+                        .integer(path.as_bytes(), binding.repeat[source][group] as u8 as u32)?
+                        as u8 as u32;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// 写入所有启用槽位的三类设备绑定，不写入槽位定义和触摸绑定。
+    pub fn write_xml(&self, xml: &mut crate::resource::XmlWriter) -> Result<()> {
+        for (key, binding) in self.bindings.iter().enumerate() {
+            if binding.enabled == 0 {
+                continue;
+            }
+            for group in 0..4 {
+                for repeat in [false, true] {
+                    for (source, name) in ["kb", "ms", "jp"].into_iter().enumerate() {
+                        let suffix = if repeat { "r" } else { "" };
+                        let name = format!("{name}{}{suffix}_{key:02}", group + 1);
+                        let value = if repeat {
+                            binding.repeat[source][group] as u8
+                        } else {
+                            binding.codes[source][group]
+                        };
+                        xml.write_integer(&["KEY", &name], value as u32)?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// 替换单槽配置并清空该槽的按键、重复元数据和强制查询计数。
     pub fn set_binding(&mut self, key: u32, binding: DeviceBinding) -> Result<()> {
         let index = key_index(key)?;
