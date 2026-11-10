@@ -81,7 +81,7 @@ pub struct HostState {
     pub message_measurement_parameter: u32,
     pub fes_message_frame_delay: i32,
     pub system_settings: Option<crate::settings::SystemSettings>,
-    /// FES 配置写回后的保存请求标记；宿主完成持久化后清除。
+    /// 全局配置变更标记；宿主处理配置变更通知后清除。
     pub system_settings_dirty: u32,
     pub languages: crate::language::LanguageState,
     pub language_change_requests: Vec<crate::language::LanguageChangeRequest>,
@@ -635,12 +635,8 @@ pub(crate) fn call_native(
                 if host.language_change_requests.len() >= read::MAX_ITEMS {
                     return Err(Error::new(vm.pc, "语言刷新请求数量超过上限"));
                 }
-                let settings = host
-                    .system_settings
-                    .as_mut()
-                    .ok_or_else(|| Error::new(vm.pc, "宿主未配置全局设置"))?;
                 *selection = args[1];
-                settings.refresh_sound_volumes();
+                host.system_settings_dirty = 1;
                 host.language_change_requests.push(LanguageChangeRequest {
                     task_id: host.task_id,
                     target,

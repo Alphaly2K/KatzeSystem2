@@ -294,7 +294,6 @@ fn language_requests_keep_task_identity_and_stack_across_budget_resumption() {
     for budget in [1, 4096] {
         let mut state = State::new(8);
         let mut host = CoreHost::new(&mut state);
-        host.system_settings = Some(Default::default());
         for id in [7, 9] {
             host.languages = Default::default();
             let mut task = OrdinaryTask::new(program.clone(), vec![]).unwrap();
@@ -309,7 +308,7 @@ fn language_requests_keep_task_identity_and_stack_across_budget_resumption() {
             assert!(complete);
             assert!(task.interpreter.stack_bytes().is_empty());
             assert_eq!(values(&task)[..2], [0x1234_5678, id]);
-            assert_eq!(host.system_settings_dirty, 0);
+            assert_eq!(host.system_settings_dirty, 1);
         }
         assert_eq!(
             host.language_change_requests,

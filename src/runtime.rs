@@ -268,7 +268,7 @@ impl<F: ObjectFactory> Runtime<F> {
         )
     }
 
-    /// 按当前选择处理语言请求的资源与声音设置；队列及平台控件由宿主管理。
+    /// 按当前选择处理语言请求的资源、编号及变更标记；队列和平台控件由宿主管理。
     pub fn refresh_language(&mut self, target: crate::language::LanguageTarget) -> Result<()> {
         use crate::language::LanguageTarget;
         let count = self.host.languages.prefixes.len();
@@ -278,7 +278,7 @@ impl<F: ObjectFactory> Runtime<F> {
             return Ok(());
         }
         self.reload_language_tables(target)?;
-        let refresh = match target {
+        let mark_changed = match target {
             LanguageTarget::Interface => true,
             LanguageTarget::MainText => (self.host.languages.message_index as usize) < count,
             LanguageTarget::Subtitle => {
@@ -288,12 +288,8 @@ impl<F: ObjectFactory> Runtime<F> {
                 true
             }
         };
-        if refresh {
-            self.host
-                .system_settings
-                .as_mut()
-                .ok_or_else(|| Error::new(0, "语言刷新需要全局设置"))?
-                .refresh_sound_volumes();
+        if mark_changed {
+            self.host.system_settings_dirty = 1;
         }
         Ok(())
     }

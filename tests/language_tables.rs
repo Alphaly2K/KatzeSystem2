@@ -245,8 +245,7 @@ fn default_wide_resource_entry_transcodes_cp932_and_rejects_unrepresentable_name
 }
 
 #[test]
-fn platform_refresh_normalizes_subtitles_and_refreshes_volumes_without_saving_or_consuming_requests()
- {
+fn platform_refresh_normalizes_subtitles_and_marks_changes_without_modifying_sound_or_requests() {
     use katze_system2::{
         Result,
         expression::State,
@@ -290,7 +289,7 @@ fn platform_refresh_normalizes_subtitles_and_refreshes_volumes_without_saving_or
     settings.sound[0x15d8..0x15dc].copy_from_slice(&30u32.to_le_bytes());
     runtime.host_mut().system_settings = Some(settings);
     runtime.host_mut().system_settings_dirty = 37;
-    for (target, value, expected_reads, refresh) in [
+    for (target, value, expected_reads, mark_changed) in [
         (Interface, 0, 2, true),
         (Interface, 2, 0, false),
         (MainText, 0, 2, true),
@@ -316,22 +315,16 @@ fn platform_refresh_normalizes_subtitles_and_refreshes_volumes_without_saving_or
         for _ in 0..2 {
             reads.set(0);
             runtime.host_mut().system_settings.as_mut().unwrap().sound[..16].fill(0x55);
+            runtime.host_mut().system_settings_dirty = 37;
+            let before = runtime.host().system_settings.clone();
             runtime.refresh_language(target).unwrap();
             let host = runtime.host();
             assert_eq!(reads.get(), expected_reads);
-            let expected = if refresh {
-                [15u32, 50, 50, 50]
-                    .into_iter()
-                    .flat_map(u32::to_le_bytes)
-                    .collect::<Vec<_>>()
-            } else {
-                vec![0x55; 16]
-            };
+            assert_eq!(host.system_settings, before);
             assert_eq!(
-                &host.system_settings.as_ref().unwrap().sound[..16],
-                expected
+                host.system_settings_dirty,
+                if mark_changed { 1 } else { 37 }
             );
-            assert_eq!(host.system_settings_dirty, 37);
             assert_eq!(host.language_change_requests, [request]);
             assert_eq!(
                 host.languages.primary_index,
@@ -353,10 +346,15 @@ fn platform_refresh_normalizes_subtitles_and_refreshes_volumes_without_saving_or
     }
     runtime.host_mut().system_settings = None;
     runtime.host_mut().languages.subtitle_index = 2;
-    assert!(runtime.refresh_language(Subtitle).is_err());
+    runtime.refresh_language(Subtitle).unwrap();
     assert_eq!(runtime.host().languages.subtitle_index, u32::MAX);
     runtime.host_mut().languages.primary_index = 2;
     runtime.host_mut().languages.message_index = 2;
+    runtime.host_mut().system_settings_dirty = 37;
     runtime.refresh_language(Interface).unwrap();
     runtime.refresh_language(MainText).unwrap();
+    assert_eq!(runtime.host().system_settings_dirty, 37);
+    runtime.host_mut().languages.primary_index = 0;
+    runtime.refresh_language(Interface).unwrap();
+    assert_eq!(runtime.host().system_settings_dirty, 1);
 }

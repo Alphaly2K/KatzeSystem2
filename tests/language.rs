@@ -5,7 +5,7 @@ use katze_system2::{
 };
 
 #[test]
-fn ordinary_language_writes_preserve_raw_selections_and_only_refresh_changes() {
+fn ordinary_language_writes_preserve_raw_selections_and_only_mark_configuration_changes() {
     use katze_system2::language::{LanguageChangeRequest, LanguageTarget::*};
     let mut numbers = State::new(0);
     let mut host = CoreHost::new(&mut numbers);
@@ -30,9 +30,17 @@ fn ordinary_language_writes_preserve_raw_selections_and_only_refresh_changes() {
         call(&mut host, &mut vm, 0, 0).unwrap(),
         NativeReturn::Continue
     );
-    assert!(call(&mut host, &mut vm, 0, 1).is_err());
     assert_eq!(host.languages.primary_index, 0);
     assert!(host.language_change_requests.is_empty());
+    assert_eq!(
+        call(&mut host, &mut vm, 0, 1).unwrap(),
+        NativeReturn::Continue
+    );
+    assert_eq!(host.languages.primary_index, 1);
+    assert_eq!(host.system_settings_dirty, 1);
+    assert_eq!(host.language_change_requests.len(), 1);
+    host.languages.primary_index = 0;
+    host.language_change_requests.clear();
     assert!(host.call(1053, &[0; 4], &mut vm).is_err());
     let mut settings = katze_system2::settings::SystemSettings::default();
     settings.sound[0x15d4..0x15d8].copy_from_slice(&50u32.to_le_bytes());
@@ -50,23 +58,14 @@ fn ordinary_language_writes_preserve_raw_selections_and_only_refresh_changes() {
         (99, 7, false),
     ] {
         host.system_settings.as_mut().unwrap().sound[..16].fill(0x55);
+        host.system_settings_dirty = 37;
+        let before = host.system_settings.clone();
         assert_eq!(
             call(&mut host, &mut vm, mode, value).unwrap(),
             NativeReturn::Continue
         );
-        let expected = if changed {
-            [15u32, 50, 50, 50]
-                .into_iter()
-                .flat_map(u32::to_le_bytes)
-                .collect::<Vec<_>>()
-        } else {
-            vec![0x55; 16]
-        };
-        assert_eq!(
-            &host.system_settings.as_ref().unwrap().sound[..16],
-            expected
-        );
-        assert_eq!(host.system_settings_dirty, 37);
+        assert_eq!(host.system_settings, before);
+        assert_eq!(host.system_settings_dirty, if changed { 1 } else { 37 });
     }
     assert_eq!(
         [
