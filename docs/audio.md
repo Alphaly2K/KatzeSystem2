@@ -14,7 +14,7 @@
 
 ## 系统语音配置选择
 
-宿主通过 `HostState::sound_config` 提供 `audio::SoundConfig`，其 `parts` 按配置声明顺序保存 `SoundPart`。`name`、`type_name` 与 `file_prefix` 分别为原始字节编码的分类名称、配置的 type 名称和文件前缀；`id` 为编号，`master_volume` 为配置的 mastervol 倍率，`volume`、`voice_volume`、`skip_volume`、`play_enabled`、`system_voice`、`mute` 为应用设置后的当前值，`children` 为有序子分类。节点默认名称为空，编号、音量和开关均为 −1。
+宿主通过 `HostState::sound_config` 提供 `audio::SoundConfig`，其 `parts` 按配置声明顺序保存 `SoundPart`。`name`、`type_name` 与 `file_prefix` 分别为原始字节编码的分类名称、配置的 type 名称和文件前缀；`id` 为编号，`master_volume` 为配置的 mastervol 倍率，`volume`、`voice_volume`、`skip_volume`、`play_enabled`、`system_voice`、`mute` 为应用设置后的当前值，`children` 为有序子分类。`same_id` 保存独立的 sameid 原值，缺失时为零且不沿用父分类。节点默认名称为空，编号、音量和其他开关均为 −1。
 
 配置的独立 `master_volume`、`master_play_enabled`、`master_system_voice` 均为 `Option<i32>`，默认 None，相应查询要求宿主显式提供；`master_mute` 默认零。宿主负责应用用户设置；构造配置或节点时可通过 `..Default::default()` 提供未使用字段。
 
@@ -71,6 +71,8 @@ FES `getsndconfex output_index volume name` 将该结果写入共享槽，只读
 964 同样先展开名称，再返回 `effective_file_volume`；主静音仍保留此前的格式展开。全部二十六项以状态一压入原始 DWORD，缺少所需宿主配置或无效地址时诊断，VM 来源和配置保留。
 
 26 个原包装的 24,192 次调用已核对状态、返回值及两块完整 VM 存储，全部一致。覆盖三种查找、声明顺序、空／缺失名称、CP932、格式展开、两种名称地址、额外参数、父子音量、静音、负数和整数溢出。两项新增常规纯内存回归分别固定逐级取整与回绕、以及 Runtime 中全部入口的返回栈和两种执行预算，不依赖参考引擎或设备。
+
+普通 1000／1001 使用相同的名称格式展开和文件前缀查询，分别返回命中节点的 `same_id` 与 `id` 原值；未匹配时分别返回零与 −1。两项均以状态一返回，忽略额外参数，不检查配置启用字段。
 
 `HostState::sound_settings_dirty` 保存全局声音设置刷新标记，默认零。FES 的后续媒体属性更新读取该标记，清除由外层设置宿主负责。
 

@@ -31,6 +31,8 @@ fn native_configuration_queries_keep_three_lookup_modes_and_stack_results_across
         parts: vec![
             SoundPart {
                 name: b"SELECTOR".to_vec(),
+                id: 11,
+                same_id: 2,
                 master_volume: 65,
                 volume: 37,
                 play_enabled: -3,
@@ -53,6 +55,8 @@ fn native_configuration_queries_keep_three_lookup_modes_and_stack_results_across
             },
             SoundPart {
                 file_prefix: b"SELECTOR".to_vec(),
+                id: -7,
+                same_id: i32::MIN,
                 master_volume: 59,
                 volume: 43,
                 play_enabled: 6,
@@ -64,9 +68,43 @@ fn native_configuration_queries_keep_three_lookup_modes_and_stack_results_across
             },
         ],
     };
-    let expected: [i32; 32] = [
-        47, -2, -3, 0, 43, 6, 7, 59, 93, 13, 0, 41, 4, -5, 73, 91, 11, 2, 37, -3, 2, 65, 89, -7, 0,
-        11, -1, 0, -1, 100, 0, 47,
+    let expected: [i32; 36] = [
+        47,
+        -2,
+        -3,
+        0,
+        43,
+        6,
+        7,
+        59,
+        93,
+        13,
+        0,
+        41,
+        4,
+        -5,
+        73,
+        91,
+        11,
+        2,
+        37,
+        -3,
+        2,
+        65,
+        89,
+        -7,
+        0,
+        11,
+        -1,
+        0,
+        -1,
+        100,
+        0,
+        47,
+        i32::MIN,
+        -7,
+        0,
+        -1,
     ];
     for budget in [1, 4096] {
         for address in [64, 0x8000_0040] {
@@ -77,6 +115,12 @@ fn native_configuration_queries_keep_three_lookup_modes_and_stack_results_across
                 .collect();
             let missing = (address & 0x8000_0000) | 80;
             queries.extend([948, 951, 955, 956, 963, 964].map(|index| (index, missing)));
+            queries.extend([
+                (1000, address),
+                (1001, address),
+                (1000, missing),
+                (1001, missing),
+            ]);
             for (i, (index, address)) in queries.into_iter().enumerate() {
                 ins(&mut code, 0x25, &[address]);
                 ins(&mut code, 0x25, &[u32::MAX]);
@@ -84,7 +128,7 @@ fn native_configuration_queries_keep_three_lookup_modes_and_stack_results_across
                 ins(&mut code, 0x26, &[128 + i as u32 * 4]);
             }
             ins(&mut code, 0x3b, &[]);
-            let mut data = vec![0; 256];
+            let mut data = vec![0; 288];
             data[16..25].copy_from_slice(b"selector\0");
             data[64..72].copy_from_slice(b"%s[G16]\0");
             data[80..88].copy_from_slice(b"missing\0");

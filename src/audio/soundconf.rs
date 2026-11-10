@@ -16,8 +16,8 @@ impl SoundConfig {
     /// 主音量、主播放开关与主静音来自 MASTER；PART 的每个子节点为一个分类，
     /// 其 `<part>` 子节点的子节点递归为有序子分类。`<head>` 保存为
     /// `file_prefix`，`<int>` 保存为 `archive`；顶层分类缺失字段保留
-    /// `SoundPart` 的未设置值，子分类缺失字段逐字段沿用父级值。`comment`、
-    /// `sameid` 与 `group` 不进入分类树，分别由文件命名、调用方和声音组处理。
+    /// `SoundPart` 的未设置值，子分类缺失字段逐字段沿用父级值。
+    /// `sameid` 独立读取，缺失时为零；`comment` 与 `group` 不进入分类树。
     pub fn from_xml(bytes: &[u8]) -> Result<Self> {
         let input = prepare(bytes, "声音配置")?;
         let document = Document::parse_with_options(
@@ -99,6 +99,7 @@ fn parse_part(node: Node<'_, '_>, depth: usize, parent: Option<&SoundPart>) -> R
         file_prefix: field_bytes(node, "head"),
         archive: field_bytes(node, "int"),
         id: field_integer(node, "id"),
+        same_id: element_child(node, "sameid").map_or(0, |field| integer(field, 0)),
         master_volume: field_integer(node, "mastervol"),
         volume: field_integer(node, "volume"),
         voice_volume: field_integer(node, "voicevol"),

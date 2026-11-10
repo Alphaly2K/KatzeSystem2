@@ -44,6 +44,7 @@ const CONFIG: &str = r#"<?xml version="1.0" encoding="utf-8"?>
 		<voice>
 			<name>VOICE</name>
 			<id>2</id>
+			<sameid>7</sameid>
 			<type>voice</type>
 			<head></head>
 			<group>2</group>
@@ -65,6 +66,7 @@ const CONFIG: &str = r#"<?xml version="1.0" encoding="utf-8"?>
 				<V1>
 					<name>n1</name>
 					<id>1</id>
+					<sameid>-1</sameid>
 					<type>w</type>
 					<head>b_</head>
 					<int>pcm_b</int>
@@ -94,6 +96,7 @@ fn soundconf_restores_master_groups_tree_and_child_inheritance() {
     assert_eq!(bgm.file_prefix, b"BGM");
     assert_eq!(bgm.archive, b"bgm");
     assert_eq!(bgm.id, 0);
+    assert_eq!(bgm.same_id, 0);
     assert_eq!(bgm.master_volume, 60);
     assert_eq!(bgm.volume, 80);
     assert_eq!(bgm.voice_volume, 60);
@@ -106,6 +109,7 @@ fn soundconf_restores_master_groups_tree_and_child_inheritance() {
     assert_eq!(voice.file_prefix, b"");
     assert_eq!(voice.archive, b"");
     assert_eq!(voice.volume, 90);
+    assert_eq!(voice.same_id, 7);
     let [child0, child1] = &voice.children[..] else {
         panic!("expected two children");
     };
@@ -114,6 +118,7 @@ fn soundconf_restores_master_groups_tree_and_child_inheritance() {
     assert_eq!(child0.file_prefix, b"a_sys_");
     assert_eq!(child0.archive, b"pcm_a");
     assert_eq!(child0.id, 0);
+    assert_eq!(child0.same_id, 0);
     assert_eq!(child0.system_voice, 1);
     assert_eq!(child0.volume, 90);
     assert_eq!(child0.master_volume, 100);
@@ -122,6 +127,7 @@ fn soundconf_restores_master_groups_tree_and_child_inheritance() {
     assert_eq!(child0.play_enabled, 1);
     assert_eq!(child0.mute, -1);
     assert_eq!(child1.volume, 30);
+    assert_eq!(child1.same_id, -1);
     assert_eq!(child1.mute, 0);
     assert_eq!(child1.play_enabled, 0);
 

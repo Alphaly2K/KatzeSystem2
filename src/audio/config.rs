@@ -9,6 +9,8 @@ pub struct SoundPart {
     /// 配置的 `<int>` 归档类别名；前缀命中后决定资源目录。
     pub archive: Vec<u8>,
     pub id: i32,
+    /// 配置的 sameid 原值；子分类不沿用父级值。
+    pub same_id: i32,
     /// 配置的 mastervol 倍率；与应用设置后的当前音量分别保存。
     pub master_volume: i32,
     pub volume: i32,
@@ -28,6 +30,7 @@ impl Default for SoundPart {
             file_prefix: Vec::new(),
             archive: Vec::new(),
             id: -1,
+            same_id: 0,
             master_volume: -1,
             volume: -1,
             voice_volume: -1,

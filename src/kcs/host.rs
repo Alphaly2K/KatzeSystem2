@@ -398,7 +398,7 @@ pub(crate) fn call_native(
     if matches!(index, 352..=358) {
         return super::vectors::call(index, arguments, vm);
     }
-    if matches!(index, 939..=964) {
+    if matches!(index, 939..=964 | 1000 | 1001) {
         let name = if index >= 943 {
             strings::format(vm, read::u32_at(arguments, 0)?, 0)?
         } else {
@@ -420,6 +420,8 @@ pub(crate) fn call_native(
                 .ok_or_else(|| Error::new(vm.pc, "宿主未提供声音主系统语音开关"))?,
             942 => config.master_mute(),
             964 => config.effective_file_volume(&name)?,
+            1000 => config.file_part(&name)?.map_or(0, |part| part.same_id),
+            1001 => config.file_part(&name)?.map_or(-1, |part| part.id),
             _ => {
                 let mode = (index - 943) / 7;
                 let field = (index - 943) % 7;

@@ -71,7 +71,7 @@ FES SOUND 文件请求通过 `Objects::set_sound_task` 的绑定发送 180／182
 
 普通 938 直接返回 `HostState::sound_config_enabled`，不读取参数或归一化结果。该字段默认零，表示新声音分类配置的启用状态，由配置宿主同步提供，独立于声音任务的设备门控。
 
-普通 939～964 以状态一返回声音配置值，要求宿主提供 `HostState::sound_config`。939～942 不读取参数，查询独立主设置；其余接受一个名称格式地址，分别按文件前缀、type 名称、分类名称查询或计算有效音量，额外参数忽略。`SoundConfig::group_part`／`type_part` 返回相应首个节点，`effective_file_volume` 自内向外应用命中分支的音量、倍率和静音，再应用独立主音量。字段、缺失默认值与整数规则见[配置查询](audio.md#普通-kcs-配置查询)。
+普通 939～964、1000／1001 以状态一返回声音配置值，要求宿主提供 `HostState::sound_config`。939～942 不读取参数，查询独立主设置；其余接受一个名称格式地址，分别按文件前缀、type 名称、分类名称查询或计算有效音量，额外参数忽略。`SoundConfig::group_part`／`type_part` 返回相应首个节点，`effective_file_volume` 自内向外应用命中分支的音量、倍率和静音，再应用独立主音量。1000／1001 按文件前缀查询节点的 sameid／编号，缺失时分别返回零／−1。字段、缺失默认值与整数规则见[配置查询](audio.md#普通-kcs-配置查询)。
 
 `settings::SystemSettings` 保存 sound／message／effects／window 四块基线配置，以及两组各八项的局部／全局变量范围、`auto_select`、`scene_animation_enabled`、`fullscreen` 和 `fullscreen_mw_pos`。`Default` 提供构造初值，`apply_xml(bytes)` 覆盖已有用户设置字段，`apply_startup_xml(bytes)` 覆盖 `GAME/flag` 中的范围；两者均覆盖 `GAME/autoselect` 并保留缺失值，应按启动、游戏默认、用户设置的顺序应用。`refresh_sound_volumes()` 显式重算四路有效音量。准备后设置 `CoreHost::system_settings` 或 `Runtime::host_mut().system_settings`。普通 359 依序复制四块到 VM，360 从 VM 写回前三块；两者不压值。359／360 的地址零有效，起点在区外的地址跳过，合法起点的容量不足继续诊断。790 按组和项索引查询变量范围，依序写入起始编号及数量，返回是否找到。999 忽略参数并返回 `auto_select` 的原始 DWORD。1050 同样忽略参数，返回 `scene_animation_enabled`，默认一，游戏默认与用户 XML 通过 `GAME/enable_scene_anm` 覆盖。741 在 `fullscreen` 非零时返回 `fullscreen_mw_pos`，为零时返回零；启动读取 `SCREEN/mw_pos`，用户设置读取 `WINDOW/fullscreen` 和 `FULL_SCREEN/mw_pos`。自动装载和媒体应用尚待接入，具体大小、XML 范围与部分失败契约见[全局设置](settings.md)。
 
