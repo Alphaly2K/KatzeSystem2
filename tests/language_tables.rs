@@ -243,3 +243,120 @@ fn default_wide_resource_entry_transcodes_cp932_and_rejects_unrepresentable_name
     assert!(files.read_utf16(&wide("😀"), ResourceMode::File).is_err());
     assert!(files.read_utf16(&[0xd800], ResourceMode::File).is_err());
 }
+
+#[test]
+fn platform_refresh_normalizes_subtitles_and_refreshes_volumes_without_saving_or_consuming_requests()
+ {
+    use katze_system2::{
+        Result,
+        expression::State,
+        kcs::ResourceServices,
+        language::{LanguageChangeRequest, LanguageTarget::*, StringTableConfig},
+        resource::ResourceMode,
+        runtime::{BaseObject, ObjectFactory, Runtime, TaskObject, kind},
+        settings::SystemSettings,
+    };
+    use std::{cell::Cell, rc::Rc};
+    struct Reject;
+    impl ObjectFactory for Reject {
+        fn create(&mut self, _: u32, _: u32, _: &[u8]) -> Result<Box<dyn TaskObject>> {
+            unreachable!()
+        }
+    }
+    struct Files(Rc<Cell<usize>>);
+    impl ResourceServices for Files {
+        fn read(&mut self, _: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
+            assert_eq!(mode, ResourceMode::File);
+            self.0.set(self.0.get() + 1);
+            Ok(Some(Vec::new()))
+        }
+    }
+    let reads = Rc::new(Cell::new(0));
+    let mut runtime = Runtime::new(
+        0,
+        kind::ROOT,
+        Box::new(BaseObject::new()),
+        State::new(0),
+        Reject,
+    );
+    runtime.set_resources(Files(reads.clone()));
+    runtime.host_mut().languages.prefixes = vec![b"a".to_vec(), b"b".to_vec()];
+    runtime.host_mut().string_table_config = Some(StringTableConfig {
+        prefixes: vec![wide("a"), wide("b")],
+        game_path: wide("game.txt"),
+    });
+    let mut settings = SystemSettings::default();
+    settings.sound[0x15d4..0x15d8].copy_from_slice(&50u32.to_le_bytes());
+    settings.sound[0x15d8..0x15dc].copy_from_slice(&30u32.to_le_bytes());
+    runtime.host_mut().system_settings = Some(settings);
+    runtime.host_mut().system_settings_dirty = 37;
+    for (target, value, expected_reads, refresh) in [
+        (Interface, 0, 2, true),
+        (Interface, 2, 0, false),
+        (MainText, 0, 2, true),
+        (MainText, 2, 1, false),
+        (Subtitle, 1, 0, true),
+        (Subtitle, 2, 0, true),
+        (Subtitle, u32::MAX, 0, true),
+    ] {
+        let host = runtime.host_mut();
+        host.languages.primary_index = 9;
+        host.languages.message_index = 10;
+        host.languages.subtitle_index = 11;
+        match target {
+            Interface => host.languages.primary_index = value,
+            MainText => host.languages.message_index = value,
+            Subtitle => host.languages.subtitle_index = value,
+        }
+        let request = LanguageChangeRequest {
+            task_id: 99,
+            target,
+        };
+        host.language_change_requests = vec![request];
+        for _ in 0..2 {
+            reads.set(0);
+            runtime.host_mut().system_settings.as_mut().unwrap().sound[..16].fill(0x55);
+            runtime.refresh_language(target).unwrap();
+            let host = runtime.host();
+            assert_eq!(reads.get(), expected_reads);
+            let expected = if refresh {
+                [15u32, 50, 50, 50]
+                    .into_iter()
+                    .flat_map(u32::to_le_bytes)
+                    .collect::<Vec<_>>()
+            } else {
+                vec![0x55; 16]
+            };
+            assert_eq!(
+                &host.system_settings.as_ref().unwrap().sound[..16],
+                expected
+            );
+            assert_eq!(host.system_settings_dirty, 37);
+            assert_eq!(host.language_change_requests, [request]);
+            assert_eq!(
+                host.languages.primary_index,
+                if target == Interface { value } else { 9 }
+            );
+            assert_eq!(
+                host.languages.message_index,
+                if target == MainText { value } else { 10 }
+            );
+            assert_eq!(
+                host.languages.subtitle_index,
+                if target == Subtitle {
+                    if value < 2 { value } else { u32::MAX }
+                } else {
+                    11
+                }
+            );
+        }
+    }
+    runtime.host_mut().system_settings = None;
+    runtime.host_mut().languages.subtitle_index = 2;
+    assert!(runtime.refresh_language(Subtitle).is_err());
+    assert_eq!(runtime.host().languages.subtitle_index, u32::MAX);
+    runtime.host_mut().languages.primary_index = 2;
+    runtime.host_mut().languages.message_index = 2;
+    runtime.refresh_language(Interface).unwrap();
+    runtime.refresh_language(MainText).unwrap();
+}

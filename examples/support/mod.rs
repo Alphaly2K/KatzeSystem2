@@ -554,7 +554,7 @@ pub fn advance_frame(
     system_time_ms: u32,
 ) -> Result<bool> {
     for request in std::mem::take(&mut runtime.host_mut().language_change_requests) {
-        runtime.reload_language_tables(request.target)?;
+        runtime.refresh_language(request.target)?;
     }
     runtime.host_mut().system_time_ms = system_time_ms;
     runtime.update(frame, 1)

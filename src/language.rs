@@ -26,7 +26,7 @@ pub struct LanguageState {
     pub default_index: u32,
     pub primary_index: u32,
     pub message_index: u32,
-    /// 副文字语言的原始编号；全一表示关闭。
+    /// 副文字语言的原始编号；全一表示关闭，平台刷新时将越界编号归一为关闭。
     pub subtitle_index: u32,
 }
 

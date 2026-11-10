@@ -89,7 +89,11 @@ FES `setconf` 更新有效主界面／主文字选择，并在本轮通知处理
 
 `StringTableConfig::from_xml` 独立保留 `language/L%02d/prefix` 和 `language/OPTTABLE` 的宽字符配置，与脚本字节前缀分别保存。`reload(target, languages, tables, read)` 根据处理时的选择生成文件名：有效界面请求依序读取 `language_<prefix>.txt` 和游戏表；无效界面编号保留旧表。游戏表先展开 `%LANG%`，再展开 `%LANG_M%`，各选择越界时回退默认编号，默认也无效则保留对应标记。主文字请求先读游戏表，当前主文字编号有效时再读一次；副文字请求不读表。界面表路径最多 1023 个 UTF-16 单元，游戏表路径最多 2047 个单元，超限诊断。
 
-`HostState::string_table_config` 和 `string_tables` 保存配置及结果。平台消费语言请求时调用 `Runtime::reload_language_tables(target)`，它先按 `ResourceMode::File` 尝试直接读取，缺失后按 `LooseFirst` 回退；方法保留请求队列，平台控件由调用方刷新。两个启动示例在搭建时装载字符串表，并在下一轮帧更新前消费上一轮语言请求。窗口示例读取宽字符 `APP/title` 并通过表查询生成标题，处理有效界面请求后更新标题；缺失配置时使用示例默认标题。示例尚未提供平台菜单。
+`HostState::string_table_config` 和 `string_tables` 保存配置及结果，字节与宽字符前缀应来自同一份 `language` 声明。`Runtime::reload_language_tables(target)` 只处理表读取，先按 `ResourceMode::File` 尝试直接读取，缺失后按 `LooseFirst` 回退；方法保留请求队列，适合初始化时单独装载表。
+
+平台消费请求时调用 `Runtime::refresh_language(target)`。有效界面请求在重载表后刷新有效音量，无效界面编号直接跳过；主文字请求始终重载游戏表，仅有效编号刷新音量；副文字请求将越界编号改为 `u32::MAX`，随后刷新音量。重复请求仍执行相同刷新，主界面及主文字原始编号保持。实际刷新音量时需要 `system_settings`，缺少设置返回诊断，副文字编号归一已发生；保存标记和请求队列保持。平台控件由调用方刷新。
+
+两个启动示例在搭建时装载字符串表，并在下一轮帧更新前消费上一轮语言请求。窗口示例读取宽字符 `APP/title` 并通过表查询生成标题，处理有效界面请求后更新标题；缺失配置时使用示例默认标题。示例尚未提供平台菜单。
 
 ## CSS 数据容器
 

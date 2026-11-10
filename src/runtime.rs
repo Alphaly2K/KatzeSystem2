@@ -268,6 +268,36 @@ impl<F: ObjectFactory> Runtime<F> {
         )
     }
 
+    /// 按当前选择处理语言请求的资源与声音设置；队列及平台控件由宿主管理。
+    pub fn refresh_language(&mut self, target: crate::language::LanguageTarget) -> Result<()> {
+        use crate::language::LanguageTarget;
+        let count = self.host.languages.prefixes.len();
+        if target == LanguageTarget::Interface
+            && self.host.languages.primary_index as usize >= count
+        {
+            return Ok(());
+        }
+        self.reload_language_tables(target)?;
+        let refresh = match target {
+            LanguageTarget::Interface => true,
+            LanguageTarget::MainText => (self.host.languages.message_index as usize) < count,
+            LanguageTarget::Subtitle => {
+                if self.host.languages.subtitle_index as usize >= count {
+                    self.host.languages.subtitle_index = u32::MAX;
+                }
+                true
+            }
+        };
+        if refresh {
+            self.host
+                .system_settings
+                .as_mut()
+                .ok_or_else(|| Error::new(0, "语言刷新需要全局设置"))?
+                .refresh_sound_volumes();
+        }
+        Ok(())
+    }
+
     /// 配置普通 629 的同步系统打开服务。
     pub fn set_system_services(&mut self, services: impl crate::kcs::SystemServices + 'static) {
         self.host.system_services = Some(Box::new(services));
