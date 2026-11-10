@@ -314,6 +314,14 @@ fn user_settings_round_trip_raw_fields_and_keep_startup_data_and_inherited_fonts
     let baseline = SystemSettings::default();
     let mut restored = baseline.clone();
     restored.apply_xml(&bytes).unwrap();
+    let mut game_defaults = baseline.clone();
+    game_defaults.apply_game_xml(&bytes).unwrap();
+    let mut expected_defaults = restored.clone();
+    expected_defaults.font_names = baseline.font_names.clone();
+    expected_defaults.font_controls = baseline.font_controls;
+    expected_defaults.fullscreen = baseline.fullscreen;
+    expected_defaults.fullscreen_mw_pos = baseline.fullscreen_mw_pos;
+    assert_eq!(game_defaults, expected_defaults);
     assert_eq!(restored.message, source.message);
     assert_eq!(restored.effects, source.effects);
     assert_eq!(restored.window, source.window);

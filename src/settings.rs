@@ -250,6 +250,17 @@ impl SystemSettings {
             }
         }
         self.font_controls = controls;
+        self.fullscreen = xml.integer(b"WINDOW/fullscreen", self.fullscreen)?;
+        self.fullscreen_mw_pos = xml.integer(b"FULL_SCREEN/mw_pos", self.fullscreen_mw_pos)?;
+        self.apply_options(&xml)
+    }
+
+    /// 游戏默认文档仅覆盖运行选项，保留字体、全屏开关及窗口位置。
+    pub fn apply_game_xml(&mut self, input: &[u8]) -> crate::Result<()> {
+        self.apply_options(&crate::resource::XmlDocument::parse(input)?)
+    }
+
+    fn apply_options(&mut self, xml: &crate::resource::XmlDocument) -> crate::Result<()> {
         self.auto_select = xml.integer(b"GAME/autoselect", self.auto_select)?;
         self.scene_animation_enabled =
             xml.integer(b"GAME/enable_scene_anm", self.scene_animation_enabled)?;
@@ -259,9 +270,7 @@ impl SystemSettings {
         for (channel, value) in self.system_voice_play.iter_mut().enumerate() {
             *value = xml.integer(format!("SYSTEMVOICE/play{channel:02}").as_bytes(), *value)?;
         }
-        self.fullscreen = xml.integer(b"WINDOW/fullscreen", self.fullscreen)?;
-        self.fullscreen_mw_pos = xml.integer(b"FULL_SCREEN/mw_pos", self.fullscreen_mw_pos)?;
-        apply_words(&mut self.sound, SOUND_FIELDS, &xml)?;
+        apply_words(&mut self.sound, SOUND_FIELDS, xml)?;
         for channel in 0..48 {
             let offset = 20 + channel * 116;
             let value = xml.integer(
@@ -270,9 +279,9 @@ impl SystemSettings {
             )?;
             put(&mut self.sound, offset, value);
         }
-        apply_words(&mut self.message, MESSAGE_FIELDS, &xml)?;
-        apply_words(&mut self.effects, EFFECTS_FIELDS, &xml)?;
-        apply_words(&mut self.window, WINDOW_FIELDS, &xml)
+        apply_words(&mut self.message, MESSAGE_FIELDS, xml)?;
+        apply_words(&mut self.effects, EFFECTS_FIELDS, xml)?;
+        apply_words(&mut self.window, WINDOW_FIELDS, xml)
     }
 
     /// 用主音量乘四类音量，保留 DWORD 乘法回绕后除以一百的顺序。

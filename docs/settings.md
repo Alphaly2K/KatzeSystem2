@@ -54,6 +54,8 @@
 
 ## 默认值与 XML 覆盖
 
+按启动、游戏默认、用户文档的顺序调用 `apply_startup_xml`、`apply_game_xml`、`apply_xml`。游戏默认文档覆盖 141 项声音、消息、效果、窗口颜色、系统声音及功能选项，保留当前字体名、字体控制、全屏开关和全屏窗口位置；用户文档还可覆盖这些字段。两种选项覆盖均不重算有效音量，由装载方最后调用 `refresh_sound_volumes`。
+
 `SystemSettings::default()` 对应基线配置构造完成时的状态。声音部分包含 48 份旧通道配置，初始启用值为一，两处音量为一百，名称为空；总音量及四类音量均为一百，前四个有效音量尚为零。消息初值包括速度四、自动预设四、基础等待十五、字符等待五、历史上限一百和读过文字颜色 `u32::MAX`。效果及窗口选项分别保留基线初始值，窗口颜色为 `u32::MAX`。
 
 `apply_xml(bytes)` 接受带 1.0／UTF-8 声明的原始 XML，复用资源 XML 读取规则。支持 VOICE 的音量、静音、连续语音及 play00～play47，MESSAGE 的速度、自动、跳过、阅读及历史选项，EFFECT 的效果和指针选项，以及 GAME 的 wndcolor／enabledrag／drawwnd／autoselect／enable_scene_anm、WINDOW/fullscreen 和 FULL_SCREEN/mw_pos。名称区分大小写，除下述字体 fixed 外，缺失字段保留原值；存在但无整数前缀的字段写零，其他值保留原始 DWORD，不裁剪、不归一化为布尔。多次调用按顺序覆盖，解析失败保留整份配置。
