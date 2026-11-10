@@ -28,6 +28,97 @@ fn arguments(values: &[u32]) -> Vec<u8> {
         .collect()
 }
 
+type ConfigurationWrites = std::rc::Rc<
+    std::cell::RefCell<Vec<(u32, katze_system2::settings::ConfigurationFile, Vec<u8>)>>,
+>;
+
+struct ConfigurationSink(ConfigurationWrites);
+
+impl katze_system2::settings::ConfigurationServices for ConfigurationSink {
+    fn write(
+        &mut self,
+        task: u32,
+        file: katze_system2::settings::ConfigurationFile,
+        bytes: &[u8],
+    ) -> Result<bool> {
+        self.0.borrow_mut().push((task, file, bytes.to_vec()));
+        Ok(false)
+    }
+}
+
+#[test]
+fn ordinary_configuration_save_keeps_file_failures_local_and_sound_gate_independent() {
+    use katze_system2::{
+        audio::SoundConfig,
+        input::DeviceKeys,
+        settings::{ConfigurationFile, PlatformSettings},
+    };
+    let mut numbers = State::new(0);
+    let mut host = CoreHost::new(&mut numbers);
+    let mut vm =
+        Interpreter::new(Program::from_code(&[], vec![0xaa; 32], 16).unwrap(), vec![]).unwrap();
+    assert!(
+        host.call(361, &[], &mut vm)
+            .unwrap_err()
+            .message
+            .contains("写入服务")
+    );
+    let writes = ConfigurationWrites::default();
+    host.configuration_services = Some(Box::new(ConfigurationSink(writes.clone())));
+    host.system_settings = Some(SystemSettings::default());
+    host.platform_settings = Some(PlatformSettings {
+        sound_stereo: 0,
+        ..PlatformSettings::default()
+    });
+    host.configuration_keys = Some(DeviceKeys::default());
+    host.sound_config = Some(SoundConfig {
+        master_volume: Some(37),
+        ..SoundConfig::default()
+    });
+    host.task_id = 71;
+    host.system_settings_dirty = 9;
+    host.sound_settings_dirty = 17;
+    host.system_settings.as_mut().unwrap().jtalk_enabled = 1;
+    assert_eq!(Host::sound_stereo(&host), 0);
+    host.sound_stereo = Some(7);
+    assert_eq!(Host::sound_stereo(&host), 7);
+    assert_eq!(
+        host.call(361, &[], &mut vm).unwrap(),
+        NativeReturn::Continue
+    );
+    host.system_settings.as_mut().unwrap().jtalk_enabled = 0;
+    host.sound_config_enabled = 0x8000_0000;
+    assert_eq!(
+        host.call(361, &[], &mut vm).unwrap(),
+        NativeReturn::Continue
+    );
+    assert!(host.call(361, &[0; 4], &mut vm).is_err());
+    assert_eq!(vm.read(0, 32).unwrap(), vec![0xaa; 32]);
+    assert_eq!(
+        [host.system_settings_dirty, host.sound_settings_dirty],
+        [9, 17]
+    );
+    let writes = writes.borrow();
+    assert_eq!(
+        writes
+            .iter()
+            .map(|(task, file, _)| (*task, *file))
+            .collect::<Vec<_>>(),
+        [
+            (71, ConfigurationFile::Main),
+            (71, ConfigurationFile::Main),
+            (71, ConfigurationFile::Sound)
+        ]
+    );
+    assert_eq!(
+        XmlDocument::parse(&writes[2].2)
+            .unwrap()
+            .integer(b"MASTER/volume", 99)
+            .unwrap(),
+        37
+    );
+}
+
 #[test]
 fn platform_overlay_checks_fullscreen_candidates_before_truncation_and_keeps_inheritance() {
     use katze_system2::settings::PlatformSettings;
@@ -636,5 +727,127 @@ fn ordinary_settings_writeback_and_external_reads_share_runtime_state() {
         expected[0x80..0xa0].fill(0x73);
         expected[0xc0..0xcc].fill(0x44);
         assert_eq!(vm.read(0x80000000, 512).unwrap(), expected);
+    }
+}
+
+struct ConfigurationDevice(katze_system2::input::DeviceKeys);
+
+impl katze_system2::input::InputDevice for ConfigurationDevice {
+    fn key_configuration(&self) -> Option<&katze_system2::input::DeviceKeys> {
+        Some(&self.0)
+    }
+    fn poll(&mut self) -> Result<()> {
+        Ok(())
+    }
+    fn pointer(&mut self) -> Result<katze_system2::input::PointerSample> {
+        Ok(Default::default())
+    }
+    fn key(
+        &mut self,
+        key: u32,
+        group: u32,
+        repeat: bool,
+    ) -> Result<katze_system2::input::KeySample> {
+        self.0.sample(key, group, repeat)
+    }
+    fn take_wheel(&mut self) -> Result<u32> {
+        Ok(0)
+    }
+    fn is_foreground(&mut self) -> Result<bool> {
+        Ok(true)
+    }
+    fn finish(&mut self) -> Result<()> {
+        Ok(())
+    }
+    fn commit(&mut self) -> Result<()> {
+        Ok(())
+    }
+    fn history(&mut self) -> Result<[u8; 32]> {
+        Ok([0; 32])
+    }
+    fn show_cursor(&mut self, _: u32) -> Result<()> {
+        Ok(())
+    }
+    fn cursor_visible(&mut self) -> Result<u32> {
+        Ok(1)
+    }
+    fn set_pointer(&mut self, _: [i32; 2]) -> Result<()> {
+        Ok(())
+    }
+    fn clear_keys(&mut self) -> Result<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn runtime_configuration_save_reads_current_device_bindings_and_preserves_the_vm_stack() {
+    use katze_system2::{
+        input::{DeviceBinding, DeviceKeys},
+        settings::PlatformSettings,
+    };
+    struct SaveSource;
+    impl ProgramLoader for SaveSource {
+        fn load(&mut self, _: &[u8]) -> Result<Option<Program>> {
+            let mut code = Vec::new();
+            for (opcode, values) in [
+                (0x25, &[0xdeadbeef][..]),
+                (0x2b, &[361, 0]),
+                (0x26, &[0]),
+                (0x3b, &[]),
+            ] {
+                code.push(opcode);
+                for value in values {
+                    code.push(3);
+                    code.extend(u32::to_le_bytes(*value));
+                }
+            }
+            Ok(Some(Program::from_code(&code, vec![0; 16], 16)?))
+        }
+    }
+    for budget in [1, 4096] {
+        let mut runtime = Runtime::new(
+            0,
+            kind::BASE,
+            Box::new(BaseObject::new()),
+            State::new(0),
+            KcsFactory::new(SaveSource),
+        );
+        runtime.set_budget(budget, 1 << 20);
+        runtime.host_mut().system_settings = Some(SystemSettings::default());
+        runtime.host_mut().platform_settings = Some(PlatformSettings::default());
+        runtime.host_mut().configuration_keys = Some(DeviceKeys::default());
+        let writes = ConfigurationWrites::default();
+        runtime.set_configuration_services(ConfigurationSink(writes.clone()));
+        for code in [65, 66] {
+            let mut bindings = [DeviceBinding::default(); 80];
+            bindings[0].enabled = 1;
+            bindings[0].codes[0][0] = code;
+            runtime
+                .set_input_device(ConfigurationDevice(DeviceKeys::new(bindings)))
+                .unwrap();
+            let task = runtime.create(0, kind::ORDINARY, b"save", b"").unwrap();
+            runtime.update(0, 0).unwrap();
+            assert_eq!(
+                runtime
+                    .object(task)
+                    .unwrap()
+                    .interpreter()
+                    .unwrap()
+                    .read(0, 4)
+                    .unwrap(),
+                0xdeadbeefu32.to_le_bytes()
+            );
+            let writes = writes.borrow();
+            let (writer, _, bytes) = writes.last().unwrap();
+            assert_eq!(*writer, task);
+            assert_eq!(
+                XmlDocument::parse(bytes)
+                    .unwrap()
+                    .integer(b"KEY/kb1_00", 0)
+                    .unwrap(),
+                u32::from(code)
+            );
+        }
+        assert_eq!(writes.borrow().len(), 2);
     }
 }

@@ -50,6 +50,9 @@ impl ScriptedDevice {
 }
 
 impl InputDevice for ScriptedDevice {
+    fn key_configuration(&self) -> Option<&DeviceKeys> {
+        Some(&self.keys)
+    }
     fn poll(&mut self) -> Result<()> {
         self.polls = self.polls.wrapping_add(1);
         let pressed = self

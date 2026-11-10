@@ -302,6 +302,13 @@ impl<F: ObjectFactory> Runtime<F> {
         self.host.system_services = Some(Box::new(services));
     }
 
+    pub fn set_configuration_services(
+        &mut self,
+        services: impl crate::settings::ConfigurationServices + 'static,
+    ) {
+        self.host.configuration_services = Some(Box::new(services));
+    }
+
     /// 配置按任务存档目录读取 CSS 文件及查询修改时间的服务；已有容器继续保留。
     pub fn set_save_services(&mut self, services: impl crate::save::SaveServices + 'static) {
         self.host.save_services = Some(Box::new(services));
@@ -1694,7 +1701,7 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
     }
 
     fn sound_stereo(&self) -> u32 {
-        self.host.sound_stereo.unwrap_or(1)
+        self.host.sound_stereo_value()
     }
 
     fn sound_config_enabled(&self) -> u32 {
@@ -1936,6 +1943,18 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
     }
 
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn> {
+        if index == 361 {
+            if !arguments.is_empty() {
+                return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+            }
+            let keys = self
+                .resources
+                .input_device
+                .as_ref()
+                .and_then(|device| device.key_configuration());
+            crate::kcs::save_configuration(self.host, keys, vm.pc)?;
+            return Ok(NativeReturn::Continue);
+        }
         if matches!(index, 1055..=1061) {
             return self.emocon_native(index, arguments, vm);
         }

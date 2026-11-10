@@ -4,6 +4,19 @@ pub use persistence::write_configuration;
 use persistence::{EFFECTS_FIELDS, MESSAGE_FIELDS, SOUND_FIELDS, WINDOW_FIELDS};
 pub use platform::PlatformSettings;
 
+/// 用户配置的两个独立文件，具体路径由平台宿主决定。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConfigurationFile {
+    Main,
+    Sound,
+}
+
+/// 同步配置文件写入；普通打开或写入失败返回 false，集成诊断使用 Err。
+pub trait ConfigurationServices {
+    fn write(&mut self, task_id: u32, file: ConfigurationFile, bytes: &[u8])
+    -> crate::Result<bool>;
+}
+
 /// 全局配置及普通脚本可查询的变量范围。
 ///
 /// 配置覆盖和脚本写回只修改数据，不触发设备或消息对象更新。

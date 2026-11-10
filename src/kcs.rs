@@ -2,6 +2,7 @@ pub use crate::memory::{MemoryRead, SharedMemory};
 use crate::{Error, Result, Step, read};
 use std::collections::BTreeMap;
 
+mod configuration;
 mod data;
 mod debug;
 mod host;
@@ -29,6 +30,7 @@ mod triples;
 mod utf8;
 mod vectors;
 pub use crate::task::TaskClock;
+pub(crate) use configuration::save_configuration;
 pub use host::{CoreHost, HostState, MenuItemRequest};
 pub(crate) use host::{call_native, hierarchy_query};
 pub(crate) use matrix::{multiply as multiply_matrix, transform as transform_vector};

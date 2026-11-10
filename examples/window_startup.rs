@@ -167,6 +167,9 @@ impl WindowDevice {
 }
 
 impl InputDevice for WindowDevice {
+    fn key_configuration(&self) -> Option<&DeviceKeys> {
+        Some(&self.keys)
+    }
     fn poll(&mut self) -> Result<()> {
         let mut shared = self.shared.borrow_mut();
         for (source, code, pressed) in shared.events.drain(..) {

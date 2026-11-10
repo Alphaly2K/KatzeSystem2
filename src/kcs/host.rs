@@ -67,7 +67,7 @@ pub struct HostState {
     pub sound_config: Option<crate::audio::SoundConfig>,
     pub sound_groups: Option<crate::audio::SoundGroups>,
     pub sound_settings_dirty: u32,
-    /// SOUND/stereo 覆盖值；缺省使用配置构造值一。
+    /// SOUND/stereo 显式覆盖值；None 读取平台配置，未配置平台时取一。
     pub sound_stereo: Option<u32>,
     pub sequence_name_mode: u32,
     pub surface_size: [u32; 2],
@@ -81,6 +81,10 @@ pub struct HostState {
     pub message_measurement_parameter: u32,
     pub fes_message_frame_delay: i32,
     pub system_settings: Option<crate::settings::SystemSettings>,
+    pub platform_settings: Option<crate::settings::PlatformSettings>,
+    /// 独立宿主的按键配置；运行时优先读取输入设备的当前配置。
+    pub configuration_keys: Option<crate::input::DeviceKeys>,
+    pub configuration_services: Option<Box<dyn crate::settings::ConfigurationServices>>,
     /// 全局配置变更标记；宿主处理配置变更通知后清除。
     pub system_settings_dirty: u32,
     pub languages: crate::language::LanguageState,
@@ -109,6 +113,14 @@ pub struct HostState {
 }
 
 impl HostState {
+    pub(crate) fn sound_stereo_value(&self) -> u32 {
+        self.sound_stereo.unwrap_or_else(|| {
+            self.platform_settings
+                .as_ref()
+                .map_or(1, |settings| settings.sound_stereo)
+        })
+    }
+
     /// 458 装载的文件数据；集合清空保留数据，420 释放时失效。
     pub fn sequence_data(&self, handle: u32) -> Result<&super::SequenceData> {
         self.sequence_maps
@@ -232,7 +244,7 @@ impl Host for CoreHost<'_> {
     }
 
     fn sound_stereo(&self) -> u32 {
-        self.host.sound_stereo.unwrap_or(1)
+        self.host.sound_stereo_value()
     }
 
     fn sound_config_enabled(&self) -> u32 {
@@ -485,6 +497,13 @@ pub(crate) fn call_native(
                 block.copy_from_slice(&vm.read(address, block.len())?);
             }
         }
+        return Ok(NativeReturn::Continue);
+    }
+    if index == 361 {
+        if !arguments.is_empty() {
+            return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+        }
+        super::save_configuration(host, None, vm.pc)?;
         return Ok(NativeReturn::Continue);
     }
     if matches!(

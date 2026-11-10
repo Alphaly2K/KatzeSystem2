@@ -43,6 +43,12 @@
 
 `settings::write_configuration(xml, system, platform, languages, keys)` 把主平台配置和用户选项写入同一文档。窗口全屏开关及位置从 `SystemSettings` 读取，语言从 `LanguageState` 读取；用户选项中同时写入配置类型、字体、手柄开关及启用按键槽。它与各模型的独立写出接口共用当前值。文件保存及装载后的设备应用由宿主执行。
 
+普通 361 无参数，以状态二继续，不修改返回槽或配置变更标记。宿主需提供 `system_settings`、`platform_settings`、按键配置及 `ConfigurationServices`。独立宿主从 `HostState::configuration_keys` 读取按键；运行时优先使用输入设备的 `key_configuration()` 当前值，无设备配置时再取该字段。读取绑定不采集或提交输入状态。
+
+`ConfigurationServices::write(task_id, file, bytes)` 同步保存完整文档，`ConfigurationFile::Main`、`Sound` 分别标识主设置和独立声音设置，路径由服务决定。打开失败、短写等普通文件失败返回 `Ok(false)`：361 继续，并在 `sound_config_enabled` 非零时尝试声音文件。此开关与 `use_jtalk` 独立。`Err` 用于集成诊断并停止调用；缺少所需模型或序列化超限同样返回诊断。`Runtime::set_configuration_services` 安装服务。
+
+音频的立体声查询在没有显式 `HostState::sound_stereo` 覆盖时读取 `platform_settings.sound_stereo`，未配置平台模型时使用初值一。
+
 
 ## 默认值与 XML 覆盖
 

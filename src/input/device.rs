@@ -9,6 +9,10 @@ pub struct PointerSample {
 
 /// 同步设备服务；每次查询均可观察前一次调用或脚本回调的修改。
 pub trait InputDevice {
+    /// 供配置保存读取当前绑定；不采集或提交输入状态。
+    fn key_configuration(&self) -> Option<&super::DeviceKeys> {
+        None
+    }
     fn poll(&mut self) -> Result<()>;
     fn pointer(&mut self) -> Result<PointerSample>;
     /// group 为绑定组 0～3；repeat 表示是否需要首次重复开关，掩码查询仍会执行。
