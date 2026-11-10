@@ -158,6 +158,27 @@ fn scene_position_commands_move_descendant_pixels_without_rebuilding_the_source(
                 }
             }
         }
+        scene
+            .objects_mut()
+            .unwrap()
+            .set_parent(group, None)
+            .unwrap();
+        while !runtime.update_fes_scene(0, &mut scene, 101).unwrap() {}
+        let task = task.unwrap();
+        assert!(runtime.drawables_mut().set_position(task, [99.0; 3]));
+        while !runtime
+            .refresh_fes_configuration(0, &mut scene, 101)
+            .unwrap()
+        {}
+        assert_eq!(
+            runtime
+                .drawables()
+                .get(task)
+                .unwrap()
+                .transform()
+                .position(),
+            [5., 1., 0.]
+        );
     }
 }
 

@@ -772,7 +772,16 @@ impl<F: ObjectFactory> Store<'_, F> {
         } else {
             scene.owner = Some(owner);
             if configuration {
-                scene.objects.invalidate(scene.objects.top())?;
+                let roots: Vec<_> = scene
+                    .objects
+                    .objects
+                    .values()
+                    .filter(|object| object.parent.is_none())
+                    .map(|object| object.handle)
+                    .collect();
+                for root in roots {
+                    scene.objects.invalidate(root)?;
+                }
             }
             scene.objects.configure_messages(
                 self.host.unicode_text != 0,

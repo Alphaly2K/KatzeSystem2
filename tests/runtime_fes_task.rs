@@ -327,6 +327,43 @@ fn configuration_command_preserves_output_and_main_wait_across_budgets() {
     }
 }
 
+#[test]
+fn frame_configuration_retries_the_fes_handler_before_another_body_update() {
+    for budget in [1, 4096] {
+        let mut runtime = setup(
+            budget,
+            b"#START\n$1+=1\nwait 1000\n#MES_CHANGECONFIG\n$0+=1\nsetconf 7 messpd\n",
+        )
+        .runtime;
+        let fes = runtime.create(0, kind::FES, b"configuration", b"").unwrap();
+        send(&mut runtime, fes, 337, 0, 0);
+        file(&mut runtime, fes, b"complete.fes").unwrap();
+        send(&mut runtime, fes, 339, 0, 0);
+        runtime.host_mut().system_settings_dirty = 7;
+        assert!(
+            runtime
+                .update(100, 1)
+                .unwrap_err()
+                .message
+                .contains("全局设置")
+        );
+        assert_eq!(runtime.numbers().shared[..2], [1, 1]);
+        assert_eq!(runtime.host().system_settings_dirty, 7);
+        let deadline = runtime.object(fes).unwrap().fes_scene().unwrap().deadline();
+        runtime.host_mut().system_settings = Some(Default::default());
+        runtime.update(200, 9).unwrap();
+        assert_eq!(runtime.numbers().shared[..2], [1, 1]);
+        assert_eq!(runtime.host().system_settings_dirty, 0);
+        assert_eq!(runtime.object(fes).unwrap().clock().time, 100);
+        assert_eq!(
+            runtime.object(fes).unwrap().fes_scene().unwrap().deadline(),
+            deadline
+        );
+        runtime.update(201, 1).unwrap();
+        assert_eq!(runtime.numbers().shared[..2], [1, 1]);
+    }
+}
+
 fn setup(budget: usize, source: &[u8]) -> Setup {
     let queries = Rc::new(RefCell::new(Vec::new()));
     let mask = Rc::new(Cell::new(false));
@@ -463,7 +500,7 @@ fn configuration_writes_apply_presets_raw_values_and_volumes_in_body_and_handler
         assert_eq!(word(&settings.sound, 4), 50);
         assert_eq!(settings.scene_animation_enabled, 0);
         assert_eq!(runtime.host().languages.subtitle_index, 1);
-        assert_eq!(runtime.host().system_settings_dirty, 1);
+        assert_eq!(runtime.host().system_settings_dirty, 0);
         runtime.host_mut().system_settings_dirty = 0;
         let mut block = b"WRITE\0".to_vec();
         runtime
@@ -502,7 +539,7 @@ fn language_writes_complete_without_notifications_for_unchanged_ui_and_invalid_i
         assert_eq!(runtime.numbers().shared[..2], [1, 1]);
         assert_eq!(runtime.numbers().shared[7], 3);
         assert_eq!(runtime.host().languages, languages);
-        assert_eq!(runtime.host().system_settings_dirty, 1);
+        assert_eq!(runtime.host().system_settings_dirty, 0);
         let settings = runtime.host().system_settings.clone();
         runtime.host_mut().system_settings_dirty = 0;
         let mut block = b"WRITE\0".to_vec();
@@ -519,7 +556,7 @@ fn language_writes_complete_without_notifications_for_unchanged_ui_and_invalid_i
         runtime.update(101, 1).unwrap();
         assert_eq!(runtime.host().languages, languages);
         assert_eq!(runtime.host().system_settings, settings);
-        assert_eq!(runtime.host().system_settings_dirty, 1);
+        assert_eq!(runtime.host().system_settings_dirty, 0);
         assert!(runtime.host().language_change_requests.is_empty());
     }
 }
@@ -615,7 +652,7 @@ fn font_configuration_keeps_raw_aliases_and_updates_message_defaults_in_handlers
         assert_eq!(defaults.font_name, selected);
         assert!(defaults.reveal);
         assert_eq!(defaults.glyph_parameter, Some((-3i32) as u32));
-        assert_eq!(runtime.host().system_settings_dirty, 1);
+        assert_eq!(runtime.host().system_settings_dirty, 0);
         runtime.host_mut().system_settings_dirty = 0;
         let mut block = b"WRITE\0".to_vec();
         runtime
@@ -650,7 +687,7 @@ fn system_voice_configuration_checks_combined_index_but_accesses_first_index() {
             runtime.numbers().shared[..7],
             [-7, 1, 0, 19, -3, 0x80000001u32 as i32, 9]
         );
-        assert_eq!(runtime.host().system_settings_dirty, 1);
+        assert_eq!(runtime.host().system_settings_dirty, 0);
         let mut block = b"WRITE\0".to_vec();
         runtime
             .dispatch_command_with_buffers(
@@ -702,7 +739,7 @@ fn configuration_write_validation_keeps_argument_effects_and_refresh_boundaries(
             }
             assert_eq!(runtime.host().system_settings.as_ref().unwrap(), &expected);
             assert_eq!(runtime.numbers().shared[7], effects);
-            assert_eq!(runtime.host().system_settings_dirty, dirty);
+            assert_eq!(runtime.host().system_settings_dirty, 0);
         }
     }
 }

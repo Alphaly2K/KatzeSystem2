@@ -13,7 +13,7 @@ use crate::kcs::{
 };
 use crate::task::{Command, CommandBuffers, Control, Lifecycle, TaskClock, TaskTree};
 use crate::{Error, Result, expression, read};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 mod audio;
 mod backlog;
@@ -149,6 +149,7 @@ pub struct Runtime<F: ObjectFactory> {
     factory: F,
     budget: usize,
     limit: usize,
+    configuration_notification: Option<BTreeSet<u32>>,
 }
 
 impl<F: ObjectFactory> Runtime<F> {
@@ -174,6 +175,7 @@ impl<F: ObjectFactory> Runtime<F> {
             factory,
             budget: DEFAULT_BUDGET,
             limit: DEFAULT_LIMIT,
+            configuration_notification: None,
         }
     }
 
@@ -418,8 +420,12 @@ impl<F: ObjectFactory> Runtime<F> {
         self.limit = limit;
     }
 
-    /// 完成一轮树更新：先更新时钟，再按编号推进子任务，最后执行主体。
+    /// 完成一轮树更新后广播配置变更并清除标记。
+    /// 通知失败后先续完原轮次，不重复推进时钟和主体。
     pub fn update(&mut self, now: u32, increment: u32) -> Result<bool> {
+        if self.configuration_notification.is_some() {
+            return self.finish_configuration_notification();
+        }
         let mut lifecycle = TaskLifecycle {
             numbers: &mut self.numbers,
             host: &mut self.host,
@@ -430,7 +436,40 @@ impl<F: ObjectFactory> Runtime<F> {
             budget: self.budget,
             limit: self.limit,
         };
-        self.tree.update(now, increment, &mut lifecycle)
+        let active = self.tree.update(now, increment, &mut lifecycle)?;
+        if active && self.host.system_settings_dirty != 0 {
+            self.configuration_notification = Some(BTreeSet::new());
+            return self.finish_configuration_notification();
+        }
+        Ok(active)
+    }
+
+    fn finish_configuration_notification(&mut self) -> Result<bool> {
+        let mut pending = self.configuration_notification.take().unwrap();
+        let root = self.tree.root_id();
+        if self.tree.node(root).is_none() {
+            return Ok(false);
+        }
+        let result = route_command_mode(
+            self.store(),
+            root,
+            Command {
+                target: root,
+                sender: 0,
+                code: 19,
+                data: [0; 3],
+            },
+            &mut CommandBuffers::default(),
+            &mut 0,
+            crate::input::InputDelivery::Broadcast,
+            Some(&mut pending),
+        );
+        if let Err(error) = result {
+            self.configuration_notification = Some(pending);
+            return Err(error);
+        }
+        self.host.system_settings_dirty = 0;
+        Ok(true)
     }
 
     /// 同步销毁子树；根任务关闭后树不再接受更新。
@@ -1160,6 +1199,7 @@ fn route_command<F: ObjectFactory>(
         buffers,
         output,
         crate::input::InputDelivery::Direct,
+        None,
     )
 }
 
@@ -1170,6 +1210,7 @@ fn route_command_mode<F: ObjectFactory>(
     buffers: &mut CommandBuffers<'_>,
     output: &mut u32,
     delivery: crate::input::InputDelivery,
+    mut completed: Option<&mut BTreeSet<u32>>,
 ) -> Result<bool> {
     let Store {
         numbers,
@@ -1184,6 +1225,12 @@ fn route_command_mode<F: ObjectFactory>(
         limit,
     } = store;
     let handler = |tree: &mut TaskTree, command: &Command, output: &mut u32| {
+        if completed
+            .as_ref()
+            .is_some_and(|receivers| receivers.contains(&command.target))
+        {
+            return Ok(true);
+        }
         let kind = tree.node(command.target).map_or(0, |node| node.kind);
         let mut propagate = false;
         run_nested(
@@ -1208,6 +1255,9 @@ fn route_command_mode<F: ObjectFactory>(
                 propagate: &mut propagate,
             },
         )?;
+        if let Some(receivers) = &mut completed {
+            receivers.insert(command.target);
+        }
         Ok(propagate)
     };
     match delivery {
@@ -1794,7 +1844,15 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         self.resources
             .input_callbacks
             .insert(origin, std::mem::take(state));
-        let result = route_command_mode(self.store(), origin, command, buffers, output, delivery);
+        let result = route_command_mode(
+            self.store(),
+            origin,
+            command,
+            buffers,
+            output,
+            delivery,
+            None,
+        );
         *state = self.resources.input_callbacks.remove(&origin).unwrap();
         result
     }

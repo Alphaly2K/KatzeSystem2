@@ -434,6 +434,8 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 
 `runtime::Runtime` 组合任务树、对象存储、普通宿主状态和对象工厂，不再要求调用者自行实现 `TaskServices` 与 `Lifecycle`。`Runtime::new(root_id, root_kind, root, numbers, factory)` 接受已经创建的根对象；`update`／`destroy` 按树契约更新时钟、子任务和主体，`create`／`dispatch_command`／`send_message` 对应外层创建、命令和消息入口。`tree`、`object`、`host`、`numbers` 提供查询，`set_budget` 替换推进预算。
 
+`update` 在树更新成功后检查 `host.system_settings_dirty`，非零时向整棵树广播配置命令 19，再清除标记；通知期间重新设置的标记同样在本轮清除。普通对象收到的消息留到下一次主体更新消费。通知失败保留标记，下一次 `update` 先完成原轮次的剩余通知，不重复推进时钟、主体或已完成的接收者；这次续跑忽略新传入的时刻和增量。根已释放时保留标记。独立的 `sound_settings_dirty` 由声音媒体刷新流程处理。
+
 `set_resources(services)` 接收拥有的 `ResourceServices`，提供普通 111 的 image 类别补全及同步读取；`images()` 查询 `graphics::Images` 中存活的解码对象。111 按名称列表选择 HG-3 帧并保留首图几何，以状态 1 返回句柄；117 对非零句柄作底端起始的原始 ARGB 填充，以状态 2 继续。所属任务实际释放时解除其图像引用，额外使用者持有的图像继续存活，后续图像句柄不复用。名称重组、合成及读取限制见 [图像接口](graphics.md)。共享持有通过 `Images::retain`／`release_reference` 配对，缓存继续接入。
 
 同一资源服务也处理 365／366／368、590～597 和 633～638，契约与 `ResourceHost` 一致。`image_data(handle)` 查询 365 装载的原始字节。365 装载的原始数据、XML、三整数分组表与名称表句柄由运行时共享，存活至显式释放或运行时销毁；任务释放和 `set_resources` 替换服务均不回收它们，其他任务可以继续查询和关闭。解码图像与原始数据分别保存，不互换句柄。未配置服务时，装载返回诊断，零句柄查询／释放仍按各自规则执行。

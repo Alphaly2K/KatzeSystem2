@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
@@ -292,6 +292,40 @@ fn queued_messages_are_consumed_by_the_next_task_update() {
 }
 
 #[test]
+fn frame_configuration_changes_queue_messages_after_task_updates() {
+    for budget in [1, 4096] {
+        let mut source = Source::new();
+        source.add(b"receiver", waiting_child(), data());
+        let mut asm = Asm::default();
+        asm.ins(0x25, &[0])
+            .ins(0x25, &[1])
+            .ins(0x2b, &[1053, 8])
+            .ins(0x3b, &[]);
+        source.add(b"writer", asm.build(), data());
+        let mut runtime = runtime(source);
+        runtime.set_budget(budget, 10000);
+        let receiver = runtime.create(0, kind::ORDINARY, b"receiver", b"").unwrap();
+        runtime.create(0, kind::ORDINARY, b"writer", b"").unwrap();
+        runtime.update(100, 1).unwrap();
+        let object = runtime.object(receiver).unwrap();
+        assert_eq!(
+            object.queued_messages().unwrap(),
+            [[0, 0xffff0011, 0, 0], [0, 0xffff001a, 0, 0],]
+        );
+        assert_eq!(words(object.interpreter().unwrap(), 52, 1), [0]);
+        assert_eq!(runtime.host().system_settings_dirty, 0);
+        runtime.update(101, 1).unwrap();
+        let object = runtime.object(receiver).unwrap();
+        assert!(object.queued_messages().unwrap().is_empty());
+        assert_eq!(
+            words(object.interpreter().unwrap(), 32, 4),
+            [0, 0xffff001a, 0, 0]
+        );
+        assert_eq!(words(object.interpreter().unwrap(), 52, 1), [0xffff001a]);
+    }
+}
+
+#[test]
 fn budget_continuation_still_completes_a_synchronous_dispatch() {
     for budget in [0, 1] {
         let mut runtime = loop_runtime(69, Some(budget));
@@ -380,7 +414,7 @@ fn task_natives_read_and_write_another_tasks_vm() {
 }
 
 #[derive(Clone, Default)]
-struct Log(Rc<RefCell<Vec<(u32, &'static str)>>>);
+struct Log(Rc<RefCell<Vec<(u32, &'static str)>>>, Rc<Cell<Option<u32>>>);
 
 impl Log {
     fn push(&self, id: u32, event: &'static str) {
@@ -446,6 +480,15 @@ impl TaskObject for Recorded {
             self.log.push(self.id, "delete");
             self.base.control.deletion_requested = 1;
         }
+        if command.code == 19 {
+            assert_eq!(command.sender, 0);
+            assert_eq!(command.data, [0; 3]);
+            self.log.push(self.id, "configuration");
+            if self.log.1.get() == Some(self.id) {
+                return Err(Error::new(0, "合成配置通知失败"));
+            }
+            return Ok(CommandOutcome::finished(false));
+        }
         Ok(CommandOutcome::finished(true))
     }
 
@@ -494,6 +537,68 @@ impl ObjectFactory for RecordingFactory {
             base: BaseObject::new(),
             log: self.0.clone(),
         }))
+    }
+}
+
+#[test]
+fn frame_configuration_retry_preserves_completed_receivers_and_task_clocks() {
+    for remove_failed in [false, true] {
+        let log = Log::default();
+        let mut runtime = Runtime::new(
+            71,
+            kind::ROOT,
+            Box::new(Recorded {
+                id: 71,
+                base: BaseObject::new(),
+                log: log.clone(),
+            }),
+            katze_system2::expression::State::new(8),
+            RecordingFactory(log.clone()),
+        );
+        let child = runtime.create(71, kind::BASE, b"child", b"").unwrap();
+        let grandchild = runtime
+            .create(child, kind::BASE, b"grandchild", b"")
+            .unwrap();
+        let sibling = runtime.create(71, kind::BASE, b"sibling", b"").unwrap();
+        log.1.set(Some(child));
+        runtime.host_mut().system_settings_dirty = 7;
+        runtime.host_mut().sound_settings_dirty = 9;
+        let error = runtime.update(100, 1).unwrap_err();
+        assert!(error.message.contains("配置通知失败"));
+        assert_eq!(
+            log.events(),
+            [
+                (grandchild, "body"),
+                (child, "body"),
+                (sibling, "body"),
+                (71, "body"),
+                (71, "configuration"),
+                (child, "configuration"),
+            ]
+        );
+        assert_eq!(runtime.host().system_settings_dirty, 7);
+        if remove_failed {
+            runtime.destroy(child).unwrap();
+        }
+        log.0.borrow_mut().clear();
+        log.1.set(None);
+        assert!(runtime.update(200, 9).unwrap());
+        let expected = if remove_failed {
+            vec![(sibling, "configuration")]
+        } else {
+            vec![
+                (child, "configuration"),
+                (grandchild, "configuration"),
+                (sibling, "configuration"),
+            ]
+        };
+        assert_eq!(log.events(), expected);
+        assert_eq!(runtime.object(71).unwrap().clock().time, 100);
+        assert_eq!(runtime.host().system_settings_dirty, 0);
+        assert_eq!(runtime.host().sound_settings_dirty, 9);
+        log.0.borrow_mut().clear();
+        runtime.update(201, 1).unwrap();
+        assert!(log.events().iter().all(|(_, event)| *event == "body"));
     }
 }
 
@@ -711,10 +816,12 @@ fn root_shutdown_closes_the_tree() {
     source.add(b"child", waiting_child(), data());
     let mut runtime = runtime(source);
     runtime.create(0, kind::ORDINARY, b"child", b"").unwrap();
+    runtime.host_mut().system_settings_dirty = 5;
     runtime.destroy(0).unwrap();
     assert!(runtime.tree().node(0).is_none());
     assert!(runtime.object(0).is_none());
     assert!(runtime.update(10, 0).is_err());
+    assert_eq!(runtime.host().system_settings_dirty, 5);
 }
 
 #[test]
