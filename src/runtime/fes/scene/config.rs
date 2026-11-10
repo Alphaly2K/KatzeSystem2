@@ -70,6 +70,23 @@ impl<F: ObjectFactory> Store<'_, F> {
             }
             return Ok(true);
         }
+        if !write && matches!(name.as_slice(), b"screen" | b"iswindow") {
+            let value = if name == b"screen" {
+                self.host
+                    .system_settings
+                    .as_ref()
+                    .ok_or_else(|| Error::new(offset, "运行时未配置全局设置"))?
+                    .fullscreen
+            } else {
+                self.host
+                    .windowed_mode
+                    .ok_or_else(|| Error::new(offset, "运行时未提供当前窗口模式"))?
+            };
+            if let Some(slot) = self.numbers.shared.get_mut(destination as usize) {
+                *slot = value as i32;
+            }
+            return Ok(true);
+        }
         let language = match name.as_slice() {
             b"lang_ui" => Some(self.host.languages.primary_index),
             b"lang_text_main" => Some(self.host.languages.message_index),
@@ -165,14 +182,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                 b"fontprop" => (9, 3),
                 b"fontfix" => (9, 4),
                 b"screen" | b"iswindow" => {
-                    return Err(Error::new(
-                        offset,
-                        if write {
-                            "FES 配置写回尚未接入"
-                        } else {
-                            "FES 配置查询尚未接入"
-                        },
-                    ));
+                    return Err(Error::new(offset, "FES 配置写回尚未接入"));
                 }
                 _ => {
                     if write {

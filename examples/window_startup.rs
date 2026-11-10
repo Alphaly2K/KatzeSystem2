@@ -281,6 +281,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|| "katze-system2".encode_utf16().collect());
     let mut title = String::from_utf16_lossy(runtime.host().string_tables.resolve(&title_source));
     let mut window = Window::new(&title, 1280, 720, WindowOptions::default())?;
+    runtime.host_mut().windowed_mode = Some(1);
     window.set_target_fps(60);
     let mut now = 0u32;
     let started = std::time::Instant::now();

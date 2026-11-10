@@ -81,6 +81,8 @@ FES SOUND 文件请求通过 `Objects::set_sound_task` 的绑定发送 180／182
 
 `PlatformSettings::apply_startup_xml(bytes, adjust_fullscreen)` 读取启动的 SCREEN、GENERAL、APP 等平台字段，回调按平台模式调整已截取低十六位的候选尺寸。
 
+FES `getconf screen` 查询 `SystemSettings::fullscreen`，`getconf iswindow` 查询平台同步的 `HostState::windowed_mode`，两者保留独立的原始 DWORD。当前窗口模式为 None 时返回诊断；窗口示例在成功创建窗口后设置为一。
+
 普通 361 使用 `settings::ConfigurationServices` 同步保存主配置，并按新声音分类开关保存声音配置。通过 `Runtime::set_configuration_services` 或 `HostState::configuration_services` 安装；输入设备可通过 `key_configuration()` 提供当前按键绑定。普通文件失败与诊断的约定见[平台配置](settings.md#平台配置与完整文档)。
 
 `language::LanguageState` 保存 CP932 字节前缀表、默认编号和两套选择，通过 `CoreHost::languages` 或 `Runtime::host_mut().languages` 提供。`prefix(mode)` 按 mode 零选择主语言、一选择消息语言，越界时回退默认编号；无有效项或 mode 无效时返回 None，有效空前缀返回空切片。`expand(input, mode)` 按 mode 零替换 `%LANG%`、一替换 `%LANG_M%`；其他值保留输入。选择越界时使用默认编号，默认也越界时保留标记。替换区分大小写、覆盖全部匹配，输入及前缀在首零结束。前缀最多 255 字节，有效替换的输出最多 2047 字节，超限返回诊断。普通 1036 接受两个输出 VM 地址，先检查两处起点，再依次写主语言和消息语言前缀，均以单零结束；没有有效项时写空串，重叠输出按此顺序覆盖。输出保持 CP932，不受 unicode_text 开关影响；前缀最多 4095 字节，空间不足返回诊断。该查询以状态二保留返回槽。普通 1062 接受 mode 和 VM 字符串地址，原地写回并保留返回槽；无效 mode 不访问地址。`LanguageState::from_xml` 读取启动 XML 的 `language` 段：`default` 为初始默认编号，`L%02d` 的子节点 `<prefix>` 按序组成前缀表，首个缺失前缀的块结束扫描，主语言和消息语言的初始选择均取默认编号；`<code>`、`<lang>`、`<accel>`、`<enable_sub>` 与 `<OPTTABLE>` 不进入前缀选择。 `LanguageState::apply_user_xml` 合并三项用户选择并按启动表范围回退，`write_xml` 导出原始选择，具体规则见[全局设置](settings.md#用户配置写出)。前缀为原始字节；需要 CP932 时宿主负责转换。

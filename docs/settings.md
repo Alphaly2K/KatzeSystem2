@@ -109,8 +109,12 @@
 |`fontweight`、`fontprop`、`fontfix`|粗体、比例字宽、固定字宽的原始 DWORD|
 |`sysplay`|系统声音播放开关，使用下面的索引规则|
 |`activewindow`、`use_sceneskip`、`use_jtalk`|`always_active`、`scene_skip_enabled`、`jtalk_enabled` 的原始配置值|
+|`screen`|`SystemSettings::fullscreen` 的原始配置值|
+|`iswindow`|`HostState::windowed_mode` 提供的平台当前窗口模式原值|
 
-`sysplay` 先检查 index 与 extra 的回绕和是否在 0～47，再以 index 本身访问数组。和越界时返回零；和有效但 index 本身越界时返回诊断。它与 `play` 使用的旧通道启用值独立。`activewindow` 是持续活动配置，实际前台及窗口状态由平台提供。`fshadow` 的负索引会访问基线字体控制区域前方，库返回诊断；extra 仍先求值。`font`／`ruby` 查询向共享字符串槽写入主字体／注音字体名，数值槽保持；未显式配置时沿用宿主默认字体。`screen`／`iswindow` 查询仍返回未接入诊断。配置读取不触发对应设备或对象更新。
+`sysplay` 先检查 index 与 extra 的回绕和是否在 0～47，再以 index 本身访问数组。和越界时返回零；和有效但 index 本身越界时返回诊断。它与 `play` 使用的旧通道启用值独立。`activewindow` 是持续活动配置，实际前台及窗口状态由平台提供。`fshadow` 的负索引会访问基线字体控制区域前方，库返回诊断；extra 仍先求值。`font`／`ruby` 查询向共享字符串槽写入主字体／注音字体名，数值槽保持；未显式配置时沿用宿主默认字体。配置读取不触发对应设备或对象更新。
+
+`screen` 和 `iswindow` 忽略已求值的 index／extra，分别读取保存的全屏选择和平台当前窗口模式，保留原始 DWORD。平台通过 `HostState::windowed_mode` 同步当前值；None 表示未提供，查询返回诊断。窗口示例成功创建窗口后提供一；无窗口宿主按自身模拟的模式显式提供。两项查询均可在主体和事件处理器中使用；对应写回仍返回未接入诊断。
 
 ## FES 配置写回
 

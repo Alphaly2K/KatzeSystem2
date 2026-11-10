@@ -82,6 +82,8 @@ pub struct HostState {
     pub fes_message_frame_delay: i32,
     pub system_settings: Option<crate::settings::SystemSettings>,
     pub platform_settings: Option<crate::settings::PlatformSettings>,
+    /// 平台当前窗口模式的原始 DWORD；独立于保存的全屏选项。
+    pub windowed_mode: Option<u32>,
     /// 独立宿主的按键配置；运行时优先读取输入设备的当前配置。
     pub configuration_keys: Option<crate::input::DeviceKeys>,
     pub configuration_services: Option<Box<dyn crate::settings::ConfigurationServices>>,

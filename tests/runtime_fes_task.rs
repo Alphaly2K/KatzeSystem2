@@ -432,13 +432,16 @@ fn setup(budget: usize, source: &[u8]) -> Setup {
 
 #[test]
 fn configuration_reads_share_host_settings_in_body_and_event_handlers() {
-    let source = b"#START\ngetconf ($7+=1)-1 messpd\ngetconf 1 wndcolor\ngetconf 2 lang_text_main\ngetconf 3 lang_text_sub\ngetconf 4 missing ($7+=1) ($7+=1)\ngetconf -1 wndframe\ngetconf 5 play 47 1\nwait 999\n#READ\ngetconf 0 messpd\ngetconf 1 dragwnd\ngetconf 2 wndframe\ngetconf 3 lang_ui\ngetconf 5 play 46 1\n";
+    let source = b"#START\ngetconf ($7+=1)-1 messpd\ngetconf 1 wndcolor\ngetconf 2 lang_text_main\ngetconf 3 lang_text_sub\ngetconf 4 missing ($7+=1) ($7+=1)\ngetconf -1 wndframe\ngetconf 5 play 47 1\ngetconf 6 screen -1 -37\ngetconf 8 iswindow -1 -37\nwait 999\n#READ\ngetconf 0 messpd\ngetconf 1 dragwnd\ngetconf 2 wndframe\ngetconf 3 lang_ui\ngetconf 5 play 46 1\ngetconf 6 screen\ngetconf 8 iswindow\n";
     for budget in [1, 4096] {
         let Setup { mut runtime, .. } = setup(budget, source);
+        runtime.numbers_mut().shared.resize(9, 0);
         let mut settings = katze_system2::settings::SystemSettings::default();
         settings.message[..4].copy_from_slice(&37u32.to_le_bytes());
         settings.window[..4].copy_from_slice(&0x80123456u32.to_le_bytes());
+        settings.fullscreen = 0x80000001;
         runtime.host_mut().system_settings = Some(settings);
+        runtime.host_mut().windowed_mode = Some(7);
         runtime.host_mut().languages.message_index = 9;
         runtime.host_mut().languages.primary_index = 3;
         runtime.numbers_mut().shared[4] = 71;
@@ -449,10 +452,27 @@ fn configuration_reads_share_host_settings_in_body_and_event_handlers() {
         runtime.update(100, 1).unwrap();
         assert_eq!(
             runtime.numbers().shared[..8],
-            [37, 0x80123456u32 as i32, 9, -1, 71, 0, 0, 3]
+            [
+                37,
+                0x80123456u32 as i32,
+                9,
+                -1,
+                71,
+                0,
+                0x80000001u32 as i32,
+                3
+            ]
         );
         runtime.host_mut().system_settings.as_mut().unwrap().message[..4]
             .copy_from_slice(&11u32.to_le_bytes());
+        assert_eq!(runtime.numbers().shared[8], 7);
+        runtime
+            .host_mut()
+            .system_settings
+            .as_mut()
+            .unwrap()
+            .fullscreen = 39;
+        runtime.host_mut().windowed_mode = Some(0);
         let mut block = b"READ\0".to_vec();
         runtime
             .dispatch_command_with_buffers(
@@ -464,7 +484,9 @@ fn configuration_reads_share_host_settings_in_body_and_event_handlers() {
                 },
             )
             .unwrap();
-        assert_eq!(runtime.numbers().shared[..8], [11, 1, 1, 3, 71, 1, 0, 3]);
+        assert_eq!(runtime.numbers().shared[..8], [11, 1, 1, 3, 71, 1, 39, 3]);
+        assert_eq!(runtime.numbers().shared[8], 0);
+        assert_eq!(runtime.host().system_settings_dirty, 0);
     }
 }
 
