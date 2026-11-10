@@ -5,6 +5,91 @@ use katze_system2::{
 };
 
 #[test]
+fn ordinary_language_writes_preserve_raw_selections_and_only_refresh_changes() {
+    use katze_system2::language::{LanguageChangeRequest, LanguageTarget::*};
+    let mut numbers = State::new(0);
+    let mut host = CoreHost::new(&mut numbers);
+    host.set_task_id(42);
+    let mut vm = Interpreter::new(
+        Program::from_code(&[], vec![0xaa; 64], 0).unwrap(),
+        vec![0xbb; 32],
+    )
+    .unwrap();
+    let call = |host: &mut CoreHost<'_>, vm: &mut Interpreter, mode: u32, value: u32| {
+        host.call(
+            1053,
+            &[mode.to_le_bytes(), value.to_le_bytes()].concat(),
+            vm,
+        )
+    };
+    assert_eq!(
+        call(&mut host, &mut vm, 3, 99).unwrap(),
+        NativeReturn::Continue
+    );
+    assert_eq!(
+        call(&mut host, &mut vm, 0, 0).unwrap(),
+        NativeReturn::Continue
+    );
+    assert!(call(&mut host, &mut vm, 0, 1).is_err());
+    assert_eq!(host.languages.primary_index, 0);
+    assert!(host.language_change_requests.is_empty());
+    assert!(host.call(1053, &[0; 4], &mut vm).is_err());
+    let mut settings = katze_system2::settings::SystemSettings::default();
+    settings.sound[0x15d4..0x15d8].copy_from_slice(&50u32.to_le_bytes());
+    settings.sound[0x15d8..0x15dc].copy_from_slice(&30u32.to_le_bytes());
+    host.system_settings = Some(settings);
+    host.system_settings_dirty = 37;
+    host.languages.prefixes = vec![b"default".to_vec()];
+    for (mode, value, changed) in [
+        (0, u32::MAX, true),
+        (0, u32::MAX, false),
+        (1, 0x8000_0000, true),
+        (1, 0x8000_0000, false),
+        (2, 0x8000_0001, true),
+        (2, 0x8000_0001, false),
+        (99, 7, false),
+    ] {
+        host.system_settings.as_mut().unwrap().sound[..16].fill(0x55);
+        assert_eq!(
+            call(&mut host, &mut vm, mode, value).unwrap(),
+            NativeReturn::Continue
+        );
+        let expected = if changed {
+            [15u32, 50, 50, 50]
+                .into_iter()
+                .flat_map(u32::to_le_bytes)
+                .collect::<Vec<_>>()
+        } else {
+            vec![0x55; 16]
+        };
+        assert_eq!(
+            &host.system_settings.as_ref().unwrap().sound[..16],
+            expected
+        );
+        assert_eq!(host.system_settings_dirty, 37);
+    }
+    assert_eq!(
+        [
+            host.languages.primary_index,
+            host.languages.message_index,
+            host.languages.subtitle_index
+        ],
+        [u32::MAX, 0x8000_0000, 0x8000_0001]
+    );
+    assert_eq!(host.languages.prefix(0), Some(b"default".as_slice()));
+    assert_eq!(host.languages.prefix(1), Some(b"default".as_slice()));
+    assert_eq!(
+        host.language_change_requests,
+        [Interface, MainText, Subtitle].map(|target| LanguageChangeRequest {
+            task_id: 42,
+            target
+        })
+    );
+    assert_eq!(vm.read(0, 64).unwrap(), [0xaa; 64]);
+    assert_eq!(vm.read(0x8000_0000, 32).unwrap(), [0xbb; 32]);
+}
+
+#[test]
 fn language_native_preserves_mode_fallback_cascade_and_atomic_vm_writes() {
     let mut numbers = State::new(0);
     let mut host = CoreHost::new(&mut numbers);

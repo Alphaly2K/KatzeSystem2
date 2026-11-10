@@ -4,6 +4,7 @@ use crate::{Error, Result};
 pub enum LanguageTarget {
     Interface,
     MainText,
+    Subtitle,
 }
 
 /// 交给平台宿主的异步语言刷新；处理时读取当前全局选择，不保存入队时的编号。

@@ -576,6 +576,7 @@ pub(crate) fn call_native(
         | 1046
         | 1049
         | 1051
+        | 1053
         | 1063 => 2,
         50..=58 | 60 | 62..=64 => 1,
         59 | 61 => 2,
@@ -618,6 +619,31 @@ pub(crate) fn call_native(
                 command_id: 0x77,
                 value: args[0],
             });
+            NativeReturn::Continue
+        }
+        1053 => {
+            use crate::language::{LanguageChangeRequest, LanguageTarget};
+            let (selection, target) = match args[0] {
+                0 => (&mut host.languages.primary_index, LanguageTarget::Interface),
+                1 => (&mut host.languages.message_index, LanguageTarget::MainText),
+                2 => (&mut host.languages.subtitle_index, LanguageTarget::Subtitle),
+                _ => return Ok(NativeReturn::Continue),
+            };
+            if *selection != args[1] {
+                if host.language_change_requests.len() >= read::MAX_ITEMS {
+                    return Err(Error::new(vm.pc, "语言刷新请求数量超过上限"));
+                }
+                let settings = host
+                    .system_settings
+                    .as_mut()
+                    .ok_or_else(|| Error::new(vm.pc, "宿主未配置全局设置"))?;
+                *selection = args[1];
+                settings.refresh_sound_volumes();
+                host.language_change_requests.push(LanguageChangeRequest {
+                    task_id: host.task_id,
+                    target,
+                });
+            }
             NativeReturn::Continue
         }
         420 => {

@@ -275,3 +275,49 @@ fn menu_requests_keep_task_identity_and_are_emitted_once_across_budget_resumptio
         .collect();
     assert_eq!(host.menu_item_requests, expected);
 }
+
+#[test]
+fn language_requests_keep_task_identity_and_stack_across_budget_resumption() {
+    use katze_system2::language::{LanguageChangeRequest, LanguageTarget::*};
+    let mut code = Vec::new();
+    ins(&mut code, 0x25, &[(3, 0x1234_5678)]);
+    for (mode, value) in [(0, 1), (1, 2), (2, 1), (1, 2), (3, 9)] {
+        ins(&mut code, 0x25, &[(3, mode)]);
+        ins(&mut code, 0x25, &[(3, value)]);
+        ins(&mut code, 0x2b, &[(3, 1053), (3, 8)]);
+    }
+    ins(&mut code, 0x26, &[(3, 0)]);
+    ins(&mut code, 0x2b, &[(3, 68), (3, 0)]);
+    ins(&mut code, 0x26, &[(3, 4)]);
+    code.push(0x3b);
+    let program = Program::from_code(&code, vec![0; 16], 128).unwrap();
+    for budget in [1, 4096] {
+        let mut state = State::new(8);
+        let mut host = CoreHost::new(&mut state);
+        host.system_settings = Some(Default::default());
+        for id in [7, 9] {
+            host.languages = Default::default();
+            let mut task = OrdinaryTask::new(program.clone(), vec![]).unwrap();
+            task.task_id = id;
+            let mut complete = false;
+            for _ in 0..100 {
+                complete = task.update(100, 1, &mut host, budget).unwrap();
+                if complete {
+                    break;
+                }
+            }
+            assert!(complete);
+            assert!(task.interpreter.stack_bytes().is_empty());
+            assert_eq!(values(&task)[..2], [0x1234_5678, id]);
+            assert_eq!(host.system_settings_dirty, 0);
+        }
+        assert_eq!(
+            host.language_change_requests,
+            [7, 9]
+                .into_iter()
+                .flat_map(|task_id| [Interface, MainText, Subtitle]
+                    .map(|target| LanguageChangeRequest { task_id, target }))
+                .collect::<Vec<_>>()
+        );
+    }
+}
