@@ -156,13 +156,12 @@ struct WindowDevice {
 }
 
 impl WindowDevice {
-    fn new(config: &[u8], shared: Rc<RefCell<Shared>>) -> Result<Self> {
-        let keys = support::input_keys(config)?;
-        Ok(Self {
+    fn new(keys: DeviceKeys, shared: Rc<RefCell<Shared>>) -> Self {
+        Self {
             shared,
             keys,
             wheel: WheelButtons::default(),
-        })
+        }
     }
 }
 
@@ -264,7 +263,12 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         [1280, 720],
     )?;
     let shared = Rc::new(RefCell::new(Shared::default()));
-    runtime.set_input_device(WindowDevice::new(startup.as_bytes(), shared.clone())?)?;
+    let keys = runtime
+        .host_mut()
+        .configuration_keys
+        .take()
+        .ok_or("缺少启动按键配置")?;
+    runtime.set_input_device(WindowDevice::new(keys, shared.clone()))?;
     runtime.input_coordinates_mut().logical_size = [1280, 720];
     let input = runtime.create(0, kind::INPUT, b"input", b"")?;
     let sound = runtime.create(0, kind::SOUND, b"sound", b"")?;

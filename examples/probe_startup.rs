@@ -22,7 +22,7 @@ struct ScriptedDevice {
 }
 
 impl ScriptedDevice {
-    fn new(config: &[u8]) -> Result<Self> {
+    fn new(keys: DeviceKeys) -> Self {
         let clicks = std::env::var("KATZE_PROBE_CLICKS").map_or_else(
             |_| Vec::new(),
             |value| {
@@ -41,11 +41,11 @@ impl ScriptedDevice {
                     .collect()
             },
         );
-        Ok(Self {
+        Self {
             polls: 0,
             clicks,
-            keys: support::input_keys(config)?,
-        })
+            keys,
+        }
     }
 }
 
@@ -352,7 +352,6 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             .map(|instruction| instruction.offset)
     );
 
-    let device = ScriptedDevice::new(game.startup.as_bytes())?;
     let mut runtime = build_runtime(
         Game {
             root: game.root,
@@ -363,7 +362,12 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         },
         [1280, 720],
     )?;
-    runtime.set_input_device(device)?;
+    let keys = runtime
+        .host_mut()
+        .configuration_keys
+        .take()
+        .ok_or("缺少启动按键配置")?;
+    runtime.set_input_device(ScriptedDevice::new(keys))?;
     let input = runtime.create(0, kind::INPUT, b"input", b"")?;
     let sound = runtime.create(0, kind::SOUND, b"sound", b"")?;
     println!("输入 {input} 声音 {sound}");

@@ -12,8 +12,8 @@
 |`message`|正文标记、颜色／字号、禁则／分组／注音布局、逐字时间与页状态、显式字形、轮廓／阴影及持久普通／渐显显示、消息任务、默认配置、普通文字调用及画布提交|设备字体适配、其余文字命令及宿主等待|
 |`backlog`|日志配置、文本追加／分行、CST 历史导入、姓名查询、段数限制、清空及存档序列化／恢复、普通日志 native|回看窗口呈现|
 |`audio`|声音任务、循环点、Vorbis 解码、通道装载／属性、前置静音及整段／流式缓冲区播放|淡变、混音、设备及其他声音命令|
-|`settings`|四块全局配置、基线初值、XML 字段覆盖、音量换算及普通 359／360 的 VM 读写|配置自动装载及媒体服务应用|
-|`language`|语言前缀、默认回退、普通 1036／1062、普通 1053／FES 选择写回、图像及字符串表重载、窗口标题翻译|平台语言识别、菜单控件与配置持久化|
+|`settings`|全局／平台配置、启动／游戏默认／用户 XML 覆盖、完整写出、音量换算、普通 359／360 的 VM 读写及 361 保存服务|平台设备应用|
+|`language`|语言前缀、默认回退、普通 1036／1062、普通 1053／FES 选择写回、用户配置、图像及字符串表重载、窗口标题翻译|平台语言识别、菜单控件|
 |`save`|CSS 加载、编号记录、容量／标签、嵌套快照、普通容器 native、240／250 共享值保存／恢复、任务目录读取及修改时间服务、FES 最新槽号查询|文件写入、其他数值分组与对象恢复及平台目录发现|
 |`fes`|容器、混合编码字节保留、注释、重复块、条件、调用、数值赋值、帧等待／重启、宏、对象创建与初始化请求、CIMAGE／IMAGE／CPLANE／PLANE 状态应用、文字布局配置核心、事件分派、声明、子命令绑定／换算／调用事件|其他类型的对象属性、对象操作、其他事件入口、运动资源装载及子任务协议|
 |`anm`|容器、全部 18 种指令、随机源、时间调度、重启、图像动画装载及属性组合|资源名称请求、图像选帧及主循环衔接|
@@ -73,7 +73,7 @@ FES SOUND 文件请求通过 `Objects::set_sound_task` 的绑定发送 180／182
 
 普通 939～964、1000／1001 以状态一返回声音配置值，要求宿主提供 `HostState::sound_config`。939～942 不读取参数，查询独立主设置；其余接受一个名称格式地址，分别按文件前缀、type 名称、分类名称查询或计算有效音量，额外参数忽略。`SoundConfig::group_part`／`type_part` 返回相应首个节点，`effective_file_volume` 自内向外应用命中分支的音量、倍率和静音，再应用独立主音量。1000／1001 按文件前缀查询节点的 sameid／编号，缺失时分别返回零／−1。字段、缺失默认值与整数规则见[配置查询](audio.md#普通-kcs-配置查询)。
 
-`settings::SystemSettings` 保存 sound／message／effects／window 四块基线配置，以及两组各八项的局部／全局变量范围、`auto_select`、`scene_animation_enabled`、`fullscreen` 和 `fullscreen_mw_pos`。`Default` 提供构造初值，`apply_startup_xml(bytes)` 覆盖启动范围和选项，`apply_game_xml(bytes)` 覆盖游戏默认运行选项，`apply_xml(bytes)` 还覆盖用户字体及全屏字段；三者按此顺序应用，保留各自范围之外的值。`refresh_sound_volumes()` 显式重算四路有效音量。准备后设置 `CoreHost::system_settings` 或 `Runtime::host_mut().system_settings`。普通 359 依序复制四块到 VM，360 从 VM 写回前三块；两者不压值。359／360 的地址零有效，起点在区外的地址跳过，合法起点的容量不足继续诊断。790 按组和项索引查询变量范围，依序写入起始编号及数量，返回是否找到。999 忽略参数并返回 `auto_select` 的原始 DWORD。1050 同样忽略参数，返回 `scene_animation_enabled`，默认一，游戏默认与用户 XML 通过 `GAME/enable_scene_anm` 覆盖。741 在 `fullscreen` 非零时返回 `fullscreen_mw_pos`，为零时返回零；启动读取 `SCREEN/mw_pos`，用户设置读取 `WINDOW/fullscreen` 和 `FULL_SCREEN/mw_pos`。自动装载和媒体应用尚待接入，具体大小、XML 范围与部分失败契约见[全局设置](settings.md)。
+`settings::SystemSettings` 保存 sound／message／effects／window 四块基线配置，以及两组各八项的局部／全局变量范围、`auto_select`、`scene_animation_enabled`、`fullscreen` 和 `fullscreen_mw_pos`。`Default` 提供构造初值，`apply_startup_xml(bytes)` 覆盖启动范围和选项，`apply_game_xml(bytes)` 覆盖游戏默认运行选项，`apply_xml(bytes)` 还覆盖用户字体及全屏字段；三者按此顺序应用，保留各自范围之外的值。`refresh_sound_volumes()` 显式重算四路有效音量。准备后设置 `CoreHost::system_settings` 或 `Runtime::host_mut().system_settings`。普通 359 依序复制四块到 VM，360 从 VM 写回前三块；两者不压值。359／360 的地址零有效，起点在区外的地址跳过，合法起点的容量不足继续诊断。790 按组和项索引查询变量范围，依序写入起始编号及数量，返回是否找到。999 忽略参数并返回 `auto_select` 的原始 DWORD。1050 同样忽略参数，返回 `scene_animation_enabled`，默认一，游戏默认与用户 XML 通过 `GAME/enable_scene_anm` 覆盖。741 在 `fullscreen` 非零时返回 `fullscreen_mw_pos`，为零时返回零；启动读取 `SCREEN/mw_pos`，用户设置读取 `WINDOW/fullscreen` 和 `FULL_SCREEN/mw_pos`。启动示例按此顺序装载用户配置；平台设备应用由宿主提供。具体大小、XML 范围与部分失败契约见[全局设置](settings.md)。
 
 `SystemSettings::write_xml(&mut XmlWriter)` 导出已支持的用户配置字段，未指定字体名时继续继承；宿主取得文档字节并保存。字段范围及装载后的音量处理见[全局设置](settings.md#用户配置写出)。
 

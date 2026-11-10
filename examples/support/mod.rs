@@ -23,6 +23,9 @@ use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 
+mod configuration;
+use configuration::ConfigurationFiles;
+
 const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
 pub fn input_keys(config: &[u8]) -> Result<DeviceKeys> {
@@ -234,6 +237,42 @@ pub struct Router {
 }
 
 impl Router {
+    fn read_name(&mut self, name: &str, mode: ResourceMode) -> Result<Option<Vec<u8>>> {
+        if mode == ResourceMode::File {
+            return Ok(std::fs::read(std::path::Path::new(&self.root).join(name)).ok());
+        }
+        let (prefix, inner) = name.split_once('/').unwrap_or(("", name));
+        for entry in &self.config.entries {
+            let entry_prefix = String::from_utf8_lossy(&entry.category.prefix);
+            let unqualified = mode == ResourceMode::LooseFirst && prefix.is_empty();
+            if !unqualified && !entry_prefix.eq_ignore_ascii_case(prefix) {
+                continue;
+            }
+            let archive = self.archives.get_mut(entry_prefix.as_ref());
+            let loose = || {
+                let directory = String::from_utf8_lossy(&entry.directory).replace('\\', "/");
+                let path = std::path::Path::new(&self.root).join(directory).join(inner);
+                std::fs::read(path).ok()
+            };
+            if mode == ResourceMode::LooseFirst {
+                if let Some(bytes) = loose() {
+                    return Ok(Some(bytes));
+                }
+            }
+            if let Some(archive) = archive {
+                if let Some(bytes) = archive.read(inner)? {
+                    return Ok(Some(bytes));
+                }
+            }
+            if mode == ResourceMode::ArchiveFirst && !entry.directory.is_empty() {
+                if let Some(bytes) = loose() {
+                    return Ok(Some(bytes));
+                }
+            }
+        }
+        Ok(None)
+    }
+
     /// 新声音配置：文件名先按分类树的 `<head>` 前缀找节点，再取其 `<int>` 归档类别。
     fn sound_archive(&self, name: &[u8]) -> Option<Vec<u8>> {
         let part = self.sound_config.as_ref()?.file_part(name).ok().flatten()?;
@@ -273,30 +312,16 @@ impl ResourceServices for Router {
         self.config.resolve_slot(slot, name)
     }
 
-    fn read(&mut self, name: &[u8], _: ResourceMode) -> Result<Option<Vec<u8>>> {
-        let name = String::from_utf8_lossy(name).into_owned();
+    fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
+        let name = String::from_utf8_lossy(name).replace('\\', "/");
+        let result = self.read_name(&name, mode);
         if std::env::var_os("KATZE_PROBE_READS").is_some() {
-            let result = if let Some((prefix, inner)) = name.split_once('/') {
-                if let Some(archive) = self.archives.get_mut(prefix) {
-                    archive.read(inner)
-                } else {
-                    Ok(std::fs::read(format!("{}/{}", self.root, name)).ok())
-                }
-            } else {
-                Ok(std::fs::read(format!("{}/{}", self.root, name)).ok())
-            };
             eprintln!(
                 "读取 {name} -> {:?}",
                 result.as_ref().map(|value| value.as_ref().map(Vec::len))
             );
-            return result;
         }
-        if let Some((prefix, inner)) = name.split_once('/') {
-            if let Some(archive) = self.archives.get_mut(prefix) {
-                return archive.read(inner);
-            }
-        }
-        Ok(std::fs::read(format!("{}/{}", self.root, name)).ok())
+        result
     }
 
     fn read_utf16(&mut self, name: &[u16], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
@@ -336,18 +361,19 @@ pub struct Saves {
 
 impl SaveServices for Saves {
     fn read(&mut self, _: u32, name: &[u8]) -> Result<Option<Vec<u8>>> {
-        let name = String::from_utf8_lossy(name).into_owned();
-        for directory in ["save", ""] {
-            if let Ok(bytes) = std::fs::read(format!("{}/{directory}/{name}", self.root)) {
-                return Ok(Some(bytes));
-            }
-        }
-        Ok(None)
+        let name = encoding_rs::SHIFT_JIS
+            .decode_without_bom_handling_and_without_replacement(name)
+            .ok_or_else(|| Error::new(0, "存档名称包含无效 CP932"))?
+            .replace('\\', "/");
+        Ok(std::fs::read(std::path::Path::new(&self.root).join(name)).ok())
     }
 
     fn modified_time(&mut self, _: u32, name: &[u8]) -> Result<Option<u64>> {
-        let name = String::from_utf8_lossy(name).into_owned();
-        let Ok(metadata) = std::fs::metadata(format!("{}/save/{name}", self.root)) else {
+        let name = encoding_rs::SHIFT_JIS
+            .decode_without_bom_handling_and_without_replacement(name)
+            .ok_or_else(|| Error::new(0, "存档名称包含无效 CP932"))?
+            .replace('\\', "/");
+        let Ok(metadata) = std::fs::metadata(std::path::Path::new(&self.root).join(name)) else {
             return Ok(None);
         };
         let Ok(modified) = metadata.modified() else {
@@ -468,26 +494,51 @@ pub fn build_runtime(
             },
         },
     );
-    if let Ok(bytes) = std::fs::read(format!("{root}/config/soundconf.xml")) {
-        router.sound_config = Some(katze_system2::audio::SoundConfig::from_xml(&bytes)?);
-        runtime.host_mut().sound_config = router.sound_config.clone();
-        runtime.host_mut().sound_groups =
-            Some(katze_system2::audio::SoundGroups::from_xml(&bytes)?);
-        runtime.host_mut().sound_config_enabled = 1;
+    let startup_xml = katze_system2::resource::XmlDocument::parse(startup.as_bytes())?;
+    let configuration_files = ConfigurationFiles::new(&root, &startup_xml)?;
+    let user_settings =
+        configuration_files.read(katze_system2::settings::ConfigurationFile::Main)?;
+    let sound_name = String::from_utf16(&configuration_files.sound_name)?;
+    if !sound_name.is_empty() {
+        let name = router.resolve(b"config", sound_name.as_bytes())?;
+        if let Some(bytes) = router.read(&name, ResourceMode::LooseFirst)? {
+            let user =
+                configuration_files.read(katze_system2::settings::ConfigurationFile::Sound)?;
+            router.sound_config = Some(
+                katze_system2::audio::SoundConfig::from_xml_with_user_settings(
+                    &bytes,
+                    user.as_deref(),
+                )?,
+            );
+            runtime.host_mut().sound_config = router.sound_config.clone();
+            runtime.host_mut().sound_groups =
+                Some(katze_system2::audio::SoundGroups::from_xml(&bytes)?);
+            runtime.host_mut().sound_config_enabled = 1;
+        }
     }
     let mut settings = katze_system2::settings::SystemSettings::default();
     settings.apply_startup_xml(startup.as_bytes())?;
+    let mut platform = katze_system2::settings::PlatformSettings::default();
+    platform.apply_startup_xml(startup.as_bytes(), |candidate| candidate)?;
     let defaults = router.resolve(b"config", b"gamedef")?;
     if let Some(bytes) = router.read(&defaults, ResourceMode::ArchiveFirst)? {
-        settings.apply_xml(&bytes)?;
+        settings.apply_game_xml(&bytes)?;
     }
-    settings.refresh_sound_volumes();
     runtime.host_mut().languages =
         katze_system2::language::LanguageState::from_xml(startup.as_bytes())?;
+    let mut keys = input_keys(startup.as_bytes())?;
+    if let Some(bytes) = &user_settings {
+        platform.apply_user_xml(bytes, |_| false)?;
+        settings.apply_xml(bytes)?;
+        runtime.host_mut().languages.apply_user_xml(bytes)?;
+        keys.apply_user_xml(bytes)?;
+    }
+    settings.refresh_sound_volumes();
+    runtime.host_mut().configuration_keys = Some(keys);
+    runtime.host_mut().platform_settings = Some(platform);
     runtime.host_mut().string_table_config = Some(
         katze_system2::language::StringTableConfig::from_xml(startup.as_bytes())?,
     );
-    let startup_xml = katze_system2::resource::XmlDocument::parse(startup.as_bytes())?;
     runtime.host_mut().unicode_text = startup_xml.integer(b"APP/utfmode", 0)?;
     runtime.set_resources(router);
     runtime.reload_language_tables(katze_system2::language::LanguageTarget::Interface)?;
@@ -505,8 +556,9 @@ pub fn build_runtime(
     #[cfg(target_os = "macos")]
     runtime.set_fonts(katze_system2::message::macos::MacFonts::new(&root));
     runtime.set_save_services(Saves {
-        root: std::env::var("KATZE_SAVE_ROOT").unwrap_or(root),
+        root: configuration_files.directory.to_string_lossy().into_owned(),
     });
+    runtime.set_configuration_services(configuration_files);
     let mut message_defaults = Default::default();
     settings.apply_message_defaults(&mut message_defaults);
     runtime.host_mut().message_defaults = Some(message_defaults);
