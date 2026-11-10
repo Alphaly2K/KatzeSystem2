@@ -16,6 +16,14 @@ pub fn ascii(bytes: &[u8]) -> Result<&str> {
 }
 
 pub(crate) fn font_name(bytes: &[u8], offset: usize) -> Result<Vec<u16>> {
+    wide_chunks(bytes, offset, 63, "字体名")
+}
+
+pub(crate) fn wide_config(bytes: &[u8]) -> Result<Vec<u16>> {
+    wide_chunks(bytes, 0, 4095, "XML 文字")
+}
+
+fn wide_chunks(bytes: &[u8], offset: usize, capacity: usize, label: &str) -> Result<Vec<u16>> {
     let bytes = bytes.split(|&byte| byte == 0).next().unwrap();
     let mut name = Vec::new();
     let mut cursor = 0;
@@ -36,7 +44,7 @@ pub(crate) fn font_name(bytes: &[u8], offset: usize) -> Result<Vec<u16>> {
                 break;
             }
             if cursor + length > bytes.len() {
-                return Err(Error::new(offset, "字体名 UTF-8 字符被截断"));
+                return Err(Error::new(offset, format!("{label} UTF-8 字符被截断")));
             }
             let mut chunk = [0; 5];
             for (i, value) in chunk[..length].iter_mut().enumerate() {
@@ -46,8 +54,11 @@ pub(crate) fn font_name(bytes: &[u8], offset: usize) -> Result<Vec<u16>> {
             let unit = text.encode_utf16().next().unwrap_or(0);
             (unit, length)
         };
-        if name.len() == 63 {
-            return Err(Error::new(offset, "字体名超过 63 个 UTF-16 单元"));
+        if name.len() == capacity {
+            return Err(Error::new(
+                offset,
+                format!("{label}超过 {capacity} 个 UTF-16 单元"),
+            ));
         }
         name.push(unit);
         cursor += length;

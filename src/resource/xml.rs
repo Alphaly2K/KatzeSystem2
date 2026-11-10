@@ -129,6 +129,11 @@ impl XmlDocument {
             text::integer_prefix(value).map_or(0, |(_, number)| number)
         }))
     }
+
+    /// 宽字符配置入口；每个 UTF-8 字符块保留首个 UTF-16 单元，缺失为 None。
+    pub fn wide_text(&self, path: &[u8]) -> Result<Option<Vec<u16>>> {
+        self.text(path)?.map(text::wide_config).transpose()
+    }
 }
 
 fn xml_error(error: roxmltree::Error) -> Error {

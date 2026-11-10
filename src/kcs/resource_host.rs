@@ -20,6 +20,21 @@ pub trait ResourceServices {
 
     fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>>;
 
+    /// 宽字符资源读取；默认转为 CP932，无法无损表示时由宿主覆盖此方法。
+    fn read_utf16(&mut self, name: &[u16], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
+        let name = &name[..name
+            .iter()
+            .position(|&unit| unit == 0)
+            .unwrap_or(name.len())];
+        let name =
+            String::from_utf16(name).map_err(|_| Error::new(0, "资源名称包含无效 UTF-16"))?;
+        let (bytes, _, errors) = encoding_rs::SHIFT_JIS.encode(&name);
+        if errors {
+            return Err(Error::new(0, "资源服务需要宽字符名称读取能力"));
+        }
+        self.read(&bytes, mode)
+    }
+
     /// 返回与普通读取共用的预读缓存；默认由 CachedResources 提供。
     fn resource_cache(&self) -> Option<ResourceCache> {
         None
@@ -35,6 +50,9 @@ impl<S: ResourceServices + ?Sized> ResourceServices for &mut S {
     }
     fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
         (**self).read(name, mode)
+    }
+    fn read_utf16(&mut self, name: &[u16], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
+        (**self).read_utf16(name, mode)
     }
     fn resource_cache(&self) -> Option<ResourceCache> {
         (**self).resource_cache()

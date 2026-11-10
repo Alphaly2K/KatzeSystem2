@@ -77,7 +77,7 @@ FES SOUND 文件请求通过 `Objects::set_sound_task` 的绑定发送 180／182
 
 `language::LanguageState` 保存 CP932 字节前缀表、默认编号和两套选择，通过 `CoreHost::languages` 或 `Runtime::host_mut().languages` 提供。`prefix(mode)` 按 mode 零选择主语言、一选择消息语言，越界时回退默认编号；无有效项或 mode 无效时返回 None，有效空前缀返回空切片。`expand(input, mode)` 按 mode 零替换 `%LANG%`、一替换 `%LANG_M%`；其他值保留输入。选择越界时使用默认编号，默认也越界时保留标记。替换区分大小写、覆盖全部匹配，输入及前缀在首零结束。前缀最多 255 字节，有效替换的输出最多 2047 字节，超限返回诊断。普通 1036 接受两个输出 VM 地址，先检查两处起点，再依次写主语言和消息语言前缀，均以单零结束；没有有效项时写空串，重叠输出按此顺序覆盖。输出保持 CP932，不受 unicode_text 开关影响；前缀最多 4095 字节，空间不足返回诊断。该查询以状态二保留返回槽。普通 1062 接受 mode 和 VM 字符串地址，原地写回并保留返回槽；无效 mode 不访问地址。`LanguageState::from_xml` 读取启动 XML 的 `language` 段：`default` 为初始默认编号，`L%02d` 的子节点 `<prefix>` 按序组成前缀表，首个缺失前缀的块结束扫描，主语言和消息语言的初始选择均取默认编号；`<code>`、`<lang>`、`<accel>`、`<enable_sub>` 与 `<OPTTABLE>` 不进入前缀选择。前缀为原始字节；需要 CP932 时宿主负责转换。
 
-FES `setconf` 更新有效主界面／主文字选择，并在本轮通知处理中向 `HostState::language_change_requests` 发布 `LanguageChangeRequest { task_id, target }`；target 为 `LanguageTarget::Interface` 或 `MainText`，平台宿主处理时读取当前全局选择并刷新对应文字及菜单，详见[全局设置](settings.md)。FES 图像在媒体更新时自动按新前缀重载，平台语言识别与字符串表装载仍由宿主接入。
+FES `setconf` 更新有效主界面／主文字选择，并在本轮通知处理中向 `HostState::language_change_requests` 发布 `LanguageChangeRequest { task_id, target }`；target 为 `LanguageTarget::Interface` 或 `MainText`，平台宿主处理时读取当前全局选择并刷新对应文字及菜单，详见[全局设置](settings.md)。FES 图像在媒体更新时自动按新前缀重载；字符串表通过下述接口重载，平台语言识别和控件刷新继续由宿主接入。
 
 普通 1053 以 mode 零／一／二选择界面／主文字／副文字，不检查编号范围；只有选择改变才刷新有效音量并输出请求，保存标记保持。其状态二不压返回值，副文字使用 `LanguageTarget::Subtitle`。
 
@@ -85,7 +85,11 @@ FES `setconf` 更新有效主界面／主文字选择，并在本轮通知处理
 
 `language::StringTable::parse` 读取 UTF-8 字符串表，`get`、`entries` 以 UTF-16 查询或枚举。文本在首零结束，可含起始 BOM；行／块注释不受引号保护，块注释保留换行。制表符转空格，每行只移除首尾各一个空格，空行及仍以空格开头的行丢弃；保留行按键、值配对，末尾孤行忽略。`$nr$` 跳过该对，`$empty$` 保存空值，重复键保留首项。引号和反斜杠保持字面值。
 
-`language::StringTables::reload(selector, read)` 在调用读取闭包前移除旧表，缺失返回 false，成功的空文件返回 true 并安装空表；读取或解析错误也不恢复旧表。`resolve` 只替换起始的 `$…$`／`#…#`，键包含两侧标记，多表按编号升序查找；找到时返回翻译（可为空），缺失时返回闭合标记后的文字。未闭合标记和普通文字原样返回，不递归展开。平台界面表编号为零，游戏表为一；自动文件名选择和平台菜单刷新继续由宿主接入。
+`language::StringTables::reload(selector, read)` 在调用读取闭包前移除旧表，缺失返回 false，成功的空文件返回 true 并安装空表；读取或解析错误也不恢复旧表。`resolve` 只替换起始的 `$…$`／`#…#`，键包含两侧标记，多表按编号升序查找；找到时返回翻译（可为空），缺失时返回闭合标记后的文字。未闭合标记和普通文字原样返回，不递归展开。平台界面表编号为零，游戏表为一。
+
+`StringTableConfig::from_xml` 独立保留 `language/L%02d/prefix` 和 `language/OPTTABLE` 的宽字符配置，与脚本字节前缀分别保存。`reload(target, languages, tables, read)` 根据处理时的选择生成文件名：有效界面请求依序读取 `language_<prefix>.txt` 和游戏表；无效界面编号保留旧表。游戏表先展开 `%LANG%`，再展开 `%LANG_M%`，各选择越界时回退默认编号，默认也无效则保留对应标记。主文字请求先读游戏表，当前主文字编号有效时再读一次；副文字请求不读表。界面表路径最多 1023 个 UTF-16 单元，游戏表路径最多 2047 个单元，超限诊断。
+
+`HostState::string_table_config` 和 `string_tables` 保存配置及结果。平台消费语言请求时调用 `Runtime::reload_language_tables(target)`，它先按 `ResourceMode::File` 尝试直接读取，缺失后按 `LooseFirst` 回退；方法保留请求队列，平台控件由调用方刷新。两个启动示例在搭建时装载字符串表，并在下一轮帧更新前消费上一轮语言请求。窗口示例读取宽字符 `APP/title` 并通过表查询生成标题，处理有效界面请求后更新标题；缺失配置时使用示例默认标题。示例尚未提供平台菜单。
 
 ## CSS 数据容器
 

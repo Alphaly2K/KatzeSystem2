@@ -8,6 +8,7 @@ mod support;
 use katze_system2::{
     Result,
     input::{ButtonSource, DeviceKeys, InputDevice, KeySample, PointerSample, WheelButtons},
+    language::LanguageTarget,
     runtime::kind,
 };
 use minifb::{Key, MouseButton, MouseMode, Window, WindowOptions};
@@ -268,7 +269,11 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let task = runtime.create(0, kind::ORDINARY, b"main", b"")?;
     println!("主任务 {task}");
 
-    let mut window = Window::new("katze-system2", 1280, 720, WindowOptions::default())?;
+    let title_source = katze_system2::resource::XmlDocument::parse(startup.as_bytes())?
+        .wide_text(b"APP/title")?
+        .unwrap_or_else(|| "katze-system2".encode_utf16().collect());
+    let mut title = String::from_utf16_lossy(runtime.host().string_tables.resolve(&title_source));
+    let mut window = Window::new(&title, 1280, 720, WindowOptions::default())?;
     window.set_target_fps(60);
     let mut now = 0u32;
     let started = std::time::Instant::now();
@@ -312,6 +317,18 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             window.set_cursor_visibility(shared.cursor != 0);
         }
         now = now.wrapping_add(1);
+        let refresh_title = runtime
+            .host()
+            .language_change_requests
+            .iter()
+            .any(|request| request.target == LanguageTarget::Interface)
+            && runtime
+                .host()
+                .string_table_config
+                .as_ref()
+                .is_some_and(|config| {
+                    (runtime.host().languages.primary_index as usize) < config.prefixes.len()
+                });
         if let Err(error) = advance_frame(&mut runtime, now, started.elapsed().as_millis() as u32) {
             eprintln!("pc {}：{}", error.offset, error.message);
             for id in 0..64 {
@@ -320,6 +337,14 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 }
             }
             break;
+        }
+        if refresh_title {
+            let next =
+                String::from_utf16_lossy(runtime.host().string_tables.resolve(&title_source));
+            if title != next {
+                window.set_title(&next);
+                title = next;
+            }
         }
         let target = runtime.drawing().target.as_ref().ok_or("缺少渲染目标")?;
         let [width, height] = target.size();

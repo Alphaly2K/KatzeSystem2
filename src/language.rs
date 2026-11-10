@@ -2,6 +2,8 @@ use crate::{Error, Result};
 
 mod table;
 pub use table::{StringTable, StringTables};
+mod table_config;
+pub use table_config::StringTableConfig;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LanguageTarget {

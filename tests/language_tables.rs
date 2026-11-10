@@ -112,3 +112,134 @@ fn reload_removes_old_tables_and_tag_lookup_preserves_fallbacks_and_priority() {
     assert!(tables.table(1).is_none());
     assert_eq!(tables.resolve(&wide("$same$Fallback")), wide("Fallback"));
 }
+
+#[test]
+fn runtime_reloads_wide_configured_paths_using_current_selections_and_file_fallback() {
+    use katze_system2::{
+        Result,
+        expression::State,
+        kcs::ResourceServices,
+        language::{LanguageState, LanguageTarget::*, StringTableConfig},
+        resource::{ResourceMode, XmlDocument},
+        runtime::{BaseObject, ObjectFactory, Runtime, TaskObject, kind},
+    };
+    use std::{cell::RefCell, rc::Rc};
+    struct Reject;
+    impl ObjectFactory for Reject {
+        fn create(&mut self, _: u32, _: u32, _: &[u8]) -> Result<Box<dyn TaskObject>> {
+            unreachable!()
+        }
+    }
+    type Reads = Rc<RefCell<Vec<(Vec<u16>, ResourceMode)>>>;
+    struct Files(Reads);
+    impl ResourceServices for Files {
+        fn read(&mut self, _: &[u8], _: ResourceMode) -> Result<Option<Vec<u8>>> {
+            panic!("wide resource paths must reach the host unchanged")
+        }
+        fn read_utf16(&mut self, path: &[u16], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
+            self.0.borrow_mut().push((path.to_vec(), mode));
+            Ok(match (String::from_utf16(path).unwrap().as_str(), mode) {
+                ("language_甲.txt", ResourceMode::File) => Some(b"$key$\nUI\n".to_vec()),
+                ("資料/甲_😀.txt", ResourceMode::LooseFirst) => {
+                    Some(b"$key$\nGame\n".to_vec())
+                }
+                _ => None,
+            })
+        }
+    }
+    let xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><document><language>\
+        <default>0</default><L00><prefix>甲</prefix></L00><L01><prefix>乙</prefix></L01>\
+        <OPTTABLE>資料/%LANG%_😀.txt</OPTTABLE></language></document>";
+    let config = StringTableConfig::from_xml(xml.as_bytes()).unwrap();
+    // 宽字符 XML 按字符块保留首单元，表内容则保留完整代理对。
+    assert_eq!(
+        config.game_path,
+        [wide("資料/%LANG%_"), vec![0xd83d], wide(".txt")].concat()
+    );
+    let xml = xml.replace("😀", "%LANG_M%");
+    let mut config = StringTableConfig::from_xml(xml.as_bytes()).unwrap();
+    config.prefixes[1] = wide("😀");
+    let reads = Reads::default();
+    let mut runtime = Runtime::new(
+        0,
+        kind::ROOT,
+        Box::new(BaseObject::new()),
+        State::new(0),
+        Reject,
+    );
+    assert!(runtime.reload_language_tables(Interface).is_err());
+    runtime.host_mut().languages = LanguageState::from_xml(xml.as_bytes()).unwrap();
+    runtime.host_mut().languages.message_index = 1;
+    runtime.host_mut().string_table_config = Some(config);
+    runtime.set_resources(Files(reads.clone()));
+    runtime.reload_language_tables(Interface).unwrap();
+    assert_eq!(
+        *reads.borrow(),
+        [
+            (wide("language_甲.txt"), ResourceMode::File),
+            (wide("資料/甲_😀.txt"), ResourceMode::File),
+            (wide("資料/甲_😀.txt"), ResourceMode::LooseFirst),
+        ]
+    );
+    assert_eq!(
+        runtime.host().string_tables.resolve(&wide("$key$Fallback")),
+        wide("UI")
+    );
+    reads.borrow_mut().clear();
+    runtime.reload_language_tables(MainText).unwrap();
+    assert_eq!(reads.borrow().len(), 4);
+    assert!(
+        reads
+            .borrow()
+            .iter()
+            .all(|(path, _)| path == &wide("資料/甲_😀.txt"))
+    );
+    reads.borrow_mut().clear();
+    runtime.host_mut().languages.primary_index = 99;
+    runtime.reload_language_tables(Interface).unwrap();
+    runtime.reload_language_tables(Subtitle).unwrap();
+    assert!(reads.borrow().is_empty());
+    runtime.reload_language_tables(MainText).unwrap();
+    assert_eq!(reads.borrow().len(), 4);
+    assert_eq!(reads.borrow()[0].0, wide("資料/甲_😀.txt"));
+    reads.borrow_mut().clear();
+    runtime.host_mut().languages.message_index = 99;
+    runtime.reload_language_tables(MainText).unwrap();
+    assert_eq!(reads.borrow().len(), 2);
+    runtime.host_mut().languages.primary_index = 1;
+    runtime.reload_language_tables(Interface).unwrap();
+    assert_eq!(
+        runtime.host().string_tables.resolve(&wide("$key$Fallback")),
+        wide("Fallback")
+    );
+    assert!(runtime.host().string_tables.table(0).is_none());
+    assert!(runtime.host().string_tables.table(1).is_none());
+
+    let xml = XmlDocument::parse(
+        b"<?xml version=\"1.0\" encoding=\"UTF-8\"?><document><empty></empty></document>",
+    )
+    .unwrap();
+    assert_eq!(xml.wide_text(b"missing").unwrap(), None);
+    assert_eq!(xml.wide_text(b"empty").unwrap(), Some(Vec::new()));
+}
+
+#[test]
+fn default_wide_resource_entry_transcodes_cp932_and_rejects_unrepresentable_names() {
+    use katze_system2::{Result, kcs::ResourceServices, resource::ResourceMode};
+    #[derive(Default)]
+    struct Files(Vec<u8>);
+    impl ResourceServices for Files {
+        fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
+            assert_eq!(mode, ResourceMode::File);
+            self.0 = name.to_vec();
+            Ok(None)
+        }
+    }
+    let mut files = Files::default();
+    let mut services = &mut files;
+    ResourceServices::read_utf16(&mut services, &wide("日本\0ignored"), ResourceMode::File)
+        .unwrap();
+    assert_eq!(files.0, [0x93, 0xfa, 0x96, 0x7b]);
+    assert!(files.read_utf16(&wide("😀"), ResourceMode::File).is_err());
+    assert!(files.read_utf16(&[0xd800], ResourceMode::File).is_err());
+}

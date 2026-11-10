@@ -85,6 +85,8 @@ pub struct HostState {
     pub system_settings_dirty: u32,
     pub languages: crate::language::LanguageState,
     pub language_change_requests: Vec<crate::language::LanguageChangeRequest>,
+    pub string_table_config: Option<crate::language::StringTableConfig>,
+    pub string_tables: crate::language::StringTables,
     pub script_replacements: BTreeMap<Vec<u8>, Vec<u8>>,
     pub save_services: Option<Box<dyn crate::save::SaveServices>>,
     /// 普通 629 使用的同步平台打开服务；未配置时该入口返回诊断。

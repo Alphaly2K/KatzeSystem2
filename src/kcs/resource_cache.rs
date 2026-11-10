@@ -227,6 +227,10 @@ impl<S: ResourceServices> ResourceServices for CachedResources<S> {
     fn resource_cache(&self) -> Option<ResourceCache> {
         Some(self.cache.clone())
     }
+
+    fn read_utf16(&mut self, name: &[u16], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
+        self.inner.read_utf16(name, mode)
+    }
 }
 
 pub(crate) fn call(

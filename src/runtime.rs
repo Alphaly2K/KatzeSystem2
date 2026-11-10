@@ -235,6 +235,39 @@ impl<F: ObjectFactory> Runtime<F> {
         self.resources.services = Some(Box::new(crate::kcs::CachedResources::new(services)));
     }
 
+    /// 处理平台语言请求的字符串表部分；请求队列和平台控件由宿主管理。
+    pub fn reload_language_tables(
+        &mut self,
+        target: crate::language::LanguageTarget,
+    ) -> Result<()> {
+        if target == crate::language::LanguageTarget::Subtitle {
+            return Ok(());
+        }
+        let config = self
+            .host
+            .string_table_config
+            .as_ref()
+            .ok_or_else(|| Error::new(0, "运行时未配置字符串表路径"))?;
+        config.reload(
+            target,
+            &self.host.languages,
+            &mut self.host.string_tables,
+            |path| {
+                let services = self
+                    .resources
+                    .services
+                    .as_deref_mut()
+                    .ok_or_else(|| Error::new(0, "运行时未配置字符串表资源服务"))?;
+                if let Some(bytes) =
+                    services.read_utf16(path, crate::resource::ResourceMode::File)?
+                {
+                    return Ok(Some(bytes));
+                }
+                services.read_utf16(path, crate::resource::ResourceMode::LooseFirst)
+            },
+        )
+    }
+
     /// 配置普通 629 的同步系统打开服务。
     pub fn set_system_services(&mut self, services: impl crate::kcs::SystemServices + 'static) {
         self.host.system_services = Some(Box::new(services));

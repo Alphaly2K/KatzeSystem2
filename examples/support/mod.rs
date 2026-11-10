@@ -298,6 +298,20 @@ impl ResourceServices for Router {
         }
         Ok(std::fs::read(format!("{}/{}", self.root, name)).ok())
     }
+
+    fn read_utf16(&mut self, name: &[u16], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
+        let name = &name[..name
+            .iter()
+            .position(|&unit| unit == 0)
+            .unwrap_or(name.len())];
+        let name = String::from_utf16(name)
+            .map_err(|_| Error::new(0, "资源名称包含无效 UTF-16"))?
+            .replace('\\', "/");
+        if mode == ResourceMode::File {
+            return Ok(std::fs::read(format!("{}/{}", self.root, name)).ok());
+        }
+        self.read(name.as_bytes(), mode)
+    }
 }
 
 pub struct Programs {
@@ -470,9 +484,24 @@ pub fn build_runtime(
     settings.refresh_sound_volumes();
     runtime.host_mut().languages =
         katze_system2::language::LanguageState::from_xml(startup.as_bytes())?;
+    runtime.host_mut().string_table_config = Some(
+        katze_system2::language::StringTableConfig::from_xml(startup.as_bytes())?,
+    );
     let startup_xml = katze_system2::resource::XmlDocument::parse(startup.as_bytes())?;
     runtime.host_mut().unicode_text = startup_xml.integer(b"APP/utfmode", 0)?;
     runtime.set_resources(router);
+    runtime.reload_language_tables(katze_system2::language::LanguageTarget::Interface)?;
+    if runtime.host().languages.primary_index as usize
+        >= runtime
+            .host()
+            .string_table_config
+            .as_ref()
+            .unwrap()
+            .prefixes
+            .len()
+    {
+        runtime.reload_language_tables(katze_system2::language::LanguageTarget::MainText)?;
+    }
     #[cfg(target_os = "macos")]
     runtime.set_fonts(katze_system2::message::macos::MacFonts::new(&root));
     runtime.set_save_services(Saves {
@@ -524,6 +553,9 @@ pub fn advance_frame(
     frame: u32,
     system_time_ms: u32,
 ) -> Result<bool> {
+    for request in std::mem::take(&mut runtime.host_mut().language_change_requests) {
+        runtime.reload_language_tables(request.target)?;
+    }
     runtime.host_mut().system_time_ms = system_time_ms;
     runtime.update(frame, 1)
 }
