@@ -446,6 +446,49 @@ fn configuration_writes_apply_presets_raw_values_and_volumes_in_body_and_handler
 }
 
 #[test]
+fn language_writes_complete_without_notifications_for_unchanged_ui_and_invalid_indices() {
+    let source = b"#START\nsetconf ($7+=1) lang_ui ($7+=1) ($7+=1)\nsetconf 3 lang_text_main\nsetconf -1 lang_ui\nsetconf 0x80000000 lang_text_main\ngetconf 0 lang_ui\ngetconf 1 lang_text_main\nwait 999\n#WRITE\nsetconf 1 lang_ui\nsetconf -1 lang_text_main\n#NOTIFY\nsetconf 1 lang_text_main\n";
+    for budget in [1, 4096] {
+        let Setup { mut runtime, .. } = setup(budget, source);
+        runtime.host_mut().system_settings = Some(Default::default());
+        runtime.host_mut().languages.prefixes = vec![b"a".to_vec(), b"b".to_vec(), b"c".to_vec()];
+        runtime.host_mut().languages.primary_index = 1;
+        runtime.host_mut().languages.message_index = 1;
+        let languages = runtime.host().languages.clone();
+        let fes = runtime.create(0, kind::FES, b"configuration", b"").unwrap();
+        send(&mut runtime, fes, 337, 0, 0);
+        file(&mut runtime, fes, b"complete.fes").unwrap();
+        send(&mut runtime, fes, 339, 0, 0);
+        runtime.update(100, 1).unwrap();
+        assert_eq!(runtime.numbers().shared[..2], [1, 1]);
+        assert_eq!(runtime.numbers().shared[7], 3);
+        assert_eq!(runtime.host().languages, languages);
+        assert_eq!(runtime.host().system_settings_dirty, 1);
+        let settings = runtime.host().system_settings.clone();
+        for (name, success) in [(b"WRITE\0".as_slice(), true), (b"NOTIFY\0", false)] {
+            runtime.host_mut().system_settings_dirty = 0;
+            let mut block = name.to_vec();
+            let result = runtime.dispatch_command_with_buffers(
+                0,
+                command(fes, 343, 0, 0),
+                &mut CommandBuffers {
+                    data1: Some(&mut block),
+                    ..Default::default()
+                },
+            );
+            if success {
+                result.unwrap();
+            } else {
+                assert!(result.unwrap_err().message.contains("切换通知"));
+            }
+            assert_eq!(runtime.host().languages, languages);
+            assert_eq!(runtime.host().system_settings, settings);
+            assert_eq!(runtime.host().system_settings_dirty, u32::from(success));
+        }
+    }
+}
+
+#[test]
 fn font_configuration_keeps_raw_aliases_and_updates_message_defaults_in_handlers() {
     let source = b"#START\nsetconf -7 fshadow 0 99\nsetconf 9 fshadow 1 -99\nsetconf 0x80000000 fshadow 999\nsetconf 13 fontprop\nsetconf -3 fontfix\ngetconf 0 fshadow 0\ngetconf 1 fshadow 1\ngetconf 2 fshadow 2\ngetconf 3 fontweight\ngetconf 4 fontprop\ngetconf 5 fontfix\nwait 999\n#WRITE\nsetconf 0 fontweight\nsetconf 17 fshadow 1 ($7+=1)\ngetconf 6 fshadow 1 ($7+=1)\n";
     for budget in [1, 4096] {
@@ -547,7 +590,7 @@ fn configuration_write_validation_keeps_argument_effects_and_refresh_boundaries(
             ("setconf ($7+=1) sysplay -1 1", 1, 0, Some("首索引")),
             ("setconf 32 autospd ($7+=1)", 1, 0, Some("预设编号")),
             ("setconf ($7+=1) fshadow -1 ($7+=1)", 2, 0, Some("阴影索引")),
-            ("setconf ($7+=1) lang_ui ($7+=1)", 2, 0, Some("切换通知")),
+            ("setconf ($7+=1) lang_ui ($7+=1)", 2, 1, None),
         ] {
             let source = format!("#START\n{line}\nwait 999\n");
             let Setup { mut runtime, .. } = setup(budget, source.as_bytes());

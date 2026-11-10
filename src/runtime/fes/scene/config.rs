@@ -78,15 +78,14 @@ impl<F: ObjectFactory> Store<'_, F> {
         };
         let value = if let Some(value) = language {
             if write {
-                if name != b"lang_text_sub" {
+                let selected = destination as u32;
+                let valid = (selected as usize) < self.host.languages.prefixes.len();
+                if valid && (name == b"lang_text_main" || name == b"lang_ui" && selected != value) {
                     return Err(Error::new(offset, "FES 主语言切换通知尚未接入"));
                 }
-                self.host.languages.subtitle_index =
-                    if (destination as u32 as usize) < self.host.languages.prefixes.len() {
-                        destination as u32
-                    } else {
-                        u32::MAX
-                    };
+                if name == b"lang_text_sub" {
+                    self.host.languages.subtitle_index = if valid { selected } else { u32::MAX };
+                }
                 self.finish_fes_config_write(offset)?;
                 return Ok(true);
             }
