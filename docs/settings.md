@@ -12,6 +12,9 @@
 |`global_flag_ranges`|64|八项全局变量范围，格式同上|
 |`auto_select`|4|`GAME/autoselect` 的原始配置值，默认零|
 |`scene_animation_enabled`|4|`GAME/enable_scene_anm` 的原始配置值，默认一|
+|`system_voice_play`|192|`SYSTEMVOICE/play00`～`play47`，默认各一|
+|`always_active`|4|`GAME/always_active`，默认一|
+|`scene_skip_enabled`／`jtalk_enabled`|各 4|`GAME/use_scene_skip`／`use_jtalk`，默认零|
 |`fullscreen`|4|`WINDOW/fullscreen` 原始开关，默认零|
 |`fullscreen_mw_pos`|4|启动 `SCREEN/mw_pos`、用户 `FULL_SCREEN/mw_pos` 共用原始值，默认零|
 |`texture_size`|8|`TEXTURE/size/x`、`y`，默认每轴 256|
@@ -69,16 +72,18 @@
 |`contvoice`、`play`|连续语音及旧通道启用值；通道编号不在 0～47 时返回零|
 |`lang_ui`、`lang_text_main`、`lang_text_sub`|`LanguageState` 的 `primary_index`、`message_index`、`subtitle_index`；副文字初值为 `u32::MAX`|
 |`enable_sceneanm`|场景动画开关|
+|`sysplay`|系统声音播放开关，使用下面的索引规则|
+|`activewindow`、`use_sceneskip`、`use_jtalk`|`always_active`、`scene_skip_enabled`、`jtalk_enabled` 的原始配置值|
 
-`sysplay`、字体与阴影、平台窗口状态及扩展功能查询仍返回未接入诊断。配置读取不触发对应设备或对象更新。
+`sysplay` 先检查 index 与 extra 的回绕和是否在 0～47，再以 index 本身访问数组。和越界时返回零；和有效但 index 本身越界时返回诊断。它与 `play` 使用的旧通道启用值独立。`activewindow` 是持续活动配置，实际前台及窗口状态由平台提供。字体与阴影、`screen`／`iswindow` 查询仍返回未接入诊断。配置读取不触发对应设备或对象更新。
 
 ## FES 配置写回
 
-`setconf value name [index [extra]]` 依次求值 value、index、extra，名称区分大小写。支持上表的消息、效果、窗口、声音字段和 `enable_sceneanm`，保留原始 DWORD；`play` 使用后两项回绕相加后的通道编号，超出 0～47 时跳过字段写入。
+`setconf value name [index [extra]]` 依次求值 value、index、extra，名称区分大小写。支持上表的消息、效果、窗口、声音字段、系统声音及扩展功能开关，保留原始 DWORD；`play` 使用后两项回绕相加后的通道编号，超出 0～47 时跳过字段写入。`sysplay` 使用与查询相同的检查和访问规则，和越界时跳过字段写入。
 
 `autospd` 同时从 `auto_wait_presets` 更新自动速度编号、基础等待和逐字等待；编号超出 0～31 时诊断且保留三项原值。`autospd_b`、`autospd_c` 分别只修改等待字段。`lang_text_sub` 选择已声明的语言编号，越界或负编号关闭副文字；主界面及主文字语言的切换通知尚未接入，写回返回诊断。
 
-完整命令完成时刷新四类有效音量，并将 `HostState::system_settings_dirty` 置一，包括未知名称及无效 `play` 编号。缺少 value 或 name 时保留已发生的参数求值副作用，跳过完成步骤。宿主负责持久化及随后清除标记；写回不直接修改存档文件，也不重新配置已有文字对象。主体、系统块及事件处理器共用这些规则。已识别但尚未支持的配置键继续返回未接入诊断。
+完整命令完成时刷新四类有效音量，并将 `HostState::system_settings_dirty` 置一，包括未知名称及无效 `play`／`sysplay` 编号。缺少 value 或 name 时保留已发生的参数求值副作用，跳过完成步骤。宿主负责持久化及随后清除标记；写回不直接修改存档文件，也不重新配置已有文字对象。主体、系统块及事件处理器共用这些规则。已识别但尚未支持的配置键继续返回未接入诊断。
 
 ## 核实范围与待办
 
@@ -97,5 +102,7 @@
 场景动画查询已对照 258 个 DWORD、三种参数与指针组合，共 774 次原入口调用，状态、返回值及完整 VM 两区一致。84 组两阶段配置覆盖的 168 份读取及查询结果也全部一致，包含默认值、缺失保留、键名差异、重复节点、非法前缀和整数回绕。既有三项合成回归扩展默认值、XML 覆盖、忽略参数及两种预算下的真实 `2B` 查询，无外部输入依赖。
 
 FES 配置写回以原分词器和设置处理器批量核对 159 组合成调用，返回状态、保存标记及完整四块配置共 913,296 字节一致；覆盖普通字段、自动预设、DWORD 高位、通道边界与回绕、大小写、未知名称、缺参及空引号。新增三项常规合成回归固定启动预设覆盖、主体／事件写回、参数副作用、音量刷新和诊断边界，不读取外部配置或设备。
+
+系统声音及扩展功能配置已以原分词器、设置处理器及完整 XML 读取器核对 96 组查询／写回和 94 次配置覆盖，包含索引和与实际访问索引的差异、通道边界、DWORD 高位、重复节点及缺失保留。新增一项合成回归固定主体与事件处理器的索引规则和旧通道隔离，既有回归扩展 XML 及诊断边界。
 
 用户配置文件发现、保存标记持久化，以及配置与设备服务的应用仍需接入。启动示例已按启动 XML、`config` 类别的 `gamedef` 默认资源顺序装载设置，并刷新有效音量；FES 的文字与消息窗配置读取这些状态。

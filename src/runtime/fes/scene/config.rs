@@ -24,7 +24,8 @@ impl<F: ObjectFactory> Store<'_, F> {
             _ => Ok(0),
         };
         let destination = if destination.is_empty() { 0 } else { eval(1)? };
-        let index = eval(3)?.wrapping_add(eval(4)?);
+        let first_index = eval(3)?;
+        let index = first_index.wrapping_add(eval(4)?);
         let Some(name) = args.get(2) else {
             return Ok(true);
         };
@@ -91,7 +92,13 @@ impl<F: ObjectFactory> Store<'_, F> {
                 b"mute_voice" => (3, 0x15f4 / 4),
                 b"mute_play" => (3, 0x15f8 / 4),
                 b"play" if (index as u32) < 48 => (3, (20 + index as usize * 116) / 4),
-                b"play" => {
+                b"sysplay" if (index as u32) < 48 => {
+                    if (first_index as u32) >= 48 {
+                        return Err(Error::new(offset, "FES 系统声音首索引超出范围"));
+                    }
+                    (5, first_index as usize)
+                }
+                b"play" | b"sysplay" => {
                     if write {
                         self.finish_fes_config_write(offset)?;
                     } else if let Some(slot) = self.numbers.shared.get_mut(destination as usize) {
@@ -101,9 +108,11 @@ impl<F: ObjectFactory> Store<'_, F> {
                 }
                 b"contvoice" => (3, 4),
                 b"enable_sceneanm" => (4, 0),
-                b"sysplay" | b"fshadow" | b"screen" | b"iswindow" | b"font" | b"ruby"
-                | b"fontweight" | b"fontfix" | b"fontprop" | b"activewindow" | b"use_sceneskip"
-                | b"use_jtalk" => {
+                b"activewindow" => (6, 0),
+                b"use_sceneskip" => (7, 0),
+                b"use_jtalk" => (8, 0),
+                b"fshadow" | b"screen" | b"iswindow" | b"font" | b"ruby" | b"fontweight"
+                | b"fontfix" | b"fontprop" => {
                     return Err(Error::new(
                         offset,
                         if write {
@@ -132,6 +141,14 @@ impl<F: ObjectFactory> Store<'_, F> {
                         .map_err(|error| Error::new(offset, error.message))?;
                 } else if block == 4 {
                     settings.scene_animation_enabled = destination as u32;
+                } else if block == 5 {
+                    settings.system_voice_play[word] = destination as u32;
+                } else if block == 6 {
+                    settings.always_active = destination as u32;
+                } else if block == 7 {
+                    settings.scene_skip_enabled = destination as u32;
+                } else if block == 8 {
+                    settings.jtalk_enabled = destination as u32;
                 } else {
                     let bytes: &mut [u8] = match block {
                         0 => &mut settings.message,
@@ -155,9 +172,14 @@ impl<F: ObjectFactory> Store<'_, F> {
                 1 => &settings.effects,
                 2 => &settings.window,
                 3 => &settings.sound,
-                _ => &settings.scene_animation_enabled.to_le_bytes(),
+                4 => &settings.scene_animation_enabled.to_le_bytes(),
+                5 => &settings.system_voice_play[word].to_le_bytes(),
+                6 => &settings.always_active.to_le_bytes(),
+                7 => &settings.scene_skip_enabled.to_le_bytes(),
+                _ => &settings.jtalk_enabled.to_le_bytes(),
             };
-            u32::from_le_bytes(bytes[word * 4..word * 4 + 4].try_into().unwrap())
+            let byte_offset = if block < 4 { word * 4 } else { 0 };
+            u32::from_le_bytes(bytes[byte_offset..byte_offset + 4].try_into().unwrap())
         };
         if let Some(slot) = self.numbers.shared.get_mut(destination as usize) {
             *slot = value as i32;

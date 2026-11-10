@@ -446,6 +446,37 @@ fn configuration_writes_apply_presets_raw_values_and_volumes_in_body_and_handler
 }
 
 #[test]
+fn system_voice_configuration_checks_combined_index_but_accesses_first_index() {
+    let source = b"#START\nsetconf -7 sysplay 46 1\nsetconf 19 play 46 1\nsetconf 99 sysplay 47 1\nsetconf -3 activewindow\nsetconf 0x80000001 use_sceneskip\nsetconf 9 use_jtalk\ngetconf 0 sysplay 46 1\ngetconf 1 sysplay 47\ngetconf 2 sysplay 47 1\ngetconf 3 play 46 1\ngetconf 4 activewindow\ngetconf 5 use_sceneskip\ngetconf 6 use_jtalk\nwait 999\n#WRITE\nsetconf 37 sysplay 47 -1\ngetconf 0 sysplay 46 1\ngetconf 1 sysplay 47 -1\n";
+    for budget in [1, 4096] {
+        let Setup { mut runtime, .. } = setup(budget, source);
+        runtime.host_mut().system_settings = Some(Default::default());
+        let fes = runtime.create(0, kind::FES, b"configuration", b"").unwrap();
+        send(&mut runtime, fes, 337, 0, 0);
+        file(&mut runtime, fes, b"complete.fes").unwrap();
+        send(&mut runtime, fes, 339, 0, 0);
+        runtime.update(100, 1).unwrap();
+        assert_eq!(
+            runtime.numbers().shared[..7],
+            [-7, 1, 0, 19, -3, 0x80000001u32 as i32, 9]
+        );
+        assert_eq!(runtime.host().system_settings_dirty, 1);
+        let mut block = b"WRITE\0".to_vec();
+        runtime
+            .dispatch_command_with_buffers(
+                0,
+                command(fes, 343, 0, 0),
+                &mut CommandBuffers {
+                    data1: Some(&mut block),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(runtime.numbers().shared[..2], [-7, 37]);
+    }
+}
+
+#[test]
 fn configuration_write_validation_keeps_argument_effects_and_refresh_boundaries() {
     for budget in [1, 4096] {
         for (line, effects, dirty, error) in [
@@ -454,6 +485,8 @@ fn configuration_write_validation_keeps_argument_effects_and_refresh_boundaries(
             ("setconf ($7+=1) unknown ($7+=1) ($7+=1)", 3, 1, None),
             ("setconf ($7+=1) MESSPD ($7+=1) ($7+=1)", 3, 1, None),
             ("setconf ($7+=1) play 47 1", 1, 1, None),
+            ("setconf ($7+=1) sysplay 47 1", 1, 1, None),
+            ("setconf ($7+=1) sysplay -1 1", 1, 0, Some("首索引")),
             ("setconf 32 autospd ($7+=1)", 1, 0, Some("预设编号")),
             ("setconf ($7+=1) lang_ui ($7+=1)", 2, 0, Some("切换通知")),
         ] {

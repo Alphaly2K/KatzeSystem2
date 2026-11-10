@@ -15,6 +15,11 @@ pub struct SystemSettings {
     pub auto_select: u32,
     /// `GAME/enable_scene_anm` 的原始 DWORD，供普通 1050 查询。
     pub scene_animation_enabled: u32,
+    /// 48 项系统声音的原始播放开关，与旧声音通道配置分别保存。
+    pub system_voice_play: [u32; 48],
+    pub always_active: u32,
+    pub scene_skip_enabled: u32,
+    pub jtalk_enabled: u32,
     /// 自动推进预设，每项依次为基础等待与逐字等待。
     pub auto_wait_presets: [[u32; 2]; 32],
     /// 用户设置 `WINDOW/fullscreen` 的原始 DWORD。
@@ -41,6 +46,10 @@ impl Default for SystemSettings {
             global_flag_ranges: [[u32::MAX; 2]; 8],
             auto_select: 0,
             scene_animation_enabled: 1,
+            system_voice_play: [1; 48],
+            always_active: 1,
+            scene_skip_enabled: 0,
+            jtalk_enabled: 0,
             auto_wait_presets: [[0; 2]; 32],
             fullscreen: 0,
             fullscreen_mw_pos: 0,
@@ -178,6 +187,12 @@ impl SystemSettings {
         self.auto_select = xml.integer(b"GAME/autoselect", self.auto_select)?;
         self.scene_animation_enabled =
             xml.integer(b"GAME/enable_scene_anm", self.scene_animation_enabled)?;
+        self.always_active = xml.integer(b"GAME/always_active", self.always_active)?;
+        self.scene_skip_enabled = xml.integer(b"GAME/use_scene_skip", self.scene_skip_enabled)?;
+        self.jtalk_enabled = xml.integer(b"GAME/use_jtalk", self.jtalk_enabled)?;
+        for (channel, value) in self.system_voice_play.iter_mut().enumerate() {
+            *value = xml.integer(format!("SYSTEMVOICE/play{channel:02}").as_bytes(), *value)?;
+        }
         self.fullscreen = xml.integer(b"WINDOW/fullscreen", self.fullscreen)?;
         self.fullscreen_mw_pos = xml.integer(b"FULL_SCREEN/mw_pos", self.fullscreen_mw_pos)?;
         apply_words(

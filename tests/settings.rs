@@ -35,6 +35,9 @@ fn defaults_and_xml_overlays_keep_missing_values_raw_flags_and_volume_update_ord
     let mut state = SystemSettings::default();
     assert_eq!(state.auto_select, 0);
     assert_eq!(state.scene_animation_enabled, 1);
+    assert_eq!(state.system_voice_play, [1; 48]);
+    assert_eq!(state.always_active, 1);
+    assert_eq!((state.scene_skip_enabled, state.jtalk_enabled), (0, 0));
     assert_eq!(state.auto_wait_presets[4], [15, 5]);
     assert_eq!(state.auto_wait_presets[10..], [[0; 2]; 22]);
     assert_eq!((state.fullscreen, state.fullscreen_mw_pos), (0, 0));
@@ -64,7 +67,8 @@ fn defaults_and_xml_overlays_keep_missing_values_raw_flags_and_volume_update_ord
                 </VOICE>
                 <MESSAGE><speed>9</speed><CHAR>0x22tail</CHAR><char>99</char></MESSAGE>
                 <MESSAGE><speed>3</speed></MESSAGE>
-                <GAME><wndcolor>0x80112233</wndcolor><enabledrag>-1</enabledrag><autoselect>-7</autoselect><enable_scene_anm>-3tail</enable_scene_anm></GAME>
+                <GAME><wndcolor>0x80112233</wndcolor><enabledrag>-1</enabledrag><autoselect>-7</autoselect><enable_scene_anm>-3tail</enable_scene_anm><always_active>-2</always_active><use_scene_skip>0x80000001</use_scene_skip><use_jtalk>invalid</use_jtalk></GAME>
+                <SYSTEMVOICE><play00>0</play00><play47>-7</play47><play48>9</play48></SYSTEMVOICE>
                 <EFFECT><auto_cds>11</auto_cds><skipmot></skipmot></EFFECT>
                 <WINDOW><fullscreen>-3</fullscreen></WINDOW>
                 <FULL_SCREEN><mw_pos>0x80000001</mw_pos></FULL_SCREEN>
@@ -85,6 +89,12 @@ fn defaults_and_xml_overlays_keep_missing_values_raw_flags_and_volume_update_ord
     assert_eq!(word(&state.window, 4), u32::MAX);
     assert_eq!(state.auto_select, (-7i32) as u32);
     assert_eq!(state.scene_animation_enabled, (-3i32) as u32);
+    assert_eq!(state.always_active, (-2i32) as u32);
+    assert_eq!(state.scene_skip_enabled, 0x80000001);
+    assert_eq!(state.jtalk_enabled, 0);
+    assert_eq!(state.system_voice_play[0], 0);
+    assert_eq!(state.system_voice_play[1..47], [1; 46]);
+    assert_eq!(state.system_voice_play[47], (-7i32) as u32);
     assert_eq!(
         (state.fullscreen, state.fullscreen_mw_pos),
         ((-3i32) as u32, 0x8000_0001)
