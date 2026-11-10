@@ -9,7 +9,7 @@ use katze_system2::{
         BaseObject, KcsFactory, ObjectFactory, OrdinaryObject, ProgramLoader, Runtime, TaskObject,
         kind,
     },
-    task::{Command, CommandOutcome, Control},
+    task::{Command, CommandBuffers, CommandOutcome, Control},
 };
 
 const DATA: usize = 512;
@@ -766,15 +766,19 @@ fn delete_native_marks_a_new_child_for_destruction_on_the_next_update() {
 
 /// 命令录制：目标处理器收到的原始命令，顺序即树遍历顺序。
 #[derive(Clone, Default)]
-struct Commands(Rc<RefCell<Vec<Command>>>);
+struct Commands {
+    packets: Rc<RefCell<Vec<Command>>>,
+    buffers: Rc<RefCell<Vec<Vec<u8>>>>,
+}
 
 impl Commands {
     fn all(&self) -> Vec<Command> {
-        self.0.borrow().clone()
+        self.packets.borrow().clone()
     }
 
     fn clear(&self) {
-        self.0.borrow_mut().clear();
+        self.packets.borrow_mut().clear();
+        self.buffers.borrow_mut().clear();
     }
 }
 
@@ -826,7 +830,7 @@ impl TaskObject for CommandRecorder {
         host: &mut dyn Host,
         budget: usize,
     ) -> Result<CommandOutcome> {
-        self.commands.0.borrow_mut().push(*command);
+        self.commands.packets.borrow_mut().push(*command);
         <BaseObject as TaskObject>::dispatch_command(
             &mut self.base,
             kind,
@@ -835,6 +839,21 @@ impl TaskObject for CommandRecorder {
             host,
             budget,
         )
+    }
+
+    fn dispatch_command_with_buffers(
+        &mut self,
+        kind: u32,
+        command: &Command,
+        buffers: &mut CommandBuffers<'_>,
+        output: &mut u32,
+        host: &mut dyn Host,
+        budget: usize,
+    ) -> Result<CommandOutcome> {
+        if let Some(bytes) = buffers.data1.as_deref() {
+            self.commands.buffers.borrow_mut().push(bytes.to_vec());
+        }
+        self.dispatch_command(kind, command, output, host, budget)
     }
 
     fn enqueue_message(&mut self, _message: [u32; 4]) -> Result<()> {
@@ -931,10 +950,26 @@ fn scalar_native_packets_keep_sender_data_and_the_callers_stack_value() {
         .ins(0x25, &[u32::MAX])
         .ins(0x25, &[1])
         .ins(0x2b, &[426, 8])
+        .ins(0x25, &[0])
+        .ins(0x2b, &[272, 4])
+        .ins(0x25, &[1])
+        .ins(0x2b, &[273, 4])
+        .ins(0x25, &[1])
+        .ins(0x25, &[128])
+        .ins(0x2b, &[275, 8])
+        .ins(0x25, &[u32::MAX])
+        .ins(0x25, &[u32::MAX])
+        .ins(0x2b, &[275, 8])
+        .ins(0x25, &[1])
+        .ins(0x2b, &[274, 4])
+        .ins(0x26, &[4])
         .ins(0x26, &[0])
         .ins(0x3b, &[]);
     let mut source = Source::new();
-    source.add(b"sender", asm.build(), data());
+    let expected: Vec<_> = (0..128).map(|i| (i * 37) as u8).collect();
+    let mut storage = data();
+    storage[128..256].copy_from_slice(&expected);
+    source.add(b"sender", asm.build(), storage);
     let (mut runtime, commands) = recording_runtime(source);
     let target = runtime.create(0, kind::PLANE, b"target", b"").unwrap();
     let sender = runtime.create(0, kind::ORDINARY, b"sender", b"").unwrap();
@@ -968,12 +1003,37 @@ fn scalar_native_packets_keep_sender_data_and_the_callers_stack_value() {
                 code: 327,
                 data: [0, u32::MAX, 0],
             },
+            Command {
+                target: 0,
+                sender,
+                code: 321,
+                data: [0; 3],
+            },
+            Command {
+                target,
+                sender,
+                code: 322,
+                data: [0; 3],
+            },
+            Command {
+                target,
+                sender,
+                code: 325,
+                data: [0, 128, 0],
+            },
+            Command {
+                target,
+                sender,
+                code: 324,
+                data: [0; 3],
+            },
         ]
     );
     assert_eq!(
-        words(runtime.object(sender).unwrap().interpreter().unwrap(), 0, 1),
-        [0xdead_beef]
+        words(runtime.object(sender).unwrap().interpreter().unwrap(), 0, 2),
+        [0xdead_beef, 0]
     );
+    assert_eq!(*commands.buffers.borrow(), [expected]);
 }
 
 #[test]

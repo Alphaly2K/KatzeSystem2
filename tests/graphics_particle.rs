@@ -57,7 +57,7 @@ fn particle_controls_keep_signed_opacity_and_clear_zero_transform_sources() -> R
         );
         assert_eq!(output, 0xdead_beef);
     }
-    for code in [320, 321, 322, 323, 324, 325, 591, 592] {
+    for code in [320, 321, 322, 323, 325, 591, 592] {
         assert!(
             particle
                 .dispatch_command(kind::PARTICLE, &command(code, 1), &mut output, &mut host, 1)
@@ -70,5 +70,74 @@ fn particle_controls_keep_signed_opacity_and_clear_zero_transform_sources() -> R
     assert_eq!(particle.opacity(), u32::MAX);
     assert_eq!(particle.transform_source(), u32::MAX);
     assert_eq!(output, 0xdead_beef);
+    Ok(())
+}
+
+#[test]
+fn particle_parameter_updates_copy_all_words_and_reject_short_buffers_atomically() -> Result<()> {
+    let mut particle = ParticleObject::new(7);
+    let mut numbers = State::new(0);
+    let mut host = CoreHost::new(&mut numbers);
+    let command = Command {
+        target: 7,
+        sender: 13,
+        code: 325,
+        data: [0; 3],
+    };
+    let expected: [u32; 32] = std::array::from_fn(|i| 0xfedc_ba98u32.wrapping_mul(i as u32));
+    let mut bytes: Vec<_> = expected
+        .iter()
+        .flat_map(|word| word.to_le_bytes())
+        .collect();
+    bytes.extend([0x55; 8]);
+    let mut output = 0xdead_beef;
+    assert_eq!(particle.parameters(), None);
+    particle.dispatch_command_with_buffers(
+        kind::PARTICLE,
+        &command,
+        &mut CommandBuffers {
+            data1: Some(&mut bytes),
+            ..CommandBuffers::default()
+        },
+        &mut output,
+        &mut host,
+        1,
+    )?;
+    assert_eq!(particle.parameters(), Some(&expected));
+    assert_eq!(output, 0xdead_beef);
+    bytes.fill(0x55);
+    for length in [0, 4, 127] {
+        assert!(
+            particle
+                .dispatch_command_with_buffers(
+                    kind::PARTICLE,
+                    &command,
+                    &mut CommandBuffers {
+                        data1: Some(&mut bytes[..length]),
+                        ..CommandBuffers::default()
+                    },
+                    &mut output,
+                    &mut host,
+                    1,
+                )
+                .is_err()
+        );
+        assert_eq!(particle.parameters(), Some(&expected));
+        assert_eq!(output, 0xdead_beef);
+    }
+    particle.dispatch_command(
+        kind::PARTICLE,
+        &Command {
+            code: 324,
+            ..command
+        },
+        &mut output,
+        &mut host,
+        1,
+    )?;
+    assert_eq!(output, 0);
+    particle.state().0.deletion_requested = 1;
+    particle.dispatch_command(kind::PARTICLE, &command, &mut output, &mut host, 1)?;
+    assert_eq!(particle.parameters(), Some(&expected));
     Ok(())
 }

@@ -9,6 +9,8 @@ pub struct ParticleObject {
     context: Vec<u8>,
     opacity: u32,
     transform_source: u32,
+    playing: u32,
+    parameters: Option<[u32; 32]>,
 }
 
 impl ParticleObject {
@@ -18,6 +20,8 @@ impl ParticleObject {
             context: Vec::new(),
             opacity: 256,
             transform_source: u32::MAX,
+            playing: 0,
+            parameters: None,
         }
     }
 
@@ -29,6 +33,11 @@ impl ParticleObject {
     /// 变换来源编号；u32::MAX 表示关闭外部变换来源。
     pub fn transform_source(&self) -> u32 {
         self.transform_source
+    }
+
+    /// 命令 325 保存的 32 项原始参数。
+    pub fn parameters(&self) -> Option<&[u32; 32]> {
+        self.parameters.as_ref()
     }
 }
 
@@ -84,7 +93,7 @@ impl TaskObject for ParticleObject {
         &mut self,
         kind: u32,
         command: &Command,
-        _buffers: &mut CommandBuffers<'_>,
+        buffers: &mut CommandBuffers<'_>,
         output: &mut u32,
         host: &mut dyn Host,
         budget: usize,
@@ -93,6 +102,17 @@ impl TaskObject for ParticleObject {
             return Ok(CommandOutcome::finished(false));
         }
         match command.code {
+            324 => *output = self.playing,
+            325 => {
+                let bytes = buffers
+                    .data1
+                    .as_deref()
+                    .and_then(|bytes| bytes.get(..128))
+                    .ok_or_else(|| Error::new(0, "粒子参数命令需要 128 字节缓冲区"))?;
+                self.parameters = Some(std::array::from_fn(|i| {
+                    u32::from_le_bytes(bytes[i * 4..i * 4 + 4].try_into().unwrap())
+                }));
+            }
             326 => {
                 let value = command.data[1];
                 self.opacity = if (value as i32) < 255 { value } else { 256 };
@@ -101,7 +121,7 @@ impl TaskObject for ParticleObject {
                 let value = command.data[1];
                 self.transform_source = if value == 0 { u32::MAX } else { value };
             }
-            320..=325 | 591 | 592 => {
+            320..=323 | 591 | 592 => {
                 return Err(Error::new(0, "粒子装载、播放及绘制命令尚未接入"));
             }
             _ => {

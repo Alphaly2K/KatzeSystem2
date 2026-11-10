@@ -1262,8 +1262,8 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
     ) -> Result<NativeReturn> {
         let count = match index {
             66 => 12,
-            67 | 75 | 109 | 452 | 520 => 4,
-            108 | 110 | 426 | 427 | 528 | 531 => 8,
+            67 | 75 | 109 | 272..=274 | 452 | 520 => 4,
+            108 | 110 | 275 | 426 | 427 | 528 | 531 => 8,
             69 | 70 | 72 | 73 | 527 => 16,
             530 | 905 => 20,
             76 => 0,
@@ -1277,6 +1277,26 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             *arg = u32::from_le_bytes(bytes.try_into().unwrap());
         }
         match index {
+            272 | 273 => {
+                self.command_target(args[0], index + 49, [0; 3])?;
+                Ok(NativeReturn::Continue)
+            }
+            274 => Ok(NativeReturn::Value(
+                self.command_target(args[0], 324, [0; 3])?,
+            )),
+            275 => {
+                let mut parameters = vm.read(args[1], 128).ok().map(|bytes| bytes.to_vec());
+                self.command_target_with_buffers(
+                    args[0],
+                    325,
+                    [0, args[1], 0],
+                    &mut CommandBuffers {
+                        data1: parameters.as_deref_mut(),
+                        ..CommandBuffers::default()
+                    },
+                )?;
+                Ok(NativeReturn::Continue)
+            }
             426 | 427 => {
                 self.command_target(args[0], index - 100, [0, args[1], 0])?;
                 Ok(NativeReturn::Continue)
@@ -1882,7 +1902,7 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         if matches!(
             index,
             66 | 67 | 69 | 70 | 72 | 73 | 75 | 76 | 108
-                ..=110 | 426 | 427 | 452 | 520 | 527 | 528 | 530 | 531 | 905
+                ..=110 | 272..=275 | 426 | 427 | 452 | 520 | 527 | 528 | 530 | 531 | 905
         ) {
             return self.task_native(index, arguments, vm);
         }
