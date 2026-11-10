@@ -1275,8 +1275,6 @@ impl<F: ObjectFactory> Store<'_, F> {
         Ok(true)
     }
 
-    /// `SAVEPANEL` 目标的专用命令：`ptype/dispid/setnum/setsave/getflag/datasave`
-    /// 目前按最小契约记录到面板状态；`getflag` 将槽位标志写回共享槽。
     fn save_panel_command(
         &mut self,
         scene: &mut Scene,
@@ -1293,8 +1291,12 @@ impl<F: ObjectFactory> Store<'_, F> {
         ) {
             return Ok(false);
         }
+        if name == b"ptype" {
+            self.panel_selection(scene, target, args, line.offset)?;
+            return Ok(true);
+        }
         let bank = if target.bank == -1 { 0 } else { target.bank };
-        let Some(handle) = scene.objects.lookup(&target.name, bank) else {
+        let Some(_) = scene.objects.lookup(&target.name, bank) else {
             return Ok(true);
         };
         let mut eval = |index: usize| -> Result<i32> {
@@ -1303,44 +1305,96 @@ impl<F: ObjectFactory> Store<'_, F> {
                 .eval(&args[index], self.numbers)
                 .map_err(|error| Error::new(line.offset + error.offset, error.message))
         };
-        match name {
-            b"getflag" => {
-                let index = eval(3)? as usize;
-                if let Some(slot) = self.numbers.shared.get_mut(index) {
-                    *slot = 0;
-                }
+        if name == b"getflag" {
+            let index = eval(3)? as usize;
+            if let Some(slot) = self.numbers.shared.get_mut(index) {
+                *slot = 0;
             }
-            b"ptype" => {
-                let kind: &[u8] = args.get(2).map_or(b"", Vec::as_slice);
-                let mut values = Vec::with_capacity(args.len());
-                for arg in args.iter().skip(3) {
-                    values.push(
-                        scene
-                            .interpreter
-                            .eval(arg, self.numbers)
-                            .unwrap_or_default(),
-                    );
-                }
-                let tag = match kind {
-                    b"NORM" => 0,
-                    b"SIMAGE" => 1,
-                    b"NUM_O" => 2,
-                    b"SSTR" => 3,
-                    _ => 4,
-                };
-                let object = scene.objects.get_mut(handle).unwrap();
-                if let ObjectState::SavePanel(panel) = &mut object.state {
-                    let mut cell = Vec::with_capacity(values.len() + 2);
-                    cell.push(tag);
-                    cell.push(values.len() as i32);
-                    cell.extend(values);
-                    panel.cells.push(cell);
-                }
-            }
-            _ => {}
         }
-        let _ = args;
         Ok(true)
+    }
+
+    fn panel_selection(
+        &mut self,
+        scene: &mut Scene,
+        target: &fes::ObjectReference,
+        args: &[Vec<u8>],
+        offset: usize,
+    ) -> Result<()> {
+        let enabled = match args.get(2) {
+            Some(value) => {
+                scene
+                    .interpreter
+                    .eval(value, self.numbers)
+                    .map_err(|error| Error::new(offset + error.offset, error.message))?
+                    != 0
+            }
+            None => true,
+        };
+        let banks = if target.bank == -1 {
+            0..i64::from(scene.objects.count(&target.name))
+        } else {
+            i64::from(target.bank)..i64::from(target.bank) + 1
+        };
+        for bank in banks {
+            let Some(handle) = scene.objects.lookup(&target.name, bank as i32) else {
+                break;
+            };
+            for source in args.iter().skip(3) {
+                let mut eval = |text: &[u8]| {
+                    scene
+                        .interpreter
+                        .eval(text, self.numbers)
+                        .map_err(|error| Error::new(offset + error.offset, error.message))
+                };
+                let (first, last) = if source.first() == Some(&b'[') {
+                    let body = &source[1..];
+                    let split = body.iter().position(|&byte| byte == b'-');
+                    let first = split.map_or(body, |index| &body[..index]);
+                    if first.len() >= 128 {
+                        return Err(Error::new(offset, "面板编号表达式超过容量"));
+                    }
+                    let first = eval(first)?;
+                    let last = match split {
+                        Some(index) => {
+                            let tail = &body[index + 1..];
+                            let end = tail
+                                .iter()
+                                .position(|&byte| byte == b']')
+                                .unwrap_or(tail.len());
+                            if end >= 128 {
+                                return Err(Error::new(offset, "面板编号表达式超过容量"));
+                            }
+                            eval(&tail[..end])?
+                        }
+                        None => first,
+                    };
+                    (first, last)
+                } else {
+                    let value = eval(source)?;
+                    (value, value)
+                };
+                if first > last {
+                    continue;
+                }
+                if last == i32::MAX || i64::from(last) - i64::from(first) >= 1_000_000 {
+                    return Err(Error::new(offset, "面板编号区间超出处理范围"));
+                }
+                if let ObjectState::SavePanel(panel) =
+                    &mut scene.objects.get_mut(handle).unwrap().state
+                {
+                    for id in first..=last {
+                        if enabled {
+                            panel.enabled_ids.insert(id);
+                        } else {
+                            panel.enabled_ids.remove(&id);
+                        }
+                    }
+                    scene.objects.invalidate(handle)?;
+                }
+            }
+        }
+        Ok(())
     }
 
     fn run_fes_stop(
