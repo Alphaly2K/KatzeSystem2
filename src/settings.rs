@@ -202,9 +202,35 @@ impl SystemSettings {
         Ok(())
     }
 
-    /// 按用户设置 XML 覆盖已存在的配置；缺失字段保留，非法整数前缀取零。
+    /// 按用户设置 XML 覆盖配置；缺失 fixed 使用本次 proportional，其余缺失字段保留。
     pub fn apply_xml(&mut self, input: &[u8]) -> crate::Result<()> {
         let xml = crate::resource::XmlDocument::parse(input)?;
+        let names = [b"FONT/face".as_slice(), b"FONT/faceruby"].map(|path| {
+            xml.text(path)?
+                .map(|bytes| crate::text::font_name(bytes, 0))
+                .transpose()
+        });
+        let [main_name, ruby_name] = names;
+        let names = [main_name?, ruby_name?];
+        let mut controls = self.font_controls;
+        for (path, value) in [
+            b"FONT/shadow/around".as_slice(),
+            b"FONT/shadow/rightdown",
+            b"FONT/bold",
+            b"FONT/proportional",
+        ]
+        .into_iter()
+        .zip(&mut controls)
+        {
+            *value = xml.integer(path, *value)?;
+        }
+        controls[4] = xml.integer(b"FONT/fixed", controls[3])?;
+        for (name, configured) in names.into_iter().zip(&mut self.font_names) {
+            if let Some(name) = name {
+                *configured = Some(name);
+            }
+        }
+        self.font_controls = controls;
         self.auto_select = xml.integer(b"GAME/autoselect", self.auto_select)?;
         self.scene_animation_enabled =
             xml.integer(b"GAME/enable_scene_anm", self.scene_animation_enabled)?;

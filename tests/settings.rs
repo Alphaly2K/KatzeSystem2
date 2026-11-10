@@ -180,6 +180,89 @@ fn defaults_and_xml_overlays_keep_missing_values_raw_flags_and_volume_update_ord
 }
 
 #[test]
+fn font_xml_overlays_keep_independent_names_and_default_fixed_to_new_proportional() {
+    let mut settings = SystemSettings {
+        font_names: [Some(vec![80]), Some(vec![82])],
+        font_controls: [11, 12, 13, 14, 15],
+        ..SystemSettings::default()
+    };
+    settings
+        .apply_xml(br#"<?xml version="1.0" encoding="UTF-8"?><document/>"#)
+        .unwrap();
+    assert_eq!(settings.font_controls, [11, 12, 13, 14, 14]);
+    assert_eq!(settings.font_names, [Some(vec![80]), Some(vec![82])]);
+    settings
+        .apply_xml(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><document><FONT>\
+        <face>あい Face</face><faceruby>\u{40000}</faceruby>\
+        <shadow><around>-7</around><rightdown>9</rightdown></shadow>\
+        <bold>0x80000000</bold><proportional>-3</proportional></FONT></document>"
+                .as_bytes(),
+        )
+        .unwrap();
+    assert_eq!(
+        settings.font_names[0],
+        Some("あい Face".encode_utf16().collect())
+    );
+    assert_eq!(settings.font_names[1], Some(vec![0xd8c0]));
+    assert_eq!(
+        settings.font_controls,
+        [
+            (-7i32) as u32,
+            9,
+            0x8000_0000,
+            (-3i32) as u32,
+            (-3i32) as u32
+        ]
+    );
+    let mut defaults = katze_system2::message::MessageDefaults::default();
+    settings.apply_message_defaults(&mut defaults);
+    assert_eq!(defaults.font_name, settings.font_names[0].clone().unwrap());
+    assert_eq!(defaults.outline, (-7i32) as u32);
+    assert_eq!(defaults.shadow, 9);
+    assert!(defaults.bold);
+    assert_eq!(defaults.glyph_parameter, Some((-3i32) as u32));
+
+    settings.apply_xml(br#"<?xml version="1.0" encoding="UTF-8"?><document><FONT><face>A&amp;B</face><proportional>0</proportional><fixed>37</fixed></FONT><FONT><face></face></FONT><font><faceruby>ignored</faceruby></font></document>"#).unwrap();
+    assert_eq!(settings.font_names, [Some(vec![]), Some(vec![0xd8c0])]);
+    assert_eq!(&settings.font_controls[3..], [0, 37]);
+    settings.apply_message_defaults(&mut defaults);
+    assert!(defaults.font_name.is_empty());
+    assert_eq!(defaults.glyph_parameter, Some(1));
+    settings.apply_xml(br#"<?xml version="1.0" encoding="UTF-8"?><document><FONT><bold>invalid</bold></FONT></document>"#).unwrap();
+    assert_eq!(&settings.font_controls[2..], [0, 0, 0]);
+    settings.apply_xml(br#"<?xml version="1.0" encoding="UTF-8"?><document><FONT><face>A&amp;B</face></FONT></document>"#).unwrap();
+    assert_eq!(
+        settings.font_names[0],
+        Some("A&amp;B".encode_utf16().collect())
+    );
+}
+
+#[test]
+fn font_xml_capacity_failures_preserve_the_entire_previous_configuration() {
+    let mut settings = SystemSettings::default();
+    for length in [63, 64, 125, 126] {
+        let snapshot = settings.clone();
+        let input = format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><document><GAME><autoselect>9</autoselect></GAME><FONT><face>Changed</face><faceruby>{}</faceruby><bold>1</bold></FONT></document>",
+            "あ".repeat(length)
+        );
+        let result = settings.apply_xml(input.as_bytes());
+        if length == 63 {
+            result.unwrap();
+            assert_eq!(settings.font_names[1], Some(vec![0x3042; 63]));
+            assert_eq!(
+                settings.font_names[0],
+                Some("Changed".encode_utf16().collect())
+            );
+        } else {
+            assert!(result.unwrap_err().message.contains("63"));
+            assert_eq!(settings, snapshot);
+        }
+    }
+}
+
+#[test]
 fn startup_auto_wait_presets_keep_raw_pairs_and_reselect_the_current_speed() {
     let mut settings = SystemSettings::default();
     settings.message[4..8].copy_from_slice(&31u32.to_le_bytes());

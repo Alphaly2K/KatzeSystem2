@@ -1,5 +1,6 @@
 use super::Scene;
-use crate::runtime::fes::fonts::{font_name, font_name_bytes};
+use crate::runtime::fes::fonts::font_name_bytes;
+use crate::text::font_name;
 use crate::{
     Error, Result,
     runtime::{ObjectFactory, Store},
