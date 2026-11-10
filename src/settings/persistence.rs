@@ -1,5 +1,17 @@
-use super::{SystemSettings, word};
-use crate::{Result, resource::XmlWriter};
+use super::{PlatformSettings, SystemSettings, word};
+use crate::{Result, input::DeviceKeys, language::LanguageState, resource::XmlWriter};
+
+/// 按平台主配置、用户选项的顺序写入同一文档，包含语言及启用的按键槽。
+pub fn write_configuration(
+    xml: &mut XmlWriter,
+    system: &SystemSettings,
+    platform: &PlatformSettings,
+    languages: &LanguageState,
+    keys: &DeviceKeys,
+) -> Result<()> {
+    platform.write_main(xml, system, languages)?;
+    system.write_options(xml, Some((platform, keys)))
+}
 
 pub(super) const SOUND_FIELDS: &[(usize, &str)] = &[
     (0x15d8, "VOICE/vol_bgm"),
@@ -59,6 +71,17 @@ impl SystemSettings {
     pub fn write_xml(&self, xml: &mut XmlWriter) -> Result<()> {
         xml.write_integer(&["WINDOW", "fullscreen"], self.fullscreen)?;
         xml.write_integer(&["FULL_SCREEN", "mw_pos"], self.fullscreen_mw_pos)?;
+        self.write_options(xml, None)
+    }
+
+    fn write_options(
+        &self,
+        xml: &mut XmlWriter,
+        platform_keys: Option<(&PlatformSettings, &DeviceKeys)>,
+    ) -> Result<()> {
+        if let Some((platform, _)) = platform_keys {
+            xml.write_integer(&["CONFIG", "type"], platform.config_type)?;
+        }
         for (name, value) in ["face", "faceruby"].into_iter().zip(&self.font_names) {
             if let Some(value) = value {
                 xml.write_wide(&["FONT", name], value)?;
@@ -72,6 +95,10 @@ impl SystemSettings {
             (4, &["FONT", "fixed"][..]),
         ] {
             xml.write_integer(path, self.font_controls[index])?;
+        }
+        if let Some((platform, keys)) = platform_keys {
+            xml.write_integer(&["KEY", "enable_joypad"], platform.joypad_enabled)?;
+            keys.write_xml(xml)?;
         }
         write_words(xml, &self.sound, &SOUND_FIELDS[..5])?;
         for channel in 0..48 {

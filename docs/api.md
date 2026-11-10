@@ -77,6 +77,8 @@ FES SOUND 文件请求通过 `Objects::set_sound_task` 的绑定发送 180／182
 
 `SystemSettings::write_xml(&mut XmlWriter)` 导出已支持的用户配置字段，未指定字体名时继续继承；宿主取得文档字节并保存。字段范围及装载后的音量处理见[全局设置](settings.md#用户配置写出)。
 
+`PlatformSettings::apply_user_xml(bytes, supports_fullscreen)` 覆盖平台用户字段，宿主回调决定是否接受候选全屏尺寸。`settings::write_configuration(xml, system, platform, languages, keys)` 组合完整配置文档，包含共享窗口字段、语言及启用按键槽；字段和继承契约见[平台配置](settings.md#平台配置与完整文档)。
+
 `language::LanguageState` 保存 CP932 字节前缀表、默认编号和两套选择，通过 `CoreHost::languages` 或 `Runtime::host_mut().languages` 提供。`prefix(mode)` 按 mode 零选择主语言、一选择消息语言，越界时回退默认编号；无有效项或 mode 无效时返回 None，有效空前缀返回空切片。`expand(input, mode)` 按 mode 零替换 `%LANG%`、一替换 `%LANG_M%`；其他值保留输入。选择越界时使用默认编号，默认也越界时保留标记。替换区分大小写、覆盖全部匹配，输入及前缀在首零结束。前缀最多 255 字节，有效替换的输出最多 2047 字节，超限返回诊断。普通 1036 接受两个输出 VM 地址，先检查两处起点，再依次写主语言和消息语言前缀，均以单零结束；没有有效项时写空串，重叠输出按此顺序覆盖。输出保持 CP932，不受 unicode_text 开关影响；前缀最多 4095 字节，空间不足返回诊断。该查询以状态二保留返回槽。普通 1062 接受 mode 和 VM 字符串地址，原地写回并保留返回槽；无效 mode 不访问地址。`LanguageState::from_xml` 读取启动 XML 的 `language` 段：`default` 为初始默认编号，`L%02d` 的子节点 `<prefix>` 按序组成前缀表，首个缺失前缀的块结束扫描，主语言和消息语言的初始选择均取默认编号；`<code>`、`<lang>`、`<accel>`、`<enable_sub>` 与 `<OPTTABLE>` 不进入前缀选择。 `LanguageState::apply_user_xml` 合并三项用户选择并按启动表范围回退，`write_xml` 导出原始选择，具体规则见[全局设置](settings.md#用户配置写出)。前缀为原始字节；需要 CP932 时宿主负责转换。
 
 FES `setconf` 更新有效主界面／主文字选择，并在本轮通知处理中向 `HostState::language_change_requests` 发布 `LanguageChangeRequest { task_id, target }`；target 为 `LanguageTarget::Interface` 或 `MainText`，平台宿主处理时读取当前全局选择并刷新对应文字及菜单，详见[全局设置](settings.md)。FES 图像在媒体更新时自动按新前缀重载；字符串表通过下述接口重载，平台语言识别和控件刷新继续由宿主接入。

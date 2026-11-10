@@ -35,6 +35,14 @@
 
 `LanguageState::apply_user_xml(bytes)` 覆盖 `language/id/UI`、`main`、`sub`，缺失字段先保留当前编号，再按启动前缀表长度检查。越界的三类编号均回退到 `default_index`；副文字的全一关闭值保持，默认编号自身不再裁剪。前缀表、默认编号及平台刷新请求保持。`LanguageState::write_xml` 写出当前三项原始编号。按键的用户覆盖及写出使用 `DeviceKeys::apply_user_xml`／`write_xml`，范围见[输入绑定](input.md)。
 
+## 平台配置与完整文档
+
+`PlatformSettings` 保存窗口／全屏尺寸、窗口与纹理选项、声音设备选项、D3D／DEPEND 开关、目录、TTS、`CONFIG/type` 和 `KEY/enable_joypad`。尺寸为两个 `[u16; 2]`，初始均为 800×600；其余整数保留原始 DWORD。`tts_parameters` 按 speed、tone 保存 float 位模式，初始为 1 和 0。三项目录依次为 picture、export、imgimport；None 保留宿主继承语义并省略写出，Some 空向量写出空字段。目录至多 259 个 UTF-16 单元，TTS 标识至多 63 个单元。
+
+`apply_user_xml(bytes, supports_fullscreen)` 覆盖平台用户字段。窗口尺寸保存低十六位；全屏候选缺省取覆盖后的窗口尺寸，由回调检查原始 DWORD 候选，接受后才保存低十六位，拒绝时保留当前全屏尺寸。调用方应按平台当前可用模式实现回调。缺失字段保留原值，但 `ETC/disablemovie` 缺失时归零。`WINDOW/full_wide`、`ETC/cache`、`DEPEND/z32`、`DEPEND/use_z` 只写出，不从用户文档覆盖。浮点及宽字符沿用 [XML 字段契约](resources.md#脚本-xml-字段)。
+
+`settings::write_configuration(xml, system, platform, languages, keys)` 把主平台配置和用户选项写入同一文档。窗口全屏开关及位置从 `SystemSettings` 读取，语言从 `LanguageState` 读取；用户选项中同时写入配置类型、字体、手柄开关及启用按键槽。它与各模型的独立写出接口共用当前值。文件保存及装载后的设备应用由宿主执行。
+
 
 ## 默认值与 XML 覆盖
 

@@ -1,5 +1,8 @@
 mod persistence;
+mod platform;
+pub use persistence::write_configuration;
 use persistence::{EFFECTS_FIELDS, MESSAGE_FIELDS, SOUND_FIELDS, WINDOW_FIELDS};
+pub use platform::PlatformSettings;
 
 /// 全局配置及普通脚本可查询的变量范围。
 ///

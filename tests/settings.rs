@@ -29,6 +29,127 @@ fn arguments(values: &[u32]) -> Vec<u8> {
 }
 
 #[test]
+fn platform_overlay_checks_fullscreen_candidates_before_truncation_and_keeps_inheritance() {
+    use katze_system2::settings::PlatformSettings;
+    let mut platform = PlatformSettings {
+        fullscreen_size: [1920, 1080],
+        etc_disablemovie: 7,
+        directories: [Some(vec![65]), None, Some(vec![66])],
+        tts_parameters: [0xffc0_1234, 0x3f80_0000],
+        ..PlatformSettings::default()
+    };
+    let input = br#"<?xml version="1.0" encoding="UTF-8"?><document>
+        <WINDOW><width>65537</width><height>480</height><full_width>66816</full_width><full_height>720</full_height><full_wide>99</full_wide></WINDOW>
+        <ETC><cache>99</cache><export></export></ETC>
+        <DEPEND><z32>99</z32><use_z>99</use_z></DEPEND>
+        <TTS><tone>-0</tone></TTS><CONFIG><type>-1</type></CONFIG><KEY><enable_joypad>257</enable_joypad></KEY>
+        </document>"#;
+    let mut candidates = Vec::new();
+    platform
+        .apply_user_xml(input, |size| {
+            candidates.push(size);
+            size == [1280, 720]
+        })
+        .unwrap();
+    assert_eq!(candidates, [[66816, 720]]);
+    assert_eq!(platform.window_size, [1, 480]);
+    assert_eq!(platform.fullscreen_size, [1920, 1080]);
+    assert_eq!(
+        [
+            platform.window_full_wide,
+            platform.etc_cache,
+            platform.depend_z32,
+            platform.depend_use_z
+        ],
+        [0, 1, 0, 1]
+    );
+    assert_eq!(platform.etc_disablemovie, 0);
+    assert_eq!(
+        platform.directories,
+        [Some(vec![65]), Some(vec![]), Some(vec![66])]
+    );
+    assert_eq!(platform.tts_parameters, [0xffc0_1234, 0x8000_0000]);
+    assert_eq!(
+        [platform.config_type, platform.joypad_enabled],
+        [u32::MAX, 257]
+    );
+    let empty = br#"<?xml version="1.0" encoding="UTF-8"?><document/>"#;
+    platform
+        .apply_user_xml(empty, |size| {
+            assert_eq!(size, [1, 480]);
+            true
+        })
+        .unwrap();
+    assert_eq!(platform.fullscreen_size, [1, 480]);
+}
+
+#[test]
+fn complete_configuration_merges_shared_window_fields_and_places_keys_with_user_options() {
+    use katze_system2::{
+        input::{DeviceBinding, DeviceKeys},
+        language::LanguageState,
+        settings::{PlatformSettings, write_configuration},
+    };
+    let system = SystemSettings {
+        fullscreen: 7,
+        fullscreen_mw_pos: u32::MAX,
+        font_names: [Some(vec![65]), Some(vec![66])],
+        ..SystemSettings::default()
+    };
+    let platform = PlatformSettings {
+        directories: [Some(vec![67]), None, Some(vec![])],
+        tts_parameters: [0x3eaa_aaab, 0x8000_0000],
+        config_type: 0x8000_0000,
+        joypad_enabled: 17,
+        ..PlatformSettings::default()
+    };
+    let mut bindings = [DeviceBinding::default(); 80];
+    bindings[3].enabled = 1;
+    bindings[3].codes[0][0] = 65;
+    let keys = DeviceKeys::new(bindings);
+    let languages = LanguageState {
+        primary_index: 3,
+        message_index: 2,
+        ..LanguageState::default()
+    };
+    let mut writer = XmlWriter::new();
+    write_configuration(&mut writer, &system, &platform, &languages, &keys).unwrap();
+    let bytes = writer.to_bytes().unwrap();
+    let source = std::str::from_utf8(&bytes).unwrap();
+    for (before, after) in [
+        ("<KEY>", "<FONT>"),
+        ("<FONT>", "<CONFIG>"),
+        ("<CONFIG>", "<TTS>"),
+        ("<TTS>", "<language>"),
+    ] {
+        assert!(source.find(before).unwrap() < source.find(after).unwrap());
+    }
+    assert_eq!(source.matches("<fullscreen>").count(), 1);
+    let xml = XmlDocument::parse(&bytes).unwrap();
+    for (path, value) in [
+        (b"WINDOW/fullscreen".as_slice(), 7),
+        (b"FULL_SCREEN/mw_pos", u32::MAX),
+        (b"CONFIG/type", 0x8000_0000),
+        (b"KEY/enable_joypad", 17),
+        (b"KEY/kb1_03", 65),
+        (b"language/id/UI", 3),
+        (b"language/id/main", 2),
+    ] {
+        assert_eq!(xml.integer(path, 99).unwrap(), value);
+    }
+    assert!(xml.text(b"ETC/export").unwrap().is_none());
+    assert!(xml.text(b"KEY/kb1_02").unwrap().is_none());
+    assert_eq!(
+        xml.text(b"TTS/speed").unwrap(),
+        Some(b"0.333333".as_slice())
+    );
+    assert_eq!(
+        xml.text(b"TTS/tone").unwrap(),
+        Some(b"-0.000000".as_slice())
+    );
+}
+
+#[test]
 fn user_settings_round_trip_raw_fields_and_keep_startup_data_and_inherited_fonts() {
     let mut source = settings();
     let mut value = 1u32;
