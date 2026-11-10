@@ -68,6 +68,32 @@ impl Objects {
 }
 
 impl<F: ObjectFactory> Store<'_, F> {
+    pub(super) fn refresh_fes_sound_configuration(
+        &mut self,
+        owner: u32,
+        objects: &mut Objects,
+        handle: u32,
+    ) -> Result<()> {
+        let ObjectState::Sound(sound) = &mut objects.get_mut(handle).unwrap().state else {
+            return Ok(());
+        };
+        sound.dirty = true;
+        sound.play_value_changed = false;
+        if sound.play_parameters[0] != 0 {
+            return Ok(());
+        }
+        let allowed = self.fes_sound_allowed(sound, false)?;
+        let channel = sound.channel as u32;
+        let task = self.fes_sound_task(owner, objects)?;
+        let playing = self.sound_command(owner, task, 186, [channel, 0, 0], None)?;
+        if playing == 0 || !allowed {
+            if let ObjectState::Sound(sound) = &mut objects.get_mut(handle).unwrap().state {
+                sound.action_requested = true;
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn update_fes_sound(
         &mut self,
         owner: u32,

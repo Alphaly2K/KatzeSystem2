@@ -70,6 +70,8 @@ struct SystemBlock {
     name: String,
     target: Option<fes::ObjectReference>,
     update: Option<(u32, bool)>,
+    configuration: bool,
+    configuration_cursor: usize,
     script_done: bool,
     motions_done: bool,
     media_cursor: usize,
@@ -503,6 +505,16 @@ impl<F: ObjectFactory> Runtime<F> {
         self.store().dispatch_fes_system_block(owner, scene, name)
     }
 
+    /// 执行配置块及场景更新，再刷新继承设置；false 后以同一时刻续跑。
+    pub fn refresh_fes_configuration(
+        &mut self,
+        owner: u32,
+        scene: &mut Scene,
+        now: u32,
+    ) -> Result<bool> {
+        self.store().refresh_fes_configuration(owner, scene, now)
+    }
+
     /// 分派输入事件；None 表示预算耗尽，续跑必须保持目标和事件不变。
     /// 完成值表示对象自身是否具有处理器；默认事件组单独执行时为 false。
     pub fn dispatch_fes_event(
@@ -708,6 +720,34 @@ impl<F: ObjectFactory> Store<'_, F> {
         name: &str,
         update: Option<(u32, bool)>,
     ) -> Result<bool> {
+        self.dispatch_fes_block_mode(owner, scene, target, name, update, false)
+    }
+
+    pub(in crate::runtime) fn refresh_fes_configuration(
+        &mut self,
+        owner: u32,
+        scene: &mut Scene,
+        now: u32,
+    ) -> Result<bool> {
+        self.dispatch_fes_block_mode(
+            owner,
+            scene,
+            None,
+            "MES_CHANGECONFIG",
+            Some((now, true)),
+            true,
+        )
+    }
+
+    fn dispatch_fes_block_mode(
+        &mut self,
+        owner: u32,
+        scene: &mut Scene,
+        target: Option<&fes::ObjectReference>,
+        name: &str,
+        update: Option<(u32, bool)>,
+        configuration: bool,
+    ) -> Result<bool> {
         if self.tree.node(owner).is_none() || scene.owner.is_some_and(|bound| bound != owner) {
             return Err(Error::new(0, "FES 系统块所属任务无效"));
         }
@@ -722,12 +762,18 @@ impl<F: ObjectFactory> Store<'_, F> {
             return Err(Error::new(0, "FES 本轮推进尚未完成"));
         }
         if let Some(pending) = &scene.system_block {
-            if pending.name != name || pending.target.as_ref() != target || pending.update != update
+            if pending.name != name
+                || pending.target.as_ref() != target
+                || pending.update != update
+                || pending.configuration != configuration
             {
                 return Err(Error::new(0, "FES 上一次系统块尚未完成"));
             }
         } else {
             scene.owner = Some(owner);
+            if configuration {
+                scene.objects.invalidate(scene.objects.top())?;
+            }
             scene.objects.configure_messages(
                 self.host.unicode_text != 0,
                 self.host
@@ -741,6 +787,8 @@ impl<F: ObjectFactory> Store<'_, F> {
                 name: name.to_owned(),
                 target: target.cloned(),
                 update,
+                configuration,
+                configuration_cursor: 0,
                 script_done: !exists,
                 motions_done: false,
                 media_cursor: 0,
@@ -777,6 +825,21 @@ impl<F: ObjectFactory> Store<'_, F> {
                 {
                     return Ok(false);
                 }
+            }
+        }
+        if configuration {
+            for _ in 0..self.budget.max(1) {
+                let cursor = scene.system_block.as_ref().unwrap().configuration_cursor;
+                if cursor == scene.objects.update_order.len() {
+                    break;
+                }
+                self.refresh_fes_configuration_record(owner, &mut scene.objects, cursor)?;
+                scene.system_block.as_mut().unwrap().configuration_cursor += 1;
+            }
+            if scene.system_block.as_ref().unwrap().configuration_cursor
+                != scene.objects.update_order.len()
+            {
+                return Ok(false);
             }
         }
         scene.system_block = None;

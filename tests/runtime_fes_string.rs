@@ -92,6 +92,69 @@ fn remaining(rt: &mut Engine, task: u32, encoding: TextEncoding) -> u32 {
 }
 
 #[test]
+fn configuration_refresh_updates_media_before_inherited_fonts_and_keeps_the_wait() {
+    for budget in [1, 4096] {
+        for kind in ["STRING", "STRING8"] {
+            let fail = Rc::new(Cell::new(false));
+            let mut rt = engine(budget, false, fail.clone());
+            let source = format!(
+                "#DEFINE\n{kind} text\n{kind} other\n#OBJECT SIZE\ntext 12,6\nother 12,6\n#START\ntext layout weight 551\nwait 1000\n#MES_CHANGECONFIG\n$0+=1\n"
+            );
+            let mut scene = Scene::new(
+                fes::Program::from_text(source.as_bytes()).unwrap(),
+                rt.host().handle_allocator(),
+            )
+            .unwrap();
+            while !rt.prepare_fes_scene(0, &mut scene).unwrap() {}
+            advance(&mut rt, &mut scene, 100).unwrap();
+            let task = string(&scene).1;
+            let deadline = scene.deadline();
+            rt.host_mut().message_defaults = Some(MessageDefaults {
+                font_name: "Updated Face".encode_utf16().collect(),
+                bold: true,
+                shadow: 7,
+                outline: 9,
+                ..Default::default()
+            });
+            let notify = |rt: &mut Engine, scene: &mut Scene| -> Result<()> {
+                for _ in 0..1000 {
+                    if rt.refresh_fes_configuration(0, scene, 100)? {
+                        return Ok(());
+                    }
+                }
+                panic!("合成配置通知未完成")
+            };
+            notify(&mut rt, &mut scene).unwrap();
+            assert_eq!(rt.numbers().shared[0], 1);
+            assert_eq!(scene.deadline(), deadline);
+            assert_eq!(string(&scene).1, task);
+            for name in ["text", "other"] {
+                let handle = scene.objects().lookup(name, 0).unwrap();
+                let ObjectState::String(state) = &scene.objects().get(handle).unwrap().state else {
+                    panic!()
+                };
+                assert!(state.layout.configuration_dirty());
+                let offset = if kind == "STRING" { 0xc4 } else { 0x104 };
+                let bytes = state.layout.configuration_bytes();
+                let word =
+                    |index: usize| u32::from_le_bytes(bytes[index..index + 4].try_into().unwrap());
+                assert_eq!(word(offset), if name == "text" { 551 } else { 700 });
+                assert_eq!([word(offset + 4), word(offset + 8)], [7, 9]);
+            }
+            fail.set(true);
+            assert!(notify(&mut rt, &mut scene).is_err());
+            assert_eq!(rt.numbers().shared[0], 2);
+            fail.set(false);
+            notify(&mut rt, &mut scene).unwrap();
+            assert_eq!(rt.numbers().shared[0], 2);
+            advance(&mut rt, &mut scene, 101).unwrap();
+            assert!(!string(&scene).0.layout.configuration_dirty());
+            assert_eq!(scene.deadline(), deadline);
+        }
+    }
+}
+
+#[test]
 fn strings_keep_independent_page_sizes_and_sample_absolute_vram_with_a_list_offset() {
     for budget in [1, 4096] {
         for kind in ["STRING", "STRING8"] {

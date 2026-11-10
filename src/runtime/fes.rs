@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 mod animation;
 mod button;
 mod commands;
+mod configuration;
 mod difimage;
 mod draw;
 mod fonts;

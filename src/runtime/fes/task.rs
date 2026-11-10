@@ -23,6 +23,15 @@ pub trait Services {
         name: &str,
         budget: usize,
     ) -> Result<bool>;
+    /// 配置块执行并更新场景后，再刷新继承的文字设置和声音动作请求。
+    fn configuration_changed(
+        &mut self,
+        _scene: &mut Scene,
+        _now: u32,
+        _budget: usize,
+    ) -> Result<bool> {
+        Err(Error::new(0, "FES 配置通知服务尚未提供"))
+    }
     /// 同步分派命名块并更新对象；refresh 为 false 时保留媒体提交请求。
     fn dispatch_block(
         &mut self,
@@ -98,6 +107,18 @@ impl<F: ObjectFactory> Services for ObjectHost<'_, F> {
         let mut store = self.store();
         store.budget = budget.max(1);
         store.dispatch_fes_system_block(owner, scene, name)
+    }
+
+    fn configuration_changed(
+        &mut self,
+        scene: &mut Scene,
+        now: u32,
+        budget: usize,
+    ) -> Result<bool> {
+        let owner = self.host.task_id;
+        let mut store = self.store();
+        store.budget = budget.max(1);
+        store.refresh_fes_configuration(owner, scene, now)
     }
 
     fn set_media_sleep(&mut self, scene: &mut Scene, sleeping: bool) -> Result<()> {
@@ -983,6 +1004,20 @@ impl TaskObject for FesObject {
         self.synchronize(host);
         let b = command.data[1];
         match command.code {
+            19 => {
+                if let Some(scene) = &mut self.scene {
+                    self.pending = Some(*command);
+                    if !services(host)?.configuration_changed(
+                        scene,
+                        self.base.clock.elapsed(),
+                        budget,
+                    )? {
+                        return Ok(CommandOutcome::RESUME);
+                    }
+                    self.pending = None;
+                    self.effects(host);
+                }
+            }
             27 | 28 => {
                 if !self.control_event(command, host, budget)? {
                     return Ok(CommandOutcome::RESUME);
@@ -1259,7 +1294,7 @@ impl TaskObject for FesObject {
                 false,
                 buffers,
             )?,
-            19 | 178 | 341 | 342 | 344 | 345 | 349..=356 => {
+            178 | 341 | 342 | 344 | 345 | 349..=356 => {
                 return Err(Error::new(0, "FES 专属命令尚未接入"));
             }
             _ => {

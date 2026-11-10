@@ -196,6 +196,79 @@ fn record(channel: u32, group: u32) -> Vec<u8> {
 }
 
 #[test]
+fn configuration_refresh_applies_sound_properties_before_deferring_policy_actions() {
+    use katze_system2::{fes::Program, runtime::fes::Scene};
+    for budget in [1, 4096] {
+        for first in [0, 2] {
+            for policy in [0, 1, -1] {
+                for force in [0, 37] {
+                    for playing in [0, 1] {
+                        let (mut runtime, _, _, trace) = setup();
+                        runtime.set_budget(budget, 10000);
+                        runtime.numbers_mut().shared.resize(1, 0);
+                        runtime.host_mut().sound_config_enabled = 1;
+                        runtime.host_mut().sound_config = Some(SoundConfig {
+                            master_volume: Some(100),
+                            parts: vec![SoundPart {
+                                file_prefix: b"tone".to_vec(),
+                                volume: 100,
+                                play_enabled: policy,
+                                mute: 0,
+                                ..Default::default()
+                            }],
+                            ..Default::default()
+                        });
+                        trace.borrow_mut().playing = playing;
+                        let mut scene = Scene::new(
+                            Program::from_text(b"#DEFINE\nSOUND sound\n#OBJECT CHANNEL\nsound 5\n#START\nwait 1000\n#MES_CHANGECONFIG\n$0+=1\n").unwrap(),
+                            runtime.host().handle_allocator(),
+                        ).unwrap();
+                        assert!(scene.prepare(runtime.numbers_mut(), 4096).unwrap());
+                        let objects = scene.objects_mut().unwrap();
+                        objects.set_sound_task(1);
+                        let id = objects.lookup("sound", 0).unwrap();
+                        let ObjectState::Sound(sound) = &mut objects.get_mut(id).unwrap().state
+                        else {
+                            panic!()
+                        };
+                        sound.file = b"tone".to_vec();
+                        sound.play_parameters = [first, 1, force];
+                        let mut complete = false;
+                        for _ in 0..256 {
+                            if runtime
+                                .refresh_fes_configuration(0, &mut scene, 100)
+                                .unwrap()
+                            {
+                                complete = true;
+                                break;
+                            }
+                        }
+                        assert!(complete);
+                        assert_eq!(runtime.numbers().shared[0], 1);
+                        let mut expected = vec![
+                            Event::Command(187, [5, 100, 0], vec![]),
+                            Event::Command(190, [5, 0, 0], vec![]),
+                        ];
+                        if first == 0 {
+                            expected.push(Event::Command(186, [5, 0, 0], vec![]));
+                        }
+                        assert_eq!(trace.borrow().events, expected);
+                        let sound = state(scene.objects(), id);
+                        assert!(sound.is_dirty());
+                        assert_eq!(
+                            sound.action_request(),
+                            (first == 0 && (playing == 0 || policy | force == 0)).then_some(0)
+                        );
+                        assert_eq!(sound.play_parameters, [first, 1, force]);
+                        assert!(!sound.play_value_changed());
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn play_policy_stops_the_prior_channel_before_properties_and_runs_the_own_handler() {
     use katze_system2::{fes::Program, runtime::fes::Scene};
     for budget in [1, 4096] {

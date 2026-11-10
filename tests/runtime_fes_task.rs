@@ -288,6 +288,45 @@ struct Setup {
     fail_media: Rc<Cell<bool>>,
 }
 
+#[test]
+fn configuration_command_preserves_output_and_main_wait_across_budgets() {
+    for budget in [1, 4096] {
+        let mut runtime = setup(
+            budget,
+            b"#DEFINE\nBASE item\n#START\nwait 1000\n#MES_CHANGECONFIG\n$0+=1\n",
+        )
+        .runtime;
+        let fes = runtime.create(0, kind::FES, b"configuration", b"").unwrap();
+        let notify = Command {
+            target: fes,
+            sender: 37,
+            code: 19,
+            data: [u32::MAX; 3],
+        };
+        assert_eq!(runtime.dispatch_command(0, notify).unwrap(), 0);
+        send(&mut runtime, fes, 337, 0, 0);
+        file(&mut runtime, fes, b"complete.fes").unwrap();
+        send(&mut runtime, fes, 339, 0, 0);
+        runtime.update(100, 1).unwrap();
+        let deadline = runtime.object(fes).unwrap().fes_scene().unwrap().deadline();
+        for expected in [1, 2] {
+            assert_eq!(runtime.dispatch_command(0, notify).unwrap(), 0);
+            assert_eq!(runtime.numbers().shared[0], expected);
+            assert_eq!(
+                runtime.object(fes).unwrap().fes_scene().unwrap().deadline(),
+                deadline
+            );
+        }
+        send(&mut runtime, fes, 348, 0, 1);
+        assert_eq!(runtime.dispatch_command(0, notify).unwrap(), 0);
+        assert_eq!(runtime.numbers().shared[0], 3);
+        assert_eq!(runtime.object(fes).unwrap().paused_fes(), Some(1));
+        runtime.dispatch_command(0, command(fes, 3, 0, 0)).unwrap();
+        assert_eq!(runtime.dispatch_command(0, notify).unwrap(), 0);
+        assert_eq!(runtime.numbers().shared[0], 3);
+    }
+}
+
 fn setup(budget: usize, source: &[u8]) -> Setup {
     let queries = Rc::new(RefCell::new(Vec::new()));
     let mask = Rc::new(Cell::new(false));
