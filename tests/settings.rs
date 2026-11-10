@@ -36,6 +36,26 @@ fn defaults_and_xml_overlays_keep_missing_values_raw_flags_and_volume_update_ord
     assert_eq!(state.auto_select, 0);
     assert_eq!(state.scene_animation_enabled, 1);
     assert_eq!(state.system_voice_play, [1; 48]);
+    assert_eq!(state.font_controls, [1, 1, 0, 1, 0]);
+    let mut defaults = katze_system2::message::MessageDefaults::default();
+    for (controls, expected) in [
+        ([1, 1, 0, 1, 0], [400, 1, 1, 0]),
+        ([7, 9, 0x8000_0000, 0, 23], [700, 9, 7, 1]),
+        ([3, 5, 1, 9, u32::MAX], [700, 5, 3, u32::MAX]),
+    ] {
+        let font_settings = SystemSettings {
+            font_controls: controls,
+            ..SystemSettings::default()
+        };
+        font_settings.apply_message_defaults(&mut defaults);
+        let configuration = defaults
+            .configuration(katze_system2::message::TextEncoding::Cp932)
+            .unwrap();
+        assert_eq!(
+            [0xc4, 0xc8, 0xcc, 0xd0].map(|offset| word(&configuration, offset)),
+            expected
+        );
+    }
     assert_eq!(state.always_active, 1);
     assert_eq!((state.scene_skip_enabled, state.jtalk_enabled), (0, 0));
     assert_eq!(state.auto_wait_presets[4], [15, 5]);

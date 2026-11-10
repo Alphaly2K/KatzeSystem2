@@ -12,6 +12,7 @@
 |`global_flag_ranges`|64|八项全局变量范围，格式同上|
 |`auto_select`|4|`GAME/autoselect` 的原始配置值，默认零|
 |`scene_animation_enabled`|4|`GAME/enable_scene_anm` 的原始配置值，默认一|
+|`font_controls`|20|轮廓、阴影、粗体、比例字宽、固定字宽，初值 `[1,1,0,1,0]`|
 |`system_voice_play`|192|`SYSTEMVOICE/play00`～`play47`，默认各一|
 |`always_active`|4|`GAME/always_active`，默认一|
 |`scene_skip_enabled`／`jtalk_enabled`|各 4|`GAME/use_scene_skip`／`use_jtalk`，默认零|
@@ -23,7 +24,7 @@
 |`texture_32bit_row`／`texture_16bit_row`|各 4|`TEXTURE/bpp32y`／`bpp16y`，默认零|
 |`auto_wait_presets`|256|32 组 `[基础等待, 逐字等待]`，供自动速度选择使用|
 
-块内字节按原布局保存，包括尚未开放类型化字段的部分。配置写回不自动触发设备、文字对象或绘图状态更新；这些应用入口继续独立接入。
+块内字节按原布局保存，包括尚未开放类型化字段的部分。`apply_message_defaults` 把字体控制应用到 `MessageDefaults`：轮廓／阴影保留 DWORD，粗体按非零启用；比例字宽为零时字形参数为一，其他情况使用固定字宽原值。该方法保留已选择的字体名。启动宿主在安装消息默认值前调用；配置数据覆盖不自动触发设备或绘图更新。
 
 ## 默认值与 XML 覆盖
 
@@ -72,14 +73,18 @@
 |`contvoice`、`play`|连续语音及旧通道启用值；通道编号不在 0～47 时返回零|
 |`lang_ui`、`lang_text_main`、`lang_text_sub`|`LanguageState` 的 `primary_index`、`message_index`、`subtitle_index`；副文字初值为 `u32::MAX`|
 |`enable_sceneanm`|场景动画开关|
+|`fshadow`|首索引按有符号值取 `min(index, 2)`，分别访问轮廓、阴影、粗体；extra 不参与选择|
+|`fontweight`、`fontprop`、`fontfix`|粗体、比例字宽、固定字宽的原始 DWORD|
 |`sysplay`|系统声音播放开关，使用下面的索引规则|
 |`activewindow`、`use_sceneskip`、`use_jtalk`|`always_active`、`scene_skip_enabled`、`jtalk_enabled` 的原始配置值|
 
-`sysplay` 先检查 index 与 extra 的回绕和是否在 0～47，再以 index 本身访问数组。和越界时返回零；和有效但 index 本身越界时返回诊断。它与 `play` 使用的旧通道启用值独立。`activewindow` 是持续活动配置，实际前台及窗口状态由平台提供。字体与阴影、`screen`／`iswindow` 查询仍返回未接入诊断。配置读取不触发对应设备或对象更新。
+`sysplay` 先检查 index 与 extra 的回绕和是否在 0～47，再以 index 本身访问数组。和越界时返回零；和有效但 index 本身越界时返回诊断。它与 `play` 使用的旧通道启用值独立。`activewindow` 是持续活动配置，实际前台及窗口状态由平台提供。`fshadow` 的负索引会访问基线字体控制区域前方，库返回诊断；extra 仍先求值。字体名 `font`／`ruby`、`screen`／`iswindow` 查询仍返回未接入诊断。配置读取不触发对应设备或对象更新。
 
 ## FES 配置写回
 
 `setconf value name [index [extra]]` 依次求值 value、index、extra，名称区分大小写。支持上表的消息、效果、窗口、声音字段、系统声音及扩展功能开关，保留原始 DWORD；`play` 使用后两项回绕相加后的通道编号，超出 0～47 时跳过字段写入。`sysplay` 使用与查询相同的检查和访问规则，和越界时跳过字段写入。
+
+`fshadow`、`fontweight`、`fontprop`、`fontfix` 采用与查询相同的选槽规则并保留原始值；成功写回同步 `HostState::message_defaults`，后续消息默认配置使用新的字形样式。字体控制的 XML 覆盖继续接入。
 
 `autospd` 同时从 `auto_wait_presets` 更新自动速度编号、基础等待和逐字等待；编号超出 0～31 时诊断且保留三项原值。`autospd_b`、`autospd_c` 分别只修改等待字段。`lang_text_sub` 选择已声明的语言编号，越界或负编号关闭副文字；主界面及主文字语言的切换通知尚未接入，写回返回诊断。
 
@@ -100,6 +105,8 @@
 全屏开关和 mw_pos 构造初值均为零。二十四组原始开关／值组合确认 741 的非零门控及状态一，另有 116 组启动／用户配置覆盖的两个字段和查询结果与库一致；包括字段组差异、缺失保留、重复节点、非法前缀及 DWORD 高位。既有配置与普通任务回归扩展这些字段，保持三项合成测试，不引入设备或外部输入依赖。
 
 场景动画查询已对照 258 个 DWORD、三种参数与指针组合，共 774 次原入口调用，状态、返回值及完整 VM 两区一致。84 组两阶段配置覆盖的 168 份读取及查询结果也全部一致，包含默认值、缺失保留、键名差异、重复节点、非法前缀和整数回绕。既有三项合成回归扩展默认值、XML 覆盖、忽略参数及两种预算下的真实 `2B` 查询，无外部输入依赖。
+
+字体控制另以原设置处理器核对 100 对写入／查询，参数提取及数值服务使用合成替代，检查五项完整状态、查询值及两次完成回调。常规回归固定主流程／事件写回、粗体别名、原始高位、第二索引副作用、负索引诊断，以及设置到消息配置的字形参数门控。
 
 FES 配置写回以原分词器和设置处理器批量核对 159 组合成调用，返回状态、保存标记及完整四块配置共 913,296 字节一致；覆盖普通字段、自动预设、DWORD 高位、通道边界与回绕、大小写、未知名称、缺参及空引号。新增三项常规合成回归固定启动预设覆盖、主体／事件写回、参数副作用、音量刷新和诊断边界，不读取外部配置或设备。
 

@@ -20,6 +20,8 @@ pub struct SystemSettings {
     pub always_active: u32,
     pub scene_skip_enabled: u32,
     pub jtalk_enabled: u32,
+    /// 字体原始开关：轮廓、阴影、粗体、比例字宽、固定字宽。
+    pub font_controls: [u32; 5],
     /// 自动推进预设，每项依次为基础等待与逐字等待。
     pub auto_wait_presets: [[u32; 2]; 32],
     /// 用户设置 `WINDOW/fullscreen` 的原始 DWORD。
@@ -50,6 +52,7 @@ impl Default for SystemSettings {
             always_active: 1,
             scene_skip_enabled: 0,
             jtalk_enabled: 0,
+            font_controls: [1, 1, 0, 1, 0],
             auto_wait_presets: [[0; 2]; 32],
             fullscreen: 0,
             fullscreen_mw_pos: 0,
@@ -120,6 +123,18 @@ impl Default for SystemSettings {
 }
 
 impl SystemSettings {
+    /// 将全局字形样式应用到消息默认值，保留宿主选择的字体名和其他显示选项。
+    pub fn apply_message_defaults(&self, defaults: &mut crate::message::MessageDefaults) {
+        defaults.outline = self.font_controls[0];
+        defaults.shadow = self.font_controls[1];
+        defaults.bold = self.font_controls[2] != 0;
+        defaults.glyph_parameter = Some(if self.font_controls[3] != 0 {
+            self.font_controls[4]
+        } else {
+            1
+        });
+    }
+
     /// 覆盖启动 XML 的变量范围、窗口颜色及纹理布局等配置。
     pub fn apply_startup_xml(&mut self, input: &[u8]) -> crate::Result<()> {
         let xml = crate::resource::XmlDocument::parse(input)?;

@@ -478,7 +478,9 @@ pub fn build_runtime(
     runtime.set_save_services(Saves {
         root: std::env::var("KATZE_SAVE_ROOT").unwrap_or(root),
     });
-    runtime.host_mut().message_defaults = Some(Default::default());
+    let mut message_defaults = Default::default();
+    settings.apply_message_defaults(&mut message_defaults);
+    runtime.host_mut().message_defaults = Some(message_defaults);
     runtime.host_mut().message_time_scale = Some(startup_xml.integer(b"GAME/strframe_frame", 0)?);
     let target = if settings.texture_grid.contains(&0) {
         RenderTarget::new(surface)?

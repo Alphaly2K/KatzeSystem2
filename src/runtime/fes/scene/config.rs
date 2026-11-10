@@ -111,8 +111,16 @@ impl<F: ObjectFactory> Store<'_, F> {
                 b"activewindow" => (6, 0),
                 b"use_sceneskip" => (7, 0),
                 b"use_jtalk" => (8, 0),
-                b"fshadow" | b"screen" | b"iswindow" | b"font" | b"ruby" | b"fontweight"
-                | b"fontfix" | b"fontprop" => {
+                b"fshadow" => {
+                    if first_index < 0 {
+                        return Err(Error::new(offset, "FES 字体阴影索引不能为负值"));
+                    }
+                    (9, first_index.min(2) as usize)
+                }
+                b"fontweight" => (9, 2),
+                b"fontprop" => (9, 3),
+                b"fontfix" => (9, 4),
+                b"screen" | b"iswindow" | b"font" | b"ruby" => {
                     return Err(Error::new(
                         offset,
                         if write {
@@ -149,6 +157,10 @@ impl<F: ObjectFactory> Store<'_, F> {
                     settings.scene_skip_enabled = destination as u32;
                 } else if block == 8 {
                     settings.jtalk_enabled = destination as u32;
+                } else if block == 9 {
+                    settings.font_controls[word] = destination as u32;
+                    settings
+                        .apply_message_defaults(self.host.message_defaults.get_or_insert_default());
                 } else {
                     let bytes: &mut [u8] = match block {
                         0 => &mut settings.message,
@@ -176,7 +188,8 @@ impl<F: ObjectFactory> Store<'_, F> {
                 5 => &settings.system_voice_play[word].to_le_bytes(),
                 6 => &settings.always_active.to_le_bytes(),
                 7 => &settings.scene_skip_enabled.to_le_bytes(),
-                _ => &settings.jtalk_enabled.to_le_bytes(),
+                8 => &settings.jtalk_enabled.to_le_bytes(),
+                _ => &settings.font_controls[word].to_le_bytes(),
             };
             let byte_offset = if block < 4 { word * 4 } else { 0 };
             u32::from_le_bytes(bytes[byte_offset..byte_offset + 4].try_into().unwrap())

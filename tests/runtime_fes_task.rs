@@ -446,6 +446,64 @@ fn configuration_writes_apply_presets_raw_values_and_volumes_in_body_and_handler
 }
 
 #[test]
+fn font_configuration_keeps_raw_aliases_and_updates_message_defaults_in_handlers() {
+    let source = b"#START\nsetconf -7 fshadow 0 99\nsetconf 9 fshadow 1 -99\nsetconf 0x80000000 fshadow 999\nsetconf 13 fontprop\nsetconf -3 fontfix\ngetconf 0 fshadow 0\ngetconf 1 fshadow 1\ngetconf 2 fshadow 2\ngetconf 3 fontweight\ngetconf 4 fontprop\ngetconf 5 fontfix\nwait 999\n#WRITE\nsetconf 0 fontweight\nsetconf 17 fshadow 1 ($7+=1)\ngetconf 6 fshadow 1 ($7+=1)\n";
+    for budget in [1, 4096] {
+        let Setup { mut runtime, .. } = setup(budget, source);
+        runtime.host_mut().system_settings = Some(Default::default());
+        let selected: Vec<_> = "Selected Face".encode_utf16().collect();
+        runtime.host_mut().message_defaults = Some(katze_system2::message::MessageDefaults {
+            font_name: selected.clone(),
+            reveal: true,
+            ..Default::default()
+        });
+        let fes = runtime.create(0, kind::FES, b"configuration", b"").unwrap();
+        send(&mut runtime, fes, 337, 0, 0);
+        file(&mut runtime, fes, b"complete.fes").unwrap();
+        send(&mut runtime, fes, 339, 0, 0);
+        runtime.update(100, 1).unwrap();
+        assert_eq!(
+            runtime.numbers().shared[..6],
+            [-7, 9, i32::MIN, i32::MIN, 13, -3]
+        );
+        assert_eq!(
+            runtime
+                .host()
+                .system_settings
+                .as_ref()
+                .unwrap()
+                .font_controls,
+            [(-7i32) as u32, 9, i32::MIN as u32, 13, (-3i32) as u32]
+        );
+        let defaults = runtime.host().message_defaults.as_ref().unwrap();
+        assert_eq!(
+            (defaults.outline, defaults.shadow, defaults.bold),
+            ((-7i32) as u32, 9, true)
+        );
+        assert_eq!(defaults.font_name, selected);
+        assert!(defaults.reveal);
+        assert_eq!(defaults.glyph_parameter, Some((-3i32) as u32));
+        assert_eq!(runtime.host().system_settings_dirty, 1);
+        runtime.host_mut().system_settings_dirty = 0;
+        let mut block = b"WRITE\0".to_vec();
+        runtime
+            .dispatch_command_with_buffers(
+                0,
+                command(fes, 343, 0, 0),
+                &mut CommandBuffers {
+                    data1: Some(&mut block),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(runtime.numbers().shared[6..8], [17, 2]);
+        let defaults = runtime.host().message_defaults.as_ref().unwrap();
+        assert_eq!((defaults.shadow, defaults.bold), (17, false));
+        assert_eq!(runtime.host().system_settings_dirty, 1);
+    }
+}
+
+#[test]
 fn system_voice_configuration_checks_combined_index_but_accesses_first_index() {
     let source = b"#START\nsetconf -7 sysplay 46 1\nsetconf 19 play 46 1\nsetconf 99 sysplay 47 1\nsetconf -3 activewindow\nsetconf 0x80000001 use_sceneskip\nsetconf 9 use_jtalk\ngetconf 0 sysplay 46 1\ngetconf 1 sysplay 47\ngetconf 2 sysplay 47 1\ngetconf 3 play 46 1\ngetconf 4 activewindow\ngetconf 5 use_sceneskip\ngetconf 6 use_jtalk\nwait 999\n#WRITE\nsetconf 37 sysplay 47 -1\ngetconf 0 sysplay 46 1\ngetconf 1 sysplay 47 -1\n";
     for budget in [1, 4096] {
@@ -488,6 +546,7 @@ fn configuration_write_validation_keeps_argument_effects_and_refresh_boundaries(
             ("setconf ($7+=1) sysplay 47 1", 1, 1, None),
             ("setconf ($7+=1) sysplay -1 1", 1, 0, Some("首索引")),
             ("setconf 32 autospd ($7+=1)", 1, 0, Some("预设编号")),
+            ("setconf ($7+=1) fshadow -1 ($7+=1)", 2, 0, Some("阴影索引")),
             ("setconf ($7+=1) lang_ui ($7+=1)", 2, 0, Some("切换通知")),
         ] {
             let source = format!("#START\n{line}\nwait 999\n");
