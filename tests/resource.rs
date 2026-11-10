@@ -372,3 +372,29 @@ fn resource_lists_apply_priority_per_member_and_patches_override_every_mode() {
             .is_err()
     );
 }
+
+#[test]
+fn folder_expansion_preserves_case_literal_tokens_and_single_pass_replacements() {
+    use katze_system2::resource::FolderPaths;
+    let paths = FolderPaths {
+        user_data: wide("user-data"),
+        common_data: wide("common-data"),
+        brand: wide("Brand%title%"),
+        title: vec![0x03a9, 0xd800, 0, 65],
+        save: wide("saved"),
+        imglib: wide("images"),
+    };
+    let mut expected = wide("user-data/common-data/common-data/Brand%title%/");
+    expected.extend([0x03a9, 0xd800]);
+    expected.extend(wide("/saved/images/%userprofile%/%%/%unknown%"));
+    assert_eq!(paths.expand(&wide("%USERPROFILE%/%ProgramData%/%ALLUSERSPROFILE%/%brand%/%title%/%save%/%imglib%/%userprofile%/%%/%unknown%")).unwrap(), expected);
+    assert_eq!(paths.expand(&wide("%title")).unwrap(), wide("%title"));
+    assert_eq!(paths.expand(&[65, 0, 66]).unwrap(), vec![65]);
+    assert_eq!(paths.expand(&vec![65; 259]).unwrap().len(), 259);
+    assert!(paths.expand(&vec![65; 260]).is_err());
+    assert!(
+        paths
+            .expand(&wide(&format!("%{}", "x".repeat(259))))
+            .is_err()
+    );
+}

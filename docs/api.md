@@ -309,6 +309,8 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 
 `resource::XmlWriter` 提供配置 XML 写出：`write` 接收名称分段与字面文本，`write_integer` 保存 DWORD，`write_float` 保存浮点数，`write_wide` 接收 UTF-16；`to_bytes` 返回完整文档供宿主保存。根节点、节点顺序、字面实体及转换容量契约见 [XML 字段](resources.md#脚本-xml-字段)。
 
+`resource::FolderPaths::expand(source)` 展开配置目录中的系统目录、品牌／标题及 save／imglib 标记。平台提供上下文，接口保留大小写、未知标记及替换结果，契约见[配置目录展开](resources.md#配置目录展开)。
+
 ### 同步系统服务
 
 `kcs::ResourceHost::new(&mut inner, &mut services)` 提供普通表 590～593 的 XML 装载、释放、整数及文本查询。服务实现 `ResourceServices::read(name, mode) -> Result<Option<Vec<u8>>>`；输入为格式展开的字节名称，当前 XML 接口采用 `ResourceMode::LooseFirst`。可由 `ResourceRouter::read` 转交已注册的归档和文件读取，再取返回资源的 bytes。None 或解析失败使 590 返回零，服务错误停止当前推进；创建的句柄存活至显式释放或宿主销毁。零句柄查询跳过地址解析，非零失效句柄返回诊断。593 的目标需为有效零结尾串，缺失字段保留原值，成功时仅覆盖 UTF-8 字段及结尾零。

@@ -2,11 +2,13 @@ use crate::{Error, Result, read};
 
 mod config;
 mod directory;
+mod folder;
 mod kif;
 mod router;
 mod xml;
 pub use config::{ArchiveConfig, ArchiveEntry};
 pub use directory::{ArchiveDirectory, DirectoryEntry};
+pub use folder::FolderPaths;
 pub use kif::{KifArchive, verification_seed};
 pub use router::{
     ArchiveMount, ResourceData, ResourceGroup, ResourceMember, ResourceMode, ResourceRouter,
