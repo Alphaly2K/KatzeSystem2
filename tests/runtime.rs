@@ -294,34 +294,43 @@ fn queued_messages_are_consumed_by_the_next_task_update() {
 #[test]
 fn frame_configuration_changes_queue_messages_after_task_updates() {
     for budget in [1, 4096] {
-        let mut source = Source::new();
-        source.add(b"receiver", waiting_child(), data());
-        let mut asm = Asm::default();
-        asm.ins(0x25, &[0])
-            .ins(0x25, &[1])
-            .ins(0x2b, &[1053, 8])
-            .ins(0x3b, &[]);
-        source.add(b"writer", asm.build(), data());
-        let mut runtime = runtime(source);
-        runtime.set_budget(budget, 10000);
-        let receiver = runtime.create(0, kind::ORDINARY, b"receiver", b"").unwrap();
-        runtime.create(0, kind::ORDINARY, b"writer", b"").unwrap();
-        runtime.update(100, 1).unwrap();
-        let object = runtime.object(receiver).unwrap();
-        assert_eq!(
-            object.queued_messages().unwrap(),
-            [[0, 0xffff0011, 0, 0], [0, 0xffff001a, 0, 0],]
-        );
-        assert_eq!(words(object.interpreter().unwrap(), 52, 1), [0]);
-        assert_eq!(runtime.host().system_settings_dirty, 0);
-        runtime.update(101, 1).unwrap();
-        let object = runtime.object(receiver).unwrap();
-        assert!(object.queued_messages().unwrap().is_empty());
-        assert_eq!(
-            words(object.interpreter().unwrap(), 32, 4),
-            [0, 0xffff001a, 0, 0]
-        );
-        assert_eq!(words(object.interpreter().unwrap(), 52, 1), [0xffff001a]);
+        for native in [533, 1053] {
+            let mut source = Source::new();
+            source.add(b"receiver", waiting_child(), data());
+            let mut asm = Asm::default();
+            asm.ins(0x25, &[0xdead_beef]);
+            if native == 1053 {
+                asm.ins(0x25, &[0]).ins(0x25, &[1]);
+            }
+            asm.ins(0x2b, &[native, if native == 1053 { 8 } else { 0 }])
+                .ins(0x26, &[0])
+                .ins(0x3b, &[]);
+            source.add(b"writer", asm.build(), data());
+            let mut runtime = runtime(source);
+            runtime.set_budget(budget, 10000);
+            let receiver = runtime.create(0, kind::ORDINARY, b"receiver", b"").unwrap();
+            let writer = runtime.create(0, kind::ORDINARY, b"writer", b"").unwrap();
+            runtime.update(100, 1).unwrap();
+            assert_eq!(
+                words(runtime.object(writer).unwrap().interpreter().unwrap(), 0, 1),
+                [0xdead_beef]
+            );
+            let object = runtime.object(receiver).unwrap();
+            let messages = if native == 1053 {
+                vec![[0, 0xffff0011, 0, 0], [0, 0xffff001a, 0, 0]]
+            } else {
+                vec![[0, 0xffff0011, 0, 0]]
+            };
+            assert_eq!(object.queued_messages().unwrap(), messages);
+            assert_eq!(words(object.interpreter().unwrap(), 52, 1), [0]);
+            assert_eq!(runtime.host().system_settings_dirty, 0);
+            runtime.update(101, 1).unwrap();
+            let object = runtime.object(receiver).unwrap();
+            assert!(object.queued_messages().unwrap().is_empty());
+            let kind = messages.last().unwrap()[1];
+            assert_eq!(words(object.interpreter().unwrap(), 32, 4), [0, kind, 0, 0]);
+            assert_eq!(words(object.interpreter().unwrap(), 52, 1), [kind]);
+        }
     }
 }
 

@@ -592,7 +592,7 @@ pub(crate) fn call_native(
         59 | 61 => 2,
         38 | 44 | 45 | 790 => 4,
         35..=37 | 41..=43 | 517 | 519 | 539 | 896 | 902 => 3,
-        5 | 76 | 789 => 0,
+        5 | 76 | 533 | 789 => 0,
         _ => return Err(Error::new(vm.pc, format!("未支持的 KCS native {index}"))),
     };
     if arguments.len() != count * 4 {
@@ -604,6 +604,11 @@ pub(crate) fn call_native(
         .collect();
     Ok(match index {
         392 | 1049 => return super::message_text::call(index, &args, vm),
+
+        533 => {
+            host.system_settings_dirty = 1;
+            NativeReturn::Continue
+        }
 
         207 => {
             let identity = std::array::from_fn(|i| if i % 5 == 0 { 1f32.to_bits() } else { 0 });
