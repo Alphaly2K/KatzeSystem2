@@ -746,6 +746,8 @@ type InputAction<'a> = dyn FnMut(&mut crate::input::InputState, &mut dyn Host) -
 
 struct RunningTask {
     deleted: bool,
+    property: u32,
+    property_changed: bool,
     deferred_delete: bool,
     clock: TaskClock,
     context: Option<Vec<u8>>,
@@ -1084,6 +1086,8 @@ fn run_nested<F: ObjectFactory>(
         target,
         RunningTask {
             deleted: object.control().deletion_requested != 0,
+            property: object.control().property,
+            property_changed: false,
             deferred_delete: object.accepts_deferred_delete(),
             clock: object.clock().clone(),
             context: object.creation_context().map(<[u8]>::to_vec),
@@ -1154,7 +1158,11 @@ fn run_nested<F: ObjectFactory>(
             }
         }
     };
-    running.remove(&target);
+    if let Some(task) = running.remove(&target) {
+        if task.property_changed {
+            object.state().0.property = task.property;
+        }
+    }
     objects.insert(target, object);
     host.task_id = saved.0;
     host.task_time = saved.1;
@@ -1421,6 +1429,20 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             }
             452 => {
                 let sender = self.host.task_id;
+                if self.require_reachable(args[0])
+                    && self
+                        .tree
+                        .node(args[0])
+                        .is_some_and(|node| node.kind == kind::ORDINARY)
+                {
+                    if let Some(task) = self.running.get(&args[0]) {
+                        return Ok(NativeReturn::Value(if task.deleted {
+                            u32::MAX
+                        } else {
+                            task.property
+                        }));
+                    }
+                }
                 let mut output = u32::MAX;
                 route_command(
                     self.store(),
@@ -1943,6 +1965,18 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
     }
 
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn> {
+        if index == 453 {
+            if arguments.len() != 4 {
+                return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+            }
+            let task = self
+                .running
+                .get_mut(&self.host.task_id)
+                .ok_or_else(|| Error::new(vm.pc, "执行中任务属性上下文不可用"))?;
+            task.property = read::u32_at(arguments, 0)?;
+            task.property_changed = true;
+            return Ok(NativeReturn::Continue);
+        }
         if index == 361 {
             if !arguments.is_empty() {
                 return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
