@@ -20,6 +20,7 @@ mod input;
 mod motion;
 mod natives;
 mod navigation;
+mod panel;
 mod plane;
 mod preload;
 mod properties;
@@ -137,7 +138,6 @@ impl ObjectState {
             Self::CPlane(state) => Some(state),
             Self::Plane(state) => Some(&state.base),
             Self::String(state) => Some(&state.layout.base.base),
-            Self::SavePanel(state) => Some(&state.plane),
             _ => None,
         }
     }
@@ -147,7 +147,6 @@ impl ObjectState {
             Self::CPlane(state) => Some(state),
             Self::Plane(state) => Some(&mut state.base),
             Self::String(state) => Some(&mut state.layout.base.base),
-            Self::SavePanel(state) => Some(&mut state.plane),
             _ => None,
         }
     }
@@ -158,6 +157,7 @@ impl ObjectState {
             Self::Image(state) | Self::ImageWindow(state) => Some(&state.base),
             Self::DifImage(state) => Some(&state.base),
             Self::Button(state) => Some(&state.image.base),
+            Self::SavePanel(state) => Some(&state.image.base),
             _ => None,
         }
     }
@@ -168,6 +168,7 @@ impl ObjectState {
             Self::Image(state) | Self::ImageWindow(state) => Some(&mut state.base),
             Self::DifImage(state) => Some(&mut state.base),
             Self::Button(state) => Some(&mut state.image.base),
+            Self::SavePanel(state) => Some(&mut state.image.base),
             _ => None,
         }
     }
@@ -176,6 +177,7 @@ impl ObjectState {
         match self {
             Self::Image(state) | Self::ImageWindow(state) => Some(state),
             Self::Button(state) => Some(&state.image),
+            Self::SavePanel(state) => Some(&state.image),
             _ => None,
         }
     }
@@ -184,6 +186,7 @@ impl ObjectState {
         match self {
             Self::Image(state) | Self::ImageWindow(state) => Some(state),
             Self::Button(state) => Some(&mut state.image),
+            Self::SavePanel(state) => Some(&mut state.image),
             _ => None,
         }
     }
@@ -627,9 +630,11 @@ impl Objects {
                 ObjectState::Scroll2(state) => state
                     .control
                     .apply(&initialization.attributes, bank as u32)?,
-                ObjectState::SavePanel(state) => {
-                    state.plane.apply(&initialization.attributes, bank as u32)
-                }
+                ObjectState::SavePanel(state) => state.image.apply(
+                    &initialization.attributes,
+                    bank as u32,
+                    &mut transform_name,
+                )?,
                 ObjectState::Sound(state) => {
                     let before = [state.sound_type, state.channel];
                     let result = state.apply(&initialization.attributes);

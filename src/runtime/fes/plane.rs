@@ -91,6 +91,9 @@ impl<F: ObjectFactory> Store<'_, F> {
         if matches!(object.state, ObjectState::String(_)) {
             return self.update_fes_string(owner, objects, handle);
         }
+        if matches!(object.state, ObjectState::SavePanel(_)) {
+            return self.update_fes_panel(owner, objects, handle, image);
+        }
         if matches!(object.state, ObjectState::Draw(_)) {
             return self.update_fes_draw(owner, objects, handle);
         }

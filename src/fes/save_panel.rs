@@ -1,13 +1,10 @@
 mod content;
 pub use content::PanelContent;
 
-/// `SAVEPANEL` 的平面、单元定义与槽位数据。
+/// `SAVEPANEL` 的图像属性、单元定义与槽位数据。
 #[derive(Clone, Debug, PartialEq)]
 pub struct SavePanelState {
-    /// 面板自身的绘制平面。
-    pub plane: crate::fes::CPlaneState,
-    /// 面板底图与各槽位图像的资源引用。
-    pub images: Vec<crate::fes::ImageReference>,
+    pub image: crate::fes::ImageState,
     /// 启用的单元编号，按有符号值排序且不重复。
     pub enabled_ids: std::collections::BTreeSet<i32>,
     /// 单元内容按编号保存，与启用选择分别更新。
@@ -29,8 +26,7 @@ pub struct SavePanelState {
 impl Default for SavePanelState {
     fn default() -> Self {
         Self {
-            plane: Default::default(),
-            images: Vec::new(),
+            image: Default::default(),
             enabled_ids: Default::default(),
             cells: Default::default(),
             contents: Default::default(),
@@ -75,6 +71,6 @@ impl PanelCell {
 
 impl SavePanelState {
     pub fn display(&self) -> i32 {
-        self.plane.display()
+        self.image.base.display
     }
 }

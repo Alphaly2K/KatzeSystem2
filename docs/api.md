@@ -542,7 +542,7 @@ FES `strvar index text [integer ...]` 已接入共享 `expression::State::string
 
 `Services::dispatch_control_event(scene, target, event, budget)` 接收滑动控件的同步通知，默认委托普通事件入口。运行时在媒体命令返回前完成事件脚本，并保留回调对当前场景的修改；`decode` 等待中的主流程位置及调用栈在处理器结束后恢复。该入口不会自动刷新媒体，也不开放事件处理器内部再次分派事件。公开 `Runtime::dispatch_fes_event` 继续要求当前推进已经完成。
 
-`runtime::fes::Objects::new(handles)` 为一份 FES 建立独立的对象存储，并登记 `_TOPOBJ_` 银行 0 的根 BASE 对象；与 Runtime 组合时传入 `runtime.host().handle_allocator()`。FES 对象标识来自共享不透明编号源，与任务编号分别使用。`define(&definition)` 接受有效的非零银行数，返回此次新创建的全部标识；目前支持 BASE、CIMAGE、IMAGE、BUTTON、CPLANE、PLANE、SLIDER、SCROLL2、SOUND 和 DRAW 的对象状态，其他类型返回诊断。SLIDER 已接入状态、数值命令、settbl 帧表、运动、关联导航及媒体准备／更新，父级输入通知及媒体更新中的同步回调均执行事件脚本。名称限定为 1～31 个非零 ASCII 字节。`get`／`get_mut` 查询实际对象及 `ObjectState`，`len` 包括根及重复声明的未绑定对象。`MediaRecord::kind()` 保存声明类型，`task_id()` 查询 BUTTON／SLIDER／SCROLL2／DRAW 下层编号；`Object::slider_task_ids()` 查询全部声明创建的滑块任务。`update_order()` 按声明及银行顺序查询当前绑定，保留重复记录并跳过缺失银行；新声明占据银行空洞后，旧记录也会解析到新绑定。
+`runtime::fes::Objects::new(handles)` 为一份 FES 建立独立的对象存储，并登记 `_TOPOBJ_` 银行 0 的根 BASE 对象；与 Runtime 组合时传入 `runtime.host().handle_allocator()`。FES 对象标识来自共享不透明编号源，与任务编号分别使用。`define(&definition)` 接受有效的非零银行数，返回此次新创建的全部标识；目前支持 BASE、CIMAGE、IMAGE、BUTTON、CPLANE、PLANE、SLIDER、SCROLL2、SOUND、SAVEPANEL 和 DRAW 的对象状态，其他类型返回诊断。SLIDER 已接入状态、数值命令、settbl 帧表、运动、关联导航及媒体准备／更新，父级输入通知及媒体更新中的同步回调均执行事件脚本。名称限定为 1～31 个非零 ASCII 字节。`get`／`get_mut` 查询实际对象及 `ObjectState`，`len` 包括根及重复声明的未绑定对象。`MediaRecord::kind()` 保存声明类型，`task_id()` 查询 BUTTON／SLIDER／SCROLL2／DRAW 下层编号；`Object::slider_task_ids()` 查询全部声明创建的滑块任务。`update_order()` 按声明及银行顺序查询当前绑定，保留重复记录并跳过缺失银行；新声明占据银行空洞后，旧记录也会解析到新绑定。
 
 `graphics::FadeObject` 由 `GraphicsFactory` 按类型 27 创建，接收 281 准备、263 启动、264／267 停止、265 播放状态查询及 266 来源替换。图像句柄由调用者持有，任务将过渡像素提交到 Runtime 的画布；`Host::effect_speed()` 缺省返回零，Runtime 从全局效果配置读取。参数记录、坐标、透明 RGB、时间和返回槽规则见[画布淡入淡出任务](graphics.md#画布淡入淡出任务)。FES `draw` 已连接临时 DRAW、来源截图、共享列表提交开关及完成清理；`runtime::fes::DrawState` 提供持续时间和媒体阶段查询。
 
@@ -563,6 +563,8 @@ FES `blend` 已连接 SOUND、CIMAGE／IMAGE／BUTTON、CPLANE／PLANE 和 SLIDE
 `fes::StringState::new(encoding, &message_defaults, measurement_parameter)` 创建文字配置核心，复用 PLANE 属性并保存两种编码的消息配置。`apply_layout` 接受数值求值回调，`set_font` 接受 UTF-16 名称与后端 DWORD，`refresh_font_defaults` 更新仍启用继承的字段；只读查询提供配置字节、恢复颜色、继承标记和重配标记，`reset_layout` 恢复布局及全局字体设置。运行时 `ObjectState::String` 已组合该配置，接入下层消息任务和普通文字播放。参数、缺省值与基线更新行为见 [FES 文字对象](fes-text.md)。
 
 `Runtime::update_fes_object(owner, &mut objects, handle)` 显式推进一个对象。BASE 无媒体操作，CPLANE／PLANE 使用实际对象工厂和命令路由创建／更新直属二维任务，`Object::task_id()` 返回可选编号。CIMAGE 与 IMAGE 通过共享类型 15 列表更新来源与登记，`Object::image_handle()` 查询可选来源包装；IMAGE 支持按当前映射帧装载普通 HG-3 文件及多文件合成，缺失文件或帧清空像素绑定。非零 PATHMODE 使用完整直接路径，跳过类别补全；IDN=−1 的原始来源与像素独立保存，具体契约见下文。调用者按 FES 对象更新顺序推进，并将 objects 与 owner 保持同一生命周期，下层任务由此入口维护。CPLANE 在创建下层任务前读取 SIZE2，PLANE 在创建后读取；POS2 在属性更新时消费；读取共用 Runtime 的资源服务，按 image 类别补全名称，支持 HG-3 元数据。VIEWPORT 引用连接二维命令 89，目标缺失保留旧裁剪；VIEWPORT 自身只更新元数据和失效标记。此入口尚不执行运动和 FES 主体调度。
+
+SAVEPANEL 通过 `fes::SavePanelState::image` 复用 IMAGE 属性及共享列表，按启用编号组合已应用内容。`cells` 保存定义，`contents` 保存独立文字、图像、数值及内容记录；槽位装载、来源与绘制约束见[存档面板](fes.md#存档面板选择)。原 `plane` 与未使用的 `images` 字段已移除，调用方改用 `image.base` 和 `image` 来源。
 
 `Objects::preloaded_image(full_name)` 以补全后的完整名称查询当前场景的图像原始字节，区分大小写并在首个零字节结束。返回 `None` 表示未缓存，`Some(&[])` 表示成功读取的空文件。预加载错误保留已完成行和当前行的补全名称，继续调用准备入口即可重试；期间 `Scene::is_pending()` 为 true，禁止通过 `objects_mut()` 修改。直接调用 `update_fes_scene` 也会在进入 START 前完成预加载。缓存范围及使用规则见[图像预加载](graphics.md#fes-图像预加载)。
 

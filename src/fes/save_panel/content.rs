@@ -44,7 +44,7 @@ impl PanelContent {
         self.put(0x40, value as u32);
     }
 
-    fn word(&self, offset: usize) -> u32 {
+    pub(crate) fn word(&self, offset: usize) -> u32 {
         u32::from_le_bytes(self.data[offset..offset + 4].try_into().unwrap())
     }
 
@@ -147,7 +147,7 @@ impl SavePanelState {
                 _ => (),
             }
         }
-        self.plane.dirty = true;
+        self.image.base.updates.request_rebuild();
         Ok(())
     }
 

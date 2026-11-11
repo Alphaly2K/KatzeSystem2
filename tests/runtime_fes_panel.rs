@@ -27,11 +27,32 @@ fn setup(budget: usize, source: &[u8]) -> (Runtime<GraphicsFactory<Reject>>, Sce
         GraphicsFactory { fallback: Reject },
     );
     runtime.set_budget(budget, 10000);
-    let scene = Scene::new(
+    runtime.host_mut().surface_size = [8, 6];
+    runtime.drawing_mut().enabled = true;
+    runtime.drawing_mut().active = true;
+    runtime.drawing_mut().target =
+        Some(katze_system2::graphics::RenderTarget::new([8, 6]).unwrap());
+    let list = runtime.create(0, kind::IMAGE_LIST, b"list", b"").unwrap();
+    runtime
+        .dispatch_command(
+            0,
+            katze_system2::task::Command {
+                target: list,
+                sender: 0,
+                code: 285,
+                data: [8, 6, 0],
+            },
+        )
+        .unwrap();
+    let mut scene = Scene::new(
         Program::from_text(source).unwrap(),
         runtime.host().handle_allocator(),
     )
     .unwrap();
+    scene
+        .objects_mut()
+        .unwrap()
+        .set_image_list(list, katze_system2::graphics::Rect::from_xywh(0, 0, 8, 6));
     (runtime, scene)
 }
 
@@ -55,9 +76,7 @@ fn word(cell: &katze_system2::fes::PanelCell, offset: usize) -> u32 {
     u32::from_le_bytes(cell.record()[offset..offset + 4].try_into().unwrap())
 }
 
-#[test]
-fn panel_images_use_frame_zero_and_keep_pixels_when_a_replacement_cannot_load() {
-    use katze_system2::save::DataContainer;
+fn pixel_file(id: u32) -> Vec<u8> {
     use std::io::Write;
 
     let compress = |bytes: &[u8]| {
@@ -68,7 +87,7 @@ fn panel_images_use_frame_zero_and_keep_pixels_when_a_replacement_cannot_load() 
     let pixels = compress(&[6, 42, 27, 64]);
     let control = compress(&[9, 1]);
     let mut image = b"HG-3".to_vec();
-    for value in [12u32, 0x300, 0, 7] {
+    for value in [12u32, 0x300, 0, id] {
         image.extend(value.to_le_bytes());
     }
     image.extend(b"stdinfo\0");
@@ -90,6 +109,240 @@ fn panel_images_use_frame_zero_and_keep_pixels_when_a_replacement_cannot_load() 
     }
     image.extend(pixels);
     image.extend(control);
+
+    image
+}
+
+#[test]
+fn panel_text_wraps_using_character_advances_and_retries_a_failed_font() {
+    use katze_system2::{
+        kcs::ResourceServices,
+        message::{FontRequest, FontServices, GlyphMask},
+        resource::ResourceMode,
+        save::DataContainer,
+    };
+    use std::{cell::RefCell, rc::Rc};
+
+    struct Files(Vec<u8>);
+    impl ResourceServices for Files {
+        fn resolve(&mut self, _: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+            Ok(name.to_vec())
+        }
+        fn read(&mut self, _: &[u8], _: ResourceMode) -> Result<Option<Vec<u8>>> {
+            Ok(Some(self.0.clone()))
+        }
+    }
+    struct Fonts(Rc<RefCell<Vec<char>>>);
+    impl FontServices for Fonts {
+        fn validate(&mut self, request: &FontRequest) -> Result<()> {
+            assert_eq!(request.name, "Fixture".encode_utf16().collect::<Vec<_>>());
+            Ok(())
+        }
+        fn measure(&mut self, _: &FontRequest, _: char, _: u32) -> Result<i32> {
+            unreachable!()
+        }
+        fn rasterize(&mut self, _: &FontRequest, character: char, size: u32) -> Result<GlyphMask> {
+            assert_eq!(size, 4);
+            let mut calls = self.0.borrow_mut();
+            calls.push(character);
+            if calls.len() == 2 {
+                return Err(Error::new(0, "合成字形失败"));
+            }
+            GlyphMask::new(
+                [1; 2],
+                [0; 2],
+                if character == 'B' { 0 } else { 3 },
+                vec![64],
+            )
+        }
+    }
+    let (mut runtime, mut scene) = setup(4096, b"#DEFINE\nSAVEPANEL panel\n#START\npanel ptype STR 0 88 4 1 0x123456 0 0 2 1 Fixture\npanel dispid 1 0\nwait 999\n");
+    let mut file = pixel_file(0);
+    file[48..52].copy_from_slice(&(-2i32).to_le_bytes());
+    file[52..56].copy_from_slice(&(-2i32).to_le_bytes());
+    file[56..60].copy_from_slice(&8u32.to_le_bytes());
+    file[60..64].copy_from_slice(&6u32.to_le_bytes());
+    runtime.set_resources(Files(file));
+    let calls = Rc::new(RefCell::new(Vec::new()));
+    runtime.set_fonts(Fonts(calls.clone()));
+    assert!(runtime.update_fes_scene(0, &mut scene, 0).unwrap());
+    let objects = scene.objects_mut().unwrap();
+    objects
+        .initialize(
+            &katze_system2::fes::ObjectInitialization {
+                target: katze_system2::fes::ObjectReference {
+                    name: "panel".into(),
+                    bank: 0,
+                },
+                attributes: katze_system2::fes::ObjectAttributes {
+                    file: Some(b"cells".to_vec()),
+                    ..Default::default()
+                },
+            },
+            |name| Ok(name.to_vec()),
+        )
+        .unwrap();
+    let handle = objects.lookup("panel", 0).unwrap();
+    let ObjectState::SavePanel(panel) = &mut objects.get_mut(handle).unwrap().state else {
+        unreachable!()
+    };
+    let mut data = DataContainer::new(0);
+    data.append(88, b"ABCDE\0").unwrap();
+    panel.data = Some(data);
+    panel.apply_data().unwrap();
+    assert!(runtime.update_fes_object(0, objects, handle).is_err());
+    let wrapper = objects.get(handle).unwrap().image_handle().unwrap();
+    assert_eq!(runtime.images().pixel_handle(wrapper).unwrap(), 0);
+    runtime.update_fes_object(0, objects, handle).unwrap();
+    let image = runtime.images().get(wrapper).unwrap();
+    for y in 0..6 {
+        for x in 0..8 {
+            assert_eq!(
+                image.surface().pixel(x, y).unwrap() >> 24,
+                if x == 0 && [0, 3].contains(&y) {
+                    255
+                } else {
+                    0
+                },
+                "({x}, {y})"
+            );
+        }
+    }
+    assert_eq!(image.surface().pixel(0, 0), Some(0xff123456));
+    assert_eq!(*calls.borrow(), ['A', 'B', 'A', 'B']);
+    runtime.update_fes_object(0, objects, handle).unwrap();
+    assert_eq!(*calls.borrow(), ['A', 'B', 'A', 'B']);
+}
+
+#[test]
+fn panel_images_compose_enabled_cells_in_the_shared_list_and_refresh_numbers() {
+    use katze_system2::{kcs::ResourceServices, resource::ResourceMode, save::DataContainer};
+
+    struct Files(Vec<u8>);
+    impl ResourceServices for Files {
+        fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+            assert_eq!(category, b"image");
+            Ok(name.to_vec())
+        }
+        fn read(&mut self, _: &[u8], _: ResourceMode) -> Result<Option<Vec<u8>>> {
+            Ok(Some(self.0.clone()))
+        }
+    }
+    let mut file = b"HG-3".to_vec();
+    file.extend(12u32.to_le_bytes());
+    file.extend(0x300u32.to_le_bytes());
+    for id in 0..4 {
+        let mut frame = pixel_file(id).split_off(12);
+        let next = if id == 3 { 0 } else { frame.len() as u32 };
+        frame[..4].copy_from_slice(&next.to_le_bytes());
+        for (at, value) in [
+            (36, [0, 2, 3, 4][id as usize]),
+            (40, [1, 0, 1, 0][id as usize]),
+            (44, 8u32),
+            (48, 6),
+        ] {
+            frame[at..at + 4].copy_from_slice(&value.to_le_bytes());
+        }
+        file.extend(frame);
+    }
+    let (mut runtime, mut scene) = setup(4096, b"#DEFINE\nSAVEPANEL panel\nIMAGE source\n#START\npanel ptype NORM 0\npanel ptype SIMAGE 1 77\npanel ptype NUM_O2 2 source[0] FLAG.0\npanel ptype NORM 3\npanel dispid 1 0 1 2\nwait 999\n#_FES_SLEEP_\npanel setnum 2 1\npanel dispid 0 0\n#_FES_WAKE_\npanel dispid 1 -1\n");
+    runtime.set_resources(Files(file));
+    assert!(runtime.update_fes_scene(0, &mut scene, 0).unwrap());
+    let objects = scene.objects_mut().unwrap();
+    for name in ["panel", "source"] {
+        objects
+            .initialize(
+                &katze_system2::fes::ObjectInitialization {
+                    target: katze_system2::fes::ObjectReference {
+                        name: name.into(),
+                        bank: 0,
+                    },
+                    attributes: katze_system2::fes::ObjectAttributes {
+                        file: Some(b"cells".to_vec()),
+                        priority: Some(if name == "panel" { 5 } else { 6 }),
+                        display: Some(1),
+                        ..Default::default()
+                    },
+                },
+                |name| Ok(name.to_vec()),
+            )
+            .unwrap();
+    }
+    let handle = objects.lookup("panel", 0).unwrap();
+    let ObjectState::SavePanel(panel) = &mut objects.get_mut(handle).unwrap().state else {
+        unreachable!()
+    };
+    let mut data = DataContainer::new(0);
+    data.append(77, &pixel_file(0)).unwrap();
+    panel.data = Some(data);
+    panel.flags[0] = 3;
+    panel.apply_data().unwrap();
+    runtime.update_fes_object(0, objects, handle).unwrap();
+    let wrapper = objects.get(handle).unwrap().image_handle().unwrap();
+    let image = runtime.images().get(wrapper).unwrap();
+    assert_eq!(image.info().size, [8, 6]);
+    for x in 0..8 {
+        assert_eq!(
+            image.surface().pixel(x, 1).unwrap() >> 24,
+            if [0, 7].contains(&x) { 255 } else { 0 },
+            "x={x}"
+        );
+    }
+    assert_eq!(image.surface().pixel(2, 0).unwrap() >> 24, 255);
+    let list = objects.image_list().unwrap();
+    runtime
+        .dispatch_command(
+            0,
+            katze_system2::task::Command {
+                target: list,
+                sender: 0,
+                code: 294,
+                data: [0; 3],
+            },
+        )
+        .map(|count| assert_eq!(count, 1))
+        .unwrap();
+    assert!(
+        runtime
+            .dispatch_fes_system_block(0, &mut scene, "_FES_SLEEP_")
+            .unwrap()
+    );
+    runtime
+        .update_fes_object(0, scene.objects_mut().unwrap(), handle)
+        .unwrap();
+    let image = runtime.images().get(wrapper).unwrap();
+    assert_eq!(image.surface().pixel(0, 1).unwrap() >> 24, 0);
+    assert_eq!(image.surface().pixel(5, 1).unwrap() >> 24, 255);
+    assert_eq!(image.surface().pixel(7, 1).unwrap() >> 24, 0);
+    assert!(
+        runtime
+            .dispatch_fes_system_block(0, &mut scene, "_FES_WAKE_")
+            .unwrap()
+    );
+    runtime
+        .update_fes_object(0, scene.objects_mut().unwrap(), handle)
+        .unwrap();
+    assert!(
+        runtime
+            .images()
+            .get(wrapper)
+            .unwrap()
+            .surface()
+            .pixels()
+            .iter()
+            .all(|&b| b == 0)
+    );
+    runtime
+        .remove_fes_object(0, scene.objects_mut().unwrap(), handle)
+        .unwrap();
+    assert!(runtime.images().get(wrapper).is_err());
+}
+
+#[test]
+fn panel_images_use_frame_zero_and_keep_pixels_when_a_replacement_cannot_load() {
+    use katze_system2::save::DataContainer;
+
+    let mut image = pixel_file(7);
 
     let (mut runtime, mut scene) = setup(
         4096,

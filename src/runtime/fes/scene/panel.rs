@@ -56,6 +56,7 @@ impl<F: ObjectFactory> Store<'_, F> {
             if let Some(content) = panel.contents.get_mut(&id) {
                 content.set_number(value);
             }
+            panel.image.base.updates.request_rebuild();
             scene.objects.invalidate(handle)?;
         }
         Ok(())
@@ -284,6 +285,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                             panel.enabled_ids.remove(&id);
                         }
                     }
+                    panel.image.base.updates.request_rebuild();
                     scene.objects.invalidate(handle)?;
                 }
             }
