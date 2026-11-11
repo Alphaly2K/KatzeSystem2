@@ -1,14 +1,19 @@
-//! CSS 文件与带编号的数据记录；文件位置和读取由外层存档服务提供。
+//! CSS 文件与带编号的数据记录；文件位置和读写由外层存档服务提供。
 
 use crate::{Error, Result, read};
 use std::io::Write;
 
 const BLOCK: usize = 0x80000;
 
-/// 按任务的存档目录读取 CSS 文件及查询文件修改时间，名称使用 CP932 字节。
+/// 按任务的存档目录读写 CSS 文件及查询文件修改时间，名称使用 CP932 字节。
 /// `None` 表示文件不存在或无法打开；未接入所需服务时返回诊断。
 pub trait SaveServices {
     fn read(&mut self, task_id: u32, name: &[u8]) -> Result<Option<Vec<u8>>>;
+
+    /// 写入完整 CSS 文件，覆盖已有内容；无法打开或完成写入时返回 false。
+    fn write(&mut self, _task_id: u32, _name: &[u8], _bytes: &[u8]) -> Result<bool> {
+        Err(Error::new(0, "存档写入服务尚未接入"))
+    }
 
     /// 查询同一目录下文件的最后修改时间，使用自 1601-01-01 UTC 起的 100 ns 计数。
     /// None 表示文件无法打开；未接入元数据查询时返回诊断。
@@ -80,16 +85,14 @@ impl DataContainer {
         self.tag
     }
 
-    /// 按逻辑容量写出 CSS 文件：四个头部 DWORD 后接 zlib 流。
-    /// 未使用容量以零写出，因此声明用量之外已经解压出的记录仍可再次加载。
+    /// 按声明用量写出 CSS 文件：四个头部 DWORD 后接 zlib 流。
     pub fn to_css(&self) -> Result<Vec<u8>> {
         if self.used as usize > self.capacity || self.bytes.len() < self.capacity {
             return Err(Error::new(0, "CSS 声明用量超过逻辑容量"));
         }
-        let mut encoder =
-            flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
         encoder
-            .write_all(&self.bytes[..self.capacity])
+            .write_all(&self.bytes[..self.used as usize])
             .map_err(|error| Error::new(0, format!("Zlib 压缩失败：{error}")))?;
         let compressed = encoder
             .finish()

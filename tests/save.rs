@@ -80,7 +80,7 @@ fn css_retains_decompressed_records_outside_declared_usage_and_ignores_zlib_erro
 }
 
 #[test]
-fn serialization_keeps_records_beyond_declared_usage_and_restores_the_tag() {
+fn serialization_writes_only_declared_usage_and_restores_the_tag() {
     let mut data = DataContainer::new(0x1234_5678);
     data.append(1, b"alpha").unwrap();
     data.append(2, b"").unwrap();
@@ -115,7 +115,8 @@ fn serialization_keeps_records_beyond_declared_usage_and_restores_the_tag() {
         .unwrap()
         .unwrap();
     assert_eq!(reloaded.used_len(), 0);
-    assert_eq!(reloaded.record(7).unwrap(), Some(b"abc".as_slice()));
+    assert_eq!(beyond.record(7).unwrap(), Some(b"abc".as_slice()));
+    assert_eq!(reloaded.record(7).unwrap(), None);
 
     let empty = DataContainer::new(0);
     let reloaded = DataContainer::from_css(&empty.to_css().unwrap())

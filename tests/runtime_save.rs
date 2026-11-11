@@ -203,7 +203,7 @@ fn data_natives_preserve_null_paths_and_validate_vm_spans_handles_and_services()
             vm,
         )
     }
-    for index in [244, 248, 254, 389] {
+    for index in [244, 245, 248, 254, 389] {
         assert_eq!(
             call(&mut host, &mut vm, index, &[0]).unwrap(),
             NativeReturn::Value(0)
@@ -242,6 +242,20 @@ fn data_natives_preserve_null_paths_and_validate_vm_spans_handles_and_services()
     assert_eq!(vm.read(8, 4).unwrap(), b"zer\0");
     assert!(call(&mut host, &mut vm, 254, &[handle, 7, 63, 4]).is_err());
     assert!(call(&mut host, &mut vm, 244, &[handle, 7, 4, 63]).is_err());
+    assert_eq!(
+        call(&mut host, &mut vm, 245, &[handle, 0])
+            .unwrap_err()
+            .message,
+        "宿主未配置存档写入服务"
+    );
+    host.save_services = Some(Box::new(Saves(Requests::default())));
+    assert_eq!(
+        call(&mut host, &mut vm, 245, &[handle, 0])
+            .unwrap_err()
+            .message,
+        "存档写入服务尚未接入"
+    );
+    host.save_services = None;
     call(&mut host, &mut vm, 246, &[handle]).unwrap();
     assert!(call(&mut host, &mut vm, 248, &[handle]).is_err());
     vm.write(0, b"slot.css\0").unwrap();
@@ -249,6 +263,96 @@ fn data_natives_preserve_null_paths_and_validate_vm_spans_handles_and_services()
         call(&mut host, &mut vm, 247, &[0]).unwrap_err().message,
         "宿主未配置存档读取服务"
     );
+}
+
+#[test]
+fn container_writes_report_failure_then_reload_the_saved_records_without_consuming_the_source() {
+    #[derive(Default)]
+    struct Files {
+        writes: Vec<(u32, Vec<u8>, Vec<u8>)>,
+        saved: Option<Vec<u8>>,
+    }
+    struct MemoryFiles(Rc<RefCell<Files>>);
+    impl SaveServices for MemoryFiles {
+        fn read(&mut self, _: u32, name: &[u8]) -> Result<Option<Vec<u8>>> {
+            assert_eq!(name, b"slot-7.css");
+            Ok(self.0.borrow().saved.clone())
+        }
+        fn write(&mut self, task: u32, name: &[u8], bytes: &[u8]) -> Result<bool> {
+            let mut files = self.0.borrow_mut();
+            files.writes.push((task, name.to_vec(), bytes.to_vec()));
+            if files.writes.len() == 1 {
+                return Ok(false);
+            }
+            files.saved = Some(bytes.to_vec());
+            Ok(true)
+        }
+    }
+    struct WritePrograms;
+    impl ProgramLoader for WritePrograms {
+        fn load(&mut self, _: &[u8]) -> Result<Option<Program>> {
+            let mut code = Vec::new();
+            push(&mut code, 0xdead_beef);
+            push(&mut code, 0xfedc_ba98);
+            native(&mut code, 238, 1);
+            store(&mut code, 0);
+            load(&mut code, 0);
+            for value in [9, 5, 96] {
+                push(&mut code, value);
+            }
+            native(&mut code, 244, 4);
+            store(&mut code, 4);
+            for output in [8, 12] {
+                load(&mut code, 0);
+                push(&mut code, 64);
+                native(&mut code, 245, 2);
+                store(&mut code, output);
+            }
+            push(&mut code, 64);
+            native(&mut code, 247, 1);
+            store(&mut code, 16);
+            ins(&mut code, 0x3b, &[]);
+            let mut data = vec![0; 128];
+            data[48..52].copy_from_slice(&7u32.to_le_bytes());
+            data[64..81].copy_from_slice(b"slot-%d[G48].css\0");
+            data[96..101].copy_from_slice(b"hello");
+            Ok(Some(Program::from_code(&code, data, 128)?))
+        }
+    }
+    for budget in [1, 4096] {
+        let files = Rc::new(RefCell::new(Files::default()));
+        let mut runtime = Runtime::new(
+            0,
+            kind::ROOT,
+            Box::new(BaseObject::new()),
+            State::new(0),
+            KcsFactory::new(WritePrograms),
+        );
+        runtime.set_budget(budget, 1 << 20);
+        runtime.set_save_services(MemoryFiles(files.clone()));
+        let task = runtime.create(0, kind::ORDINARY, b"write", b"").unwrap();
+        runtime.update(0, 1).unwrap();
+        let vm = runtime.object(task).unwrap().interpreter().unwrap();
+        let values: Vec<_> = vm
+            .read(0, 20)
+            .unwrap()
+            .chunks_exact(4)
+            .map(|bytes| u32::from_le_bytes(bytes.try_into().unwrap()))
+            .collect();
+        assert_eq!(&values[1..4], &[1, 0, 1]);
+        assert_ne!(values[0], values[4]);
+        for handle in [values[0], values[4]] {
+            let data = runtime.host().data_container(handle).unwrap();
+            assert_eq!(data.tag(), 0xfedc_ba98);
+            assert_eq!(data.record(9).unwrap(), Some(b"hello".as_slice()));
+        }
+        assert_eq!(vm.stack_bytes(), 0xdead_beefu32.to_le_bytes());
+        let files = files.borrow();
+        assert_eq!(files.writes.len(), 2);
+        assert_eq!(files.writes[0], files.writes[1]);
+        assert_eq!(files.writes[0].0, task);
+        assert_eq!(files.writes[0].1, b"slot-7.css");
+    }
 }
 
 #[test]

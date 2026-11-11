@@ -424,7 +424,7 @@ pub(crate) fn call_native(
         }
         return Ok(NativeReturn::Continue);
     }
-    if matches!(index, 238 | 242 | 244 | 246..=248 | 252 | 254 | 290 | 389 | 469 | 833..=836) {
+    if matches!(index, 238 | 242 | 244..=248 | 252 | 254 | 290 | 389 | 469 | 833..=836) {
         return super::data::call(host, index, arguments, vm);
     }
     if matches!(index, 900 | 901) {

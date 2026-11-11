@@ -384,6 +384,15 @@ impl SaveServices for Saves {
         Ok(std::fs::read(std::path::Path::new(&self.root).join(name)).ok())
     }
 
+    fn write(&mut self, _: u32, name: &[u8], bytes: &[u8]) -> Result<bool> {
+        let name = encoding_rs::SHIFT_JIS
+            .decode_without_bom_handling_and_without_replacement(name)
+            .ok_or_else(|| Error::new(0, "存档名称包含无效 CP932"))?
+            .replace('\\', "/");
+        let _ = std::fs::create_dir_all(&self.root);
+        Ok(std::fs::write(std::path::Path::new(&self.root).join(name), bytes).is_ok())
+    }
+
     fn modified_time(&mut self, _: u32, name: &[u8]) -> Result<Option<u64>> {
         let name = encoding_rs::SHIFT_JIS
             .decode_without_bom_handling_and_without_replacement(name)

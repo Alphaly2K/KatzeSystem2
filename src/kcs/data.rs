@@ -10,7 +10,7 @@ pub(super) fn call(
 ) -> Result<NativeReturn> {
     let count = match index {
         244 | 254 | 835 => 4,
-        469 => 2,
+        245 | 469 => 2,
         242 | 836 => 3,
         252 => 2,
         _ => 1,
@@ -19,7 +19,7 @@ pub(super) fn call(
         .get(..4)
         .map(|a| u32::from_le_bytes(a.try_into().unwrap()))
         .ok_or_else(|| Error::new(vm.pc, "KCS native 参数字节数不匹配"))?;
-    let null = first == 0 && matches!(index, 244 | 252 | 254 | 469 | 835 | 836);
+    let null = first == 0 && matches!(index, 244 | 245 | 252 | 254 | 469 | 835 | 836);
     if arguments.len() != count * 4 && !(null && arguments.len() == 4) {
         return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
     }
@@ -82,6 +82,16 @@ pub(super) fn call(
         } else {
             NativeReturn::Value(0)
         });
+    }
+    if index == 245 {
+        let name = strings::format(vm, read::u32_at(arguments, 4)?, 0)?;
+        let bytes = host.data_container(first)?.to_css()?;
+        let saved = host
+            .save_services
+            .as_mut()
+            .ok_or_else(|| Error::new(vm.pc, "宿主未配置存档写入服务"))?
+            .write(host.task_id, &name, &bytes)?;
+        return Ok(NativeReturn::Value(u32::from(saved)));
     }
     let args: Vec<_> = arguments
         .chunks_exact(4)
