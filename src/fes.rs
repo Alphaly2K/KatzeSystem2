@@ -30,7 +30,7 @@ pub use objects::ObjectDefinition;
 pub use params::parse as parameters;
 pub use plane::{CPlaneState, PlaneState};
 pub use resources::ImageReference;
-pub use save_panel::{PanelCell, SavePanelState};
+pub use save_panel::{PanelCell, PanelContent, SavePanelState};
 pub use scroll2::Scroll2State;
 pub use slider::{SliderState, SliderUpdates};
 pub use sound::SoundState;

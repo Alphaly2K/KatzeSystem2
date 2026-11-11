@@ -56,6 +56,98 @@ fn word(cell: &katze_system2::fes::PanelCell, offset: usize) -> u32 {
 }
 
 #[test]
+fn panel_images_use_frame_zero_and_keep_pixels_when_a_replacement_cannot_load() {
+    use katze_system2::save::DataContainer;
+    use std::io::Write;
+
+    let compress = |bytes: &[u8]| {
+        let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), Default::default());
+        encoder.write_all(bytes).unwrap();
+        encoder.finish().unwrap()
+    };
+    let pixels = compress(&[6, 42, 27, 64]);
+    let control = compress(&[9, 1]);
+    let mut image = b"HG-3".to_vec();
+    for value in [12u32, 0x300, 0, 7] {
+        image.extend(value.to_le_bytes());
+    }
+    image.extend(b"stdinfo\0");
+    for value in [56u32, 40, 1, 1, 32, 0, 0, 1, 1, 0, 0, 0] {
+        image.extend(value.to_le_bytes());
+    }
+    image.extend(b"img0000\0");
+    for value in [
+        0,
+        (24 + pixels.len() + control.len()) as u32,
+        0,
+        1,
+        pixels.len() as u32,
+        4,
+        control.len() as u32,
+        2,
+    ] {
+        image.extend(value.to_le_bytes());
+    }
+    image.extend(pixels);
+    image.extend(control);
+
+    let (mut runtime, mut scene) = setup(
+        4096,
+        b"#DEFINE\nSAVEPANEL panel\n#START\npanel ptype SIMAGE 7 77 2 3\nwait 999\n#_FES_SLEEP_\npanel ptype SIMAGE 7 88 5 6\n#_FES_WAKE_\npanel ptype IMAGE 7\n",
+    );
+    assert!(runtime.update_fes_scene(0, &mut scene, 0).unwrap());
+    fn panel(scene: &mut Scene) -> &mut katze_system2::fes::SavePanelState {
+        let handle = scene.objects().lookup("panel", 0).unwrap();
+        let ObjectState::SavePanel(panel) =
+            &mut scene.objects_mut().unwrap().get_mut(handle).unwrap().state
+        else {
+            unreachable!()
+        };
+        panel
+    }
+    let mut data = DataContainer::new(0);
+    data.append(77, &image).unwrap();
+    panel(&mut scene).data = Some(data);
+    panel(&mut scene).apply_data().unwrap();
+    assert!(panel(&mut scene).contents.is_empty());
+    image[16..20].copy_from_slice(&0u32.to_le_bytes());
+    let mut data = DataContainer::new(0);
+    data.append(77, &image).unwrap();
+    panel(&mut scene).data = Some(data);
+    panel(&mut scene).apply_data().unwrap();
+    let content = panel(&mut scene).contents[&7].clone();
+    assert_eq!(
+        content.image().unwrap().surface().pixel(0, 0),
+        Some(0xff123456)
+    );
+    assert_eq!(&content.record()[0xb4..0xbc], &[1, 0, 0, 0, 2, 0, 0, 0]);
+
+    assert!(
+        runtime
+            .dispatch_fes_system_block(0, &mut scene, "_FES_SLEEP_")
+            .unwrap()
+    );
+    let mut data = DataContainer::new(0);
+    data.append(88, b"invalid image").unwrap();
+    panel(&mut scene).data = Some(data);
+    panel(&mut scene).apply_data().unwrap();
+    let retained = panel(&mut scene).contents[&7].clone();
+    assert_eq!(retained.image(), content.image());
+    assert_eq!(&retained.record()[0xb4..0xbc], &[4, 0, 0, 0, 5, 0, 0, 0]);
+    panel(&mut scene).data = None;
+    panel(&mut scene).apply_data().unwrap();
+    assert_eq!(panel(&mut scene).contents[&7], retained);
+    assert!(
+        runtime
+            .dispatch_fes_system_block(0, &mut scene, "_FES_WAKE_")
+            .unwrap()
+    );
+    panel(&mut scene).apply_data().unwrap();
+    assert!(panel(&mut scene).contents[&7].image().is_none());
+    assert_eq!(panel(&mut scene).contents[&7].kind(), 1);
+}
+
+#[test]
 fn panel_slots_clip_flags_and_preserve_previous_data_after_missing_or_invalid_files() {
     use katze_system2::save::{DataContainer, SaveServices};
     use std::{cell::RefCell, rc::Rc};
@@ -96,11 +188,12 @@ fn panel_slots_clip_flags_and_preserve_previous_data_after_missing_or_invalid_fi
         .flat_map(i32::to_le_bytes)
         .collect();
     data.append(77, &values).unwrap();
+    data.append(88, b"SAVED TEXT\0").unwrap();
     let regular = data.to_css().unwrap();
     let mut data = DataContainer::new(8);
     data.append(77, &[88, 0, 0, 0, 255]).unwrap();
     let short = data.to_css().unwrap();
-    let script = b"#DEFINE\nSAVEPANEL panel[2]\n#START\npanel dispid 1 7\npanel ptype NORM 7\npanel setsave ($6+=1) ($6+=1) ($6+=1)\npanel getflag ($6+=1) ($6+=1)\npanel[1] setsave ($0+=1)+9 77 1022\npanel[1] getflag 1022 3\npanel[0] getflag 1022 4\npanel[1] getflag 1024 5\npanel[1] getflag ($1+=1)\nwait 999\n#_FES_SLEEP_\n$7+=1\nif ($7==1)\npanel[1] setsave 11 99 0\npanel[1] getflag 1023 2\nelse\npanel[1] setsave 13 77 1023\npanel[1] getflag -1 -1\nendif\n#_FES_WAKE_\npanel[1] setsave 12 77 0\n";
+    let script = b"#DEFINE\nSAVEPANEL panel[2]\n#START\npanel dispid 1 7\npanel ptype NORM 7\npanel ptype NUM_O2 8 panel[0] FLAG.1022:4\npanel ptype STR 9 FLAG.1023 18 100 -1 3 0x112233 2 4 Family\npanel ptype STR 10 DATE_Y 18 100 -1\npanel ptype STR 11 88 18 100 -1\npanel setsave ($6+=1) ($6+=1) ($6+=1)\npanel getflag ($6+=1) ($6+=1)\npanel[1] setsave ($0+=1)+9 77 1022\npanel[1] setnum 8 123\npanel[1] getflag 1022 3\npanel[0] getflag 1022 4\npanel[1] getflag 1024 5\npanel[1] getflag ($1+=1)\nwait 999\n#_FES_SLEEP_\n$7+=1\nif ($7==1)\npanel[1] setsave 11 99 0\npanel[1] getflag 1023 2\nelse\npanel[1] setsave 13 77 1023\npanel[1] getflag -1 -1\nendif\n#_FES_WAKE_\npanel[1] setsave 12 77 0\n";
     for budget in [1, 4096] {
         let (mut runtime, mut scene) = setup(budget, script);
         let calls = Rc::new(RefCell::new(Vec::new()));
@@ -115,6 +208,12 @@ fn panel_slots_clip_flags_and_preserve_previous_data_after_missing_or_invalid_fi
         assert!(panel(&scene, 0).data.is_none());
         assert_eq!(&panel(&scene, 1).flags[1022..], &[-7, 22]);
         assert_eq!(panel(&scene, 1).date, [2026, 11, 9, 12, 34, 56]);
+        assert!(panel(&scene, 0).contents.is_empty());
+        assert_eq!(panel(&scene, 1).contents.len(), 5);
+        assert_eq!(panel(&scene, 1).contents[&8].number(), 123);
+        assert_eq!(panel(&scene, 1).contents[&9].text(), b"22");
+        assert_eq!(panel(&scene, 1).contents[&10].text(), b"2026");
+        assert_eq!(panel(&scene, 1).contents[&11].text(), b"SAVED TEXT");
         let loaded = panel(&scene, 1).data.clone();
         for (block, name, record) in [
             ("_FES_SLEEP_", b"save0011.dat", 99),
@@ -130,6 +229,10 @@ fn panel_slots_clip_flags_and_preserve_previous_data_after_missing_or_invalid_fi
             assert_eq!(panel.record_id, record);
             assert_eq!(panel.date, [0; 6]);
             assert_eq!(panel.data, loaded);
+            assert_eq!(panel.contents[&8].number(), -7);
+            assert_eq!(panel.contents[&9].text(), b"22");
+            assert_eq!(panel.contents[&10].text(), b"0");
+            assert_eq!(panel.contents[&11].text(), b"SAVED TEXT");
             assert_eq!(&panel.flags[1022..], &[-7, 22]);
         }
         assert!((0..256).any(|_| {
@@ -140,6 +243,9 @@ fn panel_slots_clip_flags_and_preserve_previous_data_after_missing_or_invalid_fi
         assert_eq!(runtime.numbers().shared[2], 22);
         assert_eq!(&panel(&scene, 1).flags[1022..], &[-7, 88]);
         assert_eq!(panel(&scene, 1).data.as_ref().unwrap().tag(), 8);
+        assert_eq!(panel(&scene, 1).contents[&9].text(), b"88");
+        assert_eq!(panel(&scene, 1).contents[&10].text(), b"2026");
+        assert_eq!(panel(&scene, 1).contents[&11].text(), b"SAVED TEXT");
         assert_eq!(selected(&scene, 1), [7]);
         assert_eq!(cell(&scene, 1, 7).record(), &[0; 188]);
         assert_eq!(
@@ -158,7 +264,7 @@ fn panel_slots_clip_flags_and_preserve_previous_data_after_missing_or_invalid_fi
 
 #[test]
 fn panel_cells_parse_once_and_replace_one_bank_without_changing_selection() {
-    let source = b"#DEFINE\nSAVEPANEL panel[2]\nBASE source[2]\n#START\npanel dispid 1 9\npanel ptype SIMAGE ($0+=1)+8 ($1+=1)+1 32 19\npanel ptype STR 12 FLAG.3:4 ($2+=1) 20 30 3 17 2 5 %04d\npanel ptype NUM_O2 13 source[-1] DATE_Y:2\npanel ptype IMAGEOBJ 14 source[1]\npanel ptype NUM_S 15\npanel ptype NUM_I 16\npanel ptype NORM 17\npanel ptype IMAGE 18 ($7+=1)\npanel ptype SSTR 19 6 10 20 30\npanel ptype unknown ($7+=1)\npanel ptype STR 12 FLAG\npanel setnum 9 ($3+=1)*7\npanel setnum 99 ($4+=1)\npanel setnum ($5+=1)+98\npanel[0] setnum 19 \"\"\nwait 999\n#_FES_SLEEP_\npanel[1] setnum 9 -3\n#_FES_WAKE_\npanel[1] ptype NORM 9\n";
+    let source = b"#DEFINE\nSAVEPANEL panel[2]\nBASE source[2]\n#START\npanel dispid 1 9\npanel ptype SIMAGE ($0+=1)+8 ($1+=1)+1 32 19\npanel ptype STR 12 FLAG.3:4 ($2+=1) 20 30 3 17 2 5 Family\npanel ptype NUM_O2 13 source[-1] DATE_Y:2\npanel ptype IMAGEOBJ 14 source[1]\npanel ptype NUM_S 15\npanel ptype NUM_I 16\npanel ptype NORM 17\npanel ptype IMAGE 18 ($7+=1)\npanel ptype SSTR 19 6 10 20 30\npanel ptype unknown ($7+=1)\npanel ptype STR 12 FLAG\npanel setnum 9 ($3+=1)*7\npanel setnum 99 ($4+=1)\npanel setnum ($5+=1)+98\npanel[0] setnum 19 \"\"\nwait 999\n#_FES_SLEEP_\npanel[1] setnum 9 -3\n#_FES_WAKE_\npanel[1] ptype NORM 9\n";
     for budget in [1, 4096] {
         let (mut runtime, mut scene) = setup(budget, source);
         assert!((0..256).any(|_| runtime.update_fes_scene(0, &mut scene, 0).unwrap()));
@@ -180,7 +286,7 @@ fn panel_cells_parse_once_and_replace_one_bank_without_changing_selection() {
                 (1, 30, 20)
             );
             assert_eq!((word(text, 0x48), word(text, 0x4c)), (1, 1));
-            assert_eq!(&text.record()[0x64..0x68], b"%04d");
+            assert_eq!(&text.record()[0x64..0x6a], b"Family");
             let number = cell(&scene, bank, 13);
             assert_eq!((number.kind(), number.source_kind()), (5, 3));
             assert_eq!((word(number, 0x40), word(number, 0x54)), (u32::MAX, 1));

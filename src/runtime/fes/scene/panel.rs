@@ -45,13 +45,17 @@ impl<F: ObjectFactory> Store<'_, F> {
             let Some(handle) = scene.objects.lookup(&target.name, bank as i32) else {
                 break;
             };
-            let Some(cell) = (match &mut scene.objects.get_mut(handle).unwrap().state {
-                ObjectState::SavePanel(panel) => panel.cells.get_mut(&id),
-                _ => None,
-            }) else {
+            let ObjectState::SavePanel(panel) = &mut scene.objects.get_mut(handle).unwrap().state
+            else {
+                continue;
+            };
+            let Some(cell) = panel.cells.get_mut(&id) else {
                 continue;
             };
             cell.data[0x60..0x64].copy_from_slice(&value.to_le_bytes());
+            if let Some(content) = panel.contents.get_mut(&id) {
+                content.set_number(value);
+            }
             scene.objects.invalidate(handle)?;
         }
         Ok(())
@@ -131,6 +135,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                     }
                 }
             }
+            panel.apply_data()?;
             Ok(())
         })();
         result.map_err(|error: Error| Error::new(offset + error.offset, error.message))?;
@@ -372,12 +377,12 @@ impl CellArguments<'_> {
                 for (index, offset) in [(9, 0x50), (10, 0x58), (11, 0x5c)] {
                     parser.number(index, offset)?;
                 }
-                if let Some(format) = args.get(12) {
-                    let format = format.split(|&byte| byte == 0).next().unwrap();
-                    if format.len() >= 88 {
-                        return Err(Error::new(0, "面板文字格式超过容量"));
+                if let Some(font) = args.get(12) {
+                    let font = font.split(|&byte| byte == 0).next().unwrap();
+                    if font.len() >= 88 {
+                        return Err(Error::new(0, "面板字体名称超过容量"));
                     }
-                    parser.cell.data[0x64..0x64 + format.len()].copy_from_slice(format);
+                    parser.cell.data[0x64..0x64 + font.len()].copy_from_slice(font);
                 }
             }
             5 if !parser.reference(4)? || !parser.selector(5)? => return Ok(None),

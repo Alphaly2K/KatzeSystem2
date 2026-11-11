@@ -1,4 +1,7 @@
-/// `SAVEPANEL` 的平面和启用编号；`dispid` 选择独立于单元内容。
+mod content;
+pub use content::PanelContent;
+
+/// `SAVEPANEL` 的平面、单元定义与槽位数据。
 #[derive(Clone, Debug, PartialEq)]
 pub struct SavePanelState {
     /// 面板自身的绘制平面。
@@ -9,6 +12,8 @@ pub struct SavePanelState {
     pub enabled_ids: std::collections::BTreeSet<i32>,
     /// 单元内容按编号保存，与启用选择分别更新。
     pub cells: std::collections::BTreeMap<i32, PanelCell>,
+    /// 来源应用后的内容；重定义单元不立即替换该记录。
+    pub contents: std::collections::BTreeMap<i32, PanelContent>,
     /// 最近请求的存档文件名，使用 CP932 字节。
     pub save_name: Vec<u8>,
     /// 最近请求读取的数值记录编号。
@@ -28,6 +33,7 @@ impl Default for SavePanelState {
             images: Vec::new(),
             enabled_ids: Default::default(),
             cells: Default::default(),
+            contents: Default::default(),
             save_name: Vec::new(),
             record_id: 0,
             flags: vec![0; 1024],
@@ -60,6 +66,10 @@ impl PanelCell {
 
     pub fn source_kind(&self) -> u32 {
         u32::from_le_bytes(self.data[4..8].try_into().unwrap())
+    }
+
+    fn word(&self, offset: usize) -> u32 {
+        u32::from_le_bytes(self.data[offset..offset + 4].try_into().unwrap())
     }
 }
 
