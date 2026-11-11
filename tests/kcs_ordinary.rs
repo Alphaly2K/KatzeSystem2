@@ -236,6 +236,35 @@ fn split_update_preserves_clock_controls_and_messages_changed_by_children() {
 }
 
 #[test]
+fn window_close_requests_keep_order_task_identity_and_return_stack_across_budgets() {
+    use katze_system2::kcs::WindowCloseRequest;
+    let mut code = Vec::new();
+    ins(&mut code, 0x25, &[(3, 0x12345678)]);
+    for value in [0, 1, u32::MAX] {
+        ins(&mut code, 0x25, &[(3, value)]);
+        ins(&mut code, 0x2b, &[(3, 9), (3, 4)]);
+    }
+    ins(&mut code, 0x26, &[(3, 0)]);
+    code.push(0x3b);
+    for budget in [1, 100] {
+        let program = Program::from_code(&code, vec![0; 16], 64).unwrap();
+        let mut task = OrdinaryTask::new(program, vec![]).unwrap();
+        task.task_id = 19;
+        let mut state = State::new(8);
+        let mut host = CoreHost::new(&mut state);
+        while !task.update(100, 1, &mut host, budget).unwrap() {}
+        assert_eq!(values(&task)[0], 0x12345678);
+        assert_eq!(
+            host.window_close_requests,
+            [true, false, false].map(|notify| WindowCloseRequest {
+                task_id: 19,
+                notify
+            })
+        );
+    }
+}
+
+#[test]
 fn menu_requests_keep_task_identity_and_are_emitted_once_across_budget_resumption() {
     use katze_system2::kcs::MenuItemRequest;
     let mut code = Vec::new();

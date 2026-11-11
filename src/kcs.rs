@@ -31,7 +31,7 @@ mod utf8;
 mod vectors;
 pub use crate::task::TaskClock;
 pub(crate) use configuration::save_configuration;
-pub use host::{CoreHost, HostState, MenuItemRequest};
+pub use host::{CoreHost, HostState, MenuItemRequest, WindowCloseRequest};
 pub(crate) use host::{call_native, hierarchy_query};
 pub(crate) use matrix::{multiply as multiply_matrix, transform as transform_vector};
 pub use memory::MemoryCopyMode;

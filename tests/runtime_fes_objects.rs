@@ -183,6 +183,57 @@ fn plane_links_evaluate_once_stop_at_holes_or_controls_and_only_invalidate_chang
 }
 
 #[test]
+fn initialization_skips_optional_targets_and_bank_holes_without_transforming_missing_sources() {
+    let mut objects = Objects::new(HandleAllocator::default()).unwrap();
+    let handles = objects.define(&definition("IMAGE", "item", 3)).unwrap();
+    objects.remove(handles[1]).unwrap();
+    let mut loads = Vec::new();
+    for name in ["optional", "item"] {
+        objects
+            .initialize(
+                &ObjectInitialization {
+                    target: ObjectReference {
+                        name: name.into(),
+                        bank: -1,
+                    },
+                    attributes: ObjectAttributes {
+                        file: Some(b"image".to_vec()),
+                        display: Some(1),
+                        ..Default::default()
+                    },
+                },
+                |name| {
+                    loads.push(name.to_vec());
+                    Ok(name.to_vec())
+                },
+            )
+            .unwrap();
+    }
+    objects
+        .initialize(
+            &ObjectInitialization {
+                target: ObjectReference {
+                    name: "optional".into(),
+                    bank: 0,
+                },
+                attributes: ObjectAttributes {
+                    file: Some(b"ignored".to_vec()),
+                    ..Default::default()
+                },
+            },
+            |_| panic!("missing initialization target must not transform its source"),
+        )
+        .unwrap();
+    assert_eq!(loads, [b"image".to_vec(), b"image".to_vec()]);
+    for handle in [handles[0], handles[2]] {
+        let ObjectState::Image(image) = &objects.get(handle).unwrap().state else {
+            panic!()
+        };
+        assert_eq!(image.base.display, 1);
+    }
+}
+
+#[test]
 fn object_commands_evaluate_once_and_keep_distinct_bank_and_type_traversal_rules() {
     for hole in [false, true] {
         let mut objects = Objects::new(HandleAllocator::default()).unwrap();
@@ -846,7 +897,7 @@ fn reparenting_and_removal_keep_bank_holes_and_failed_initialization_changes() {
             ..Default::default()
         },
     };
-    assert!(objects.initialize(&all, |_| unreachable!()).is_err());
+    objects.initialize(&all, |_| unreachable!()).unwrap();
     assert_eq!(objects.get(new[0]).unwrap().parent(), None);
     assert_eq!(objects.get(new[1]).unwrap().parent(), None);
     let mut interpreter =
@@ -870,7 +921,7 @@ fn reparenting_and_removal_keep_bank_holes_and_failed_initialization_changes() {
         },
         attributes: ObjectAttributes::default(),
     };
-    assert!(objects.initialize(&invalid, |_| unreachable!()).is_err());
+    objects.initialize(&invalid, |_| unreachable!()).unwrap();
     assert!(objects.remove(objects.top()).is_err());
     assert!(objects.remove(banks[0]).is_err());
 }

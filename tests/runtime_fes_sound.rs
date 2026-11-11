@@ -607,10 +607,11 @@ fn sysvoiceex_disabled_mode_skips_candidates_and_missing_configuration_retries_b
 fn named_volume_queries_retry_missing_values_and_keep_names_and_extra_arguments_as_text() {
     for budget in [1, 4096] {
         let mut runtime = voice_runtime(budget);
-        let config = runtime.host_mut().sound_config.take().unwrap();
+        let mut config = runtime.host_mut().sound_config.take().unwrap();
+        config.parts[0].children[0].voice_volume = -17;
         runtime.numbers_mut().strings.insert(0, b"PaReNt".to_vec());
         let mut scene = Scene::new(
-            Program::from_text(b"#DEFINE\nBASE obj\n#START\ngetsndconfex ($0+=1)+3 volume $str0; ($1+=100)\ngetsndconfex 5 volume ($1+=100)\ngetsndconfex 6 volume master\nwait 77\n#_FES_SLEEP_\ngetsndconfex 6 volume CHILD ($1+=100)\n#obj.PUSH_L\ngetsndconfex 7 volume PARENT ($1+=100)\n").unwrap(),
+            Program::from_text(b"#DEFINE\nBASE obj\n#START\ngetsndconfex ($0+=1)+3 volume $str0; ($1+=100)\ngetsndconfex 5 volume ($1+=100)\ngetsndconfex 6 volume master\nwait 77\n#_FES_SLEEP_\ngetsndconfex 6 volume CHILD ($1+=100)\n#obj.PUSH_L\ngetsndconfex 7 volume PARENT ($1+=100)\ngetsndconfex 2 voicebgm CHILD ($1+=100)\ngetsndconfex 3 voicebgm master\n").unwrap(),
             runtime.host().handle_allocator(),
         ).unwrap();
         assert!(update(&mut runtime, &mut scene).is_err());
@@ -655,7 +656,7 @@ fn named_volume_queries_retry_missing_values_and_keep_names_and_extra_arguments_
             }
         }
         assert!(done);
-        assert_eq!(runtime.numbers().shared, [1, 0, 0, 0, 83, 100, 37, 83]);
+        assert_eq!(runtime.numbers().shared, [1, 0, -17, 100, 83, 100, 37, 83]);
         assert_eq!(scene.deadline(), Some(177));
         assert_eq!(
             runtime.host_mut().random.next_integer(),
@@ -666,11 +667,12 @@ fn named_volume_queries_retry_missing_values_and_keep_names_and_extra_arguments_
 
 #[test]
 fn sound_config_id_queries_use_separate_path_arguments_and_keep_the_random_stream() {
-    let source = b"#DEFINE\nBASE obj\n#START\ngetsndconfex\ngetsndconfex ($0+=1)+3\ngetsndconfex ($0+=1)+3 volume_id ($1+=20) ($2+=21)\ngetsndconfex -1 volume_id ($3+=20)\nwait 99\n#_FES_SLEEP_\ngetsndconfex 6 volume_id 20 999\n#obj.PUSH_L\ngetsndconfex 7 sysplay_id 20 21\n";
+    let source = b"#DEFINE\nBASE obj\n#START\ngetsndconfex\ngetsndconfex ($0+=1)+3\ngetsndconfex ($0+=1)+3 volume_id ($1+=20) ($2+=21)\ngetsndconfex -1 volume_id ($3+=20)\nwait 99\n#_FES_SLEEP_\ngetsndconfex 6 volume_id 20 999\ngetsndconfex 2 play_id 20 21\ngetsndconfex 3 play_id 20 999\ngetsndconfex 4 play_id 999 20 21\n#obj.PUSH_L\ngetsndconfex 7 sysplay_id 20 21\n";
     for budget in [1, 4096] {
         let mut runtime = voice_runtime(budget);
         runtime.host_mut().sound_config_enabled = 0;
-        let config = runtime.host_mut().sound_config.take().unwrap();
+        let mut config = runtime.host_mut().sound_config.take().unwrap();
+        config.parts[0].children[0].play_enabled = -19;
         let mut scene = Scene::new(
             Program::from_text(source).unwrap(),
             runtime.host().handle_allocator(),
@@ -713,6 +715,7 @@ fn sound_config_id_queries_use_separate_path_arguments_and_keep_the_random_strea
             }
         }
         assert!(done);
+        assert_eq!(runtime.numbers().shared[2..5], [-19, 1, -19]);
         assert_eq!(runtime.numbers().shared[6..], [100, 0]);
         assert_eq!(runtime.host_mut().random.next_integer(), 477480905);
     }

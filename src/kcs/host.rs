@@ -35,6 +35,14 @@ pub struct MenuItemRequest {
     pub value: u32,
 }
 
+/// 普通 9 提交的窗口关闭请求；由平台宿主消费。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WindowCloseRequest {
+    pub task_id: u32,
+    /// 零参数使用应用退出通知，非零参数使用标准关闭消息。
+    pub notify: bool,
+}
+
 /// 普通任务表的持久宿主状态；数值区由 `CoreHost::state` 单独提供，
 /// 以便同一份状态在多次 native 调用之间保留集合句柄、随机序列和请求队列。
 /// 普通 869～875 的文本记录对象；0x5C 字节内部布局与后续命令语义待原入口核实。
@@ -55,6 +63,7 @@ pub struct HostState {
     /// 普通 1040 输出的 UTF-16 调试文字，包含末尾换行。
     pub unicode_debug_messages: Vec<Vec<u16>>,
     pub menu_item_requests: Vec<MenuItemRequest>,
+    pub window_close_requests: Vec<WindowCloseRequest>,
     pub task_time: u32,
     pub task_origin: u32,
     pub task_id: u32,
@@ -593,8 +602,8 @@ pub(crate) fn call_native(
     }
     let count = match index {
         399 => 5,
-        1 | 6 | 17 | 18 | 25 | 26 | 40 | 47 | 48 | 71 | 207 | 209 | 210 | 212 | 213 | 278 | 319
-        | 75 | 393 | 420 | 421 | 516 | 898 | 899 | 1040 => 1,
+        1 | 6 | 9 | 17 | 18 | 25 | 26 | 40 | 47 | 48 | 71 | 207 | 209 | 210 | 212 | 213 | 278
+        | 319 | 75 | 393 | 420 | 421 | 516 | 898 | 899 | 1040 => 1,
         8
         | 13..=16
         | 19..=24
@@ -653,6 +662,16 @@ pub(crate) fn call_native(
         }
         1 | 1040 => return super::debug::call(host, index, args[0], vm),
         6 => NativeReturn::Value(args[0]),
+        9 => {
+            if host.window_close_requests.len() >= read::MAX_ITEMS {
+                return Err(Error::new(vm.pc, "KCS 窗口关闭请求数量超过上限"));
+            }
+            host.window_close_requests.push(WindowCloseRequest {
+                task_id: host.task_id,
+                notify: args[0] == 0,
+            });
+            NativeReturn::Continue
+        }
         393 => {
             if host.menu_item_requests.len() >= read::MAX_ITEMS {
                 return Err(Error::new(vm.pc, "KCS 菜单请求数量超过上限"));

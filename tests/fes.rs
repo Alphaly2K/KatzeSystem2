@@ -100,6 +100,63 @@ fn repeated_macro_declarations_expand_runtime_strings_before_commands() {
 }
 
 #[test]
+fn missing_optional_calls_return_to_nested_and_event_callers() {
+    let source = b"#START\ncall OUTER\n$0+=1\nwait 9\n#OUTER\ncall OPTIONAL\n$1+=1\n#button.PUSH_L\ncall OPTIONAL\n$2+=1\n";
+    for budget in [1, 128] {
+        let mut vm = fes::Interpreter::new(fes::Program::from_text(source).unwrap()).unwrap();
+        let mut state = State::new(4);
+        loop {
+            match vm.run(&mut state, budget).unwrap() {
+                Step::Yield => (),
+                event => {
+                    assert_eq!(event, Step::Event(fes::Event::Wait(9)));
+                    break;
+                }
+            }
+        }
+        assert_eq!(&state.shared[..3], &[1, 1, 0]);
+        assert!(vm.dispatch_event("button", 0, "PUSH_L", None).unwrap());
+        for _ in 0..20 {
+            assert_eq!(vm.run(&mut state, budget).unwrap(), Step::Yield);
+            if vm.event_context().is_none() {
+                break;
+            }
+        }
+        assert!(vm.event_context().is_none());
+        assert_eq!(&state.shared[..3], &[1, 1, 1]);
+        assert_eq!(
+            vm.run(&mut state, 128).unwrap(),
+            Step::Event(fes::Event::Wait(9))
+        );
+        let source =
+            b"#START\nwait 9\n#DEFAULT.PUSH_L\ncall OPTIONAL\n$0+=1\n#button.PUSH_L\n$1+=1\n";
+        let mut vm = fes::Interpreter::new(fes::Program::from_text(source).unwrap()).unwrap();
+        let mut state = State::new(4);
+        assert_eq!(
+            vm.run(&mut state, 128).unwrap(),
+            Step::Event(fes::Event::Wait(9))
+        );
+        assert!(
+            vm.dispatch_event("button", 0, "PUSH_L", Some("DEFAULT"))
+                .unwrap()
+        );
+        for _ in 0..20 {
+            assert_eq!(vm.run(&mut state, budget).unwrap(), Step::Yield);
+            if vm.event_context().is_none() {
+                break;
+            }
+        }
+        assert!(vm.event_context().is_none());
+        assert_eq!(&state.shared[..2], &[0, 1]);
+        assert_eq!(
+            vm.run(&mut state, 128).unwrap(),
+            Step::Event(fes::Event::Frame)
+        );
+        assert_eq!(&state.shared[..2], &[1, 1]);
+    }
+}
+
+#[test]
 fn next_discards_all_subroutine_return_locations() {
     let program = fes::Program::from_text(
         b"#START\ncall OUTER\nexit 99\n#OUTER\ncall INNER\nexit 98\n#INNER\nnext FINAL\n#FINAL\nexit 7\n"

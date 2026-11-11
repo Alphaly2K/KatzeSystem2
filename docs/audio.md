@@ -34,7 +34,7 @@ FES `sysvoiceex output_index [path ...]` 选择一个配置编号写入共享数
 
 `SoundConfig::volume(path)` 查询路径最后一个分类的当前原始音量；空路径或最后分量缺失时返回 100。匹配、缺失分量后继续当前层和重复编号的规则与 `system_voice_enabled` 相同。查询返回单个分类的值，不计算祖先或主音量的乘积，不裁剪到百分比范围。
 
-FES `getsndconfex output_index volume_id [id ...]` 依次求值输出槽和每个独立 id 参数，将 volume 查询结果写入共享数值槽；`sysplay_id` 则写入 `system_voice_enabled` 结果。此处每个参数是一个完整整数表达式，不按逗号拆分。命令不检查 `sound_config_enabled`，也不消耗随机数；无效输出槽只跳过写入，其余求值仍执行。无输出参数时直接继续，只有输出参数时对它求值后继续。主体、系统块和对象处理器共用这一入口。
+FES `getsndconfex output_index volume_id [id ...]` 依次求值输出槽和每个独立 id 参数，将 volume 查询结果写入共享数值槽；`sysplay_id` 则写入 `system_voice_enabled` 结果，`play_id` 写入 `play_enabled` 结果。播放开关查询保留分类原始值，空路径和缺失分量返回一，之后的分量仍继续查询。此处每个参数是一个完整整数表达式，不按逗号拆分。命令不检查 `sound_config_enabled`，也不消耗随机数；无效输出槽只跳过写入，其余求值仍执行。无输出参数时直接继续，只有输出参数时对它求值后继续。主体、系统块和对象处理器共用这一入口。
 
 ## 分类名称与主音量查询
 
@@ -43,6 +43,8 @@ FES `getsndconfex output_index volume_id [id ...]` 依次求值输出槽和每�
 FES `getsndconfex output_index volume name` 将该结果写入共享槽，只读取一个名称参数，不计算名称中的表达式或额外参数。缺少名称或名称为空时仍求值输出槽，但不写入；配置缺失或精确 master 所需的主音量未提供时，在表达式副作用之前诊断，补配置后可续跑。该查询不读取配置启用值、不消耗随机数，三类 FES 执行入口保持同一契约。
 
 上述配置查询要求宿主已提供分类配置；缺失配置时在表达式求值前诊断，允许补齐后重试。其他 getsndconfex 查询目前返回未接入诊断。
+
+`getsndconfex output_index voicebgm name` 查询分类的 `voice_volume`，即语音播放时使用的分类音量，缺失分类返回 100。名称和额外参数的处理与 volume 相同，但 `master` 在此处按普通分类名查询。对应库接口为 `SoundConfig::group_voice_volume`。
 
 ## 文件分类与播放设置
 

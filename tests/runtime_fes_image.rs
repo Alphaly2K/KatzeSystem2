@@ -2245,12 +2245,13 @@ fn scene_object_commands_select_frames_reload_sizes_and_update_final_pixels() {
         let reads = Rc::new(RefCell::new(Vec::new()));
         runtime.set_resources(PixelFiles {
             files: BTreeMap::from([
-                (b"texture".to_vec(), first),
+                (b"texture".to_vec(), first.clone()),
+                (b"replacement".to_vec(), first),
                 (b"position".to_vec(), position),
             ]),
             reads: reads.clone(),
         });
-        let program = fes::Program::from_text(b"#DEFINE\nIMAGE sprite\nPLANE panel\n#OBJECT FILE IDN PRI POS DISP\nsprite texture 7 5 1,1 0\n#OBJECT POS SIZE VRAM PRI DISP\npanel 0,0 8,6 0,0 500 1\n#START\n\\0=0\nsprite disp\nsprite pri 7\nwait 1\nsprite setid 8\nsprite getid 0\nsprite size (\\0+=1) (\\0+=1)\n$1=\\0\nwait 1\nsprite size 1 2\nwait 1\nsprite size -1 -1\nsprite pos2 position 7\nwait 1\nsprite disp 0\nwait 99\n").unwrap();
+        let program = fes::Program::from_text(b"#DEFINE\nIMAGE sprite\nPLANE panel\n#OBJECT FILE IDN PRI POS DISP\nsprite texture 7 5 1,1 0\n#OBJECT POS SIZE VRAM PRI DISP\npanel 0,0 8,6 0,0 500 1\n#START\n\\0=0\nsprite disp\nsprite pri 7\nwait 1\nsprite load replacement 8 ($0+=100)\nsprite getid 0\nsprite size (\\0+=1) (\\0+=1)\n$1=\\0\nwait 1\nsprite size 1 2\nwait 1\nsprite size -1 -1\nsprite pos2 position 7\nwait 1\nsprite disp 0\nwait 99\n").unwrap();
         let mut scene =
             katze_system2::runtime::fes::Scene::new(program, runtime.host().handle_allocator())
                 .unwrap();
@@ -2292,8 +2293,8 @@ fn scene_object_commands_select_frames_reload_sizes_and_update_final_pixels() {
             &*reads.borrow(),
             &[
                 b"texture".to_vec(),
-                b"texture".to_vec(),
-                b"texture".to_vec(),
+                b"replacement".to_vec(),
+                b"replacement".to_vec(),
                 b"position".to_vec()
             ]
         );

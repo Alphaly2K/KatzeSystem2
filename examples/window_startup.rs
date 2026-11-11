@@ -44,6 +44,47 @@ fn attach_metal(
     Ok(())
 }
 
+#[cfg(target_os = "macos")]
+#[allow(unexpected_cfgs)]
+fn mouse_event_position(window: &Window) -> Option<(f32, f32)> {
+    use metal::objc::{class, msg_send, runtime::Object, sel, sel_impl};
+    #[repr(C)]
+    struct Point {
+        x: f64,
+        y: f64,
+    }
+    // 点击与全局指针轮询可能来自不同采样时刻，优先使用当前鼠标事件的位置。
+    unsafe {
+        let app: *mut Object = msg_send![class!(NSApplication), sharedApplication];
+        let event: *mut Object = msg_send![app, currentEvent];
+        if event.is_null() {
+            return None;
+        }
+        let event_window: *mut Object = msg_send![event, window];
+        let event_type: u64 = msg_send![event, type];
+        if event_window != window.get_window_handle().cast::<Object>()
+            || !matches!(event_type, 1..=7 | 22 | 25..=27)
+        {
+            return None;
+        }
+        let point: Point = msg_send![event, locationInWindow];
+        Some((point.x as f32, window.get_size().1 as f32 - point.y as f32))
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[allow(unexpected_cfgs)]
+fn window_active(window: &Window) -> bool {
+    use metal::objc::{msg_send, runtime::Object, sel, sel_impl};
+    // 当前 minifb macOS 包装反转了活动标记，直接查询原生键窗口。
+    unsafe { msg_send![window.get_window_handle().cast::<Object>(), isKeyWindow] }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn window_active(window: &Window) -> bool {
+    window.is_active()
+}
+
 /// minifb 键到 Windows 虚拟键码的映射；键槽绑定按 VK 低八位匹配。
 const KEY_VK: &[(Key, u8)] = &[
     (Key::Backspace, 0x08),
@@ -348,10 +389,14 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         {
             let mut shared = shared.borrow_mut();
             let pointer = window.get_mouse_pos(MouseMode::Discard);
+            #[cfg(target_os = "macos")]
+            let pointer = mouse_event_position(&window)
+                .or(pointer)
+                .filter(|&(x, y)| (0.0..1280.).contains(&x) && (0.0..720.).contains(&y));
             if let Some((x, y)) = pointer {
                 shared.position = [x as i32, y as i32];
             }
-            shared.active = u32::from(pointer.is_some() && window.is_active());
+            shared.active = u32::from(pointer.is_some() && window_active(&window));
             for (button, code) in [
                 (MouseButton::Left, 1),
                 (MouseButton::Right, 3),
@@ -380,7 +425,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                         .push((ButtonSource::Mouse, if y > 0. { 6 } else { 7 }, 1));
                 }
             }
-            shared.foreground = window.is_active();
+            shared.foreground = window_active(&window);
             window.set_cursor_visibility(shared.cursor != 0);
         }
         now = now.wrapping_add(1);
@@ -403,6 +448,9 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                     eprintln!("  任务 {id} pc {}", vm.pc);
                 }
             }
+            break;
+        }
+        if !runtime.host_mut().window_close_requests.is_empty() {
             break;
         }
         if refresh_title {

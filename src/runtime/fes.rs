@@ -599,9 +599,9 @@ impl Objects {
         };
         for bank in banks {
             let bank = bank as i32;
-            let handle = self
-                .lookup(name, bank)
-                .ok_or_else(|| Error::new(0, format!("FES 对象 {name}[{bank}] 不存在")))?;
+            let Some(handle) = self.lookup(name, bank) else {
+                continue;
+            };
             if let Some(parent) = &initialization.attributes.parent {
                 self.set_parent(handle, self.lookup(&parent.name, parent.bank))?;
             }

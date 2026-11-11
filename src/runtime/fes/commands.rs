@@ -363,10 +363,12 @@ impl Objects {
                 }
                 continue;
             };
-            if name == b"load" {
-                number(3, 0, state)?;
-            }
-            let object = &mut self.get_mut(handle).unwrap().state;
+            let image_number = if name == b"load" {
+                number(3, 0, state)?
+            } else {
+                0
+            };
+            let object = &mut self.objects.get_mut(&handle).unwrap().state;
             if name == b"getpos" {
                 let position = if let Some(image) = object.image() {
                     let [x, y] = image.position.map(super::plane::integer_position);
@@ -389,6 +391,18 @@ impl Objects {
                 return Err(Error::new(offset, "FES 图形 pos 需要场景运动资源服务"));
             }
             if name == b"load" {
+                if let Some(image) = object.image_source_mut() {
+                    image.apply(
+                        &fes::ObjectAttributes {
+                            file: Some(args.get(2).cloned().unwrap_or_default()),
+                            image_number: Some(image_number),
+                            ..Default::default()
+                        },
+                        bank as u32,
+                        |name| self.languages.expand_image(name),
+                    )?;
+                    continue;
+                }
                 if let ObjectState::Sound(sound) = object {
                     // 通用 load 分派已经求值一次，声音分支按原顺序重新求值。
                     let load_mode = number(3, 0, state)?;

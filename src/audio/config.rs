@@ -97,6 +97,11 @@ impl SoundConfig {
         self.path_value(path, 1, |part| part.system_voice)
     }
 
+    /// 查询显式编号路径的播放开关；空路径及缺失分量使用一。
+    pub fn play_enabled(&self, path: &[i32]) -> Result<i32> {
+        self.path_value(path, 1, |part| part.play_enabled)
+    }
+
     /// 查询最后一个分类的当前音量；空路径及缺失分量使用一百。
     pub fn volume(&self, path: &[i32]) -> Result<i32> {
         self.path_value(path, 100, |part| part.volume)
@@ -119,6 +124,11 @@ impl SoundConfig {
     /// GROUP 按分类名称查当前音量；master 在此处也是普通分类名称。
     pub fn group_volume(&self, name: &[u8]) -> Result<i32> {
         Ok(self.group_part(name)?.map_or(100, |part| part.volume))
+    }
+
+    /// 分类名称查询的语音播放音量；未匹配时返回一百，master 也按普通名称查询。
+    pub fn group_voice_volume(&self, name: &[u8]) -> Result<i32> {
+        Ok(self.group_part(name)?.map_or(100, |part| part.voice_volume))
     }
 
     pub fn group_part(&self, name: &[u8]) -> Result<Option<&SoundPart>> {

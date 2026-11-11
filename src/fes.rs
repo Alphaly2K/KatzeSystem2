@@ -543,18 +543,27 @@ impl Interpreter {
                         return Err(Error::new(line.offset, "块转移需要一个目标"));
                     }
                     let target = text::ascii(&args[1])?;
-                    let block = self
-                        .program
-                        .blocks
-                        .iter()
-                        .position(|b| b.name == target)
-                        .ok_or_else(|| Error::new(line.offset, "目标块不存在"))?;
                     if command == b"call" {
                         if self.calls.len() >= 128 {
                             return Err(Error::new(line.offset, "FES 调用过深"));
                         }
                         self.calls.push((self.block, self.pc));
-                    } else {
+                    }
+                    let block = self.program.blocks.iter().position(|b| b.name == target);
+                    let Some(block) = block else {
+                        if command == b"call" {
+                            if self.invocation.is_some() {
+                                if self.event_block_ended() {
+                                    return Ok(Step::Yield);
+                                }
+                            } else {
+                                (self.block, self.pc) = self.calls.pop().unwrap();
+                            }
+                            continue;
+                        }
+                        return Err(Error::new(line.offset, "目标块不存在"));
+                    };
+                    if command == b"next" {
                         self.calls.clear();
                     }
                     self.block = block;

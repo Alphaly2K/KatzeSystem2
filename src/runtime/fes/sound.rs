@@ -495,21 +495,28 @@ impl<F: ObjectFactory> Store<'_, F> {
             scene.interpreter.eval(output, self.numbers)?;
             return Ok(true);
         };
-        if operation != b"volume_id" && operation != b"sysplay_id" && operation != b"volume" {
+        if !matches!(
+            operation.as_slice(),
+            b"volume_id" | b"sysplay_id" | b"play_id" | b"volume" | b"voicebgm"
+        ) {
             return Err(Error::new(offset, "FES 此声音配置查询尚未接入"));
         }
-        if operation == b"volume" {
+        if matches!(operation.as_slice(), b"volume" | b"voicebgm") {
             let Some(name) = args.get(3).filter(|name| !name.is_empty()) else {
                 scene.interpreter.eval(output, self.numbers)?;
                 return Ok(true);
             };
-            let value = self
+            let config = self
                 .host
                 .sound_config
                 .as_ref()
-                .ok_or_else(|| Error::new(offset, "运行时未提供新声音分类配置"))?
-                .volume_by_name(name)
-                .map_err(|error| Error::new(offset + error.offset, error.message))?;
+                .ok_or_else(|| Error::new(offset, "运行时未提供新声音分类配置"))?;
+            let value = if operation == b"volume" {
+                config.volume_by_name(name)
+            } else {
+                config.group_voice_volume(name)
+            }
+            .map_err(|error| Error::new(offset + error.offset, error.message))?;
             let output = scene.interpreter.eval(output, self.numbers)?;
             if let Some(slot) = self.numbers.shared.get_mut(output as usize) {
                 *slot = value;
@@ -525,10 +532,10 @@ impl<F: ObjectFactory> Store<'_, F> {
             path.push(scene.interpreter.eval(input, self.numbers)?);
         }
         let config = self.host.sound_config.as_ref().unwrap();
-        let value = if operation == b"volume_id" {
-            config.volume(&path)?
-        } else {
-            config.system_voice_enabled(&path)?
+        let value = match operation.as_slice() {
+            b"volume_id" => config.volume(&path)?,
+            b"play_id" => config.play_enabled(&path)?,
+            _ => config.system_voice_enabled(&path)?,
         };
         if let Some(slot) = self.numbers.shared.get_mut(output as usize) {
             *slot = value;
