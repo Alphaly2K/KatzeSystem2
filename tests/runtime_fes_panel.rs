@@ -43,9 +43,75 @@ fn selected(scene: &Scene, bank: i32) -> Vec<i32> {
     panel.enabled_ids.iter().copied().collect()
 }
 
+fn cell(scene: &Scene, bank: i32, id: i32) -> &katze_system2::fes::PanelCell {
+    let handle = scene.objects().lookup("panel", bank).unwrap();
+    let ObjectState::SavePanel(panel) = &scene.objects().get(handle).unwrap().state else {
+        panic!("合成对象应为存档面板")
+    };
+    &panel.cells[&id]
+}
+
+fn word(cell: &katze_system2::fes::PanelCell, offset: usize) -> u32 {
+    u32::from_le_bytes(cell.record()[offset..offset + 4].try_into().unwrap())
+}
+
+#[test]
+fn panel_cells_parse_once_and_replace_one_bank_without_changing_selection() {
+    let source = b"#DEFINE\nSAVEPANEL panel[2]\nBASE source[2]\n#START\npanel dispid 1 9\npanel ptype SIMAGE ($0+=1)+8 ($1+=1)+1 32 19\npanel ptype STR 12 FLAG.3:4 ($2+=1) 20 30 3 17 2 5 %04d\npanel ptype NUM_O2 13 source[-1] DATE_Y:2\npanel ptype IMAGEOBJ 14 source[1]\npanel ptype NUM_S 15\npanel ptype NUM_I 16\npanel ptype NORM 17\npanel ptype IMAGE 18 ($7+=1)\npanel ptype SSTR 19 6 10 20 30\npanel ptype unknown ($7+=1)\npanel ptype STR 12 FLAG\npanel setnum 9 ($3+=1)*7\npanel setnum 99 ($4+=1)\npanel setnum ($5+=1)+98\npanel[0] setnum 19 \"\"\nwait 999\n#_FES_SLEEP_\npanel[1] setnum 9 -3\n#_FES_WAKE_\npanel[1] ptype NORM 9\n";
+    for budget in [1, 4096] {
+        let (mut runtime, mut scene) = setup(budget, source);
+        assert!((0..256).any(|_| runtime.update_fes_scene(0, &mut scene, 0).unwrap()));
+        assert_eq!(&runtime.numbers().shared[..6], &[1, 1, 1, 1, 1, 1]);
+        assert_eq!(runtime.numbers().shared[7], 0);
+        for bank in [0, 1] {
+            assert_eq!(selected(&scene, bank), [9]);
+            let image = cell(&scene, bank, 9);
+            assert_eq!(
+                (image.kind(), image.source_kind(), word(image, 0x10)),
+                (7, 10, 2)
+            );
+            assert_eq!((word(image, 0xb4), word(image, 0xb8)), (31, 18));
+            let text = cell(&scene, bank, 12);
+            assert_eq!((text.kind(), text.source_kind()), (3, 0));
+            assert_eq!((word(text, 8), word(text, 12)), (3, 4));
+            assert_eq!(
+                (word(text, 0x14), word(text, 0x18), word(text, 0x1c)),
+                (1, 30, 20)
+            );
+            assert_eq!((word(text, 0x48), word(text, 0x4c)), (1, 1));
+            assert_eq!(&text.record()[0x64..0x68], b"%04d");
+            let number = cell(&scene, bank, 13);
+            assert_eq!((number.kind(), number.source_kind()), (5, 3));
+            assert_eq!((word(number, 0x40), word(number, 0x54)), (u32::MAX, 1));
+            assert_eq!(word(cell(&scene, bank, 14), 0x40), 1);
+            for (id, kind) in [(15, 4), (16, 6), (17, 0), (18, 1)] {
+                assert_eq!(cell(&scene, bank, id).kind(), kind);
+            }
+            let text = cell(&scene, bank, 19);
+            assert_eq!((text.source_kind(), word(text, 0x10)), (2, 6));
+            assert_eq!(word(text, 0x60), 6);
+        }
+        assert!((0..256).any(|_| {
+            runtime
+                .dispatch_fes_system_block(0, &mut scene, "_FES_SLEEP_")
+                .unwrap()
+        }));
+        assert_eq!(word(cell(&scene, 0, 9), 0x60), 7);
+        assert_eq!(word(cell(&scene, 1, 9), 0x60), (-3i32) as u32);
+        assert!((0..256).any(|_| {
+            runtime
+                .dispatch_fes_system_block(0, &mut scene, "_FES_WAKE_")
+                .unwrap()
+        }));
+        assert_eq!(cell(&scene, 0, 9).kind(), 7);
+        assert_eq!(cell(&scene, 1, 9).record(), &[0; 188]);
+        assert_eq!(selected(&scene, 1), [9]);
+    }
+}
+
 #[test]
 fn panel_selection_keeps_sorted_ids_and_evaluates_ranges_for_each_bank() {
-    let source = b"#DEFINE\nSAVEPANEL panel[2]\n#START\npanel ptype 7 [1-3] -1 3\npanel[1] ptype 0 [2-3]\nwait 999\n#_FES_SLEEP_\npanel ptype ($0+=1) ($1+=1) [4-4] [9-7]\n";
+    let source = b"#DEFINE\nSAVEPANEL panel[2]\n#START\npanel dispid 7 [1-3] -1 3\npanel[1] dispid 0 [2-3]\nwait 999\n#_FES_SLEEP_\npanel dispid ($0+=1) ($1+=1) [4-4] [9-7]\n";
     for budget in [1, 4096] {
         let (mut runtime, mut scene) = setup(budget, source);
         assert!((0..256).any(|_| runtime.update_fes_scene(0, &mut scene, 0).unwrap()));
@@ -69,7 +135,7 @@ fn panel_selection_diagnoses_unbounded_ranges_and_keeps_completed_ids() {
     for budget in [1, 4096] {
         for value in ["2147483647", "[0-1000000]", "1+"] {
             let source =
-                format!("#DEFINE\nSAVEPANEL panel\n#START\npanel ptype 1 5 {value}\nwait 999\n");
+                format!("#DEFINE\nSAVEPANEL panel\n#START\npanel dispid 1 5 {value}\nwait 999\n");
             let (mut runtime, mut scene) = setup(budget, source.as_bytes());
             let error = (0..256)
                 .find_map(|_| match runtime.update_fes_scene(0, &mut scene, 0) {

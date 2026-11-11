@@ -7,6 +7,7 @@ use std::collections::{BTreeMap, VecDeque};
 
 mod background;
 mod config;
+mod panel;
 mod save;
 mod scripts;
 mod strings;
@@ -1273,128 +1274,6 @@ impl<F: ObjectFactory> Store<'_, F> {
             self.host.debug_messages.push(message);
         }
         Ok(true)
-    }
-
-    fn save_panel_command(
-        &mut self,
-        scene: &mut Scene,
-        target: &fes::ObjectReference,
-        args: &[Vec<u8>],
-        line: &fes::Line,
-    ) -> Result<bool> {
-        let Some(name) = args.get(1).map(Vec::as_slice) else {
-            return Ok(false);
-        };
-        if !matches!(
-            name,
-            b"ptype" | b"dispid" | b"setnum" | b"setsave" | b"getflag" | b"datasave"
-        ) {
-            return Ok(false);
-        }
-        if name == b"ptype" {
-            self.panel_selection(scene, target, args, line.offset)?;
-            return Ok(true);
-        }
-        let bank = if target.bank == -1 { 0 } else { target.bank };
-        let Some(_) = scene.objects.lookup(&target.name, bank) else {
-            return Ok(true);
-        };
-        let mut eval = |index: usize| -> Result<i32> {
-            scene
-                .interpreter
-                .eval(&args[index], self.numbers)
-                .map_err(|error| Error::new(line.offset + error.offset, error.message))
-        };
-        if name == b"getflag" {
-            let index = eval(3)? as usize;
-            if let Some(slot) = self.numbers.shared.get_mut(index) {
-                *slot = 0;
-            }
-        }
-        Ok(true)
-    }
-
-    fn panel_selection(
-        &mut self,
-        scene: &mut Scene,
-        target: &fes::ObjectReference,
-        args: &[Vec<u8>],
-        offset: usize,
-    ) -> Result<()> {
-        let enabled = match args.get(2) {
-            Some(value) => {
-                scene
-                    .interpreter
-                    .eval(value, self.numbers)
-                    .map_err(|error| Error::new(offset + error.offset, error.message))?
-                    != 0
-            }
-            None => true,
-        };
-        let banks = if target.bank == -1 {
-            0..i64::from(scene.objects.count(&target.name))
-        } else {
-            i64::from(target.bank)..i64::from(target.bank) + 1
-        };
-        for bank in banks {
-            let Some(handle) = scene.objects.lookup(&target.name, bank as i32) else {
-                break;
-            };
-            for source in args.iter().skip(3) {
-                let mut eval = |text: &[u8]| {
-                    scene
-                        .interpreter
-                        .eval(text, self.numbers)
-                        .map_err(|error| Error::new(offset + error.offset, error.message))
-                };
-                let (first, last) = if source.first() == Some(&b'[') {
-                    let body = &source[1..];
-                    let split = body.iter().position(|&byte| byte == b'-');
-                    let first = split.map_or(body, |index| &body[..index]);
-                    if first.len() >= 128 {
-                        return Err(Error::new(offset, "面板编号表达式超过容量"));
-                    }
-                    let first = eval(first)?;
-                    let last = match split {
-                        Some(index) => {
-                            let tail = &body[index + 1..];
-                            let end = tail
-                                .iter()
-                                .position(|&byte| byte == b']')
-                                .unwrap_or(tail.len());
-                            if end >= 128 {
-                                return Err(Error::new(offset, "面板编号表达式超过容量"));
-                            }
-                            eval(&tail[..end])?
-                        }
-                        None => first,
-                    };
-                    (first, last)
-                } else {
-                    let value = eval(source)?;
-                    (value, value)
-                };
-                if first > last {
-                    continue;
-                }
-                if last == i32::MAX || i64::from(last) - i64::from(first) >= 1_000_000 {
-                    return Err(Error::new(offset, "面板编号区间超出处理范围"));
-                }
-                if let ObjectState::SavePanel(panel) =
-                    &mut scene.objects.get_mut(handle).unwrap().state
-                {
-                    for id in first..=last {
-                        if enabled {
-                            panel.enabled_ids.insert(id);
-                        } else {
-                            panel.enabled_ids.remove(&id);
-                        }
-                    }
-                    scene.objects.invalidate(handle)?;
-                }
-            }
-        }
-        Ok(())
     }
 
     fn run_fes_stop(
