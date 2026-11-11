@@ -1,6 +1,6 @@
 use super::SoundChannel;
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct Ramps {
     pub active: u8,
     pub current: [f32; 2],

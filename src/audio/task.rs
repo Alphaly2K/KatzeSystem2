@@ -1,4 +1,6 @@
-use super::{LoopPoints, Pcm, SoundChannel, SoundGroups, channel, playback::Playback};
+use super::{
+    LoopPoints, Pcm, SoundChannel, SoundGroups, channel, output::Action, playback::Playback,
+};
 use crate::kcs::{Host, Interpreter};
 use crate::runtime::{BaseObject, ObjectFactory, TaskObject, kind};
 use crate::task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock};
@@ -8,8 +10,9 @@ use std::collections::BTreeMap;
 /// 循环范围、六十四个物理通道及其原始累计时刻。
 pub struct SoundState {
     loops: LoopPoints,
-    channels: [SoundChannel; 64],
+    pub(super) channels: [SoundChannel; 64],
     groups: Option<BTreeMap<u32, GroupRange>>,
+    pub(super) output: Option<super::output::Link>,
 }
 
 struct GroupRange {
@@ -23,6 +26,7 @@ impl Default for SoundState {
             loops: LoopPoints::default(),
             channels: std::array::from_fn(|_| SoundChannel::default()),
             groups: None,
+            output: None,
         }
     }
 }
@@ -71,9 +75,11 @@ impl SoundState {
         sound.file.clear();
         sound.pcm = None;
         sound.playback = Playback::default();
+        sound.resampler = super::mix::Resampler::default();
         sound.clock.elapsed = 0;
         sound.loop_range[0] = 0;
         sound.allocation_flags = [0; 2];
+        self.output_replace(selected as usize);
         Ok(selected)
     }
 
@@ -93,6 +99,9 @@ impl SoundState {
 
     /// 读取物理通道的源格式采样并推进位置；空闲及结束后的部分补零。
     pub fn read_channel(&mut self, channel: u32, frames: usize) -> Result<Pcm> {
+        if self.output.is_some() {
+            return Err(Error::new(0, "声音采样已交给独立混音器"));
+        }
         let sound = self
             .channels
             .get_mut(channel as usize)
@@ -106,6 +115,7 @@ impl SoundState {
             .filter(|count| *count <= read::MAX_BYTES / 2)
             .ok_or_else(|| Error::new(0, "声音采样输出超过容量上限"))?;
         let mut output = vec![0; count];
+        sound.resampler = super::mix::Resampler::default();
         sound.playback.read(pcm, &mut output)?;
         Pcm::new(pcm.sample_rate(), pcm.channels(), output)
     }
@@ -122,6 +132,7 @@ impl SoundState {
             clock.previous = now;
             clock.elapsed = clock.elapsed.wrapping_add(now.wrapping_sub(previous));
         }
+        self.output_gains();
     }
 
     fn configuration_changed(&mut self) {
@@ -163,6 +174,7 @@ impl SoundState {
                 sound.clock.previous = 0;
             } else {
                 sound.unload();
+                self.output_replace(index as usize);
             }
         }
         Ok(())
@@ -189,6 +201,7 @@ impl SoundState {
                 sound.pcm_volume = volume;
             }
         }
+        self.output_gains();
     }
 
     fn set_pan(&mut self, channel: u32, pan: i32, stereo: bool) {
@@ -199,6 +212,7 @@ impl SoundState {
                 sound.pcm_pan = pan.clamp(-100, 100);
             }
         }
+        self.output_gains();
     }
 
     fn start_ramp(&mut self, channel: u32, packed: u32, pan: bool, now: u32) -> Result<()> {
@@ -226,6 +240,7 @@ impl SoundState {
     }
 
     fn start(&mut self, channel: u32, count: u32, tick: u32) -> Result<()> {
+        self.sync_output();
         if let Some(index) = self.property_channel(channel) {
             let sound = &mut self.channels[index];
             if sound.parameters[0] != 0 {
@@ -233,6 +248,10 @@ impl SoundState {
             }
             sound.ramps.active = 0;
             if let Some(pcm) = &sound.pcm {
+                if sound.playback.playing || !sound.resampler.paused {
+                    sound.resampler = super::mix::Resampler::default();
+                }
+                sound.resampler.paused = false;
                 sound
                     .playback
                     .start(pcm, count, playback_range(sound, count))?;
@@ -241,11 +260,15 @@ impl SoundState {
             if sound.started_tick == u32::MAX {
                 sound.started_tick = tick;
             }
+            let range = playback_range(sound, count);
+            self.output_gains();
+            self.output_action(index, Action::Start(count, range));
         }
         Ok(())
     }
 
     fn control_pair(&mut self, channel: u32, command: u32, tick: u32) -> Result<()> {
+        self.sync_output();
         let Some(sound) = self.channels.get(channel as usize) else {
             return Ok(());
         };
@@ -256,13 +279,22 @@ impl SoundState {
                 sound.ramps.active = 0;
             }
             match command {
-                184 => sound.playback.pause(),
+                184 => {
+                    sound.playback.pause();
+                    sound.resampler.paused = true;
+                }
                 185 => {
+                    sound.resampler = super::mix::Resampler::default();
                     if let Some(pcm) = &sound.pcm {
                         sound.playback.stop(pcm)?;
                     }
                 }
                 218 if sound.started_tick == u32::MAX => sound.started_tick = tick,
+                _ => (),
+            }
+            match command {
+                184 => self.output_action(index as usize, Action::Pause),
+                185 => self.output_action(index as usize, Action::Stop),
                 _ => (),
             }
         }
@@ -279,12 +311,13 @@ impl SoundState {
     }
 
     fn change_count(&mut self, channel: u32, count: u32) -> Result<()> {
+        self.sync_output();
         if let Some(index) = self.property_channel(channel) {
             let sound = &mut self.channels[index];
             if sound.pcm.is_some() {
-                sound
-                    .playback
-                    .change_count(count, playback_range(sound, count));
+                let range = playback_range(sound, count);
+                sound.playback.change_count(count, range);
+                self.output_action(index, Action::Count(count, range));
             }
         }
         Ok(())
@@ -347,6 +380,9 @@ impl SoundState {
         sound.file.clear();
         sound.pcm = None;
         sound.playback = Playback::default();
+        sound.resampler = super::mix::Resampler::default();
+        self.output_replace(physical as usize);
+        let sound = &mut self.channels[physical as usize];
         if let Some(pcm) = channel::load_pcm(services, name)? {
             let playback = Playback::new(&pcm, whole, options)?;
             sound.file.extend_from_slice(name);
@@ -389,6 +425,7 @@ impl SoundState {
         } else if mode != 0 {
             self.channels[logical as usize].linked = Some(physical);
         }
+        self.output_replace(physical as usize);
         channel::check_metadata(services, name)
     }
 }
@@ -606,6 +643,7 @@ impl TaskObject for SoundObject {
                         return Err(Error::new(0, "声音空间设置缺少记录缓冲区"));
                     }
                 }
+                self.audio.output_gains();
                 return Ok(CommandOutcome::finished(false));
             }
             198 => {
@@ -713,6 +751,95 @@ impl<F: ObjectFactory> ObjectFactory for SoundFactory<F> {
 mod tests {
     use super::*;
     use crate::{expression::State, kcs::CoreHost};
+
+    fn output_state() -> SoundState {
+        let mut sound = SoundState::default();
+        let channel = &mut sound.channels[0];
+        let pcm = Pcm::new(8, 1, vec![8192, 16384, 24576, 16384]).unwrap();
+        channel.playback = Playback::new(&pcm, true, 0).unwrap();
+        channel.pcm = Some(pcm);
+        channel.requested_volume = 100.0;
+        sound
+    }
+
+    #[test]
+    fn output_mixer_advances_without_task_updates_and_keeps_controls_and_progress() {
+        let mut sound = output_state();
+        let mut mixer = sound.connect_output().unwrap();
+        assert!(sound.connect_output().is_err());
+        assert!(sound.read_channel(0, 1).is_err());
+        assert!(sound.mix_stereo(8, &mut [0.0; 2]).is_err());
+        sound.start(0, 1, 7).unwrap();
+        assert!(sound.channel(0).unwrap().is_playing());
+        let mut sample = [0.0; 2];
+        mixer.render(8, &mut sample).unwrap();
+        assert_eq!(sample, [0.25; 2]);
+        assert_eq!(sound.channel(0).unwrap().position_frames(), 1);
+        sound.control_pair(0, 184, 0).unwrap();
+        assert!(!sound.channel(0).unwrap().is_playing());
+        mixer.render(8, &mut sample).unwrap();
+        assert_eq!(sample, [0.0; 2]);
+        sound.start(0, 1, 8).unwrap();
+        sound.set_volume(0, 50);
+        sound.set_pan(0, -100, true);
+        mixer.render(8, &mut sample).unwrap();
+        assert_eq!(sample, [0.25, 0.0]);
+        let (mut mixer, tail) = std::thread::spawn(move || {
+            let mut tail = [0.0; 6];
+            mixer.render(8, &mut tail).unwrap();
+            (mixer, tail)
+        })
+        .join()
+        .unwrap();
+        assert_eq!(tail, [0.375, 0.0, 0.25, 0.0, 0.0, 0.0]);
+        assert!(!sound.channel(0).unwrap().is_playing());
+        assert_eq!(sound.channel(0).unwrap().completed_passes(), 1);
+        sound.set_volume(0, 100);
+        sound.set_pan(0, 0, true);
+        sound.start(0, 0, 9).unwrap();
+        mixer.render(8, &mut [0.0; 18]).unwrap();
+        assert!(sound.channel(0).unwrap().is_playing());
+        sound.change_count(0, 1).unwrap();
+        mixer.render(8, &mut [0.0; 8]).unwrap();
+        assert!(!sound.channel(0).unwrap().is_playing());
+        sound.start(0, 2, 10).unwrap();
+        sound.control_pair(0, 185, 0).unwrap();
+        mixer.render(8, &mut sample).unwrap();
+        assert_eq!(sample, [0.0; 2]);
+        assert_eq!(sound.channel(0).unwrap().position_frames(), 0);
+        sound.start(0, 1, 11).unwrap();
+        mixer.render(8, &mut sample).unwrap();
+        assert_eq!(sample, [0.25; 2]);
+        sound.unload(0).unwrap();
+        mixer.render(8, &mut sample).unwrap();
+        assert_eq!(sample, [0.0; 2]);
+    }
+
+    #[test]
+    fn pending_output_controls_keep_newer_status_and_replacement_gain() {
+        let mut sound = output_state();
+        let mut mixer = sound.connect_output().unwrap();
+        sound.start(0, 0, 1).unwrap();
+        mixer.render(8, &mut [0.0; 2]).unwrap();
+        let progress = sound.channels[0].progress.as_ref().unwrap().clone();
+        let status = progress.lock().unwrap();
+        mixer.render(8, &mut [0.0; 2]).unwrap();
+        drop(status);
+        sound.control_pair(0, 185, 0).unwrap();
+        sound.start(0, 1, 2).unwrap();
+        assert!(sound.channel(0).unwrap().is_playing());
+        mixer.render(8, &mut [0.0; 8]).unwrap();
+        assert!(!sound.channel(0).unwrap().is_playing());
+        sound.set_volume(0, 50);
+        sound.channels[0].pcm_volume = 100;
+        sound.output_replace(0);
+        sound.start(0, 1, 3).unwrap();
+        let mut output = [0.0; 2];
+        mixer.render(8, &mut output).unwrap();
+        assert_eq!(output, [0.125; 2]);
+        drop(mixer);
+        assert!(!sound.channel(0).unwrap().is_playing());
+    }
 
     #[test]
     fn configuration_notification_preserves_playback_and_marks_query_positions() {

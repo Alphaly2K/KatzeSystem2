@@ -4,6 +4,8 @@
 //! macOS 默认使用 Metal；KATZE_WINDOW_RENDERER=software 选择软件绘制。
 //! 关闭窗口或按 ESC 结束。
 
+#[path = "support/audio_output.rs"]
+mod audio_output;
 mod support;
 
 use katze_system2::{
@@ -341,6 +343,12 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     runtime.input_coordinates_mut().logical_size = [1280, 720];
     let input = runtime.create(0, kind::INPUT, b"input", b"")?;
     let sound = runtime.create(0, kind::SOUND, b"sound", b"")?;
+    let mut audio = audio_output::Output::new(
+        runtime
+            .object_mut(sound)
+            .and_then(|object| object.audio_state_mut())
+            .ok_or("缺少声音状态")?,
+    )?;
     println!("输入 {input} 声音 {sound}");
     let task = runtime.create(0, kind::ORDINARY, b"main", b"")?;
     println!("主任务 {task}");
@@ -450,9 +458,18 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             }
             break;
         }
+        if std::env::var_os("KATZE_TRACE_TIMING").is_some()
+            && frame_started.elapsed().as_millis() >= 20
+        {
+            eprintln!(
+                "[slow-update] frame={now} ms={:.2}",
+                frame_started.elapsed().as_secs_f64() * 1000.0
+            );
+        }
         if !runtime.host_mut().window_close_requests.is_empty() {
             break;
         }
+        audio.pump()?;
         if refresh_title {
             let next =
                 String::from_utf16_lossy(runtime.host().string_tables.resolve(&title_source));

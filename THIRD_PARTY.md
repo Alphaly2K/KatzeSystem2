@@ -58,3 +58,19 @@ macOS 图形后端使用 Metal 的 Rust 绑定。以下依赖选择 MIT 分支�
 |quote|1.0.47|MIT|[声明](licenses/quote-1.0.47)|
 |syn|3.0.9|MIT|[声明](licenses/syn-3.0.9)|
 |unicode-ident|1.0.27|MIT + Unicode-3.0|[声明](licenses/unicode-ident-1.0.27)|
+
+
+桌面窗口的音频设备使用 SDL2：Rust 绑定采用 MIT，所带 SDL 源码采用 Zlib，HIDAPI 选择 BSD-3-Clause，像素转换组件同为 BSD-3-Clause；这些许可与 LGPL-2.1 兼容。分发示例时随附以下声明，保留版权、不得冒用来源或作者背书，修改第三方源码时标明修改。当前直接构建未修改的上游源码，未启用 SDL 扩展库。
+
+|包|版本|采用的许可|声明|
+|:--|:--|:--|:--|
+|sdl2|0.38.0|MIT|[许可](licenses/sdl2-0.38.0/LICENSE)|
+|sdl2-sys|0.38.0|MIT + Zlib + BSD-3-Clause|[绑定](licenses/sdl2-sys-0.38.0/LICENSE-MIT)、[SDL](licenses/sdl2-sys-0.38.0/SDL/LICENSE.txt)、[HIDAPI](licenses/sdl2-sys-0.38.0/SDL/src/hidapi/LICENSE-bsd.txt)、[像素转换](licenses/sdl2-sys-0.38.0/SDL/src/video/yuv2rgb/LICENSE)|
+|cmake|0.1.58|MIT|[许可](licenses/cmake-0.1.58/LICENSE-MIT)|
+|lazy_static|1.5.1|MIT|[许可](licenses/lazy_static-1.5.1/LICENSE-MIT)|
+|version-compare|0.1.1|MIT|[许可](licenses/version-compare-0.1.1/LICENSE)|
+|cc|1.11.1|MIT|[许可](licenses/cc-1.11.1/LICENSE-MIT)|
+|find-msvc-tools|0.1.15|MIT|[许可](licenses/find-msvc-tools-0.1.15/LICENSE-MIT)|
+|shlex|2.0.1|MIT|[许可](licenses/shlex-2.0.1/LICENSE-MIT)|
+
+SDL2 使用 bundled／static-link 构建，设备由同一套跨平台接口选择。CMake 4 构建旧版 SDL 时，需要最低策略版本 3.5；Cargo 配置提供可覆盖的默认环境值。

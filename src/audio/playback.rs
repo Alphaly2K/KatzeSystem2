@@ -2,7 +2,7 @@ use super::Pcm;
 use crate::{Error, Result, read};
 use std::ops::Range;
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct Playback {
     pub playing: bool,
     pub position: usize,
@@ -156,6 +156,7 @@ impl Playback {
     }
 }
 
+#[derive(Clone)]
 struct Decoder {
     position: usize,
     ready: bool,
@@ -211,7 +212,7 @@ impl Decoder {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct Buffered {
     frames: usize,
     silence: usize,
@@ -245,6 +246,7 @@ impl Buffered {
     }
 }
 
+#[derive(Clone)]
 struct Stream {
     samples: Vec<i16>,
     half_frames: usize,

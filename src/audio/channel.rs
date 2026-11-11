@@ -11,6 +11,7 @@ pub(super) struct ChannelClock {
 }
 
 /// 一个物理声音通道持有的资源及装载参数；PCM 保留源格式。
+#[derive(Clone)]
 pub struct SoundChannel {
     pub(super) clock: ChannelClock,
     pub(super) file: Vec<u8>,
@@ -31,6 +32,8 @@ pub struct SoundChannel {
     pub(super) loop_range: [i64; 2],
     pub(super) grouped: bool,
     pub(super) allocation_flags: [u32; 2],
+    pub(super) progress: Option<std::sync::Arc<std::sync::Mutex<super::output::Status>>>,
+    pub(super) resampler: super::mix::Resampler,
 }
 
 impl Default for SoundChannel {
@@ -55,6 +58,8 @@ impl Default for SoundChannel {
             loop_range: [0, -1],
             grouped: false,
             allocation_flags: [0; 2],
+            progress: None,
+            resampler: super::mix::Resampler::default(),
         }
     }
 }
@@ -102,20 +107,44 @@ impl SoundChannel {
     }
 
     pub fn is_playing(&self) -> bool {
-        self.pcm.is_some() && self.playback.playing
+        if let Some(progress) = &self.progress {
+            return progress
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .playing;
+        }
+        self.pcm.is_some() && (self.playback.playing || self.resampler.pending())
     }
 
     /// 由采样读取推进的位置；流式来源返回环形缓冲区内的采样帧位置。
     pub fn position_frames(&self) -> usize {
+        if let Some(progress) = &self.progress {
+            return progress
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .position;
+        }
         self.playback.position
     }
 
     pub fn remaining_plays(&self) -> u32 {
+        if let Some(progress) = &self.progress {
+            return progress
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .remaining;
+        }
         self.playback.remaining
     }
 
     /// 整段来源已消费的遍数；基线流式来源保持零。
     pub fn completed_passes(&self) -> u64 {
+        if let Some(progress) = &self.progress {
+            return progress
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .completed;
+        }
         self.playback.completed
     }
 
@@ -155,6 +184,7 @@ impl SoundChannel {
         self.file.clear();
         self.pcm = None;
         self.playback = Playback::default();
+        self.resampler = super::mix::Resampler::default();
         self.ramps.active = 0;
         self.started_tick = u32::MAX;
         self.clock = ChannelClock::default();

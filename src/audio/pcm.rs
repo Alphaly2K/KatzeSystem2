@@ -7,7 +7,7 @@ use std::io::Cursor;
 pub struct Pcm {
     sample_rate: u32,
     channels: u8,
-    samples: Vec<i16>,
+    samples: std::sync::Arc<[i16]>,
 }
 
 impl Pcm {
@@ -24,7 +24,7 @@ impl Pcm {
         Ok(Self {
             sample_rate,
             channels,
-            samples,
+            samples: samples.into(),
         })
     }
 

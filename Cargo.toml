@@ -22,3 +22,4 @@ metal = "=0.28.0"
 [dev-dependencies]
 libc = "0.2.191"
 minifb = "0.29.0"
+sdl2 = { version = "=0.38.0", default-features = false, features = ["bundled", "static-link"] }
