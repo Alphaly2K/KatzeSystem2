@@ -607,6 +607,7 @@ pub(crate) fn call_native(
         8
         | 13..=16
         | 19..=24
+        | 46
         | 149
         | 211
         | 276
@@ -911,6 +912,26 @@ pub(crate) fn call_native(
         }
         40 => {
             NativeReturn::Value((strings::character_width(&vm.read_string(args[0])?) == 2) as u32)
+        }
+        46 => {
+            if vm.read(args[0], 1).is_err() {
+                return Ok(NativeReturn::Continue);
+            }
+            let source = vm.read_string(args[0])?;
+            let percentage = source
+                .ends_with(b"%")
+                .then(|| text::integer_prefix(&source))
+                .flatten();
+            drop(source);
+            if let Some((_, value)) = percentage {
+                let value = numeric::convert(0x37, value);
+                let base = numeric::convert(0x36, args[1]);
+                let product = numeric::float_ieee(3, value, base);
+                let scaled = numeric::float_ieee(4, product, 100f32.to_bits());
+                let result = numeric::convert(0x39, scaled) as i32;
+                write_string(vm, args[0], result.to_string().as_bytes(), 1)?;
+            }
+            NativeReturn::Continue
         }
         47 | 48 => {
             let source = if index == 48 {

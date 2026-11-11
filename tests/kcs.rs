@@ -958,6 +958,62 @@ fn core_integer_conversion_expands_formats_and_uses_engine_prefix_rules() {
 }
 
 #[test]
+fn percentage_strings_scale_in_place_with_unsigned_bases_and_single_precision() {
+    use kcs::Host;
+    let mut vm = kcs::Interpreter::new(
+        kcs::Program::from_code(&[], vec![0; 256], 64).unwrap(),
+        vec![0; 256],
+    )
+    .unwrap();
+    let mut state = katze_system2::expression::State::new(0);
+    let mut host = kcs::CoreHost::new(&mut state);
+    for (source, base, expected) in [
+        ("50%", 3, "1"),
+        ("-50%", 3, "-1"),
+        ("+33%", 1920, "633"),
+        ("0x10%", 100, "16"),
+        ("0x%", 100, "0"),
+        ("0x1.5%", 100, "1"),
+        ("12tail%", 100, "12"),
+        ("100%%", 100, "100"),
+        ("16777217%", 100, "16777216"),
+        ("4294967297%", 1920, "19"),
+        ("99%", u32::MAX, "-2147483648"),
+        ("", 100, ""),
+        ("%", 100, "%"),
+        (" 12%", 100, " 12%"),
+        ("12.5%", 100, "12.5%"),
+        ("12%tail", 100, "12%tail"),
+    ] {
+        for address in [64u32, 0x8000_0040] {
+            let mut original = [0x55; 64];
+            original[..source.len()].copy_from_slice(source.as_bytes());
+            original[source.len()] = 0;
+            vm.write(address, &original).unwrap();
+            let arguments = [address.to_le_bytes(), base.to_le_bytes()].concat();
+            assert_eq!(
+                host.call(46, &arguments, &mut vm).unwrap(),
+                kcs::NativeReturn::Continue
+            );
+            let mut actual = original;
+            actual[..expected.len()].copy_from_slice(expected.as_bytes());
+            actual[expected.len()] = 0;
+            assert_eq!(&*vm.read(address, 64).unwrap(), actual);
+        }
+    }
+    assert_eq!(
+        host.call(
+            46,
+            &[0x8000_0100u32.to_le_bytes(), 100u32.to_le_bytes()].concat(),
+            &mut vm
+        )
+        .unwrap(),
+        kcs::NativeReturn::Continue
+    );
+    assert!(host.call(46, &[0; 4], &mut vm).is_err());
+}
+
+#[test]
 fn core_scalar_math_keeps_table_mapping_sse_angle_order_and_pow_nan_signs() {
     use kcs::Host;
     let mut vm =
