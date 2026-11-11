@@ -72,8 +72,9 @@ fn startup_discovers_patch_priority_and_preloads_overridden_and_added_programs()
         std::fs::write(root.0.join(name), archive(&entries)).unwrap();
     }
     std::fs::write(root.0.join("updatex1.int"), b"ignored").unwrap();
+    std::fs::write(root.0.join("update99.int"), archive(&[])).unwrap();
     let mut game = support::load_game(root.0.to_str().unwrap()).unwrap();
-    assert_eq!(game.router.patches.len(), 2);
+    assert_eq!(game.router.patches.len(), 3);
     assert_eq!(game.programs["main"].control, 12);
     assert_eq!(game.programs["extra.kcs"].control, 13);
     for mode in [

@@ -117,7 +117,9 @@ impl Archive {
         let count = u32::from_le_bytes(head[4..8].try_into().unwrap()) as usize;
         let mut directory = vec![0; count * 72];
         file.read_exact(&mut directory)?;
-        let encrypted = directory[..64].split(|&b| b == 0).next() == Some(b"__key__.dat");
+        let encrypted = directory
+            .get(..64)
+            .is_some_and(|name| name.split(|&b| b == 0).next() == Some(b"__key__.dat"));
         let mut entries = Vec::new();
         let mut cipher = None;
         if encrypted {
