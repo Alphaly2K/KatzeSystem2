@@ -33,6 +33,10 @@ mod particle;
 pub use particle::ParticleObject;
 mod raster;
 pub use raster::TextureFilter;
+mod frame;
+pub use frame::{FrameTexture, FrameTriangle};
+#[cfg(target_os = "macos")]
+pub mod metal;
 mod resample;
 
 /// 包含左上边、不包含右下边的像素矩形。

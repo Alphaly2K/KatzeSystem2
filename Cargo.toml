@@ -14,6 +14,9 @@ fontdue = { version = "=0.9.3", default-features = false, features = ["std"] }
 lewton = { version = "=0.10.2", default-features = false, features = ["ogg"] }
 roxmltree = "0.20.0"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+metal = "=0.28.0"
+
 [dev-dependencies]
 libc = "0.2.191"
 minifb = "0.29.0"

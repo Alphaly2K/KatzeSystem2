@@ -29,3 +29,26 @@
 依赖版本与校验值由 `Cargo.lock` 固定。Zlib 解压采用 Rust 后端，不要求系统 Zlib。未引入先行实现的源码或资源。
 
 启动示例使用开发依赖 `libc` 0.2.191 调用平台本地日期转换，选择 MIT 许可，兼容项目 LGPL-2.1；分发示例时保留其[版权及许可声明](licenses/libc-0.2.191/LICENSE-MIT)。
+
+macOS 图形后端使用 Metal 的 Rust 绑定。以下依赖选择 MIT 分支；`unicode-ident` 另保留 Unicode-3.0 声明，分发时随附全部版权和许可文字。`block`、`malloc_buf` 的发布包通过包元数据声明 MIT，本项目同时保留声明的作者及 MIT 正文。
+
+|包|版本|采用的许可|声明|
+|:--|:--|:--|:--|
+|bitflags|1.3.2|MIT|[声明](licenses/bitflags-1.3.2)|
+|bitflags|2.13.2|MIT|[声明](licenses/bitflags-2.13.2)|
+|block|0.1.6|MIT|[声明](licenses/block-0.1.6)|
+|core-foundation|0.9.4|MIT|[声明](licenses/core-foundation-0.9.4)|
+|core-foundation-sys|0.8.7|MIT|[声明](licenses/core-foundation-sys-0.8.7)|
+|core-graphics-types|0.1.3|MIT|[声明](licenses/core-graphics-types-0.1.3)|
+|foreign-types|0.5.0|MIT|[声明](licenses/foreign-types-0.5.0)|
+|foreign-types-macros|0.2.4|MIT|[声明](licenses/foreign-types-macros-0.2.4)|
+|foreign-types-shared|0.3.1|MIT|[声明](licenses/foreign-types-shared-0.3.1)|
+|log|0.4.35|MIT|[声明](licenses/log-0.4.35)|
+|malloc_buf|0.0.6|MIT|[声明](licenses/malloc_buf-0.0.6)|
+|metal|0.28.0|MIT|[声明](licenses/metal-0.28.0)|
+|objc|0.2.7|MIT|[声明](licenses/objc-0.2.7)|
+|paste|1.0.15|MIT|[声明](licenses/paste-1.0.15)|
+|proc-macro2|1.0.107|MIT|[声明](licenses/proc-macro2-1.0.107)|
+|quote|1.0.47|MIT|[声明](licenses/quote-1.0.47)|
+|syn|3.0.9|MIT|[声明](licenses/syn-3.0.9)|
+|unicode-ident|1.0.27|MIT + Unicode-3.0|[声明](licenses/unicode-ident-1.0.27)|

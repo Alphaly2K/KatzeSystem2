@@ -1,12 +1,14 @@
 //! 以本机游戏目录打开桌面窗口，按帧驱动启动链并把键鼠输入桥接给输入任务。
 //!
-//! 用法：`cargo run --example window_startup -- <游戏目录>`。
+//! 用法：`cargo run --release --example window_startup -- <游戏目录>`。
+//! macOS 默认使用 Metal；KATZE_WINDOW_RENDERER=software 选择软件绘制。
 //! 关闭窗口或按 ESC 结束。
 
 mod support;
 
 use katze_system2::{
     Result,
+    graphics::{Projection, RenderTarget, TextureFilter, Transform},
     input::{ButtonSource, DeviceKeys, InputDevice, KeySample, PointerSample, WheelButtons},
     language::LanguageTarget,
     runtime::kind,
@@ -15,6 +17,32 @@ use minifb::{Key, MouseButton, MouseMode, Window, WindowOptions};
 use std::cell::RefCell;
 use std::rc::Rc;
 use support::{advance_frame, build_runtime, load_game};
+
+#[cfg(target_os = "macos")]
+#[allow(unexpected_cfgs)]
+fn attach_metal(
+    window: &Window,
+    renderer: &katze_system2::graphics::metal::Renderer,
+) -> Result<()> {
+    use metal::{
+        foreign_types::ForeignTypeRef,
+        objc::{msg_send, runtime::Object, sel, sel_impl},
+    };
+    // minifb 的 macOS 句柄是 NSWindow，最后一个内容子视图是其 MTKView。
+    unsafe {
+        let native = window.get_window_handle().cast::<Object>();
+        let content: *mut Object = msg_send![native, contentView];
+        let views: *mut Object = msg_send![content, subviews];
+        let view: *mut Object = msg_send![views, lastObject];
+        if view.is_null() {
+            return Err(katze_system2::Error::new(0, "窗口缺少 Metal 视图"));
+        }
+        let _: () = msg_send![view, setDelegate: std::ptr::null_mut::<Object>()];
+        let _: () = msg_send![view, setWantsLayer: true];
+        let _: () = msg_send![view, setLayer: renderer.layer().as_ptr()];
+    }
+    Ok(())
+}
 
 /// minifb 键到 Windows 虚拟键码的映射；键槽绑定按 VK 低八位匹配。
 const KEY_VK: &[(Key, u8)] = &[
@@ -283,16 +311,47 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let mut window = Window::new(&title, 1280, 720, WindowOptions::default())?;
     runtime.host_mut().windowed_mode = Some(1);
     window.set_target_fps(60);
+    #[cfg(target_os = "macos")]
+    let mut gpu = if std::env::var("KATZE_WINDOW_RENDERER").as_deref() == Ok("software") {
+        None
+    } else {
+        let renderer =
+            metal::objc::rc::autoreleasepool(katze_system2::graphics::metal::Renderer::new)?;
+        attach_metal(&window, &renderer)?;
+        println!("绘制设备：Metal / {}", renderer.device_name());
+        Some(renderer)
+    };
+    #[cfg(target_os = "macos")]
+    let accelerated = gpu.is_some();
+    #[cfg(not(target_os = "macos"))]
+    let accelerated = false;
+    let mut output = if accelerated {
+        None
+    } else {
+        Some(RenderTarget::new([1280, 720])?)
+    };
+    let mut buffer = if accelerated {
+        Vec::new()
+    } else {
+        vec![0; 1280 * 720]
+    };
+    let limit = std::env::var("KATZE_WINDOW_FRAMES")
+        .ok()
+        .and_then(|s| s.parse::<u32>().ok());
     let mut now = 0u32;
     let started = std::time::Instant::now();
+    let mut report_started = started;
+    let mut update_time = std::time::Duration::ZERO;
+    let mut render_time = std::time::Duration::ZERO;
     while window.is_open() && !window.is_key_down(Key::Escape) {
+        let frame_started = std::time::Instant::now();
         {
             let mut shared = shared.borrow_mut();
-            let (x, y) = window
-                .get_mouse_pos(MouseMode::Clamp)
-                .unwrap_or((640., 360.));
-            shared.position = [x as i32, y as i32];
-            shared.active = u32::from(window.get_mouse_down(MouseButton::Left));
+            let pointer = window.get_mouse_pos(MouseMode::Discard);
+            if let Some((x, y)) = pointer {
+                shared.position = [x as i32, y as i32];
+            }
+            shared.active = u32::from(pointer.is_some() && window.is_active());
             for (button, code) in [
                 (MouseButton::Left, 1),
                 (MouseButton::Right, 3),
@@ -354,15 +413,58 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 title = next;
             }
         }
-        let target = runtime.drawing().target.as_ref().ok_or("缺少渲染目标")?;
-        let [width, height] = target.size();
-        let mut buffer = Vec::with_capacity((width * height) as usize);
-        for y in 0..height {
-            for x in 0..width {
-                buffer.push(target.pixel(x, y).unwrap_or(0) & 0x00ff_ffff);
+        update_time += frame_started.elapsed();
+        let render_started = std::time::Instant::now();
+        #[cfg(target_os = "macos")]
+        if let Some(renderer) = &mut gpu {
+            let triangles = runtime
+                .drawables_mut()
+                .frame_triangles(&Projection::default(), *Transform::default().matrix())?;
+            let canvas = runtime
+                .drawing_mut()
+                .target
+                .as_mut()
+                .ok_or("运行时缺少画布")?;
+            metal::objc::rc::autoreleasepool(|| {
+                renderer.present(&triangles, canvas, [1280, 720], TextureFilter::Point)
+            })?;
+        }
+        if let Some(output) = &mut output {
+            output.clear_rect(katze_system2::graphics::Rect::from_xywh(0, 0, 1280, 720));
+            runtime.render_frame(
+                output,
+                &Projection::default(),
+                *Transform::default().matrix(),
+                TextureFilter::Point,
+            )?;
+            let [width, height] = output.size();
+            for y in 0..height {
+                for x in 0..width {
+                    buffer[(y * width + x) as usize] =
+                        output.pixel(x, y).unwrap_or(0) & 0x00ff_ffff;
+                }
             }
         }
-        window.update_with_buffer(&buffer, width as usize, height as usize)?;
+        render_time += render_started.elapsed();
+        if accelerated {
+            window.update();
+        } else {
+            window.update_with_buffer(&buffer, 1280, 720)?;
+        }
+        if now.is_multiple_of(120) {
+            println!(
+                "帧 {now}：{:.1} FPS，更新 {:.2} ms，绘制 {:.2} ms",
+                120. / report_started.elapsed().as_secs_f64(),
+                update_time.as_secs_f64() * 1000. / 120.,
+                render_time.as_secs_f64() * 1000. / 120.
+            );
+            update_time = std::time::Duration::ZERO;
+            render_time = std::time::Duration::ZERO;
+            report_started = std::time::Instant::now();
+        }
+        if limit.is_some_and(|limit| now >= limit) {
+            break;
+        }
     }
     Ok(())
 }
