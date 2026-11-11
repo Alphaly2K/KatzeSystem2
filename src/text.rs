@@ -8,6 +8,19 @@ pub fn cp932(bytes: &[u8]) -> Result<String> {
         .ok_or_else(|| Error::new(0, "无效 CP932 文本"))
 }
 
+pub(crate) fn decode_script(
+    bytes: &[u8],
+    encoding: &'static encoding_rs::Encoding,
+) -> Result<String> {
+    if encoding == encoding_rs::SHIFT_JIS {
+        return cp932(bytes);
+    }
+    encoding
+        .decode_without_bom_handling_and_without_replacement(bytes)
+        .map(|s| s.into_owned())
+        .ok_or_else(|| Error::new(0, format!("无效 {} 脚本文本", encoding.name())))
+}
+
 pub fn ascii(bytes: &[u8]) -> Result<&str> {
     if !bytes.is_ascii() {
         return Err(Error::new(0, "语法字段需要 ASCII"));

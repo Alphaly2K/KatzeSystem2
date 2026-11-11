@@ -20,6 +20,11 @@ pub trait ResourceServices {
 
     fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>>;
 
+    /// CST 与名称表原始文字的编码；默认沿用基线 CP932。
+    fn script_encoding(&self) -> &'static encoding_rs::Encoding {
+        encoding_rs::SHIFT_JIS
+    }
+
     /// 宽字符资源读取；默认转为 CP932，无法无损表示时由宿主覆盖此方法。
     fn read_utf16(&mut self, name: &[u16], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
         let name = &name[..name
@@ -42,6 +47,9 @@ pub trait ResourceServices {
 }
 
 impl<S: ResourceServices + ?Sized> ResourceServices for &mut S {
+    fn script_encoding(&self) -> &'static encoding_rs::Encoding {
+        (**self).script_encoding()
+    }
     fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
         (**self).resolve(category, name)
     }

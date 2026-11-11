@@ -12,6 +12,7 @@ mod snapshot;
 pub struct CstContext {
     languages: BTreeSet<Vec<u8>>,
     script: Option<Arc<crate::cst::Script>>,
+    encoding: &'static encoding_rs::Encoding,
     localization: Option<Arc<crate::cstl::Table>>,
     position: [i32; 2],
     registrations: Vec<Entry>,
@@ -45,6 +46,7 @@ impl CstContext {
                 })
                 .collect(),
             script: None,
+            encoding: encoding_rs::SHIFT_JIS,
             localization: None,
             position: [0; 2],
             registrations: Vec::new(),
@@ -105,6 +107,7 @@ impl CstContext {
             };
             if size.checked_add(16) == Some(data.len()) {
                 self.script = Some(Arc::new(crate::cst::Script::parse(&data)?));
+                self.encoding = services.script_encoding();
                 self.position = [0; 2];
                 loaded = true;
             }
@@ -174,7 +177,7 @@ impl CstContext {
             }
         }
         Ok(Some(if utf8 || unicode {
-            crate::text::cp932(&line.bytes)?.into_bytes()
+            crate::text::decode_script(&line.bytes, self.encoding)?.into_bytes()
         } else {
             line.bytes.clone()
         }))

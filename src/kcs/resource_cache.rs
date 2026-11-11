@@ -209,6 +209,9 @@ impl<S: ResourceServices> CachedResources<S> {
 }
 
 impl<S: ResourceServices> ResourceServices for CachedResources<S> {
+    fn script_encoding(&self) -> &'static encoding_rs::Encoding {
+        self.inner.script_encoding()
+    }
     fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
         self.inner.resolve(category, name)
     }

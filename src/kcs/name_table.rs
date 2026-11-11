@@ -11,7 +11,11 @@ struct Entry {
 }
 
 impl NameTable {
-    fn parse(bytes: &[u8], unicode: bool) -> Result<Self> {
+    fn parse(
+        bytes: &[u8],
+        unicode: bool,
+        encoding: &'static encoding_rs::Encoding,
+    ) -> Result<Self> {
         if bytes.len() > read::MAX_BYTES || bytes.contains(&0) {
             return Err(Error::new(0, "名称表长度无效或包含零字节"));
         }
@@ -43,7 +47,7 @@ impl NameTable {
             };
             let id = text::integer_prefix(id).map_or(0, |(_, id)| id);
             let name = if unicode {
-                text::cp932(name)?.into_bytes()
+                text::decode_script(name, encoding)?.into_bytes()
             } else {
                 name.clone()
             };
@@ -148,7 +152,7 @@ impl ResourceState {
             if bytes.is_empty() {
                 return Ok(NativeReturn::Value(0));
             }
-            let table = NameTable::parse(&bytes, unicode)?;
+            let table = NameTable::parse(&bytes, unicode, services.script_encoding())?;
             let handle = self.allocate_handle(vm.pc)?;
             self.name_tables.insert(handle, table);
             return Ok(NativeReturn::Value(handle));

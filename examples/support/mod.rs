@@ -147,8 +147,13 @@ impl Archive {
         } else {
             for i in 0..count {
                 let base = i * 72;
+                let name = &directory[base..base + 64];
+                let end = name
+                    .iter()
+                    .position(|&byte| byte == 0)
+                    .unwrap_or(name.len());
                 entries.push(Entry {
-                    name: guess_name(&directory[base..base + 64]),
+                    name: String::from_utf8_lossy(&name[..end]).into_owned(),
                     raw: directory[base..base + 64].to_vec(),
                     offset: u32::from_le_bytes(directory[base + 64..base + 68].try_into().unwrap()),
                     length: u32::from_le_bytes(directory[base + 68..base + 72].try_into().unwrap()),
@@ -175,6 +180,7 @@ impl Archive {
         if let Some(&position) = self.index.get(&name.to_ascii_uppercase()) {
             return Some(position);
         }
+        self.cipher.as_ref()?;
         for (position, entry) in self.entries.iter().enumerate() {
             let end = entry
                 .raw
@@ -234,10 +240,18 @@ pub struct Router {
     pub config: ArchiveConfig,
     pub sound_config: Option<katze_system2::audio::SoundConfig>,
     pub archives: BTreeMap<String, Archive>,
+    pub patches: Vec<Archive>,
+    pub script_encoding: &'static encoding_rs::Encoding,
 }
 
 impl Router {
     fn read_name(&mut self, name: &str, mode: ResourceMode) -> Result<Option<Vec<u8>>> {
+        let inner = name.rsplit('/').next().unwrap_or(name);
+        for patch in &mut self.patches {
+            if let Some(bytes) = patch.read(inner)? {
+                return Ok(Some(bytes));
+            }
+        }
         if mode == ResourceMode::File {
             return Ok(std::fs::read(std::path::Path::new(&self.root).join(name)).ok());
         }
@@ -285,6 +299,9 @@ impl Router {
 }
 
 impl ResourceServices for Router {
+    fn script_encoding(&self) -> &'static encoding_rs::Encoding {
+        self.script_encoding
+    }
     fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
         let value = if category == b"sound" {
             match self.sound_archive(name) {
@@ -332,10 +349,7 @@ impl ResourceServices for Router {
         let name = String::from_utf16(name)
             .map_err(|_| Error::new(0, "资源名称包含无效 UTF-16"))?
             .replace('\\', "/");
-        if mode == ResourceMode::File {
-            return Ok(std::fs::read(format!("{}/{}", self.root, name)).ok());
-        }
-        self.read(name.as_bytes(), mode)
+        self.read_name(&name, mode)
     }
 }
 
@@ -436,12 +450,35 @@ pub struct Game {
 pub fn load_game(root: &str) -> std::result::Result<Game, Box<dyn std::error::Error>> {
     let startup = std::fs::read_to_string(format!("{root}/config/startup.xml"))?;
     let config = ArchiveConfig::from_xml(&startup)?;
+    let script_encoding = match std::env::var("KATZE_SCRIPT_ENCODING") {
+        Ok(name) => encoding_rs::Encoding::for_label(name.as_bytes()).ok_or("未知脚本文字编码")?,
+        Err(_) => encoding_rs::SHIFT_JIS,
+    };
     let mut router = Router {
         root: root.to_string(),
         config: config.clone(),
         sound_config: None,
         archives: BTreeMap::new(),
+        patches: Vec::new(),
+        script_encoding,
     };
+    let mut patches = Vec::new();
+    for entry in std::fs::read_dir(root)? {
+        let entry = entry?;
+        let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+        let Some(number) = patch_number(&name) else {
+            continue;
+        };
+        if entry.file_type()?.is_file() {
+            patches.push((number, entry.path()));
+        }
+    }
+    patches.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+    for (_, path) in patches {
+        router.patches.push(Archive::open(
+            path.to_str().ok_or("补丁归档路径包含无效编码")?,
+        )?);
+    }
     for entry in config.entries.iter() {
         let prefix = String::from_utf8_lossy(&entry.category.prefix).into_owned();
         let path = format!("{root}/{prefix}");
@@ -465,13 +502,23 @@ pub fn load_game(root: &str) -> std::result::Result<Game, Box<dyn std::error::Er
         .to_string();
     println!("启动脚本 {start}");
     let mut programs = BTreeMap::new();
-    if let Some(archive) = router.archives.get_mut("kcs.int") {
-        let names: Vec<String> = archive
+    if let Some(archive) = router.archives.get("kcs.int") {
+        let mut names: std::collections::BTreeSet<String> = archive
             .entries()
             .map(|(name, _, _, _)| name.to_string())
             .collect();
+        for patch in &router.patches {
+            names.extend(
+                patch
+                    .entries()
+                    .filter(|(name, _, _, _)| name.ends_with(".kcs"))
+                    .map(|(name, _, _, _)| name.to_string()),
+            );
+        }
         for name in names {
-            let Some(data) = archive.read(&name)? else {
+            let Some(data) =
+                router.read_name(&format!("kcs.int/{name}"), ResourceMode::ArchiveFirst)?
+            else {
                 continue;
             };
             let Ok(program) = Program::parse(&data) else {
@@ -489,6 +536,14 @@ pub fn load_game(root: &str) -> std::result::Result<Game, Box<dyn std::error::Er
         start,
         programs,
     })
+}
+
+fn patch_number(name: &str) -> Option<u32> {
+    let number = name.strip_prefix("update")?.strip_suffix(".int")?;
+    if number.len() != 2 || !number.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    number.parse().ok()
 }
 
 pub type Factory = SoundFactory<

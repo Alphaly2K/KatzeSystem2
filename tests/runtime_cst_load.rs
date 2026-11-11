@@ -138,6 +138,89 @@ fn runtime(code: &[u8], budget: usize) -> (Runtime<KcsFactory<Loader>>, u32, Fil
 }
 
 #[test]
+fn localized_scene_and_name_table_use_resource_encoding_for_unicode_outputs() {
+    struct TranslatedSources(Vec<u8>);
+    impl ResourceServices for TranslatedSources {
+        fn script_encoding(&self) -> &'static encoding_rs::Encoding {
+            encoding_rs::GBK
+        }
+        fn resolve(&mut self, category: &[u8], _: &[u8]) -> Result<Vec<u8>> {
+            Ok(if category == b"scene" {
+                b"scene".to_vec()
+            } else {
+                b"names".to_vec()
+            })
+        }
+        fn read(&mut self, name: &[u8], _: ResourceMode) -> Result<Option<Vec<u8>>> {
+            Ok(match name {
+                b"scene" => Some(self.0.clone()),
+                b"names" => Some(
+                    encoding_rs::GBK
+                        .encode("0\t汉化姓名\tvoice\n")
+                        .0
+                        .into_owned(),
+                ),
+                _ => None,
+            })
+        }
+    }
+    let text = encoding_rs::GBK.encode("汉化正文").0.into_owned();
+    let mut body: Vec<u8> = [15 + text.len() as u32, 1, 8, 12, 1, 0, 0]
+        .into_iter()
+        .flat_map(u32::to_le_bytes)
+        .collect();
+    body.extend([1, 0x20]);
+    body.extend(&text);
+    body.push(0);
+    let mut scene = b"CatScene".to_vec();
+    scene.extend(
+        [0, body.len() as u32]
+            .into_iter()
+            .flat_map(u32::to_le_bytes),
+    );
+    scene.extend(body);
+    let mut code = Vec::new();
+    for (index, args, output) in [
+        (323, vec![], 400),
+        (325, vec![1, 64], 0),
+        (327, vec![1, 160, 0, 0], 4),
+        (1037, vec![1, 200, 0, 0], 8),
+        (633, vec![64], 12),
+        (637, vec![2, 0, 240], 16),
+    ] {
+        call(&mut code, index, &args, Some(output));
+    }
+    for budget in [1, 4096] {
+        for unicode in [0, 1] {
+            let (mut rt, task, _, _) = runtime(&code, budget);
+            rt.host_mut().unicode_text = unicode;
+            rt.set_resources(katze_system2::kcs::CachedResources::new(TranslatedSources(
+                scene.clone(),
+            )));
+            rt.update(0, 1).unwrap();
+            let vm = rt.object(task).unwrap().interpreter().unwrap();
+            assert_eq!(
+                vm.read_string(160).unwrap(),
+                if unicode == 0 {
+                    text.as_slice()
+                } else {
+                    "汉化正文".as_bytes()
+                }
+            );
+            assert_eq!(vm.read_string(200).unwrap(), "汉化正文".as_bytes());
+            assert_eq!(
+                vm.read_string(240).unwrap(),
+                if unicode == 0 {
+                    encoding_rs::GBK.encode("汉化姓名").0.into_owned()
+                } else {
+                    "汉化姓名".as_bytes().to_vec()
+                }
+            );
+        }
+    }
+}
+
+#[test]
 fn loading_preserves_missing_state_clears_failed_payload_and_rebinds_languages() {
     let mut code = vec![];
     call(&mut code, 323, &[], Some(400));
