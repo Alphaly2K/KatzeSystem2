@@ -1,5 +1,5 @@
 /// `SAVEPANEL` 的平面和启用编号；`dispid` 选择独立于单元内容。
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SavePanelState {
     /// 面板自身的绘制平面。
     pub plane: crate::fes::CPlaneState,
@@ -9,6 +9,32 @@ pub struct SavePanelState {
     pub enabled_ids: std::collections::BTreeSet<i32>,
     /// 单元内容按编号保存，与启用选择分别更新。
     pub cells: std::collections::BTreeMap<i32, PanelCell>,
+    /// 最近请求的存档文件名，使用 CP932 字节。
+    pub save_name: Vec<u8>,
+    /// 最近请求读取的数值记录编号。
+    pub record_id: u32,
+    /// 面板独立的 1024 项数值区。
+    pub flags: Vec<i32>,
+    /// 文件修改时间的本地年、月、日、时、分、秒。
+    pub date: [u32; 6],
+    /// 最近成功装载的 CSS 数据；文件缺失时保留。
+    pub data: Option<crate::save::DataContainer>,
+}
+
+impl Default for SavePanelState {
+    fn default() -> Self {
+        Self {
+            plane: Default::default(),
+            images: Vec::new(),
+            enabled_ids: Default::default(),
+            cells: Default::default(),
+            save_name: Vec::new(),
+            record_id: 0,
+            flags: vec![0; 1024],
+            date: [0; 6],
+            data: None,
+        }
+    }
 }
 
 /// 不含进程地址的原生面板单元记录。

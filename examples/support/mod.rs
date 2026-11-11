@@ -386,6 +386,42 @@ impl SaveServices for Saves {
             elapsed.as_nanos() as u64 / 100 + 116_444_736_000_000_000,
         ))
     }
+
+    fn modified_date(&mut self, owner: u32, name: &[u8]) -> Result<Option<[u32; 6]>> {
+        self.modified_time(owner, name)?
+            .map(local_save_date)
+            .transpose()
+    }
+}
+
+fn local_save_date(file_time: u64) -> Result<[u32; 6]> {
+    let seconds = (i128::from(file_time) - 116_444_736_000_000_000i128) / 10_000_000;
+    let seconds =
+        libc::time_t::try_from(seconds).map_err(|_| Error::new(0, "存档修改时间超过平台范围"))?;
+    let mut date = std::mem::MaybeUninit::<libc::tm>::uninit();
+    #[cfg(unix)]
+    let valid = unsafe { !libc::localtime_r(&seconds, date.as_mut_ptr()).is_null() };
+    #[cfg(windows)]
+    let valid = unsafe { libc::localtime_s(date.as_mut_ptr(), &seconds) == 0 };
+    #[cfg(not(any(unix, windows)))]
+    let valid = false;
+    if !valid {
+        return Err(Error::new(0, "存档本地日期转换失败"));
+    }
+    let date = unsafe { date.assume_init() };
+    let values = [
+        date.tm_year + 1900,
+        date.tm_mon + 1,
+        date.tm_mday,
+        date.tm_hour,
+        date.tm_min,
+        date.tm_sec,
+    ];
+    let mut result = [0; 6];
+    for (target, value) in result.iter_mut().zip(values) {
+        *target = u32::try_from(value).map_err(|_| Error::new(0, "存档本地日期字段超出范围"))?;
+    }
+    Ok(result)
 }
 
 /// 游戏目录装载结果；`router` 在 `build_runtime` 时被移交资源服务。

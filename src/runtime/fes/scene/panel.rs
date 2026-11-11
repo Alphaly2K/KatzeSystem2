@@ -5,17 +5,16 @@ use crate::{
 };
 
 impl<F: ObjectFactory> Store<'_, F> {
-    fn panel_number(
+    fn panel_values<const N: usize>(
         &mut self,
         scene: &mut Scene,
-        target: &fes::ObjectReference,
         args: &[Vec<u8>],
         offset: usize,
-    ) -> Result<()> {
-        let mut values = [0; 2];
+    ) -> Result<Option<[i32; N]>> {
+        let mut values = [0; N];
         for (index, value) in values.iter_mut().enumerate() {
             let Some(source) = args.get(index + 2) else {
-                return Ok(());
+                return Ok(None);
             };
             if !source.is_empty() {
                 *value = scene
@@ -24,7 +23,19 @@ impl<F: ObjectFactory> Store<'_, F> {
                     .map_err(|error| Error::new(offset + error.offset, error.message))?;
             }
         }
-        let [id, value] = values;
+        Ok(Some(values))
+    }
+
+    fn panel_number(
+        &mut self,
+        scene: &mut Scene,
+        target: &fes::ObjectReference,
+        args: &[Vec<u8>],
+        offset: usize,
+    ) -> Result<()> {
+        let Some([id, value]) = self.panel_values(scene, args, offset)? else {
+            return Ok(());
+        };
         let banks = if target.bank == -1 {
             0..i64::from(scene.objects.count(&target.name))
         } else {
@@ -43,6 +54,87 @@ impl<F: ObjectFactory> Store<'_, F> {
             cell.data[0x60..0x64].copy_from_slice(&value.to_le_bytes());
             scene.objects.invalidate(handle)?;
         }
+        Ok(())
+    }
+
+    fn panel_flag(
+        &mut self,
+        scene: &mut Scene,
+        target: &fes::ObjectReference,
+        args: &[Vec<u8>],
+        offset: usize,
+    ) -> Result<()> {
+        if target.bank == -1 {
+            return Ok(());
+        }
+        let Some([id, destination]) = self.panel_values(scene, args, offset)? else {
+            return Ok(());
+        };
+        let Some(handle) = scene.objects.lookup(&target.name, target.bank) else {
+            return Ok(());
+        };
+        if let ObjectState::SavePanel(panel) = &scene.objects.get(handle).unwrap().state {
+            let value = panel.flags.get(id as usize).copied().unwrap_or(0);
+            if let Some(slot) = self.numbers.shared.get_mut(destination as usize) {
+                *slot = value;
+            }
+        }
+        Ok(())
+    }
+
+    fn panel_save(
+        &mut self,
+        scene: &mut Scene,
+        target: &fes::ObjectReference,
+        args: &[Vec<u8>],
+        offset: usize,
+    ) -> Result<()> {
+        if target.bank == -1 {
+            return Ok(());
+        }
+        let Some([slot, record_id, start]) = self.panel_values(scene, args, offset)? else {
+            return Ok(());
+        };
+        let Some(handle) = scene.objects.lookup(&target.name, target.bank) else {
+            return Ok(());
+        };
+        let ObjectState::SavePanel(panel) = &mut scene.objects.get_mut(handle).unwrap().state
+        else {
+            return Ok(());
+        };
+        let name = format!("save{slot:04}.dat").into_bytes();
+        panel.save_name.clone_from(&name);
+        panel.record_id = record_id as u32;
+        let result = (|| {
+            let services = self
+                .host
+                .save_services
+                .as_mut()
+                .ok_or_else(|| Error::new(0, "运行时未配置存档读取服务"))?;
+            let data = services
+                .read(scene.owner.unwrap(), &name)?
+                .map(|file| crate::save::DataContainer::from_css(&file))
+                .transpose()?
+                .flatten();
+            panel.date = [0; 6];
+            if let Some(data) = data {
+                panel.data = Some(data);
+                panel.date = services
+                    .modified_date(scene.owner.unwrap(), &name)?
+                    .unwrap_or([0; 6]);
+                if let (Some(source), Some(target)) = (
+                    panel.data.as_ref().unwrap().record(record_id as u32)?,
+                    panel.flags.get_mut(start as usize..),
+                ) {
+                    for (target, bytes) in target.iter_mut().zip(source.chunks_exact(4)) {
+                        *target = i32::from_le_bytes(bytes.try_into().unwrap());
+                    }
+                }
+            }
+            Ok(())
+        })();
+        result.map_err(|error: Error| Error::new(offset + error.offset, error.message))?;
+        scene.objects.invalidate(handle)?;
         Ok(())
     }
 
@@ -87,7 +179,7 @@ impl<F: ObjectFactory> Store<'_, F> {
         };
         if !matches!(
             name,
-            b"ptype" | b"dispid" | b"setnum" | b"setsave" | b"getflag" | b"datasave"
+            b"ptype" | b"dispid" | b"setnum" | b"setsave" | b"getflag"
         ) {
             return Ok(false);
         }
@@ -103,21 +195,10 @@ impl<F: ObjectFactory> Store<'_, F> {
             self.panel_selection(scene, target, args, line.offset)?;
             return Ok(true);
         }
-        let bank = if target.bank == -1 { 0 } else { target.bank };
-        let Some(_) = scene.objects.lookup(&target.name, bank) else {
-            return Ok(true);
-        };
-        let mut eval = |index: usize| -> Result<i32> {
-            scene
-                .interpreter
-                .eval(&args[index], self.numbers)
-                .map_err(|error| Error::new(line.offset + error.offset, error.message))
-        };
         if name == b"getflag" {
-            let index = eval(3)? as usize;
-            if let Some(slot) = self.numbers.shared.get_mut(index) {
-                *slot = 0;
-            }
+            self.panel_flag(scene, target, args, line.offset)?;
+        } else if name == b"setsave" {
+            self.panel_save(scene, target, args, line.offset)?;
         }
         Ok(true)
     }

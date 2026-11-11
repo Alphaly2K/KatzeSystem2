@@ -15,9 +15,15 @@ pub trait SaveServices {
     fn modified_time(&mut self, _task_id: u32, _name: &[u8]) -> Result<Option<u64>> {
         Err(Error::new(0, "存档修改时间查询服务尚未接入"))
     }
+
+    /// 查询文件修改时间的本地年、月、日、时、分、秒；None 表示无法查询。
+    fn modified_date(&mut self, _task_id: u32, _name: &[u8]) -> Result<Option<[u32; 6]>> {
+        Err(Error::new(0, "存档本地日期查询服务尚未接入"))
+    }
 }
 
 /// 连续的编号／长度／正文记录，保留重复编号、声明用量和逻辑容量。
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DataContainer {
     bytes: Vec<u8>,
     capacity: usize,

@@ -27,3 +27,5 @@
 |version_check|0.9.5|MIT|[许可](licenses/version_check-0.9.5/LICENSE-MIT)|
 
 依赖版本与校验值由 `Cargo.lock` 固定。Zlib 解压采用 Rust 后端，不要求系统 Zlib。未引入先行实现的源码或资源。
+
+启动示例使用开发依赖 `libc` 0.2.191 调用平台本地日期转换，选择 MIT 许可，兼容项目 LGPL-2.1；分发示例时保留其[版权及许可声明](licenses/libc-0.2.191/LICENSE-MIT)。

@@ -15,4 +15,5 @@ lewton = { version = "=0.10.2", default-features = false, features = ["ogg"] }
 roxmltree = "0.20.0"
 
 [dev-dependencies]
+libc = "0.2.191"
 minifb = "0.29.0"

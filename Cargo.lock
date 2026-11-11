@@ -306,6 +306,7 @@ dependencies = [
  "flate2",
  "fontdue",
  "lewton",
+ "libc",
  "minifb",
  "roxmltree",
 ]
