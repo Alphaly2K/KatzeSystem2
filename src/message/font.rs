@@ -130,18 +130,31 @@ impl Font {
     }
 
     pub fn measure(&self, character: char, size: u32) -> Result<i32> {
-        let metrics = self.metrics(character, size)?;
+        let metrics = self.metrics(character, size, false)?;
         Ok(metrics.advance_width.round() as i32)
     }
 
     pub fn rasterize(&self, character: char, size: u32) -> Result<GlyphMask> {
-        self.metrics(character, size)?;
+        self.rasterize_glyph(character, size, false)
+    }
+
+    pub(super) fn measure_or_missing(&self, character: char, size: u32) -> Result<i32> {
+        Ok(self.metrics(character, size, true)?.advance_width.round() as i32)
+    }
+
+    pub(super) fn rasterize_or_missing(&self, character: char, size: u32) -> Result<GlyphMask> {
+        self.rasterize_glyph(character, size, true)
+    }
+
+    fn rasterize_glyph(
+        &self,
+        character: char,
+        size: u32,
+        allow_missing: bool,
+    ) -> Result<GlyphMask> {
+        self.metrics(character, size, allow_missing)?;
         let (metrics, coverage) = self.font.rasterize(character, size as f32);
-        let baseline = self
-            .font
-            .horizontal_line_metrics(size as f32)
-            .map_or(size as i32, |line| line.ascent.round() as i32)
-            .min(size as i32);
+        let baseline = self.baseline(size);
         GlyphMask::new(
             [metrics.width as u32, metrics.height as u32],
             [
@@ -159,8 +172,15 @@ impl Font {
         )
     }
 
-    fn metrics(&self, character: char, size: u32) -> Result<fontdue::Metrics> {
-        if !self.has_character(character) {
+    pub(super) fn baseline(&self, size: u32) -> i32 {
+        self.font
+            .horizontal_line_metrics(size as f32)
+            .map_or(size as i32, |line| line.ascent.round() as i32)
+            .min(size as i32)
+    }
+
+    fn metrics(&self, character: char, size: u32, allow_missing: bool) -> Result<fontdue::Metrics> {
+        if !allow_missing && !self.has_character(character) {
             return Err(Error::new(
                 0,
                 format!("字体缺少字符 U+{:04X}", character as u32),

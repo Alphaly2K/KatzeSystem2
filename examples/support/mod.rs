@@ -644,8 +644,7 @@ pub fn build_runtime(
     {
         runtime.reload_language_tables(katze_system2::language::LanguageTarget::MainText)?;
     }
-    #[cfg(target_os = "macos")]
-    runtime.set_fonts(katze_system2::message::macos::MacFonts::new(&root));
+    runtime.set_fonts(katze_system2::message::Fonts::new(&root));
     runtime.set_save_services(Saves {
         root: configuration_files.directory.to_string_lossy().into_owned(),
     });

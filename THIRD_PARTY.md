@@ -13,7 +13,13 @@
 |simd-adler32|0.3.10|MIT|[许可](licenses/simd-adler32-0.3.10/LICENSE.md)|
 |roxmltree|0.20.0|MIT|[许可](licenses/roxmltree-0.20.0/LICENSE-MIT)|
 |fontdue|0.9.3|MIT|[许可](licenses/fontdue-0.9.3/LICENSE-MIT)|
+|fontdb|0.23.0|MIT|[许可](licenses/fontdb-0.23.0/LICENSE)|
+|fontconfig-parser|0.5.8|MIT|[许可](licenses/fontconfig-parser-0.5.8/LICENSE)|
 |ttf-parser|0.21.1|MIT|[许可](licenses/ttf-parser-0.21.1/LICENSE-MIT)|
+|ttf-parser|0.25.1|MIT|[许可](licenses/ttf-parser-0.25.1/LICENSE-MIT)|
+|slotmap|1.1.1|Zlib|[许可](licenses/slotmap-1.1.1/LICENSE)|
+|core_maths|0.1.1|MIT|[许可](licenses/core_maths-0.1.1/LICENSE)|
+|libm|0.2.16|MIT|[许可及上游声明](licenses/libm-0.2.16/LICENSE.txt)|
 |lewton|0.10.2|MIT|[许可](licenses/lewton-0.10.2/LICENSE)|
 |ogg|0.8.0|BSD-3-Clause|[许可](licenses/ogg-0.8.0/LICENSE)|
 |tinyvec|1.13.3|MIT|[许可](licenses/tinyvec-1.13.3/LICENSE-MIT.md)|
@@ -26,7 +32,7 @@
 |typenum|1.20.1|MIT|[许可](licenses/typenum-1.20.1/LICENSE-MIT)|
 |version_check|0.9.5|MIT|[许可](licenses/version_check-0.9.5/LICENSE-MIT)|
 
-依赖版本与校验值由 `Cargo.lock` 固定。Zlib 解压采用 Rust 后端，不要求系统 Zlib。未引入先行实现的源码或资源。
+依赖版本与校验值由 `Cargo.lock` 固定。Zlib 解压采用 Rust 后端，不要求系统 Zlib。字体服务使用 fontdb 统一发现、fontdue 栅格化和 ttf-parser 元数据解析；fontdb 启用 fs／fontconfig，fontconfig-parser 使用纯 Rust 解析配置，关闭 memmap。新增依赖采用上表的 MIT 或 Zlib 许可，分发时保留许可及版权声明；slotmap 的来源与修改标记义务按其 Zlib 许可执行。未引入先行实现的源码或资源。
 
 启动示例使用开发依赖 `libc` 0.2.191 调用平台本地日期转换，选择 MIT 许可，兼容项目 LGPL-2.1；分发示例时保留其[版权及许可声明](licenses/libc-0.2.191/LICENSE-MIT)。
 
