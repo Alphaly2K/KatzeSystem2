@@ -125,7 +125,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                                 .transpose()?
                                 .flatten()
                             {
-                                blend(&mut surface, part, [0; 2]);
+                                blend_hg3(&mut surface, part, [0; 2])?;
                             }
                         }
                         1 | 6 => {
@@ -168,7 +168,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                                 .transpose()?
                                 .flatten()
                             {
-                                blend(&mut surface, part, position);
+                                blend_hg3(&mut surface, part, position)?;
                             }
                         }
                         3 | 4 => self.panel_text(&mut surface, content, position)?,
@@ -202,7 +202,14 @@ impl<F: ObjectFactory> Store<'_, F> {
                 }
                 self.resources.images.recreate(wrapper, surface.size())?;
                 let image = self.resources.images.get_mut(wrapper)?;
-                image.pixels_mut().copy_from_slice(surface.pixels());
+                // 面板按顶部坐标合成，共享图像列表读取底端起始的来源。
+                for (target, source) in image
+                    .pixels_mut()
+                    .chunks_exact_mut(surface.stride())
+                    .zip(surface.pixels().rchunks_exact(surface.stride()))
+                {
+                    target.copy_from_slice(source);
+                }
                 image.use_pixel_canvas();
             }
         }
@@ -239,7 +246,13 @@ impl<F: ObjectFactory> Store<'_, F> {
             }
             crate::text::decode_script(bytes, encoding)
         };
-        let text = decode(content.text())?;
+        let text = match std::str::from_utf8(content.text()) {
+            Ok(text) => text.to_owned(),
+            Err(_) if encoding != encoding_rs::SHIFT_JIS => {
+                crate::text::decode_script(content.text(), encoding)?
+            }
+            Err(_) => return Err(Error::new(0, "面板文字不是有效 UTF-8")),
+        };
         let name = content.record()[0x64..].split(|&b| b == 0).next().unwrap();
         let name = if name.is_empty() {
             self.host
@@ -312,6 +325,22 @@ impl<F: ObjectFactory> Store<'_, F> {
 fn blend(target: &mut Surface, source: &Image, position: [i32; 2]) {
     let at = std::array::from_fn(|i| position[i].wrapping_add(source.info().offset[i]));
     blend_surface(target, source.surface(), at);
+}
+
+fn blend_hg3(target: &mut Surface, source: &Image, position: [i32; 2]) -> Result<()> {
+    // HG-3 来源沿图像列表的行序保存，先转换到面板的顶部坐标。
+    let mut top_down = Surface::new(source.info().size)?;
+    let stride = top_down.stride();
+    for (target, source) in top_down
+        .pixels_mut()
+        .chunks_exact_mut(stride)
+        .zip(source.surface().pixels().rchunks_exact(stride))
+    {
+        target.copy_from_slice(source);
+    }
+    let at = std::array::from_fn(|i| position[i].wrapping_add(source.info().offset[i]));
+    blend_surface(target, &top_down, at);
+    Ok(())
 }
 
 fn blend_surface(target: &mut Surface, source: &Surface, at: [i32; 2]) {

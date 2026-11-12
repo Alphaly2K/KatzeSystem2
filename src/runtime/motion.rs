@@ -38,6 +38,123 @@ impl MotionSnapshot {
 }
 
 impl<F: ObjectFactory> ObjectHost<'_, F> {
+    fn motion_restore_native(
+        &mut self,
+        arguments: &[u8],
+        vm: &Interpreter,
+    ) -> Result<NativeReturn> {
+        let container = read::u32_at(arguments, 0)?;
+        if container == 0 {
+            return Ok(NativeReturn::Value(0));
+        }
+        if arguments.len() != 16 {
+            return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+        }
+        let Some(bytes) = self
+            .host
+            .data_container(container)?
+            .record(read::u32_at(arguments, 4)?)?
+        else {
+            return Ok(NativeReturn::Value(0));
+        };
+        let bytes = bytes.to_vec();
+        if self.resources.motion_snapshots.len() == read::MAX_ITEMS {
+            return Err(Error::new(vm.pc, "运动快照数量超过上限"));
+        }
+        let controller = read::u32_at(arguments, 8)?;
+        if controller != 0 {
+            self.restore_motion_records(controller, &bytes, read::u32_at(arguments, 12)?)?;
+        }
+        let size = bytes.len();
+        let snapshot = MotionSnapshot {
+            controller,
+            storage: bytes,
+            size,
+        };
+        let handle = self.host.handle_allocator().allocate()?;
+        self.resources.motion_snapshots.insert(handle, snapshot);
+        Ok(NativeReturn::Value(handle))
+    }
+
+    fn restore_motion_records(&mut self, controller: u32, bytes: &[u8], now: u32) -> Result<()> {
+        let count = read::u32_at(bytes, 4)? as usize;
+        if count > read::MAX_ITEMS {
+            return Err(Error::new(4, "运动快照记录数量超过上限"));
+        }
+        self.resources
+            .motion_controllers
+            .get_mut(&controller)
+            .ok_or_else(|| Error::new(0, "运动控制器句柄无效"))?
+            .clear();
+        let mut offset = 8;
+        for _ in 0..count {
+            let record = read::range(bytes, offset, 0x454)?;
+            let size = read::sized(read::u32_at(record, 0)?, offset)?;
+            if size == 0 {
+                offset += 0x454;
+                continue;
+            }
+            let name: Vec<_> = record[4..0x44]
+                .chunks_exact(2)
+                .map(|bytes| u16::from_le_bytes(bytes.try_into().unwrap()))
+                .take_while(|&unit| unit != 0)
+                .collect();
+            if name.len() == 32 {
+                return Err(Error::new(offset + 4, "运动快照名称缺少结束单元"));
+            }
+            let text = String::from_utf16(&name)
+                .map_err(|_| Error::new(offset + 4, "运动快照名称不是有效 UTF-16"))?;
+            let (encoded, _, errors) = encoding_rs::SHIFT_JIS.encode(&text);
+            if errors {
+                return Err(Error::new(offset + 4, "运动快照名称无法转换为 CP932"));
+            }
+            if !name.is_empty() {
+                let resolved = self
+                    .resources
+                    .services
+                    .as_deref_mut()
+                    .ok_or_else(|| Error::new(0, "运行时未配置运动资源服务"))?
+                    .resolve(b"mot", &encoded)?;
+                if let Some(program) = self.resources.load_motion(&resolved)? {
+                    let mut state = MotionState::default();
+                    for (parameter, bytes) in state
+                        .parameters
+                        .iter_mut()
+                        .zip(record[0x48..0x448].chunks_exact(4))
+                    {
+                        *parameter = u32::from_le_bytes(bytes.try_into().unwrap());
+                    }
+                    let mut task = MotionTask::new(
+                        program,
+                        state,
+                        now.wrapping_sub(read::u32_at(record, 0x44c)?),
+                    )?;
+                    task.snapshot_name = name;
+                    task.snapshot_flags = read::u32_at(record, 0x450)?;
+                    let length = read::sized(read::u32_at(record, 0x448)?, offset + 0x448)?;
+                    if length != 0 {
+                        let data = read::range(bytes, offset + 0x454, length)?.to_vec();
+                        let address = task.interpreter.allocate_bytes(data)?;
+                        task.interpreter
+                            .write(0x8000_049c, &address.to_le_bytes())?;
+                        task.interpreter
+                            .write(0x8000_04a0, &(length as u32).to_le_bytes())?;
+                        task.snapshot_data = Some((address, length));
+                    }
+                    self.resources
+                        .motion_controllers
+                        .get_mut(&controller)
+                        .unwrap()
+                        .insert(task, read::u32_at(record, 0x44)? as i32)?;
+                }
+            }
+            offset = offset
+                .checked_add(size)
+                .ok_or_else(|| Error::new(offset, "运动快照记录偏移溢出"))?;
+        }
+        Ok(())
+    }
+
     fn motion_start_native(
         &mut self,
         index: u32,
@@ -183,6 +300,9 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         arguments: &[u8],
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
+        if index == 388 {
+            return self.motion_restore_native(arguments, vm);
+        }
         if matches!(index, 304 | 535) {
             return self.motion_start_native(index, arguments, vm);
         }

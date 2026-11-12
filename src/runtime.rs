@@ -2173,7 +2173,7 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         ) {
             return self.cst_native(index, arguments, vm);
         }
-        if matches!(index, 294..=317 | 440 | 535 | 586) {
+        if matches!(index, 294..=317 | 388 | 440 | 535 | 586) {
             return self.motion_native(index, arguments, vm);
         }
         if index == 458 {

@@ -239,8 +239,20 @@ fn motion_loading_copies_parameters_and_saved_data_and_reuses_programs() {
     call(&mut code, 387, &[(0x13, 24), (3, 99), (3, 2)]);
     store(&mut code, 28);
     call(&mut code, 65, &[]);
+    call(&mut code, 388, &[(3, 3), (3, 99), (3, 0), (3, 200)]);
+    store(&mut code, 32);
+    call(&mut code, 388, &[(3, 3), (3, 99), (3, 1), (3, 200)]);
+    store(&mut code, 36);
+    call(&mut code, 388, &[(3, 0)]);
+    store(&mut code, 40);
+    call(&mut code, 388, &[(3, 3), (3, 100), (3, u32::MAX), (3, 0)]);
+    store(&mut code, 44);
+    call(&mut code, 246, &[(3, 3)]);
+    call(&mut code, 65, &[]);
     call(&mut code, 295, &[(3, 1)]);
     call(&mut code, 317, &[(3, 2)]);
+    call(&mut code, 317, &[(3, 4)]);
+    call(&mut code, 317, &[(3, 5)]);
     code.push(0x3b);
     let program = Program::from_code(&code, data, 128).unwrap();
 
@@ -284,7 +296,7 @@ fn motion_loading_copies_parameters_and_saved_data_and_reuses_programs() {
         );
 
         runtime.update(1, 1).unwrap();
-        let bytes = runtime.motion_snapshot(2).unwrap().bytes();
+        let bytes = runtime.motion_snapshot(2).unwrap().bytes().to_vec();
         assert_eq!(bytes.len(), 8 + 0x454 * 2 + 8);
         assert_eq!(&bytes[8 + 0x454..8 + 0x45c], b"\x44\x33\x22\x11efgh");
         assert_eq!(
@@ -294,7 +306,7 @@ fn motion_loading_copies_parameters_and_saved_data_and_reuses_programs() {
                 .unwrap()
                 .record(99)
                 .unwrap(),
-            Some(bytes)
+            Some(bytes.as_slice())
         );
         let vm = runtime.object(task).unwrap().interpreter().unwrap();
         assert_eq!(
@@ -305,8 +317,40 @@ fn motion_loading_copies_parameters_and_saved_data_and_reuses_programs() {
         assert_eq!(vm.stack_bytes(), 0xdead_beefu32.to_le_bytes());
         assert_eq!(word(vm, 28), 1);
         runtime.update(2, 1).unwrap();
+        assert!(runtime.host().data_container(3).is_err());
+        assert_eq!(runtime.motion_snapshot(4).unwrap().controller(), 0);
+        assert_eq!(runtime.motion_snapshot(5).unwrap().controller(), 1);
+        for handle in [4, 5] {
+            let snapshot = runtime.motion_snapshot(handle).unwrap();
+            assert_eq!(snapshot.bytes(), bytes);
+            assert_eq!(snapshot.capacity(), bytes.len());
+        }
+        let queue = runtime.motion_controller(1).unwrap();
+        assert_eq!(
+            (queue.len(), queue.group(3), queue.group(4)),
+            (2, Some(-3), Some(7))
+        );
+        assert!(queue.task(1).is_none());
+        assert_eq!(queue.task(3).unwrap().base_time, 100);
+        assert_eq!(queue.snapshot(200).unwrap(), bytes);
+        assert_eq!(
+            *reads.borrow(),
+            [
+                b"missing".to_vec(),
+                b"path/move7".to_vec(),
+                b"move7".to_vec()
+            ]
+        );
+        let vm = runtime.object(task).unwrap().interpreter().unwrap();
+        assert_eq!(
+            (8..12).map(|i| word(vm, i * 4)).collect::<Vec<_>>(),
+            [4, 5, 0, 0]
+        );
+        runtime.update(3, 1).unwrap();
         assert!(runtime.motion_controller(1).is_none());
         assert!(runtime.motion_snapshot(2).is_none());
+        assert!(runtime.motion_snapshot(4).is_none());
+        assert!(runtime.motion_snapshot(5).is_none());
     }
 }
 

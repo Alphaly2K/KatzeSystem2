@@ -152,10 +152,10 @@ fn panel_text_wraps_using_character_advances_and_retries_a_failed_font() {
                 return Err(Error::new(0, "合成字形失败"));
             }
             GlyphMask::new(
-                [1; 2],
+                [1, 2],
                 [0; 2],
                 if character == 'B' { 0 } else { 3 },
-                vec![64],
+                vec![64, 32],
             )
         }
     }
@@ -179,6 +179,7 @@ fn panel_text_wraps_using_character_advances_and_retries_a_failed_font() {
                 },
                 attributes: katze_system2::fes::ObjectAttributes {
                     file: Some(b"cells".to_vec()),
+                    display: Some(1),
                     ..Default::default()
                 },
             },
@@ -202,8 +203,10 @@ fn panel_text_wraps_using_character_advances_and_retries_a_failed_font() {
         for x in 0..8 {
             assert_eq!(
                 image.surface().pixel(x, y).unwrap() >> 24,
-                if x == 0 && [0, 3].contains(&y) {
+                if x == 0 && [2, 5].contains(&y) {
                     255
+                } else if x == 0 && [1, 4].contains(&y) {
+                    127
                 } else {
                     0
                 },
@@ -211,7 +214,22 @@ fn panel_text_wraps_using_character_advances_and_retries_a_failed_font() {
             );
         }
     }
-    assert_eq!(image.surface().pixel(0, 0), Some(0xff123456));
+    assert_eq!(image.surface().pixel(0, 5), Some(0xff123456));
+    let list = objects.image_list().unwrap();
+    runtime
+        .dispatch_command(
+            0,
+            katze_system2::task::Command {
+                target: list,
+                sender: 0,
+                code: 296,
+                data: [0; 3],
+            },
+        )
+        .unwrap();
+    let canvas = runtime.drawing().target.as_ref().unwrap();
+    assert_eq!(canvas.pixel(0, 0), Some(0xff123456));
+    assert_eq!(canvas.pixel(0, 1), Some(0x7f123456));
     assert_eq!(*calls.borrow(), ['A', 'B', 'A', 'B']);
     runtime.update_fes_object(0, objects, handle).unwrap();
     assert_eq!(*calls.borrow(), ['A', 'B', 'A', 'B']);
@@ -223,7 +241,7 @@ fn panel_text_wraps_using_character_advances_and_retries_a_failed_font() {
             ['中', '文'],
         ),
         (encoding_rs::GBK, "中文\0".as_bytes(), ['中', '文']),
-        (encoding_rs::SHIFT_JIS, b"\x93\xfa\x96\x7b\0", ['日', '本']),
+        (encoding_rs::SHIFT_JIS, "日本\0".as_bytes(), ['日', '本']),
     ] {
         runtime.set_resources(Files(file.clone(), encoding));
         let ObjectState::SavePanel(panel) = &mut objects.get_mut(handle).unwrap().state else {
@@ -298,7 +316,22 @@ fn panel_images_compose_enabled_cells_in_the_shared_list_and_refresh_numbers() {
         unreachable!()
     };
     let mut data = DataContainer::new(0);
-    data.append(77, &pixel_file(0)).unwrap();
+    let preview = [
+        0xff010203u32,
+        0xff040506,
+        0xff111213,
+        0xff141516,
+        0xff212223,
+        0xff242526,
+    ]
+    .into_iter()
+    .flat_map(u32::to_le_bytes)
+    .collect::<Vec<_>>();
+    data.append(
+        77,
+        &katze_system2::hg2::encode_frame([2, 3], &preview).unwrap(),
+    )
+    .unwrap();
     panel.data = Some(data);
     panel.flags[0] = 3;
     panel.apply_data().unwrap();
@@ -308,12 +341,14 @@ fn panel_images_compose_enabled_cells_in_the_shared_list_and_refresh_numbers() {
     assert_eq!(image.info().size, [8, 6]);
     for x in 0..8 {
         assert_eq!(
-            image.surface().pixel(x, 1).unwrap() >> 24,
-            if [0, 7].contains(&x) { 255 } else { 0 },
+            image.surface().pixel(x, 4).unwrap() >> 24,
+            if [0, 2, 3, 7].contains(&x) { 255 } else { 0 },
             "x={x}"
         );
     }
-    assert_eq!(image.surface().pixel(2, 0).unwrap() >> 24, 255);
+    assert_eq!(image.surface().pixel(2, 5).unwrap() >> 24, 255);
+    assert_eq!(image.surface().pixel(2, 5), Some(0xff010203));
+    assert_eq!(image.surface().pixel(2, 3), Some(0xff212223));
     let list = objects.image_list().unwrap();
     runtime
         .dispatch_command(
@@ -327,6 +362,20 @@ fn panel_images_compose_enabled_cells_in_the_shared_list_and_refresh_numbers() {
         )
         .map(|count| assert_eq!(count, 1))
         .unwrap();
+    runtime
+        .dispatch_command(
+            0,
+            katze_system2::task::Command {
+                target: list,
+                sender: 0,
+                code: 296,
+                data: [0; 3],
+            },
+        )
+        .unwrap();
+    let canvas = runtime.drawing().target.as_ref().unwrap();
+    assert_eq!(canvas.pixel(2, 0), Some(0xff010203));
+    assert_eq!(canvas.pixel(2, 2), Some(0xff212223));
     assert!(
         runtime
             .dispatch_fes_system_block(0, &mut scene, "_FES_SLEEP_")
@@ -336,9 +385,9 @@ fn panel_images_compose_enabled_cells_in_the_shared_list_and_refresh_numbers() {
         .update_fes_object(0, scene.objects_mut().unwrap(), handle)
         .unwrap();
     let image = runtime.images().get(wrapper).unwrap();
-    assert_eq!(image.surface().pixel(0, 1).unwrap() >> 24, 0);
-    assert_eq!(image.surface().pixel(5, 1).unwrap() >> 24, 255);
-    assert_eq!(image.surface().pixel(7, 1).unwrap() >> 24, 0);
+    assert_eq!(image.surface().pixel(0, 4).unwrap() >> 24, 0);
+    assert_eq!(image.surface().pixel(5, 4).unwrap() >> 24, 255);
+    assert_eq!(image.surface().pixel(7, 4).unwrap() >> 24, 0);
     assert!(
         runtime
             .dispatch_fes_system_block(0, &mut scene, "_FES_WAKE_")
