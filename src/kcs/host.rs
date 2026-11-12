@@ -672,6 +672,7 @@ pub(crate) fn call_native(
         | 276
         | 277
         | 392
+        | 397
         | 422
         | 423
         | 518
@@ -887,6 +888,11 @@ pub(crate) fn call_native(
             let rounded = numeric::native_math(15, &[shifted]);
             NativeReturn::Value(numeric::convert(0x39, rounded))
         }
+        397 => NativeReturn::Value(if f32::from_bits(args[1]).is_nan() {
+            args[1] | 0x0040_0000
+        } else {
+            numeric::native_math(12, &args)
+        }),
         50..=61 => {
             let function = match index {
                 50..=55 => index - 44,

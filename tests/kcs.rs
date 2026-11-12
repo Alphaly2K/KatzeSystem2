@@ -1041,6 +1041,19 @@ fn core_scalar_math_keeps_table_mapping_sse_angle_order_and_pow_nan_signs() {
         (62, vec![f32::MAX.to_bits()], f32::INFINITY.to_bits()),
         (63, vec![f32::MAX.to_bits()], f32::INFINITY.to_bits()),
         (64, vec![i32::MIN as u32], i32::MIN as u32),
+        (397, vec![0x8000_0000, 0], 0x8000_0000),
+        (
+            397,
+            vec![1f32.to_bits(), 0],
+            std::f32::consts::FRAC_PI_2.to_bits(),
+        ),
+        (
+            397,
+            vec![0, (-1f32).to_bits()],
+            std::f32::consts::PI.to_bits(),
+        ),
+        (397, vec![0xff80_1234, 0], 0xffc0_1234),
+        (397, vec![0x7fc0_1234, 0xff80_5678], 0xffc0_5678),
         (
             318,
             vec![2., 10., 4., 8., 3.]
