@@ -1911,6 +1911,45 @@ fn start_button_scene(runtime: &mut TestRuntime) -> (u32, u32, Vec<u32>) {
 }
 
 #[test]
+fn media_updates_and_release_continue_after_the_shared_list_is_destroyed() {
+    let source = b"#DEFINE\nCIMAGE swatch\nIMAGE sprite\nBUTTON button\n#OBJECT SIZE COLOR PRI DISP\nswatch 2,2 0xff123456 5 1\nbutton 2,2 0xffffffff 6 1\n#START\nwait 2\nswatch size 3 3\nbutton disp 0\n$0+=1\nwait 9999\n";
+    for budget in [1, 4096] {
+        let Setup { mut runtime, .. } = setup(budget, source);
+        let (fes, list, buttons) = start_button_scene(&mut runtime);
+        let swatch = runtime
+            .object(fes)
+            .unwrap()
+            .fes_scene()
+            .unwrap()
+            .objects()
+            .lookup("swatch", 0)
+            .unwrap();
+        let wrapper = runtime
+            .object(fes)
+            .unwrap()
+            .fes_scene()
+            .unwrap()
+            .objects()
+            .get(swatch)
+            .unwrap()
+            .image_handle()
+            .unwrap();
+        runtime.destroy(list).unwrap();
+        runtime.update(102, 1).unwrap();
+        assert_eq!(runtime.numbers().shared[0], 1);
+        assert_eq!(
+            runtime.images().get(wrapper).unwrap().surface().pixel(0, 0),
+            Some(0xff123456)
+        );
+        assert_eq!(runtime.images().get(wrapper).unwrap().info().size, [3, 3]);
+        assert!(buttons.iter().all(|&id| runtime.object(id).is_some()));
+        runtime.destroy(fes).unwrap();
+        assert!(runtime.images().get(wrapper).is_err());
+        assert!(buttons.iter().all(|&id| runtime.object(id).is_none()));
+    }
+}
+
+#[test]
 fn system_keys_scan_live_records_without_replacing_focus_or_release_targets() {
     let source = br"#DEFINE
 BUTTON first
