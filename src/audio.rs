@@ -10,6 +10,7 @@ mod pcm;
 mod playback;
 mod settings;
 mod soundconf;
+mod tags;
 mod task;
 pub use channel::SoundChannel;
 pub use config::{SoundConfig, SoundPart};

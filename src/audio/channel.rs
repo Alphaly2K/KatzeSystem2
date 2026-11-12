@@ -15,6 +15,7 @@ pub(super) struct ChannelClock {
 pub struct SoundChannel {
     pub(super) clock: ChannelClock,
     pub(super) file: Vec<u8>,
+    pub(super) tags: std::collections::BTreeMap<Vec<u8>, u32>,
     pub(super) pcm: Option<Pcm>,
     pub(super) requested_volume: f32,
     pub(super) pcm_volume: i32,
@@ -41,6 +42,7 @@ impl Default for SoundChannel {
         Self {
             clock: ChannelClock::default(),
             file: Vec::new(),
+            tags: Default::default(),
             pcm: None,
             requested_volume: 0.0,
             pcm_volume: 100,
@@ -67,6 +69,11 @@ impl Default for SoundChannel {
 impl SoundChannel {
     pub fn file(&self) -> &[u8] {
         &self.file
+    }
+
+    /// 当前资源的原始 TAG 名称和值；停止和卸载不清除此表。
+    pub fn tags(&self) -> &std::collections::BTreeMap<Vec<u8>, u32> {
+        &self.tags
     }
 
     pub fn pcm(&self) -> Option<&Pcm> {
@@ -200,7 +207,12 @@ pub(super) fn load_pcm(services: &mut dyn ResourceServices, file: &[u8]) -> Resu
         .transpose()
 }
 
-pub(super) fn check_metadata(services: &mut dyn ResourceServices, file: &[u8]) -> Result<()> {
+pub(super) fn load_metadata(
+    services: &mut dyn ResourceServices,
+    file: &[u8],
+    tags: &mut std::collections::BTreeMap<Vec<u8>, u32>,
+) -> Result<()> {
+    tags.clear();
     let basename = file
         .rsplit(|byte| matches!(byte, b'/' | b'\\'))
         .next()
@@ -226,11 +238,12 @@ pub(super) fn check_metadata(services: &mut dyn ResourceServices, file: &[u8]) -
         if name.len() >= 1024 {
             return Err(Error::new(0, "声音附加资源名称超过缓冲区容量"));
         }
-        if services
-            .read(&name, ResourceMode::LooseFirst)?
-            .is_some_and(|bytes| !bytes.is_empty())
-        {
-            return Err(Error::new(0, "声音附加资源内容尚未接入"));
+        if let Some(bytes) = services.read(&name, ResourceMode::LooseFirst)? {
+            if category == b"tag" {
+                *tags = super::tags::parse(&bytes)?;
+            } else if !bytes.is_empty() {
+                return Err(Error::new(0, "声音附加资源内容尚未接入"));
+            }
         }
     }
     Ok(())

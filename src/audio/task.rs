@@ -301,6 +301,20 @@ impl SoundState {
         Ok(())
     }
 
+    /// 查询逻辑通道关联的 TAG；全一选择首个含该名称的物理通道。
+    pub fn tag_value(&self, channel: u32, name: &[u8]) -> u32 {
+        if channel == u32::MAX {
+            self.channels
+                .iter()
+                .find_map(|sound| sound.tags.get(name).copied())
+                .unwrap_or(0)
+        } else {
+            self.property_channel(channel)
+                .and_then(|index| self.channels[index].tags.get(name).copied())
+                .unwrap_or(0)
+        }
+    }
+
     fn is_playing(&self, channel: u32) -> bool {
         self.channels.get(channel as usize).is_some_and(|sound| {
             sound.is_playing()
@@ -426,7 +440,7 @@ impl SoundState {
             self.channels[logical as usize].linked = Some(physical);
         }
         self.output_replace(physical as usize);
-        channel::check_metadata(services, name)
+        channel::load_metadata(services, name, &mut self.channels[physical as usize].tags)
     }
 }
 
@@ -565,6 +579,18 @@ impl TaskObject for SoundObject {
                     .position(|&byte| byte == 0)
                     .ok_or_else(|| Error::new(0, "声音组名称缺少零结尾"))?;
                 *output = host.sound_group_id(&name[..end])?;
+                return Ok(CommandOutcome::finished(false));
+            }
+            215 => {
+                *output = 0;
+                let channel = command.data[0];
+                if channel == u32::MAX || channel < 64 {
+                    let bytes = buffers
+                        .data1
+                        .as_deref()
+                        .ok_or_else(|| Error::new(0, "声音 TAG 查询缺少名称缓冲区"))?;
+                    *output = self.audio.tag_value(channel, read::zstr(bytes, 0)?);
+                }
                 return Ok(CommandOutcome::finished(false));
             }
             182 => {

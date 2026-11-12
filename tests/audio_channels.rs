@@ -23,7 +23,7 @@ enum Event {
 struct Source {
     events: Vec<Event>,
     fail: bool,
-    metadata: bool,
+    metadata: Option<Vec<u8>>,
 }
 
 struct Resources(Rc<RefCell<Source>>);
@@ -49,7 +49,7 @@ impl ResourceServices for Resources {
             b"audio/stereo.ogg" => Some(STEREO.to_vec()),
             b"audio/long.ogg" => Some(LONG_MONO.to_vec()),
             b"audio/corrupt.ogg" => Some(vec![1, 2, 3]),
-            b"tag/tone.tag" if source.metadata => Some(vec![1]),
+            b"tag/tone.tag" => source.metadata.clone(),
             _ => None,
         })
     }
@@ -1021,7 +1021,7 @@ fn vorbis_channels_keep_both_sources_during_replacement_and_release_the_linked_p
 }
 
 #[test]
-fn load_failures_keep_completed_changes_and_diagnose_unimplemented_metadata() {
+fn load_failures_keep_completed_changes_and_ignore_incomplete_tag_records() {
     let (mut runtime, source) = setup();
     let mut first = record(0, 0, 17, b"audio/tone.ogg");
     load(&mut runtime, &mut first).unwrap();
@@ -1046,23 +1046,72 @@ fn load_failures_keep_completed_changes_and_diagnose_unimplemented_metadata() {
         audio(&runtime).channel(0).unwrap().load_parameters(),
         [0, 3]
     );
-    source.borrow_mut().metadata = true;
-    assert!(
-        load(&mut runtime, &mut first)
-            .unwrap_err()
-            .message
-            .contains("附加资源")
-    );
+    source.borrow_mut().metadata = Some(vec![1]);
+    assert_eq!(load(&mut runtime, &mut first).unwrap(), 1);
     assert_eq!(
         audio(&runtime).channel(0).unwrap().pcm().unwrap().frames(),
         1379
     );
     assert_eq!(
         source.borrow().events.last(),
-        Some(&Event::Read(b"tag/tone.tag".to_vec()))
+        Some(&Event::Read(b"sound/tone.lv".to_vec()))
     );
     assert!(load(&mut runtime, &mut first[..287]).is_err());
     assert!(load(&mut runtime, &mut record(32, -1, 0, b"audio/tone.ogg")).is_err());
     assert_eq!(runtime.dispatch_command(0, command(201, 64)).unwrap(), 0);
     runtime.dispatch_command(0, command(182, u32::MAX)).unwrap();
+}
+
+#[test]
+fn tag_queries_keep_first_values_follow_linked_channels_and_clear_on_reload() {
+    let (mut runtime, source) = setup();
+    let table = |records: &[(&[u8], u32)]| {
+        records
+            .iter()
+            .flat_map(|(name, value)| {
+                let mut record = [0u8; 24];
+                record[..name.len()].copy_from_slice(name);
+                record[20..].copy_from_slice(&value.to_le_bytes());
+                record
+            })
+            .collect::<Vec<_>>()
+    };
+    source.borrow_mut().metadata = Some(table(&[
+        (b"speaker", 7),
+        (b"speaker", 99),
+        (b"Speaker", 11),
+        (b"zero", 0),
+        (b"", 13),
+    ]));
+    load(&mut runtime, &mut record(0, 0, 0, b"audio/tone.ogg")).unwrap();
+    let query = |runtime: &mut Runtime<SoundFactory<Reject>>, channel, name: &[u8]| {
+        let mut name = [name, &[0]].concat();
+        runtime
+            .dispatch_command_with_buffers(
+                0,
+                command(215, channel),
+                &mut CommandBuffers {
+                    data1: Some(&mut name),
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+    };
+    assert_eq!(query(&mut runtime, 0, b"speaker"), 7);
+    assert_eq!(query(&mut runtime, 0, b"Speaker"), 11);
+    assert_eq!(query(&mut runtime, 0, b""), 13);
+    source.borrow_mut().metadata = Some(table(&[(b"speaker", 21), (b"zero", 6)]));
+    load(&mut runtime, &mut record(1, 0, 0, b"audio/tone.ogg")).unwrap();
+    assert_eq!(query(&mut runtime, u32::MAX, b"speaker"), 7);
+    assert_eq!(query(&mut runtime, u32::MAX, b"zero"), 0);
+    assert_eq!(runtime.dispatch_command(0, command(215, 64)).unwrap(), 0);
+    source.borrow_mut().metadata = Some(table(&[(b"speaker", 31)]));
+    load(&mut runtime, &mut record(0, 1, 0, b"audio/tone.ogg")).unwrap();
+    assert_eq!(query(&mut runtime, 0, b"speaker"), 31);
+    runtime.dispatch_command(0, command(182, 0)).unwrap();
+    assert_eq!(query(&mut runtime, 0, b"speaker"), 31);
+    source.borrow_mut().metadata = None;
+    load(&mut runtime, &mut record(0, 1, 0, b"audio/tone.ogg")).unwrap();
+    assert_eq!(query(&mut runtime, 0, b"speaker"), 0);
+    assert_eq!(query(&mut runtime, u32::MAX, b"speaker"), 7);
 }

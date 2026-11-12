@@ -35,9 +35,17 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                 )?);
             }
             349 => record.resize(4, 0xcc),
+            903 => {
+                record = format_string(vm, read::u32_at(arguments, 4)?, 0)?;
+                record.truncate(terminated(&record).len());
+                if record.len() >= 1024 {
+                    return Err(Error::new(vm.pc, "声音 TAG 名称超过格式缓冲区容量"));
+                }
+                record.push(0);
+            }
             _ => {}
         }
-        let query = matches!(index, 160 | 162 | 165 | 349);
+        let query = matches!(index, 160 | 162 | 165 | 349 | 903);
         if query {
             let supported = self
                 .tree
@@ -57,6 +65,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             match index {
                 156..=168 => 182 + index - 156,
                 347..=349 => 196 + index - 347,
+                903 => 215,
                 _ => unreachable!(),
             },
             data,

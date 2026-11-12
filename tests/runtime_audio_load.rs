@@ -32,7 +32,7 @@ impl ProgramLoader for Source {
                 instruction(&mut code, 0x25, &[*arg]);
             }
             instruction(&mut code, 0x2b, &[*index, args.len() as u32 * 4]);
-            if matches!(index, 160 | 162 | 165 | 349 | 935 | 936) {
+            if matches!(index, 160 | 162 | 165 | 349 | 903 | 935 | 936) {
                 instruction(&mut code, 0x26, &[256 + i as u32 * 4]);
             }
         }
@@ -52,8 +52,16 @@ impl ResourceServices for Resources {
     }
     fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
         assert_eq!(mode, ResourceMode::LooseFirst);
-        Ok((name == b"sound/tone_17.ogg")
-            .then(|| include_bytes!("fixtures/audio/mono-44100.ogg").to_vec()))
+        Ok(match name {
+            b"sound/tone_17.ogg" => Some(include_bytes!("fixtures/audio/mono-44100.ogg").to_vec()),
+            b"tag/tone_17" => {
+                let mut row = vec![0; 24];
+                row[..11].copy_from_slice(b"tone_17.ogg");
+                row[20..].copy_from_slice(&37u32.to_le_bytes());
+                Some(row)
+            }
+            _ => None,
+        })
     }
 }
 
@@ -314,5 +322,35 @@ fn native_spatial_and_ramp_controls_preserve_float_bits_and_reach_real_channels(
             .channel(5)
             .unwrap();
         assert_eq!((sound.volume(), sound.pan()), (Some(80), Some(-60)));
+    }
+}
+
+#[test]
+fn formatted_tag_queries_use_both_vm_regions_and_keep_tags_after_unload() {
+    for budget in [1, 4096] {
+        let mut runtime = setup(vec![
+            (935, vec![5, u32::MAX, 64, 1, 0]),
+            (903, vec![5, 64]),
+            (903, vec![5, 0x80000040]),
+            (903, vec![u32::MAX, 64]),
+            (156, vec![5]),
+            (903, vec![5, 64]),
+            (935, vec![5, u32::MAX, 63, 1, 0]),
+            (903, vec![5, 64]),
+        ]);
+        runtime.set_budget(budget, 1 << 20);
+        runtime.update(0, 1).unwrap();
+        let vm = runtime.object(2).unwrap().interpreter().unwrap();
+        for index in [1, 2, 3, 5] {
+            assert_eq!(
+                vm.read(256 + index * 4, 4).unwrap().as_ref(),
+                37u32.to_le_bytes()
+            );
+        }
+        assert_eq!(
+            vm.read(256 + 7 * 4, 4).unwrap().as_ref(),
+            0u32.to_le_bytes()
+        );
+        assert_eq!(vm.read(0, 4).unwrap().as_ref(), 0xdeadbeefu32.to_le_bytes());
     }
 }
