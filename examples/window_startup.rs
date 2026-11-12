@@ -361,7 +361,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     runtime.host_mut().windowed_mode = Some(1);
     window.set_target_fps(60);
     #[cfg(target_os = "macos")]
-    let mut gpu = if std::env::var("KATZE_WINDOW_RENDERER").as_deref() == Ok("software") {
+    let gpu = if std::env::var("KATZE_WINDOW_RENDERER").as_deref() == Ok("software") {
         None
     } else {
         let renderer =
@@ -374,6 +374,10 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let accelerated = gpu.is_some();
     #[cfg(not(target_os = "macos"))]
     let accelerated = false;
+    #[cfg(target_os = "macos")]
+    if let Some(renderer) = gpu {
+        runtime.set_graphics_backend(renderer);
+    }
     let mut output = if accelerated {
         None
     } else {
@@ -483,19 +487,8 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         }
         update_time += frame_started.elapsed();
         let render_started = std::time::Instant::now();
-        #[cfg(target_os = "macos")]
-        if let Some(renderer) = &mut gpu {
-            let triangles = runtime
-                .drawables_mut()
-                .frame_triangles(&Projection::default(), *Transform::default().matrix())?;
-            let canvas = runtime
-                .drawing_mut()
-                .target
-                .as_mut()
-                .ok_or("运行时缺少画布")?;
-            metal::objc::rc::autoreleasepool(|| {
-                renderer.present(&triangles, canvas, [1280, 720], TextureFilter::Point)
-            })?;
+        if accelerated {
+            runtime.present_frame([1280, 720])?;
         }
         if let Some(output) = &mut output {
             output.clear_rect(katze_system2::graphics::Rect::from_xywh(0, 0, 1280, 720));

@@ -341,31 +341,40 @@ impl Drawables {
         filter: TextureFilter,
         range: Option<[f32; 2]>,
     ) -> Result<bool> {
-        self.visit_frame(projection, parent, range, |triangle| {
-            let vertices = triangle.vertices;
-            if let Some(source) = triangle.texture {
-                let canvas =
-                    canvas.ok_or_else(|| Error::new(0, "纹理图元需要独立画布输入与帧输出"))?;
-                if let Some(texture) = canvas
-                    .tiles()
-                    .get(source.tile as usize)
-                    .and_then(Option::as_ref)
-                {
-                    if vertices.iter().any(|v| !v.rhw.is_finite() || v.rhw <= 0.) {
-                        return Err(Error::new(0, "纹理插值需要有限的正 RHW"));
-                    }
-                    return Ok(output.blend_textured_triangle_clipped(
-                        vertices,
-                        source.uv,
-                        texture,
-                        filter,
-                        triangle.clip,
-                    ));
-                }
-            }
-            draw_colors(output, vertices, triangle.clip)
+        self.visit_frame(projection, parent, range, |command| {
+            draw_command(output, canvas, command, filter)
         })
     }
+}
+
+pub(super) fn draw_command(
+    output: &mut super::RenderTarget,
+    canvas: Option<&super::RenderTarget>,
+    command: super::DrawCommand,
+    filter: TextureFilter,
+) -> Result<bool> {
+    let vertices = command.vertices;
+    validate_depth(vertices)?;
+    if let Some(source) = command.texture {
+        let canvas = canvas.ok_or_else(|| Error::new(0, "纹理图元需要独立画布输入与帧输出"))?;
+        if let Some(texture) = canvas
+            .tiles()
+            .get(source.tile as usize)
+            .and_then(Option::as_ref)
+        {
+            if vertices.iter().any(|v| !v.rhw.is_finite() || v.rhw <= 0.) {
+                return Err(Error::new(0, "纹理插值需要有限的正 RHW"));
+            }
+            return Ok(output.blend_textured_triangle_clipped(
+                vertices,
+                source.uv,
+                texture,
+                filter,
+                command.clip,
+            ));
+        }
+    }
+    draw_colors(output, vertices, command.clip)
 }
 
 pub(super) fn validate_depth(vertices: [ProjectedVertex; 3]) -> Result<()> {

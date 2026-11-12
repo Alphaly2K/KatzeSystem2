@@ -34,7 +34,9 @@ pub use particle::ParticleObject;
 mod raster;
 pub use raster::TextureFilter;
 mod frame;
-pub use frame::{FrameTexture, FrameTriangle};
+pub use frame::{DrawCommand, DrawList, FrameTexture, FrameTriangle};
+mod backend;
+pub use backend::{GraphicsBackend, SoftwareBackend};
 #[cfg(target_os = "macos")]
 pub mod metal;
 mod resample;

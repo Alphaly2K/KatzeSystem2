@@ -1,7 +1,10 @@
 use katze_system2::{
     Result,
     expression::State,
-    graphics::{Drawable, Projection, RenderTarget, TextureFilter, Transform},
+    graphics::{
+        DrawList, Drawable, GraphicsBackend, Projection, RenderTarget, SoftwareBackend,
+        TextureFilter, Transform,
+    },
     kcs::Program,
     runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, kind},
 };
@@ -92,8 +95,59 @@ fn call(rt: &mut Engine) -> u32 {
 }
 
 #[test]
+fn capture_and_presentation_share_the_backend_with_distinct_depth_selections() {
+    use std::{cell::RefCell, rc::Rc};
+
+    type Calls = Rc<RefCell<Vec<(bool, DrawList, [u32; 2])>>>;
+    struct Backend(Calls);
+    impl GraphicsBackend for Backend {
+        fn render(
+            &mut self,
+            frame: &DrawList,
+            canvas: &mut RenderTarget,
+            size: [u32; 2],
+        ) -> Result<RenderTarget> {
+            self.0.borrow_mut().push((false, frame.clone(), size));
+            SoftwareBackend.render(frame, canvas, size)
+        }
+
+        fn present(
+            &mut self,
+            frame: &DrawList,
+            _: &mut RenderTarget,
+            size: [u32; 2],
+        ) -> Result<bool> {
+            self.0.borrow_mut().push((true, frame.clone(), size));
+            Ok(false)
+        }
+    }
+
+    let args: Vec<_> = [10f32, 20.]
+        .into_iter()
+        .flat_map(f32::to_le_bytes)
+        .collect();
+    let mut rt = engine(&args, true);
+    let events = Rc::new(RefCell::new(Vec::new()));
+    rt.set_graphics_backend(Backend(events.clone()));
+    call(&mut rt);
+    let capture = rt.offscreen_frame().unwrap();
+    assert_eq!(capture.pixel(1, 1), Some(0));
+    assert_eq!(capture.pixel(3, 1), Some(0xff123457));
+    assert_eq!(capture.pixel(5, 1), Some(0));
+    assert!(!rt.present_frame([16, 8]).unwrap());
+    let events = events.borrow();
+    assert_eq!(events.len(), 2);
+    assert_eq!((events[0].0, events[0].2), (false, [8, 4]));
+    assert_eq!((events[1].0, events[1].2), (true, [16, 8]));
+    assert_eq!(events[0].1.commands.len(), 2);
+    assert_eq!(events[1].1.commands.len(), 6);
+    assert_eq!(events[0].1.filter, TextureFilter::Point);
+    assert_eq!(rt.compose_frame().unwrap(), events[1].1);
+}
+
+#[test]
 fn native_pass_uses_saved_view_ordered_depth_bounds_and_clears_each_output() {
-    for budget in [1, 4096] {
+    for (budget, backend) in [(1, false), (4096, false), (1, true), (4096, true)] {
         for (range, visible) in [
             ([10.0, 20.0], [false, true, false]),
             ([f32::from_bits(0x7fa12345), 20.0], [true, true, false]),
@@ -112,6 +166,9 @@ fn native_pass_uses_saved_view_ordered_depth_bounds_and_clears_each_output() {
                     args.extend([0xff; 8]);
                 }
                 let mut rt = engine(&args, true);
+                if backend {
+                    rt.set_graphics_backend(SoftwareBackend);
+                }
                 rt.set_budget(budget, 4096);
                 let canvas = rt.drawing().clone();
                 call(&mut rt);

@@ -1,4 +1,4 @@
-use super::{Drawables, ProjectedVertex, Projection, Rect};
+use super::{Drawables, ProjectedVertex, Projection, Rect, TextureFilter};
 use crate::{Error, Result};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -9,13 +9,43 @@ pub struct FrameTexture {
 
 /// 已按图元顺序、相机和投影准备的设备输入。
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct FrameTriangle {
+pub struct DrawCommand {
     pub vertices: [ProjectedVertex; 3],
     pub texture: Option<FrameTexture>,
     pub clip: Option<Rect>,
 }
 
+pub type FrameTriangle = DrawCommand;
+
+/// 已完成排序、裁剪和投影的绘制命令；不包含设备资源或脚本对象。
+#[derive(Clone, Debug, PartialEq)]
+pub struct DrawList {
+    pub commands: Vec<DrawCommand>,
+    pub filter: TextureFilter,
+}
+
 impl Drawables {
+    /// 合成全帧或指定深度区间；区间上界非正时返回空列表。
+    pub fn compose(
+        &mut self,
+        projection: &Projection,
+        parent: [f32; 16],
+        filter: TextureFilter,
+        range: Option<[f32; 2]>,
+    ) -> Result<DrawList> {
+        let mut frame = DrawList {
+            commands: Vec::new(),
+            filter,
+        };
+        if range.is_none_or(|range| range[1] > 0. || range[1].is_nan()) {
+            self.visit_frame(projection, parent, range, |command| {
+                frame.commands.push(command);
+                Ok(true)
+            })?;
+        }
+        Ok(frame)
+    }
+
     pub fn frame_triangles(
         &mut self,
         projection: &Projection,

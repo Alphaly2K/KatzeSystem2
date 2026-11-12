@@ -142,7 +142,7 @@ impl Renderer {
         Ok(true)
     }
 
-    /// 显式诊断用的离屏绘制与 BGRA 读回；交互呈现无需经过此路径。
+    /// 离屏绘制与 BGRA 读回，供画面捕获使用。
     pub fn render_offscreen(
         &mut self,
         triangles: &[FrameTriangle],
@@ -342,6 +342,31 @@ impl Renderer {
             encoder.draw_primitives(MTLPrimitiveType::Triangle, index as u64 * 3, 3);
         }
         encoder.end_encoding();
+    }
+}
+
+impl super::GraphicsBackend for Renderer {
+    fn render(
+        &mut self,
+        frame: &super::DrawList,
+        canvas: &mut RenderTarget,
+        size: [u32; 2],
+    ) -> Result<RenderTarget> {
+        let surface = ::metal::objc::rc::autoreleasepool(|| {
+            self.render_offscreen(&frame.commands, canvas, size, frame.filter)
+        })?;
+        RenderTarget::from_tiles(size, [1, 1], vec![Some(surface)])
+    }
+
+    fn present(
+        &mut self,
+        frame: &super::DrawList,
+        canvas: &mut RenderTarget,
+        size: [u32; 2],
+    ) -> Result<bool> {
+        ::metal::objc::rc::autoreleasepool(|| {
+            Renderer::present(self, &frame.commands, canvas, size, frame.filter)
+        })
     }
 }
 

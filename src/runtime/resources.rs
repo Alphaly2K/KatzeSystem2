@@ -9,6 +9,7 @@ pub(super) struct Resources {
     pub images: Images,
     pub drawing: DrawingContext,
     pub drawables: Drawables,
+    pub graphics_backend: Option<Box<dyn crate::graphics::GraphicsBackend>>,
     pub frame_view: Option<(
         crate::graphics::Projection,
         [f32; 16],
@@ -33,13 +34,44 @@ pub(super) struct Resources {
 }
 
 impl Resources {
+    pub fn compose_frame(&mut self, range: Option<[f32; 2]>) -> Result<crate::graphics::DrawList> {
+        let (projection, parent, filter) = self
+            .frame_view
+            .as_ref()
+            .ok_or_else(|| Error::new(0, "绘制列表需要配置运行时帧视图"))?;
+        self.drawables.compose(projection, *parent, *filter, range)
+    }
+
+    pub fn present_frame(&mut self, size: [u32; 2]) -> Result<bool> {
+        let frame = self.compose_frame(None)?;
+        let canvas = self
+            .drawing
+            .target
+            .as_mut()
+            .ok_or_else(|| Error::new(0, "运行时未配置画布纹理输入"))?;
+        self.graphics_backend
+            .as_deref_mut()
+            .ok_or_else(|| Error::new(0, "运行时未配置窗口图形后端"))?
+            .present(&frame, canvas, size)
+    }
+
     pub fn render_offscreen(&mut self, size: [u32; 2], range: [f32; 2]) -> Result<bool> {
         if self.drawing.mode != 0 || !self.drawing.enabled {
             return Ok(false);
         }
-        let Some(canvas) = &self.drawing.target else {
+        if self.drawing.target.is_none() {
             return Ok(false);
-        };
+        }
+        if self.graphics_backend.is_some() {
+            let frame = self.compose_frame(Some(range))?;
+            self.offscreen_frame = Some(self.graphics_backend.as_deref_mut().unwrap().render(
+                &frame,
+                self.drawing.target.as_mut().unwrap(),
+                size,
+            )?);
+            return Ok(true);
+        }
+        let canvas = self.drawing.target.as_ref().unwrap();
         let (projection, parent, filter) = self
             .frame_view
             .as_ref()

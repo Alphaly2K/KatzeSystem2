@@ -14,8 +14,8 @@ fn main() {
 #[cfg(target_os = "macos")]
 fn check() -> Result<(), Box<dyn std::error::Error>> {
     use katze_system2::graphics::{
-        FrameTexture, FrameTriangle, ProjectedVertex, Rect, RenderTarget, Surface, TextureFilter,
-        metal::Renderer,
+        DrawList, FrameTexture, FrameTriangle, GraphicsBackend, ProjectedVertex, Rect,
+        RenderTarget, Surface, TextureFilter, metal::Renderer,
     };
     let mut renderer = Renderer::new()?;
     println!("Metal 设备：{}", renderer.device_name());
@@ -123,7 +123,15 @@ fn check() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             }
-            let actual = renderer.render_offscreen(triangles, &mut canvas, [32, 24], filter)?;
+            let output = renderer.render(
+                &DrawList {
+                    commands: triangles.clone(),
+                    filter,
+                },
+                &mut canvas,
+                [32, 24],
+            )?;
+            let actual = output.tiles()[0].as_ref().unwrap();
             for (index, (&actual, &expected)) in
                 actual.pixels().iter().zip(expected.pixels()).enumerate()
             {

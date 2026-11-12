@@ -494,7 +494,11 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 
 `Drawable::from_canvas(data, count)` 读取显式画布三角形，`CanvasTriangle` 保留 tag、面块索引、顶点和 UV；平面命令 83 使用显式缓冲区接入。`Drawables::render_frame` 读取画布并写入独立目标，`Runtime::render_frame` 使用运行时当前画布。提交、缺失纹理和过滤约束见[画布图元与帧](graphics.md#画布图元与独立帧提交)。
 
-`Drawables::frame_triangles(projection, parent)` 返回按显示、排序、相机及投影准备的 `FrameTriangle`，供设备宿主使用；`FrameTexture` 指定画布面块和 UV。macOS 的 `graphics::metal::Renderer` 提供 Metal 绘制，`layer()` 交由宿主附着到原生视图，`present` 清空并呈现最终帧，窗口不可呈现时返回 false。`render_offscreen` 同步读回 BGRA，供显式硬件核对。每个实例绑定一份画布并消费其 dirty 标记，更换画布须先调用 `invalidate_canvas`；宿主为每帧提供 Objective-C autorelease pool。无设备、着色器失败及执行错误均返回诊断。
+`Drawables::compose(projection, parent, filter, range)` 生成设备无关的 `DrawList`，包含按显示、排序、相机、裁剪及投影准备的 `DrawCommand`。`range=None` 合成全帧，指定区间时按图元基点 Z 选择 `[lower, upper)`，非正上界返回空列表。`FrameTexture` 指定画布面块和 UV，`FrameTriangle` 保留为 `DrawCommand` 的兼容别名；既有 `frame_triangles` 返回同类命令。`Runtime::compose_frame()` 使用 `set_frame_view` 配置的视图合成全帧。
+
+`GraphicsBackend::render` 接收绘制列表、画布和输出尺寸，返回从透明背景开始绘制的独立完整目标。`present` 提交至宿主已附着的窗口，暂时无法呈现时返回 false，未提供窗口能力时返回诊断。`SoftwareBackend` 提供无设备的离屏实现。`Runtime::set_graphics_backend` 连接后端，`present_frame(size)` 合成并呈现；脚本画面捕获使用同一后端，捕获失败保留前次完整目标。未连接后端时，既有软件捕获和显式 `render_frame` 接口继续可用。
+
+macOS 的 `graphics::metal::Renderer` 实现该后端接口，`layer()` 交由宿主附着到原生视图。直接调用 `present` 清空并呈现最终帧，`render_offscreen` 同步读回 BGRA。每个实例绑定一份画布并消费其 dirty 标记，更换画布须先调用 `invalidate_canvas`；后端接口管理调用所需的 Objective-C autorelease pool，直接调用底层方法时由宿主提供。无设备、着色器失败及执行错误均返回诊断。
 
 普通 568 用两个原始 f32 深度边界执行离屏绘制，状态二保留返回栈；与 DIFIMAGE 捕获共用保存的帧视图。`Runtime::offscreen_frame()` 借用最近一次离屏目标，跳过的调用保留旧目标，绘制错误保留已写像素。门控、范围和生命周期见[脚本离屏绘制](graphics.md#脚本离屏绘制)。
 

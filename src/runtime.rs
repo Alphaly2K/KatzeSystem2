@@ -223,6 +223,25 @@ impl<F: ObjectFactory> Runtime<F> {
         self.resources.frame_view = Some((projection, parent, filter));
     }
 
+    /// 连接窗口呈现及脚本画面捕获共用的后端；未配置时捕获继续使用软件绘制。
+    /// 后端捕获失败时保留前次完整目标。
+    pub fn set_graphics_backend(
+        &mut self,
+        backend: impl crate::graphics::GraphicsBackend + 'static,
+    ) {
+        self.resources.graphics_backend = Some(Box::new(backend));
+    }
+
+    /// 以已配置的帧视图和当前画布合成绘制列表。
+    pub fn compose_frame(&mut self) -> Result<crate::graphics::DrawList> {
+        self.resources.compose_frame(None)
+    }
+
+    /// 通过已连接的图形后端呈现完整帧；暂时无法呈现时返回 false。
+    pub fn present_frame(&mut self, size: [u32; 2]) -> Result<bool> {
+        self.resources.present_frame(size)
+    }
+
     /// 设置内部捕获所读取的画面区域；None 使用 surface_size 定义的整幅画面。
     pub fn set_frame_capture_rectangle(&mut self, rectangle: Option<crate::graphics::Rect>) {
         self.resources.capture_rectangle = rectangle;
