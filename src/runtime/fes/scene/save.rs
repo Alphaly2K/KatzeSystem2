@@ -2,6 +2,7 @@ use super::Scene;
 use crate::{
     Error, Result, read,
     runtime::{ObjectFactory, Store},
+    save::DataContainer,
 };
 
 pub(super) struct SaveQuery {
@@ -19,10 +20,21 @@ impl<F: ObjectFactory> Store<'_, F> {
         args: &[Vec<u8>],
         offset: usize,
     ) -> Result<Option<bool>> {
-        if args.first().is_none_or(|name| name != b"newsave") {
+        let Some(name) = args.first().map(Vec::as_slice) else {
+            return Ok(None);
+        };
+        if !matches!(name, b"newsave" | b"saveexist" | b"datasave") {
             return Ok(None);
         }
         let result = (|| {
+            if name == b"saveexist" {
+                self.fes_save_exists(scene, args)?;
+                return Ok(Some(true));
+            }
+            if name == b"datasave" {
+                self.fes_data_save(scene, args)?;
+                return Ok(Some(true));
+            }
             if scene.save_query.is_none() {
                 let mut values = [0; 3];
                 for (i, value) in values.iter_mut().enumerate() {
@@ -76,5 +88,75 @@ impl<F: ObjectFactory> Store<'_, F> {
             Ok(Some(true))
         })();
         result.map_err(|error: Error| Error::new(offset + error.offset, error.message))
+    }
+
+    fn fes_save_exists(&mut self, scene: &mut Scene, args: &[Vec<u8>]) -> Result<()> {
+        let mut args = args.iter().skip(1);
+        let Some(source) = args.next() else {
+            return Ok(());
+        };
+        let slot = scene.interpreter.eval(source, self.numbers)?;
+        let name = if slot < 0 {
+            let Some(name) = args.next() else {
+                return Ok(());
+            };
+            name.clone()
+        } else {
+            format!("save{slot:04}.dat").into_bytes()
+        };
+        let Some(source) = args.next() else {
+            return Ok(());
+        };
+        let destination = scene.interpreter.eval(source, self.numbers)?;
+        let lower = args
+            .next()
+            .map(|source| scene.interpreter.eval(source, self.numbers))
+            .transpose()?
+            .unwrap_or(-1) as u32;
+        let upper = args
+            .next()
+            .map(|source| scene.interpreter.eval(source, self.numbers))
+            .transpose()?
+            .map_or(lower, |value| value as u32);
+        let data = self
+            .host
+            .save_services
+            .as_mut()
+            .ok_or_else(|| Error::new(0, "运行时未配置存档读取服务"))?
+            .read(scene.owner.unwrap(), &name)?
+            .map(|file| DataContainer::from_css(&file))
+            .transpose()?
+            .flatten();
+        let result = match data {
+            None => 0,
+            Some(data) if lower == u32::MAX || (lower..=upper).contains(&data.tag()) => 1,
+            Some(_) => -1,
+        };
+        if let Some(slot) = self.numbers.shared.get_mut(destination as usize) {
+            *slot = result;
+        }
+        Ok(())
+    }
+
+    fn fes_data_save(&mut self, scene: &mut Scene, args: &[Vec<u8>]) -> Result<()> {
+        let mut values = [0; 2];
+        for (index, value) in values.iter_mut().enumerate() {
+            let Some(source) = args.get(index + 1) else {
+                return Ok(());
+            };
+            *value = scene.interpreter.eval(source, self.numbers)?;
+        }
+        let [slot, handle] = values;
+        if handle == 0 {
+            return Ok(());
+        }
+        let bytes = self.host.data_container(handle as u32)?.to_css()?;
+        let name = format!("save{slot:04}.dat");
+        self.host
+            .save_services
+            .as_mut()
+            .ok_or_else(|| Error::new(0, "运行时未配置存档写入服务"))?
+            .write(scene.owner.unwrap(), name.as_bytes(), &bytes)?;
+        Ok(())
     }
 }

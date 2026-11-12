@@ -194,11 +194,10 @@ fn decode_image(bytes: &[u8]) -> Result<Option<Image>> {
             .map(Image::from_frame)
             .transpose();
     }
-    if bytes.starts_with(b"HG-2")
-        || bytes.starts_with(b"BM")
-        || bytes.starts_with(b"\xff\xd8")
-        || bytes.starts_with(b"\x89PNG")
-    {
+    if bytes.starts_with(b"HG-2") {
+        return Image::from_frame(crate::hg2::decode_frame(bytes)?).map(Some);
+    }
+    if bytes.starts_with(b"BM") || bytes.starts_with(b"\xff\xd8") || bytes.starts_with(b"\x89PNG") {
         return Err(Error::new(0, "面板存档图像编码尚未接入"));
     }
     Ok(None)

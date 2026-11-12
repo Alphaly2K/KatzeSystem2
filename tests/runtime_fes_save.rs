@@ -2,8 +2,9 @@ use katze_system2::{
     Error, Result,
     expression::State,
     fes::{ObjectReference, Program},
+    kcs::{CoreHost, Host, Interpreter, NativeReturn},
     runtime::{BaseObject, ObjectFactory, Runtime, TaskObject, fes::Scene, kind},
-    save::SaveServices,
+    save::{DataContainer, SaveServices},
 };
 use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
 
@@ -20,13 +21,28 @@ struct Files {
     times: BTreeMap<Vec<u8>, u64>,
     calls: Vec<(u32, Vec<u8>)>,
     fail: Option<Vec<u8>>,
+    contents: BTreeMap<Vec<u8>, Vec<u8>>,
+    reads: Vec<(u32, Vec<u8>)>,
+    writes: Vec<(u32, Vec<u8>, Vec<u8>)>,
+    writable: bool,
 }
 
 struct Saves(Rc<RefCell<Files>>);
 
 impl SaveServices for Saves {
-    fn read(&mut self, _: u32, _: &[u8]) -> Result<Option<Vec<u8>>> {
-        panic!("修改时间查询不读取 CSS 内容")
+    fn read(&mut self, owner: u32, name: &[u8]) -> Result<Option<Vec<u8>>> {
+        let mut files = self.0.borrow_mut();
+        files.reads.push((owner, name.to_vec()));
+        Ok(files.contents.get(name).cloned())
+    }
+
+    fn write(&mut self, owner: u32, name: &[u8], bytes: &[u8]) -> Result<bool> {
+        let mut files = self.0.borrow_mut();
+        files.writes.push((owner, name.to_vec(), bytes.to_vec()));
+        if files.writable {
+            files.contents.insert(name.to_vec(), bytes.to_vec());
+        }
+        Ok(files.writable)
     }
 
     fn modified_time(&mut self, owner: u32, name: &[u8]) -> Result<Option<u64>> {
@@ -36,6 +52,127 @@ impl SaveServices for Saves {
             return Err(Error::new(0, "合成修改时间查询失败"));
         }
         Ok(files.times.get(name).copied())
+    }
+}
+
+#[test]
+fn save_existence_checks_css_tags_as_unsigned_and_preserves_argument_effects() {
+    let mut runtime = runtime(4096);
+    let files = Rc::new(RefCell::new(Files::default()));
+    for (name, tag) in [
+        (b"save0000.dat".as_slice(), 2),
+        (b"save0001.dat", 0x8000_0001),
+        (b"named.dat", 77),
+    ] {
+        files
+            .borrow_mut()
+            .contents
+            .insert(name.to_vec(), DataContainer::new(tag).to_css().unwrap());
+    }
+    files
+        .borrow_mut()
+        .contents
+        .insert(b"save0003.dat".to_vec(), b"invalid".to_vec());
+    runtime.set_save_services(Saves(files.clone()));
+    let mut scene = new_scene(&runtime, b"#DEFINE\nBASE obj\n#START\nsaveexist 0 0\nsaveexist 0 1 2\nsaveexist 0 2 3\nsaveexist 0 3 0 2\nsaveexist 0 4 3 1\nsaveexist 1 5 0x80000000 0xfffffffe\nsaveexist 1 6 0 2147483647\nsaveexist -1 named.dat 7\nsaveexist 2 8\nsaveexist 3 9\nsaveexist 0 100\nsaveexist ($14+=1)\nsaveexist -1 ($15+=1)\nwait 99\n#_FES_SLEEP_\nsaveexist 0 12 -1 ($15+=1)\n#obj.PUSH_L\nsaveexist 1 13 0x80000001\n");
+    update(&mut runtime, &mut scene, 100).unwrap();
+    assert_eq!(
+        &runtime.numbers().shared[..10],
+        &[1, 1, -1, 1, -1, 1, -1, 1, 0, 0]
+    );
+    assert_eq!(&runtime.numbers().shared[14..], &[1, 0]);
+    assert!(
+        runtime
+            .dispatch_fes_system_block(77, &mut scene, "_FES_SLEEP_")
+            .unwrap()
+    );
+    assert_eq!(
+        runtime
+            .dispatch_fes_event(
+                77,
+                &mut scene,
+                Some(&ObjectReference {
+                    name: "obj".into(),
+                    bank: 0
+                }),
+                2
+            )
+            .unwrap(),
+        Some(true)
+    );
+    assert_eq!(&runtime.numbers().shared[12..], &[1, 1, 1, 1]);
+    let files = files.borrow();
+    assert_eq!(files.reads.len(), 13);
+    assert!(files.reads.iter().all(|(owner, _)| *owner == 77));
+    assert!(files.calls.is_empty());
+    assert!(files.writes.is_empty());
+}
+
+#[test]
+fn data_save_writes_persistent_containers_from_each_fes_entry_and_ignores_write_failure() {
+    for writable in [false, true] {
+        let mut runtime = runtime(4096);
+        let mut numbers = State::new(0);
+        let mut host = CoreHost::new(&mut numbers);
+        let mut vm = Interpreter::new(
+            katze_system2::kcs::Program::from_code(&[], vec![], 32).unwrap(),
+            vec![],
+        )
+        .unwrap();
+        let NativeReturn::Value(handle) = host.call(238, &77u32.to_le_bytes(), &mut vm).unwrap()
+        else {
+            panic!()
+        };
+        *runtime.host_mut() = host.host;
+        let mut null = new_scene(
+            &runtime,
+            b"#START\ndatasave ($14+=1)\ndatasave ($14+=1) 0 ($15+=1)\nwait 99\n",
+        );
+        update(&mut runtime, &mut null, 100).unwrap();
+        assert_eq!(&runtime.numbers().shared[14..], &[2, 0]);
+        let files = Rc::new(RefCell::new(Files {
+            writable,
+            ..Default::default()
+        }));
+        runtime.set_save_services(Saves(files.clone()));
+        let script = format!(
+            "#DEFINE\nBASE obj\n#START\ndatasave -2 {handle} ($15+=1)\nwait 99\n#_FES_SLEEP_\ndatasave 12 {handle}\n#obj.PUSH_L\ndatasave 12345 {handle}\n"
+        );
+        let mut scene = new_scene(&runtime, script.as_bytes());
+        update(&mut runtime, &mut scene, 100).unwrap();
+        assert!(
+            runtime
+                .dispatch_fes_system_block(77, &mut scene, "_FES_SLEEP_")
+                .unwrap()
+        );
+        assert_eq!(
+            runtime
+                .dispatch_fes_event(
+                    77,
+                    &mut scene,
+                    Some(&ObjectReference {
+                        name: "obj".into(),
+                        bank: 0
+                    }),
+                    2
+                )
+                .unwrap(),
+            Some(true)
+        );
+        assert_eq!(runtime.numbers().shared[15], 0);
+        assert_eq!(runtime.host().data_container(handle).unwrap().tag(), 77);
+        let files = files.borrow();
+        assert_eq!(files.writes.len(), 3);
+        for ((owner, name, bytes), expected) in files.writes.iter().zip([
+            b"save-002.dat".as_slice(),
+            b"save0012.dat",
+            b"save12345.dat",
+        ]) {
+            assert_eq!(*owner, 77);
+            assert_eq!(name, expected);
+            assert_eq!(DataContainer::from_css(bytes).unwrap().unwrap().tag(), 77);
+        }
+        assert_eq!(files.contents.len(), if writable { 3 } else { 0 });
     }
 }
 

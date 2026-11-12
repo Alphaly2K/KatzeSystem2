@@ -123,8 +123,11 @@ fn panel_text_wraps_using_character_advances_and_retries_a_failed_font() {
     };
     use std::{cell::RefCell, rc::Rc};
 
-    struct Files(Vec<u8>);
+    struct Files(Vec<u8>, &'static encoding_rs::Encoding);
     impl ResourceServices for Files {
+        fn script_encoding(&self) -> &'static encoding_rs::Encoding {
+            self.1
+        }
         fn resolve(&mut self, _: &[u8], name: &[u8]) -> Result<Vec<u8>> {
             Ok(name.to_vec())
         }
@@ -162,7 +165,7 @@ fn panel_text_wraps_using_character_advances_and_retries_a_failed_font() {
     file[52..56].copy_from_slice(&(-2i32).to_le_bytes());
     file[56..60].copy_from_slice(&8u32.to_le_bytes());
     file[60..64].copy_from_slice(&6u32.to_le_bytes());
-    runtime.set_resources(Files(file));
+    runtime.set_resources(Files(file.clone(), encoding_rs::SHIFT_JIS));
     let calls = Rc::new(RefCell::new(Vec::new()));
     runtime.set_fonts(Fonts(calls.clone()));
     assert!(runtime.update_fes_scene(0, &mut scene, 0).unwrap());
@@ -212,6 +215,28 @@ fn panel_text_wraps_using_character_advances_and_retries_a_failed_font() {
     assert_eq!(*calls.borrow(), ['A', 'B', 'A', 'B']);
     runtime.update_fes_object(0, objects, handle).unwrap();
     assert_eq!(*calls.borrow(), ['A', 'B', 'A', 'B']);
+
+    for (encoding, bytes, expected) in [
+        (
+            encoding_rs::GBK,
+            b"\xd6\xd0\xce\xc4\0".as_slice(),
+            ['中', '文'],
+        ),
+        (encoding_rs::GBK, "中文\0".as_bytes(), ['中', '文']),
+        (encoding_rs::SHIFT_JIS, b"\x93\xfa\x96\x7b\0", ['日', '本']),
+    ] {
+        runtime.set_resources(Files(file.clone(), encoding));
+        let ObjectState::SavePanel(panel) = &mut objects.get_mut(handle).unwrap().state else {
+            unreachable!()
+        };
+        let mut data = DataContainer::new(0);
+        data.append(88, bytes).unwrap();
+        panel.data = Some(data);
+        panel.apply_data().unwrap();
+        let start = calls.borrow().len();
+        runtime.update_fes_object(0, objects, handle).unwrap();
+        assert_eq!(calls.borrow()[start..], expected);
+    }
 }
 
 #[test]
@@ -374,6 +399,21 @@ fn panel_images_use_frame_zero_and_keep_pixels_when_a_replacement_cannot_load() 
         Some(0xff123456)
     );
     assert_eq!(&content.record()[0xb4..0xbc], &[1, 0, 0, 0, 2, 0, 0, 0]);
+
+    let pixels = [0xff654321u32; 6]
+        .into_iter()
+        .flat_map(u32::to_le_bytes)
+        .collect::<Vec<_>>();
+    let mut data = DataContainer::new(0);
+    data.append(
+        77,
+        &katze_system2::hg2::encode_frame([2, 3], &pixels).unwrap(),
+    )
+    .unwrap();
+    panel(&mut scene).data = Some(data);
+    panel(&mut scene).apply_data().unwrap();
+    let content = panel(&mut scene).contents[&7].clone();
+    assert_eq!(content.image().unwrap().surface().pixels(), pixels);
 
     assert!(
         runtime

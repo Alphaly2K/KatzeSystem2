@@ -224,6 +224,22 @@ impl<F: ObjectFactory> Store<'_, F> {
         if font_size > i32::MAX as u32 - 8 {
             return Err(Error::new(0, "面板字号超过字形服务支持范围"));
         }
+        let encoding = self
+            .resources
+            .services
+            .as_ref()
+            .map_or(encoding_rs::SHIFT_JIS, |services| {
+                services.script_encoding()
+            });
+        let decode = |bytes: &[u8]| {
+            if encoding != encoding_rs::SHIFT_JIS {
+                if let Ok(text) = std::str::from_utf8(bytes) {
+                    return Ok(text.to_owned());
+                }
+            }
+            crate::text::decode_script(bytes, encoding)
+        };
+        let text = decode(content.text())?;
         let name = content.record()[0x64..].split(|&b| b == 0).next().unwrap();
         let name = if name.is_empty() {
             self.host
@@ -231,7 +247,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                 .as_ref()
                 .map_or_else(Vec::new, |defaults| defaults.font_name.clone())
         } else {
-            crate::text::cp932(name)?.encode_utf16().collect()
+            decode(name)?.encode_utf16().collect()
         };
         let request = FontRequest {
             encoding: TextEncoding::Unicode,
@@ -265,7 +281,7 @@ impl<F: ObjectFactory> Store<'_, F> {
             .wrapping_mul(size)
             .wrapping_sub(size / 2);
         let (mut width, mut line) = (0i32, 0i32);
-        for character in crate::text::cp932(content.text())?.chars() {
+        for character in text.chars() {
             if width > limit {
                 line = line.wrapping_add(1);
                 if line >= content.word(0x5c) as i32 {
