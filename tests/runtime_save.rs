@@ -444,6 +444,88 @@ fn container_writes_report_failure_then_reload_the_saved_records_without_consumi
 }
 
 #[test]
+fn string_restore_replaces_shared_values_keeps_first_duplicate_and_checks_record_bounds() {
+    fn call(
+        host: &mut impl Host,
+        vm: &mut Interpreter,
+        index: u32,
+        args: &[u32],
+    ) -> Result<NativeReturn> {
+        host.call(
+            index,
+            &args
+                .iter()
+                .flat_map(|value| value.to_le_bytes())
+                .collect::<Vec<_>>(),
+            vm,
+        )
+    }
+    let mut data = 4u32.to_le_bytes().to_vec();
+    for (id, value) in [
+        (7u32, b"first".as_slice()),
+        (u32::MAX, b"last"),
+        (7, b"duplicate"),
+        (0x8000_0000, b""),
+    ] {
+        data.extend(id.to_le_bytes());
+        data.extend(value);
+        data.push(0);
+    }
+    data.extend(b"ignored trailing bytes");
+    let valid_length = data.len() as u32;
+    data.extend(u32::MAX.to_le_bytes());
+    data.extend([1u32, 42].into_iter().flat_map(u32::to_le_bytes));
+    data.extend(b"unterminated");
+    let mut state = State::new(0);
+    let mut host = CoreHost::new(&mut state);
+    let mut vm =
+        Interpreter::new(Program::from_code(&[], data.clone(), 32).unwrap(), vec![]).unwrap();
+    let NativeReturn::Value(handle) = call(&mut host, &mut vm, 238, &[0]).unwrap() else {
+        panic!()
+    };
+    for (id, length, offset) in [
+        (1, valid_length, 0),
+        (2, 4, valid_length),
+        (3, data.len() as u32 - valid_length - 4, valid_length + 4),
+        (4, 4, valid_length + 4),
+    ] {
+        assert_eq!(
+            call(&mut host, &mut vm, 244, &[handle, id, length, offset]).unwrap(),
+            NativeReturn::Value(1)
+        );
+    }
+    host.state.strings.insert(3, b"old".to_vec());
+    for args in [&[0][..], &[handle, 99]] {
+        assert_eq!(
+            call(&mut host, &mut vm, 253, args).unwrap(),
+            NativeReturn::Value(0)
+        );
+        assert_eq!(host.state.strings.get(&3).unwrap(), b"old");
+    }
+    assert_eq!(
+        call(&mut host, &mut vm, 253, &[handle, 1]).unwrap(),
+        NativeReturn::Value(1)
+    );
+    let expected = [
+        (7, b"first".to_vec()),
+        (0x8000_0000, Vec::new()),
+        (u32::MAX, b"last".to_vec()),
+    ]
+    .into_iter()
+    .collect();
+    assert_eq!(host.state.strings, expected);
+    for id in [2, 3, 4] {
+        assert!(call(&mut host, &mut vm, 253, &[handle, id]).is_err());
+        assert_eq!(host.state.strings, expected);
+    }
+    assert_eq!(
+        call(&mut host, &mut vm, 246, &[handle]).unwrap(),
+        NativeReturn::Continue
+    );
+    assert_eq!(host.state.strings, expected);
+}
+
+#[test]
 fn nested_containers_keep_first_snapshot_capacity_and_independent_lifetimes() {
     fn call(host: &mut impl Host, vm: &mut Interpreter, index: u32, args: &[u32]) -> u32 {
         let NativeReturn::Value(value) = host

@@ -99,7 +99,8 @@ fn log_line_rules_keep_literal_controls_and_use_byte_widths_for_brackets() {
 #[test]
 fn startup_log_settings_preserve_utf8_name_format_and_missing_values() {
     let mut system = katze_system2::settings::SystemSettings::default();
-    system.apply_startup_xml(r#"<?xml version="1.0" encoding="UTF-8"?><document><GAME><log><col>12</col><prof>2</prof><nameline>0</nameline><nameformat><first>【🙂</first><last>】</last></nameformat><nameindent>2</nameindent><space>1</space><escape>0</escape><disp><mes>0</mes><name>2</name></disp></log></GAME></document>"#.as_bytes()).unwrap();
+    assert_eq!(system.backlog_static, 0);
+    system.apply_startup_xml(r#"<?xml version="1.0" encoding="UTF-8"?><document><GAME><log><col>12</col><prof>2</prof><nameline>0</nameline><nameformat><first>【🙂</first><last>】</last></nameformat><nameindent>2</nameindent><space>1</space><escape>0</escape><static>2147483648</static><disp><mes>0</mes><name>2</name></disp></log></GAME></document>"#.as_bytes()).unwrap();
     let s = &system.backlog;
     assert_eq!(
         (
@@ -116,4 +117,18 @@ fn startup_log_settings_preserve_utf8_name_format_and_missing_values() {
     assert_eq!((s.display_message, s.display_name), (0, 2));
     assert_eq!(s.name_prefix, "【🙂".as_bytes());
     assert_eq!(s.name_suffix, "】".as_bytes());
+    system
+        .apply_startup_xml(b"<?xml version=\"1.0\" encoding=\"UTF-8\"?><document/>")
+        .unwrap();
+    assert_eq!(system.backlog_static, 0x8000_0000);
+    use katze_system2::kcs::{CoreHost, Host, Interpreter, NativeReturn, Program};
+    let mut numbers = katze_system2::expression::State::new(0);
+    let mut host = CoreHost::new(&mut numbers);
+    let mut vm = Interpreter::new(Program::from_code(&[], vec![], 16).unwrap(), vec![]).unwrap();
+    assert!(host.call(852, &[], &mut vm).is_err());
+    host.system_settings = Some(system);
+    assert_eq!(
+        host.call(852, &[], &mut vm).unwrap(),
+        NativeReturn::Value(0x8000_0000)
+    );
 }

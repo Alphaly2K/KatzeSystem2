@@ -327,13 +327,36 @@ pub(crate) fn call_native(
     arguments: &[u8],
     vm: &mut Interpreter,
 ) -> Result<NativeReturn> {
-    if index == 243 {
+    if matches!(index, 243 | 253) {
         let handle = read::u32_at(arguments, 0)?;
         if handle == 0 {
             return Ok(NativeReturn::Value(0));
         }
         if arguments.len() != 8 {
             return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+        }
+        if index == 253 {
+            let Some(bytes) = host
+                .data_container(handle)?
+                .record(read::u32_at(arguments, 4)?)?
+            else {
+                return Ok(NativeReturn::Value(0));
+            };
+            let count = read::u32_at(bytes, 0)? as usize;
+            if count > read::MAX_ITEMS {
+                return Err(Error::new(vm.pc, "CSS 字符串数量超过读取上限"));
+            }
+            let mut strings = BTreeMap::new();
+            let mut offset = 4;
+            for _ in 0..count {
+                let id = read::u32_at(bytes, offset)?;
+                offset += 4;
+                let text = read::zstr(bytes, offset)?;
+                strings.entry(id).or_insert_with(|| text.to_vec());
+                offset += text.len() + 1;
+            }
+            state.strings = strings;
+            return Ok(NativeReturn::Value(1));
         }
         let mut bytes = (state.strings.len() as u32).to_le_bytes().to_vec();
         for (id, text) in &state.strings {
@@ -355,6 +378,13 @@ pub(crate) fn call_native(
         host.data_container_mut(handle)?
             .append(read::u32_at(arguments, 4)?, &bytes)?;
         return Ok(NativeReturn::Value(1));
+    }
+    if index == 852 {
+        let settings = host
+            .system_settings
+            .as_ref()
+            .ok_or_else(|| Error::new(vm.pc, "宿主未配置全局设置"))?;
+        return Ok(NativeReturn::Value(settings.backlog_static));
     }
     let index = match index {
         675 | 885 | 894 => 515,

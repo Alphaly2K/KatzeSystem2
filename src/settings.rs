@@ -50,6 +50,8 @@ pub struct SystemSettings {
     /// 启动 `SCREEN/mw_pos`、用户 `FULL_SCREEN/mw_pos` 的原始 DWORD。
     pub fullscreen_mw_pos: u32,
     pub backlog: crate::backlog::Settings,
+    /// 启动 `GAME/log/static` 的原始 DWORD。
+    pub backlog_static: u32,
     pub texture_size: [u32; 2],
     pub texture_grid: [u32; 2],
     /// 八组面块区域：起始列、起始行、列数、行数；首项全一表示停用。
@@ -79,6 +81,7 @@ impl Default for SystemSettings {
             fullscreen: 0,
             fullscreen_mw_pos: 0,
             backlog: crate::backlog::Settings::default(),
+            backlog_static: 0,
             texture_size: [256; 2],
             texture_grid: [0; 2],
             texture_areas: [[u32::MAX; 4]; 8],
@@ -175,6 +178,7 @@ impl SystemSettings {
         self.select_auto_wait_preset(word(&self.message, 4))?;
         self.fullscreen_mw_pos = xml.integer(b"SCREEN/mw_pos", self.fullscreen_mw_pos)?;
         self.backlog.apply(&xml)?;
+        self.backlog_static = xml.integer(b"GAME/log/static", self.backlog_static)?;
         let color = word(&self.window, 0);
         let mut components = [16, 8, 0, 24].map(|shift| (color >> shift) & 255);
         for (name, value) in ["r", "g", "b", "a"].into_iter().zip(&mut components) {

@@ -106,6 +106,8 @@ fn cst_tables_merge_values_preserve_nonadjacent_records_and_clear_independently(
     instruction(&mut code, 0x25, &[(3, 0x1234_5678)]);
     call(&mut code, 323, &[]);
     instruction(&mut code, 0x26, &[(3, 0)]);
+    call(&mut code, 982, &[(0x13, 0)]);
+    instruction(&mut code, 0x26, &[(3, 128)]);
     for (slot, index, name, value) in [
         (4, 328, 64, 7),
         (8, 328, 80, u32::MAX),
@@ -119,18 +121,28 @@ fn cst_tables_merge_values_preserve_nonadjacent_records_and_clear_independently(
     }
     call(&mut code, 332, &[(0x13, 0), (3, 80)]);
     instruction(&mut code, 0x26, &[(3, 28)]);
+    call(&mut code, 982, &[(0x13, 0)]);
+    instruction(&mut code, 0x26, &[(3, 132)]);
     call(&mut code, 65, &[]);
     call(&mut code, 330, &[(0x13, 0)]);
     call(&mut code, 332, &[(0x13, 0), (3, 64)]);
     instruction(&mut code, 0x26, &[(3, 32)]);
+    call(&mut code, 982, &[(0x13, 0)]);
+    instruction(&mut code, 0x26, &[(3, 136)]);
     call(&mut code, 65, &[]);
     call(&mut code, 331, &[(0x13, 0)]);
+    call(&mut code, 982, &[(0x13, 0)]);
+    instruction(&mut code, 0x26, &[(3, 140)]);
     for (slot, index) in [(36, 329), (40, 328)] {
         call(&mut code, index, &[(0x13, 0), (3, 112)]);
         instruction(&mut code, 0x26, &[(3, slot)]);
     }
     call(&mut code, 329, &[(0x13, 0), (3, 64), (3, 9)]);
     instruction(&mut code, 0x26, &[(3, 44)]);
+    call(&mut code, 982, &[(0x13, 0)]);
+    instruction(&mut code, 0x26, &[(3, 144)]);
+    call(&mut code, 982, &[(3, 0)]);
+    instruction(&mut code, 0x26, &[(3, 148)]);
     for (slot, index) in [(48, 332), (52, 328), (56, 329)] {
         call(&mut code, index, &[(3, 0)]);
         instruction(&mut code, 0x26, &[(3, slot)]);
@@ -138,7 +150,7 @@ fn cst_tables_merge_values_preserve_nonadjacent_records_and_clear_independently(
     call(&mut code, 330, &[(3, 0)]);
     call(&mut code, 331, &[(3, 0)]);
     code.push(0x3b);
-    let mut data = vec![0; 128];
+    let mut data = vec![0; 152];
     data[64..70].copy_from_slice(b"A.cst\0");
     data[80..86].copy_from_slice(b"a.alt\0");
     data[96..102].copy_from_slice(b"B.cst\0");
@@ -176,6 +188,13 @@ fn cst_tables_merge_values_preserve_nonadjacent_records_and_clear_independently(
             [(b"A".as_slice(), 9)]
         );
         let vm = runtime.object(task).unwrap().interpreter().unwrap();
+        assert_eq!(
+            vm.read(128, 24).unwrap().as_ref(),
+            [u32::MAX, 2, 2, u32::MAX, 0, u32::MAX]
+                .into_iter()
+                .flat_map(u32::to_le_bytes)
+                .collect::<Vec<_>>()
+        );
         let values: Vec<_> = vm
             .read(4, 56)
             .unwrap()

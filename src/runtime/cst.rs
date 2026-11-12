@@ -240,7 +240,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         if handle == 0 {
             return Ok(match index {
                 330 | 331 => NativeReturn::Continue,
-                329 => NativeReturn::Value(u32::MAX),
+                329 | 982 => NativeReturn::Value(u32::MAX),
                 _ => NativeReturn::Value(0),
             });
         }
@@ -249,6 +249,11 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             .cst_contexts
             .get_mut(&handle)
             .ok_or_else(|| Error::new(vm.pc, "CST 上下文句柄无效"))?;
+        if index == 982 {
+            return Ok(NativeReturn::Value(
+                (context.history.len() as u32).wrapping_sub(1),
+            ));
+        }
         if index == 325 {
             if arguments.len() != 8 {
                 return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
