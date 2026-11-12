@@ -13,6 +13,7 @@ use katze_system2::{
     expression::State,
     graphics::{DrawingContext, GraphicsFactory, RenderTarget},
     input::{ButtonSource, DeviceBinding, DeviceKeys, InputFactory},
+    io::{FileSource, ReadSource},
     kcs::{Program, ResourceServices},
     memory::SharedMemory,
     resource::{ArchiveConfig, ResourceMode},
@@ -20,8 +21,6 @@ use katze_system2::{
     save::SaveServices,
 };
 use std::collections::BTreeMap;
-use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
 
 mod configuration;
 use configuration::ConfigurationFiles;
@@ -100,7 +99,7 @@ struct Entry {
 }
 
 pub struct Archive {
-    file: File,
+    file: FileSource,
     cipher: Option<BlowfishLE>,
     entries: Vec<Entry>,
     index: BTreeMap<String, usize>,
@@ -108,15 +107,15 @@ pub struct Archive {
 
 impl Archive {
     pub fn open(path: &str) -> std::result::Result<Self, Box<dyn std::error::Error>> {
-        let mut file = File::open(path)?;
+        let file = FileSource::open(path)?;
         let mut head = vec![0; 8];
-        file.read_exact(&mut head)?;
+        file.read_exact_at(0, &mut head)?;
         if &head[..4] != b"KIF\0" {
             return Err("KIF 签名无效".into());
         }
         let count = u32::from_le_bytes(head[4..8].try_into().unwrap()) as usize;
         let mut directory = vec![0; count * 72];
-        file.read_exact(&mut directory)?;
+        file.read_exact_at(8, &mut directory)?;
         let encrypted = directory
             .get(..64)
             .is_some_and(|name| name.split(|&b| b == 0).next() == Some(b"__key__.dat"));
@@ -199,17 +198,14 @@ impl Archive {
         None
     }
 
-    pub fn read(&mut self, name: &str) -> Result<Option<Vec<u8>>> {
+    pub fn read(&self, name: &str) -> Result<Option<Vec<u8>>> {
         let Some(position) = self.locate(name) else {
             return Ok(None);
         };
         let entry = &self.entries[position];
-        self.file
-            .seek(SeekFrom::Start(entry.offset as u64))
-            .map_err(|error| Error::new(0, format!("归档读取失败：{error}")))?;
         let mut data = vec![0; entry.length as usize];
         self.file
-            .read_exact(&mut data)
+            .read_exact_at(entry.offset as u64, &mut data)
             .map_err(|error| Error::new(0, format!("归档读取失败：{error}")))?;
         if let Some(cipher) = &self.cipher {
             for block in data.chunks_mut(8).filter(|block| block.len() == 8) {

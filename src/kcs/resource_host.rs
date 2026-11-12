@@ -20,6 +20,13 @@ pub trait ResourceServices {
 
     fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>>;
 
+    /// 打开可独立交给解码线程的读取源；默认持有普通读取返回的字节。
+    fn open(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<crate::io::SharedSource>> {
+        Ok(self
+            .read(name, mode)?
+            .map(|bytes| std::sync::Arc::new(bytes) as crate::io::SharedSource))
+    }
+
     /// CST 与名称表原始文字的编码；默认沿用基线 CP932。
     fn script_encoding(&self) -> &'static encoding_rs::Encoding {
         encoding_rs::SHIFT_JIS
@@ -58,6 +65,9 @@ impl<S: ResourceServices + ?Sized> ResourceServices for &mut S {
     }
     fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
         (**self).read(name, mode)
+    }
+    fn open(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<crate::io::SharedSource>> {
+        (**self).open(name, mode)
     }
     fn read_utf16(&mut self, name: &[u16], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
         (**self).read_utf16(name, mode)

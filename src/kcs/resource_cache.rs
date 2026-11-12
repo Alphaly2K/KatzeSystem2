@@ -227,6 +227,13 @@ impl<S: ResourceServices> ResourceServices for CachedResources<S> {
         self.inner.read(name, mode)
     }
 
+    fn open(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<crate::io::SharedSource>> {
+        if let Some(bytes) = self.cache.read_cached(name)? {
+            return Ok(Some(std::sync::Arc::new(bytes)));
+        }
+        self.inner.open(name, mode)
+    }
+
     fn resource_cache(&self) -> Option<ResourceCache> {
         Some(self.cache.clone())
     }

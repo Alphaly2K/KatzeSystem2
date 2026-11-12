@@ -26,6 +26,47 @@ impl ResourceServices for Files {
 }
 
 #[test]
+fn source_opening_forwards_host_overrides_and_keeps_cached_sources_after_eviction() {
+    #[derive(Default)]
+    struct Opens {
+        reads: usize,
+        opens: usize,
+    }
+    impl ResourceServices for Opens {
+        fn read(&mut self, _: &[u8], _: ResourceMode) -> Result<Option<Vec<u8>>> {
+            self.reads += 1;
+            Ok(Some(vec![1; 4]))
+        }
+        fn open(
+            &mut self,
+            _: &[u8],
+            _: ResourceMode,
+        ) -> Result<Option<katze_system2::io::SharedSource>> {
+            self.opens += 1;
+            Ok(Some(std::sync::Arc::new(vec![9; 4])))
+        }
+    }
+    let mut inner = Opens::default();
+    let mut files = CachedResources::new(&mut inner);
+    let direct = files.open(b"x", ResourceMode::File).unwrap().unwrap();
+    let mut bytes = [0; 4];
+    direct.read_exact_at(0, &mut bytes).unwrap();
+    assert_eq!(bytes, [9; 4]);
+    assert_eq!((files.opens, files.reads), (1, 0));
+    let cache = files.resource_cache().unwrap();
+    cache.enqueue(b"x", 1).unwrap();
+    cache.start();
+    assert!(cache.advance(&mut files).unwrap());
+    let cached = files.open(b"X", ResourceMode::Archive).unwrap().unwrap();
+    assert_eq!((files.opens, files.reads), (1, 1));
+    cache.clear();
+    cached.read_exact_at(0, &mut bytes).unwrap();
+    assert_eq!(bytes, [1; 4]);
+    direct.read_exact_at(0, &mut bytes).unwrap();
+    assert_eq!(bytes, [9; 4]);
+}
+
+#[test]
 fn prefetch_groups_renew_life_without_reordering_and_keep_copies_after_eviction() {
     let source = Files::default();
     let mut files = CachedResources::new(source.clone());

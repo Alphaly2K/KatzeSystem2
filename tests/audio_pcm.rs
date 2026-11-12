@@ -1,7 +1,31 @@
-use katze_system2::audio::decode_vorbis;
+use katze_system2::{
+    Result,
+    audio::{decode_vorbis, decode_vorbis_source},
+    io::ReadSource,
+};
 
 const MONO: &[u8] = include_bytes!("fixtures/audio/mono-44100.ogg");
 const STEREO: &[u8] = include_bytes!("fixtures/audio/stereo-48000.ogg");
+
+#[test]
+fn source_decoding_keeps_pcm_when_random_reads_return_short_chunks() {
+    struct Chunked(&'static [u8]);
+    impl ReadSource for Chunked {
+        fn len(&self) -> Result<u64> {
+            ReadSource::len(self.0)
+        }
+        fn read_at(&self, offset: u64, output: &mut [u8]) -> Result<usize> {
+            let count = output.len().min(13);
+            self.0.read_at(offset, &mut output[..count])
+        }
+    }
+    for bytes in [MONO, STEREO] {
+        assert_eq!(
+            decode_vorbis_source(&Chunked(bytes)).unwrap(),
+            decode_vorbis(bytes).unwrap()
+        );
+    }
+}
 
 #[test]
 fn vorbis_preserves_channel_order_and_exact_final_frames_against_independent_pcm() {

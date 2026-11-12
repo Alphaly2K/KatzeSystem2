@@ -13,6 +13,7 @@ pub mod hg2;
 pub mod hg3;
 mod hg_pixels;
 pub mod input;
+pub mod io;
 pub mod kcs;
 pub mod language;
 pub mod memory;

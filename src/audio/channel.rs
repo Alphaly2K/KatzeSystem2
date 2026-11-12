@@ -1,5 +1,5 @@
 use super::playback::Playback;
-use super::{Pcm, decode_vorbis};
+use super::{Pcm, decode_vorbis_source};
 use crate::kcs::ResourceServices;
 use crate::resource::ResourceMode;
 use crate::{Error, Result};
@@ -200,11 +200,13 @@ impl SoundChannel {
 }
 
 pub(super) fn load_pcm(services: &mut dyn ResourceServices, file: &[u8]) -> Result<Option<Pcm>> {
-    services
-        .read(file, ResourceMode::LooseFirst)?
-        .filter(|bytes| !bytes.is_empty())
-        .map(|bytes| decode_vorbis(&bytes))
-        .transpose()
+    let Some(source) = services.open(file, ResourceMode::LooseFirst)? else {
+        return Ok(None);
+    };
+    if source.is_empty()? {
+        return Ok(None);
+    }
+    decode_vorbis_source(source.as_ref()).map(Some)
 }
 
 pub(super) fn load_metadata(

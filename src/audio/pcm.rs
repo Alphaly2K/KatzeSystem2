@@ -1,6 +1,6 @@
+use crate::io::{ReadSource, SourceReader};
 use crate::{Error, Result, read};
 use lewton::inside_ogg::OggStreamReader;
-use std::io::Cursor;
 
 /// 交错排列的有符号 16 位 PCM；一帧包含每个声道的一个采样。
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -47,12 +47,18 @@ impl Pcm {
 
 /// 解码单个完整 Ogg Vorbis 流；保留采样率、声道顺序及末页的帧数。
 pub fn decode_vorbis(bytes: &[u8]) -> Result<Pcm> {
-    if bytes.len() > read::MAX_BYTES {
+    decode_vorbis_source(bytes)
+}
+
+/// 从独立随机读取源解码完整 Ogg Vorbis 流；不持有资源路由或文件路径。
+pub fn decode_vorbis_source<S: ReadSource + ?Sized>(source: &S) -> Result<Pcm> {
+    let length = source.len()?;
+    if length > read::MAX_BYTES as u64 {
         return Err(Error::new(0, "Ogg Vorbis 数据超过读取上限"));
     }
-    let (serial, frames) = stream_end(bytes)?;
+    let (serial, frames) = stream_end(source, length as usize)?;
     let error = |error| Error::new(0, format!("Ogg Vorbis 解码失败：{error}"));
-    let mut decoder = OggStreamReader::new(Cursor::new(bytes)).map_err(error)?;
+    let mut decoder = OggStreamReader::new(SourceReader::new(source)).map_err(error)?;
     let rate = decoder.ident_hdr.audio_sample_rate;
     let channels = decoder.ident_hdr.audio_channels;
     if rate == 0 || !matches!(channels, 1 | 2) {
@@ -84,11 +90,12 @@ pub fn decode_vorbis(bytes: &[u8]) -> Result<Pcm> {
     Pcm::new(rate, channels, samples)
 }
 
-fn stream_end(bytes: &[u8]) -> Result<(u32, u64)> {
+fn stream_end<S: ReadSource + ?Sized>(source: &S, length: usize) -> Result<(u32, u64)> {
     let mut position = 0;
     let mut serial = None;
-    while position < bytes.len() {
-        let header = read::range(bytes, position, 27)?;
+    while position < length {
+        let mut header = [0; 27];
+        read_source(source, length, position, &mut header)?;
         if &header[..4] != b"OggS" || header[4] != 0 {
             return Err(Error::new(position, "Ogg 页签名或版本无效"));
         }
@@ -103,13 +110,17 @@ fn stream_end(bytes: &[u8]) -> Result<(u32, u64)> {
             }
             serial = Some(current);
         }
-        let table = read::range(bytes, position + 27, header[26] as usize)?;
+        let mut table = [0; 255];
+        let table = &mut table[..header[26] as usize];
+        read_source(source, length, position + 27, table)?;
         let body = position + 27 + table.len();
-        let length = table.iter().map(|&value| value as usize).sum();
-        read::range(bytes, body, length)?;
-        position = body + length;
+        let body_length: usize = table.iter().map(|&value| value as usize).sum();
+        if body.checked_add(body_length).is_none_or(|end| end > length) {
+            return Err(Error::new(body, "输入范围越界"));
+        }
+        position = body + body_length;
         if header[5] & 4 != 0 {
-            if position != bytes.len() {
+            if position != length {
                 return Err(Error::new(position, "Ogg 结束页后仍有数据"));
             }
             return Ok((
@@ -119,4 +130,19 @@ fn stream_end(bytes: &[u8]) -> Result<(u32, u64)> {
         }
     }
     Err(Error::new(position, "Ogg 流缺少结束页"))
+}
+
+fn read_source<S: ReadSource + ?Sized>(
+    source: &S,
+    length: usize,
+    position: usize,
+    output: &mut [u8],
+) -> Result<()> {
+    if position
+        .checked_add(output.len())
+        .is_none_or(|end| end > length)
+    {
+        return Err(Error::new(position, "输入范围越界"));
+    }
+    source.read_exact_at(position as u64, output)
 }
