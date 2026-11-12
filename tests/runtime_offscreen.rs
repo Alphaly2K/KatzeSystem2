@@ -39,12 +39,16 @@ fn program(args: &[u8]) -> Program {
 }
 
 fn engine(args: &[u8], view: bool) -> Engine {
+    engine_program(program(args), view)
+}
+
+fn engine_program(program: Program, view: bool) -> Engine {
     let mut rt = Runtime::new(
         0,
         kind::ROOT,
         Box::new(BaseObject::new()),
         State::new(0),
-        KcsFactory::new(Source(program(args))),
+        KcsFactory::new(Source(program)),
     );
     rt.host_mut().surface_size = [8, 4];
     rt.drawing_mut().enabled = true;
@@ -166,4 +170,69 @@ fn skipped_passes_keep_the_last_frame_and_short_arguments_precede_gating() {
     short.create(0, kind::ORDINARY, b"caller", b"").unwrap();
     assert!(short.update(0, 0).unwrap_err().message.contains("范围"));
     assert!(short.offscreen_frame().is_none());
+}
+
+#[test]
+fn frame_capture_returns_an_owned_cropped_image_and_skips_a_disabled_device() {
+    let mut code = vec![0x2b, 3];
+    code.extend(113u32.to_le_bytes());
+    code.push(3);
+    code.extend(0u32.to_le_bytes());
+    code.extend([0x26, 3]);
+    code.extend(0u32.to_le_bytes());
+    for (opcode, values) in [
+        (0x2f, vec![0]),
+        (0x25, vec![4]),
+        (0x25, vec![8]),
+        (0x2b, vec![362, 12]),
+    ] {
+        code.push(opcode);
+        for value in values {
+            code.push(3);
+            code.extend(u32::to_le_bytes(value));
+        }
+    }
+    code.push(0x3b);
+    for enabled in [false, true] {
+        let mut rt = engine_program(Program::from_code(&code, vec![0; 16], 128).unwrap(), true);
+        rt.drawing_mut().enabled = enabled;
+        rt.set_frame_capture_rectangle(Some(katze_system2::graphics::Rect::from_xywh(1, 1, 3, 2)));
+        let caller = rt.create(0, kind::ORDINARY, b"capture", b"").unwrap();
+        rt.update(0, 0).unwrap();
+        let handle = u32::from_le_bytes(
+            rt.object(caller)
+                .unwrap()
+                .interpreter()
+                .unwrap()
+                .read(0, 4)
+                .unwrap()
+                .try_into()
+                .unwrap(),
+        );
+        let extents = rt
+            .object(caller)
+            .unwrap()
+            .interpreter()
+            .unwrap()
+            .read(4, 8)
+            .unwrap()
+            .to_vec();
+        assert_eq!(
+            extents,
+            if enabled {
+                [3u32.to_le_bytes(), 2u32.to_le_bytes()].concat()
+            } else {
+                vec![0; 8]
+            }
+        );
+        if enabled {
+            let image = rt.images().get(handle).unwrap();
+            assert_eq!(image.surface().size(), [3, 2]);
+            assert_eq!(image.surface().pixel(0, 0), Some(0xff123456));
+            rt.destroy(caller).unwrap();
+            assert!(rt.images().get(handle).is_err());
+        } else {
+            assert_eq!(handle, 0);
+        }
+    }
 }

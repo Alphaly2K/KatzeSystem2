@@ -460,7 +460,7 @@ impl FesObject {
                     .as_ref()
                     .is_none_or(|scene| scene.focus_lock() == 0)
             {
-                self.focus = None;
+                self.set_focus(None);
                 self.pressed = None;
             }
         }
@@ -610,7 +610,7 @@ impl FesObject {
             64 => {
                 let target = find();
                 if target.is_some() {
-                    self.focus = if key != 0 { target.clone() } else { None };
+                    self.set_focus(if key != 0 { target.clone() } else { None });
                 }
                 clear_selection = target.is_none() || key == 0;
                 target
@@ -741,7 +741,7 @@ impl FesObject {
         if !current_exists {
             let point = self.pointer_position(host, 0)?;
             if let Some(target) = objects.navigation_hit(point, host)? {
-                self.focus = Some(target);
+                self.set_focus(Some(target));
             } else {
                 return Ok(self.preferred_navigation());
             }
@@ -754,7 +754,7 @@ impl FesObject {
         )?;
         match result {
             NavigationOutcome::Target(target) => {
-                self.focus = Some(target.clone());
+                self.set_focus(Some(target.clone()));
                 Ok(NavigationOutcome::Target(target))
             }
             NavigationOutcome::Unhandled => {
@@ -782,8 +782,9 @@ impl FesObject {
         if let Some(target) = scene
             .preferred_focus()
             .filter(|target| scene.objects().enabled_button(target))
+            .cloned()
         {
-            self.focus = Some(target.clone());
+            self.set_focus(Some(target.clone()));
             NavigationOutcome::Target(target.clone())
         } else {
             NavigationOutcome::Unhandled
@@ -846,6 +847,7 @@ impl FesObject {
 
     fn bind(&mut self) -> Result<()> {
         if let Some(scene) = &mut self.scene {
+            scene.focus = self.focus.clone();
             scene.set_external_storage(self.external.clone());
             let objects = scene.objects_mut()?;
             if let Some(list) = self.list {
@@ -856,6 +858,13 @@ impl FesObject {
             objects.set_sound_task(self.sound);
         }
         Ok(())
+    }
+
+    fn set_focus(&mut self, target: Option<fes::ObjectReference>) {
+        if let Some(scene) = &mut self.scene {
+            scene.focus = target.clone();
+        }
+        self.focus = target;
     }
 
     fn run_body(&mut self, host: &mut dyn Host, budget: usize) -> Result<bool> {
@@ -897,6 +906,18 @@ impl FesObject {
                     .unwrap()
                     .record_input_event(if mode != 0 { 19 } else { 20 });
                 self.input_mode = mode;
+            }
+            let objects = self.scene.as_ref().unwrap().objects();
+            if self.focus.as_ref().is_some_and(|target| {
+                objects
+                    .lookup(&target.name, target.bank)
+                    .and_then(|handle| objects.get(handle))
+                    .is_some_and(|object| {
+                        matches!(&object.state,
+                        super::ObjectState::Button(button) if button.enabled == 0)
+                    })
+            }) {
+                self.set_focus(None);
             }
         }
         let result = services(host)?.update(
@@ -1229,6 +1250,12 @@ impl TaskObject for FesObject {
                 self.effects(host);
                 return Ok(CommandOutcome::finished(true));
             }
+            342 => {
+                self.scene
+                    .as_mut()
+                    .ok_or_else(|| Error::new(0, "FES 保存对象绑定需要已初始化对象"))?
+                    .set_system_value("_SAVEOBJ_", b as i32);
+            }
             346 | 347 => {
                 if !self.initialized {
                     return Err(Error::new(0, "FES 参数访问需要已初始化对象"));
@@ -1294,7 +1321,7 @@ impl TaskObject for FesObject {
                 false,
                 buffers,
             )?,
-            178 | 341 | 342 | 344 | 345 | 349..=356 => {
+            178 | 341 | 344 | 345 | 349..=356 => {
                 return Err(Error::new(0, "FES 专属命令尚未接入"));
             }
             _ => {
@@ -1438,7 +1465,7 @@ fn send(
     Ok(output)
 }
 
-fn update_pointer_values(
+pub(super) fn update_pointer_values(
     owner: u32,
     input: u32,
     scene: Option<&mut Scene>,

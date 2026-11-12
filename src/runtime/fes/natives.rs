@@ -53,6 +53,12 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             449 => {
                 self.command_target(target, 340, [0, read::u32_at(arguments, 4)?, 0])?;
             }
+            451 => {
+                self.command_target(target, 342, [0, read::u32_at(arguments, 4)?, 0])?;
+            }
+            647 => {
+                self.command_target(target, 348, [0, read::u32_at(arguments, 4)?, 0])?;
+            }
             630 => {
                 let mut name = format_string(vm, read::u32_at(arguments, 4)?, 0)?;
                 if std::env::var_os("KATZE_TRACE_NATIVE").is_some() {
@@ -101,7 +107,8 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                 let active = self
                     .objects
                     .get(&target)
-                    .is_some_and(|object| object.control().deletion_requested == 0);
+                    .map(|object| object.control().deletion_requested == 0)
+                    .unwrap_or_else(|| self.running.get(&target).is_some_and(|task| !task.deleted));
                 if !supported || !active {
                     return Err(Error::new(
                         vm.pc,

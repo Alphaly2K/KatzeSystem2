@@ -95,6 +95,27 @@ impl ProgramLoader for Programs {
                     ins(&mut code, 0x26, &[result]);
                 }
             }
+            b"save_raw" => {
+                for (native, args, result) in [(365, vec![32], 0), (238, vec![7], 4)] {
+                    for value in &args {
+                        push(&mut code, *value);
+                    }
+                    ins(&mut code, 0x2b, &[native, args.len() as u32 * 4]);
+                    ins(&mut code, 0x26, &[result]);
+                }
+                load(&mut code, 4);
+                push(&mut code, 99);
+                load(&mut code, 0);
+                ins(&mut code, 0x2b, &[387, 12]);
+                ins(&mut code, 0x26, &[8]);
+                for (result, args) in [(12, [0, 99, u32::MAX]), (16, [u32::MAX, 99, 0])] {
+                    for value in args {
+                        push(&mut code, value);
+                    }
+                    ins(&mut code, 0x2b, &[387, 12]);
+                    ins(&mut code, 0x26, &[result]);
+                }
+            }
             b"consume" => {
                 load(&mut code, 4);
                 for n in [99, 64] {
@@ -180,6 +201,45 @@ fn runtime() -> Runtime<KcsFactory<Programs>> {
         State::new(0),
         KcsFactory::new(Programs),
     )
+}
+
+#[test]
+fn raw_image_records_keep_source_bytes_after_the_loading_task_is_removed() {
+    for budget in [1, 4096] {
+        let mut runtime = runtime();
+        runtime.set_budget(budget, 1 << 20);
+        runtime.set_resources(Files {
+            value: 17,
+            requests: Requests::default(),
+        });
+        let task = runtime.create(0, kind::ORDINARY, b"save_raw", b"").unwrap();
+        runtime.update(1, 1).unwrap();
+        let bytes = runtime
+            .object(task)
+            .unwrap()
+            .interpreter()
+            .unwrap()
+            .read(0, 20)
+            .unwrap()
+            .to_vec();
+        let values: Vec<_> = bytes
+            .chunks_exact(4)
+            .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
+            .collect();
+        assert_eq!(&values[2..], &[1, 0, 0]);
+        let original = runtime.image_data(values[0]).unwrap().to_vec();
+        runtime.destroy(task).unwrap();
+        runtime.update(2, 1).unwrap();
+        assert_eq!(
+            runtime
+                .host()
+                .data_container(values[1])
+                .unwrap()
+                .record(99)
+                .unwrap(),
+            Some(original.as_slice())
+        );
+    }
 }
 
 #[test]

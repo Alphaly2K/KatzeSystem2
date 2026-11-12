@@ -564,6 +564,19 @@ impl<F: ObjectFactory> Store<'_, F> {
         if let Some(text) = &state.text {
             if text.len() != state.consumed || state.append_pending {
                 let mut bytes = text[state.consumed..].to_vec();
+                if state.layout.encoding() == TextEncoding::Unicode
+                    && std::str::from_utf8(&bytes).is_err()
+                {
+                    if let Some(encoding) = self
+                        .resources
+                        .services
+                        .as_ref()
+                        .map(|services| services.script_encoding())
+                        .filter(|&encoding| encoding != encoding_rs::SHIFT_JIS)
+                    {
+                        bytes = crate::text::decode_script(&bytes, encoding)?.into_bytes();
+                    }
+                }
                 bytes.push(0);
                 self.fes_command(owner, Some(task), 458 + extra, [0, 0, 1], Some(&mut bytes))?;
                 let state = objects.string_mut(handle);

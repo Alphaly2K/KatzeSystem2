@@ -497,11 +497,20 @@ impl<F: ObjectFactory> Store<'_, F> {
         };
         if !matches!(
             operation.as_slice(),
-            b"volume_id" | b"sysplay_id" | b"play_id" | b"volume" | b"voicebgm"
+            b"volume_id"
+                | b"sysplay_id"
+                | b"play_id"
+                | b"volume"
+                | b"voicebgm"
+                | b"volume_type"
+                | b"play_type"
         ) {
             return Err(Error::new(offset, "FES 此声音配置查询尚未接入"));
         }
-        if matches!(operation.as_slice(), b"volume" | b"voicebgm") {
+        if matches!(
+            operation.as_slice(),
+            b"volume" | b"voicebgm" | b"volume_type" | b"play_type"
+        ) {
             let Some(name) = args.get(3).filter(|name| !name.is_empty()) else {
                 scene.interpreter.eval(output, self.numbers)?;
                 return Ok(true);
@@ -511,10 +520,15 @@ impl<F: ObjectFactory> Store<'_, F> {
                 .sound_config
                 .as_ref()
                 .ok_or_else(|| Error::new(offset, "运行时未提供新声音分类配置"))?;
-            let value = if operation == b"volume" {
-                config.volume_by_name(name)
-            } else {
-                config.group_voice_volume(name)
+            let value = match operation.as_slice() {
+                b"volume" => config.volume_by_name(name),
+                b"voicebgm" => config.group_voice_volume(name),
+                b"volume_type" => config
+                    .type_part(name)
+                    .map(|part| part.map_or(100, |p| p.volume)),
+                _ => config
+                    .type_part(name)
+                    .map(|part| part.map_or(0, |p| p.play_enabled)),
             }
             .map_err(|error| Error::new(offset + error.offset, error.message))?;
             let output = scene.interpreter.eval(output, self.numbers)?;

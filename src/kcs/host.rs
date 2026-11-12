@@ -327,6 +327,35 @@ pub(crate) fn call_native(
     arguments: &[u8],
     vm: &mut Interpreter,
 ) -> Result<NativeReturn> {
+    if index == 243 {
+        let handle = read::u32_at(arguments, 0)?;
+        if handle == 0 {
+            return Ok(NativeReturn::Value(0));
+        }
+        if arguments.len() != 8 {
+            return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+        }
+        let mut bytes = (state.strings.len() as u32).to_le_bytes().to_vec();
+        for (id, text) in &state.strings {
+            let length = text.len();
+            let text = text.split(|&byte| byte == 0).next().unwrap();
+            if bytes
+                .len()
+                .checked_add(length + 13)
+                .is_none_or(|size| size > read::MAX_BYTES)
+            {
+                return Err(Error::new(vm.pc, "CSS 字符串记录超过读取上限"));
+            }
+            bytes.extend(id.to_le_bytes());
+            let end = bytes.len() + length + 1;
+            bytes.extend(text);
+            bytes.resize(end, 0);
+        }
+        bytes.extend([0; 8]);
+        host.data_container_mut(handle)?
+            .append(read::u32_at(arguments, 4)?, &bytes)?;
+        return Ok(NativeReturn::Value(1));
+    }
     let index = match index {
         675 | 885 | 894 => 515,
         676 | 886 | 895 => 516,
@@ -424,7 +453,7 @@ pub(crate) fn call_native(
         }
         return Ok(NativeReturn::Continue);
     }
-    if matches!(index, 238 | 242 | 244..=248 | 252 | 254 | 290 | 389 | 469 | 833..=836) {
+    if matches!(index, 238 | 242 | 244..=248 | 252 | 254 | 290 | 389 | 390 | 469 | 833..=836) {
         return super::data::call(host, index, arguments, vm);
     }
     if matches!(index, 900 | 901) {
@@ -601,7 +630,7 @@ pub(crate) fn call_native(
         return Ok(NativeReturn::Value(0));
     }
     let count = match index {
-        399 => 5,
+        318 | 399 => 5,
         1 | 6 | 9 | 17 | 18 | 25 | 26 | 40 | 47 | 48 | 71 | 207 | 209 | 210 | 212 | 213 | 278
         | 319 | 75 | 393 | 420 | 421 | 516 | 898 | 899 | 1040 => 1,
         8
@@ -624,6 +653,7 @@ pub(crate) fn call_native(
         | 1046
         | 1049
         | 1051
+        | 1052
         | 1053
         | 1063 => 2,
         50..=58 | 60 | 62..=64 => 1,
@@ -805,6 +835,22 @@ pub(crate) fn call_native(
             digits.reverse();
             write_string(vm, args[0], &digits, 2)?;
             NativeReturn::Continue
+        }
+        318 => {
+            let [from, to, start, end, now] = args[..5].try_into().unwrap();
+            let value = if f32::from_bits(start) >= f32::from_bits(now) {
+                from
+            } else if f32::from_bits(now) >= f32::from_bits(end) {
+                to
+            } else {
+                let elapsed = numeric::float_ieee(2, now, start);
+                let duration = numeric::float_ieee(2, end, start);
+                let distance = numeric::float_ieee(2, to, from);
+                let fraction = numeric::float_ieee(4, elapsed, duration);
+                let scaled = numeric::float_ieee(3, fraction, distance);
+                numeric::float_ieee(1, scaled, from)
+            };
+            NativeReturn::Value(value)
         }
         319 => {
             let shifted = numeric::float_ieee(1, args[0], 0.5f32.to_bits());
@@ -1128,9 +1174,9 @@ pub(crate) fn call_native(
                 NativeReturn::Continue
             }
         }
-        896..=899 | 902 => {
+        896..=899 | 902 | 1052 => {
             if (index == 902 && vm.read(args[2], 1).is_err()) || args[0] == 0 {
-                return Ok(if matches!(index, 897 | 899 | 902) {
+                return Ok(if matches!(index, 897 | 899 | 902 | 1052) {
                     NativeReturn::Value(0)
                 } else {
                     NativeReturn::Continue
@@ -1141,6 +1187,20 @@ pub(crate) fn call_native(
                 .get_mut(&args[0])
                 .ok_or_else(|| Error::new(vm.pc, "无效的 KCS 整数字典句柄"))?;
             match index {
+                1052 => {
+                    let text = strings::format(vm, args[1], 0)?;
+                    let text = text.split(|&byte| byte == 0).next().unwrap();
+                    NativeReturn::Value(
+                        entries
+                            .iter()
+                            .find_map(|(key, value)| {
+                                text.get(..key.len())
+                                    .is_some_and(|prefix| prefix.eq_ignore_ascii_case(key))
+                                    .then_some(*value)
+                            })
+                            .unwrap_or(0),
+                    )
+                }
                 896 | 897 => {
                     let key = strings::format(vm, args[1], 0)?;
                     let key = key.split(|&byte| byte == 0).next().unwrap();

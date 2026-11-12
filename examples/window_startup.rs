@@ -451,9 +451,12 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 });
         if let Err(error) = advance_frame(&mut runtime, now, started.elapsed().as_millis() as u32) {
             eprintln!("pc {}：{}", error.offset, error.message);
-            for id in 0..64 {
+            for id in 0..128 {
                 if let Some(vm) = runtime.object(id).and_then(|object| object.interpreter()) {
                     eprintln!("  任务 {id} pc {}", vm.pc);
+                }
+                if let Some(scene) = runtime.object(id).and_then(|object| object.fes_scene()) {
+                    eprintln!("  FES {id}: {:?}", scene.interpreter().pending_pc());
                 }
             }
             break;

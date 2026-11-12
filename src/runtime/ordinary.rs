@@ -393,6 +393,25 @@ impl TaskObject for OrdinaryObject {
         }
         match command.code {
             161 => return self.load(command, buffers, host, budget),
+            173 => {
+                let bytes = buffers
+                    .data1
+                    .as_deref_mut()
+                    .filter(|bytes| bytes.len() >= 16)
+                    .ok_or_else(|| Error::new(0, "普通任务消息需要十六字节缓冲区"))?;
+                let mut message: [u32; 4] = std::array::from_fn(|index| {
+                    u32::from_le_bytes(bytes[index * 4..index * 4 + 4].try_into().unwrap())
+                });
+                let result = self.dispatch_message(&mut message, output, host, budget);
+                for (destination, value) in bytes.chunks_exact_mut(4).zip(message) {
+                    destination.copy_from_slice(&value.to_le_bytes());
+                }
+                return Ok(if result? {
+                    CommandOutcome::finished(false)
+                } else {
+                    CommandOutcome::RESUME
+                });
+            }
             172 => {
                 self.require_idle()?;
                 if let Some(task) = &mut self.task {

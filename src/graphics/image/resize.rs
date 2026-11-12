@@ -45,7 +45,7 @@ impl Image {
         Ok(true)
     }
 
-    /// 普通 735 的图像拷贝：独立裁剪两端，保留来源偏移和底端起算的坐标。
+    /// 普通 116／735 的图像拷贝：独立裁剪两端，保留来源偏移和底端起算的坐标。
     pub fn copy_scaled_from(&mut self, source: &Self, from: Rect, to: Rect) -> Result<bool> {
         let Some((from, to)) = self.scaled_regions(source, from, to) else {
             return Ok(false);

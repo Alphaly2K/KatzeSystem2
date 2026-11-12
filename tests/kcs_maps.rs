@@ -85,6 +85,7 @@ fn null_integer_map_operations_skip_key_address_resolution() {
     for (index, args, expected) in [
         (896, vec![0, u32::MAX, 7], NativeReturn::Continue),
         (897, vec![0, u32::MAX], NativeReturn::Value(0)),
+        (1052, vec![0, u32::MAX], NativeReturn::Value(0)),
         (898, vec![0], NativeReturn::Continue),
         (899, vec![0], NativeReturn::Value(0)),
         (900, vec![0, u32::MAX], NativeReturn::Continue),
@@ -151,6 +152,15 @@ fn named_values_share_dictionary_handles_and_keep_formatted_updates_and_sorted_k
         assert_eq!(
             call(&mut host, &mut vm, size, &[handle]),
             NativeReturn::Value(40)
+        );
+        vm.write(112, b"aBcTail\0").unwrap();
+        assert_eq!(
+            call(&mut host, &mut vm, 1052, &[handle, 112]),
+            NativeReturn::Value(9)
+        );
+        assert_eq!(
+            call(&mut host, &mut vm, 1052, &[handle, 16]),
+            NativeReturn::Value(0x80000001)
         );
         for (index, expected_key) in [b"%d[G0]".as_slice(), b"17", b"ABC", b"abc"]
             .into_iter()

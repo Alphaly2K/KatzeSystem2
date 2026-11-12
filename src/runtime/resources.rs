@@ -56,6 +56,32 @@ impl Resources {
         Ok(true)
     }
 
+    pub fn capture_image(
+        &mut self,
+        size: [u32; 2],
+        range: [f32; 2],
+    ) -> Result<Option<crate::graphics::Image>> {
+        if !self.render_offscreen(size, range)? {
+            return Ok(None);
+        }
+        let frame = self.offscreen_frame.as_ref().unwrap();
+        let rectangle = self
+            .capture_rectangle
+            .unwrap_or_else(|| Rect::from_xywh(0, 0, size[0] as i32, size[1] as i32));
+        let extent = [
+            rectangle.right.wrapping_sub(rectangle.left),
+            rectangle.bottom.wrapping_sub(rectangle.top),
+        ];
+        if extent.iter().any(|&value| value < 0) {
+            return Err(Error::new(0, "画面捕获区域尺寸不能为负数"));
+        }
+        let mut snapshot = crate::graphics::Surface::new(extent.map(|value| value as u32))?;
+        snapshot.copy_from(frame.tiles()[0].as_ref().unwrap(), rectangle, [0; 2]);
+        let mut image = crate::graphics::Image::new(snapshot.size())?;
+        image.pixels_mut().copy_from_slice(snapshot.pixels());
+        Ok(Some(image))
+    }
+
     pub fn load_motion(&mut self, name: &[u8]) -> Result<Option<crate::kcs::Program>> {
         let name = &name[..name
             .iter()
@@ -147,6 +173,8 @@ impl Resources {
         let valid = match index {
             111 | 114 => length == 4,
             112 => length == 8,
+            362 => length == 12,
+            116 => length == 40,
             115 => {
                 length == 40
                     || ((24..40).contains(&length)
@@ -163,6 +191,24 @@ impl Resources {
         let mut args = [0; 10];
         for (arg, bytes) in args.iter_mut().zip(arguments.chunks_exact(4)) {
             *arg = u32::from_le_bytes(bytes.try_into().unwrap());
+        }
+        if index == 362 {
+            vm.read(args[1], 4)?;
+            vm.read(args[2], 4)?;
+            vm.write(args[1], &[0; 4])?;
+            vm.write(args[2], &[0; 4])?;
+            if args[0] != 0 {
+                let info = self.images.get(args[0])?.info();
+                for (axis, address) in args[1..3].iter().enumerate() {
+                    let extent = if info.canvas_size[axis] == 0 {
+                        info.size[axis]
+                    } else {
+                        info.canvas_size[axis]
+                    };
+                    vm.write(*address, &extent.to_le_bytes())?;
+                }
+            }
+            return Ok(NativeReturn::Continue);
         }
         if index == 536 {
             if args[0] == 0 {
@@ -200,6 +246,27 @@ impl Resources {
                 .ok_or_else(|| Error::new(vm.pc, "运行时未配置资源服务"))?;
             let handle = self.images.load(owner, names, services.as_mut())?;
             return Ok(NativeReturn::Value(handle));
+        }
+        if index == 116 {
+            if args[0] != 0 && args[5] != 0 {
+                self.images.copy_scaled(
+                    args[0],
+                    args[5],
+                    Rect::from_xywh(
+                        args[6] as i32,
+                        args[7] as i32,
+                        args[8] as i32,
+                        args[9] as i32,
+                    ),
+                    Rect::from_xywh(
+                        args[1] as i32,
+                        args[2] as i32,
+                        args[3] as i32,
+                        args[4] as i32,
+                    ),
+                )?;
+            }
+            return Ok(NativeReturn::Continue);
         }
         if index == 115 {
             if args[5] == 0 {

@@ -34,9 +34,14 @@ pub(super) fn call(
         }
         return Ok(NativeReturn::Continue);
     }
-    if matches!(index, 238 | 247 | 252) {
+    if matches!(index, 238 | 247 | 252 | 390) {
         let container = if index == 238 {
             DataContainer::new(first)
+        } else if index == 390 {
+            if first == 0 {
+                return Ok(NativeReturn::Value(0));
+            }
+            host.data_container(first)?.clone()
         } else if index == 252 {
             if first == 0 {
                 return Ok(NativeReturn::Value(0));

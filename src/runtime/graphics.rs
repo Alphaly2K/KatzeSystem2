@@ -10,6 +10,22 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         arguments: &[u8],
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
+        if index == 113 {
+            if !arguments.is_empty() {
+                return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+            }
+            let Some(image) = self
+                .resources
+                .capture_image(self.host.surface_size, [f32::NEG_INFINITY, f32::INFINITY])?
+            else {
+                return Ok(NativeReturn::Value(0));
+            };
+            let handle = self
+                .resources
+                .images
+                .insert(self.host.task_id, image, None)?;
+            return Ok(NativeReturn::Value(handle));
+        }
         if index == 568 {
             let range = [
                 f32::from_bits(read::u32_at(arguments, 0)?),

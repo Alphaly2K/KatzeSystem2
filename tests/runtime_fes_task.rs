@@ -55,6 +55,41 @@ struct Factory {
 }
 impl ObjectFactory for Factory {
     fn create(&mut self, id: u32, kind: u32, name: &[u8]) -> Result<Box<dyn TaskObject>> {
+        if kind == kind::ORDINARY && name == b"send receiver" {
+            let mut code = Vec::new();
+            let mut ins = |opcode: u8, flags: u8, values: &[u32]| {
+                code.push(opcode);
+                for value in values {
+                    code.push(flags);
+                    code.extend(value.to_le_bytes());
+                }
+            };
+            ins(0x25, 3, &[32]);
+            ins(0x2b, 3, &[71, 4]);
+            ins(0x26, 3, &[0]);
+            ins(0x2f, 3, &[32]);
+            ins(0x25, 3, &[7]);
+            ins(0x25, 3, &[91]);
+            ins(0x2b, 3, &[645, 12]);
+            ins(0x2f, 3, &[32]);
+            ins(0x25, 3, &[7]);
+            ins(0x2b, 3, &[646, 8]);
+            ins(0x26, 3, &[4]);
+            ins(0x2f, 3, &[32]);
+            ins(0x25, 3, &[64]);
+            ins(0x25, 3, &[0]);
+            ins(0x25, 3, &[0]);
+            ins(0x2b, 3, &[630, 16]);
+            ins(0x29, 3, &[0]);
+            let mut data = vec![0; 128];
+            data[64..70].copy_from_slice(b"REPLY\0");
+            let mut task = katze_system2::kcs::OrdinaryTask::new(
+                Program::from_code(&code, data, 128)?,
+                Vec::new(),
+            )?;
+            task.task_id = id;
+            return Ok(Box::new(OrdinaryObject::new(task)));
+        }
         if kind == kind::ORDINARY && name == b"native driver" {
             fn ins(code: &mut Vec<u8>, op: u8, args: &[u32]) {
                 code.push(op);
@@ -68,6 +103,7 @@ impl ObjectFactory for Factory {
             for (native, args) in [
                 (449, vec![3, 4]),
                 (447, vec![3, 64]),
+                (451, vec![3, 0x8000_0001]),
                 (882, vec![3, 160, 0xdead_beef]),
                 (882, vec![3, 160, 0x8000_0001]),
                 (882, vec![3, 192, 9]),
@@ -1025,6 +1061,16 @@ fn ordinary_natives_bind_load_and_start_fes_with_shared_values_and_pixels() {
             runtime.update(0, 1).unwrap();
             assert_eq!(runtime.numbers().shared[0], 1);
             assert_eq!(runtime.numbers().shared[1], 17);
+            assert_eq!(
+                runtime
+                    .object(fes)
+                    .unwrap()
+                    .fes_scene()
+                    .unwrap()
+                    .interpreter()
+                    .named["_SAVEOBJ_"][&0],
+                0x8000_0001u32 as i32
+            );
             assert_eq!(
                 runtime.numbers().shared[2..5],
                 [1, 0, 0x8000_0001u32 as i32]
@@ -2164,6 +2210,111 @@ fn focus_notifications_wait_for_the_body_and_lock_commands_end_local_handlers() 
         update(&mut runtime, &mut scene, 103);
         assert_eq!(scene.focus_lock(), 0);
         assert_eq!(runtime.numbers().shared[6], 0);
+    }
+}
+
+#[test]
+fn fes_send_allows_synchronous_parameter_access_and_a_block_callback() {
+    for budget in [1, 4096] {
+        let mut runtime = setup(
+            budget,
+            b"#START\nsend 7 8 9\n$0=$0+1\nwait 1000\n#REPLY\n$1=\\7\n",
+        )
+        .runtime;
+        let parent = runtime
+            .create(0, kind::ORDINARY, b"send receiver", b"")
+            .unwrap();
+        runtime.update(100, 1).unwrap();
+        let fes = runtime.create(parent, kind::FES, b"scene", b"").unwrap();
+        send(&mut runtime, fes, 337, 0, 0);
+        file(&mut runtime, fes, b"complete.fes").unwrap();
+        let list = runtime.create(fes, kind::IMAGE_LIST, b"list", b"").unwrap();
+        send(&mut runtime, list, 285, 8, 6);
+        send(&mut runtime, fes, 340, 0, list);
+        send(&mut runtime, fes, 339, 0, 0);
+        runtime.update(101, 1).unwrap();
+        assert_eq!(&runtime.numbers().shared[..2], &[1, 91]);
+        assert_eq!(
+            &*runtime
+                .object(parent)
+                .unwrap()
+                .interpreter()
+                .unwrap()
+                .read(4, 4)
+                .unwrap(),
+            &91u32.to_le_bytes()
+        );
+    }
+}
+
+#[test]
+fn react_repeats_the_current_focus_in_the_body_after_the_input_handler() {
+    let source = b"#DEFINE\nBUTTON item\n#OBJECT SIZE PRI\nitem 2,2 5\n#START\nwait 1000\n#item.FOCUS\n$0=$0+1\n#item.PUSH_L\nreact\n$1=$1+1\n";
+    for budget in [1, 4096] {
+        let Setup {
+            mut runtime,
+            pointer,
+            ..
+        } = setup(budget, source);
+        pointer.set(PointerSample {
+            position: [1, 1],
+            active: 1,
+        });
+        runtime.input_coordinates_mut().logical_size = [8, 6];
+        let (fes, _, buttons) = start_button_scene(&mut runtime);
+        runtime.update_input_selection(1, Some([1, 1])).unwrap();
+        assert_eq!(runtime.numbers().shared[0], 1);
+        send(&mut runtime, buttons[0], 4, 0, 1);
+        assert_eq!(&runtime.numbers().shared[..2], &[1, 1]);
+        runtime.update(102, 1).unwrap();
+        assert_eq!(&runtime.numbers().shared[..2], &[2, 1]);
+        runtime.update(103, 1).unwrap();
+        assert_eq!(&runtime.numbers().shared[..2], &[2, 1]);
+        assert_eq!(
+            runtime
+                .input_state(1)
+                .unwrap()
+                .regions()
+                .get(buttons[0])
+                .unwrap()
+                .selected(),
+            1
+        );
+        pointer.set(PointerSample {
+            position: [7, 5],
+            active: 1,
+        });
+        runtime.update_input_selection(1, Some([7, 5])).unwrap();
+        send(&mut runtime, buttons[0], 4, 0, 1);
+        assert_eq!(&runtime.numbers().shared[..2], &[2, 1]);
+        assert!(runtime.object(fes).unwrap().fes_scene().is_some());
+    }
+}
+
+#[test]
+fn disabled_focus_does_not_reactivate_when_a_menu_button_is_enabled_again() {
+    let source = b"#DEFINE\nBUTTON item\n#OBJECT SIZE PRI ENABLE\nitem 2,2 5 21\n#START\nwait 1000\n#item.PUSH_L\n$0=$0+1\nitem enable 0\n#item.RELEASE_L\n$1=$1+1\n#REENABLE\nitem enable 21\n";
+    for budget in [1, 4096] {
+        let mut runtime = setup(budget, source).runtime;
+        let (fes, _, buttons) = start_button_scene(&mut runtime);
+        send(&mut runtime, fes, 64, buttons[0], 1);
+        send(&mut runtime, buttons[0], 4, 0, 1);
+        runtime.update(102, 1).unwrap();
+        let mut block = b"REENABLE\0".to_vec();
+        runtime
+            .dispatch_command_with_buffers(
+                0,
+                command(fes, 343, 0, 0),
+                &mut CommandBuffers {
+                    data1: Some(&mut block),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        send(&mut runtime, buttons[0], 4, 0, 0);
+        assert_eq!(&runtime.numbers().shared[..2], &[1, 1]);
+        send(&mut runtime, buttons[0], 4, 0, 1);
+        assert_eq!(&runtime.numbers().shared[..2], &[1, 1]);
     }
 }
 

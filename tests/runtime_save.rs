@@ -72,6 +72,38 @@ impl ProgramLoader for Programs {
     fn load(&mut self, name: &[u8]) -> Result<Option<Program>> {
         let mut code = Vec::new();
         let mut data = vec![0; 128];
+        if name == b"thumbnail" {
+            for value in [2, 3] {
+                push(&mut code, value);
+            }
+            native(&mut code, 112, 2);
+            store(&mut code, 0);
+            load(&mut code, 0);
+            for value in [0, 0, 2, 3, 0xff123456] {
+                push(&mut code, value);
+            }
+            native(&mut code, 117, 6);
+            push(&mut code, 64);
+            native(&mut code, 238, 1);
+            store(&mut code, 4);
+            load(&mut code, 4);
+            push(&mut code, 7);
+            load(&mut code, 0);
+            native(&mut code, 241, 3);
+            store(&mut code, 8);
+            load(&mut code, 0);
+            native(&mut code, 114, 1);
+            load(&mut code, 4);
+            push(&mut code, 7);
+            native(&mut code, 251, 2);
+            store(&mut code, 12);
+            load(&mut code, 4);
+            push(&mut code, 99);
+            native(&mut code, 251, 2);
+            store(&mut code, 16);
+            ins(&mut code, 0x3b, &[]);
+            return Ok(Some(Program::from_code(&code, data, 256)?));
+        }
         data[48..52].copy_from_slice(&7u32.to_le_bytes());
         data[64..81].copy_from_slice(b"slot-%d[G48].css\0");
         if name == b"load" {
@@ -116,6 +148,62 @@ impl ProgramLoader for Programs {
         }
         ins(&mut code, 0x3b, &[]);
         Ok(Some(Program::from_code(&code, data, 256)?))
+    }
+}
+
+#[test]
+fn image_records_roundtrip_pixels_and_register_restored_images_to_the_loading_task() {
+    for budget in [1, 4096] {
+        let mut runtime = Runtime::new(
+            0,
+            kind::ROOT,
+            Box::new(BaseObject::new()),
+            State::new(0),
+            KcsFactory::new(Programs),
+        );
+        runtime.set_budget(budget, 10000);
+        let task = runtime
+            .create(0, kind::ORDINARY, b"thumbnail", b"")
+            .unwrap();
+        for _ in 0..128 {
+            runtime.update(0, 0).unwrap();
+        }
+        let vm = runtime.object(task).unwrap().interpreter().unwrap();
+        let words: Vec<_> = vm
+            .read(0, 20)
+            .unwrap()
+            .chunks_exact(4)
+            .map(|word| u32::from_le_bytes(word.try_into().unwrap()))
+            .collect();
+        assert_eq!(words[2], 1);
+        assert_eq!(words[4], 0);
+        assert!(runtime.images().get(words[0]).is_err());
+        let restored = runtime.images().get(words[3]).unwrap();
+        assert_eq!(restored.info().size, [2, 3]);
+        assert_eq!(restored.info().canvas_size, [2, 3]);
+        assert_eq!(
+            restored.surface().pixels(),
+            &[0x56, 0x34, 0x12, 0xff].repeat(6)
+        );
+        let bytes = runtime
+            .host()
+            .data_container(words[1])
+            .unwrap()
+            .record(7)
+            .unwrap()
+            .unwrap();
+        assert_eq!(&bytes[..4], b"HG-2");
+        runtime.destroy(task).unwrap();
+        assert!(runtime.images().get(words[3]).is_err());
+        assert!(
+            runtime
+                .host()
+                .data_container(words[1])
+                .unwrap()
+                .record(7)
+                .unwrap()
+                .is_some()
+        );
     }
 }
 
@@ -411,6 +499,25 @@ fn nested_containers_keep_first_snapshot_capacity_and_independent_lifetimes() {
     assert_eq!(call(&mut host, &mut vm, 252, &[0]), 0);
     assert_eq!(call(&mut host, &mut vm, 252, &[outer, 45]), 0);
     let restored = call(&mut host, &mut vm, 252, &[outer, 44]);
+    let duplicate = call(&mut host, &mut vm, 390, &[restored]);
+    assert_eq!(
+        host.data_container(duplicate).unwrap(),
+        host.data_container(restored).unwrap()
+    );
+    host.state.strings.insert(0xffff_ffff, b"last".to_vec());
+    host.state.strings.insert(7, b"first\0gap".to_vec());
+    assert_eq!(call(&mut host, &mut vm, 243, &[duplicate, 71]), 1);
+    let mut strings = 2u32.to_le_bytes().to_vec();
+    strings.extend(7u32.to_le_bytes());
+    strings.extend(b"first\0\0\0\0\0");
+    strings.extend(u32::MAX.to_le_bytes());
+    strings.extend(b"last\0");
+    strings.extend([0; 8]);
+    assert_eq!(
+        host.data_container(duplicate).unwrap().record(71).unwrap(),
+        Some(strings.as_slice())
+    );
+    assert_eq!(call(&mut host, &mut vm, 243, &[0]), 0);
     release(&mut host, &mut vm, inner);
     release(&mut host, &mut vm, outer);
     let data = host.data_container(restored).unwrap();
@@ -418,6 +525,11 @@ fn nested_containers_keep_first_snapshot_capacity_and_independent_lifetimes() {
     assert_eq!((data.capacity(), data.used_len()), (0x80000 - 11, 13));
     assert_eq!(data.record(17).unwrap(), Some(b"later".as_slice()));
     assert_eq!(call(&mut host, &mut vm, 242, &[restored, 55, restored]), 1);
+    assert_eq!(
+        host.data_container(duplicate).unwrap().record(55).unwrap(),
+        None
+    );
+    release(&mut host, &mut vm, duplicate);
     let copy = call(&mut host, &mut vm, 252, &[restored, 55]);
     release(&mut host, &mut vm, restored);
     let data = host.data_container(copy).unwrap();

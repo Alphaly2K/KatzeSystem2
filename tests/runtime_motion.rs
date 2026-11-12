@@ -234,6 +234,10 @@ fn motion_loading_copies_parameters_and_saved_data_and_reuses_programs() {
     store(&mut code, 16);
     call(&mut code, 315, &[(3, 1), (3, 100)]);
     store(&mut code, 20);
+    call(&mut code, 238, &[(3, 7)]);
+    store(&mut code, 24);
+    call(&mut code, 387, &[(0x13, 24), (3, 99), (3, 2)]);
+    store(&mut code, 28);
     call(&mut code, 65, &[]);
     call(&mut code, 295, &[(3, 1)]);
     call(&mut code, 317, &[(3, 2)]);
@@ -283,6 +287,15 @@ fn motion_loading_copies_parameters_and_saved_data_and_reuses_programs() {
         let bytes = runtime.motion_snapshot(2).unwrap().bytes();
         assert_eq!(bytes.len(), 8 + 0x454 * 2 + 8);
         assert_eq!(&bytes[8 + 0x454..8 + 0x45c], b"\x44\x33\x22\x11efgh");
+        assert_eq!(
+            runtime
+                .host()
+                .data_container(3)
+                .unwrap()
+                .record(99)
+                .unwrap(),
+            Some(bytes)
+        );
         let vm = runtime.object(task).unwrap().interpreter().unwrap();
         assert_eq!(
             (0..6).map(|i| word(vm, i * 4)).collect::<Vec<_>>(),
@@ -290,6 +303,7 @@ fn motion_loading_copies_parameters_and_saved_data_and_reuses_programs() {
         );
         assert_eq!(vm.read(1200, 8).unwrap(), [0xff; 8]);
         assert_eq!(vm.stack_bytes(), 0xdead_beefu32.to_le_bytes());
+        assert_eq!(word(vm, 28), 1);
         runtime.update(2, 1).unwrap();
         assert!(runtime.motion_controller(1).is_none());
         assert!(runtime.motion_snapshot(2).is_none());

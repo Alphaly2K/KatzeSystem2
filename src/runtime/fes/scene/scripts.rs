@@ -1,6 +1,7 @@
 use super::{Notification, Scene};
 use crate::runtime::{
-    ObjectFactory, Store, create_object, create_unloaded_ordinary, kind, route_command,
+    FesSceneLoan, ObjectFactory, Store, create_object, create_unloaded_ordinary, kind,
+    route_command,
 };
 use crate::task::{Command, CommandBuffers};
 use crate::{Error, Result};
@@ -14,6 +15,13 @@ pub(super) struct ChildScripts {
 }
 
 pub(super) enum ScriptRequest {
+    React {
+        target: Option<crate::fes::ObjectReference>,
+    },
+    Send {
+        message: [u32; 3],
+        parent: bool,
+    },
     SetBackground {
         source: Option<BackgroundSource>,
         image: u32,
@@ -55,6 +63,24 @@ impl Scene {
         numbers: &mut crate::expression::State,
     ) -> Result<Option<ScriptDisposition>> {
         match args.first().map(Vec::as_slice) {
+            Some(b"send") => {
+                let Some(code) = args.get(1) else {
+                    return Ok(Some(ScriptDisposition::Continue));
+                };
+                let mut values = [self.interpreter.eval(code, numbers)? as u32, 0, 0, 1];
+                for (value, argument) in values[1..].iter_mut().zip(args.iter().skip(2)) {
+                    *value = self.interpreter.eval(argument, numbers)? as u32;
+                }
+                self.notify(Notification::Script(ScriptRequest::Send {
+                    message: values[..3].try_into().unwrap(),
+                    parent: values[3] != 0,
+                }))?;
+                Ok(Some(if self.interpreter.event_context().is_some() {
+                    ScriptDisposition::Continue
+                } else {
+                    ScriptDisposition::Flush
+                }))
+            }
             Some(b"baseimg") => {
                 let source = match args.get(1).filter(|name| !name.is_empty()) {
                     None => None,
@@ -123,12 +149,12 @@ impl Scene {
                 Ok(Some(ScriptDisposition::Flush))
             }
             Some(b"react") => {
-                let bank = self
-                    .interpreter
-                    .event_context()
-                    .map_or(0, |context| context.bank);
-                self.request_react(bank);
-                Ok(Some(ScriptDisposition::Continue))
+                self.notify(Notification::Script(ScriptRequest::React { target: None }))?;
+                Ok(Some(if self.interpreter.event_context().is_some() {
+                    ScriptDisposition::Continue
+                } else {
+                    ScriptDisposition::Flush
+                }))
             }
             _ => Ok(None),
         }
@@ -192,6 +218,93 @@ impl<F: ObjectFactory> Store<'_, F> {
         request: &mut ScriptRequest,
     ) -> Result<bool> {
         match request {
+            ScriptRequest::React { target } => {
+                if target.is_none() {
+                    let Some(focus) = scene.focus.clone() else {
+                        return Ok(true);
+                    };
+                    let input = scene
+                        .objects
+                        .input_task()
+                        .ok_or_else(|| Error::new(0, "FES 焦点刷新缺少输入任务绑定"))?;
+                    let mut host = crate::runtime::ObjectHost {
+                        numbers: self.numbers,
+                        host: self.host,
+                        resources: self.resources,
+                        tree: self.tree,
+                        objects: self.objects,
+                        running: self.running,
+                        factory: self.factory,
+                        fes_scene: self.fes_scene.as_mut().map(FesSceneLoan::reborrow),
+                        context: Vec::new(),
+                        budget: self.budget,
+                        limit: self.limit,
+                    };
+                    super::super::task::update_pointer_values(
+                        owner,
+                        input,
+                        Some(scene),
+                        &mut host,
+                    )?;
+                    route_command(
+                        self.reborrow(),
+                        owner,
+                        Command {
+                            target: input,
+                            sender: owner,
+                            code: 94,
+                            data: [0, 1, 1],
+                        },
+                        &mut CommandBuffers::default(),
+                        &mut 0,
+                    )?;
+                    *target = Some(focus);
+                }
+                Ok(self
+                    .dispatch_fes_control_event(owner, scene, target.as_ref().unwrap(), 0)?
+                    .is_some())
+            }
+            ScriptRequest::Send { message, parent } => {
+                let target = if *parent {
+                    self.tree.node(owner).and_then(|node| node.parent)
+                } else {
+                    scene.scripts.kcs
+                };
+                let Some(target) = target else {
+                    return Ok(true);
+                };
+                if self
+                    .running
+                    .get(&target)
+                    .is_some_and(|task| task.remaining_messages.is_some())
+                {
+                    return Ok(true);
+                }
+                let mut bytes = [owner, message[0], message[1], message[2]]
+                    .into_iter()
+                    .flat_map(u32::to_le_bytes)
+                    .collect::<Vec<_>>();
+                let mut store = self.reborrow();
+                if store.fes_scene.is_none() {
+                    store.fes_scene = Some(FesSceneLoan { owner, scene });
+                }
+                route_command(
+                    store,
+                    owner,
+                    Command {
+                        target,
+                        sender: owner,
+                        code: 173,
+                        data: [0, 1, 1],
+                    },
+                    &mut CommandBuffers {
+                        data1: Some(&mut bytes),
+                        ..CommandBuffers::default()
+                    },
+                    &mut 0,
+                )?;
+                Ok(true)
+            }
             ScriptRequest::SetBackground {
                 source,
                 image,

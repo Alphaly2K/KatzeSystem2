@@ -1,7 +1,6 @@
 use super::{ObjectState, Objects};
-use crate::graphics::{Image, Rect, Surface};
+use crate::Result;
 use crate::runtime::{ObjectFactory, Store};
-use crate::{Error, Result};
 
 /// DIFIMAGE 的基础图像属性与一次性捕获请求。
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -68,29 +67,12 @@ impl<F: ObjectFactory> Store<'_, F> {
     }
 
     fn capture_fes_image(&mut self, range: [u32; 2]) -> Result<Option<u32>> {
-        let size = self.host.surface_size;
-        if !self
+        let Some(image) = self
             .resources
-            .render_offscreen(size, range.map(|value| value as f32))?
-        {
+            .capture_image(self.host.surface_size, range.map(|value| value as f32))?
+        else {
             return Ok(None);
-        }
-        let frame = self.resources.offscreen_frame.as_ref().unwrap();
-        let rectangle = self
-            .resources
-            .capture_rectangle
-            .unwrap_or_else(|| Rect::from_xywh(0, 0, size[0] as i32, size[1] as i32));
-        let extent = [
-            rectangle.right.wrapping_sub(rectangle.left),
-            rectangle.bottom.wrapping_sub(rectangle.top),
-        ];
-        if extent.iter().any(|&value| value < 0) {
-            return Err(Error::new(0, "画面捕获区域尺寸不能为负数"));
-        }
-        let mut snapshot = Surface::new(extent.map(|value| value as u32))?;
-        snapshot.copy_from(frame.tiles()[0].as_ref().unwrap(), rectangle, [0; 2]);
-        let mut image = Image::new(snapshot.size())?;
-        image.pixels_mut().copy_from_slice(snapshot.pixels());
+        };
         self.resources
             .images
             .insert_resource(None, image, false)

@@ -37,6 +37,7 @@ pub(crate) use matrix::{multiply as multiply_matrix, transform as transform_vect
 pub use memory::MemoryCopyMode;
 pub(crate) use memory::copy as copy_memory;
 pub(crate) use memory::copy_between as copy_memory_between;
+pub(crate) use memory::{MemoryLoan, copy_loan};
 pub use motion::{MotionHost, MotionState, MotionTask};
 pub(crate) use numeric::float as float_operation;
 pub use ordinary::OrdinaryTask;

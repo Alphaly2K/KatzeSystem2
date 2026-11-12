@@ -46,6 +46,8 @@ FES `getsndconfex output_index volume name` 将该结果写入共享槽，只读
 
 `getsndconfex output_index voicebgm name` 查询分类的 `voice_volume`，即语音播放时使用的分类音量，缺失分类返回 100。名称和额外参数的处理与 volume 相同，但 `master` 在此处按普通分类名查询。对应库接口为 `SoundConfig::group_voice_volume`。
 
+`getsndconfex output_index volume_type name` 与 `play_type name` 按 `type_name` 查询首个分类，分别读取当前音量与播放开关；缺失类型分别返回 100 与 0。名称参数、额外参数和输出槽的处理与按名称音量查询相同，`master` 也按普通类型名称查询。
+
 ## 文件分类与播放设置
 
 `file_part(name)` 按独立的 file_prefix 查找分类，不使用分类 name。输入和配置前缀到首个零字节结束；单字节 ASCII 大小写等同，CP932 双字节保持原值。按存储顺序先检查父节点，再递归子节点；非空前缀匹配文件名开头即返回，不选择最长前缀，不拆分目录。空前缀跳过自身，继续查子节点。输入正文须短于 512 字节。

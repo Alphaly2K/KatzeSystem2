@@ -38,6 +38,64 @@ impl FontServices for Fonts {
     }
 }
 type Engine = Runtime<MessageFactory<GraphicsFactory<Reject>>>;
+
+#[test]
+fn translated_fes_text_uses_the_declared_encoding_and_keeps_expanded_utf8() {
+    struct Source;
+    impl katze_system2::kcs::ResourceServices for Source {
+        fn read(
+            &mut self,
+            _: &[u8],
+            _: katze_system2::resource::ResourceMode,
+        ) -> Result<Option<Vec<u8>>> {
+            Ok(None)
+        }
+        fn script_encoding(&self) -> &'static encoding_rs::Encoding {
+            encoding_rs::GBK
+        }
+    }
+    let (legacy, _, errors) = encoding_rs::GBK.encode("文本速度测试");
+    assert!(!errors);
+    for budget in [1, 4096] {
+        let mut runtime = engine(budget, false, Rc::new(Cell::new(false)));
+        runtime.set_resources(Source);
+        runtime
+            .numbers_mut()
+            .strings
+            .insert(7, "正文".as_bytes().to_vec());
+        let mut script =
+            b"#DEFINE\nSTRING8 text\n#START\ntext layout view 32 24\ntext str ".to_vec();
+        script.extend(&*legacy);
+        script.extend(b"\ntext draw -1\ntext skip\nwait 1\ntext str $str7;\ntext draw -1\ntext skip\nwait 1000\n");
+        let mut scene = Scene::new(
+            fes::Program::from_text(&script).unwrap(),
+            runtime.host().handle_allocator(),
+        )
+        .unwrap();
+        advance(&mut runtime, &mut scene, 0).unwrap();
+        let task = string(&scene).1;
+        assert_eq!(
+            runtime
+                .object(task)
+                .unwrap()
+                .message_page()
+                .unwrap()
+                .source(),
+            "文本速度测试"
+        );
+        advance(&mut runtime, &mut scene, 1).unwrap();
+        assert_eq!(
+            runtime
+                .object(task)
+                .unwrap()
+                .message_page()
+                .unwrap()
+                .source(),
+            "正文"
+        );
+    }
+}
+
 fn engine(budget: usize, unicode: bool, fail: Rc<Cell<bool>>) -> Engine {
     let mut rt = Runtime::new(
         0,

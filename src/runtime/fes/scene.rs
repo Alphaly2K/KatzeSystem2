@@ -32,6 +32,7 @@ pub struct Scene {
     scripts: ChildScripts,
     preferred_focus: Option<fes::ObjectReference>,
     focus_lock: i32,
+    pub(super) focus: Option<fes::ObjectReference>,
     invocation: Option<Invocation>,
     input: super::input::SystemInput,
     system_block: Option<SystemBlock>,
@@ -47,8 +48,6 @@ pub struct Scene {
     pub(super) property_call: Option<super::properties::PropertyCall>,
     pub(super) preload: super::preload::Preload,
     save_query: Option<save::SaveQuery>,
-    /// FES `react` 请求：待发往父任务的对象编号。
-    react: Option<i32>,
 }
 
 struct Invocation {
@@ -137,6 +136,7 @@ impl Scene {
             scripts: ChildScripts::default(),
             preferred_focus: None,
             focus_lock: 0,
+            focus: None,
             invocation: None,
             input: super::input::SystemInput::default(),
             system_block: None,
@@ -152,7 +152,6 @@ impl Scene {
             property_call: None,
             preload,
             save_query: None,
-            react: None,
         })
     }
 
@@ -185,11 +184,11 @@ impl Scene {
         Ok(())
     }
 
-    pub(super) fn parameter_values(&self) -> &[i32] {
+    pub(in crate::runtime) fn parameter_values(&self) -> &[i32] {
         self.interpreter.local_values()
     }
 
-    pub(super) fn parameter_values_mut(&mut self) -> &mut [i32] {
+    pub(in crate::runtime) fn parameter_values_mut(&mut self) -> &mut [i32] {
         self.interpreter.local_values_mut()
     }
 
@@ -383,21 +382,12 @@ impl Scene {
         Ok(Some(false))
     }
 
-    pub(super) fn set_system_value(&mut self, name: &str, value: i32) {
+    pub(in crate::runtime) fn set_system_value(&mut self, name: &str, value: i32) {
         self.interpreter
             .named
             .entry(name.to_owned())
             .or_default()
             .insert(0, value);
-    }
-
-    /// `react` 把当前对象编号交给父任务；宿主在下一次命令完成点发送。
-    pub(super) fn request_react(&mut self, bank: i32) {
-        self.react = Some(bank);
-    }
-
-    pub(super) fn take_react(&mut self) -> Option<i32> {
-        self.react.take()
     }
 
     pub fn is_pending(&self) -> bool {
@@ -535,6 +525,20 @@ impl<F: ObjectFactory> Runtime<F> {
 }
 
 impl<F: ObjectFactory> Store<'_, F> {
+    pub(in crate::runtime) fn dispatch_borrowed_fes_block(
+        &mut self,
+        owner: u32,
+        scene: &mut Scene,
+        target: Option<&fes::ObjectReference>,
+        name: &str,
+        now: u32,
+    ) -> Result<bool> {
+        let invocation = scene.invocation.take();
+        let result = self.dispatch_fes_block(owner, scene, target, name, Some((now, true)));
+        scene.invocation = invocation;
+        result
+    }
+
     fn fes_debug_command(&mut self, scene: &mut Scene, args: &[Vec<u8>]) -> Result<bool> {
         let Some(name) = args.first() else {
             return Ok(false);
@@ -979,24 +983,6 @@ impl<F: ObjectFactory> Store<'_, F> {
         Ok(Some(scene.object_event.take().unwrap().handled))
     }
 
-    /// 把 FES `react` 的对象编号作为一次点击消息排入父任务。
-    pub(super) fn flush_fes_react(&mut self, scene: &mut Scene) -> Result<()> {
-        let Some(bank) = scene.take_react() else {
-            return Ok(());
-        };
-        let Some(owner) = scene.owner else {
-            return Ok(());
-        };
-        let Some(parent) = self.tree.node(owner).and_then(|node| node.parent) else {
-            return Ok(());
-        };
-        let message = [owner, 0xffff_0003, bank as u32, 0];
-        if let Some(object) = self.objects.get_mut(&parent) {
-            object.enqueue_message(message)?;
-        }
-        Ok(())
-    }
-
     pub(super) fn run_fes_handler(&mut self, scene: &mut Scene) -> Result<bool> {
         for _ in 0..self.budget.max(1) {
             if std::env::var_os("KATZE_TRACE_FES").is_some() {
@@ -1018,7 +1004,6 @@ impl<F: ObjectFactory> Store<'_, F> {
                     if let Some(disposition) =
                         scene.script_command(&args, line.offset, self.numbers)?
                     {
-                        self.flush_fes_react(scene)?;
                         if matches!(disposition, ScriptDisposition::Continue) {
                             scene.interpreter.resume();
                         } else {
@@ -1354,7 +1339,10 @@ impl<F: ObjectFactory> Store<'_, F> {
         scene: &mut Scene,
         now: u32,
     ) -> Result<bool> {
-        if scene.system_block.is_some() || scene.object_event.is_some() {
+        if scene.system_block.is_some()
+            || (scene.object_event.is_some()
+                && !matches!(scene.scripts.active, Some(ScriptRequest::React { .. })))
+        {
             return Err(Error::new(0, "FES 事件尚未完成"));
         }
         if self.tree.node(owner).is_none() {
@@ -1499,7 +1487,6 @@ impl<F: ObjectFactory> Store<'_, F> {
                             if let Some(disposition) =
                                 scene.script_command(&args, line.offset, self.numbers)?
                             {
-                                self.flush_fes_react(scene)?;
                                 scene.interpreter.resume();
                                 match disposition {
                                     ScriptDisposition::Continue => (),

@@ -750,10 +750,12 @@ struct RunningTask {
     property_changed: bool,
     deferred_delete: bool,
     clock: TaskClock,
+    paused_changed: Option<i32>,
     context: Option<Vec<u8>>,
     shared_numbers: Option<bool>,
     external: Option<crate::memory::SharedMemory>,
     remaining_messages: Option<usize>,
+    memory: Option<crate::kcs::MemoryLoan>,
     effects: TaskEffects,
 }
 
@@ -861,6 +863,19 @@ fn run_nested<F: ObjectFactory>(
         }
     }
     if let Some(task) = running.get_mut(&target) {
+        if let Execution::Command {
+            command, propagate, ..
+        } = &mut execution
+        {
+            if command.code == 29 {
+                if !task.deleted {
+                    task.clock.paused = command.data[1] as i32;
+                    task.paused_changed = Some(command.data[1] as i32);
+                }
+                **propagate = false;
+                return Ok(());
+            }
+        }
         let propagate = match &mut execution {
             Execution::Delete if task.deferred_delete => Some(None),
             Execution::Command {
@@ -881,9 +896,91 @@ fn run_nested<F: ObjectFactory>(
     }
     if fes_scene.as_ref().is_some_and(|loan| loan.owner == target) {
         if let Execution::Command {
-            command, propagate, ..
+            command,
+            buffers,
+            output,
+            propagate,
+            ..
         } = &mut execution
         {
+            if command.code == 343 {
+                **propagate = false;
+                if running.get(&target).is_some_and(|task| task.deleted) {
+                    return Ok(());
+                }
+                let block = crate::text::cp932(crate::read::zstr(
+                    buffers
+                        .data1
+                        .as_deref()
+                        .ok_or_else(|| Error::new(0, "FES 块名称缓冲区缺失"))?,
+                    0,
+                )?)?;
+                let context = buffers
+                    .data0
+                    .as_deref()
+                    .map(|bytes| {
+                        if bytes.len() < 36 {
+                            return Err(Error::new(0, "FES 块对象上下文容量不足"));
+                        }
+                        Ok(crate::fes::ObjectReference {
+                            name: crate::text::cp932(crate::read::zstr(&bytes[..32], 0)?)?,
+                            bank: read::u32_at(bytes, 32)? as i32,
+                        })
+                    })
+                    .transpose()?;
+                let loan = fes_scene.take().unwrap();
+                let now = running
+                    .get(&target)
+                    .map_or(host.task_time, |task| task.clock.elapsed());
+                let saved = (host.task_id, host.task_time, host.task_origin);
+                host.task_id = target;
+                if let Some(task) = running.get(&target) {
+                    host.task_time = task.clock.time;
+                    host.task_origin = task.clock.origin;
+                }
+                let mut store = Store {
+                    numbers,
+                    host,
+                    resources,
+                    tree,
+                    objects,
+                    running,
+                    factory,
+                    fes_scene: None,
+                    budget,
+                    limit,
+                };
+                let result = drain(budget, limit, || {
+                    store.dispatch_borrowed_fes_block(
+                        target,
+                        loan.scene,
+                        context.as_ref(),
+                        &block,
+                        now,
+                    )
+                });
+                store.host.task_id = saved.0;
+                store.host.task_time = saved.1;
+                store.host.task_origin = saved.2;
+                return result;
+            }
+            if matches!(command.code, 342 | 346 | 347) {
+                **propagate = false;
+                if !running.get(&target).is_some_and(|task| task.deleted) {
+                    let scene = &mut fes_scene.as_mut().unwrap().scene;
+                    let index = command.data[0] as usize;
+                    if command.code == 342 {
+                        scene.set_system_value("_SAVEOBJ_", command.data[1] as i32);
+                    } else if command.code == 346 {
+                        if let Some(value) = scene.parameter_values_mut().get_mut(index) {
+                            *value = command.data[1] as i32;
+                        }
+                    } else {
+                        **output = scene.parameter_values().get(index).copied().unwrap_or(0) as u32;
+                    }
+                }
+                return Ok(());
+            }
             if matches!(command.code, 27 | 28) {
                 **propagate = false;
                 if running.get(&target).is_some_and(|task| task.deleted) {
@@ -1079,9 +1176,16 @@ fn run_nested<F: ObjectFactory>(
         host.task_origin = saved.2;
         return result;
     }
-    let mut object = objects
-        .remove(&target)
-        .ok_or_else(|| Error::new(0, "任务对象不存在或正在执行"))?;
+    let mut object = objects.remove(&target).ok_or_else(|| {
+        let operation = match &execution {
+            Execution::Command { command, .. } => format!("命令 {}", command.code),
+            _ => "执行".to_owned(),
+        };
+        Error::new(
+            0,
+            format!("任务对象不存在或正在执行（{target}，{operation}）"),
+        )
+    })?;
     running.insert(
         target,
         RunningTask {
@@ -1090,12 +1194,14 @@ fn run_nested<F: ObjectFactory>(
             property_changed: false,
             deferred_delete: object.accepts_deferred_delete(),
             clock: object.clock().clone(),
+            paused_changed: None,
             context: object.creation_context().map(<[u8]>::to_vec),
             shared_numbers: object.shared_numbers_available(),
             external: object.external_storage(),
             remaining_messages: object
                 .queued_messages()
                 .map(|messages| read::MAX_ITEMS.saturating_sub(messages.len())),
+            memory: None,
             effects: TaskEffects::default(),
         },
     );
@@ -1161,6 +1267,9 @@ fn run_nested<F: ObjectFactory>(
     if let Some(task) = running.remove(&target) {
         if task.property_changed {
             object.state().0.property = task.property;
+        }
+        if let Some(paused) = task.paused_changed {
+            object.state().1.paused = paused;
         }
     }
     objects.insert(target, object);
@@ -1389,7 +1498,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         let count = match index {
             66 => 12,
             67 | 75 | 109 | 272..=274 | 452 | 520 => 4,
-            108 | 110 | 275 | 426 | 427 | 528 | 531 => 8,
+            108 | 110 | 275 | 426 | 427 | 528 | 531 | 694 => 8,
             69 | 70 | 72 | 73 | 527 => 16,
             530 | 905 => 20,
             76 => 0,
@@ -1536,7 +1645,11 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                 let value = if args[0] == self.host.task_id {
                     0
                 } else {
-                    self.message_target(args[0], &mut message)?
+                    let owner = self.host.task_id;
+                    self.running.get_mut(&owner).unwrap().memory = Some(vm.lend_memory());
+                    let result = self.message_target(args[0], &mut message);
+                    vm.restore_memory(self.running.get_mut(&owner).unwrap().memory.take().unwrap());
+                    result?
                 };
                 Ok(NativeReturn::Value(value))
             }
@@ -1605,6 +1718,10 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                 self.command_target(args[0], if index == 108 { 95 } else { 97 }, [0, args[1], 0])?;
                 Ok(NativeReturn::Continue)
             }
+            694 => {
+                self.command_target(args[0], 29, [0, args[1], 0])?;
+                Ok(NativeReturn::Continue)
+            }
             72 | 73 => {
                 let count = read::sized(args[2], vm.pc)?;
                 if args[0] == self.host.task_id {
@@ -1623,6 +1740,22 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                 } else {
                     if !self.require_reachable(args[0]) {
                         return Err(Error::new(vm.pc, "任务存储目标不存在"));
+                    }
+                    if let Some(loan) = self
+                        .running
+                        .get_mut(&args[0])
+                        .and_then(|task| task.memory.as_mut())
+                    {
+                        crate::kcs::copy_loan(
+                            vm,
+                            loan,
+                            args[1],
+                            args[3],
+                            count,
+                            self.host.memory_copy_mode,
+                            index == 73,
+                        )?;
+                        return Ok(NativeReturn::Continue);
                     }
                     let other = self
                         .objects
@@ -1949,6 +2082,9 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         self.host.set_task_clock(clock);
         if let Some(task) = self.running.get_mut(&self.host.task_id) {
             task.clock = clock.clone();
+            if let Some(paused) = task.paused_changed {
+                task.clock.paused = paused;
+            }
         }
     }
 
@@ -1965,6 +2101,27 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
     }
 
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn> {
+        struct Timer(u32, u32, Option<std::time::Instant>);
+        impl Drop for Timer {
+            fn drop(&mut self) {
+                if let Some(started) = self.2 {
+                    let elapsed = started.elapsed();
+                    if elapsed.as_millis() >= 20 {
+                        eprintln!(
+                            "[slow-native] task={} native={} ms={:.2}",
+                            self.0,
+                            self.1,
+                            elapsed.as_secs_f64() * 1000.0
+                        );
+                    }
+                }
+            }
+        }
+        let _timer = Timer(
+            self.host.task_id,
+            index,
+            std::env::var_os("KATZE_TRACE_TIMING").map(|_| std::time::Instant::now()),
+        );
         if index == 453 {
             if arguments.len() != 4 {
                 return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
@@ -2050,7 +2207,7 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         if matches!(index, 611..=621 | 695 | 884) {
             return self.message_native(index, arguments, vm);
         }
-        if matches!(index, 447..=449 | 630 | 645 | 646 | 882 | 883) {
+        if matches!(index, 447..=449 | 451 | 630 | 645..=647 | 882 | 883) {
             return self.fes_native(index, arguments, vm);
         }
         if index == 149 {
@@ -2067,7 +2224,7 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         }
         if matches!(
             index,
-            78 | 79
+            113 | 78 | 79
                 | 80
                 | 82
                 | 83
@@ -2089,13 +2246,57 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         if matches!(
             index,
             66 | 67 | 69 | 70 | 72 | 73 | 75 | 76 | 108
-                ..=110 | 272..=275 | 426 | 427 | 452 | 520 | 527 | 528 | 530 | 531 | 905
+                ..=110 | 272..=275 | 426 | 427 | 452 | 520 | 527 | 528 | 530 | 531 | 694 | 905
         ) {
             return self.task_native(index, arguments, vm);
         }
+        if matches!(index, 241 | 251 | 387) {
+            let container = read::u32_at(arguments, 0)?;
+            if container == 0 {
+                return Ok(NativeReturn::Value(0));
+            }
+            if arguments.len() != if index == 251 { 8 } else { 12 } {
+                return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+            }
+            let record = read::u32_at(arguments, 4)?;
+            if index == 251 {
+                let Some(bytes) = self.host.data_container(container)?.record(record)? else {
+                    return Ok(NativeReturn::Value(0));
+                };
+                let frame = crate::hg2::decode_frame(bytes)?;
+                let has_alpha = frame.info.reserved != 0;
+                let image = crate::graphics::Image::from_frame(frame)?;
+                let handle =
+                    self.resources
+                        .images
+                        .insert(self.host.task_id, image, Some(has_alpha))?;
+                return Ok(NativeReturn::Value(handle));
+            }
+            let source = read::u32_at(arguments, 8)?;
+            if source == 0 {
+                return Ok(NativeReturn::Value(0));
+            }
+            if index == 241 {
+                let image = self.resources.images.get(source)?;
+                let bytes = crate::hg2::encode_frame(image.info().size, image.surface().pixels())?;
+                self.host
+                    .data_container_mut(container)?
+                    .append(record, &bytes)?;
+                return Ok(NativeReturn::Value(1));
+            }
+            let bytes = if let Some(snapshot) = self.resources.motion_snapshots.get(&source) {
+                snapshot.bytes()
+            } else {
+                self.resources.raw.image_data(source)?
+            };
+            self.host
+                .data_container_mut(container)?
+                .append(read::u32_at(arguments, 4)?, bytes)?;
+            return Ok(NativeReturn::Value(1));
+        }
         if matches!(
             index,
-            111 | 112 | 114 | 115 | 117 | 365 | 366 | 368 | 434..=438 | 536 | 590..=597
+            111 | 112 | 114..=117 | 362 | 365 | 366 | 368 | 434..=438 | 536 | 590..=597
         ) {
             return self.resources.call(self.host.task_id, index, arguments, vm);
         }

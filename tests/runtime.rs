@@ -122,6 +122,44 @@ fn waiting_child() -> Vec<u8> {
 }
 
 #[test]
+fn fes_send_delivers_evaluated_values_to_the_parent_and_skips_an_absent_child() {
+    for budget in [1, 4096] {
+        for destination in ["", " 1", " 0"] {
+            let mut source = Source::new();
+            source.add(b"receiver", waiting_child(), data());
+            source.add(b"panel", vec![0x3b], data());
+            let mut runtime = runtime(source);
+            runtime.set_budget(budget, 1 << 20);
+            let parent = runtime.create(0, kind::ORDINARY, b"receiver", b"").unwrap();
+            let panel = runtime
+                .create(parent, kind::ORDINARY, b"panel", b"")
+                .unwrap();
+            runtime.update(0, 1).unwrap();
+            let text = format!(
+                "#START\nsend\nsend (($0+=1)+0x12345677) ($1+=7) ($2+=23){destination}\n$3+=1\nwait 1000\n"
+            );
+            let mut scene = katze_system2::runtime::fes::Scene::new(
+                katze_system2::fes::Program::from_text(text.as_bytes()).unwrap(),
+                runtime.host().handle_allocator(),
+            )
+            .unwrap();
+            while !runtime.update_fes_scene(panel, &mut scene, 1).unwrap() {}
+            assert_eq!(&runtime.numbers().shared[..4], &[1, 7, 23, 1]);
+            let vm = runtime.object(parent).unwrap().interpreter().unwrap();
+            assert_eq!(
+                words(vm, 32, 4),
+                if destination == " 0" {
+                    vec![0; 4]
+                } else {
+                    vec![panel, 0x1234_5678, 7, 23]
+                }
+            );
+            assert_eq!(vm.waiting_message_address(), Some(32));
+        }
+    }
+}
+
+#[test]
 fn creation_registers_minimum_id_and_inherits_raw_context() {
     let mut parent_data = data();
     parent_data[100..106].copy_from_slice(b"child\0");
@@ -1346,6 +1384,19 @@ fn message_handler_can_reply_to_the_running_sender() {
             .ins(0x25, &[0])
             .ins(0x2b, &[69, 16])
             .ins(0x26, &[4])
+            .ins(0x2f, &[32])
+            .ins(0x25, &[64])
+            .ins(0x25, &[8])
+            .ins(0x25, &[80])
+            .ins(0x2b, &[72, 16])
+            .ins(0x2f, &[32])
+            .ins(0x25, &[96])
+            .ins(0x25, &[8])
+            .ins(0x25, &[80])
+            .ins(0x2b, &[73, 16])
+            .ins(0x2f, &[32])
+            .ins(0x25, &[1])
+            .ins(0x2b, &[694, 8])
             .jump(0x29, "wait");
         let mut sender = Asm::default();
         sender
@@ -1358,7 +1409,9 @@ fn message_handler_can_reply_to_the_running_sender() {
             .ins(0x3b, &[]);
         let mut source = Source::new();
         source.add(b"receiver", receiver.build(), data());
-        source.add(b"sender", sender.build(), data());
+        let mut storage = data();
+        storage[64..72].copy_from_slice(&[17u32.to_le_bytes(), 23u32.to_le_bytes()].concat());
+        source.add(b"sender", sender.build(), storage);
         let mut runtime = runtime(source);
         runtime.set_budget(budget, 1 << 20);
         let receiver = runtime.create(0, kind::ORDINARY, b"receiver", b"").unwrap();
@@ -1372,6 +1425,9 @@ fn message_handler_can_reply_to_the_running_sender() {
         assert!(receiver_vm.is_waiting_for_message(), "接收者回到消息等待");
         let sender_vm = runtime.object(sender).unwrap().interpreter().unwrap();
         assert_eq!(words(sender_vm, 0, 1), [1], "外层 native 69 返回一");
+        assert_eq!(words(receiver_vm, 80, 2), [17, 23]);
+        assert_eq!(words(sender_vm, 96, 2), [17, 23]);
+        assert_eq!(runtime.object(sender).unwrap().clock().paused, 1);
     }
 }
 
