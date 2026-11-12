@@ -655,7 +655,9 @@ pub fn build_runtime(
     {
         runtime.reload_language_tables(katze_system2::language::LanguageTarget::MainText)?;
     }
-    runtime.set_fonts(katze_system2::message::Fonts::new(&root));
+    let mut fonts = katze_system2::message::Fonts::new(&root);
+    fonts.discover_system();
+    runtime.set_fonts(fonts);
     runtime.set_save_services(Saves {
         root: configuration_files.directory.to_string_lossy().into_owned(),
     });

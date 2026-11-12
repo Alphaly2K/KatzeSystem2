@@ -59,10 +59,12 @@ impl Fonts {
         Ok(count)
     }
 
-    fn discover_system(&mut self) {
+    /// 提前发现系统字体；可在进入帧循环前调用，后续选择复用同一目录。
+    pub fn discover_system(&mut self) {
         if !std::mem::take(&mut self.system_pending) {
             return;
         }
+        let timing = std::env::var_os("KATZE_TRACE_TIMING").map(|_| std::time::Instant::now());
         let mut database = fontdb::Database::new();
         database.load_system_fonts();
         let files: BTreeSet<_> = database
@@ -86,6 +88,13 @@ impl Fonts {
                 break;
             }
             self.faces.extend(faces);
+        }
+        if let Some(started) = timing {
+            eprintln!(
+                "[font-discovery] faces={} ms={:.2}",
+                self.faces.len(),
+                started.elapsed().as_secs_f64() * 1000.
+            );
         }
     }
 
@@ -191,11 +200,18 @@ impl Fonts {
     fn font(&mut self, index: usize) -> Result<&Font> {
         let face = &mut self.faces[index];
         if face.font.is_none() {
+            let timing = std::env::var_os("KATZE_TRACE_TIMING").map(|_| std::time::Instant::now());
             let bytes = match &face.source {
                 Source::Data(bytes) => bytes.clone(),
                 Source::File(path) => read_file(path)?.into(),
             };
             face.font = Some(Font::from_bytes(&bytes, face.index)?);
+            if let Some(started) = timing {
+                eprintln!(
+                    "[font-load] index={index} ms={:.2}",
+                    started.elapsed().as_secs_f64() * 1000.
+                );
+            }
         }
         Ok(face.font.as_ref().unwrap())
     }
