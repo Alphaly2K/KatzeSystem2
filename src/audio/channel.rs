@@ -1,8 +1,5 @@
+use super::Pcm;
 use super::playback::Playback;
-use super::{Pcm, decode_vorbis_source};
-use crate::kcs::ResourceServices;
-use crate::resource::ResourceMode;
-use crate::{Error, Result};
 
 #[derive(Clone, Copy, Default)]
 pub(super) struct ChannelClock {
@@ -197,64 +194,4 @@ impl SoundChannel {
         self.clock = ChannelClock::default();
         self.loop_range[0] = 0;
     }
-}
-
-pub(super) fn load_pcm(services: &mut dyn ResourceServices, file: &[u8]) -> Result<Option<Pcm>> {
-    let Some(source) = services.open(file, ResourceMode::LooseFirst)? else {
-        return Ok(None);
-    };
-    if source.is_empty()? {
-        return Ok(None);
-    }
-    decode_vorbis_source(source.as_ref()).map(Some)
-}
-
-pub(super) fn load_metadata(
-    services: &mut dyn ResourceServices,
-    file: &[u8],
-    tags: &mut std::collections::BTreeMap<Vec<u8>, u32>,
-) -> Result<()> {
-    tags.clear();
-    let basename = file
-        .rsplit(|byte| matches!(byte, b'/' | b'\\'))
-        .next()
-        .unwrap();
-    let stem = without_extension(basename);
-    for (category, extension) in [
-        (b"tag".as_slice(), None),
-        (b"sound".as_slice(), Some(b"plv".as_slice())),
-        (b"sound".as_slice(), Some(b"lpb".as_slice())),
-        (b"sound".as_slice(), Some(b"lv".as_slice())),
-    ] {
-        let mut name = services.resolve(category, stem)?;
-        name.truncate(
-            name.iter()
-                .position(|&byte| byte == 0)
-                .unwrap_or(name.len()),
-        );
-        if let Some(extension) = extension {
-            name.truncate(without_extension(&name).len());
-            name.push(b'.');
-            name.extend(extension);
-        }
-        if name.len() >= 1024 {
-            return Err(Error::new(0, "声音附加资源名称超过缓冲区容量"));
-        }
-        if let Some(bytes) = services.read(&name, ResourceMode::LooseFirst)? {
-            if category == b"tag" {
-                *tags = super::tags::parse(&bytes)?;
-            } else if !bytes.is_empty() {
-                return Err(Error::new(0, "声音附加资源内容尚未接入"));
-            }
-        }
-    }
-    Ok(())
-}
-
-fn without_extension(name: &[u8]) -> &[u8] {
-    let dot = name
-        .iter()
-        .rposition(|byte| matches!(byte, b'.' | b'/' | b'\\'))
-        .filter(|&position| name[position] == b'.');
-    &name[..dot.unwrap_or(name.len())]
 }

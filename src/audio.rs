@@ -4,12 +4,14 @@ mod channel;
 mod config;
 mod control;
 mod groups;
+mod load;
 mod mix;
 mod output;
 mod pcm;
 mod playback;
 mod settings;
 mod soundconf;
+mod state;
 mod tags;
 mod task;
 pub use channel::SoundChannel;
@@ -17,7 +19,8 @@ pub use config::{SoundConfig, SoundPart};
 pub use groups::{SoundGroup, SoundGroups};
 pub use output::Mixer;
 pub use pcm::{Pcm, decode_vorbis, decode_vorbis_source};
-pub use task::{SoundFactory, SoundObject, SoundState};
+pub use state::SoundState;
+pub use task::{SoundFactory, SoundObject};
 
 /// 声音任务登记的原始循环范围；计数尚未转换为播放设备的单位。
 #[derive(Clone, Debug, PartialEq, Eq)]

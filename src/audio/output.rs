@@ -58,8 +58,10 @@ impl SoundState {
                 ..Status::default()
             }))
         });
-        let mut sound = SoundState::default();
-        sound.channels = self.channels.clone();
+        let sound = SoundState {
+            channels: self.channels.clone(),
+            ..SoundState::default()
+        };
         for (channel, progress) in self.channels.iter_mut().zip(&progress) {
             channel.progress = Some(progress.clone());
         }
