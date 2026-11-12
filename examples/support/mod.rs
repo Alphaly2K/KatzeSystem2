@@ -43,11 +43,50 @@ pub fn input_keys(config: &[u8]) -> Result<DeviceKeys> {
 fn decode(name: &[u8], position_shift: usize) -> Vec<u8> {
     name.iter()
         .enumerate()
-        .map(|(i, &b)| match ALPHABET.iter().position(|c| *c == b) {
-            Some(index) => ALPHABET[51 - (index + position_shift + i) % 52],
-            None => b,
-        })
+        .map(|(i, &b)| decode_byte(b, position_shift + i))
         .collect()
+}
+
+fn alphabet_index(byte: u8) -> Option<usize> {
+    match byte {
+        b'A'..=b'Z' => Some((byte - b'A') as usize),
+        b'a'..=b'z' => Some((byte - b'a') as usize + 26),
+        _ => None,
+    }
+}
+
+fn decode_byte(byte: u8, position: usize) -> u8 {
+    alphabet_index(byte).map_or(byte, |index| ALPHABET[51 - (index + position) % 52])
+}
+
+fn encrypted_name_matches(raw: &[u8], name: &str) -> bool {
+    if !name.is_ascii() {
+        return (0..52)
+            .any(|shift| String::from_utf8_lossy(&decode(raw, shift)).eq_ignore_ascii_case(name));
+    }
+    if raw.len() != name.len() {
+        return false;
+    }
+    let Some((position, index)) = raw
+        .iter()
+        .enumerate()
+        .find_map(|(position, &byte)| alphabet_index(byte).map(|index| (position, index)))
+    else {
+        return raw.eq_ignore_ascii_case(name.as_bytes());
+    };
+    let Some(expected) = alphabet_index(name.as_bytes()[position]) else {
+        return false;
+    };
+    // 忽略大小写时首个字母只对应两种位移；其余字节验证完整名称。
+    let shift = (155 - expected - index - position % 52) % 52;
+    [shift, (shift + 26) % 52].into_iter().any(|shift| {
+        raw.iter()
+            .zip(name.bytes())
+            .enumerate()
+            .all(|(i, (&byte, expected))| {
+                decode_byte(byte, shift + i).eq_ignore_ascii_case(&expected)
+            })
+    })
 }
 
 fn name_score(name: &[u8]) -> i32 {
@@ -174,7 +213,7 @@ impl Archive {
         })
     }
 
-    /// 精确名称优先；未命中时逐条目尝试全部位移，按请求名称反查。
+    /// 精确名称优先；未命中时逐条目按请求名称反查。
     ///
     /// 样本的校验码不可得，条目名称的位移只能猜测；反查只服务本机探针。
     fn locate(&self, name: &str) -> Option<usize> {
@@ -188,11 +227,8 @@ impl Archive {
                 .iter()
                 .position(|&byte| byte == 0)
                 .unwrap_or(entry.raw.len());
-            for shift in 0..52 {
-                let decoded = decode(&entry.raw[..end], shift);
-                if String::from_utf8_lossy(&decoded).eq_ignore_ascii_case(name) {
-                    return Some(position);
-                }
+            if encrypted_name_matches(&entry.raw[..end], name) {
+                return Some(position);
             }
         }
         None

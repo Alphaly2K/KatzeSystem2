@@ -5,6 +5,11 @@ mod support;
 use katze_system2::{kcs::ResourceServices, resource::ResourceMode};
 use std::path::PathBuf;
 
+use blowfish::{
+    BlowfishLE,
+    cipher::{BlockEncrypt, KeyInit},
+};
+
 struct Directory(PathBuf);
 
 impl Drop for Directory {
@@ -109,4 +114,71 @@ fn startup_discovers_patch_priority_and_preloads_overridden_and_added_programs()
             .unwrap(),
         Some(Vec::new())
     );
+}
+
+#[test]
+fn encrypted_archive_lookup_preserves_all_name_shifts_and_lossy_unicode_matching() {
+    let root = Directory(
+        std::env::temp_dir().join(format!("katze-startup-encrypted-{}", std::process::id())),
+    );
+    std::fs::create_dir(&root.0).unwrap();
+    let key = katze_system2::kcs::ScriptRandom::seeded(23)
+        .next_integer()
+        .to_le_bytes();
+    let cipher = BlowfishLE::new_from_slice(&key).unwrap();
+    let alphabet = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    for (case, raw) in [
+        b"Voice_0123.ogg".as_slice(),
+        b"123_45.678",
+        b".a_B-9",
+        "a音b".as_bytes(),
+        b"a\xffb",
+        b"",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut directory = [0u8; 144];
+        directory[..11].copy_from_slice(b"__key__.dat");
+        directory[68..72].copy_from_slice(&23u32.to_le_bytes());
+        directory[72..72 + raw.len()].copy_from_slice(raw);
+        let mut block = [0u8; 8];
+        block[..4].copy_from_slice(&152u32.to_le_bytes());
+        block[4..].copy_from_slice(&8u32.to_le_bytes());
+        cipher.encrypt_block((&mut block).into());
+        let offset = u32::from_le_bytes(block[..4].try_into().unwrap()).wrapping_sub(1);
+        directory[136..140].copy_from_slice(&offset.to_le_bytes());
+        directory[140..].copy_from_slice(&block[4..]);
+        let payload = *b"contents";
+        let mut data = payload;
+        cipher.encrypt_block((&mut data).into());
+        let bytes = [b"KIF\0".as_slice(), &2u32.to_le_bytes(), &directory, &data].concat();
+        let path = root.0.join(format!("{case}.int"));
+        std::fs::write(&path, bytes).unwrap();
+        let archive = support::Archive::open(path.to_str().unwrap()).unwrap();
+        for shift in 0..52 {
+            let decoded: Vec<_> = raw
+                .iter()
+                .enumerate()
+                .map(|(i, &byte)| {
+                    alphabet
+                        .iter()
+                        .position(|&letter| letter == byte)
+                        .map_or(byte, |index| alphabet[51 - (index + shift + i) % 52])
+                })
+                .collect();
+            let name = String::from_utf8_lossy(&decoded);
+            for request in [
+                name.to_string(),
+                name.to_ascii_uppercase(),
+                name.to_ascii_lowercase(),
+            ] {
+                assert_eq!(
+                    archive.read(&request).unwrap().as_deref(),
+                    Some(payload.as_slice())
+                );
+                assert_eq!(archive.read(&format!("{request}!")).unwrap(), None);
+            }
+        }
+    }
 }
