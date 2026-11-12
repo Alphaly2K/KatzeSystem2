@@ -1,5 +1,6 @@
 use katze_system2::graphics::{
-    Drawable, Drawables, ProjectedVertex, Projection, RenderTarget, Surface, TextureFilter, Vertex,
+    Compositor, Drawable, Drawables, GraphicsBackend, ProjectedVertex, Projection, RenderTarget,
+    SoftwareBackend, Surface, TextureFilter, Vertex,
 };
 
 fn texture() -> Surface {
@@ -183,4 +184,22 @@ fn drawable_submission_interpolates_colors_without_a_texture() {
     assert_eq!(target.pixel(0, 0), Some(0xffff0000));
     assert_eq!(target.pixel(1, 1), Some(0xff804040));
     assert_eq!(target.pixel(2, 2), Some(0));
+
+    let mut compositor = Compositor::default();
+    *compositor.drawables_mut() = drawables;
+    compositor.drawing_mut().target = Some(RenderTarget::new([4, 4]).unwrap());
+    compositor.set_frame_view(Projection::default(), IDENTITY, TextureFilter::Point);
+    let frame = compositor.compose(None).unwrap();
+    let composited = SoftwareBackend
+        .render(
+            &frame,
+            compositor.drawing_mut().target.as_mut().unwrap(),
+            [4, 4],
+        )
+        .unwrap();
+    for y in 0..4 {
+        for x in 0..4 {
+            assert_eq!(composited.pixel(x, y), target.pixel(x, y));
+        }
+    }
 }

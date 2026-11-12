@@ -36,7 +36,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             return Ok(NativeReturn::Continue);
         }
         if index == 542 {
-            let drawing = &mut self.resources.drawing;
+            let drawing = &mut self.resources.compositor.drawing;
             if drawing.mode == 0 && drawing.enabled {
                 if let Some(target) = drawing.target.as_mut() {
                     let settings = self
@@ -62,7 +62,9 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             for address in [addresses[1], addresses[0]] {
                 vm.write(address, &[0; 4])?;
             }
-            if self.resources.drawing.mode == 0 && self.resources.drawing.enabled {
+            if self.resources.compositor.drawing.mode == 0
+                && self.resources.compositor.drawing.enabled
+            {
                 for (address, value) in addresses.iter().zip(mapping.truncated_device_offset()) {
                     vm.write(*address, &value.to_le_bytes())?;
                 }

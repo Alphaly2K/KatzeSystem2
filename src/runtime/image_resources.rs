@@ -183,7 +183,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                 read::u32_at(arguments, 12)? as i32,
                 read::u32_at(arguments, 16)? as i32,
             );
-            self.resources.drawing.clear_rect(rectangle);
+            self.resources.compositor.drawing.clear_rect(rectangle);
             return Ok(NativeReturn::Continue);
         }
         if handle == 0 {

@@ -200,15 +200,9 @@ impl<F: ObjectFactory> Runtime<F> {
         parent: [f32; 16],
         filter: crate::graphics::TextureFilter,
     ) -> Result<bool> {
-        let canvas = self
-            .resources
-            .drawing
-            .target
-            .as_ref()
-            .ok_or_else(|| Error::new(0, "运行时未配置画布纹理输入"))?;
         self.resources
-            .drawables
-            .render_frame(output, canvas, projection, parent, filter)
+            .compositor
+            .render_frame(output, projection, parent, filter)
     }
 
     /// 配置脚本内部画面捕获使用的投影、父变换和纹理取样。
@@ -219,7 +213,9 @@ impl<F: ObjectFactory> Runtime<F> {
         parent: [f32; 16],
         filter: crate::graphics::TextureFilter,
     ) {
-        self.resources.frame_view = Some((projection, parent, filter));
+        self.resources
+            .compositor
+            .set_frame_view(projection, parent, filter);
     }
 
     /// 连接窗口呈现及脚本画面捕获共用的后端；未配置时捕获继续使用软件绘制。
@@ -362,19 +358,28 @@ impl<F: ObjectFactory> Runtime<F> {
     }
 
     pub fn drawing(&self) -> &crate::graphics::DrawingContext {
-        &self.resources.drawing
+        self.resources.compositor.drawing()
     }
 
     pub fn drawing_mut(&mut self) -> &mut crate::graphics::DrawingContext {
-        &mut self.resources.drawing
+        self.resources.compositor.drawing_mut()
     }
 
     pub fn drawables(&self) -> &crate::graphics::Drawables {
-        &self.resources.drawables
+        self.resources.compositor.drawables()
     }
 
     pub fn drawables_mut(&mut self) -> &mut crate::graphics::Drawables {
-        &mut self.resources.drawables
+        self.resources.compositor.drawables_mut()
+    }
+
+    /// 借用脚本、媒体任务和最终帧提交共用的合成状态。
+    pub fn compositor(&self) -> &crate::graphics::Compositor {
+        &self.resources.compositor
+    }
+
+    pub fn compositor_mut(&mut self) -> &mut crate::graphics::Compositor {
+        &mut self.resources.compositor
     }
 
     /// 更新完成后显式绘制基础纯色及渐变图元；帧清空和平台呈现由调用者驱动。
@@ -384,8 +389,8 @@ impl<F: ObjectFactory> Runtime<F> {
         parent: [f32; 16],
     ) -> Result<bool> {
         self.resources
-            .drawing
-            .render_triangles(&mut self.resources.drawables, projection, parent)
+            .compositor
+            .render_triangles(projection, parent)
     }
 
     pub fn host(&self) -> &HostState {
@@ -729,7 +734,7 @@ fn create_object_impl<F: ObjectFactory>(
     {
         state.initialize_pointer(device.pointer()?.position);
     }
-    object.register_graphics(&mut resources.drawables)?;
+    object.register_graphics(&mut resources.compositor.drawables)?;
     tree.insert(parent, id, kind)?;
     objects.insert(id, object);
     Ok(id)
@@ -874,7 +879,12 @@ fn run_nested<F: ObjectFactory>(
         }
         if *kind == kind::PLANE && matches!(command.code, 61 | 62) {
             if !task.deleted {
-                crate::graphics::query_geometry(&resources.drawables, target, command, buffers)?;
+                crate::graphics::query_geometry(
+                    &resources.compositor.drawables,
+                    target,
+                    command,
+                    buffers,
+                )?;
             }
             **propagate = false;
             return Ok(());
@@ -1910,12 +1920,13 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
     }
 
     fn message_plane_display(&mut self, id: u32) -> Result<Option<u32>> {
-        let drawing = &self.resources.drawing;
+        let drawing = &self.resources.compositor.drawing;
         if drawing.mode != 0 || !drawing.enabled {
             return Ok(None);
         }
         Ok(self
             .resources
+            .compositor
             .drawables
             .get(id)
             .map(crate::graphics::Drawable::display))
@@ -1927,7 +1938,11 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         rectangle: crate::graphics::Rect,
         at: [i32; 2],
     ) -> Result<bool> {
-        Ok(self.resources.drawing.copy_surface(surface, rectangle, at))
+        Ok(self
+            .resources
+            .compositor
+            .drawing
+            .copy_surface(surface, rectangle, at))
     }
 
     fn update_image_list(
@@ -1980,6 +1995,7 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
     }
     fn canvas_layout(&self) -> Result<Option<crate::graphics::CanvasLayout>> {
         self.resources
+            .compositor
             .drawing
             .target
             .as_ref()
@@ -1988,7 +2004,7 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
     }
 
     fn drawables(&mut self) -> Option<&mut crate::graphics::Drawables> {
-        Some(&mut self.resources.drawables)
+        Some(&mut self.resources.compositor.drawables)
     }
 
     fn resource_services(&mut self) -> Option<&mut dyn crate::kcs::ResourceServices> {
@@ -2213,7 +2229,7 @@ impl<F: ObjectFactory> Lifecycle for TaskLifecycle<'_, F> {
         self.resources.images.release_resources(id)?;
         self.resources.images.release_owner(id);
         self.resources.raw.release_owner(id);
-        self.resources.drawables.remove(id);
+        self.resources.compositor.drawables.remove(id);
         self.resources.emocon.remove(&id);
         self.objects.remove(&id);
         Ok(())

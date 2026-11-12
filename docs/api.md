@@ -488,6 +488,8 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 
 `graphics::Projection` 将对象／父级变换后的三角形转换为 `ProjectedVertex`，保留独立 RHW、颜色、平面／透视分支和两级坐标变换。`Drawable::projected_triangle` 提供组合入口；调用者显式给出投影原点与开关，实际摄像及坐标组配置尚未自动装载。参数契约见[绘图投影](graphics.md#绘图投影)。
 
+`graphics::Compositor::default()` 创建独立合成状态；`drawing()`／`drawing_mut()` 提供画布上下文，`drawables()`／`drawables_mut()` 提供图元及相机登记。调用 `set_frame_view` 后，`compose(None)` 合成全帧，`compose(Some(range))` 合成指定深度区间。合成器生成绘制列表，设备由 `GraphicsBackend` 管理。`Runtime::compositor()`／`compositor_mut()` 访问运行时使用的同一实例，既有画布、绘图登记和视图接口均访问该状态。
+
 `graphics::Drawable` 保存非纹理或画布三角形、独立原始边界及绘图属性，`rectangle` 提供矩形几何，`Drawables` 按编号登记、查询和删除，`order` 提供按基点 Z 稳定归并后的顺序。`Runtime::drawables()`／`drawables_mut()` 与具体二维对象共用该登记；对象释放时清理同编号登记。属性设置、颜色覆盖及非有限优先级契约见[绘图登记](graphics.md#绘图登记与三角形)。
 
 `Runtime::render_triangles(projection, parent)` 在已开启的当前绘图上下文中绘制基础纯色及渐变图元，返回是否覆盖目标；调用者在 update 后显式调用并负责目标清空和设备呈现。`Drawables`、`DrawingContext` 提供同名独立入口，`Surface`／`RenderTarget::blend_triangle` 提供二维纯色核心。显示门控、像素中心、Alpha 和当前限制见[纯色绘制](graphics.md#纯色三角形绘制)。 `Surface`／`RenderTarget::blend_projected_triangle` 提供 RHW 颜色插值，`blend_textured_triangle` 以同一组权重插值 UV，使用 `TextureFilter` 的镜像点取样或双线性过滤；参数与限制见[纹理与插值](graphics.md#纹理与顶点颜色插值)。

@@ -35,6 +35,8 @@ mod raster;
 pub use raster::TextureFilter;
 mod frame;
 pub use frame::{DrawCommand, DrawList, FrameTexture, FrameTriangle};
+mod compositor;
+pub use compositor::Compositor;
 mod backend;
 pub use backend::{GraphicsBackend, SoftwareBackend};
 #[cfg(target_os = "macos")]

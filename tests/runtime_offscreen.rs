@@ -183,7 +183,7 @@ fn native_pass_uses_saved_view_ordered_depth_bounds_and_clears_each_output() {
                 }
                 assert_eq!(rt.drawing(), &canvas);
                 for id in 100..103 {
-                    rt.drawables_mut().set_display(id, 0);
+                    rt.compositor_mut().drawables_mut().set_display(id, 0);
                 }
                 call(&mut rt);
                 assert!(

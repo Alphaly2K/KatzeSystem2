@@ -1,4 +1,4 @@
-use crate::graphics::{Drawables, DrawingContext, Images, Rect};
+use crate::graphics::{Compositor, Images, Rect};
 use crate::kcs::{Interpreter, NativeReturn, ResourceServices, ResourceState, format_string};
 use crate::{Error, Result};
 
@@ -7,14 +7,8 @@ pub(super) struct Resources {
     pub services: Option<Box<dyn ResourceServices>>,
     pub fonts: Option<Box<dyn crate::message::FontServices>>,
     pub images: Images,
-    pub drawing: DrawingContext,
-    pub drawables: Drawables,
+    pub compositor: Compositor,
     pub graphics_backend: Option<Box<dyn crate::graphics::GraphicsBackend>>,
-    pub frame_view: Option<(
-        crate::graphics::Projection,
-        [f32; 16],
-        crate::graphics::TextureFilter,
-    )>,
     pub capture_rectangle: Option<Rect>,
     pub offscreen_frame: Option<crate::graphics::RenderTarget>,
     pub raw: ResourceState,
@@ -35,16 +29,13 @@ pub(super) struct Resources {
 
 impl Resources {
     pub fn compose_frame(&mut self, range: Option<[f32; 2]>) -> Result<crate::graphics::DrawList> {
-        let (projection, parent, filter) = self
-            .frame_view
-            .as_ref()
-            .ok_or_else(|| Error::new(0, "绘制列表需要配置运行时帧视图"))?;
-        self.drawables.compose(projection, *parent, *filter, range)
+        self.compositor.compose(range)
     }
 
     pub fn present_frame(&mut self, size: [u32; 2]) -> Result<bool> {
         let frame = self.compose_frame(None)?;
         let canvas = self
+            .compositor
             .drawing
             .target
             .as_mut()
@@ -56,28 +47,29 @@ impl Resources {
     }
 
     pub fn render_offscreen(&mut self, size: [u32; 2], range: [f32; 2]) -> Result<bool> {
-        if self.drawing.mode != 0 || !self.drawing.enabled {
+        if self.compositor.drawing.mode != 0 || !self.compositor.drawing.enabled {
             return Ok(false);
         }
-        if self.drawing.target.is_none() {
+        if self.compositor.drawing.target.is_none() {
             return Ok(false);
         }
         if self.graphics_backend.is_some() {
             let frame = self.compose_frame(Some(range))?;
             self.offscreen_frame = Some(self.graphics_backend.as_deref_mut().unwrap().render(
                 &frame,
-                self.drawing.target.as_mut().unwrap(),
+                self.compositor.drawing.target.as_mut().unwrap(),
                 size,
             )?);
             return Ok(true);
         }
-        let canvas = self.drawing.target.as_ref().unwrap();
+        let canvas = self.compositor.drawing.target.as_ref().unwrap();
         let (projection, parent, filter) = self
+            .compositor
             .frame_view
             .as_ref()
             .ok_or_else(|| Error::new(0, "离屏绘制需要配置运行时帧视图"))?;
         self.offscreen_frame = Some(crate::graphics::RenderTarget::new(size)?);
-        self.drawables.render_depth_range(
+        self.compositor.drawables.render_depth_range(
             self.offscreen_frame.as_mut().unwrap(),
             canvas,
             projection,
@@ -162,7 +154,7 @@ impl Resources {
         let offset = list.offset();
         let mut copied = false;
         for region in regions {
-            copied |= self.drawing.copy_image(
+            copied |= self.compositor.drawing.copy_image(
                 image,
                 region,
                 [
@@ -312,7 +304,8 @@ impl Resources {
             );
             let at = [args[1] as i32, args[2] as i32];
             if args[0] == 0 {
-                self.drawing
+                self.compositor
+                    .drawing
                     .copy_image(self.images.get(args[5])?, source_rect, at);
             } else {
                 self.images.blend(args[0], at, args[5], source_rect)?;
@@ -320,7 +313,7 @@ impl Resources {
             return Ok(NativeReturn::Continue);
         }
         if args[0] == 0 {
-            self.drawing.clear_rect(Rect::from_xywh(
+            self.compositor.drawing.clear_rect(Rect::from_xywh(
                 args[1] as i32,
                 args[2] as i32,
                 args[3] as i32,
