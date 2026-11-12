@@ -1,6 +1,36 @@
 use katze_system2::{Step, expression::State, fes};
 
 #[test]
+fn expression_statements_keep_readonly_assignment_effects_and_local_scope() {
+    let source = b"#START\n\\130 = 131 = -1\n$0=\\130\n$1=5=($2+=1)\nwait 9\n#button.PUSH_L\n\\130=7=($2+=2)\n$3=\\130\n";
+    for budget in [1, 128] {
+        let mut vm = fes::Interpreter::new(fes::Program::from_text(source).unwrap()).unwrap();
+        let mut state = State::new(4);
+        state.local[130] = 99;
+        loop {
+            match vm.run(&mut state, budget).unwrap() {
+                Step::Yield => (),
+                Step::Event(fes::Event::Wait(9)) => break,
+                result => panic!("{result:?}"),
+            }
+        }
+        assert_eq!(state.shared, [0, 0, 1, 0]);
+        assert_eq!(state.local[130], 99);
+        vm.resume();
+        vm.dispatch_event("button", 0, "PUSH_L", None).unwrap();
+        loop {
+            match vm.run(&mut state, budget).unwrap() {
+                Step::Yield => (),
+                Step::Event(fes::Event::Frame) => break,
+                result => panic!("{result:?}"),
+            }
+        }
+        assert_eq!(state.shared, [0, 0, 3, 0]);
+        assert_eq!(state.local[130], 99);
+    }
+}
+
+#[test]
 fn fes_parameters_keep_tabs_groups_and_the_quote_termination_rule() {
     for (source, expected) in [
         ("cmd a b", vec!["cmd", "a", "b"]),

@@ -530,7 +530,7 @@ impl Interpreter {
                 continue;
             }
             if bytes.first().is_some_and(|b| matches!(b, b'$' | b'\\')) {
-                self.eval(bytes, state)?;
+                self.eval_fallback(bytes, state)?;
                 continue;
             }
             let args = self.parameters(bytes, state)?;
