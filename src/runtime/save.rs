@@ -4,6 +4,56 @@ use crate::task::CommandBuffers;
 use crate::{Error, Result, read};
 
 impl<F: ObjectFactory> ObjectHost<'_, F> {
+    pub(super) fn media_record_native(
+        &mut self,
+        index: u32,
+        arguments: &[u8],
+        vm: &Interpreter,
+    ) -> Result<NativeReturn> {
+        let container = read::u32_at(arguments, 0)?;
+        if container == 0 {
+            return Ok(NativeReturn::Value(0));
+        }
+        if arguments.len() != if index == 251 { 8 } else { 12 } {
+            return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+        }
+        let record = read::u32_at(arguments, 4)?;
+        if index == 251 {
+            let Some(bytes) = self.host.data_container(container)?.record(record)? else {
+                return Ok(NativeReturn::Value(0));
+            };
+            let frame = crate::hg2::decode_frame(bytes)?;
+            let has_alpha = frame.info.reserved != 0;
+            let image = crate::graphics::Image::from_frame(frame)?;
+            let handle = self
+                .resources
+                .images
+                .insert(self.host.task_id, image, Some(has_alpha))?;
+            return Ok(NativeReturn::Value(handle));
+        }
+        let source = read::u32_at(arguments, 8)?;
+        if source == 0 {
+            return Ok(NativeReturn::Value(0));
+        }
+        if index == 241 {
+            let image = self.resources.images.get(source)?;
+            let bytes = crate::hg2::encode_frame(image.info().size, image.surface().pixels())?;
+            self.host
+                .data_container_mut(container)?
+                .append(record, &bytes)?;
+            return Ok(NativeReturn::Value(1));
+        }
+        let bytes = if let Some(snapshot) = self.resources.motion_snapshots.get(&source) {
+            snapshot.bytes()
+        } else {
+            self.resources.raw.image_data(source)?
+        };
+        self.host
+            .data_container_mut(container)?
+            .append(read::u32_at(arguments, 4)?, bytes)?;
+        Ok(NativeReturn::Value(1))
+    }
+
     pub(super) fn shared_record(
         &mut self,
         index: u32,

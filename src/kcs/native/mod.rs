@@ -3,6 +3,7 @@ use crate::task::TaskTree;
 use crate::{Error, Result, expression};
 
 mod registry;
+pub(crate) use registry::{RuntimeHandler, runtime as runtime_native_handler};
 mod scalar;
 mod settings;
 mod storage;

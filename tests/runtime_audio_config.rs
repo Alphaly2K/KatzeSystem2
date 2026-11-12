@@ -67,6 +67,7 @@ fn native_configuration_queries_keep_three_lookup_modes_and_stack_results_across
                 ..Default::default()
             },
         ],
+        ..Default::default()
     };
     let expected: [i32; 36] = [
         47,

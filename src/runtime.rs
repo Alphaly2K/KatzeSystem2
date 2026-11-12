@@ -8,9 +8,7 @@
 //! 向执行中普通 VM 同步发送消息返回零。输入同步回调开放同一份区域、键和基类命令状态，图形通知开放响应槽及几何查询；
 //! 其他需要直接借用执行中对象的操作返回诊断。
 
-use crate::kcs::{
-    Host, HostState, Interpreter, NativeReturn, OrdinaryTask, Program, TaskEffects, call_native,
-};
+use crate::kcs::{Host, HostState, Interpreter, NativeReturn, OrdinaryTask, Program, TaskEffects};
 use crate::task::{Command, CommandBuffers, Control, Lifecycle, TaskClock, TaskTree};
 use crate::{Error, Result, expression, read};
 use std::collections::{BTreeMap, BTreeSet};
@@ -25,6 +23,7 @@ mod graphics;
 mod input;
 mod message;
 mod motion;
+mod native;
 pub use motion::MotionSnapshot;
 mod image_resources;
 mod object;
@@ -1415,7 +1414,7 @@ fn route_command_mode<F: ObjectFactory>(
     }
 }
 
-/// 执行中对象的宿主：普通表 native 委托 [`call_native`]，任务 native 使用对象存储。
+/// 执行中对象的宿主；核心调用由注册表分派，任务调用使用当前对象存储。
 struct ObjectHost<'a, F: ObjectFactory> {
     numbers: &'a mut expression::State,
     host: &'a mut HostState,
@@ -2120,219 +2119,7 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
     }
 
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn> {
-        struct Timer(u32, u32, Option<std::time::Instant>);
-        impl Drop for Timer {
-            fn drop(&mut self) {
-                if let Some(started) = self.2 {
-                    let elapsed = started.elapsed();
-                    if elapsed.as_millis() >= 20 {
-                        eprintln!(
-                            "[slow-native] task={} native={} ms={:.2}",
-                            self.0,
-                            self.1,
-                            elapsed.as_secs_f64() * 1000.0
-                        );
-                    }
-                }
-            }
-        }
-        let _timer = Timer(
-            self.host.task_id,
-            index,
-            std::env::var_os("KATZE_TRACE_TIMING").map(|_| std::time::Instant::now()),
-        );
-        if index == 453 {
-            if arguments.len() != 4 {
-                return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
-            }
-            let task = self
-                .running
-                .get_mut(&self.host.task_id)
-                .ok_or_else(|| Error::new(vm.pc, "执行中任务属性上下文不可用"))?;
-            task.property = read::u32_at(arguments, 0)?;
-            task.property_changed = true;
-            return Ok(NativeReturn::Continue);
-        }
-        if index == 361 {
-            if !arguments.is_empty() {
-                return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
-            }
-            let keys = self
-                .resources
-                .input_device
-                .as_ref()
-                .and_then(|device| device.key_configuration());
-            crate::kcs::save_configuration(self.host, keys, vm.pc)?;
-            return Ok(NativeReturn::Continue);
-        }
-        if matches!(index, 1055..=1061) {
-            return self.emocon_native(index, arguments, vm);
-        }
-        if matches!(index, 696..=700 | 785 | 850 | 851 | 876 | 977 | 1034) {
-            return self.backlog_native(index, arguments, vm);
-        }
-        if index == 143 {
-            return self.ordinary_load_native(arguments, vm);
-        }
-        if matches!(index, 633..=638) {
-            return self.resources.raw.name_table_call(
-                index,
-                arguments,
-                vm,
-                self.resources
-                    .services
-                    .as_mut()
-                    .map(|services| services.as_mut() as _),
-                self.host.unicode_text != 0,
-            );
-        }
-        if matches!(
-            index,
-            323..=337 | 385 | 386 | 982 | 991 | 992 | 994 | 1033 | 1037 | 1038
-        ) {
-            return self.cst_native(index, arguments, vm);
-        }
-        if matches!(index, 294..=317 | 388 | 440 | 535 | 586) {
-            return self.motion_native(index, arguments, vm);
-        }
-        if index == 458 {
-            if let Some((handle, bytes)) = crate::kcs::load_sequence_file(
-                arguments,
-                vm,
-                self.resources
-                    .services
-                    .as_mut()
-                    .map(|services| services.as_mut() as _),
-            )? {
-                self.host.load_sequence_data(handle, bytes)?;
-            }
-            return Ok(NativeReturn::Continue);
-        }
-        if matches!(index, 240 | 250) {
-            return self.shared_record(index, arguments, vm);
-        }
-        if index == 400 {
-            return self.load_sound_loop_table(arguments, vm);
-        }
-        if matches!(index, 156..=168 | 347..=349 | 903) {
-            return self.control_sound_native(index, arguments, vm);
-        }
-        if matches!(index, 935 | 936) {
-            return self.load_sound_native(index, arguments, vm);
-        }
-        if matches!(index, 145..=148 | 154 | 285 | 286 | 401 | 403 | 404 | 937) {
-            return self.input_native(index, arguments, vm);
-        }
-        if matches!(index, 611..=621 | 695 | 884) {
-            return self.message_native(index, arguments, vm);
-        }
-        if matches!(index, 447..=449 | 451 | 630 | 645..=647 | 882 | 883) {
-            return self.fes_native(index, arguments, vm);
-        }
-        if index == 149 {
-            if arguments.len() != 8 {
-                return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
-            }
-            if let Some(device) = self.resources.input_device.as_mut() {
-                self.host.pointer_position = self
-                    .resources
-                    .input_coordinates
-                    .to_logical(device.pointer()?.position)
-                    .0;
-            }
-        }
-        if matches!(
-            index,
-            113 | 78 | 79
-                | 80
-                | 82
-                | 83
-                | 84..=89
-                | 91..=107
-                | 256
-                | 258
-                | 260
-                | 262
-                | 263
-                | 339..=342
-                | 343..=345
-                | 402
-                | 455 | 732
-                | 462..=464 | 466 | 534 | 542 | 568 | 572 | 625 | 653 | 663 | 739 | 848 | 849 | 880 | 1065..=1069
-        ) {
-            return self.graphics_native(index, arguments, vm);
-        }
-        if matches!(
-            index,
-            66 | 67 | 69 | 70 | 72 | 73 | 75 | 76 | 108
-                ..=110 | 272..=275 | 426 | 427 | 452 | 520 | 527 | 528 | 530 | 531 | 694 | 905
-        ) {
-            return self.task_native(index, arguments, vm);
-        }
-        if matches!(index, 241 | 251 | 387) {
-            let container = read::u32_at(arguments, 0)?;
-            if container == 0 {
-                return Ok(NativeReturn::Value(0));
-            }
-            if arguments.len() != if index == 251 { 8 } else { 12 } {
-                return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
-            }
-            let record = read::u32_at(arguments, 4)?;
-            if index == 251 {
-                let Some(bytes) = self.host.data_container(container)?.record(record)? else {
-                    return Ok(NativeReturn::Value(0));
-                };
-                let frame = crate::hg2::decode_frame(bytes)?;
-                let has_alpha = frame.info.reserved != 0;
-                let image = crate::graphics::Image::from_frame(frame)?;
-                let handle =
-                    self.resources
-                        .images
-                        .insert(self.host.task_id, image, Some(has_alpha))?;
-                return Ok(NativeReturn::Value(handle));
-            }
-            let source = read::u32_at(arguments, 8)?;
-            if source == 0 {
-                return Ok(NativeReturn::Value(0));
-            }
-            if index == 241 {
-                let image = self.resources.images.get(source)?;
-                let bytes = crate::hg2::encode_frame(image.info().size, image.surface().pixels())?;
-                self.host
-                    .data_container_mut(container)?
-                    .append(record, &bytes)?;
-                return Ok(NativeReturn::Value(1));
-            }
-            let bytes = if let Some(snapshot) = self.resources.motion_snapshots.get(&source) {
-                snapshot.bytes()
-            } else {
-                self.resources.raw.image_data(source)?
-            };
-            self.host
-                .data_container_mut(container)?
-                .append(read::u32_at(arguments, 4)?, bytes)?;
-            return Ok(NativeReturn::Value(1));
-        }
-        if matches!(
-            index,
-            111 | 112 | 114..=117 | 362 | 365 | 366 | 368 | 434..=438 | 536 | 590..=597
-        ) {
-            return self.resources.call(self.host.task_id, index, arguments, vm);
-        }
-        if matches!(
-            index,
-            710..=715 | 717..=724 | 726..=728 | 730 | 733 | 735..=737
-        ) {
-            return self.image_resource_native(index, arguments, vm);
-        }
-        call_native(
-            &mut *self.numbers,
-            &mut *self.host,
-            None,
-            index,
-            arguments,
-            vm,
-        )
+        self.call_registered_native(index, arguments, vm)
     }
 }
 

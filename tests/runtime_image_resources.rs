@@ -311,7 +311,7 @@ fn loaded_resources_resolve_before_frame_selection_and_preserve_geometry_and_att
 }
 
 #[test]
-fn failed_loads_do_not_allocate_and_animation_or_layer_sources_report_their_missing_protocols() {
+fn failed_loads_skip_allocation_and_validate_animation_and_name_sources() {
     let mut code = Vec::new();
     call(&mut code, 710, &[u32::MAX]);
     ins(&mut code, 0x26, &[120]);
@@ -319,6 +319,7 @@ fn failed_loads_do_not_allocate_and_animation_or_layer_sources_report_their_miss
     let names = [
         b"".as_slice(),
         b",,,",
+        b"art,1",
         b"missing",
         b"empty",
         b"art:99",
@@ -353,10 +354,15 @@ fn failed_loads_do_not_allocate_and_animation_or_layer_sources_report_their_miss
     }
     assert!(runtime.image_resource(1).is_ok());
     assert!(vm(&runtime, task).stack_bytes().is_empty());
+    assert!(
+        requests
+            .borrow()
+            .iter()
+            .any(|name| name == b"image/art_1.hg3")
+    );
 
     for (name, error) in [
-        (b"art,1".as_slice(), "组合图层"),
-        (b"animate", "ANM 来源"),
+        (b"animate".as_slice(), "ANM 来源"),
         (b"\xe7\x94\xbb\xe5\x83\x8f", "CP932"),
     ] {
         let mut code = Vec::new();
