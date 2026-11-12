@@ -24,6 +24,16 @@ impl<F: ObjectFactory> Store<'_, F> {
                     )?;
                 }
             }
+            "LOGSTRING" | "LOGSTRING8" => {
+                if let ObjectState::LogString(state) = &mut objects.get_mut(handle).unwrap().state {
+                    state.template.layout.refresh_font_defaults(
+                        self.host
+                            .message_defaults
+                            .as_ref()
+                            .unwrap_or(&Default::default()),
+                    )?;
+                }
+            }
             "SOUND" | "SNDTABLE" => self.refresh_fes_sound_configuration(owner, objects, handle)?,
             _ => (),
         }

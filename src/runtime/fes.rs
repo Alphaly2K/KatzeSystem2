@@ -17,6 +17,7 @@ mod fonts;
 mod image;
 mod image_attributes;
 mod input;
+mod logstring;
 mod motion;
 mod natives;
 mod navigation;
@@ -35,6 +36,7 @@ mod viewport;
 pub use animation::ImageAnimationRequest;
 pub use difimage::DifImageState;
 pub use draw::DrawState;
+pub use logstring::LogStringState;
 pub use navigation::NavigationOutcome;
 pub use scene::Scene;
 pub use string::StringState;
@@ -88,6 +90,7 @@ pub enum ObjectState {
     Sound(Box<SoundState>),
     Draw(Box<DrawState>),
     String(Box<StringState>),
+    LogString(Box<LogStringState>),
     SavePanel(Box<crate::fes::SavePanelState>),
 }
 
@@ -108,6 +111,7 @@ impl ObjectState {
             Self::Sound(_) => "SOUND",
             Self::Draw(_) => "DRAW",
             Self::String(state) => state.kind(),
+            Self::LogString(state) => state.kind(),
             Self::SavePanel(_) => "SAVEPANEL",
         }
     }
@@ -128,6 +132,9 @@ impl ObjectState {
             "SOUND" => Self::Sound(Box::default()),
             "DRAW" => Self::Draw(Box::default()),
             "STRING" | "STRING8" => Self::String(Box::new(StringState::new(kind, text)?)),
+            "LOGSTRING" | "LOGSTRING8" => {
+                Self::LogString(Box::new(LogStringState::new(kind, text)?))
+            }
             "SAVEPANEL" => Self::SavePanel(Box::default()),
             _ => return Err(Error::new(0, format!("FES 对象类型 {kind} 尚未接入"))),
         })
@@ -138,6 +145,7 @@ impl ObjectState {
             Self::CPlane(state) => Some(state),
             Self::Plane(state) => Some(&state.base),
             Self::String(state) => Some(&state.layout.base.base),
+            Self::LogString(state) => Some(&state.template.layout.base.base),
             _ => None,
         }
     }
@@ -147,6 +155,7 @@ impl ObjectState {
             Self::CPlane(state) => Some(state),
             Self::Plane(state) => Some(&mut state.base),
             Self::String(state) => Some(&mut state.layout.base.base),
+            Self::LogString(state) => Some(&mut state.template.layout.base.base),
             _ => None,
         }
     }
@@ -624,6 +633,9 @@ impl Objects {
                     .layout
                     .base
                     .apply(&initialization.attributes, bank as u32),
+                ObjectState::LogString(state) => {
+                    state.apply(&initialization.attributes, bank as u32)?
+                }
                 ObjectState::Slider(state) => {
                     state.apply(&initialization.attributes, bank as u32)?
                 }

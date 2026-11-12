@@ -677,6 +677,18 @@ impl<F: ObjectFactory> Store<'_, F> {
                     )?;
                 }
             }
+            if let super::ObjectState::LogString(state) = &object.state {
+                for task in state.task_ids() {
+                    self.fes_command(
+                        owner,
+                        Some(task),
+                        47,
+                        [0, u32::from(!sleeping && state.task_display(task)), 0],
+                        None,
+                    )?;
+                }
+                continue;
+            }
             if let Some(image) = object.state.image() {
                 self.fes_command(
                     owner,

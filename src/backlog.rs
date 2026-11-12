@@ -76,6 +76,8 @@ struct Group {
 struct Row {
     group: u32,
     text: Vec<u8>,
+    // 副文字在语言重建时生成，不进入存档。
+    secondary: Vec<u8>,
 }
 
 /// 独立回看记录；来源、段、显示行和姓名分别保存。
@@ -100,6 +102,16 @@ pub struct Record<'a> {
     pub text: &'a [u8],
     pub flag: u32,
     pub space: u32,
+    pub extra: u32,
+}
+
+pub(crate) struct RowInfo<'a> {
+    pub group: u32,
+    pub first: u32,
+    pub last: u32,
+    pub flags: u32,
+    pub file: &'a [u8],
+    pub input: u32,
     pub extra: u32,
 }
 
@@ -186,6 +198,7 @@ impl Backlog {
             pending.push(Row {
                 group: u32::MAX,
                 text: Vec::new(),
+                secondary: Vec::new(),
             });
         }
         let mut name_row = None;
@@ -197,6 +210,7 @@ impl Backlog {
             pending.push(Row {
                 group,
                 text: formatted_name.clone(),
+                secondary: Vec::new(),
             });
         }
         if !text.is_empty() {
@@ -207,7 +221,11 @@ impl Backlog {
             let rows = lines::split(&self.settings, &text, &formatted_name)?;
             words[3] = start;
             words[4] = start.wrapping_add(rows.len() as u32).wrapping_sub(1);
-            pending.extend(rows.into_iter().map(|text| Row { group, text }));
+            pending.extend(rows.into_iter().map(|text| Row {
+                group,
+                text,
+                secondary: Vec::new(),
+            }));
         }
         if let Some(row) = name_row {
             words[3] = row;
@@ -242,6 +260,72 @@ impl Backlog {
             .map(Vec::as_slice)
     }
 
+    pub(crate) fn secondary_row(&self, index: u32) -> Option<&[u8]> {
+        self.rows
+            .get(index as usize)
+            .map(|row| row.secondary.as_slice())
+    }
+
+    pub(crate) fn group_sources(&self) -> Vec<(u32, Vec<u8>, u32)> {
+        self.groups
+            .iter()
+            .enumerate()
+            .filter_map(|(index, group)| {
+                let number = self.first_group.wrapping_add(index as u32);
+                if !self.rows.iter().any(|row| row.group == number) {
+                    return None;
+                }
+                Some((
+                    index as u32,
+                    self.files.get(group.words[1] as usize)?.clone(),
+                    group.words[2],
+                ))
+            })
+            .collect()
+    }
+
+    pub(crate) fn replace_group_text(
+        &mut self,
+        group: u32,
+        text: &[u8],
+        secondary: &[u8],
+        name: Option<&[u8]>,
+    ) -> Result<()> {
+        let number = self.first_group.wrapping_add(group);
+        for row in &mut self.rows {
+            if row.group == number {
+                row.text = text.to_vec();
+                row.secondary = secondary.to_vec();
+            }
+        }
+        if let Some(name) = name {
+            let name = lines::preprocess(name, self.settings.escape != 0);
+            let mut formatted = c_string(&self.settings.name_prefix).to_vec();
+            formatted.extend(name);
+            formatted.extend(c_string(&self.settings.name_suffix));
+            let index = register(&mut self.names, &formatted)?;
+            if let Some(group) = self.groups.get_mut(group as usize) {
+                group.words[5] = index;
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn row_info(&self, index: u32) -> Option<RowInfo<'_>> {
+        let row = self.rows.get(index as usize)?;
+        let group = row.group.wrapping_sub(self.first_group);
+        let words = &self.groups.get(group as usize)?.words;
+        Some(RowInfo {
+            group,
+            first: words[3].wrapping_sub(self.first_row),
+            last: words[4].wrapping_sub(self.first_row),
+            flags: words[0],
+            file: self.files.get(words[1] as usize)?,
+            input: words[2],
+            extra: words[6],
+        })
+    }
+
     /// 装载四张表并应用当前保留数量；配置由原对象保留。
     pub fn restore(&mut self, data: &[u8]) -> Result<()> {
         if data.len() > read::MAX_BYTES {
@@ -270,7 +354,11 @@ impl Backlog {
                     2 => {
                         let group = take_word(data, &mut at)?;
                         let text = take_string(data, &mut at)?;
-                        next.rows.push_back(Row { group, text });
+                        next.rows.push_back(Row {
+                            group,
+                            text,
+                            secondary: Vec::new(),
+                        });
                     }
                     3 => next.names.push(take_string(data, &mut at)?),
                     _ => unreachable!(),

@@ -18,7 +18,7 @@ pub(super) struct Context {
 pub struct StringState {
     pub layout: fes::StringState,
     kind: &'static str,
-    initial: bool,
+    pub(super) initial: bool,
     text: Option<Vec<u8>>,
     consumed: usize,
     append_pending: bool,
@@ -30,9 +30,9 @@ pub struct StringState {
     remaining: [i32; 2],
     lines: u32,
     cursor: [i32; 2],
-    user_font_source: Option<u32>,
-    user_fonts: Vec<(u16, u16)>,
-    user_fonts_dirty: bool,
+    pub(super) user_font_source: Option<u32>,
+    pub(super) user_fonts: Vec<(u16, u16)>,
+    pub(super) user_fonts_dirty: bool,
     character_clears: [bool; 4],
     character_remove: Option<(u32, Vec<u8>)>,
     character_add: Option<(u32, Vec<u8>)>,
@@ -132,6 +132,24 @@ impl StringState {
         self.remaining[0] = -1;
     }
 
+    pub(super) fn set_log_text(&mut self, text: Vec<u8>) {
+        self.set_text(text);
+        self.draw = Some(u32::MAX);
+    }
+
+    pub(super) fn copy_layout_requests(&self, target: &mut Self) {
+        target.character_clears = self.character_clears;
+        target.character_remove.clone_from(&self.character_remove);
+        target.character_add.clone_from(&self.character_add);
+    }
+
+    pub(super) fn clear_layout_requests(&mut self) {
+        self.character_clears = [false; 4];
+        self.character_remove = None;
+        self.character_add = None;
+        self.layout.clear_shift_dirty();
+    }
+
     fn append(&mut self, bytes: &[u8]) -> Result<()> {
         let current = self.text.as_ref().map_or(0, Vec::len);
         if bytes.len() > crate::read::MAX_BYTES - current {
@@ -159,16 +177,18 @@ impl Objects {
     }
 
     fn string(&self, handle: u32) -> &StringState {
-        let ObjectState::String(state) = &self.get(handle).unwrap().state else {
-            unreachable!()
-        };
-        state
+        match &self.get(handle).unwrap().state {
+            ObjectState::String(state) => state,
+            ObjectState::LogString(state) => &state.template,
+            _ => unreachable!(),
+        }
     }
     fn string_mut(&mut self, handle: u32) -> &mut StringState {
-        let ObjectState::String(state) = &mut self.get_mut(handle).unwrap().state else {
-            unreachable!()
-        };
-        state
+        match &mut self.get_mut(handle).unwrap().state {
+            ObjectState::String(state) => state,
+            ObjectState::LogString(state) => &mut state.template,
+            _ => unreachable!(),
+        }
     }
 
     pub(super) fn dispatch_string_command(
@@ -209,10 +229,19 @@ impl Objects {
             &target.name,
             if target.bank == -1 { 0 } else { target.bank },
         );
-        if !first
-            .is_some_and(|handle| matches!(self.get(handle).unwrap().state, ObjectState::String(_)))
-        {
+        if !first.is_some_and(|handle| {
+            matches!(
+                self.get(handle).unwrap().state,
+                ObjectState::String(_) | ObjectState::LogString(_)
+            )
+        }) {
             return Ok(matches!(command, b"userfontobj" | b"userfont"));
+        }
+        if first.is_some_and(|handle| {
+            matches!(self.get(handle).unwrap().state, ObjectState::LogString(_))
+        }) && !matches!(command, b"layout" | b"reset" | b"userfontobj" | b"userfont")
+        {
+            return Ok(true);
         }
         let user_source = if command == b"userfontobj" {
             let Some(reference) = args.get(2) else {
@@ -279,7 +308,10 @@ impl Objects {
         };
         let mut layout_values = std::collections::BTreeMap::new();
         for handle in handles {
-            if !matches!(self.get(handle).unwrap().state, ObjectState::String(_)) {
+            if !matches!(
+                self.get(handle).unwrap().state,
+                ObjectState::String(_) | ObjectState::LogString(_)
+            ) {
                 continue;
             }
             let context = &self.text;
@@ -481,11 +513,6 @@ impl<F: ObjectFactory> Store<'_, F> {
         {
             return Err(Error::new(0, "FES 下层文字任务绑定失效"));
         }
-        let extra = if state.layout.encoding() == TextEncoding::Unicode {
-            21
-        } else {
-            0
-        };
         let cache = objects.preloaded_images.clone();
         if state.layout.base.base.rebuild {
             let size = match &state.layout.base.base.size_resource {
@@ -494,13 +521,45 @@ impl<F: ObjectFactory> Store<'_, F> {
             };
             objects.string_mut(handle).layout.set_view_size(size);
         }
-        let state = objects.string(handle);
+        let source = self.fes_user_font_source(objects, objects.string(handle))?;
+        self.submit_fes_string(owner, task, objects.string_mut(handle), source)?;
+        self.update_fes_plane_properties(owner, objects, handle, Some(task))?;
+        self.finish_fes_string(owner, task, objects.string_mut(handle))
+    }
+
+    pub(super) fn fes_user_font_source(
+        &self,
+        objects: &Objects,
+        state: &StringState,
+    ) -> Result<u32> {
+        let source = match state
+            .user_font_source
+            .and_then(|source| objects.get(source))
+        {
+            Some(source) if source.state.image_source().is_some() => source.raw_image,
+            Some(_) => return Err(Error::new(0, "FES 用户字形来源需要原始图像对象")),
+            None => 0,
+        };
+        Ok(source)
+    }
+
+    pub(super) fn submit_fes_string(
+        &mut self,
+        owner: u32,
+        task: u32,
+        state: &mut StringState,
+        source: u32,
+    ) -> Result<()> {
+        let extra = if state.layout.encoding() == TextEncoding::Unicode {
+            21
+        } else {
+            0
+        };
         let vram = state.layout.base.vram();
         let offset = [vram[0], vram[1]].map(super::plane::integer_position);
         if !state.initial {
-            self.update_fes_user_fonts(owner, objects, handle, task, extra)?;
+            self.update_fes_user_fonts(owner, state, source, task, extra)?;
         }
-        let state = objects.string(handle);
         if state.initial || state.layout.configuration_dirty() {
             let initial = state.initial;
             let mut bytes = state.layout.submission_configuration(offset);
@@ -511,23 +570,21 @@ impl<F: ObjectFactory> Store<'_, F> {
                 [0, 0, 1],
                 Some(&mut bytes),
             )?;
-            let state = objects.string_mut(handle);
             state.initial = false;
             state.layout.clear_configuration_dirty();
         }
-        if objects.string(handle).layout.shift_dirty() {
-            let shift = objects.string(handle).layout.shift() as u32;
+        if state.layout.shift_dirty() {
+            let shift = state.layout.shift() as u32;
             self.fes_command(owner, Some(task), 470 + extra, [0, shift, 1], None)?;
-            objects.string_mut(handle).layout.clear_shift_dirty();
+            state.layout.clear_shift_dirty();
         }
         for index in 0..4 {
-            if objects.string(handle).character_clears[index] {
+            if state.character_clears[index] {
                 self.fes_command(owner, Some(task), 474 + extra, [index as u32, 0, 1], None)?;
-                objects.string_mut(handle).character_clears[index] = false;
+                state.character_clears[index] = false;
             }
         }
         for add in [false, true] {
-            let state = objects.string(handle);
             let pending = if add {
                 &state.character_add
             } else {
@@ -543,7 +600,6 @@ impl<F: ObjectFactory> Store<'_, F> {
                     [*index, 0, 1],
                     Some(&mut bytes),
                 )?;
-                let state = objects.string_mut(handle);
                 if add {
                     state.character_add = None;
                 } else {
@@ -551,16 +607,15 @@ impl<F: ObjectFactory> Store<'_, F> {
                 }
             }
         }
-        self.update_fes_user_fonts(owner, objects, handle, task, extra)?;
-        if objects.string(handle).clear {
+        self.update_fes_user_fonts(owner, state, source, task, extra)?;
+        if state.clear {
             self.fes_command(owner, Some(task), 459 + extra, [0, 0, 1], None)?;
-            objects.string_mut(handle).clear = false;
+            state.clear = false;
         }
-        if objects.string(handle).replace {
+        if state.replace {
             self.fes_command(owner, Some(task), 459 + extra, [0, 0, 1], None)?;
-            objects.string_mut(handle).replace = false;
+            state.replace = false;
         }
-        let state = objects.string(handle);
         if let Some(text) = &state.text {
             if text.len() != state.consumed || state.append_pending {
                 let mut bytes = text[state.consumed..].to_vec();
@@ -579,22 +634,20 @@ impl<F: ObjectFactory> Store<'_, F> {
                 }
                 bytes.push(0);
                 self.fes_command(owner, Some(task), 458 + extra, [0, 0, 1], Some(&mut bytes))?;
-                let state = objects.string_mut(handle);
                 state.consumed = state.text.as_ref().unwrap().len();
                 state.append_pending = false;
                 state.lines_dirty = true;
             }
         }
-        if objects.string(handle).lines_dirty {
+        if state.lines_dirty {
             let lines = self.string_query(owner, task, 469 + extra)?;
-            let state = objects.string_mut(handle);
             state.lines = lines;
             state.lines_dirty = false;
         }
-        if objects.string(handle).layout.base.base.rebuild {
-            let size = objects.string(handle).layout.base.base.size;
+        if state.layout.base.base.rebuild {
+            let size = state.layout.base.base.size;
             {
-                let base = &mut objects.string_mut(handle).layout.base.base;
+                let base = &mut state.layout.base.base;
                 base.size = size;
                 base.rebuild = false;
                 base.dirty = true;
@@ -617,16 +670,29 @@ impl<F: ObjectFactory> Store<'_, F> {
             }
             self.fes_command(owner, Some(task), 41, [0; 3], Some(&mut rectangle))?;
         }
-        self.update_fes_plane_properties(owner, objects, handle, Some(task))?;
+        Ok(())
+    }
+
+    pub(super) fn finish_fes_string(
+        &mut self,
+        owner: u32,
+        task: u32,
+        state: &mut StringState,
+    ) -> Result<()> {
+        let extra = if state.layout.encoding() == TextEncoding::Unicode {
+            21
+        } else {
+            0
+        };
         self.fes_command(owner, Some(task), 467 + extra, [0, 10, 1], None)?;
-        if let Some(segment) = objects.string(handle).draw {
+        if let Some(segment) = state.draw {
             self.fes_command(owner, Some(task), 463 + extra, [0, segment, 1], None)?;
-            objects.string_mut(handle).draw = None;
+            state.draw = None;
         }
-        if objects.string(handle).remaining[0] != 0 {
+        if state.remaining[0] != 0 {
             let all = self.string_query(owner, task, 460 + extra)?;
             let segment = self.string_query(owner, task, 472 + extra)?;
-            objects.string_mut(handle).remaining = [all as i32, segment as i32];
+            state.remaining = [all as i32, segment as i32];
         }
         let mut x = [0; 4];
         let mut y = [0; 4];
@@ -645,10 +711,10 @@ impl<F: ObjectFactory> Store<'_, F> {
                 external: None,
             },
         )?;
-        objects.string_mut(handle).cursor = [i32::from_le_bytes(x), i32::from_le_bytes(y)];
-        if objects.string(handle).skip {
+        state.cursor = [i32::from_le_bytes(x), i32::from_le_bytes(y)];
+        if state.skip {
             self.fes_command(owner, Some(task), 461 + extra, [0, 0, 1], None)?;
-            objects.string_mut(handle).skip = false;
+            state.skip = false;
         }
         Ok(())
     }
@@ -656,23 +722,14 @@ impl<F: ObjectFactory> Store<'_, F> {
     fn update_fes_user_fonts(
         &mut self,
         owner: u32,
-        objects: &mut Objects,
-        handle: u32,
+        state: &mut StringState,
+        source: u32,
         task: u32,
         extra: u32,
     ) -> Result<()> {
-        let state = objects.string(handle);
         if !state.user_fonts_dirty {
             return Ok(());
         }
-        let source = match state
-            .user_font_source
-            .and_then(|source| objects.get(source))
-        {
-            Some(source) if source.state.image_source().is_some() => source.raw_image,
-            Some(_) => return Err(Error::new(0, "FES 用户字形来源需要原始图像对象")),
-            None => 0,
-        };
         let mappings = state.user_fonts.clone();
         self.fes_command(owner, Some(task), 464 + extra, [0, source, 1], None)?;
         for (character, frame) in mappings {
@@ -684,7 +741,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                 None,
             )?;
         }
-        objects.string_mut(handle).user_fonts_dirty = false;
+        state.user_fonts_dirty = false;
         Ok(())
     }
 

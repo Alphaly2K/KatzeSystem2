@@ -115,6 +115,14 @@ impl StringState {
         bytes
     }
 
+    pub(crate) fn set_colors(&mut self, colors: [u32; 3]) {
+        self.restore_colors = colors;
+        for (i, color) in colors.into_iter().enumerate() {
+            self.set(0xc + i * 4, color);
+        }
+        self.configuration_dirty = true;
+    }
+
     pub fn restore_colors(&self) -> [u32; 3] {
         self.restore_colors
     }

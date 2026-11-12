@@ -88,6 +88,9 @@ impl<F: ObjectFactory> Store<'_, F> {
             .get(handle)
             .ok_or_else(|| Error::new(0, "FES 对象标识无效"))?;
         let canvas = matches!(object.state, ObjectState::Plane(_));
+        if matches!(object.state, ObjectState::LogString(_)) {
+            return self.update_fes_log(owner, objects, handle);
+        }
         if matches!(object.state, ObjectState::String(_)) {
             return self.update_fes_string(owner, objects, handle);
         }
@@ -349,6 +352,8 @@ impl<F: ObjectFactory> Store<'_, F> {
                 }) {
                     return Err(Error::new(0, "FES 下层文字任务绑定失效"));
                 }
+            } else if let ObjectState::LogString(state) = &object.state {
+                self.check_fes_log_binding(owner, state)?;
             } else {
                 self.check_fes_plane_binding(owner, object.task_id)?;
             }

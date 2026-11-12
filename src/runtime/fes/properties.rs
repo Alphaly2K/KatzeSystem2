@@ -143,6 +143,9 @@ impl<F: ObjectFactory> Store<'_, F> {
         args: &[Vec<u8>],
         line: &fes::Line,
     ) -> Result<Option<bool>> {
+        if self.fes_log_command(scene, args, line)? {
+            return Ok(Some(true));
+        }
         let offset = line.offset;
         let Some(name) = args.get(1) else {
             return Ok(None);
