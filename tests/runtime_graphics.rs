@@ -524,6 +524,15 @@ impl TaskObject for Recorder {
         host: &mut dyn Host,
         _: usize,
     ) -> Result<CommandOutcome> {
+        if matches!(c.code, 448 | 450 | 451) {
+            assert_eq!(c.data[0], 0);
+            assert_eq!(c.data[2], 0);
+            self.records
+                .borrow_mut()
+                .push([self.id, c.sender, c.code, c.data[1]]);
+            *output = 0x1234;
+            return Ok(CommandOutcome::finished(false));
+        }
         assert!(matches!(c.data, [1 | 2, 0, 0]));
         let data = buffers.data1.as_deref_mut().unwrap();
         let value = u32::from_le_bytes(data[..4].try_into().unwrap());
@@ -647,6 +656,81 @@ fn property_commands_forward_with_shared_buffers_and_return_slots_through_nested
             [5, parent, 52, 1f32.to_bits()]
         ]
     );
+}
+
+#[test]
+fn image_commands_route_zero_targets_and_unwrap_pixels_without_consuming_return_slots() {
+    struct Loader(Program);
+    impl ProgramLoader for Loader {
+        fn load(&mut self, _: &[u8]) -> Result<Option<Program>> {
+            Ok(Some(self.0.clone()))
+        }
+    }
+    fn ins(code: &mut Vec<u8>, opcode: u8, args: &[u32]) {
+        code.push(opcode);
+        for value in args {
+            code.push(3);
+            code.extend(value.to_le_bytes());
+        }
+    }
+    fn call(code: &mut Vec<u8>, native: u32, args: &[u32]) {
+        for value in args {
+            ins(code, 0x25, &[*value]);
+        }
+        ins(code, 0x2b, &[native, args.len() as u32 * 4]);
+    }
+    for budget in [1, 4096] {
+        for root in [0, 77] {
+            for source in [0, 1, 2, u32::MAX] {
+                let mut code = Vec::new();
+                ins(&mut code, 0x25, &[0xdead_beef]);
+                call(&mut code, 570, &[root]);
+                call(&mut code, 571, &[root, source]);
+                call(&mut code, 572, &[root]);
+                ins(&mut code, 0x26, &[0]);
+                ins(&mut code, 0x3b, &[]);
+                let records = Records::default();
+                let mut runtime = Runtime::new(
+                    root,
+                    kind::ROOT,
+                    Box::new(Recorder {
+                        id: root,
+                        base: BaseObject::new(),
+                        records: records.clone(),
+                    }),
+                    State::new(0),
+                    KcsFactory::new(Loader(Program::from_code(&code, vec![0; 16], 128).unwrap())),
+                );
+                runtime.set_budget(budget, 1 << 20);
+                let empty = runtime.images_mut().create_empty(root).unwrap();
+                let image = runtime.images_mut().create(root, [2, 3]).unwrap();
+                assert_eq!([empty, image], [1, 2]);
+                let pixels = runtime.images().pixel_handle(image).unwrap();
+                assert_ne!(pixels, image);
+                let task = runtime
+                    .create(root, kind::ORDINARY, b"commands", b"")
+                    .unwrap();
+                let result = runtime.update(0, 1);
+                if source == u32::MAX {
+                    assert!(result.unwrap_err().message.contains("句柄无效"));
+                    assert_eq!(*records.borrow(), [[root, task, 448, 0]]);
+                } else {
+                    result.unwrap();
+                    assert_eq!(
+                        *records.borrow(),
+                        [
+                            [root, task, 448, 0],
+                            [root, task, 451, if source == image { pixels } else { 0 }],
+                            [root, task, 450, 0],
+                        ]
+                    );
+                    let vm = runtime.object(task).unwrap().interpreter().unwrap();
+                    assert_eq!(vm.read(0, 4).unwrap(), 0xdead_beefu32.to_le_bytes());
+                    assert!(vm.stack_bytes().is_empty());
+                }
+            }
+        }
+    }
 }
 
 struct Programs;

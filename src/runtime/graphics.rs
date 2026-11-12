@@ -35,6 +35,20 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                 .render_offscreen(self.host.surface_size, range)?;
             return Ok(NativeReturn::Continue);
         }
+        if index == 571 {
+            if arguments.len() != 8 {
+                return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+            }
+            let target = read::u32_at(arguments, 0)?;
+            let image = read::u32_at(arguments, 4)?;
+            let pixels = if image == 0 {
+                0
+            } else {
+                self.resources.images.pixel_handle(image)?
+            };
+            self.command_target(target, 451, [0, pixels, 0])?;
+            return Ok(NativeReturn::Continue);
+        }
         if index == 542 {
             let drawing = &mut self.resources.compositor.drawing;
             if drawing.mode == 0 && drawing.enabled {
@@ -82,7 +96,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         let count = match index {
             78 => 12,
             79 => 16,
-            80 | 83 | 89 | 91 | 98 | 99 | 107 | 340..=342 | 572 | 1065 | 1067 | 1069 => 4,
+            80 | 83 | 89 | 91 | 98 | 99 | 107 | 340..=342 | 570 | 572 | 1065 | 1067 | 1069 => 4,
             82 | 88 | 92 | 94 | 95 | 97 | 102 | 103 | 105 | 106 | 258 | 262 | 402 | 455 | 462
             | 464 | 466 | 534 | 653 | 848 | 849 | 1066 | 1068 => 8,
             880 => 16,
@@ -100,7 +114,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         let route_zero = matches!(
             index,
             104 | 105 | 106 | 107 | 256 | 258 | 260 | 262 | 263 | 339..=342 | 402 | 455 | 732 | 462
-                ..=464 | 534 | 572 | 625 | 653 | 663 | 848 | 849 | 880 | 1065..=1069
+                ..=464 | 534 | 570 | 572 | 625 | 653 | 663 | 848 | 849 | 880 | 1065..=1069
         );
         if route_zero && arguments.len() != count {
             return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
@@ -156,12 +170,13 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     },
                 )?;
             }
-            80 | 83 | 91 | 99 | 572 | 1065 | 1067 | 1069 => {
+            80 | 83 | 91 | 99 | 570 | 572 | 1065 | 1067 | 1069 => {
                 let code = match index {
                     80 => 45,
                     83 => 68,
                     91 => 54,
                     99 => 91,
+                    570 => 448,
                     572 => 450,
                     1065 => 590,
                     _ => 592,
