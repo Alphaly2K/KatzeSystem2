@@ -174,10 +174,21 @@ fn encrypted_archive_lookup_preserves_all_name_shifts_and_lossy_unicode_matching
                 name.to_ascii_lowercase(),
             ] {
                 assert_eq!(
-                    archive.read(&request).unwrap().as_deref(),
+                    archive
+                        .open_source(&request)
+                        .unwrap()
+                        .map(support::read_source)
+                        .transpose()
+                        .unwrap()
+                        .as_deref(),
                     Some(payload.as_slice())
                 );
-                assert_eq!(archive.read(&format!("{request}!")).unwrap(), None);
+                assert!(
+                    archive
+                        .open_source(&format!("{request}!"))
+                        .unwrap()
+                        .is_none()
+                );
             }
         }
     }
