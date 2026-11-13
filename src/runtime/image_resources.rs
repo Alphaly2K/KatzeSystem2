@@ -27,7 +27,7 @@ impl<F: ObjectFactory> Runtime<F> {
 }
 
 impl Resources {
-    fn load_image_resource(&mut self, name: &[u8]) -> Result<Option<Image>> {
+    fn load_image_resource(&mut self, name: &[u8]) -> Result<Option<(Image, Option<bool>)>> {
         if name.len() >= 260 {
             return Err(Error::new(0, "图像资源名超过基线缓冲区范围"));
         }
@@ -49,24 +49,47 @@ impl Resources {
         if table_length > 256 || parts.len() > 65 {
             return Err(Error::new(0, "独立图像资源名称分量超过缓冲区上限"));
         }
-        let joined = if parts.len() != 1 {
-            // 逗号分量按下划线连接为单一文件名；本样本中 `evb01,a` 对应 `evb01_a.hg3`。
-            let mut joined = Vec::with_capacity(name.len());
-            for (i, part) in parts.iter().enumerate() {
-                if i != 0 {
-                    joined.push(b'_');
-                }
-                joined.extend_from_slice(part);
-            }
-            joined.extend_from_slice(&name[end..]);
-            joined
-        } else {
-            name.to_vec()
-        };
         let services = self
             .services
             .as_deref_mut()
             .ok_or_else(|| Error::new(0, "运行时未配置资源服务"))?;
+        if parts.len() > 1 {
+            let mut layers = Vec::new();
+            for (index, part) in parts[1..].iter().enumerate() {
+                let value = part[0];
+                if value == b'0' {
+                    continue;
+                }
+                let mut layer = parts[0].to_vec();
+                layer.push(b'_');
+                layer.resize(layer.len() + index, b'0');
+                // 分量来自有符号 char 的 DWORD，字符串在第四字节处终止。
+                let value = (value as i8 as i32).to_le_bytes();
+                layer.extend(value[..3].iter().take_while(|&&byte| byte != 0));
+                let extension = name.get(end + 1..).unwrap_or_default();
+                if layer.len() + 1 + extension.len() >= 260 {
+                    return Err(Error::new(0, "图层资源名超过基线缓冲区范围"));
+                }
+                let animation_name = [&layer, b".anm".as_slice()].concat();
+                if services
+                    .read(&animation_name, ResourceMode::LooseFirst)?
+                    .is_some()
+                {
+                    return Err(Error::new(0, "独立图像资源的 ANM 图层尚未接入"));
+                }
+                layer.push(b'.');
+                layer.extend_from_slice(extension);
+                let Some(bytes) = services.read(&layer, ResourceMode::LooseFirst)? else {
+                    continue;
+                };
+                if !bytes.is_empty() {
+                    if let Some(frame) = crate::hg3::decode_frame(&bytes, 0)? {
+                        layers.push(Image::from_frame(frame)?);
+                    }
+                }
+            }
+            return Ok(Image::from_layers(&layers)?.map(|image| (image, None)));
+        }
         let animation_name = [&name[..end], b".anm"].concat();
         if let Some(animation) = services.read(&animation_name, ResourceMode::LooseFirst)? {
             if animation.is_empty() {
@@ -74,17 +97,20 @@ impl Resources {
             }
             return Err(Error::new(0, "独立图像资源的 ANM 来源尚未接入"));
         }
-        // 单图装载使用补全后的完整名称，逗号分量已先按下划线并入文件名。
-        let reference = ImageReference::parse(&joined)?;
+        let reference = ImageReference::parse(name)?;
         let Some(bytes) = services.read(&reference.name, ResourceMode::LooseFirst)? else {
             return Ok(None);
         };
         if bytes.is_empty() {
             return Ok(None);
         }
-        crate::hg3::decode_frame(&bytes, reference.frame)?
+        let image = crate::hg3::decode_frame(&bytes, reference.frame)?
             .map(Image::from_frame)
-            .transpose()
+            .transpose()?;
+        Ok(image.map(|image| {
+            let has_alpha = image.info().reserved != 0;
+            (image, Some(has_alpha))
+        }))
     }
 }
 
@@ -99,8 +125,11 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             if arguments.len() != if index == 710 { 4 } else { 8 } {
                 return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
             }
-            let image = if index == 733 {
-                Image::new([read::u32_at(arguments, 0)?, read::u32_at(arguments, 4)?])?
+            let (image, has_alpha) = if index == 733 {
+                (
+                    Image::new([read::u32_at(arguments, 0)?, read::u32_at(arguments, 4)?])?,
+                    None,
+                )
             } else {
                 let address = read::u32_at(arguments, 0)?;
                 if vm.read(address, 1).is_err() {
@@ -140,6 +169,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                 Some(self.host.task_id),
                 image,
                 index == 710,
+                has_alpha,
             )?;
             return Ok(NativeReturn::Value(handle));
         }

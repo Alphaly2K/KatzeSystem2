@@ -6,6 +6,7 @@ use crate::{Error, HandleAllocator, Result, hg3, read};
 use std::collections::BTreeMap;
 
 mod blur;
+mod layers;
 mod resize;
 mod resource;
 mod transform;

@@ -385,6 +385,70 @@ fn failed_loads_skip_allocation_and_validate_animation_and_name_sources() {
 }
 
 #[test]
+fn layered_resource_names_expand_each_component_and_scan_composite_alpha() {
+    struct Layers(Requests);
+    impl ResourceServices for Layers {
+        fn resolve(&mut self, _: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+            Ok([name, b".hg3"].concat())
+        }
+
+        fn read(&mut self, name: &[u8], _: ResourceMode) -> Result<Option<Vec<u8>>> {
+            self.0.borrow_mut().push(name.to_vec());
+            let x = match name {
+                b"art_1.hg3" => -2i32,
+                b"art_000a.hg3" => 3,
+                _ => return Ok(None),
+            };
+            let mut bytes = blob();
+            bytes[16..20].copy_from_slice(&0u32.to_le_bytes());
+            bytes[48..52].copy_from_slice(&x.to_le_bytes());
+            Ok(Some(bytes))
+        }
+    }
+
+    let mut code = Vec::new();
+    call(&mut code, 710, &[64]);
+    ins(&mut code, 0x26, &[0]);
+    handle_call(&mut code, 721, &[]);
+    ins(&mut code, 0x26, &[4]);
+    call(&mut code, 65, &[]);
+    for budget in [1, 4096] {
+        let mut runtime = runtime(&code, budget);
+        let requests = Requests::default();
+        runtime.set_resources(Layers(requests.clone()));
+        let task = runtime.create(0, kind::ORDINARY, b"layers", b"").unwrap();
+        runtime
+            .object_mut(task)
+            .unwrap()
+            .interpreter_mut()
+            .unwrap()
+            .write(64, b",art,,12,missing,0,alpha,\0")
+            .unwrap();
+        runtime.update(0, 1).unwrap();
+        let handle = word(vm(&runtime, task), 0);
+        assert_eq!(word(vm(&runtime, task), 4), 1);
+        let image = runtime.image_resource(handle).unwrap();
+        assert_eq!(image.info().size, [6, 1]);
+        assert_eq!(image.info().offset, [-2, 5]);
+        assert_eq!(image.info().base, [3, 4]);
+        assert_eq!(image.attribute(1), Some([9, 8, 7, 6, 5]));
+        assert_eq!(
+            *requests.borrow(),
+            [
+                b"art_1.anm".to_vec(),
+                b"art_1.hg3".to_vec(),
+                b"art_0m.anm".to_vec(),
+                b"art_0m.hg3".to_vec(),
+                b"art_000a.anm".to_vec(),
+                b"art_000a.hg3".to_vec(),
+            ]
+        );
+        runtime.destroy(task).unwrap();
+        assert!(runtime.image_resource(handle).is_err());
+    }
+}
+
+#[test]
 fn resource_transforms_keep_return_stack_and_shared_update_flag() {
     for budget in [1, 4096] {
         let mut code = Vec::new();

@@ -75,7 +75,7 @@ impl<F: ObjectFactory> Store<'_, F> {
         };
         self.resources
             .images
-            .insert_resource(None, image, false)
+            .insert_resource(None, image, false, None)
             .map(Some)
     }
 }

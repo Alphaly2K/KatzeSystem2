@@ -68,12 +68,12 @@ impl Images {
         owner: Option<u32>,
         image: Image,
         has_source_layer: bool,
+        has_alpha: Option<bool>,
     ) -> Result<u32> {
         if self.resources.len() >= read::MAX_ITEMS {
             return Err(Error::new(0, "独立图像资源数量超过上限"));
         }
         let handle = self.handles.allocate()?;
-        let has_alpha = has_source_layer.then_some(image.info().reserved != 0);
         let geometry = ResourceGeometry::from_image(&image);
         let image = self.insert_unowned(image, has_alpha)?;
         self.resources.insert(
@@ -171,7 +171,9 @@ mod tests {
         image.info_mut().canvas_size = [2, 1];
         image.info_mut().base = [7, 8];
         image.resize_canvas([0, 2]).unwrap();
-        let handle = images.insert_resource(None, image, true).unwrap();
+        let handle = images
+            .insert_resource(None, image, true, Some(false))
+            .unwrap();
         images.rebuild_resource_geometry(handle).unwrap();
         let geometry = images.resource_entry(handle).unwrap().geometry;
         assert_eq!(geometry.size, [0; 2]);
@@ -181,7 +183,9 @@ mod tests {
 
         let mut image = Image::new([2, 1]).unwrap();
         image.info_mut().offset = [i32::MAX, 0];
-        let handle = images.insert_resource(None, image, true).unwrap();
+        let handle = images
+            .insert_resource(None, image, true, Some(false))
+            .unwrap();
         images.rebuild_resource_geometry(handle).unwrap();
         let mut list = ImageList::new(99, [4, 2], &mut images).unwrap();
         list.update(&mut images).unwrap();
