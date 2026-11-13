@@ -21,11 +21,29 @@ fn call(
 }
 
 fn vm(size: usize) -> kcs::Interpreter {
-    kcs::Interpreter::new(
-        kcs::Program::from_code(&[], vec![0; size], 64).unwrap(),
-        vec![],
-    )
-    .unwrap()
+    let mut program = kcs::Program::from_code(&[], vec![0; size], 64).unwrap();
+    program.control = 2;
+    kcs::Interpreter::new(program, vec![]).unwrap()
+}
+
+#[test]
+fn older_particle_programs_keep_the_shared_calls_without_the_snapshot_extension() {
+    for control in [0, 1, 2, 3, 0x0001_0002] {
+        let mut program = kcs::Program::from_code(&[], vec![], 64).unwrap();
+        program.control = control;
+        let mut vm = kcs::Interpreter::new(program, vec![]).unwrap();
+        let mut host = ParticleHost::default();
+        host.quads[0][0].position[0] = 7.;
+        assert_eq!(call(&mut host, &mut vm, 36, &[]), NativeReturn::Value(0));
+        let result = host.call(44, &[], &mut vm);
+        if control == 2 {
+            result.unwrap();
+            assert_eq!(host.quads[0][0].position[0], 0.);
+        } else {
+            assert!(result.is_err());
+            assert_eq!(host.quads[0][0].position[0], 7.);
+        }
+    }
 }
 
 #[test]

@@ -27,7 +27,7 @@ impl Default for ParticleVertex {
     }
 }
 
-/// KCS 2.0 粒子任务表。宿主在每次推进前提供时间和当前网格上下文。
+/// 粒子任务表。宿主在每次推进前提供时间和当前网格上下文。
 pub struct ParticleHost {
     pub frame_rate: u32,
     pub elapsed: u32,
@@ -151,6 +151,10 @@ impl ParticleTask {
 
 impl Host for ParticleHost {
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn> {
+        let count = if vm.program().control == 2 { 51 } else { 44 };
+        if index >= count {
+            return Err(Error::new(vm.pc, "粒子 KCS native 超出当前程序的接口表"));
+        }
         let count = match index {
             1 | 2 | 4 | 32..=34 | 36 | 40 | 44..=47 => 0,
             0 | 3 | 6..=11 | 13..=15 | 17 | 19..=21 | 30 | 31 | 35 | 42 | 50 => 1,

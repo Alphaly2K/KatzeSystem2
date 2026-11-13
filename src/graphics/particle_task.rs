@@ -70,9 +70,6 @@ impl Particle3DObject {
                 return Err(Error::new(0, "粒子插件装载尚未接入"));
             }
             let program = Program::parse(&bytes)?;
-            if program.control != 2 {
-                return Err(Error::new(8, "未支持的粒子 KCS 版本"));
-            }
             let image = if name(0x84)?.is_empty() {
                 None
             } else {

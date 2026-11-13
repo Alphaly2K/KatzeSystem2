@@ -27,12 +27,12 @@ fn native(code: &mut Vec<u8>, index: u32, args: &[u32]) {
     ins(code, 0x2b, &[index, args.len() as u32 * 4]);
 }
 
-fn encoded(code: &[u8]) -> Vec<u8> {
+fn encoded(code: &[u8], control: u32) -> Vec<u8> {
     let length = code.len() as u32;
     let mut bytes = b"KCS\0".to_vec();
     for value in [
         2,
-        2,
+        control,
         52,
         length,
         52 + length,
@@ -83,7 +83,10 @@ fn particle_runtime_loads_native_packets_resumes_and_shares_random_state() -> Re
     ins(&mut particle_code, 0x26, &[0]);
     native(&mut particle_code, 35, &[16]);
     particle_code.push(0x3b);
-    for budget in [1, 4096] {
+    for (budget, control) in [1, 4096]
+        .into_iter()
+        .flat_map(|budget| [0, 1, 2].map(|control| (budget, control)))
+    {
         let mut code = Vec::new();
         for id in [1, 2] {
             native(&mut code, 271, &[id, 0, 8, 1, 5000f32.to_bits(), 32]);
@@ -110,7 +113,7 @@ fn particle_runtime_loads_native_packets_resumes_and_shares_random_state() -> Re
         runtime.set_budget(budget, 1 << 20);
         runtime.host_mut().surface_size = [1279, 719];
         runtime.host_mut().random = ScriptRandom::seeded(17);
-        runtime.set_resources(Files(encoded(&particle_code)));
+        runtime.set_resources(Files(encoded(&particle_code, control)));
         for _ in 0..2 {
             runtime.create(0, kind::PARTICLE_3D, b"", b"context")?;
         }
