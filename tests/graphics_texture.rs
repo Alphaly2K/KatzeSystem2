@@ -43,6 +43,7 @@ fn draw_commands_apply_all_blend_factors_after_texture_modulation() {
                 blend_mode: mode,
             };
             let mut frame = DrawList {
+                passes: Vec::new(),
                 commands: vec![background, foreground],
                 filter: TextureFilter::Point,
             };
@@ -70,6 +71,7 @@ fn image_commands_hold_their_pixels_and_mix_with_canvas_textures() {
     canvas_pixel.clear(0xff0000ff);
     let mut canvas = RenderTarget::from_tiles([1, 1], [1, 1], vec![Some(canvas_pixel)]).unwrap();
     let frame = DrawList {
+        passes: Vec::new(),
         commands: vec![
             DrawCommand {
                 vertices: vertices(),
@@ -126,6 +128,7 @@ fn depth_clipping_keeps_visible_color_and_texture_interpolation() {
                 }
             }
             let mut frame = DrawList {
+                passes: Vec::new(),
                 commands: vec![DrawCommand {
                     vertices: triangle,
                     texture: (mode == 2).then(|| FrameTexture {
@@ -384,4 +387,75 @@ fn drawable_submission_interpolates_colors_without_a_texture() {
             assert_eq!(composited.pixel(x, y), target.pixel(x, y));
         }
     }
+}
+
+fn pass_triangle(index: u32) -> DrawCommand {
+    DrawCommand {
+        vertices: [[-0.5, -0.5], [15.5, -0.5], [-0.5, 15.5]].map(|xy| ProjectedVertex {
+            position: [xy[0], xy[1], 0.5],
+            rhw: 1.,
+            color: 0xffffffff,
+        }),
+        texture: Some(FrameTexture {
+            source: TextureSource::Pass(index),
+            uv: [[0.5; 2]; 3],
+        }),
+        clip: None,
+        blend_mode: 0,
+    }
+}
+
+#[test]
+fn frame_passes_sample_current_outputs_and_preserve_clear_color() {
+    use katze_system2::graphics::DrawPass;
+    let mut frame = DrawList {
+        passes: vec![
+            DrawPass {
+                size: [3, 2],
+                clear: 0xff123456,
+                commands: Vec::new(),
+            },
+            DrawPass {
+                size: [4, 5],
+                clear: 0xff654321,
+                commands: vec![pass_triangle(0)],
+            },
+        ],
+        commands: vec![pass_triangle(1)],
+        filter: TextureFilter::Point,
+    };
+    let mut canvas = RenderTarget::new([1, 1]).unwrap();
+    for color in [0xff123456, 0xffabcdef] {
+        frame.passes[0].clear = color;
+        let output = SoftwareBackend.render(&frame, &mut canvas, [8, 8]).unwrap();
+        assert_eq!(output.pixel(2, 3), Some(color));
+        assert_eq!(output.pixel(7, 7), Some(color));
+    }
+    frame.passes[1].commands.clear();
+    let output = SoftwareBackend.render(&frame, &mut canvas, [8, 8]).unwrap();
+    assert_eq!(output.pixel(2, 3), Some(0xff654321));
+}
+
+#[test]
+fn frame_passes_reject_unfinished_sources_before_drawing() {
+    use katze_system2::graphics::DrawPass;
+    let mut frame = DrawList {
+        passes: vec![DrawPass {
+            size: [1, 1],
+            clear: 0xffffffff,
+            commands: vec![pass_triangle(0)],
+        }],
+        commands: vec![pass_triangle(0)],
+        filter: TextureFilter::Point,
+    };
+    let mut target = RenderTarget::new([8, 8]).unwrap();
+    let before = target.clone();
+    assert!(frame.render_into(&mut target, None).is_err());
+    assert_eq!(target, before);
+    frame.passes[0].commands.clear();
+    frame.commands[0].texture.as_mut().unwrap().source = TextureSource::Pass(1);
+    assert!(frame.render_into(&mut target, None).is_err());
+    frame.commands.clear();
+    frame.passes[0].size[0] = 0;
+    assert!(frame.render_into(&mut target, None).is_err());
 }

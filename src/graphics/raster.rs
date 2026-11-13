@@ -374,7 +374,7 @@ impl Drawables {
         range: Option<[f32; 2]>,
     ) -> Result<bool> {
         self.visit_frame(projection, parent, range, |command| {
-            draw_command(output, canvas, &command, filter)
+            draw_command(output, canvas, &command, filter, &[])
         })
     }
 }
@@ -384,6 +384,7 @@ pub(super) fn draw_command(
     canvas: Option<&super::RenderTarget>,
     command: &super::DrawCommand,
     filter: TextureFilter,
+    passes: &[super::RenderTarget],
 ) -> Result<bool> {
     let vertices = command.vertices;
     let state = RasterState {
@@ -402,6 +403,9 @@ pub(super) fn draw_command(
                 .get(*tile as usize)
                 .and_then(Option::as_ref),
             super::TextureSource::Image(image) => Some(image.as_ref()),
+            super::TextureSource::Pass(index) => passes
+                .get(*index as usize)
+                .and_then(|target| target.tiles()[0].as_ref()),
         };
         if let Some(texture) = texture {
             if vertices.iter().any(|v| !v.rhw.is_finite() || v.rhw <= 0.) {

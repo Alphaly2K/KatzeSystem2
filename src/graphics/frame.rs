@@ -1,12 +1,14 @@
 use super::{Drawables, ProjectedVertex, Projection, Rect, RenderTarget, Surface, TextureFilter};
-use crate::Result;
+use crate::{Error, Result};
 use std::sync::Arc;
 
-/// 画布面块或共享的只读图像；绘制列表持有图像直到后端提交完成。
+/// 画布面块、共享只读图像或本帧离屏阶段；图像随绘制列表持有。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TextureSource {
     Canvas(u32),
     Image(Arc<Surface>),
+    /// 本帧中编号更小且已经完成的离屏绘制阶段。
+    Pass(u32),
 }
 
 impl TextureSource {
@@ -14,6 +16,7 @@ impl TextureSource {
         match self {
             Self::Canvas(tile) => canvas.tiles().get(*tile as usize).and_then(Option::as_ref),
             Self::Image(image) => Some(image),
+            Self::Pass(_) => None,
         }
     }
 }
@@ -36,23 +39,53 @@ pub struct DrawCommand {
 
 pub type FrameTriangle = DrawCommand;
 
+/// 在最终帧之前执行的离屏绘制阶段；可采样此前阶段的输出。
+#[derive(Clone, Debug, PartialEq)]
+pub struct DrawPass {
+    pub size: [u32; 2],
+    pub clear: u32,
+    pub commands: Vec<DrawCommand>,
+}
+
 /// 已完成排序、裁剪和投影的绘制命令；不包含设备资源或脚本对象。
 #[derive(Clone, Debug, PartialEq)]
 pub struct DrawList {
+    pub passes: Vec<DrawPass>,
     pub commands: Vec<DrawCommand>,
     pub filter: TextureFilter,
 }
 
 impl DrawList {
+    pub(crate) fn validate_passes(&self) -> Result<()> {
+        for (index, pass) in self.passes.iter().enumerate() {
+            if pass.size.contains(&0) {
+                return Err(Error::new(0, "离屏绘制阶段需要非零尺寸"));
+            }
+            validate_sources(&pass.commands, index)?;
+        }
+        validate_sources(&self.commands, self.passes.len())
+    }
+
     /// 向已有目标混合软件帧；画布仅在命令使用其面块时需要，不清空目标。
     pub fn render_into(
         &self,
         output: &mut RenderTarget,
         canvas: Option<&RenderTarget>,
     ) -> Result<bool> {
+        self.validate_passes()?;
+        let mut targets = Vec::with_capacity(self.passes.len());
+        for pass in &self.passes {
+            let mut surface = Surface::new(pass.size)?;
+            surface.clear(pass.clear);
+            let mut target = RenderTarget::from_tiles(pass.size, [1, 1], vec![Some(surface)])?;
+            for command in &pass.commands {
+                super::raster::draw_command(&mut target, canvas, command, self.filter, &targets)?;
+            }
+            targets.push(target);
+        }
         let mut touched = false;
         for command in &self.commands {
-            touched |= super::raster::draw_command(output, canvas, command, self.filter)?;
+            touched |= super::raster::draw_command(output, canvas, command, self.filter, &targets)?;
         }
         Ok(touched)
     }
@@ -68,6 +101,7 @@ impl Drawables {
         range: Option<[f32; 2]>,
     ) -> Result<DrawList> {
         let mut frame = DrawList {
+            passes: Vec::new(),
             commands: Vec::new(),
             filter,
         };
@@ -183,4 +217,19 @@ impl Drawables {
         }
         Ok(touched)
     }
+}
+
+pub(super) fn validate_sources(commands: &[DrawCommand], completed: usize) -> Result<()> {
+    for command in commands {
+        if let Some(FrameTexture {
+            source: TextureSource::Pass(index),
+            ..
+        }) = &command.texture
+        {
+            if *index as usize >= completed {
+                return Err(Error::new(0, "纹理引用尚未完成的离屏绘制阶段"));
+            }
+        }
+    }
+    Ok(())
 }

@@ -3,7 +3,7 @@
 use super::{FrameTriangle, Rect, RenderTarget, Surface, TextureFilter, TextureSource};
 use crate::{Error, Result};
 use ::metal::*;
-use std::{collections::BTreeMap, sync::Arc};
+use std::{borrow::Cow, collections::BTreeMap, sync::Arc};
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -40,6 +40,7 @@ pub struct Renderer {
     vertices: Vec<Vertex>,
     buffer: Option<Buffer>,
     previous: Option<CommandBuffer>,
+    passes: Vec<Texture>,
 }
 
 impl Renderer {
@@ -117,6 +118,7 @@ impl Renderer {
             vertices: Vec::new(),
             buffer: None,
             previous: None,
+            passes: Vec::new(),
         })
     }
 
@@ -152,6 +154,17 @@ impl Renderer {
         size: [u32; 2],
         filter: TextureFilter,
     ) -> Result<bool> {
+        self.present_passes(triangles, &[], canvas, size, filter)
+    }
+
+    fn present_passes(
+        &mut self,
+        triangles: &[FrameTriangle],
+        passes: &[super::DrawPass],
+        canvas: &mut RenderTarget,
+        size: [u32; 2],
+        filter: TextureFilter,
+    ) -> Result<bool> {
         validate_size(size)?;
         let mut drawable_size = self.layer.drawable_size();
         drawable_size.width = f64::from(size[0]);
@@ -161,9 +174,17 @@ impl Renderer {
         let Some(drawable) = self.layer.next_drawable().map(ToOwned::to_owned) else {
             return Ok(false);
         };
-        self.prepare(triangles, canvas, size)?;
+        let combined = self.prepare_passes(triangles, passes, canvas, size)?;
         let command = self.queue.new_command_buffer();
-        self.encode(command, drawable.texture(), triangles, canvas, filter);
+        let offset = self.encode_passes(command, passes, &combined, canvas, filter);
+        self.encode(
+            command,
+            drawable.texture(),
+            triangles,
+            canvas,
+            filter,
+            (offset, 0),
+        );
         command.present_drawable(&drawable);
         command.commit();
         self.previous = Some(command.to_owned());
@@ -178,12 +199,24 @@ impl Renderer {
         size: [u32; 2],
         filter: TextureFilter,
     ) -> Result<Surface> {
+        self.render_offscreen_passes(triangles, &[], canvas, size, filter)
+    }
+
+    fn render_offscreen_passes(
+        &mut self,
+        triangles: &[FrameTriangle],
+        passes: &[super::DrawPass],
+        canvas: &mut RenderTarget,
+        size: [u32; 2],
+        filter: TextureFilter,
+    ) -> Result<Surface> {
         validate_size(size)?;
         let mut surface = Surface::new(size)?;
-        self.prepare(triangles, canvas, size)?;
+        let combined = self.prepare_passes(triangles, passes, canvas, size)?;
         let target = texture(&self.device, size, MTLTextureUsage::RenderTarget);
         let command = self.queue.new_command_buffer();
-        self.encode(command, &target, triangles, canvas, filter);
+        let offset = self.encode_passes(command, passes, &combined, canvas, filter);
+        self.encode(command, &target, triangles, canvas, filter, (offset, 0));
         if target.storage_mode() == MTLStorageMode::Managed {
             let blit = command.new_blit_command_encoder();
             blit.synchronize_resource(&target);
@@ -201,19 +234,95 @@ impl Renderer {
         Ok(surface)
     }
 
+    fn prepare_passes<'a>(
+        &mut self,
+        triangles: &'a [FrameTriangle],
+        passes: &[super::DrawPass],
+        canvas: &mut RenderTarget,
+        size: [u32; 2],
+    ) -> Result<Cow<'a, [FrameTriangle]>> {
+        for (index, pass) in passes.iter().enumerate() {
+            super::frame::validate_sources(&pass.commands, index)?;
+        }
+        super::frame::validate_sources(triangles, passes.len())?;
+        self.wait()?;
+        if passes.is_empty() {
+            self.passes.clear();
+            self.prepare(triangles, canvas, &[(triangles.len(), size)])?;
+            return Ok(Cow::Borrowed(triangles));
+        }
+        for (index, pass) in passes.iter().enumerate() {
+            validate_size(pass.size)?;
+            if self.passes.get(index).is_none_or(|target| {
+                target.width() != u64::from(pass.size[0])
+                    || target.height() != u64::from(pass.size[1])
+            }) {
+                let target = texture(
+                    &self.device,
+                    pass.size,
+                    MTLTextureUsage::RenderTarget | MTLTextureUsage::ShaderRead,
+                );
+                if index < self.passes.len() {
+                    self.passes[index] = target;
+                } else {
+                    self.passes.push(target);
+                }
+            }
+        }
+        self.passes.truncate(passes.len());
+        let mut combined = Vec::new();
+        let mut sizes = Vec::new();
+        for pass in passes {
+            combined.extend_from_slice(&pass.commands);
+            sizes.push((combined.len(), pass.size));
+        }
+        combined.extend_from_slice(triangles);
+        sizes.push((combined.len(), size));
+        self.prepare(&combined, canvas, &sizes)?;
+        Ok(Cow::Owned(combined))
+    }
+
+    fn encode_passes(
+        &self,
+        command: &CommandBufferRef,
+        passes: &[super::DrawPass],
+        combined: &[FrameTriangle],
+        canvas: &RenderTarget,
+        filter: TextureFilter,
+    ) -> usize {
+        let mut offset = 0;
+        for (index, pass) in passes.iter().enumerate() {
+            let end = offset + pass.commands.len();
+            self.encode(
+                command,
+                &self.passes[index],
+                &combined[offset..end],
+                canvas,
+                filter,
+                (offset, pass.clear),
+            );
+            offset = end;
+        }
+        offset
+    }
+
     fn prepare(
         &mut self,
         triangles: &[FrameTriangle],
         canvas: &mut RenderTarget,
-        size: [u32; 2],
+        sizes: &[(usize, [u32; 2])],
     ) -> Result<()> {
         self.wait()?;
         self.vertices.clear();
-        for triangle in triangles {
-            let textured = triangle
-                .texture
-                .as_ref()
-                .is_some_and(|t| t.source.surface(canvas).is_some());
+        let mut group = 0;
+        for (triangle_index, triangle) in triangles.iter().enumerate() {
+            while triangle_index >= sizes[group].0 {
+                group += 1;
+            }
+            let size = sizes[group].1;
+            let textured = triangle.texture.as_ref().is_some_and(|t| {
+                matches!(t.source, TextureSource::Pass(_)) || t.source.surface(canvas).is_some()
+            });
             let interpolate = !super::raster::triangle_culled(triangle.vertices)
                 && (textured
                     || triangle
@@ -361,13 +470,20 @@ impl Renderer {
         triangles: &[FrameTriangle],
         canvas: &RenderTarget,
         filter: TextureFilter,
+        settings: (usize, u32),
     ) {
+        let (offset, clear) = settings;
         let descriptor = RenderPassDescriptor::new();
         let color = descriptor.color_attachments().object_at(0).unwrap();
         color.set_texture(Some(target));
         color.set_load_action(MTLLoadAction::Clear);
         color.set_store_action(MTLStoreAction::Store);
-        color.set_clear_color(MTLClearColor::new(0., 0., 0., 0.));
+        color.set_clear_color(MTLClearColor::new(
+            f64::from(clear >> 16 & 255) / 255.,
+            f64::from(clear >> 8 & 255) / 255.,
+            f64::from(clear & 255) / 255.,
+            f64::from(clear >> 24) / 255.,
+        ));
         let encoder = command.new_render_command_encoder(descriptor);
         encoder.set_render_pipeline_state(&self.pipelines[0]);
         let mut blend_mode = 0;
@@ -394,7 +510,11 @@ impl Renderer {
                 .iter()
                 .any(|v| v.position[..2].iter().any(|v| !v.is_finite()))
                 || source.is_some_and(|surface| surface.size().contains(&0))
-                || source.is_some()
+                || (source.is_some()
+                    || triangle
+                        .texture
+                        .as_ref()
+                        .is_some_and(|texture| matches!(texture.source, TextureSource::Pass(_))))
                     && triangle
                         .texture
                         .as_ref()
@@ -417,6 +537,9 @@ impl Renderer {
                         .get(*tile as usize)
                         .and_then(Option::as_ref)
                         .map(|tile| &*tile.texture),
+                    TextureSource::Pass(index) => {
+                        self.passes.get(*index as usize).map(|texture| &**texture)
+                    }
                     TextureSource::Image(image) => self
                         .images
                         .get(&(Arc::as_ptr(image) as usize))
@@ -433,7 +556,7 @@ impl Renderer {
                 blend_mode = selected;
             }
             encoder.set_fragment_texture(0, Some(texture));
-            encoder.draw_primitives(MTLPrimitiveType::Triangle, index as u64 * 3, 3);
+            encoder.draw_primitives(MTLPrimitiveType::Triangle, (offset + index) as u64 * 3, 3);
         }
         encoder.end_encoding();
     }
@@ -446,8 +569,9 @@ impl super::GraphicsBackend for Renderer {
         canvas: &mut RenderTarget,
         size: [u32; 2],
     ) -> Result<RenderTarget> {
+        frame.validate_passes()?;
         let surface = ::metal::objc::rc::autoreleasepool(|| {
-            self.render_offscreen(&frame.commands, canvas, size, frame.filter)
+            self.render_offscreen_passes(&frame.commands, &frame.passes, canvas, size, frame.filter)
         })?;
         RenderTarget::from_tiles(size, [1, 1], vec![Some(surface)])
     }
@@ -458,8 +582,9 @@ impl super::GraphicsBackend for Renderer {
         canvas: &mut RenderTarget,
         size: [u32; 2],
     ) -> Result<bool> {
+        frame.validate_passes()?;
         ::metal::objc::rc::autoreleasepool(|| {
-            Renderer::present(self, &frame.commands, canvas, size, frame.filter)
+            self.present_passes(&frame.commands, &frame.passes, canvas, size, frame.filter)
         })
     }
 }

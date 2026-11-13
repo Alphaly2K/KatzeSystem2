@@ -34,6 +34,7 @@ impl Movie {
         }
         let bounds = Rect::from_xywh(0, 0, size[0] as i32, size[1] as i32);
         let mut output = DrawList {
+            passes: Vec::new(),
             commands: Vec::new(),
             filter,
         };
