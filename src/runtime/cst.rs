@@ -183,6 +183,31 @@ impl CstContext {
         }))
     }
 
+    fn localized_option(&self, index: u32, language: &[u8]) -> Option<Vec<u8>> {
+        if !self.languages.contains(language) {
+            return None;
+        }
+        let table = self.localization.as_ref()?;
+        let column = table
+            .languages
+            .iter()
+            .position(|name| name.as_bytes() == language)?;
+        let inputs = self
+            .script
+            .as_ref()
+            .map_or(0, |script| script.inputs().len() as u32);
+        let row = inputs.wrapping_sub(1).wrapping_add(index) as usize;
+        let message = table.messages.get(row)?.get(column)?;
+        Some(
+            message
+                .content
+                .split('\x1f')
+                .take_while(|text| !text.is_empty())
+                .flat_map(|text| text.bytes().take_while(|&byte| byte != 0))
+                .collect(),
+        )
+    }
+
     /// 按原始字节顺序枚举去重后的语言名，包括已注册的空名称。
     pub fn languages(&self) -> impl ExactSizeIterator<Item = &[u8]> {
         self.languages.iter().map(Vec::as_slice)
@@ -273,7 +298,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                 context.load(&name, services)?,
             )));
         }
-        if matches!(index, 327 | 1033 | 1037 | 1038) {
+        if matches!(index, 327 | 1033 | 1037 | 1038 | 1064) {
             let expected = if matches!(index, 1033 | 1038) { 20 } else { 16 };
             if arguments.len() != expected {
                 return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
@@ -281,6 +306,25 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             let address = read::u32_at(arguments, 4)?;
             if vm.read(address, 1).is_err() {
                 return Ok(NativeReturn::Value(0));
+            }
+            if index == 1064 {
+                let mut language = crate::kcs::format_string(vm, read::u32_at(arguments, 12)?, 0)?;
+                language.truncate(
+                    language
+                        .iter()
+                        .position(|&byte| byte == 0)
+                        .unwrap_or(language.len()),
+                );
+                if language.len() >= 64 {
+                    return Err(Error::new(vm.pc, "CST 查询语言名超过缓冲区上限"));
+                }
+                let mut text = context
+                    .localized_option(read::u32_at(arguments, 8)?, &language)
+                    .unwrap_or_default();
+                let length = text.len() as u32;
+                text.push(0);
+                vm.write(address, &text)?;
+                return Ok(NativeReturn::Value(length));
             }
             let language = if expected == 20 {
                 let mut name = crate::kcs::format_string(vm, read::u32_at(arguments, 16)?, 0)?;

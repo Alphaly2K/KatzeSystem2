@@ -364,3 +364,37 @@ fn record_queries_keep_raw_and_utf8_paths_separate_and_use_current_indices() {
         assert_eq!(vm.read(192, 6).unwrap().as_ref(), b"J-two\0");
     }
 }
+
+#[test]
+fn localized_option_query_joins_segments_and_clears_missing_results() {
+    let mut code = vec![];
+    call(&mut code, 323, &[], Some(400));
+    call(&mut code, 325, &[1, 64], Some(404));
+    for (args, output) in [
+        (vec![1, 128, 0, 80], 0),
+        (vec![1, 160, u32::MAX, 80], 4),
+        (vec![1, 192, 0, 96], 8),
+        (vec![1, 224, 8, 80], 12),
+        (vec![1, 0xdeadbeef, 0, 0xdeadbeef], 16),
+        (vec![0], 20),
+    ] {
+        call(&mut code, 1064, &args, Some(output));
+    }
+    call(&mut code, 65, &[], None);
+    for budget in [1, 4096] {
+        let (mut rt, task, _, _) = runtime(&code, budget);
+        rt.update(0, 1).unwrap();
+        let vm = rt.object(task).unwrap().interpreter().unwrap();
+        let results: Vec<_> = vm
+            .read(0, 24)
+            .unwrap()
+            .chunks_exact(4)
+            .map(|bytes| u32::from_le_bytes(bytes.try_into().unwrap()))
+            .collect();
+        assert_eq!(results, [6, 10, 0, 0, 0, 0]);
+        assert_eq!(vm.read_string(128).unwrap().as_ref(), b"J-next");
+        assert_eq!(vm.read_string(160).unwrap().as_ref(), b"J-oneJ-two");
+        assert_eq!(vm.read(192, 2).unwrap().as_ref(), &[0, 0x5a]);
+        assert_eq!(vm.read(224, 2).unwrap().as_ref(), &[0, 0x5a]);
+    }
+}

@@ -197,7 +197,9 @@ pub(crate) fn runtime(index: u32) -> RuntimeHandler {
         265..=270 | 417 | 788 | 997 | 998 => RuntimeHandler::Movie,
         196..=200 | 203 | 853..=857 | 860 | 861 => RuntimeHandler::Transition,
         633..=638 => RuntimeHandler::NameTable,
-        323..=337 | 385 | 386 | 982 | 991 | 992 | 994 | 1033 | 1037 | 1038 => RuntimeHandler::Cst,
+        323..=337 | 385 | 386 | 982 | 991 | 992 | 994 | 1033 | 1037 | 1038 | 1064 => {
+            RuntimeHandler::Cst
+        }
         294..=317 | 388 | 440 | 535 | 586 => RuntimeHandler::Motion,
         458 => RuntimeHandler::SequenceFile,
         240 | 250 => RuntimeHandler::SharedRecord,
