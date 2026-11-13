@@ -18,9 +18,9 @@ impl ReadSource for Chunked {
 
 #[test]
 fn readers_keep_independent_positions_short_reads_and_failed_seek_state() {
-    let source = Chunked(b"0123456789abcdef");
-    let mut first = SourceReader::new(&source);
-    let mut second = SourceReader::new(&source);
+    let source: katze_system2::io::SharedSource = std::sync::Arc::new(Chunked(b"0123456789abcdef"));
+    let mut first = SourceReader::new(source.as_ref());
+    let mut second = SourceReader::from_shared(source.clone());
     let mut bytes = [0; 6];
     first.read_exact(&mut bytes).unwrap();
     assert_eq!(&bytes, b"012345");

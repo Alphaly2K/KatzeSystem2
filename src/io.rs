@@ -111,14 +111,45 @@ impl ReadSource for FileSource {
 
 /// 为每个解码器保存独立位置，将随机读取源适配为标准 Read／Seek。
 pub struct SourceReader<'a, S: ReadSource + ?Sized> {
-    source: &'a S,
+    source: ReaderSource<'a, S>,
     position: u64,
+}
+
+enum ReaderSource<'a, S: ReadSource + ?Sized> {
+    Borrowed(&'a S),
+    Shared(SharedSource),
+}
+
+impl<S: ReadSource + ?Sized> ReadSource for ReaderSource<'_, S> {
+    fn len(&self) -> Result<u64> {
+        match self {
+            Self::Borrowed(source) => source.len(),
+            Self::Shared(source) => source.len(),
+        }
+    }
+
+    fn read_at(&self, offset: u64, output: &mut [u8]) -> Result<usize> {
+        match self {
+            Self::Borrowed(source) => source.read_at(offset, output),
+            Self::Shared(source) => source.read_at(offset, output),
+        }
+    }
 }
 
 impl<'a, S: ReadSource + ?Sized> SourceReader<'a, S> {
     pub fn new(source: &'a S) -> Self {
         Self {
-            source,
+            source: ReaderSource::Borrowed(source),
+            position: 0,
+        }
+    }
+}
+
+impl SourceReader<'static, dyn ReadSource> {
+    /// 持有共享来源，可随解码器移动到其他线程；读取位置仍由本游标独立保存。
+    pub fn from_shared(source: SharedSource) -> Self {
+        Self {
+            source: ReaderSource::Shared(source),
             position: 0,
         }
     }

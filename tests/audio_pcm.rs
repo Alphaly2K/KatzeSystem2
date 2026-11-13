@@ -1,6 +1,6 @@
 use katze_system2::{
     Result,
-    audio::{decode_vorbis, decode_vorbis_source},
+    audio::{VorbisDecoder, decode_vorbis, decode_vorbis_source},
     io::ReadSource,
 };
 
@@ -50,6 +50,21 @@ fn vorbis_preserves_channel_order_and_exact_final_frames_against_independent_pcm
         assert_eq!(pcm.channels(), channels);
         assert_eq!(pcm.frames(), frames);
         assert_eq!(pcm.samples().len() * 2, reference.len());
+        let mut decoder = VorbisDecoder::new(encoded).unwrap();
+        assert_eq!(decoder.sample_rate(), rate);
+        assert_eq!(decoder.channels(), channels);
+        assert_eq!(decoder.frames(), frames);
+        let mut packets = Vec::new();
+        let mut packet_count = 0;
+        while let Some(packet) = decoder.read_packet().unwrap() {
+            assert!(!packet.is_empty());
+            assert!(packet.len().is_multiple_of(channels as usize));
+            packets.extend(packet);
+            packet_count += 1;
+        }
+        assert!(packet_count > 1);
+        assert_eq!(packets, pcm.samples());
+        assert_eq!(decoder.read_packet().unwrap(), None);
         for (index, (actual, expected)) in pcm
             .samples()
             .iter()
@@ -62,6 +77,42 @@ fn vorbis_preserves_channel_order_and_exact_final_frames_against_independent_pcm
                 "sample {index}: {actual} != {expected}"
             );
         }
+    }
+}
+
+#[test]
+fn packet_reader_reports_corruption_when_reading_the_audio_page() {
+    let mut corrupt = MONO.to_vec();
+    *corrupt.last_mut().unwrap() ^= 1;
+    let mut decoder = VorbisDecoder::new(corrupt.as_slice()).unwrap();
+    assert_eq!(decoder.frames(), 1379);
+    loop {
+        match decoder.read_packet() {
+            Ok(Some(_)) => (),
+            Err(_) => break,
+            Ok(None) => panic!("corrupt audio page was accepted"),
+        }
+    }
+}
+
+#[test]
+fn shared_source_and_partial_decoder_state_move_together_to_a_worker() {
+    for bytes in [MONO, STEREO] {
+        let source: katze_system2::io::SharedSource = std::sync::Arc::new(bytes.to_vec());
+        let mut decoder = VorbisDecoder::from_shared(source.clone()).unwrap();
+        let mut actual = decoder.read_packet().unwrap().unwrap();
+        drop(source);
+        let remaining = std::thread::spawn(move || {
+            let mut samples = Vec::new();
+            while let Some(packet) = decoder.read_packet().unwrap() {
+                samples.extend(packet);
+            }
+            samples
+        })
+        .join()
+        .unwrap();
+        actual.extend(remaining);
+        assert_eq!(actual, decode_vorbis(bytes).unwrap().samples());
     }
 }
 
