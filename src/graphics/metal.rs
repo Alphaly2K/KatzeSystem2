@@ -1,8 +1,9 @@
 //! macOS Metal 最终帧绘制。画布仍由运行时维护，设备仅上传变更面块。
 
-use super::{FrameTriangle, Rect, RenderTarget, Surface, TextureFilter};
+use super::{FrameTriangle, Rect, RenderTarget, Surface, TextureFilter, TextureSource};
 use crate::{Error, Result};
 use ::metal::*;
+use std::{collections::BTreeMap, sync::Arc};
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -18,6 +19,12 @@ struct Tile {
     source: usize,
 }
 
+struct ImageTexture {
+    texture: Texture,
+    // 保留来源分配，避免后续图像复用同一地址时误命中缓存。
+    _source: Arc<Surface>,
+}
+
 /// 一个窗口／画布使用一个实例。呈现会清空最终帧，并消费画布的 dirty 标记。
 /// 更换画布时须调用 invalidate_canvas；宿主应为每帧提供 Objective-C autorelease pool。
 pub struct Renderer {
@@ -28,6 +35,7 @@ pub struct Renderer {
     samplers: [SamplerState; 2],
     white: Texture,
     tiles: Vec<Option<Tile>>,
+    images: BTreeMap<usize, ImageTexture>,
     vertices: Vec<Vertex>,
     buffer: Option<Buffer>,
     previous: Option<CommandBuffer>,
@@ -86,6 +94,7 @@ impl Renderer {
             samplers,
             white,
             tiles: Vec::new(),
+            images: BTreeMap::new(),
             vertices: Vec::new(),
             buffer: None,
             previous: None,
@@ -183,12 +192,10 @@ impl Renderer {
         self.vertices.clear();
         for triangle in triangles {
             super::raster::validate_depth(triangle.vertices)?;
-            let textured = triangle.texture.is_some_and(|t| {
-                canvas
-                    .tiles()
-                    .get(t.tile as usize)
-                    .is_some_and(Option::is_some)
-            });
+            let textured = triangle
+                .texture
+                .as_ref()
+                .is_some_and(|t| t.source.surface(canvas).is_some());
             let interpolate = textured
                 || triangle
                     .vertices
@@ -221,6 +228,7 @@ impl Renderer {
                     ],
                     uv: triangle
                         .texture
+                        .as_ref()
                         .filter(|_| textured)
                         .map_or([0.; 2], |t| t.uv[index]),
                     padding: [0.; 2],
@@ -280,6 +288,41 @@ impl Renderer {
                 );
             }
         }
+        let mut images = BTreeMap::new();
+        for triangle in triangles {
+            let Some(super::FrameTexture {
+                source: TextureSource::Image(source),
+                ..
+            }) = &triangle.texture
+            else {
+                continue;
+            };
+            if source.size().contains(&0) {
+                continue;
+            }
+            let pointer = Arc::as_ptr(source) as usize;
+            if images.contains_key(&pointer) {
+                continue;
+            }
+            let image = if let Some(image) = self.images.remove(&pointer) {
+                image
+            } else {
+                validate_size(source.size())?;
+                let texture = texture(&self.device, source.size(), MTLTextureUsage::ShaderRead);
+                texture.replace_region(
+                    region(source.size()),
+                    0,
+                    source.pixels().as_ptr().cast(),
+                    source.stride() as u64,
+                );
+                ImageTexture {
+                    texture,
+                    _source: source.clone(),
+                }
+            };
+            images.insert(pointer, image);
+        }
+        self.images = images;
         canvas.clear_dirty();
         Ok(())
     }
@@ -310,8 +353,8 @@ impl Renderer {
         for (index, triangle) in triangles.iter().enumerate() {
             let source = triangle
                 .texture
-                .and_then(|t| canvas.tiles().get(t.tile as usize))
-                .and_then(Option::as_ref);
+                .as_ref()
+                .and_then(|t| t.source.surface(canvas));
             let Some(clip) = triangle.clip.unwrap_or(bounds).intersect(bounds) else {
                 continue;
             };
@@ -323,6 +366,7 @@ impl Renderer {
                 || source.is_some()
                     && triangle
                         .texture
+                        .as_ref()
                         .is_some_and(|t| t.uv.iter().flatten().any(|v| !v.is_finite()))
             {
                 continue;
@@ -335,9 +379,19 @@ impl Renderer {
             });
             let texture = triangle
                 .texture
-                .and_then(|t| self.tiles.get(t.tile as usize))
-                .and_then(Option::as_ref)
-                .map_or(&*self.white, |tile| &*tile.texture);
+                .as_ref()
+                .and_then(|t| match &t.source {
+                    TextureSource::Canvas(tile) => self
+                        .tiles
+                        .get(*tile as usize)
+                        .and_then(Option::as_ref)
+                        .map(|tile| &*tile.texture),
+                    TextureSource::Image(image) => self
+                        .images
+                        .get(&(Arc::as_ptr(image) as usize))
+                        .map(|image| &*image.texture),
+                })
+                .unwrap_or(&self.white);
             encoder.set_fragment_texture(0, Some(texture));
             encoder.draw_primitives(MTLPrimitiveType::Triangle, index as u64 * 3, 3);
         }

@@ -1,14 +1,31 @@
-use super::{Drawables, ProjectedVertex, Projection, Rect, TextureFilter};
+use super::{Drawables, ProjectedVertex, Projection, Rect, RenderTarget, Surface, TextureFilter};
 use crate::{Error, Result};
+use std::sync::Arc;
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// 画布面块或共享的只读图像；绘制列表持有图像直到后端提交完成。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TextureSource {
+    Canvas(u32),
+    Image(Arc<Surface>),
+}
+
+impl TextureSource {
+    pub fn surface<'a>(&'a self, canvas: &'a RenderTarget) -> Option<&'a Surface> {
+        match self {
+            Self::Canvas(tile) => canvas.tiles().get(*tile as usize).and_then(Option::as_ref),
+            Self::Image(image) => Some(image),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct FrameTexture {
-    pub tile: u32,
+    pub source: TextureSource,
     pub uv: [[f32; 2]; 3],
 }
 
 /// 已按图元顺序、相机和投影准备的设备输入。
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct DrawCommand {
     pub vertices: [ProjectedVertex; 3],
     pub texture: Option<FrameTexture>,
@@ -119,7 +136,7 @@ impl Drawables {
                             true,
                         ),
                         Some(FrameTexture {
-                            tile: triangle.tile,
+                            source: TextureSource::Canvas(triangle.tile),
                             uv: triangle.uv,
                         }),
                     )

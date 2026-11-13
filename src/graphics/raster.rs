@@ -342,7 +342,7 @@ impl Drawables {
         range: Option<[f32; 2]>,
     ) -> Result<bool> {
         self.visit_frame(projection, parent, range, |command| {
-            draw_command(output, canvas, command, filter)
+            draw_command(output, canvas, &command, filter)
         })
     }
 }
@@ -350,18 +350,21 @@ impl Drawables {
 pub(super) fn draw_command(
     output: &mut super::RenderTarget,
     canvas: Option<&super::RenderTarget>,
-    command: super::DrawCommand,
+    command: &super::DrawCommand,
     filter: TextureFilter,
 ) -> Result<bool> {
     let vertices = command.vertices;
     validate_depth(vertices)?;
-    if let Some(source) = command.texture {
-        let canvas = canvas.ok_or_else(|| Error::new(0, "纹理图元需要独立画布输入与帧输出"))?;
-        if let Some(texture) = canvas
-            .tiles()
-            .get(source.tile as usize)
-            .and_then(Option::as_ref)
-        {
+    if let Some(source) = &command.texture {
+        let texture = match &source.source {
+            super::TextureSource::Canvas(tile) => canvas
+                .ok_or_else(|| Error::new(0, "纹理图元需要独立画布输入与帧输出"))?
+                .tiles()
+                .get(*tile as usize)
+                .and_then(Option::as_ref),
+            super::TextureSource::Image(image) => Some(image.as_ref()),
+        };
+        if let Some(texture) = texture {
             if vertices.iter().any(|v| !v.rhw.is_finite() || v.rhw <= 0.) {
                 return Err(Error::new(0, "纹理插值需要有限的正 RHW"));
             }

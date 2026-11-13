@@ -1,7 +1,57 @@
 use katze_system2::graphics::{
-    Compositor, Drawable, Drawables, GraphicsBackend, ProjectedVertex, Projection, RenderTarget,
-    SoftwareBackend, Surface, TextureFilter, Vertex,
+    Compositor, DrawCommand, DrawList, Drawable, Drawables, FrameTexture, GraphicsBackend,
+    ProjectedVertex, Projection, Rect, RenderTarget, SoftwareBackend, Surface, TextureFilter,
+    TextureSource, Vertex,
 };
+use std::sync::Arc;
+
+#[test]
+fn image_commands_hold_their_pixels_and_mix_with_canvas_textures() {
+    let mut source = Surface::new([1, 1]).unwrap();
+    source.clear(0xffff0000);
+    let mut image = Arc::new(source);
+    let mut canvas_pixel = Surface::new([1, 1]).unwrap();
+    canvas_pixel.clear(0xff0000ff);
+    let mut canvas = RenderTarget::from_tiles([1, 1], [1, 1], vec![Some(canvas_pixel)]).unwrap();
+    let frame = DrawList {
+        commands: vec![
+            DrawCommand {
+                vertices: vertices(),
+                texture: Some(FrameTexture {
+                    source: TextureSource::Image(image.clone()),
+                    uv: [[0.5; 2]; 3],
+                }),
+                clip: Some(Rect::from_xywh(0, 0, 4, 8)),
+            },
+            DrawCommand {
+                vertices: vertices(),
+                texture: Some(FrameTexture {
+                    source: TextureSource::Canvas(0),
+                    uv: [[0.5; 2]; 3],
+                }),
+                clip: Some(Rect::from_xywh(4, 0, 4, 8)),
+            },
+        ],
+        filter: TextureFilter::Point,
+    };
+    let mut copy = frame.clone();
+    drop(frame);
+    Arc::make_mut(&mut image).clear(0xff00ff00);
+    let mut backend = SoftwareBackend;
+    let output = backend.render(&copy, &mut canvas, [8, 8]).unwrap();
+    for y in 0..8 {
+        for x in 0..8 {
+            assert_eq!(
+                output.pixel(x, y),
+                Some(if x < 4 { 0xffff0000 } else { 0xff0000ff })
+            );
+        }
+    }
+    copy.commands[0].texture.as_mut().unwrap().source = TextureSource::Image(image);
+    let changed = backend.render(&copy, &mut canvas, [8, 8]).unwrap();
+    assert_eq!(changed.pixel(1, 1), Some(0xff00ff00));
+    assert_eq!(changed.pixel(6, 1), Some(0xff0000ff));
+}
 
 fn texture() -> Surface {
     let mut pixels = vec![];

@@ -34,7 +34,7 @@ pub use particle::ParticleObject;
 mod raster;
 pub use raster::TextureFilter;
 mod frame;
-pub use frame::{DrawCommand, DrawList, FrameTexture, FrameTriangle};
+pub use frame::{DrawCommand, DrawList, FrameTexture, FrameTriangle, TextureSource};
 mod compositor;
 pub use compositor::Compositor;
 mod backend;

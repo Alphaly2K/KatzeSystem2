@@ -15,7 +15,7 @@ fn main() {
 fn check() -> Result<(), Box<dyn std::error::Error>> {
     use katze_system2::graphics::{
         DrawList, FrameTexture, FrameTriangle, GraphicsBackend, ProjectedVertex, Rect,
-        RenderTarget, Surface, TextureFilter, metal::Renderer,
+        RenderTarget, Surface, TextureFilter, TextureSource, metal::Renderer,
     };
     let mut renderer = Renderer::new()?;
     println!("Metal 设备：{}", renderer.device_name());
@@ -60,7 +60,7 @@ fn check() -> Result<(), Box<dyn std::error::Error>> {
             [[-4., -4.], [40., -4.], [-4., 40.]],
             [0x8080c040; 3],
             Some(FrameTexture {
-                tile: 0,
+                source: TextureSource::Canvas(0),
                 uv: [uv; 3],
             }),
         );
@@ -79,7 +79,7 @@ fn check() -> Result<(), Box<dyn std::error::Error>> {
     triangles.push(gradient);
     cases.push(triangles.clone());
     triangles.last_mut().unwrap().texture = Some(FrameTexture {
-        tile: 0,
+        source: TextureSource::Canvas(0),
         uv: [[0.17, 0.19], [1.13, 0.87], [-0.21, 1.31]],
     });
     cases.push(triangles);
@@ -87,11 +87,21 @@ fn check() -> Result<(), Box<dyn std::error::Error>> {
         [[0., 0.], [32., 0.], [0., 24.]],
         [0xff123456; 3],
         Some(FrameTexture {
-            tile: 1,
+            source: TextureSource::Canvas(1),
             uv: [[0.; 2]; 3],
         }),
     )]);
     cases.push(vec![]);
+    let image = std::sync::Arc::new(canvas.tiles()[0].as_ref().unwrap().clone());
+    let mut independent = cases[11].clone();
+    independent
+        .last_mut()
+        .unwrap()
+        .texture
+        .as_mut()
+        .unwrap()
+        .source = TextureSource::Image(image.clone());
+    cases.push(independent.clone());
     let mut comparisons = 0;
     let mut largest_error = 0;
     for filter in [TextureFilter::Point, TextureFilter::Linear] {
@@ -99,13 +109,11 @@ fn check() -> Result<(), Box<dyn std::error::Error>> {
             let mut expected = Surface::new([32, 24])?;
             for triangle in triangles {
                 let before = expected.clone();
-                if let Some((source, texture)) = triangle.texture.and_then(|t| {
-                    canvas
-                        .tiles()
-                        .get(t.tile as usize)
-                        .and_then(Option::as_ref)
-                        .map(|s| (s, t))
-                }) {
+                if let Some((source, texture)) = triangle
+                    .texture
+                    .as_ref()
+                    .and_then(|t| t.source.surface(&canvas).map(|s| (s, t)))
+                {
                     expected.blend_textured_triangle(triangle.vertices, texture.uv, source, filter);
                 } else {
                     expected.blend_projected_triangle(triangle.vertices);
@@ -163,6 +171,29 @@ fn check() -> Result<(), Box<dyn std::error::Error>> {
         after,
         renderer.render_offscreen(triangles, &mut canvas, [32, 24], TextureFilter::Point)?
     );
+    let before =
+        renderer.render_offscreen(&independent, &mut canvas, [32, 24], TextureFilter::Point)?;
+    let mut changed = Surface::new([4, 4])?;
+    changed.clear(0xff00ff00);
+    let changed = std::sync::Arc::new(changed);
+    let released = std::sync::Arc::downgrade(&changed);
+    independent
+        .last_mut()
+        .unwrap()
+        .texture
+        .as_mut()
+        .unwrap()
+        .source = TextureSource::Image(changed);
+    let after =
+        renderer.render_offscreen(&independent, &mut canvas, [32, 24], TextureFilter::Point)?;
+    assert_ne!(before, after);
+    assert_eq!(
+        after,
+        renderer.render_offscreen(&independent, &mut canvas, [32, 24], TextureFilter::Point)?
+    );
+    drop(independent);
+    renderer.render_offscreen(&[], &mut canvas, [32, 24], TextureFilter::Point)?;
+    assert!(released.upgrade().is_none());
     println!("通过 {comparisons} 组合成帧、缓存复用与变更上传；最大通道误差 {largest_error}");
     Ok(())
 }
