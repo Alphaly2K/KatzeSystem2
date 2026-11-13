@@ -55,6 +55,16 @@ impl Transform {
         self.matrix_override.as_ref()
     }
 
+    pub(crate) fn rotation_matrix(&self) -> [f32; 16] {
+        if let Some(matrix) = self.matrix_override {
+            return matrix;
+        }
+        let mut rotation = self.clone();
+        rotation.scale = [1.; 3];
+        rotation.rebuild_matrix();
+        rotation.matrix
+    }
+
     pub fn is_dirty(&self) -> bool {
         self.dirty
     }

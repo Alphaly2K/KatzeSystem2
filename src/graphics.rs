@@ -24,6 +24,7 @@ mod mosaic_task;
 mod shatter;
 mod shatter_task;
 pub use shatter_task::ShatterObject;
+mod echo;
 mod plane;
 mod rwipe;
 mod rwipe_task;

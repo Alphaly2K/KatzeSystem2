@@ -103,7 +103,6 @@ pub(super) fn core(index: u32) -> CoreHandler {
         | 184
         | 185
         | 187..=191
-        | 399
         | 429
         | 439
         | 543..=548
@@ -228,6 +227,8 @@ pub(crate) fn runtime(index: u32) -> RuntimeHandler {
         | 263
         | 339..=342
         | 343..=345
+        | 398
+        | 399
         | 402
         | 455
         | 732

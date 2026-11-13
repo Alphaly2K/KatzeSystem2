@@ -25,6 +25,8 @@ pub struct PlaneObject {
     parent_offset: Option<[f32; 3]>,
     shape_kind: u32,
     geometry_name: Vec<u8>,
+    echo: Option<super::echo::Echo>,
+    echo_paused: bool,
 }
 
 impl PlaneObject {
@@ -49,6 +51,8 @@ impl PlaneObject {
             parent_offset: None,
             shape_kind: 0,
             geometry_name: Vec::new(),
+            echo: None,
+            echo_paused: false,
         }
     }
 
@@ -82,6 +86,13 @@ impl PlaneObject {
 
     pub fn parent_offset(&self) -> Option<[f32; 3]> {
         self.parent_offset
+    }
+
+    fn stop_echo(&mut self, host: &mut dyn Host) -> Result<()> {
+        if let Some(mut echo) = self.echo.take() {
+            echo.release(self.id, drawings(host)?);
+        }
+        Ok(())
     }
 
     fn inherit_coordinates(&self, host: &mut dyn Host) -> Result<()> {
@@ -491,11 +502,15 @@ impl TaskObject for PlaneObject {
 
     fn update_body(
         &mut self,
-        _host: &mut dyn Host,
+        host: &mut dyn Host,
         _increment: u32,
         _budget: usize,
     ) -> Result<bool> {
-        // 运动与历史网格只能由尚未接入的专属命令创建；基础平面主体不推进脚本。
+        if !self.echo_paused {
+            if let Some(echo) = &mut self.echo {
+                echo.update(self.id, drawings(host)?);
+            }
+        }
         self.event_response = 0;
         Ok(true)
     }
@@ -538,6 +553,7 @@ impl TaskObject for PlaneObject {
                     self.size = [0.0; 2];
                 }
                 if command.code == 3 {
+                    self.stop_echo(host)?;
                     self.unregister_input(command.data[2], host)?;
                     self.control.deletion_requested = 1;
                 }
@@ -750,6 +766,13 @@ impl TaskObject for PlaneObject {
             }
             54 => self.parent_offset = None,
             47 | 48 => {
+                let paused = command.data[1] == 0;
+                if paused || self.echo_paused {
+                    if let Some(echo) = &self.echo {
+                        echo.set_display(id, u32::from(!paused), drawings(host)?);
+                    }
+                }
+                self.echo_paused = paused;
                 if command.code == 47 {
                     self.display = command.data[1];
                 }
@@ -856,10 +879,30 @@ impl TaskObject for PlaneObject {
                 self.hide_hint(host)?;
             }
             78 => self.update_property = command.data[1],
+            79 => {
+                self.stop_echo(host)?;
+                if command.data[0] != 0 {
+                    let bytes = buffers.data1.as_deref().unwrap_or(&[]);
+                    let drawings = drawings(host)?;
+                    if let Some(source) = drawings.get(id) {
+                        let mut echo = super::echo::Echo::new(bytes, source, self.size)?;
+                        echo.register(id, drawings)?;
+                        self.echo = Some(echo);
+                    }
+                }
+            }
+            80 => {
+                if let Some(echo) = &mut self.echo {
+                    echo.restore(buffers.data1.as_deref().unwrap_or(&[]))?;
+                }
+            }
             81 => {
                 let value = command.data[1];
                 self.blend_mode = if value <= 5 { value } else { 0 };
                 drawings(host)?.set_blend_mode(id, value);
+                if let Some(echo) = &self.echo {
+                    echo.set_blend_mode(id, value, drawings(host)?);
+                }
             }
             82 => {
                 drawings(host)?.set_projection_origin_mode(id, command.data[1]);
@@ -938,9 +981,15 @@ impl TaskObject for PlaneObject {
     }
 
     fn request_delete(&mut self, host: &mut dyn Host, _budget: usize) -> Result<bool> {
+        self.stop_echo(host)?;
         drawings(host)?.remove(self.id);
         self.unregister_input(0, host)?;
         self.control.deletion_requested = 1;
+        Ok(true)
+    }
+
+    fn prepare_release(&mut self, host: &mut dyn Host, _budget: usize) -> Result<bool> {
+        self.stop_echo(host)?;
         Ok(true)
     }
 }

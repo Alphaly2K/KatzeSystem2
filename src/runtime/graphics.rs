@@ -2,6 +2,7 @@ use super::{ObjectFactory, ObjectHost};
 use crate::kcs::{Interpreter, NativeReturn, format_string};
 use crate::task::CommandBuffers;
 use crate::{Error, Result, read};
+mod echo;
 
 impl<F: ObjectFactory> ObjectHost<'_, F> {
     pub(super) fn graphics_native(
@@ -10,6 +11,9 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         arguments: &[u8],
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
+        if matches!(index, 398 | 399) {
+            return self.echo_native(index, arguments, vm);
+        }
         if matches!(index, 858 | 859) {
             let count = if index == 858 { 4 } else { 12 };
             if arguments.len() != count {
