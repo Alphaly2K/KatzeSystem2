@@ -380,12 +380,11 @@ fn fes_control_flow_merges_blocks_and_keeps_local_state_per_instance() {
 }
 
 #[test]
-fn fes_preserves_mixed_text_columns_and_reports_orphan_terminators() {
-    let text =
-        "#OBJECT POS DISP\nlabel 0,0 1\n#START\nlabel text \"日本語//text\" // comment\nendif\n";
+fn fes_preserves_mixed_text_columns_and_skips_orphan_terminators() {
+    let text = "#OBJECT POS DISP\nlabel 0,0 1\n#START\nlabel text \"日本語//text\" // comment\nendif\nemit 7\n";
     let program = fes::Program::from_text(text.as_bytes()).unwrap();
     assert_eq!(program.declarations[0].header, b"OBJECT POS DISP");
-    assert_eq!(program.diagnostics.len(), 1);
+    assert!(program.diagnostics.is_empty());
     let mut vm = fes::Interpreter::new(program).unwrap();
     let mut state = State::new(8);
     assert!(matches!(
@@ -398,7 +397,15 @@ fn fes_preserves_mixed_text_columns_and_reports_orphan_terminators() {
     };
     assert_eq!(line.bytes, "label text \"日本語//text\"".as_bytes());
     vm.resume();
-    assert!(vm.run(&mut state, 20).is_err());
+    let Step::Event(fes::Event::Command(line)) = vm.run(&mut state, 20).unwrap() else {
+        panic!()
+    };
+    assert_eq!(line.bytes, b"emit 7");
+    vm.resume();
+    assert_eq!(
+        vm.run(&mut state, 20).unwrap(),
+        Step::Event(fes::Event::Frame)
+    );
 }
 
 #[test]
