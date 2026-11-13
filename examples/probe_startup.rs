@@ -23,7 +23,7 @@ struct ScriptedDevice {
 
 impl ScriptedDevice {
     fn new(keys: DeviceKeys) -> Self {
-        let clicks = std::env::var("KATZE_PROBE_CLICKS").map_or_else(
+        let mut clicks: Vec<(u32, [i32; 2])> = std::env::var("KATZE_PROBE_CLICKS").map_or_else(
             |_| Vec::new(),
             |value| {
                 value
@@ -41,6 +41,7 @@ impl ScriptedDevice {
                     .collect()
             },
         );
+        clicks.sort_by_key(|(frame, _)| *frame);
         Self {
             polls: 0,
             clicks,
