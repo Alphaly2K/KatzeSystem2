@@ -194,9 +194,10 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 .map(|(name, _, _, _)| name.to_string())
                 .collect();
             for name in names {
-                let Some(data) = archive.read(&name)? else {
+                let Some(source) = archive.open_source(&name)? else {
                     continue;
                 };
+                let data = support::read_source(source)?;
                 for needle in &needles {
                     let mut from = 0;
                     while let Some(position) = data[from..]

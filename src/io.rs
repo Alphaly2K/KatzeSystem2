@@ -77,6 +77,13 @@ impl FileSource {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let file =
             File::open(path).map_err(|error| Error::new(0, format!("文件打开失败：{error}")))?;
+        if !file
+            .metadata()
+            .map_err(|error| Error::new(0, format!("文件属性读取失败：{error}")))?
+            .is_file()
+        {
+            return Err(Error::new(0, "文件读取源需要普通文件"));
+        }
         Ok(Self {
             file: Mutex::new(file),
         })

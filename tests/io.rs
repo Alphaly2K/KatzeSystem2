@@ -63,6 +63,7 @@ fn file_source_reads_concurrently_without_sharing_reader_positions() {
         .open(&path)
         .unwrap();
     let scratch = Scratch(path);
+    assert!(FileSource::open(scratch.0.parent().unwrap()).is_err());
     let bytes: Vec<_> = (0..4096).map(|i| i as u8).collect();
     file.write_all(&bytes).unwrap();
     drop(file);

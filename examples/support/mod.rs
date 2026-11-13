@@ -13,14 +13,14 @@ use katze_system2::{
     expression::State,
     graphics::{DrawingContext, GraphicsFactory, RenderTarget},
     input::{ButtonSource, DeviceBinding, DeviceKeys, InputFactory},
-    io::{FileSource, ReadSource},
+    io::{FileSource, SharedSource},
     kcs::{Program, ResourceServices},
     memory::SharedMemory,
-    resource::{ArchiveConfig, ResourceMode},
+    resource::{ArchiveConfig, KifEntrySource, ResourceMode},
     runtime::{KcsFactory, ProgramLoader, RootObject, Runtime, fes::FesFactory, kind},
     save::SaveServices,
 };
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 
 mod configuration;
 use configuration::ConfigurationFiles;
@@ -138,15 +138,15 @@ struct Entry {
 }
 
 pub struct Archive {
-    file: FileSource,
-    cipher: Option<BlowfishLE>,
+    file: SharedSource,
+    key: Option<u32>,
     entries: Vec<Entry>,
     index: BTreeMap<String, usize>,
 }
 
 impl Archive {
     pub fn open(path: &str) -> std::result::Result<Self, Box<dyn std::error::Error>> {
-        let file = FileSource::open(path)?;
+        let file = Arc::new(FileSource::open(path)?) as SharedSource;
         let mut head = vec![0; 8];
         file.read_exact_at(0, &mut head)?;
         if &head[..4] != b"KIF\0" {
@@ -159,13 +159,11 @@ impl Archive {
             .get(..64)
             .is_some_and(|name| name.split(|&b| b == 0).next() == Some(b"__key__.dat"));
         let mut entries = Vec::new();
-        let mut cipher = None;
+        let mut archive_key = None;
         if encrypted {
             let length = u32::from_le_bytes(directory[68..72].try_into().unwrap());
-            let key = katze_system2::kcs::ScriptRandom::seeded(length)
-                .next_integer()
-                .to_le_bytes();
-            let value = BlowfishLE::new_from_slice(&key).unwrap();
+            let key = katze_system2::kcs::ScriptRandom::seeded(length).next_integer();
+            let value = BlowfishLE::new_from_slice(&key.to_le_bytes()).unwrap();
             for i in 1..count {
                 let base = i * 72;
                 let mut block = [0; 8];
@@ -183,7 +181,7 @@ impl Archive {
                     length: u32::from_le_bytes(block[4..].try_into().unwrap()),
                 });
             }
-            cipher = Some(value);
+            archive_key = Some(key);
         } else {
             for i in 0..count {
                 let base = i * 72;
@@ -207,7 +205,7 @@ impl Archive {
             .collect();
         Ok(Self {
             file,
-            cipher,
+            key: archive_key,
             entries,
             index,
         })
@@ -220,7 +218,7 @@ impl Archive {
         if let Some(&position) = self.index.get(&name.to_ascii_uppercase()) {
             return Some(position);
         }
-        self.cipher.as_ref()?;
+        self.key?;
         for (position, entry) in self.entries.iter().enumerate() {
             let end = entry
                 .raw
@@ -234,21 +232,17 @@ impl Archive {
         None
     }
 
-    pub fn read(&self, name: &str) -> Result<Option<Vec<u8>>> {
+    pub fn open_source(&self, name: &str) -> Result<Option<SharedSource>> {
         let Some(position) = self.locate(name) else {
             return Ok(None);
         };
         let entry = &self.entries[position];
-        let mut data = vec![0; entry.length as usize];
-        self.file
-            .read_exact_at(entry.offset as u64, &mut data)
-            .map_err(|error| Error::new(0, format!("归档读取失败：{error}")))?;
-        if let Some(cipher) = &self.cipher {
-            for block in data.chunks_mut(8).filter(|block| block.len() == 8) {
-                cipher.decrypt_block((&mut *block).into());
-            }
-        }
-        Ok(Some(data))
+        Ok(Some(Arc::new(KifEntrySource::new(
+            self.file.clone(),
+            entry.offset as u64,
+            entry.length,
+            self.key,
+        )?)))
     }
 
     /// 枚举已还原的条目名及原始名称字节；仅服务诊断输出。
@@ -269,6 +263,20 @@ impl Archive {
     }
 }
 
+fn open_file(path: impl AsRef<std::path::Path>) -> Option<SharedSource> {
+    FileSource::open(path)
+        .ok()
+        .map(|source| Arc::new(source) as SharedSource)
+}
+
+pub fn read_source(source: SharedSource) -> Result<Vec<u8>> {
+    let length =
+        usize::try_from(source.len()?).map_err(|_| Error::new(0, "资源大小超出宿主范围"))?;
+    let mut bytes = vec![0; length];
+    source.read_exact_at(0, &mut bytes)?;
+    Ok(bytes)
+}
+
 pub struct Router {
     pub root: String,
     pub config: ArchiveConfig,
@@ -280,14 +288,18 @@ pub struct Router {
 
 impl Router {
     fn read_name(&mut self, name: &str, mode: ResourceMode) -> Result<Option<Vec<u8>>> {
+        self.open_name(name, mode)?.map(read_source).transpose()
+    }
+
+    fn open_name(&mut self, name: &str, mode: ResourceMode) -> Result<Option<SharedSource>> {
         let inner = name.rsplit('/').next().unwrap_or(name);
         for patch in &mut self.patches {
-            if let Some(bytes) = patch.read(inner)? {
+            if let Some(bytes) = patch.open_source(inner)? {
                 return Ok(Some(bytes));
             }
         }
         if mode == ResourceMode::File {
-            return Ok(std::fs::read(std::path::Path::new(&self.root).join(name)).ok());
+            return Ok(open_file(std::path::Path::new(&self.root).join(name)));
         }
         let (prefix, inner) = name.split_once('/').unwrap_or(("", name));
         for entry in &self.config.entries {
@@ -300,7 +312,7 @@ impl Router {
             let loose = || {
                 let directory = String::from_utf8_lossy(&entry.directory).replace('\\', "/");
                 let path = std::path::Path::new(&self.root).join(directory).join(inner);
-                std::fs::read(path).ok()
+                open_file(path)
             };
             if mode == ResourceMode::LooseFirst {
                 if let Some(bytes) = loose() {
@@ -308,7 +320,7 @@ impl Router {
                 }
             }
             if let Some(archive) = archive {
-                if let Some(bytes) = archive.read(inner)? {
+                if let Some(bytes) = archive.open_source(inner)? {
                     return Ok(Some(bytes));
                 }
             }
@@ -373,6 +385,11 @@ impl ResourceServices for Router {
             );
         }
         result
+    }
+
+    fn open(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<SharedSource>> {
+        let name = String::from_utf8_lossy(name).replace('\\', "/");
+        self.open_name(&name, mode)
     }
 
     fn read_utf16(&mut self, name: &[u16], mode: ResourceMode) -> Result<Option<Vec<u8>>> {

@@ -4,12 +4,14 @@ mod config;
 mod directory;
 mod folder;
 mod kif;
+mod kif_source;
 mod router;
 mod xml;
 pub use config::{ArchiveConfig, ArchiveEntry};
 pub use directory::{ArchiveDirectory, DirectoryEntry};
 pub use folder::FolderPaths;
 pub use kif::{KifArchive, verification_seed};
+pub use kif_source::KifEntrySource;
 pub use router::{
     ArchiveMount, ResourceData, ResourceGroup, ResourceMember, ResourceMode, ResourceRouter,
     ResourceSlot, ResourceSource,
