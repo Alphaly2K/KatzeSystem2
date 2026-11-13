@@ -43,7 +43,7 @@ pub(super) fn core(index: u32) -> CoreHandler {
         | 1046
         | 1051
         | 1063 => CoreHandler::Text,
-        33 | 34 | 50..=64 | 218 | 318 | 319 | 397 => CoreHandler::Scalar,
+        33 | 34 | 50..=64 | 218 | 318..=320 | 397 => CoreHandler::Scalar,
         359..=361
         | 533
         | 565

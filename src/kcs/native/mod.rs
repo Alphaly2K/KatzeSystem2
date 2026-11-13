@@ -6,6 +6,7 @@ mod registry;
 pub(crate) use registry::{RuntimeHandler, runtime as runtime_native_handler};
 mod scalar;
 mod settings;
+mod spline;
 mod storage;
 mod system;
 mod text;

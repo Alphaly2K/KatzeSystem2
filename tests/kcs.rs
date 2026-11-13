@@ -49,6 +49,69 @@ fn rectangle_intersection_uses_signed_endpoints_and_clears_empty_results() -> Re
     Ok(())
 }
 
+#[test]
+fn spline_preparation_keeps_control_points_boundary_coefficients_and_guard_bytes() -> Result<()> {
+    use kcs::Host;
+    let mut vm = kcs::Interpreter::new(kcs::Program::from_code(&[], vec![0xa5; 88], 64)?, vec![])?;
+    let mut numbers = katze_system2::expression::State::new(0);
+    let mut host = kcs::CoreHost::new(&mut numbers);
+    let input: Vec<_> = (0..4)
+        .flat_map(|i| [i as f32, (i * i * i) as f32, 0., 0., 0.].map(f32::to_bits))
+        .flat_map(u32::to_le_bytes)
+        .collect();
+    vm.write(4, &input)?;
+    let arguments = |address: u32, count: u32| {
+        [address, count]
+            .into_iter()
+            .flat_map(u32::to_le_bytes)
+            .collect::<Vec<_>>()
+    };
+    for count in [0, 1, 2, u32::MAX] {
+        assert_eq!(
+            host.call(320, &arguments(4, count), &mut vm)?,
+            kcs::NativeReturn::Continue
+        );
+        assert_eq!(vm.read(4, 80)?, input);
+    }
+    assert_eq!(
+        host.call(320, &arguments(4, 4), &mut vm)?,
+        kcs::NativeReturn::Continue
+    );
+    let expected = [
+        0,
+        0,
+        0x3f2f_fffc,
+        0xbf97_fffe,
+        0x3fc0_0000,
+        0x3f80_0000,
+        0x3f80_0000,
+        0x4034_0000,
+        0x4054_0001,
+        0x3f5f_fffe,
+        0x4000_0000,
+        0x4100_0000,
+        0x4141_0000,
+        0x40be_0000,
+        0x3f80_0003,
+        0x4040_0000,
+        0x41d8_0000,
+        0x41d7_8000,
+        0x403e_aaac,
+        0x3f80_0003,
+    ]
+    .into_iter()
+    .flat_map(u32::to_le_bytes)
+    .collect::<Vec<_>>();
+    assert_eq!(vm.read(4, 80)?, expected);
+    assert_eq!(vm.read(0, 4)?, [0xa5; 4]);
+    assert_eq!(vm.read(84, 4)?, [0xa5; 4]);
+    let before = vm.read(0, 88)?.to_vec();
+    assert!(host.call(320, &arguments(0x7fff_ffff, 5), &mut vm).is_err());
+    assert!(host.call(320, &[0; 4], &mut vm).is_err());
+    assert_eq!(vm.read(0, 88)?, before);
+    Ok(())
+}
+
 fn ins(code: &mut Vec<u8>, op: u8, args: &[(u8, u32)]) {
     code.push(op);
     for &(flags, n) in args {

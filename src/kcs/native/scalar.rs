@@ -15,11 +15,14 @@ pub(super) fn call(
         return Ok(NativeReturn::Value(host.random.next_float().to_bits()));
     }
     let count = match index {
-        59 | 61 | 397 => 2,
+        59 | 61 | 320 | 397 => 2,
         218 | 318 => 5,
         _ => 1,
     };
     let args = words(arguments, count, vm.pc)?;
+    if index == 320 {
+        return super::spline::prepare(&args, vm);
+    }
     Ok(match index {
         218 => {
             let source: [i32; 4] = {
