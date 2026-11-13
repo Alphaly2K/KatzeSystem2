@@ -1,14 +1,18 @@
-use super::{Compositor, mosaic::Mosaic};
+use super::{
+    Compositor,
+    mosaic::{Mosaic, MosaicKind},
+};
 use crate::kcs::{Host, Interpreter};
 use crate::runtime::{BaseObject, TaskObject};
 use crate::task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock};
 use crate::{Error, Result, read};
 
-/// 类型 50 的双画面马赛克转场；帧资源由合成器随任务释放。
+/// 类型 50 的双画面马赛克与类型 51 的马赛克淡出；帧资源随任务释放。
 pub struct MosaicObject {
     base: BaseObject,
     id: u32,
     ready: bool,
+    kind: MosaicKind,
 }
 
 impl MosaicObject {
@@ -17,6 +21,14 @@ impl MosaicObject {
             base: BaseObject::new(),
             id,
             ready: true,
+            kind: MosaicKind::Dual,
+        }
+    }
+
+    pub fn fading(id: u32) -> Self {
+        Self {
+            kind: MosaicKind::Fade,
+            ..Self::new(id)
         }
     }
 
@@ -73,6 +85,29 @@ impl TaskObject for MosaicObject {
     fn set_creation_context(&mut self, context: &[u8]) -> Result<()> {
         self.base.set_creation_context(context)
     }
+    fn initialize_resources(&mut self, host: &mut dyn Host) -> Result<()> {
+        if self.kind != MosaicKind::Fade {
+            return Ok(());
+        }
+        let available = host.reserve_auxiliary_targets(1)?;
+        let compositor = compositor(host)?;
+        let image = available
+            .then_some(&compositor.auxiliary_targets)
+            .and_then(|targets| targets.first())
+            .and_then(|target| target.tiles()[0].as_ref())
+            .cloned();
+        compositor.auxiliary_targets.clear();
+        self.ready = image.is_some();
+        if let Some(image) = image {
+            compositor
+                .mosaics
+                .entries
+                .insert(self.id, Mosaic::fading(image));
+            compositor.mosaics.selected = Some(self.id);
+        }
+        Ok(())
+    }
+
     fn update_body(&mut self, host: &mut dyn Host, _: u32, _: usize) -> Result<bool> {
         if let Some(effect) = compositor(host)?.mosaics.entries.get_mut(&self.id) {
             effect.now = self.base.clock().elapsed();
@@ -117,8 +152,16 @@ impl TaskObject for MosaicObject {
                     .get(&self.id)
                     .map_or(0, |effect| effect.state);
             }
-            525 if self.ready => {
-                let bytes = read::range(buffers.data1.as_deref().unwrap_or_default(), 0, 20)?;
+            525 | 528 if self.ready && (command.code == 528) == (self.kind == MosaicKind::Fade) => {
+                let bytes = read::range(
+                    buffers.data1.as_deref().unwrap_or_default(),
+                    0,
+                    if self.kind == MosaicKind::Fade {
+                        24
+                    } else {
+                        20
+                    },
+                )?;
                 let values: [u32; 5] = std::array::from_fn(|i| {
                     u32::from_le_bytes(bytes[i * 4..i * 4 + 4].try_into().unwrap())
                 });
@@ -131,20 +174,24 @@ impl TaskObject for MosaicObject {
                 effect.duration = values[2];
                 effect.block = values[3] as i32;
                 effect.algorithm = values[4];
-                if effect.duration < 2 {
+                if self.kind == MosaicKind::Dual && effect.duration < 2 {
                     self.ready = false;
                     return Ok(CommandOutcome::finished(false));
                 }
                 if effect.state != 0 {
                     effect.restart(now);
                 }
-                self.capture(0, host)?;
+                if self.kind == MosaicKind::Fade {
+                    effect.prepare_fade()?;
+                } else {
+                    self.capture(0, host)?;
+                }
             }
-            526 if self.ready => {
+            526 if self.ready && self.kind == MosaicKind::Dual => {
                 self.capture(1, host)?;
                 compositor(host)?.auxiliary_targets.clear();
             }
-            527 if self.ready => {
+            527 | 529 if self.ready && (command.code == 529) == (self.kind == MosaicKind::Fade) => {
                 compositor(host)?
                     .mosaics
                     .entries
@@ -152,7 +199,7 @@ impl TaskObject for MosaicObject {
                     .or_insert_with(Mosaic::default)
                     .set_state(command.data[1], now);
             }
-            525..=527 => {}
+            525..=529 if (command.code >= 528) == (self.kind == MosaicKind::Fade) => {}
             3 => {
                 self.release(host)?;
                 return self

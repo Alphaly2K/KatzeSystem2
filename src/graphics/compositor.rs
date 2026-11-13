@@ -88,8 +88,10 @@ impl Compositor {
         let mut frame = self
             .drawables
             .compose(&projection, parent, filter, Some([0., far]))?;
-        if let Some(image) = image {
-            frame.commands.extend(super::mosaic::screen_commands(image));
+        if let Some((image, opacity)) = image {
+            frame
+                .commands
+                .extend(super::mosaic::screen_commands(image, opacity));
         }
         frame.commands.extend(
             self.drawables

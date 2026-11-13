@@ -61,6 +61,7 @@ pub mod kind {
     pub const SLIDER: u32 = 42;
     pub const STRING_PLANE: u32 = 48;
     pub const RENDER_WMOSAIC: u32 = 50;
+    pub const RENDER_FMOSAIC: u32 = 51;
     pub const STRING_PLANE_UTF8: u32 = 63;
     pub const CAMERA_2D: u32 = 65;
     /// 粒子任务（`kcTaskParticle`）；控制属性已接入，装载、播放及绘制待接入。
@@ -727,7 +728,11 @@ fn create_object_impl<F: ObjectFactory>(
         factory,
         resources,
         host,
-        ..
+        numbers,
+        running,
+        fes_scene,
+        budget,
+        limit,
     } = store;
     if tree.node(parent).is_none() {
         return Err(Error::new(0, "任务父级不存在"));
@@ -747,6 +752,19 @@ fn create_object_impl<F: ObjectFactory>(
     {
         state.initialize_pointer(device.pointer()?.position);
     }
+    object.initialize_resources(&mut ObjectHost {
+        numbers,
+        host,
+        resources,
+        tree,
+        objects,
+        running,
+        factory,
+        fes_scene,
+        context: Vec::new(),
+        budget,
+        limit,
+    })?;
     object.register_graphics(&mut resources.compositor.drawables)?;
     tree.insert(parent, id, kind)?;
     objects.insert(id, object);

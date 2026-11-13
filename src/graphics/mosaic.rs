@@ -3,12 +3,20 @@ use crate::{Error, Result};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum MosaicKind {
+    #[default]
+    Dual,
+    Fade,
+}
+
 #[derive(Clone)]
 struct Level {
     image: Arc<Surface>,
     cell: u32,
     time: u32,
     source: usize,
+    opacity: u8,
 }
 
 #[derive(Default)]
@@ -26,6 +34,8 @@ impl Mosaics {
 
 #[derive(Default)]
 pub(crate) struct Mosaic {
+    pub kind: MosaicKind,
+    opacity: u8,
     pub far: f32,
     pub duration: u32,
     pub block: i32,
@@ -44,7 +54,7 @@ impl Mosaic {
     pub fn capture(&mut self, index: usize, surface: Surface) -> Result<()> {
         let image = Arc::new(surface);
         self.frames[index] = Some(image.clone());
-        let mut levels = self.levels(image, index)?;
+        let mut levels = self.levels(image, index, self.duration >> 1)?;
         if index == 0 {
             self.levels = levels;
         } else {
@@ -65,19 +75,36 @@ impl Mosaic {
         Ok(())
     }
 
-    fn levels(&self, image: Arc<Surface>, source: usize) -> Result<Vec<Level>> {
+    pub fn fading(surface: Surface) -> Self {
+        Self {
+            kind: MosaicKind::Fade,
+            far: 1_000_000.,
+            frames: [Some(Arc::new(surface)), None],
+            ..Default::default()
+        }
+    }
+
+    pub fn prepare_fade(&mut self) -> Result<()> {
+        let image = self.frames[0].as_ref().unwrap().clone();
+        self.levels = self.levels(image, 0, self.duration)?;
+        self.sample(0)?;
+        Ok(())
+    }
+
+    fn levels(&self, image: Arc<Surface>, source: usize, steps: u32) -> Result<Vec<Level>> {
         let size = image.size();
         let mut levels = vec![Level {
             image,
             cell: 1,
             time: 0,
             source,
+            opacity: 255,
         }];
-        let half = self.duration >> 1;
         let delta = self.block as f32 - 1.;
         let mut previous = 1;
-        for time in 1..half {
-            let cell = ((time as f32 / half as f32) * delta + 1.) as i32;
+        for time in 1..steps {
+            let fraction = time as f32 / steps as f32;
+            let cell = (fraction * delta + 1.) as i32;
             if cell == previous {
                 continue;
             }
@@ -92,6 +119,11 @@ impl Mosaic {
                 cell,
                 time,
                 source,
+                opacity: if self.kind == MosaicKind::Fade {
+                    !((fraction * 255.) as u8)
+                } else {
+                    255
+                },
             });
             previous = cell as i32;
         }
@@ -122,8 +154,12 @@ impl Mosaic {
                 .map(|index| &self.levels[index.saturating_sub(1)])
         };
         let Some(level) = selected else {
+            if self.kind == MosaicKind::Fade {
+                self.opacity = 0;
+            }
             return Ok(self.last_source);
         };
+        self.opacity = level.opacity;
         if self.last_time == Some(level.time) {
             return Ok(self.last_source);
         }
@@ -164,14 +200,17 @@ impl Mosaic {
         Ok(level.source)
     }
 
-    pub fn frame(&mut self) -> Result<Option<Arc<Surface>>> {
+    pub fn frame(&mut self) -> Result<Option<(Arc<Surface>, u8)>> {
         let selected = if self.state != 0 {
             let elapsed = self.now.wrapping_sub(self.start).min(self.deadline);
             self.sample(elapsed)?
         } else {
             0
         };
-        let frame = self.frames[selected].clone();
+        let opacity = if self.state == 0 { 255 } else { self.opacity };
+        let frame = self.frames[selected]
+            .as_ref()
+            .map(|frame| (frame.clone(), opacity));
         if self.now >= self.deadline {
             self.state = 0;
         }
@@ -198,13 +237,13 @@ fn flip(surface: &mut Surface) {
     }
 }
 
-pub(crate) fn screen_commands(image: Arc<Surface>) -> [DrawCommand; 2] {
+pub(crate) fn screen_commands(image: Arc<Surface>, opacity: u8) -> [DrawCommand; 2] {
     let [width, height] = image.size().map(|value| value as f32);
     let vertices =
         [[0., 0.], [width, 0.], [0., height], [width, height]].map(|position| ProjectedVertex {
             position: [position[0] - 0.5, position[1] - 0.5, 0.],
             rhw: 1.,
-            color: 0xffff_ffff,
+            color: 0x00ff_ffff | (u32::from(opacity) << 24),
         });
     let uv = [[0., 0.], [1., 0.], [0., 1.], [1., 1.]];
     [[0, 1, 2], [2, 1, 3]].map(|indices| DrawCommand {
@@ -318,5 +357,25 @@ mod tests {
             effect.frames[1].as_ref().unwrap().pixel(2, 0),
             Some(0xff3a_7a74)
         );
+    }
+
+    #[test]
+    fn fading_mosaic_uses_level_opacity_and_becomes_transparent_past_the_table() {
+        for algorithm in [0, 1] {
+            let mut effect = Mosaic::fading(source(0));
+            effect.duration = 8;
+            effect.block = 5;
+            effect.algorithm = algorithm;
+            effect.prepare_fade().unwrap();
+            effect.set_state(1, 0);
+            for (elapsed, alpha) in [255, 255, 192, 192, 128, 128, 0, 0, 0]
+                .into_iter()
+                .enumerate()
+            {
+                effect.sample(elapsed as u32).unwrap();
+                assert_eq!(effect.opacity, alpha);
+            }
+            assert_eq!(effect.last_time, Some(4));
+        }
     }
 }

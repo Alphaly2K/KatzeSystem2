@@ -191,3 +191,63 @@ fn unavailable_targets_and_short_duration_leave_the_live_scene_visible() {
         rt.destroy(id).unwrap();
     }
 }
+
+#[test]
+fn fading_mosaic_captures_during_creation_then_blends_over_the_live_scene() {
+    for (algorithm, duration) in [(0, 8), (1, 8), (0, 0), (1, 1)] {
+        let mut rt = engine();
+        execute(&mut rt, &[(858, &[1]), (859, &[0, 0, 10f32.to_bits()])]);
+        let id = rt.create(0, kind::RENDER_FMOSAIC, b"fade", b"").unwrap();
+        assert!(rt.compositor().auxiliary_targets().is_empty());
+        rt.drawables_mut().set_color(100, 0xffab_cdef, u32::MAX);
+        execute(
+            &mut rt,
+            &[
+                (
+                    856,
+                    &[id, duration, 0, 10f32.to_bits(), 5, algorithm, u32::MAX],
+                ),
+                (857, &[id, 3]),
+                (856, &[0]),
+                (857, &[0]),
+            ],
+        );
+        if duration < 2 {
+            assert_eq!(state(&mut rt, id), 3);
+            rt.update(duration, 1).unwrap();
+            rt.compose_frame().unwrap();
+            assert_eq!(state(&mut rt, id), 0);
+            rt.destroy(id).unwrap();
+            continue;
+        }
+        let mut output = RenderTarget::new([8, 6]).unwrap();
+        rt.compose_frame()
+            .unwrap()
+            .render_into(&mut output, rt.drawing().target.as_ref())
+            .unwrap();
+        assert_eq!(output.pixel(0, 0), Some(0xff11_2233));
+        rt.update(2, 1).unwrap();
+        let frame = rt.compose_frame().unwrap();
+        assert!(
+            frame
+                .commands
+                .iter()
+                .any(|command| command.vertices[0].color == 0xc0ff_ffff)
+        );
+        let mut output = RenderTarget::new([8, 6]).unwrap();
+        frame
+            .render_into(&mut output, rt.drawing().target.as_ref())
+            .unwrap();
+        assert_eq!(output.pixel(0, 0), Some(0xd037_4c61));
+        assert_eq!(state(&mut rt, id), 3);
+        rt.update(8, 1).unwrap();
+        let mut output = RenderTarget::new([8, 6]).unwrap();
+        rt.compose_frame()
+            .unwrap()
+            .render_into(&mut output, rt.drawing().target.as_ref())
+            .unwrap();
+        assert_eq!(output.pixel(0, 0), Some(0xffab_cdef));
+        assert_eq!(state(&mut rt, id), 0);
+        rt.destroy(id).unwrap();
+    }
+}
