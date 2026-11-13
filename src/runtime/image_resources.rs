@@ -71,32 +71,26 @@ impl Resources {
                     return Err(Error::new(0, "图层资源名超过基线缓冲区范围"));
                 }
                 let animation_name = [&layer, b".anm".as_slice()].concat();
-                if services
+                let animated = services
                     .read(&animation_name, ResourceMode::LooseFirst)?
-                    .is_some()
-                {
-                    return Err(Error::new(0, "独立图像资源的 ANM 图层尚未接入"));
-                }
+                    .is_some();
                 layer.push(b'.');
                 layer.extend_from_slice(extension);
                 let Some(bytes) = services.read(&layer, ResourceMode::LooseFirst)? else {
                     continue;
                 };
                 if !bytes.is_empty() {
-                    if let Some(frame) = crate::hg3::decode_frame(&bytes, 0)? {
-                        layers.push(Image::from_frame(frame)?);
+                    if let Some(image) = source_snapshot(&bytes, (!animated).then_some(0))? {
+                        layers.push(image);
                     }
                 }
             }
             return Ok(Image::from_layers(&layers)?.map(|image| (image, None)));
         }
         let animation_name = [&name[..end], b".anm"].concat();
-        if let Some(animation) = services.read(&animation_name, ResourceMode::LooseFirst)? {
-            if animation.is_empty() {
-                return Ok(None);
-            }
-            return Err(Error::new(0, "独立图像资源的 ANM 来源尚未接入"));
-        }
+        let animated = services
+            .read(&animation_name, ResourceMode::LooseFirst)?
+            .is_some();
         let reference = ImageReference::parse(name)?;
         let Some(bytes) = services.read(&reference.name, ResourceMode::LooseFirst)? else {
             return Ok(None);
@@ -104,14 +98,28 @@ impl Resources {
         if bytes.is_empty() {
             return Ok(None);
         }
-        let image = crate::hg3::decode_frame(&bytes, reference.frame)?
-            .map(Image::from_frame)
-            .transpose()?;
+        let image = source_snapshot(&bytes, (!animated).then_some(reference.frame))?;
         Ok(image.map(|image| {
             let has_alpha = image.info().reserved != 0;
             (image, Some(has_alpha))
         }))
     }
+}
+
+fn source_snapshot(bytes: &[u8], frame: Option<i32>) -> Result<Option<Image>> {
+    // ANM 来源初始暂停，显示多帧缓存的最小无符号 ID；静态来源按指定 ID 查询。
+    let frame = match frame {
+        Some(frame) => frame,
+        None => crate::hg3::Metadata::parse(bytes)?
+            .frames
+            .iter()
+            .map(|frame| frame.id)
+            .min()
+            .unwrap_or(0) as i32,
+    };
+    crate::hg3::decode_frame(bytes, frame)?
+        .map(Image::from_frame)
+        .transpose()
 }
 
 impl<F: ObjectFactory> ObjectHost<'_, F> {

@@ -311,7 +311,7 @@ fn loaded_resources_resolve_before_frame_selection_and_preserve_geometry_and_att
 }
 
 #[test]
-fn failed_loads_skip_allocation_and_validate_animation_and_name_sources() {
+fn failed_loads_skip_allocation_and_validate_name_sources() {
     let mut code = Vec::new();
     call(&mut code, 710, &[u32::MAX]);
     ins(&mut code, 0x26, &[120]);
@@ -324,6 +324,7 @@ fn failed_loads_skip_allocation_and_validate_animation_and_name_sources() {
         b"empty",
         b"art:99",
         b"emptyanim",
+        b"animate",
         b"art:7",
     ];
     for _ in names {
@@ -361,10 +362,8 @@ fn failed_loads_skip_allocation_and_validate_animation_and_name_sources() {
             .any(|name| name == b"image/art_1.hg3")
     );
 
-    for (name, error) in [
-        (b"animate".as_slice(), "ANM 来源"),
-        (b"\xe7\x94\xbb\xe5\x83\x8f", "CP932"),
-    ] {
+    {
+        let (name, error) = (b"\xe7\x94\xbb\xe5\x83\x8f".as_slice(), "CP932");
         let mut code = Vec::new();
         call(&mut code, 710, &[64]);
         let mut runtime = self::runtime(&code, 1);
@@ -381,6 +380,73 @@ fn failed_loads_skip_allocation_and_validate_animation_and_name_sources() {
             .unwrap();
         assert!(runtime.update(0, 1).unwrap_err().message.contains(error));
         assert!(runtime.image_resource(1).is_err());
+    }
+}
+
+#[test]
+fn animation_sources_start_with_the_smallest_cached_frame_for_single_and_layered_snapshots() {
+    struct Animated {
+        sidecar: Option<Vec<u8>>,
+        image: Vec<u8>,
+    }
+    impl ResourceServices for Animated {
+        fn resolve(&mut self, _: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+            Ok([name, b".hg3"].concat())
+        }
+        fn read(&mut self, name: &[u8], _: ResourceMode) -> Result<Option<Vec<u8>>> {
+            Ok(match name {
+                b"single.anm" | b"art_1.anm" => self.sidecar.clone(),
+                b"single.hg3" | b"art_1.hg3" => Some(self.image.clone()),
+                _ => None,
+            })
+        }
+    }
+    let mut image = blob();
+    let frame_length = (image.len() - 12) as u32;
+    image[12..16].copy_from_slice(&frame_length.to_le_bytes());
+    image[16..20].copy_from_slice(&9u32.to_le_bytes());
+    image[48..52].copy_from_slice(&9i32.to_le_bytes());
+    let mut second = blob();
+    second[16..20].copy_from_slice(&2u32.to_le_bytes());
+    second[48..52].copy_from_slice(&2i32.to_le_bytes());
+    image.extend(&second[12..]);
+    let mut animation = b"ANM\0".to_vec();
+    animation.extend([0u32, 1].into_iter().flat_map(u32::to_le_bytes));
+    animation.resize(100, 0);
+    animation[40..44].copy_from_slice(&9u32.to_le_bytes());
+    for name in [b"single\0".as_slice(), b"art,1\0"] {
+        for sidecar in [None, Some(animation.clone()), Some(vec![]), Some(vec![1])] {
+            let loaded = sidecar.is_some();
+            let mut code = Vec::new();
+            call(&mut code, 710, &[64]);
+            ins(&mut code, 0x26, &[0]);
+            call(&mut code, 65, &[]);
+            let mut runtime = runtime(&code, 1);
+            runtime.set_resources(Animated {
+                sidecar,
+                image: image.clone(),
+            });
+            let task = runtime.create(0, kind::ORDINARY, b"snapshot", b"").unwrap();
+            runtime
+                .object_mut(task)
+                .unwrap()
+                .interpreter_mut()
+                .unwrap()
+                .write(64, name)
+                .unwrap();
+            runtime.update(0, 1).unwrap();
+            let handle = word(vm(&runtime, task), 0);
+            if loaded {
+                assert_ne!(handle, 0);
+                assert_eq!(runtime.image_resource(handle).unwrap().info().offset[0], 2);
+                runtime.update(100, 1).unwrap();
+                assert_eq!(runtime.image_resource(handle).unwrap().info().offset[0], 2);
+                runtime.destroy(task).unwrap();
+                assert!(runtime.image_resource(handle).is_err());
+            } else {
+                assert_eq!(handle, 0);
+            }
+        }
     }
 }
 
