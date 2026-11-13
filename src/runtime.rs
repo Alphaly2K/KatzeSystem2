@@ -60,6 +60,7 @@ pub mod kind {
     pub const SCROLL2: u32 = 41;
     pub const SLIDER: u32 = 42;
     pub const STRING_PLANE: u32 = 48;
+    pub const RENDER_WMOSAIC: u32 = 50;
     pub const STRING_PLANE_UTF8: u32 = 63;
     pub const CAMERA_2D: u32 = 65;
     /// 粒子任务（`kcTaskParticle`）；控制属性已接入，装载、播放及绘制待接入。
@@ -2039,6 +2040,23 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
 
     fn drawables(&mut self) -> Option<&mut crate::graphics::Drawables> {
         Some(&mut self.resources.compositor.drawables)
+    }
+
+    fn compositor(&mut self) -> Option<&mut crate::graphics::Compositor> {
+        Some(&mut self.resources.compositor)
+    }
+
+    fn reserve_auxiliary_targets(&mut self, count: u32) -> Result<bool> {
+        let settings = self.host.platform_settings.as_ref();
+        if settings.is_some_and(|settings| settings.d3d_backbuffer == 0) {
+            return Ok(false);
+        }
+        self.resources.compositor.reserve_auxiliary_targets(
+            self.host.surface_size,
+            count,
+            settings.map_or(u32::MAX, |settings| settings.d3d_tex_size),
+        )?;
+        Ok(count <= 2 && self.resources.compositor.auxiliary_targets.len() >= count as usize)
     }
 
     fn resource_services(&mut self) -> Option<&mut dyn crate::kcs::ResourceServices> {

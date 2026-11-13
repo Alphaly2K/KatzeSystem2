@@ -293,6 +293,16 @@ pub trait Host {
         None
     }
 
+    /// 合成器持有的帧效果和辅助绘制目标。
+    fn compositor(&mut self) -> Option<&mut crate::graphics::Compositor> {
+        None
+    }
+
+    /// 按宿主的显示设置扩充辅助目标池，返回所需容量是否可用。
+    fn reserve_auxiliary_targets(&mut self, _count: u32) -> Result<bool> {
+        Err(Error::new(0, "宿主未提供辅助绘制目标分配"))
+    }
+
     /// 具体绘图对象使用的登记与属性服务；独立解释宿主可以不提供。
     fn drawables(&mut self) -> Option<&mut crate::graphics::Drawables> {
         None
@@ -544,6 +554,14 @@ impl<T: Host + ?Sized> Host for &mut T {
 
     fn drawables(&mut self) -> Option<&mut crate::graphics::Drawables> {
         (**self).drawables()
+    }
+
+    fn compositor(&mut self) -> Option<&mut crate::graphics::Compositor> {
+        (**self).compositor()
+    }
+
+    fn reserve_auxiliary_targets(&mut self, count: u32) -> Result<bool> {
+        (**self).reserve_auxiliary_targets(count)
     }
 
     fn image(&self, handle: u32) -> Result<&crate::graphics::Image> {

@@ -10,6 +10,46 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         arguments: &[u8],
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
+        if matches!(index, 853..=855) {
+            let target = read::u32_at(arguments, 0)?;
+            let length = match index {
+                853 => 24,
+                854 => 4,
+                _ => 8,
+            };
+            if arguments.len() != length && !(target == 0 && arguments.len() == 4) {
+                return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+            }
+            if target != 0 {
+                if index == 853 {
+                    let mut record = [0; 20];
+                    for (bytes, offset) in record.chunks_exact_mut(4).zip([8, 12, 4, 16, 20]) {
+                        bytes.copy_from_slice(&arguments[offset..offset + 4]);
+                    }
+                    self.command_target_with_buffers(
+                        target,
+                        525,
+                        [0; 3],
+                        &mut CommandBuffers {
+                            data1: Some(&mut record),
+                            ..Default::default()
+                        },
+                    )?;
+                } else {
+                    let value = if index == 855 {
+                        read::u32_at(arguments, 4)?
+                    } else {
+                        0
+                    };
+                    self.command_target(
+                        target,
+                        if index == 854 { 526 } else { 527 },
+                        [0, value, 0],
+                    )?;
+                }
+            }
+            return Ok(NativeReturn::Continue);
+        }
         let count = if matches!(index, 196 | 199) { 8 } else { 4 };
         if arguments.len() != count {
             return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));

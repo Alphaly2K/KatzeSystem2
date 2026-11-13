@@ -77,6 +77,14 @@ impl<H: Host, S: SystemServices> Host for SystemHost<'_, H, S> {
         self.inner.drawables()
     }
 
+    fn compositor(&mut self) -> Option<&mut crate::graphics::Compositor> {
+        self.inner.compositor()
+    }
+
+    fn reserve_auxiliary_targets(&mut self, count: u32) -> Result<bool> {
+        self.inner.reserve_auxiliary_targets(count)
+    }
+
     fn image(&self, handle: u32) -> Result<&crate::graphics::Image> {
         self.inner.image(handle)
     }

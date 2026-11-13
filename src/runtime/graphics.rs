@@ -18,22 +18,8 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             let first = read::u32_at(arguments, 0)?;
             if index == 858 {
                 let drawing = self.resources.compositor.drawing();
-                let enabled = self
-                    .host
-                    .platform_settings
-                    .as_ref()
-                    .is_none_or(|settings| settings.d3d_backbuffer != 0);
-                if drawing.mode == 0 && drawing.enabled && enabled {
-                    let maximum_size = self
-                        .host
-                        .platform_settings
-                        .as_ref()
-                        .map_or(u32::MAX, |settings| settings.d3d_tex_size);
-                    self.resources.compositor.reserve_auxiliary_targets(
-                        self.host.surface_size,
-                        first,
-                        maximum_size,
-                    )?;
+                if drawing.mode == 0 && drawing.enabled {
+                    crate::kcs::Host::reserve_auxiliary_targets(self, first)?;
                 }
             } else {
                 let range = [
