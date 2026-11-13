@@ -574,6 +574,8 @@ FES `strvar index text [integer ...]` 已接入共享 `expression::State::string
 
 `graphics::FadeObject` 由 `GraphicsFactory` 按类型 27 创建，接收 281 准备、263 启动、264／267 停止、265 播放状态查询及 266 来源替换。图像句柄由调用者持有，任务将过渡像素提交到 Runtime 的画布；`Host::effect_speed()` 缺省返回零，Runtime 从全局效果配置读取。参数记录、坐标、透明 RGB、时间和返回槽规则见[画布淡入淡出任务](graphics.md#画布淡入淡出任务)。FES `draw` 已连接临时 DRAW、来源截图、共享列表提交开关及完成清理；`runtime::fes::DrawState` 提供持续时间和媒体阶段查询。
 
+`graphics::WipeObject` 由同一工厂按类型 26 创建，通过命令 280 准备图像遮罩转场，其余播放控制与淡入淡出任务一致。来源及遮罩由调用者持有；参数与坐标约束见[画布遮罩转场任务](graphics.md#画布遮罩转场任务)。
+
 `fes::SoundState` 保存 SOUND 的声明／运动属性及装载、动作请求，`subcommand_context()` 提供声音自定义运动参数的零向量、单位缩放及音量 Alpha，`load_parameters`、`play_parameters` 保留原始参数，`action_request()` 查询待消费动作。空闲 SOUND 可参与场景媒体顺序；文件请求、新声音配置下的音量／声像提交已路由到声音任务，播放动作及自身 PLAY 处理器已连接，旧配置属性与组通道自动回收继续接入。初始化及对象 load／play／channel／stype 的求值与银行规则见[声音文档](audio.md#fes-sound-对象命令)。
 
 FES `blend` 已连接 SOUND、CIMAGE／IMAGE／BUTTON、CPLANE／PLANE 和 SLIDER／SCROLL2：先保存音量或透明度，再装载默认运动，保留数组银行、一次求值、运动基准、延迟和失败续跑。平面保存完整颜色，默认运动保留 RGB 参数。主体、系统块及对象处理器共用该入口。完整参数与更新时序见[FES blend](audio.md#fes-blend)。
