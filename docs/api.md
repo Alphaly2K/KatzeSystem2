@@ -576,6 +576,8 @@ FES `strvar index text [integer ...]` 已接入共享 `expression::State::string
 
 `graphics::WipeObject` 由同一工厂按类型 26 创建，通过命令 280 准备图像遮罩转场，其余播放控制与淡入淡出任务一致。来源及遮罩由调用者持有；参数与坐标约束见[画布遮罩转场任务](graphics.md#画布遮罩转场任务)。
 
+Runtime 的普通 196 为上述两种图像转场提交准备记录，197 启动，198 立即完成，200 查询播放状态。普通 199 发送独立的 64 字节命令记录。参数、返回值和当前支持的目标类型见[普通 KCS 调用表](kcs.md)。
+
 `fes::SoundState` 保存 SOUND 的声明／运动属性及装载、动作请求，`subcommand_context()` 提供声音自定义运动参数的零向量、单位缩放及音量 Alpha，`load_parameters`、`play_parameters` 保留原始参数，`action_request()` 查询待消费动作。空闲 SOUND 可参与场景媒体顺序；文件请求、新声音配置下的音量／声像提交已路由到声音任务，播放动作及自身 PLAY 处理器已连接，旧配置属性与组通道自动回收继续接入。初始化及对象 load／play／channel／stype 的求值与银行规则见[声音文档](audio.md#fes-sound-对象命令)。
 
 FES `blend` 已连接 SOUND、CIMAGE／IMAGE／BUTTON、CPLANE／PLANE 和 SLIDER／SCROLL2：先保存音量或透明度，再装载默认运动，保留数组银行、一次求值、运动基准、延迟和失败续跑。平面保存完整颜色，默认运动保留 RGB 参数。主体、系统块及对象处理器共用该入口。完整参数与更新时序见[FES blend](audio.md#fes-blend)。

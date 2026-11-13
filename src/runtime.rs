@@ -33,6 +33,7 @@ mod ordinary;
 mod resources;
 mod root;
 mod save;
+mod transition;
 
 use resources::Resources;
 
