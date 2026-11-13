@@ -18,6 +18,7 @@ pub struct Drawable {
     pub(super) triangles: Vec<[Vertex; 3]>,
     pub(super) canvas_triangles: Option<Vec<CanvasTriangle>>,
     pub(super) canvas_source: Option<Box<super::canvas::CanvasSource>>,
+    pub(crate) particle_mesh: Option<super::ParticleMesh>,
     pub(super) bounds: [[f32; 3]; 2],
     pub(super) color: u32,
     pub(super) color_enabled: u32,
@@ -35,6 +36,7 @@ impl Default for Drawable {
             triangles: Vec::new(),
             canvas_triangles: None,
             canvas_source: None,
+            particle_mesh: None,
             bounds: [[0.0; 3]; 2],
             color: u32::MAX,
             color_enabled: 0,
@@ -48,6 +50,17 @@ impl Default for Drawable {
 }
 
 impl Drawable {
+    pub fn from_particle_mesh(mesh: super::ParticleMesh) -> Self {
+        Self {
+            particle_mesh: Some(mesh),
+            ..Self::default()
+        }
+    }
+
+    pub fn particle_mesh(&self) -> Option<&super::ParticleMesh> {
+        self.particle_mesh.as_ref()
+    }
+
     /// 读取 KX2 的独立二维边界和 XYZ／ARGB 三角形，不从顶点重新计算边界。
     pub fn from_kx2(data: &[u8]) -> Result<Self> {
         if data.len() > read::MAX_BYTES || data.get(..4) != Some(b"KX2\0") {
@@ -359,7 +372,7 @@ impl Drawables {
         self.update(id, |d| d.projection_origin_mode = value)
     }
 
-    fn update(&mut self, id: u32, change: impl FnOnce(&mut Drawable)) -> bool {
+    pub(super) fn update(&mut self, id: u32, change: impl FnOnce(&mut Drawable)) -> bool {
         let Some(drawable) = self.entries.get_mut(&id) else {
             return false;
         };

@@ -24,6 +24,7 @@ mod input;
 mod message;
 mod motion;
 mod native;
+mod particle;
 pub use motion::MotionSnapshot;
 mod image_resources;
 mod object;
@@ -48,6 +49,7 @@ pub mod kind {
     pub const ORDINARY: u32 = 12;
     pub const SOUND: u32 = 13;
     pub const IMAGE_LIST: u32 = 15;
+    pub const PARTICLE_3D: u32 = 16;
     pub const FADE: u32 = 27;
     pub const FES: u32 = 34;
     pub const RWIPE: u32 = 39;
@@ -1818,6 +1820,15 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
 }
 
 impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
+    fn update_particle(
+        &mut self,
+        task: &mut crate::kcs::ParticleTask,
+        now: u32,
+        budget: usize,
+    ) -> Result<bool> {
+        self.update_particle_task(task, now, budget)
+    }
+
     fn language_selection(&self) -> [u32; 3] {
         self.host.languages.selection()
     }

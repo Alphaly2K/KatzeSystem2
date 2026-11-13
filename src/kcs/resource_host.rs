@@ -232,6 +232,15 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
         self.inner.load_kcs_program(name)
     }
 
+    fn update_particle(
+        &mut self,
+        task: &mut crate::kcs::ParticleTask,
+        now: u32,
+        budget: usize,
+    ) -> Result<bool> {
+        self.inner.update_particle(task, now, budget)
+    }
+
     fn fes_services(&mut self) -> Option<&mut dyn crate::runtime::fes::Services> {
         self.inner.fes_services()
     }

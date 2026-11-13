@@ -263,6 +263,16 @@ pub trait Host {
         Err(Error::new(0, "宿主未提供 KCS 程序装载"))
     }
 
+    /// 推进粒子脚本；运行时宿主负责与其他脚本共用随机状态。
+    fn update_particle(
+        &mut self,
+        task: &mut ParticleTask,
+        now: u32,
+        budget: usize,
+    ) -> Result<bool> {
+        Ok(!matches!(task.update(now, budget)?, Some(Step::Yield)))
+    }
+
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn>;
 
     /// 外层资源宿主共用的编号源；不创建句柄的宿主可以不提供。
@@ -496,6 +506,15 @@ impl<T: Host + ?Sized> Host for &mut T {
     }
     fn load_kcs_program(&mut self, name: &[u8]) -> Result<Option<Program>> {
         (**self).load_kcs_program(name)
+    }
+
+    fn update_particle(
+        &mut self,
+        task: &mut crate::kcs::ParticleTask,
+        now: u32,
+        budget: usize,
+    ) -> Result<bool> {
+        (**self).update_particle(task, now, budget)
     }
 
     fn fes_services(&mut self) -> Option<&mut dyn crate::runtime::fes::Services> {

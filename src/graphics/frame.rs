@@ -99,6 +99,17 @@ impl Drawables {
             if drawable.display() == 0 {
                 continue;
             }
+            if let Some(mesh) = &drawable.particle_mesh {
+                if drawable.blend_mode() != 0 {
+                    return Err(Error::new(0, "粒子特殊混合模式尚未接入"));
+                }
+                let mut selected = projection.clone();
+                if let Some(camera) = self.cameras.get(&drawable.camera_id()) {
+                    camera.apply_projection(&mut selected);
+                }
+                touched |= mesh.visit(&selected, &mut draw)?;
+                continue;
+            }
             drawable.prepare_canvas()?;
             let count = drawable
                 .canvas_triangles()
