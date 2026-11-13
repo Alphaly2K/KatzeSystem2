@@ -192,6 +192,56 @@ impl Scene {
         self.interpreter.local_values_mut()
     }
 
+    pub(in crate::runtime) fn parameter_record_command(
+        &mut self,
+        code: u32,
+        length: u32,
+        bytes: Option<&mut [u8]>,
+        output: &mut u32,
+    ) -> Result<()> {
+        if code == 349 {
+            let values = self.parameter_values();
+            let size = values.len() * 4;
+            *output = size as u32;
+            if let Some(target) = bytes {
+                if (length as usize) < size {
+                    *output = 0;
+                } else {
+                    let target = target
+                        .get_mut(..size)
+                        .ok_or_else(|| Error::new(0, "FES 参数记录输出缓冲区不足"))?;
+                    for (target, value) in target.chunks_exact_mut(4).zip(values) {
+                        target.copy_from_slice(&value.to_le_bytes());
+                    }
+                }
+            }
+        } else {
+            let size = (length as usize).min(2048);
+            let bytes = if size == 0 {
+                &[][..]
+            } else {
+                bytes
+                    .and_then(|bytes| bytes.get(..size))
+                    .ok_or_else(|| Error::new(0, "FES 参数记录输入缓冲区不足"))?
+            };
+            self.restore_parameter_bytes(bytes)?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn restore_parameter_bytes(&mut self, bytes: &[u8]) -> Result<()> {
+        let values = self.interpreter.local_values_mut();
+        for (value, input) in values.iter_mut().zip(bytes.chunks(4)) {
+            let mut word = value.to_le_bytes();
+            word[..input.len()].copy_from_slice(input);
+            *value = i32::from_le_bytes(word);
+        }
+        if !bytes.is_empty() {
+            self.interpreter.restart_block("_LOAD_")?;
+        }
+        Ok(())
+    }
+
     /// 当前由 execfes 启动的直属子任务；完成通知不自动清除此编号。
     pub fn child_fes(&self) -> Option<u32> {
         self.scripts.fes

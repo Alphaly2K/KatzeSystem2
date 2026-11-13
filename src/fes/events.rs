@@ -18,6 +18,31 @@ pub(super) struct Invocation {
 }
 
 impl Interpreter {
+    pub(crate) fn restart_block(&mut self, name: &str) -> Result<bool> {
+        let Some(block) = self
+            .program
+            .blocks
+            .iter()
+            .position(|block| block.name == name)
+        else {
+            return Ok(false);
+        };
+        if self.invocation.is_some() || self.initialization_pending() {
+            return Err(Error::new(0, "FES 无法在当前状态切换主流程块"));
+        }
+        if self
+            .pending
+            .as_ref()
+            .is_some_and(|event| !matches!(event, Event::Wait(_) | Event::Frame))
+        {
+            return Err(Error::new(0, "FES 需要先完成当前宿主操作"));
+        }
+        self.pending = None;
+        self.block = block;
+        self.pc = 0;
+        Ok(true)
+    }
+
     pub fn event_context(&self) -> Option<&EventContext> {
         self.invocation.as_ref().map(|i| &i.context)
     }

@@ -10,6 +10,9 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         arguments: &[u8],
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
+        if matches!(index, 649 | 650) {
+            return self.fes_local_record_native(index, arguments, vm);
+        }
         let length = match index {
             448 => 4,
             630 => 16,
@@ -168,5 +171,61 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             _ => unreachable!(),
         }
         Ok(NativeReturn::Continue)
+    }
+    fn fes_local_record_native(
+        &mut self,
+        index: u32,
+        arguments: &[u8],
+        vm: &Interpreter,
+    ) -> Result<NativeReturn> {
+        let container = read::u32_at(arguments, 0)?;
+        if container == 0 {
+            return Ok(NativeReturn::Value(0));
+        }
+        if arguments.len() != 12 {
+            return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+        }
+        let record = read::u32_at(arguments, 4)?;
+        let target = read::u32_at(arguments, 8)?;
+        if index == 650 {
+            let Some(bytes) = self.host.data_container(container)?.record(record)? else {
+                return Ok(NativeReturn::Value(0));
+            };
+            let mut bytes = bytes.to_vec();
+            self.command_target_with_buffers(
+                target,
+                350,
+                [bytes.len() as u32, 0, 0],
+                &mut CommandBuffers {
+                    data1: Some(&mut bytes),
+                    ..Default::default()
+                },
+            )?;
+            return Ok(NativeReturn::Value(1));
+        }
+        let size = self.command_target(target, 349, [0; 3])? as usize;
+        if size == 0 {
+            return Ok(NativeReturn::Value(0));
+        }
+        if size > read::MAX_BYTES {
+            return Err(Error::new(vm.pc, "FES 参数记录超过存储上限"));
+        }
+        let mut bytes = vec![0; size];
+        let copied = self.command_target_with_buffers(
+            target,
+            349,
+            [size as u32, 0, 0],
+            &mut CommandBuffers {
+                data1: Some(&mut bytes),
+                ..Default::default()
+            },
+        )? as usize;
+        if copied > bytes.len() {
+            return Err(Error::new(vm.pc, "FES 参数记录返回长度超过缓冲区"));
+        }
+        self.host
+            .data_container_mut(container)?
+            .append(record, &bytes[..copied])?;
+        Ok(NativeReturn::Value(1))
     }
 }

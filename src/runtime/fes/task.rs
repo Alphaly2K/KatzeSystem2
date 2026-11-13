@@ -1321,7 +1321,19 @@ impl TaskObject for FesObject {
                 false,
                 buffers,
             )?,
-            178 | 341 | 344 | 345 | 349..=356 => {
+            349 | 350 => {
+                if let Some(scene) = &mut self.scene {
+                    scene.parameter_record_command(
+                        command.code,
+                        command.data[0],
+                        buffers.data1.as_deref_mut(),
+                        output,
+                    )?;
+                } else {
+                    *output = 0;
+                }
+            }
+            178 | 341 | 344 | 345 | 351..=356 => {
                 return Err(Error::new(0, "FES 专属命令尚未接入"));
             }
             _ => {

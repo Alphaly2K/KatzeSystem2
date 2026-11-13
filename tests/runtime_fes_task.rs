@@ -75,6 +75,23 @@ impl ObjectFactory for Factory {
             ins(0x25, 3, &[7]);
             ins(0x2b, 3, &[646, 8]);
             ins(0x26, 3, &[4]);
+            ins(0x25, 3, &[0]);
+            ins(0x2b, 3, &[238, 4]);
+            ins(0x26, 3, &[8]);
+            ins(0x2f, 3, &[8]);
+            ins(0x25, 3, &[42]);
+            ins(0x2f, 3, &[32]);
+            ins(0x2b, 3, &[649, 12]);
+            ins(0x26, 3, &[12]);
+            ins(0x2f, 3, &[32]);
+            ins(0x25, 3, &[7]);
+            ins(0x25, 3, &[123]);
+            ins(0x2b, 3, &[645, 12]);
+            ins(0x2f, 3, &[8]);
+            ins(0x25, 3, &[42]);
+            ins(0x2f, 3, &[32]);
+            ins(0x2b, 3, &[650, 12]);
+            ins(0x26, 3, &[16]);
             ins(0x2f, 3, &[32]);
             ins(0x25, 3, &[64]);
             ins(0x25, 3, &[0]);
@@ -145,9 +162,31 @@ impl ObjectFactory for Factory {
                 ins(&mut code, 0x2b, &[883, 8]);
                 ins(&mut code, 0x26, &[address]);
             }
+            ins(&mut code, 0x25, &[0]);
+            ins(&mut code, 0x2b, &[238, 4]);
+            ins(&mut code, 0x26, &[232]);
+            for (native, args, address) in [
+                (649, vec![None, Some(42), Some(3)], 236),
+                (645, vec![Some(3), Some(2), Some(123)], 0),
+                (650, vec![None, Some(42), Some(3)], 240),
+                (646, vec![Some(3), Some(2)], 244),
+            ] {
+                for value in &args {
+                    if let Some(value) = value {
+                        ins(&mut code, 0x25, &[*value]);
+                    } else {
+                        code.extend([0x25, 0x13]);
+                        code.extend(232u32.to_le_bytes());
+                    }
+                }
+                ins(&mut code, 0x2b, &[native, args.len() as u32 * 4]);
+                if address != 0 {
+                    ins(&mut code, 0x26, &[address]);
+                }
+            }
             ins(&mut code, 0x26, &[0]);
             ins(&mut code, 0x3b, &[]);
-            let mut data = vec![0; 240];
+            let mut data = vec![0; 256];
             data[32..36].copy_from_slice(&7u32.to_le_bytes());
             let format = b"complete_%d[G32]\0";
             data[64..64 + format.len()].copy_from_slice(format);
@@ -1089,6 +1128,20 @@ fn ordinary_natives_bind_load_and_start_fes_with_shared_values_and_pixels() {
                 assert_eq!(vm.read(address, 4).unwrap(), expected.to_le_bytes());
             }
             assert!(vm.stack_bytes().is_empty());
+            for (address, expected) in [(236, 1u32), (240, 1), (244, 17)] {
+                assert_eq!(vm.read(address, 4).unwrap(), expected.to_le_bytes());
+            }
+            let container = u32::from_le_bytes(vm.read(232, 4).unwrap().try_into().unwrap());
+            let record = runtime
+                .host()
+                .data_container(container)
+                .unwrap()
+                .record(42)
+                .unwrap()
+                .unwrap();
+            assert_eq!(record.len(), 2048);
+            assert_eq!(&record[8..12], &17u32.to_le_bytes());
+            assert_eq!(&record[2044..], &0x8000_0001u32.to_le_bytes());
             runtime.update(1, 1).unwrap();
             let mut output = RenderTarget::new([8, 6]).unwrap();
             runtime
@@ -1101,6 +1154,85 @@ fn ordinary_natives_bind_load_and_start_fes_with_shared_values_and_pixels() {
                 .unwrap();
             assert_eq!(output.pixel(1, 1), Some(0xff123456));
             assert_eq!(runtime.numbers().shared[0], 1);
+        }
+    }
+}
+
+#[test]
+fn local_parameter_records_preserve_prefixes_waits_and_call_returns() {
+    for budget in [1, 4096] {
+        for load in [false, true] {
+            let mut source =
+                b"#START\n\\0=0x11223344\ncall MAIN\n$6+=1\nwait 1000\n#MAIN\nwait 1000\n$5+=1\n"
+                    .to_vec();
+            if load {
+                source.extend(b"#_LOAD_\n$7=\\0\n");
+            }
+            let mut runtime = setup(budget, &source).runtime;
+            let target = runtime.create(0, kind::FES, b"records", b"").unwrap();
+            assert_eq!(send(&mut runtime, target, 349, 0, 0), 0);
+            assert_eq!(send(&mut runtime, target, 350, 0, 0), 0);
+            send(&mut runtime, target, 337, 0, 0);
+            file(&mut runtime, target, b"complete.fes").unwrap();
+            send(&mut runtime, target, 339, 0, 0);
+            runtime.update(100, 1).unwrap();
+            let deadline = runtime
+                .object(target)
+                .unwrap()
+                .fes_scene()
+                .unwrap()
+                .deadline();
+            assert_eq!(send(&mut runtime, target, 349, 0, 0), 2048);
+            let mut output = [0xa5; 2064];
+            for capacity in [2047, 2048, 2064] {
+                let result = runtime
+                    .dispatch_command_with_buffers(
+                        0,
+                        command(target, 349, capacity, 0),
+                        &mut CommandBuffers {
+                            data1: Some(&mut output),
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap();
+                assert_eq!(result, if capacity < 2048 { 0 } else { 2048 });
+                if capacity < 2048 {
+                    assert_eq!(output, [0xa5; 2064]);
+                } else {
+                    assert_eq!(&output[..4], &0x1122_3344u32.to_le_bytes());
+                    assert!(output[4..2048].iter().all(|&byte| byte == 0));
+                    assert_eq!(&output[2048..], &[0xa5; 16]);
+                }
+            }
+            for mut bytes in [vec![], vec![1, 2, 3]] {
+                runtime
+                    .dispatch_command_with_buffers(
+                        0,
+                        command(target, 350, bytes.len() as u32, 0),
+                        &mut CommandBuffers {
+                            data1: Some(&mut bytes),
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap();
+                assert_eq!(
+                    runtime
+                        .object(target)
+                        .unwrap()
+                        .fes_scene()
+                        .unwrap()
+                        .deadline(),
+                    deadline
+                );
+            }
+            assert_eq!(send(&mut runtime, target, 347, 0, 0), 0x1103_0201);
+            runtime.update(101, 1).unwrap();
+            assert_eq!(runtime.numbers().shared[5..8], [0, 0, 0]);
+            runtime.update(deadline.unwrap(), 1).unwrap();
+            assert_eq!(
+                runtime.numbers().shared[5..8],
+                [i32::from(!load), 1, if load { 0x1103_0201 } else { 0 }]
+            );
         }
     }
 }
@@ -2273,16 +2405,19 @@ fn fes_send_allows_synchronous_parameter_access_and_a_block_callback() {
         send(&mut runtime, fes, 339, 0, 0);
         runtime.update(101, 1).unwrap();
         assert_eq!(&runtime.numbers().shared[..2], &[1, 91]);
-        assert_eq!(
-            &*runtime
-                .object(parent)
-                .unwrap()
-                .interpreter()
-                .unwrap()
-                .read(4, 4)
-                .unwrap(),
-            &91u32.to_le_bytes()
-        );
+        let vm = runtime.object(parent).unwrap().interpreter().unwrap();
+        for (address, value) in [(4, 91u32), (12, 1), (16, 1)] {
+            assert_eq!(&*vm.read(address, 4).unwrap(), &value.to_le_bytes());
+        }
+        let container = u32::from_le_bytes(vm.read(8, 4).unwrap().try_into().unwrap());
+        let record = runtime
+            .host()
+            .data_container(container)
+            .unwrap()
+            .record(42)
+            .unwrap()
+            .unwrap();
+        assert_eq!(&record[28..32], &91u32.to_le_bytes());
     }
 }
 

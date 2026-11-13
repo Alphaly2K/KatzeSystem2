@@ -994,6 +994,18 @@ fn run_nested<F: ObjectFactory>(
                 store.host.task_origin = saved.2;
                 return result;
             }
+            if matches!(command.code, 349 | 350) {
+                **propagate = false;
+                if !running.get(&target).is_some_and(|task| task.deleted) {
+                    fes_scene.as_mut().unwrap().scene.parameter_record_command(
+                        command.code,
+                        command.data[0],
+                        buffers.data1.as_deref_mut(),
+                        output,
+                    )?;
+                }
+                return Ok(());
+            }
             if matches!(command.code, 342 | 346 | 347) {
                 **propagate = false;
                 if !running.get(&target).is_some_and(|task| task.deleted) {
