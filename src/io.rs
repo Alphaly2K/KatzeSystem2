@@ -143,6 +143,16 @@ impl<'a, S: ReadSource + ?Sized> SourceReader<'a, S> {
             position: 0,
         }
     }
+
+    pub(crate) fn reopen(&self) -> Self {
+        Self {
+            source: match &self.source {
+                ReaderSource::Borrowed(source) => ReaderSource::Borrowed(source),
+                ReaderSource::Shared(source) => ReaderSource::Shared(source.clone()),
+            },
+            position: 0,
+        }
+    }
 }
 
 impl SourceReader<'static, dyn ReadSource> {

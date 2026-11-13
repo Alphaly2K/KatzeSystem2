@@ -1,6 +1,6 @@
 use super::Source;
 use crate::{Error, Result, read};
-use std::ops::Range;
+use std::{collections::VecDeque, ops::Range};
 
 #[derive(Clone, Default)]
 pub(super) struct Playback {
@@ -9,7 +9,6 @@ pub(super) struct Playback {
     pub remaining: u32,
     pub completed: u64,
     ended: bool,
-    refill_pending: bool,
     buffered: Buffered,
     stream: Option<Stream>,
 }
@@ -46,6 +45,7 @@ impl Playback {
                 previous_cursor: 0,
                 accumulated: 0,
                 prefetched_loops: 0,
+                refills: VecDeque::new(),
             };
             stream.prefill(pcm)?;
             playback.stream = Some(stream);
@@ -63,7 +63,6 @@ impl Playback {
             if self.playing {
                 self.position = 0;
                 stream.reset(pcm)?;
-                self.refill_pending = false;
             }
             stream.loop_start = range[0];
         } else {
@@ -102,7 +101,6 @@ impl Playback {
         self.position = 0;
         self.completed = 0;
         self.ended = false;
-        self.refill_pending = false;
         if let Some(stream) = &mut self.stream {
             stream.reset(pcm)?;
         } else {
@@ -117,18 +115,9 @@ impl Playback {
         let mut position = 0;
         if let Some(stream) = &mut self.stream {
             while self.playing && position < output.len() {
-                if self.refill_pending {
-                    let Some(ended) =
-                        stream.consume(pcm, self.position, &mut self.remaining, wait)?
-                    else {
-                        break;
-                    };
-                    self.refill_pending = false;
-                    if ended {
-                        self.playing = false;
-                        self.position = 0;
-                        break;
-                    }
+                stream.fill_pending(pcm, wait)?;
+                if stream.refills.len() == 8 {
+                    break;
                 }
                 let frames = (stream.half_frames - self.position % stream.half_frames)
                     .min((output.len() - position) / channels);
@@ -139,16 +128,11 @@ impl Playback {
                 position += count;
                 self.position = (self.position + frames) % (stream.half_frames * 8);
                 if self.position.is_multiple_of(stream.half_frames) {
-                    match stream.consume(pcm, self.position, &mut self.remaining, wait)? {
-                        Some(true) => {
-                            self.playing = false;
-                            self.position = 0;
-                        }
-                        Some(false) => (),
-                        None => {
-                            self.refill_pending = true;
-                            break;
-                        }
+                    if stream.consume(pcm, &mut self.remaining)? {
+                        self.playing = false;
+                        self.position = 0;
+                    } else {
+                        stream.fill_pending(pcm, wait)?;
                     }
                 }
             }
@@ -207,7 +191,9 @@ impl Default for Decoder {
 
 impl Decoder {
     fn length_bytes(&self, pcm: &Source) -> u32 {
-        (pcm.frames() as u32 * u32::from(pcm.channels()) * 2)
+        (pcm.frames() as u32)
+            .wrapping_mul(u32::from(pcm.channels()))
+            .wrapping_mul(2)
             .wrapping_add((self.silence * i64::from(pcm.channels()) * 2) as u32)
     }
 
@@ -291,6 +277,20 @@ struct Stream {
     previous_cursor: usize,
     accumulated: i64,
     prefetched_loops: u32,
+    refills: VecDeque<Refill>,
+}
+
+#[derive(Clone)]
+struct Refill {
+    slot: usize,
+    copies: Vec<Copy>,
+    copied: usize,
+}
+
+#[derive(Clone)]
+struct Copy {
+    offset: usize,
+    source: Range<usize>,
 }
 
 impl Stream {
@@ -312,6 +312,7 @@ impl Stream {
     }
 
     fn reset(&mut self, pcm: &Source) -> Result<()> {
+        self.refills.clear();
         self.next_fill = 0;
         self.previous_cursor = 0;
         self.accumulated = 0;
@@ -320,36 +321,46 @@ impl Stream {
         self.prefill(pcm)
     }
 
-    fn consume(
-        &mut self,
-        pcm: &Source,
-        cursor: usize,
-        remaining: &mut u32,
-        wait: bool,
-    ) -> Result<Option<bool>> {
-        if cursor / self.half_frames == self.next_fill {
-            return Ok(Some(false));
+    fn fill_pending(&mut self, pcm: &Source, wait: bool) -> Result<()> {
+        let channels = pcm.channels() as usize;
+        while let Some(fill) = self.refills.front_mut() {
+            if fill.copied == 0 {
+                self.scratch.fill(0);
+            }
+            for copy in &fill.copies[fill.copied..] {
+                if !read_source(
+                    pcm,
+                    copy.source.start,
+                    &mut self.scratch[copy.offset..copy.offset + copy.source.len() * channels],
+                    wait,
+                )? {
+                    return Ok(());
+                }
+                fill.copied += 1;
+            }
+            let start = fill.slot * self.half_frames * channels;
+            self.samples[start..start + self.scratch.len()].copy_from_slice(&self.scratch);
+            self.refills.pop_front();
         }
+        Ok(())
+    }
+
+    fn consume(&mut self, pcm: &Source, remaining: &mut u32) -> Result<bool> {
+        // 先提交消费和循环状态，采样复制可等到后台窗口就绪后继续。
+        let cursor = ((self.next_fill + 1) % 8) * self.half_frames;
         let frame_bytes = u32::from(pcm.channels()) * 2;
-        let offset = self.next_fill * self.half_frames;
         let mut decoder = self.decoder.clone();
         let mut count = *remaining;
         let mut loops = self.prefetched_loops;
-        self.scratch.fill(0);
         let mut filled = 0;
         let mut read_sum = 0u32;
+        let mut copies = Vec::new();
         while filled < self.half_frames {
             let (silence, source) = decoder.take(pcm, self.half_frames - filled)?;
-            let channels = pcm.channels() as usize;
-            if !read_source(
-                pcm,
-                source.start,
-                &mut self.scratch
-                    [(filled + silence) * channels..(filled + silence + source.len()) * channels],
-                wait,
-            )? {
-                return Ok(None);
-            }
+            copies.push(Copy {
+                offset: (filled + silence) * pcm.channels() as usize,
+                source: source.clone(),
+            });
             filled += silence + source.len();
             read_sum = read_sum.wrapping_add(filled as u32 * frame_bytes);
             if filled == self.half_frames || count == 1 {
@@ -371,12 +382,14 @@ impl Stream {
             decoder.ready = true;
             loops = loops.wrapping_add(1);
         }
-        self.samples[offset * pcm.channels() as usize
-            ..(offset + self.half_frames) * pcm.channels() as usize]
-            .copy_from_slice(&self.scratch);
         self.decoder = decoder;
         self.prefetched_loops = loops;
         *remaining = count;
+        self.refills.push_back(Refill {
+            slot: self.next_fill,
+            copies,
+            copied: 0,
+        });
         self.next_fill = (self.next_fill + 1) % 8;
         let advanced = if cursor < self.previous_cursor {
             self.half_frames * 8 - self.previous_cursor + cursor
@@ -402,14 +415,15 @@ impl Stream {
             }
         }
         if read_sum == 0 && self.accumulated >= i64::from(self.decoder.length_bytes(pcm)) {
+            self.refills.clear();
             self.next_fill = 0;
             self.decoder.rewind();
             self.prefill(pcm)?;
             self.accumulated = 0;
             self.previous_cursor = 0;
-            return Ok(Some(true));
+            return Ok(true);
         }
-        Ok(Some(false))
+        Ok(false)
     }
 }
 

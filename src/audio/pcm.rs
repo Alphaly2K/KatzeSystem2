@@ -54,9 +54,16 @@ pub fn decode_vorbis_source<S: ReadSource + ?Sized>(source: &S) -> Result<Pcm> {
     let mut decoder = super::VorbisDecoder::new(source)?;
     let rate = decoder.sample_rate();
     let channels = decoder.channels();
-    let mut samples = Vec::with_capacity(decoder.frames() * channels as usize);
+    let mut samples = Vec::with_capacity(sample_count(decoder.frames(), channels)?);
     while let Some(packet) = decoder.read_packet()? {
         samples.extend(packet);
     }
     Pcm::new(rate, channels, samples)
+}
+
+pub(super) fn sample_count(frames: usize, channels: u8) -> Result<usize> {
+    frames
+        .checked_mul(channels as usize)
+        .filter(|count| *count <= read::MAX_BYTES / 2)
+        .ok_or_else(|| Error::new(0, "PCM 数据超过读取上限"))
 }

@@ -6,39 +6,47 @@ use lewton::inside_ogg::OggStreamReader;
 /// 返回交错的有符号 16 位采样，最后一包裁到末页声明的帧数。
 pub struct VorbisDecoder<'a, S: ReadSource + ?Sized> {
     decoder: OggStreamReader<SourceReader<'a, S>>,
+    source: SourceReader<'a, S>,
+    granules: Vec<u64>,
     serial: u32,
     frames: usize,
     decoded: usize,
     finished: bool,
+    pending: Option<Vec<i16>>,
+}
+
+struct Metadata {
+    serial: u32,
+    frames: u64,
+    granules: Vec<u64>,
 }
 
 impl<'a, S: ReadSource + ?Sized> VorbisDecoder<'a, S> {
     pub fn new(source: &'a S) -> Result<Self> {
-        let (serial, frames) = metadata(source)?;
-        Self::from_reader(SourceReader::new(source), serial, frames)
+        Self::from_reader(SourceReader::new(source), metadata(source)?)
     }
 
-    fn from_reader(reader: SourceReader<'a, S>, serial: u32, frames: u64) -> Result<Self> {
+    fn from_reader(reader: SourceReader<'a, S>, metadata: Metadata) -> Result<Self> {
+        let source = reader.reopen();
         let decoder = OggStreamReader::new(reader).map_err(decode_error)?;
         let rate = decoder.ident_hdr.audio_sample_rate;
         let channels = decoder.ident_hdr.audio_channels;
         if rate == 0 || !matches!(channels, 1 | 2) {
             return Err(Error::new(0, "Ogg Vorbis 需要非零采样率及单声道或双声道"));
         }
-        let frames = usize::try_from(frames)
+        let frames = usize::try_from(metadata.frames)
             .ok()
-            .filter(|frames| {
-                frames
-                    .checked_mul(channels as usize)
-                    .is_some_and(|count| count <= read::MAX_BYTES / 2)
-            })
-            .ok_or_else(|| Error::new(0, "Ogg Vorbis 解码采样数量超过读取上限"))?;
+            .filter(|frames| frames.checked_mul(channels as usize * 2).is_some())
+            .ok_or_else(|| Error::new(0, "Ogg Vorbis 声明采样长度超出可寻址范围"))?;
         Ok(Self {
             decoder,
-            serial,
+            source,
+            granules: metadata.granules,
+            serial: metadata.serial,
             frames,
             decoded: 0,
             finished: false,
+            pending: None,
         })
     }
 
@@ -57,6 +65,9 @@ impl<'a, S: ReadSource + ?Sized> VorbisDecoder<'a, S> {
     /// 空音频包在内部跳过；读到流末尾返回 None，后续调用继续返回 None。
     /// 解码和后续页面错误在读取对应音频包时报告。
     pub fn read_packet(&mut self) -> Result<Option<Vec<i16>>> {
+        if let Some(packet) = self.pending.take() {
+            return Ok(Some(packet));
+        }
         if self.finished {
             return Ok(None);
         }
@@ -76,22 +87,74 @@ impl<'a, S: ReadSource + ?Sized> VorbisDecoder<'a, S> {
             let next = self
                 .decoded
                 .checked_add(count)
-                .filter(|&count| count <= read::MAX_BYTES / 2)
-                .ok_or_else(|| Error::new(0, "Ogg Vorbis 解码采样数量超过读取上限"))?;
+                .ok_or_else(|| Error::new(0, "Ogg Vorbis 采样位置溢出"))?;
             packet.truncate(expected.saturating_sub(self.decoded));
-            self.decoded = next;
+            self.decoded = next.min(expected);
             if !packet.is_empty() {
                 return Ok(Some(packet));
             }
         }
+    }
+
+    /// 定位到指定采样帧；下一包从该帧开始，定位期间执行读取和解码。
+    pub fn seek_frame(&mut self, frame: usize) -> Result<()> {
+        if frame > self.frames {
+            return Err(Error::new(0, "Ogg Vorbis 定位超出采样帧范围"));
+        }
+        self.pending = None;
+        self.finished = frame == self.frames;
+        let target = frame * self.channels() as usize;
+        if self.finished {
+            self.decoded = target;
+            return Ok(());
+        }
+        let previous = self.granules.partition_point(|end| *end < frame as u64);
+        if let Some(anchor) = previous.checked_sub(1).map(|index| self.granules[index]) {
+            self.decoder.seek_absgp_pg(anchor).map_err(decode_error)?;
+            // 先完成前一页，使重叠窗口及绝对采样位置都已就绪。
+            loop {
+                if self
+                    .decoder
+                    .read_dec_packet_itl()
+                    .map_err(decode_error)?
+                    .is_none()
+                {
+                    return Err(Error::new(0, "Ogg Vorbis 定位前置页提前结束"));
+                }
+                if self.decoder.stream_serial() != self.serial {
+                    return Err(Error::new(0, "Ogg Vorbis 不支持串联或混合逻辑流"));
+                }
+                if let Some(end) = self.decoder.get_last_absgp() {
+                    if end > frame as u64 {
+                        return Err(Error::new(0, "Ogg Vorbis 定位前置页超过目标"));
+                    }
+                    self.decoded = end as usize * self.channels() as usize;
+                    break;
+                }
+            }
+        } else {
+            self.decoder = OggStreamReader::new(self.source.reopen()).map_err(decode_error)?;
+            self.decoded = 0;
+        }
+        while self.decoded < target {
+            let Some(mut packet) = self.read_packet()? else {
+                return Err(Error::new(0, "Ogg Vorbis 定位采样不足"));
+            };
+            if self.decoded > target {
+                let skip = packet.len() - (self.decoded - target);
+                packet.drain(..skip);
+                self.pending = Some(packet);
+            }
+        }
+        Ok(())
     }
 }
 
 impl VorbisDecoder<'static, dyn ReadSource> {
     /// 持有共享来源，解码状态及其读取游标可以一起移交预取线程。
     pub fn from_shared(source: SharedSource) -> Result<Self> {
-        let (serial, frames) = metadata(source.as_ref())?;
-        Self::from_reader(SourceReader::from_shared(source), serial, frames)
+        let metadata = metadata(source.as_ref())?;
+        Self::from_reader(SourceReader::from_shared(source), metadata)
     }
 }
 
@@ -99,7 +162,7 @@ fn decode_error(error: lewton::VorbisError) -> Error {
     Error::new(0, format!("Ogg Vorbis 解码失败：{error}"))
 }
 
-fn metadata<S: ReadSource + ?Sized>(source: &S) -> Result<(u32, u64)> {
+fn metadata<S: ReadSource + ?Sized>(source: &S) -> Result<Metadata> {
     let length = source.len()?;
     if length > read::MAX_BYTES as u64 {
         return Err(Error::new(0, "Ogg Vorbis 数据超过读取上限"));
@@ -107,9 +170,10 @@ fn metadata<S: ReadSource + ?Sized>(source: &S) -> Result<(u32, u64)> {
     stream_end(source, length as usize)
 }
 
-fn stream_end<S: ReadSource + ?Sized>(source: &S, length: usize) -> Result<(u32, u64)> {
+fn stream_end<S: ReadSource + ?Sized>(source: &S, length: usize) -> Result<Metadata> {
     let mut position = 0;
     let mut serial = None;
+    let mut granules = Vec::new();
     while position < length {
         let mut header = [0; 27];
         read_source(source, length, position, &mut header)?;
@@ -136,14 +200,25 @@ fn stream_end<S: ReadSource + ?Sized>(source: &S, length: usize) -> Result<(u32,
             return Err(Error::new(body, "输入范围越界"));
         }
         position = body + body_length;
+        let end = u64::from_le_bytes(header[6..14].try_into().unwrap());
+        if end != u64::MAX && end != 0 {
+            if granules.last().is_some_and(|previous| *previous > end) {
+                return Err(Error::new(position, "Ogg Vorbis 页面采样位置倒退"));
+            }
+            if granules.len() >= read::MAX_ITEMS {
+                return Err(Error::new(position, "Ogg Vorbis 页面数量超过读取上限"));
+            }
+            granules.push(end);
+        }
         if header[5] & 4 != 0 {
             if position != length {
                 return Err(Error::new(position, "Ogg 结束页后仍有数据"));
             }
-            return Ok((
-                current,
-                u64::from_le_bytes(header[6..14].try_into().unwrap()),
-            ));
+            return Ok(Metadata {
+                serial: current,
+                frames: end,
+                granules,
+            });
         }
     }
     Err(Error::new(position, "Ogg 流缺少结束页"))

@@ -1,4 +1,4 @@
-"""使用 FFmpeg 的 libvorbis 生成合成信号及短来源的独立解码参考。"""
+"""使用 FFmpeg 生成合成信号及短来源的独立解码参考。"""
 
 from pathlib import Path
 import subprocess
@@ -10,14 +10,15 @@ def run(*args):
 
 directory = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "audio"
 directory.mkdir(exist_ok=True)
-for name, rate, frames, signal, reference in (
-    ("mono-44100", 44100, 1379, "0.35*sin(2*PI*440*n/44100)", True),
+for name, rate, frames, signal, reference, encoder in (
+    ("mono-44100", 44100, 1379, "0.35*sin(2*PI*440*n/44100)", True, "libvorbis"),
     (
         "stereo-48000",
         48000,
         1903,
         "0.25*sin(2*PI*440*n/48000)|0.5*sin(2*PI*1300*n/48000)",
         True,
+        "libvorbis",
     ),
     (
         "mono-8000-long",
@@ -25,13 +26,22 @@ for name, rate, frames, signal, reference in (
         40_000,
         "10000/32768*sin(2*PI*(220+80*n/40000)*n/8000)",
         False,
+        "libvorbis",
+    ),
+    (
+        "stereo-8000-stream",
+        8000,
+        96_000,
+        "0.3*sin(2*PI*(220+80*n/96000)*n/8000)|0.4*sin(2*PI*(440-90*n/96000)*n/8000)",
+        False,
+        "vorbis",
     ),
 ):
     encoded = directory / f"{name}.ogg"
     run(
         "-f", "lavfi", "-i", f"aevalsrc={signal}:s={rate}",
         "-af", f"atrim=end_sample={frames}",
-        "-c:a", "libvorbis", "-q:a", "4", "-map_metadata", "-1",
+        "-c:a", encoder, "-strict", "experimental", "-q:a", "4", "-map_metadata", "-1",
         "-fflags", "+bitexact", "-flags:a", "+bitexact", str(encoded),
     )
     if not reference:

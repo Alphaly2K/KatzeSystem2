@@ -117,6 +117,62 @@ fn shared_source_and_partial_decoder_state_move_together_to_a_worker() {
 }
 
 #[test]
+fn packet_seeks_preserve_exact_samples_across_pages_and_end_of_stream() {
+    fn check<S: katze_system2::io::ReadSource + ?Sized>(
+        bytes: &[u8],
+        mut decoder: VorbisDecoder<'_, S>,
+    ) {
+        let expected = decode_vorbis(bytes).unwrap();
+        let channels = expected.channels() as usize;
+        let mut targets = vec![0, 1, expected.frames() - 1, expected.frames()];
+        let mut at = 0;
+        while at < bytes.len() {
+            let end = u64::from_le_bytes(bytes[at + 6..at + 14].try_into().unwrap());
+            if end > 0 && end < expected.frames() as u64 {
+                targets.extend([end as usize - 1, end as usize, end as usize + 1]);
+            }
+            let segments = bytes[at + 26] as usize;
+            at += 27
+                + segments
+                + bytes[at + 27..at + 27 + segments]
+                    .iter()
+                    .map(|count| *count as usize)
+                    .sum::<usize>();
+        }
+        targets.sort_unstable();
+        targets.dedup();
+        let reverse = targets.iter().rev().copied().collect::<Vec<_>>();
+        for frame in targets.into_iter().chain(reverse) {
+            decoder.seek_frame(frame).unwrap();
+            assert!(decoder.seek_frame(expected.frames() + 1).is_err());
+            let count = (expected.frames() - frame).min(257) * channels;
+            let mut actual = Vec::new();
+            while actual.len() < count {
+                actual.extend(decoder.read_packet().unwrap().unwrap());
+            }
+            actual.truncate(count);
+            assert_eq!(
+                actual,
+                expected.samples()[frame * channels..frame * channels + count],
+                "frame {frame}"
+            );
+            if frame == expected.frames() {
+                assert!(decoder.read_packet().unwrap().is_none());
+            }
+        }
+    }
+    let long = include_bytes!("fixtures/audio/mono-8000-long.ogg");
+    let stereo_stream = include_bytes!("fixtures/audio/stereo-8000-stream.ogg");
+    for bytes in [MONO, STEREO, long.as_slice(), stereo_stream.as_slice()] {
+        check(bytes, VorbisDecoder::new(bytes).unwrap());
+    }
+    check(
+        long,
+        VorbisDecoder::from_shared(std::sync::Arc::new(long.to_vec())).unwrap(),
+    );
+}
+
+#[test]
 fn vorbis_rejects_incomplete_pages_corruption_chained_streams_and_excessive_frame_counts() {
     let pages: Vec<_> = MONO
         .windows(4)
