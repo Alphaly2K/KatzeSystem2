@@ -55,7 +55,11 @@ impl Objects {
         if command == b"lineinfo" && args.get(2).is_none() {
             return Ok(true);
         }
-        let count = if command == b"endpos" { 2 } else { 3 };
+        let count = if matches!(command, b"endpos" | b"drawarea") {
+            2
+        } else {
+            3
+        };
         let mut values = [if command == b"lineinfo" { 0 } else { -1 }; 3];
         for (value, bytes) in values.iter_mut().take(count).zip(args.iter().skip(2)) {
             *value = interpreter
@@ -76,11 +80,12 @@ impl Objects {
                 continue;
             };
             let object = self.get(handle).unwrap();
-            let position = if command == b"endpos" {
+            let position = if matches!(command, b"endpos" | b"drawarea") {
                 let ObjectState::String(state) = &object.state else {
                     continue;
                 };
                 let [x, y] = state.cursor();
+                // 475／496 不写输出；原媒体更新把前一次光标查询的两个值缓存为绘制尺寸。
                 [x, y, 0]
             } else if object.state.plane().is_some() {
                 let point = self.plane_position(handle);
