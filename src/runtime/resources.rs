@@ -25,10 +25,24 @@ pub(super) struct Resources {
     pub backlogs: std::collections::BTreeMap<u32, crate::backlog::Backlog>,
     pub cst_contexts: std::collections::BTreeMap<u32, super::CstContext>,
     pub emocon: std::collections::BTreeMap<u32, super::emocon::EmoconState>,
+    pub movie: Option<super::movie::Movie>,
 }
 
 impl Resources {
     pub fn compose_frame(&mut self, range: Option<[f32; 2]>) -> Result<crate::graphics::DrawList> {
+        if range.is_none() {
+            let size = self.movie.as_ref().map(|movie| movie.surface_size);
+            if let Some(size) = size {
+                let filter = self
+                    .compositor
+                    .frame_view
+                    .as_ref()
+                    .map_or(crate::graphics::TextureFilter::Linear, |view| view.2);
+                if let Some(frame) = self.movie_frame(size, filter)? {
+                    return Ok(frame);
+                }
+            }
+        }
         self.compositor.compose(range)
     }
 

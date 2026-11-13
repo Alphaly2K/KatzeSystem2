@@ -43,6 +43,21 @@ pub struct DrawList {
     pub filter: TextureFilter,
 }
 
+impl DrawList {
+    /// 向已有目标混合软件帧；画布仅在命令使用其面块时需要，不清空目标。
+    pub fn render_into(
+        &self,
+        output: &mut RenderTarget,
+        canvas: Option<&RenderTarget>,
+    ) -> Result<bool> {
+        let mut touched = false;
+        for command in &self.commands {
+            touched |= super::raster::draw_command(output, canvas, command, self.filter)?;
+        }
+        Ok(touched)
+    }
+}
+
 impl Drawables {
     /// 合成全帧或指定深度区间；区间上界非正时返回空列表。
     pub fn compose(

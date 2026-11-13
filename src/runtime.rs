@@ -23,6 +23,7 @@ mod graphics;
 mod input;
 mod message;
 mod motion;
+mod movie;
 mod native;
 mod particle;
 pub use motion::MotionSnapshot;
@@ -202,6 +203,9 @@ impl<F: ObjectFactory> Runtime<F> {
         parent: [f32; 16],
         filter: crate::graphics::TextureFilter,
     ) -> Result<bool> {
+        if let Some(frame) = self.resources.movie_frame(output.size(), filter)? {
+            return frame.render_into(output, self.resources.compositor.drawing.target.as_ref());
+        }
         self.resources
             .compositor
             .render_frame(output, projection, parent, filter)
@@ -455,6 +459,9 @@ impl<F: ObjectFactory> Runtime<F> {
     /// 完成一轮树更新后广播配置变更并清除标记。
     /// 通知失败后先续完原轮次，不重复推进时钟和主体。
     pub fn update(&mut self, now: u32, increment: u32) -> Result<bool> {
+        if let Some(movie) = &mut self.resources.movie {
+            movie.advance(self.host.system_time_ms)?;
+        }
         if self.configuration_notification.is_some() {
             return self.finish_configuration_notification();
         }

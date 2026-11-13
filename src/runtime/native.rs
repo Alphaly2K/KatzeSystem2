@@ -59,6 +59,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             RuntimeHandler::Backlog => self.backlog_native(index, arguments, vm),
             RuntimeHandler::LoadProgram => self.ordinary_load_native(arguments, vm),
             RuntimeHandler::LoadParticle => self.load_particle_native(index, arguments, vm),
+            RuntimeHandler::Movie => self.movie_native(index, arguments, vm),
             RuntimeHandler::NameTable => self.resources.raw.name_table_call(
                 index,
                 arguments,

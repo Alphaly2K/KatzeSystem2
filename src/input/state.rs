@@ -89,6 +89,7 @@ impl CommandState {
                     self.show_cursor(command.target, 1, true, host)?;
                 }
             }
+            144 => {}
             145 => {
                 if command.data[0] >= 80 {
                     return Err(Error::new(0, "输入键槽位超出 0～79"));

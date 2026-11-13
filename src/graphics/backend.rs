@@ -34,9 +34,7 @@ impl GraphicsBackend for SoftwareBackend {
         size: [u32; 2],
     ) -> Result<RenderTarget> {
         let mut output = RenderTarget::new(size)?;
-        for command in &frame.commands {
-            super::raster::draw_command(&mut output, Some(canvas), command, frame.filter)?;
-        }
+        frame.render_into(&mut output, Some(canvas))?;
         Ok(output)
     }
 }
