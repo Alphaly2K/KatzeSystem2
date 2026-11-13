@@ -17,14 +17,15 @@ impl ProgramLoader for Source {
 }
 type Engine = Runtime<KcsFactory<Source>>;
 
-fn program(args: &[u8]) -> Program {
-    fn instruction(code: &mut Vec<u8>, opcode: u8, words: &[u32]) {
-        code.push(opcode);
-        for word in words {
-            code.push(3);
-            code.extend(word.to_le_bytes());
-        }
+fn instruction(code: &mut Vec<u8>, opcode: u8, words: &[u32]) {
+    code.push(opcode);
+    for word in words {
+        code.push(3);
+        code.extend(word.to_le_bytes());
     }
+}
+
+fn program(args: &[u8]) -> Program {
     let mut code = vec![];
     instruction(&mut code, 0x25, &[0xdeadbeef]);
     let mut stack = vec![0xa5; (4 - args.len() % 4) % 4];
@@ -92,6 +93,119 @@ fn call(rt: &mut Engine) -> u32 {
     assert_eq!(vm.stack_bytes(), 0xdeadbeefu32.to_le_bytes());
     assert_eq!(vm.read(0, 256).unwrap(), [0x5a; 256]);
     id
+}
+
+fn execute(rt: &mut Engine, calls: &[(u32, Vec<u32>)]) {
+    let mut code = vec![];
+    instruction(&mut code, 0x25, &[0xdeadbeef]);
+    for (index, arguments) in calls {
+        for value in arguments {
+            instruction(&mut code, 0x25, &[*value]);
+        }
+        instruction(&mut code, 0x2b, &[*index, arguments.len() as u32 * 4]);
+    }
+    instruction(&mut code, 0x3b, &[]);
+    let id = rt.create(0, kind::ORDINARY, b"sequence", b"").unwrap();
+    *rt.object_mut(id).unwrap().interpreter_mut().unwrap() = katze_system2::kcs::Interpreter::new(
+        Program::from_code(&code, vec![0x5a; 256], 128).unwrap(),
+        vec![],
+    )
+    .unwrap();
+    rt.update(0, 0).unwrap();
+    assert_eq!(
+        rt.object(id).unwrap().interpreter().unwrap().stack_bytes(),
+        0xdeadbeefu32.to_le_bytes()
+    );
+}
+
+#[test]
+fn auxiliary_passes_keep_each_target_capture_and_canvas_independent() {
+    for (budget, backend) in [(1, false), (4096, false), (1, true), (4096, true)] {
+        let mut rt = engine(&[0; 8], true);
+        rt.set_budget(budget, 4096);
+        if backend {
+            rt.set_graphics_backend(SoftwareBackend);
+        }
+        let canvas = rt.drawing().clone();
+        execute(
+            &mut rt,
+            &[
+                (858, vec![2]),
+                (859, vec![0, 10f32.to_bits(), 20f32.to_bits()]),
+                (859, vec![1, 0f32.to_bits(), 10f32.to_bits()]),
+                (859, vec![2, 0, 30f32.to_bits()]),
+                (568, vec![20f32.to_bits(), 21f32.to_bits()]),
+            ],
+        );
+        let targets = rt.compositor().auxiliary_targets();
+        for (index, frame) in targets.iter().enumerate() {
+            for x in [1, 3, 5] {
+                let expected = match (index, x) {
+                    (0, 3) => 0xff123457,
+                    (1, 1) => 0xff123456,
+                    _ => 0,
+                };
+                assert_eq!(frame.pixel(x, 1), Some(expected));
+            }
+        }
+        assert_eq!(rt.offscreen_frame().unwrap().pixel(5, 1), Some(0xff123458));
+        let other = targets[1].clone();
+        let capture = rt.offscreen_frame().cloned();
+        rt.drawables_mut().set_display(101, 0);
+        execute(&mut rt, &[(859, vec![0, 10f32.to_bits(), 20f32.to_bits()])]);
+        assert_eq!(rt.compositor().auxiliary_targets()[0].pixel(3, 1), Some(0));
+        assert_eq!(rt.compositor().auxiliary_targets()[1], other);
+        assert_eq!(rt.offscreen_frame(), capture.as_ref());
+        assert_eq!(rt.drawing(), &canvas);
+    }
+}
+
+#[test]
+fn auxiliary_reservations_preserve_capacity_and_reset_grown_targets() {
+    let mut rt = engine(&[0; 8], true);
+    rt.host_mut().platform_settings = Some(katze_system2::settings::PlatformSettings {
+        d3d_backbuffer: 0,
+        ..Default::default()
+    });
+    execute(&mut rt, &[(858, vec![1])]);
+    assert!(rt.compositor().auxiliary_targets().is_empty());
+    rt.host_mut()
+        .platform_settings
+        .as_mut()
+        .unwrap()
+        .d3d_backbuffer = 1;
+    execute(
+        &mut rt,
+        &[(858, vec![1]), (859, vec![0, 0, 30f32.to_bits()])],
+    );
+    let first = rt.compositor().auxiliary_targets()[0].clone();
+    execute(&mut rt, &[(858, vec![0]), (858, vec![1]), (858, vec![3])]);
+    assert_eq!(rt.compositor().auxiliary_targets(), &[first]);
+    rt.host_mut()
+        .platform_settings
+        .as_mut()
+        .unwrap()
+        .d3d_tex_size = 4;
+    execute(&mut rt, &[(858, vec![2])]);
+    assert!(rt.compositor().auxiliary_targets().is_empty());
+    rt.host_mut()
+        .platform_settings
+        .as_mut()
+        .unwrap()
+        .d3d_tex_size = u32::MAX;
+    execute(&mut rt, &[(858, vec![2])]);
+    let targets = rt.compositor().auxiliary_targets();
+    assert_eq!(targets.len(), 2);
+    for target in targets {
+        for y in 0..4 {
+            for x in 0..8 {
+                assert_eq!(target.pixel(x, y), Some(0));
+            }
+        }
+    }
+    rt.drawing_mut().enabled = false;
+    execute(&mut rt, &[(859, vec![0, 0, 30f32.to_bits()])]);
+    assert_eq!(rt.compositor().auxiliary_targets()[0].pixel(3, 1), Some(0));
 }
 
 #[test]

@@ -241,6 +241,8 @@ pub(crate) fn runtime(index: u32) -> RuntimeHandler {
         | 739
         | 848
         | 849
+        | 858
+        | 859
         | 862
         | 880
         | 1065..=1069 => RuntimeHandler::Graphics,

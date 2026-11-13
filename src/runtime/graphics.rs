@@ -10,6 +10,41 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         arguments: &[u8],
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
+        if matches!(index, 858 | 859) {
+            let count = if index == 858 { 4 } else { 12 };
+            if arguments.len() != count {
+                return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+            }
+            let first = read::u32_at(arguments, 0)?;
+            if index == 858 {
+                let drawing = self.resources.compositor.drawing();
+                let enabled = self
+                    .host
+                    .platform_settings
+                    .as_ref()
+                    .is_none_or(|settings| settings.d3d_backbuffer != 0);
+                if drawing.mode == 0 && drawing.enabled && enabled {
+                    let maximum_size = self
+                        .host
+                        .platform_settings
+                        .as_ref()
+                        .map_or(u32::MAX, |settings| settings.d3d_tex_size);
+                    self.resources.compositor.reserve_auxiliary_targets(
+                        self.host.surface_size,
+                        first,
+                        maximum_size,
+                    )?;
+                }
+            } else {
+                let range = [
+                    f32::from_bits(read::u32_at(arguments, 4)?),
+                    f32::from_bits(read::u32_at(arguments, 8)?),
+                ];
+                self.resources
+                    .render_auxiliary(first, self.host.surface_size, range)?;
+            }
+            return Ok(NativeReturn::Continue);
+        }
         if index == 113 {
             if !arguments.is_empty() {
                 return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));

@@ -1,4 +1,4 @@
-use crate::graphics::{Compositor, Images, Rect};
+use crate::graphics::{Compositor, GraphicsBackend, Images, Rect, RenderTarget, SoftwareBackend};
 use crate::kcs::{Interpreter, NativeReturn, ResourceServices, ResourceState, format_string};
 use crate::{Error, Result};
 
@@ -61,37 +61,47 @@ impl Resources {
     }
 
     pub fn render_offscreen(&mut self, size: [u32; 2], range: [f32; 2]) -> Result<bool> {
-        if self.compositor.drawing.mode != 0 || !self.compositor.drawing.enabled {
+        let Some(frame) = self.render_depth_frame(size, range)? else {
             return Ok(false);
+        };
+        self.offscreen_frame = Some(frame);
+        Ok(true)
+    }
+
+    pub fn render_auxiliary(
+        &mut self,
+        index: u32,
+        size: [u32; 2],
+        range: [f32; 2],
+    ) -> Result<bool> {
+        if index as usize >= self.compositor.auxiliary_targets.len() {
+            return Ok(false);
+        }
+        let Some(frame) = self.render_depth_frame(size, range)? else {
+            return Ok(false);
+        };
+        self.compositor.auxiliary_targets[index as usize] = frame;
+        Ok(true)
+    }
+
+    fn render_depth_frame(
+        &mut self,
+        size: [u32; 2],
+        range: [f32; 2],
+    ) -> Result<Option<RenderTarget>> {
+        if self.compositor.drawing.mode != 0 || !self.compositor.drawing.enabled {
+            return Ok(None);
         }
         if self.compositor.drawing.target.is_none() {
-            return Ok(false);
+            return Ok(None);
         }
-        if self.graphics_backend.is_some() {
-            let frame = self.compose_frame(Some(range))?;
-            self.offscreen_frame = Some(self.graphics_backend.as_deref_mut().unwrap().render(
-                &frame,
-                self.compositor.drawing.target.as_mut().unwrap(),
-                size,
-            )?);
-            return Ok(true);
+        let frame = self.compose_frame(Some(range))?;
+        let canvas = self.compositor.drawing.target.as_mut().unwrap();
+        if let Some(backend) = self.graphics_backend.as_deref_mut() {
+            backend.render(&frame, canvas, size).map(Some)
+        } else {
+            SoftwareBackend.render(&frame, canvas, size).map(Some)
         }
-        let canvas = self.compositor.drawing.target.as_ref().unwrap();
-        let (projection, parent, filter) = self
-            .compositor
-            .frame_view
-            .as_ref()
-            .ok_or_else(|| Error::new(0, "离屏绘制需要配置运行时帧视图"))?;
-        self.offscreen_frame = Some(crate::graphics::RenderTarget::new(size)?);
-        self.compositor.drawables.render_depth_range(
-            self.offscreen_frame.as_mut().unwrap(),
-            canvas,
-            projection,
-            *parent,
-            *filter,
-            range,
-        )?;
-        Ok(true)
     }
 
     pub fn capture_image(

@@ -7,6 +7,7 @@ pub struct Compositor {
     pub(crate) drawing: DrawingContext,
     pub(crate) drawables: Drawables,
     pub(crate) frame_view: Option<(Projection, [f32; 16], TextureFilter)>,
+    pub(crate) auxiliary_targets: Vec<RenderTarget>,
 }
 
 impl Compositor {
@@ -24,6 +25,30 @@ impl Compositor {
 
     pub fn drawables_mut(&mut self) -> &mut Drawables {
         &mut self.drawables
+    }
+
+    /// 按零起始编号保存的辅助绘制目标；独立于画布和单次画面捕获。
+    pub fn auxiliary_targets(&self) -> &[RenderTarget] {
+        &self.auxiliary_targets
+    }
+
+    pub(crate) fn reserve_auxiliary_targets(
+        &mut self,
+        size: [u32; 2],
+        count: u32,
+        maximum_size: u32,
+    ) -> Result<()> {
+        if count > 2 || count as usize <= self.auxiliary_targets.len() {
+            return Ok(());
+        }
+        self.auxiliary_targets.clear();
+        if maximum_size as i32 > 0 && size.iter().any(|&dimension| dimension > maximum_size) {
+            return Ok(());
+        }
+        for _ in 0..count {
+            self.auxiliary_targets.push(RenderTarget::new(size)?);
+        }
+        Ok(())
     }
 
     /// 后续合成使用同一视图；调用本身不绘制或更改画布像素。
