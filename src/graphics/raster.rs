@@ -28,7 +28,7 @@ impl Surface {
         self.rasterize(points, origin, clip, |_| Some(color))
     }
 
-    /// 以 RHW 透视插值顶点颜色；不执行深度裁剪或深度缓冲。
+    /// 以 RHW 透视插值顶点颜色，裁掉归一化深度区间外的像素；不使用深度缓冲。
     pub fn blend_projected_triangle(&mut self, vertices: [ProjectedVertex; 3]) -> bool {
         self.blend_projected_triangle_at(vertices, [0; 2], None)
     }
@@ -235,6 +235,7 @@ struct Interpolation {
     rhw: [f64; 3],
     colors: [[f64; 4]; 3],
     area: f64,
+    depth: Option<[f64; 3]>,
 }
 
 impl Interpolation {
@@ -252,6 +253,15 @@ impl Interpolation {
             rhw: vertices.map(|v| f64::from(v.rhw)),
             colors: vertices.map(|v| v.color.to_le_bytes().map(f64::from)),
             area,
+            depth: needs_depth_clip(vertices).then(|| {
+                vertices.map(|v| {
+                    if v.position[2].is_finite() {
+                        f64::from(v.position[2])
+                    } else {
+                        0.
+                    }
+                })
+            }),
         })
     }
 
@@ -259,8 +269,16 @@ impl Interpolation {
         // 插值使用未对齐的顶点；八位亚像素仅决定像素覆盖。
         let mut weights = std::array::from_fn(|i| {
             edge(self.points[(i + 1) % 3], self.points[(i + 2) % 3], point) / self.area
-                * self.rhw[i]
         });
+        if let Some(depth) = self.depth {
+            let value: f64 = (0..3).map(|i| depth[i] * weights[i]).sum();
+            if !(0.0..=1.0).contains(&value) {
+                return None;
+            }
+        }
+        for (weight, rhw) in weights.iter_mut().zip(self.rhw) {
+            *weight *= rhw;
+        }
         let denominator: f64 = weights.iter().sum();
         if !denominator.is_finite() || denominator <= 0. {
             return None;
@@ -354,7 +372,9 @@ pub(super) fn draw_command(
     filter: TextureFilter,
 ) -> Result<bool> {
     let vertices = command.vertices;
-    validate_depth(vertices)?;
+    if triangle_culled(vertices) {
+        return Ok(false);
+    }
     if let Some(source) = &command.texture {
         let texture = match &source.source {
             super::TextureSource::Canvas(tile) => canvas
@@ -380,14 +400,29 @@ pub(super) fn draw_command(
     draw_colors(output, vertices, command.clip)
 }
 
-pub(super) fn validate_depth(vertices: [ProjectedVertex; 3]) -> Result<()> {
-    if vertices
+fn needs_depth_clip(vertices: [ProjectedVertex; 3]) -> bool {
+    vertices
         .iter()
         .any(|v| v.position[2].is_finite() && !(0.0..=1.0).contains(&v.position[2]))
+}
+
+pub(super) fn triangle_culled(vertices: [ProjectedVertex; 3]) -> bool {
+    if vertices
+        .iter()
+        .all(|v| v.position[2].is_finite() && v.position[2] < 0.)
+        || vertices
+            .iter()
+            .all(|v| v.position[2].is_finite() && v.position[2] > 1.)
+        || vertices
+            .iter()
+            .any(|v| v.position[..2].iter().any(|n| !n.is_finite()))
     {
-        return Err(Error::new(0, "三角形深度裁剪尚未接入"));
+        return true;
     }
-    Ok(())
+    let points = vertices.map(|v| {
+        [v.position[0], v.position[1]].map(|n| (f64::from(n) * 256. + 0.5).floor() / 256.)
+    });
+    edge(points[0], points[1], points[2]) == 0.
 }
 
 fn draw_colors(
@@ -396,6 +431,12 @@ fn draw_colors(
     clip: Option<Rect>,
 ) -> Result<bool> {
     if vertices.iter().all(|v| v.color == vertices[0].color) {
+        if needs_depth_clip(vertices) {
+            return Ok(target.blend_projected_triangle_clipped(
+                vertices.map(|v| ProjectedVertex { rhw: 1., ..v }),
+                clip,
+            ));
+        }
         Ok(target.blend_triangle_clipped(
             vertices.map(|v| [v.position[0], v.position[1]]),
             vertices[0].color,

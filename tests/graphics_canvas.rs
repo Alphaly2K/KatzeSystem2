@@ -3,7 +3,7 @@ use katze_system2::{
     expression::State,
     graphics::{
         CanvasLayout, Drawable, Drawables, DrawingContext, GraphicsFactory, PlaneObject,
-        Projection, RenderTarget, Surface, TextureFilter,
+        Projection, Rect, RenderTarget, Surface, TextureFilter,
     },
     kcs::{Host, Interpreter, NativeReturn, Program},
     runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, TaskObject, kind},
@@ -230,6 +230,32 @@ fn frames_read_canvas_tiles_keep_missing_texture_behavior_and_submit_past_32() {
         );
         assert_eq!(output.pixel(0, 0), Some(0xff0000ff));
         assert_eq!(output.pixel(3, 3), Some(expected));
+        drawings.set_base_point(2, [0., 0., 65001.]);
+        output.clear_rect(Rect::from_xywh(0, 0, 4, 4));
+        drawings
+            .render_frame(
+                &mut output,
+                &canvas,
+                &Projection::default(),
+                IDENTITY,
+                TextureFilter::Point,
+            )
+            .unwrap();
+        assert_eq!(output.pixel(0, 0), Some(expected));
+        drawings.set_base_point(1, [0., 0., -65001.]);
+        output.clear_rect(Rect::from_xywh(0, 0, 4, 4));
+        assert!(
+            !drawings
+                .render_frame(
+                    &mut output,
+                    &canvas,
+                    &Projection::default(),
+                    IDENTITY,
+                    TextureFilter::Point,
+                )
+                .unwrap()
+        );
+        assert_eq!(output.pixel(0, 0), Some(0));
     }
     assert_eq!(canvas, before);
 }

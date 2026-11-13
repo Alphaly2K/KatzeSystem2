@@ -148,7 +148,9 @@ impl Drawables {
                         None,
                     )
                 };
-                super::raster::validate_depth(vertices)?;
+                if super::raster::triangle_culled(vertices) {
+                    continue;
+                }
                 touched |= draw(FrameTriangle {
                     vertices,
                     texture,

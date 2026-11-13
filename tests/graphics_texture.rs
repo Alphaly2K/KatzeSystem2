@@ -53,6 +53,79 @@ fn image_commands_hold_their_pixels_and_mix_with_canvas_textures() {
     assert_eq!(changed.pixel(6, 1), Some(0xff0000ff));
 }
 
+#[test]
+fn depth_clipping_keeps_visible_color_and_texture_interpolation() {
+    let image = Arc::new(texture());
+    let mut canvas = RenderTarget::new([1, 1]).unwrap();
+    let mut backend = SoftwareBackend;
+    for filter in [TextureFilter::Point, TextureFilter::Linear] {
+        for mode in 0..3 {
+            let mut triangle = vertices();
+            for (index, vertex) in triangle.iter_mut().enumerate() {
+                vertex.rhw = [1., 0.5, 2.][index];
+                if mode != 0 {
+                    vertex.color = [0x408020ff, 0xc020ff40, 0xffef8040][index];
+                }
+            }
+            let mut frame = DrawList {
+                commands: vec![DrawCommand {
+                    vertices: triangle,
+                    texture: (mode == 2).then(|| FrameTexture {
+                        source: TextureSource::Image(image.clone()),
+                        uv: [[0.17, 0.19], [1.13, 0.87], [-0.21, 1.31]],
+                    }),
+                    clip: None,
+                }],
+                filter,
+            };
+            let reference = backend.render(&frame, &mut canvas, [8, 8]).unwrap();
+            for (depth, visible) in [
+                ([-0.25; 3], 0),
+                ([1.25; 3], 0),
+                ([-0.625, 1.375, -0.625], 1),
+                ([0.375, 0.375, 2.375], 2),
+                ([0.; 3], 3),
+                ([1.; 3], 3),
+            ] {
+                for (index, vertex) in frame.commands[0].vertices.iter_mut().enumerate() {
+                    vertex.position[2] = depth[index];
+                    vertex.rhw = if visible == 0 {
+                        [-1., 0., f32::NAN][index]
+                    } else {
+                        [1., 0.5, 2.][index]
+                    };
+                }
+                let output = backend.render(&frame, &mut canvas, [8, 8]).unwrap();
+                for y in 0..8 {
+                    for x in 0..8 {
+                        let inside = match visible {
+                            0 => false,
+                            1 => x >= 4,
+                            2 => y < 4,
+                            _ => true,
+                        };
+                        assert_eq!(
+                            output.pixel(x, y),
+                            if inside {
+                                reference.pixel(x, y)
+                            } else {
+                                Some(0)
+                            },
+                            "mode={mode} filter={filter:?} depth={depth:?} pixel=({x},{y})"
+                        );
+                    }
+                }
+            }
+            for (index, vertex) in frame.commands[0].vertices.iter_mut().enumerate() {
+                vertex.position = [4., 4., 0.5];
+                vertex.rhw = [-1., 0., f32::NAN][index];
+            }
+            let empty = backend.render(&frame, &mut canvas, [8, 8]).unwrap();
+            assert_eq!(empty.pixel(4, 4), Some(0));
+        }
+    }
+}
+
 fn texture() -> Surface {
     let mut pixels = vec![];
     for y in 0..4 {

@@ -11,7 +11,8 @@ struct Vertex {
     position: [f32; 4],
     color: [f32; 4],
     uv: [f32; 2],
-    padding: [f32; 2],
+    depth: f32,
+    padding: f32,
 }
 
 struct Tile {
@@ -191,16 +192,16 @@ impl Renderer {
         self.wait()?;
         self.vertices.clear();
         for triangle in triangles {
-            super::raster::validate_depth(triangle.vertices)?;
             let textured = triangle
                 .texture
                 .as_ref()
                 .is_some_and(|t| t.source.surface(canvas).is_some());
-            let interpolate = textured
-                || triangle
-                    .vertices
-                    .iter()
-                    .any(|v| v.color != triangle.vertices[0].color);
+            let interpolate = !super::raster::triangle_culled(triangle.vertices)
+                && (textured
+                    || triangle
+                        .vertices
+                        .iter()
+                        .any(|v| v.color != triangle.vertices[0].color));
             if interpolate
                 && triangle
                     .vertices
@@ -231,7 +232,12 @@ impl Renderer {
                         .as_ref()
                         .filter(|_| textured)
                         .map_or([0.; 2], |t| t.uv[index]),
-                    padding: [0.; 2],
+                    depth: if vertex.position[2].is_finite() {
+                        vertex.position[2]
+                    } else {
+                        0.
+                    },
+                    padding: 0.,
                 });
             }
         }
@@ -290,6 +296,9 @@ impl Renderer {
         }
         let mut images = BTreeMap::new();
         for triangle in triangles {
+            if super::raster::triangle_culled(triangle.vertices) {
+                continue;
+            }
             let Some(super::FrameTexture {
                 source: TextureSource::Image(source),
                 ..
@@ -351,6 +360,9 @@ impl Renderer {
         );
         let bounds = Rect::from_xywh(0, 0, target.width() as i32, target.height() as i32);
         for (index, triangle) in triangles.iter().enumerate() {
+            if super::raster::triangle_culled(triangle.vertices) {
+                continue;
+            }
             let source = triangle
                 .texture
                 .as_ref()

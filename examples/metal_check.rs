@@ -102,6 +102,55 @@ fn check() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap()
         .source = TextureSource::Image(image.clone());
     cases.push(independent.clone());
+    for depth in [
+        [-0.25; 3],
+        [1.25; 3],
+        [-0.625, 1.375, -0.625],
+        [0.375, 0.375, 2.375],
+        [0., 1., 0.5],
+    ] {
+        for mode in 0..3 {
+            let mut clipped = triangle(
+                [[-4., -4.], [20., -4.], [-4., 20.]],
+                if mode == 0 {
+                    [0x8080c040; 3]
+                } else {
+                    [0x408020ff, 0xc020ff40, 0xffef8040]
+                },
+                (mode == 2).then(|| FrameTexture {
+                    source: TextureSource::Image(image.clone()),
+                    uv: [[0.17, 0.19], [1.13, 0.87], [-0.21, 1.31]],
+                }),
+            );
+            for (index, vertex) in clipped.vertices.iter_mut().enumerate() {
+                vertex.rhw = if depth.iter().all(|z| *z < 0.) || depth.iter().all(|z| *z > 1.) {
+                    [-1., 0., f32::NAN][index]
+                } else {
+                    [1., 0.5, 2.][index]
+                };
+                vertex.position[2] = depth[index];
+            }
+            cases.push(vec![clipped]);
+        }
+    }
+    for mode in 0..3 {
+        let mut empty = triangle(
+            [[4.; 2]; 3],
+            if mode == 0 {
+                [u32::MAX; 3]
+            } else {
+                [0x408020ff, 0xc020ff40, 0xffef8040]
+            },
+            (mode == 2).then(|| FrameTexture {
+                source: TextureSource::Image(image.clone()),
+                uv: [[0.5; 2]; 3],
+            }),
+        );
+        for (index, vertex) in empty.vertices.iter_mut().enumerate() {
+            vertex.rhw = [-1., 0., f32::NAN][index];
+        }
+        cases.push(vec![empty]);
+    }
     let mut comparisons = 0;
     let mut largest_error = 0;
     for filter in [TextureFilter::Point, TextureFilter::Linear] {
