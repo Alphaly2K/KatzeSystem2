@@ -40,7 +40,7 @@ unsafe extern "C" {
     pub fn plm_create_with_buffer(buffer: *mut Buffer, destroy: c_int) -> *mut Player;
     pub fn plm_destroy(player: *mut Player);
     pub fn plm_probe(player: *mut Player, bytes: usize) -> c_int;
-    pub fn plm_rewind(player: *mut Player);
+    pub fn katze_movie_rewind(player: *mut Player);
     pub fn plm_has_headers(player: *mut Player) -> c_int;
     pub fn plm_get_width(player: *mut Player) -> c_int;
     pub fn plm_get_height(player: *mut Player) -> c_int;

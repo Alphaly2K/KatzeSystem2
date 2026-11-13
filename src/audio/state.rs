@@ -8,6 +8,7 @@ pub struct SoundState {
     pub(super) channels: [SoundChannel; 64],
     pub(super) groups: Option<BTreeMap<u32, GroupRange>>,
     pub(super) output: Option<super::output::Link>,
+    pub(super) movie: Option<crate::movie::AudioOutput>,
 }
 
 pub(super) struct GroupRange {
@@ -22,6 +23,7 @@ impl Default for SoundState {
             channels: std::array::from_fn(|_| SoundChannel::default()),
             groups: None,
             output: None,
+            movie: None,
         }
     }
 }

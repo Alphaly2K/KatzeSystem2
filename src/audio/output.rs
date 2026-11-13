@@ -20,10 +20,13 @@ pub(super) enum Action {
     Gain(i32, i32),
 }
 
-struct Update {
-    channel: usize,
-    generation: u64,
-    action: Action,
+enum Update {
+    Channel {
+        channel: usize,
+        generation: u64,
+        action: Action,
+    },
+    Movie(Option<crate::movie::AudioOutput>),
 }
 
 pub(super) struct Link {
@@ -60,6 +63,7 @@ impl SoundState {
         });
         let sound = SoundState {
             channels: self.channels.clone(),
+            movie: self.movie.clone(),
             ..SoundState::default()
         };
         for (channel, progress) in self.channels.iter_mut().zip(&progress) {
@@ -114,11 +118,19 @@ impl SoundState {
             }
             Action::Gain(_, _) => (),
         }
-        let _ = link.sender.send(Update {
+        let _ = link.sender.send(Update::Channel {
             channel,
             generation: status.generation,
             action,
         });
+    }
+
+    /// 设置独立电影音轨；不占用脚本的六十四个物理声音通道。
+    pub fn set_movie_output(&mut self, movie: Option<crate::movie::AudioOutput>) {
+        self.movie = movie.clone();
+        if let Some(link) = &self.output {
+            let _ = link.sender.send(Update::Movie(movie));
+        }
     }
 
     pub(super) fn output_replace(&mut self, channel: usize) {
@@ -160,35 +172,47 @@ impl Mixer {
     /// 消费已提交的控制，覆写交错的立体声采样，并发布新的播放进度。
     pub fn render(&mut self, sample_rate: u32, output: &mut [f32]) -> Result<()> {
         for update in self.receiver.try_iter() {
-            let channel = &mut self.sound.channels[update.channel];
-            match update.action {
-                Action::Replace(sound) => *channel = *sound,
+            let Update::Channel {
+                channel,
+                generation,
+                action,
+            } = update
+            else {
+                let Update::Movie(movie) = update else {
+                    unreachable!()
+                };
+                self.sound.movie = movie;
+                continue;
+            };
+            let sound_channel = &mut self.sound.channels[channel];
+            match action {
+                Action::Replace(sound) => *sound_channel = *sound,
                 Action::Start(count, range) => {
-                    if channel.playback.playing || !channel.resampler.paused {
-                        channel.resampler = super::mix::Resampler::default();
+                    if sound_channel.playback.playing || !sound_channel.resampler.paused {
+                        sound_channel.resampler = super::mix::Resampler::default();
                     }
-                    channel.resampler.paused = false;
-                    if let Some(pcm) = &channel.source {
-                        channel.playback.start(pcm, count, range)?;
+                    sound_channel.resampler.paused = false;
+                    if let Some(pcm) = &sound_channel.source {
+                        sound_channel.playback.start(pcm, count, range)?;
                     }
                 }
                 Action::Pause => {
-                    channel.playback.pause();
-                    channel.resampler.paused = true;
+                    sound_channel.playback.pause();
+                    sound_channel.resampler.paused = true;
                 }
                 Action::Stop => {
-                    channel.resampler = super::mix::Resampler::default();
-                    if let Some(pcm) = &channel.source {
-                        channel.playback.stop(pcm)?;
+                    sound_channel.resampler = super::mix::Resampler::default();
+                    if let Some(pcm) = &sound_channel.source {
+                        sound_channel.playback.stop(pcm)?;
                     }
                 }
-                Action::Count(count, range) => channel.playback.change_count(count, range),
+                Action::Count(count, range) => sound_channel.playback.change_count(count, range),
                 Action::Gain(volume, pan) => {
-                    channel.pcm_volume = volume;
-                    channel.pcm_pan = pan;
+                    sound_channel.pcm_volume = volume;
+                    sound_channel.pcm_pan = pan;
                 }
             }
-            self.generations[update.channel] = update.generation;
+            self.generations[channel] = generation;
         }
         self.sound.mix(sample_rate, output, false)?;
         for (index, channel) in self.sound.channels.iter().enumerate() {

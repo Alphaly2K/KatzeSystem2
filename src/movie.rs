@@ -1,6 +1,8 @@
 //! MPEG-1 视频与 MP2 立体声的流式解码；输入不依赖平台文件路径。
 
 mod ffi;
+mod playback;
+pub use playback::{AudioOutput, Player};
 
 use crate::{Error, Result, graphics::Surface, io::SharedSource, read};
 use std::{ffi::c_void, panic::AssertUnwindSafe, ptr::NonNull};
@@ -88,7 +90,7 @@ impl Decoder {
         };
         // 容器头的 audio_bound 可能为零；实际 PES 扫描仍能发现 MP2 音轨。
         let valid = unsafe {
-            ffi::plm_rewind(player.as_ptr());
+            ffi::katze_movie_rewind(player.as_ptr());
             ffi::plm_probe(player.as_ptr(), length.min(1024 * 1024)) != 0
                 && ffi::plm_has_headers(player.as_ptr()) != 0
         };
@@ -122,7 +124,7 @@ impl Decoder {
         Surface::new(metadata.size)?;
         decoder.metadata = metadata;
         unsafe {
-            ffi::plm_rewind(player.as_ptr());
+            ffi::katze_movie_rewind(player.as_ptr());
             ffi::plm_set_video_decode_callback(player.as_ptr(), video, user);
             ffi::plm_set_audio_decode_callback(player.as_ptr(), audio, user);
         }
@@ -135,6 +137,17 @@ impl Decoder {
 
     pub fn time(&self) -> f64 {
         unsafe { ffi::plm_get_time(self.player.as_ptr()) }
+    }
+
+    /// 回到流起点，清除尚未取走的输出；读取故障后的实例仍返回原诊断。
+    pub fn rewind(&mut self) -> Result<()> {
+        self.check_error()?;
+        self.input.video = None;
+        self.input.audio = None;
+        unsafe {
+            ffi::katze_movie_rewind(self.player.as_ptr());
+        }
+        self.check_error()
     }
 
     /// 每次推进零至一秒；较大的时钟变化由调用方分批推进。
