@@ -327,6 +327,8 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 
 普通 9 接收一个 DWORD，以状态二提交 `WindowCloseRequest`，保留 VM 返回栈。`HostState::window_close_requests` 按调用顺序记录发起任务及 `notify`：参数零为应用退出通知，非零为标准窗口关闭。平台宿主消费请求并执行窗口关闭流程；窗口示例在帧更新后处理该队列。
 
+普通 787 向四个地址依次写回窗口绘图区的 x、y、宽和高，保留返回槽；输出地址可重叠，后写覆盖先写。宿主通过 `HostState::window_content_rect` 提供客户区内的矩形，未提供时使用从零开始的 `surface_size`。
+
 `kcs::ResourceHost::new(&mut inner, &mut services)` 提供普通表 590～593 的 XML 装载、释放、整数及文本查询。服务实现 `ResourceServices::read(name, mode) -> Result<Option<Vec<u8>>>`；输入为格式展开的字节名称，当前 XML 接口采用 `ResourceMode::LooseFirst`。可由 `ResourceRouter::read` 转交已注册的归档和文件读取，再取返回资源的 bytes。None 或解析失败使 590 返回零，服务错误停止当前推进；创建的句柄存活至显式释放或宿主销毁。零句柄查询跳过地址解析，非零失效句柄返回诊断。593 的目标需为有效零结尾串，缺失字段保留原值，成功时仅覆盖 UTF-8 字段及结尾零。
 
 594～597 提供独立的三整数分组表：594 以格式化资源名称装载，595 释放，596 按组名、597 按条目名查询。596／597 接受句柄、格式化名称地址及三个输出地址，找到时依序写入原始 DWORD 并返回一；未找到或零句柄返回零，保持输出。读取同样采用 `LooseFirst`；成功打开的空文件仍返回有效空表句柄。分组、注释、首次定义及不完整头部的规则见[资源格式](resources.md#三整数分组表)。

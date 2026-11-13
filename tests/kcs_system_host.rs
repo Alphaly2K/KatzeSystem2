@@ -1,7 +1,10 @@
 use katze_system2::{
     Error, Result,
     expression::State,
-    kcs::{CoreHost, OrdinaryTask, Program, SystemHost, SystemServices},
+    kcs::{
+        CoreHost, Host, Interpreter, NativeReturn, OrdinaryTask, Program, SystemHost,
+        SystemServices,
+    },
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -10,6 +13,53 @@ struct Call {
     target: Vec<u8>,
     parameters: Vec<u8>,
     directory: Vec<u8>,
+}
+
+#[test]
+fn window_content_query_uses_host_bounds_and_preserves_aliased_write_order() {
+    let mut state = State::new(0);
+    let mut host = CoreHost::new(&mut state);
+    host.surface_size = [1280, 720];
+    let mut vm = Interpreter::new(
+        Program::from_code(&[0x3b], vec![0; 32], 16).unwrap(),
+        vec![],
+    )
+    .unwrap();
+    let call = |host: &mut CoreHost<'_>, vm: &mut Interpreter, addresses: [u32; 4]| {
+        host.call(
+            787,
+            &addresses
+                .into_iter()
+                .flat_map(u32::to_le_bytes)
+                .collect::<Vec<_>>(),
+            vm,
+        )
+    };
+    let words = |vm: &Interpreter| {
+        vm.read(0, 16)
+            .unwrap()
+            .chunks_exact(4)
+            .map(|b| i32::from_le_bytes(b.try_into().unwrap()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        call(&mut host, &mut vm, [0, 4, 8, 12]).unwrap(),
+        NativeReturn::Continue
+    );
+    assert_eq!(words(&vm), [0, 0, 1280, 720]);
+    host.window_content_rect = Some(katze_system2::graphics::Rect {
+        left: -20,
+        top: 33,
+        right: 1004,
+        bottom: 609,
+    });
+    call(&mut host, &mut vm, [0, 4, 8, 12]).unwrap();
+    assert_eq!(words(&vm), [-20, 33, 1024, 576]);
+    call(&mut host, &mut vm, [0; 4]).unwrap();
+    assert_eq!(words(&vm)[0], 576);
+    let before = vm.read(0, 16).unwrap().to_vec();
+    assert!(call(&mut host, &mut vm, [0, 4, 8, u32::MAX]).is_err());
+    assert_eq!(vm.read(0, 16).unwrap(), before);
 }
 
 #[derive(Default)]

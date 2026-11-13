@@ -58,11 +58,34 @@ pub(super) fn call(
         1 | 6 | 9 | 71 | 75 | 207 | 209 | 210 | 212 | 213 | 393 | 1040 => 1,
         8 | 149 | 211 | 392 | 1049 => 2,
         35 | 36 => 3,
+        787 => 4,
         5 | 76 => 0,
         _ => unreachable!(),
     };
     let args = super::words(arguments, count, vm.pc)?;
     Ok(match index {
+        787 => {
+            for address in &args {
+                vm.read(*address, 4)?;
+            }
+            let rectangle = host.window_content_rect.unwrap_or_else(|| {
+                crate::graphics::Rect::from_xywh(
+                    0,
+                    0,
+                    host.surface_size[0] as i32,
+                    host.surface_size[1] as i32,
+                )
+            });
+            for (address, value) in args.iter().zip([
+                rectangle.left,
+                rectangle.top,
+                rectangle.right.wrapping_sub(rectangle.left),
+                rectangle.bottom.wrapping_sub(rectangle.top),
+            ]) {
+                vm.write(*address, &value.to_le_bytes())?;
+            }
+            NativeReturn::Continue
+        }
         392 | 1049 => return crate::kcs::message_text::call(index, &args, vm),
 
         207 => {

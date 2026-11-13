@@ -79,6 +79,8 @@ pub struct HostState {
     pub sound_stereo: Option<u32>,
     pub sequence_name_mode: u32,
     pub surface_size: [u32; 2],
+    /// 窗口客户区内的绘图矩形；未配置时使用从零开始的 surface_size。
+    pub window_content_rect: Option<crate::graphics::Rect>,
     /// 外层图形宿主维护的连续截图开关，保留原始 DWORD。
     pub frame_capture_enabled: u32,
     /// 下一次连续截图使用的序号；由外层捕获流程同步。
