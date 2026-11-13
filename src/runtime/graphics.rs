@@ -114,7 +114,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             | 464 | 466 | 534 | 653 | 848 | 849 | 1066 | 1068 => 8,
             880 => 16,
             339 => 24,
-            84 | 87 | 93 | 101 | 345 => 20,
+            84 | 87 | 93 | 101 | 345 | 862 => 20,
             85 | 86 => 16,
             96 | 100 | 256 | 260 | 263 | 343 | 344 | 463 | 625 | 663 => 12,
             104 => 28,
@@ -127,7 +127,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         let route_zero = matches!(
             index,
             104 | 105 | 106 | 107 | 256 | 258 | 260 | 261 | 262 | 263 | 339..=342 | 402 | 455 | 732 | 462
-                ..=464 | 534 | 570 | 572 | 625 | 653 | 663 | 848 | 849 | 880 | 1065..=1069
+                ..=464 | 534 | 570 | 572 | 625 | 653 | 663 | 848 | 849 | 862 | 880 | 1065..=1069
         );
         if route_zero && arguments.len() != count {
             return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
@@ -145,6 +145,18 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         }
         let word = |i: usize| u32::from_le_bytes(arguments[i * 4..i * 4 + 4].try_into().unwrap());
         match index {
+            862 => {
+                let mut rectangle = arguments[4..20].to_vec();
+                self.command_target_with_buffers(
+                    target,
+                    316,
+                    [0; 3],
+                    &mut CommandBuffers {
+                        data1: Some(&mut rectangle),
+                        ..Default::default()
+                    },
+                )?;
+            }
             732 => {
                 let mut record = [0; 60];
                 record[12..16].copy_from_slice(&arguments[8..12]);

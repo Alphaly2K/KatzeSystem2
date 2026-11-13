@@ -346,12 +346,12 @@ impl<F: ObjectFactory> Runtime<F> {
     /// 整幅重绘图像列表并复制到当前画布；提交受 DrawingContext 的模式与开关门控。
     pub fn redraw_image_list(&mut self, list: &mut crate::graphics::ImageList) -> Result<bool> {
         list.invalidate_all();
-        self.resources.update_image_list(list, true, true)
+        self.resources.update_image_list(list, true, true, None)
     }
 
     /// 更新并提交列表脏区；关闭上下文时仍更新自有图像并消费脏区。
     pub fn update_image_list(&mut self, list: &mut crate::graphics::ImageList) -> Result<bool> {
-        self.resources.update_image_list(list, true, false)
+        self.resources.update_image_list(list, true, false, None)
     }
 
     /// 365 装载的原始图像字节，存活至 366 显式释放或运行时销毁。
@@ -1973,8 +1973,9 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         list: &mut crate::graphics::ImageList,
         submit: bool,
         force: bool,
+        clip: Option<crate::graphics::Rect>,
     ) -> Result<bool> {
-        self.resources.update_image_list(list, submit, force)
+        self.resources.update_image_list(list, submit, force, clip)
     }
 
     fn update_image_list_animations(

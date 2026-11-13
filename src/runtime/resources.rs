@@ -140,8 +140,9 @@ impl Resources {
         list: &mut crate::graphics::ImageList,
         submit: bool,
         force: bool,
+        clip: Option<crate::graphics::Rect>,
     ) -> Result<bool> {
-        let regions = list.update(&mut self.images)?;
+        let regions = list.update_region(&mut self.images, clip)?;
         if !submit {
             return Ok(false);
         }

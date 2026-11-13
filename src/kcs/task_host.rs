@@ -181,8 +181,9 @@ impl<H: Host, S: TaskServices> Host for TaskHost<'_, H, S> {
         list: &mut crate::graphics::ImageList,
         submit: bool,
         force: bool,
+        clip: Option<crate::graphics::Rect>,
     ) -> Result<bool> {
-        self.inner.update_image_list(list, submit, force)
+        self.inner.update_image_list(list, submit, force, clip)
     }
 
     fn update_image_list_animations(

@@ -652,6 +652,11 @@ impl ImageList {
     /// 清除全部脏区后按条目、面块顺序绘制；成功后消费脏区并返回提交矩形。
     /// 捕获来源的过滤自动产生脏区；其他像素修改需重登记或 invalidate_all。
     pub fn update(&mut self, images: &mut Images) -> Result<Vec<Rect>> {
+        self.update_region(images, None)
+    }
+
+    /// 局部更新只修改裁剪内的像素，保留全部脏区并返回原始提交矩形。
+    pub fn update_region(&mut self, images: &mut Images, clip: Option<Rect>) -> Result<Vec<Rect>> {
         self.check_animation_pass()?;
         images.get(self.image)?;
         let mut changed = Vec::new();
@@ -668,7 +673,10 @@ impl ImageList {
             self.mark(bounds);
         }
         let regions: Vec<_> = self.dirty_rectangles().collect();
-        for &region in &regions {
+        let updates = regions
+            .iter()
+            .filter_map(|&region| clip.map_or(Some(region), |clip| region.intersect(clip)));
+        for region in updates.clone() {
             images.get_mut(self.image)?.fill_rect_from_bottom(region, 0);
         }
         let mut entries: Vec<_> = self.entries.iter().collect();
@@ -677,7 +685,7 @@ impl ImageList {
             let display = entry.display();
             let p = entry.properties;
             if display.visible != 0 && display.blend != 0 {
-                for &clip in &regions {
+                for clip in updates.clone() {
                     let Some(clip) = clip.intersect(entry.clip) else {
                         continue;
                     };
@@ -692,8 +700,10 @@ impl ImageList {
                 }
             }
         }
-        for block in &mut self.blocks {
-            block.dirty = None;
+        if clip.is_none() {
+            for block in &mut self.blocks {
+                block.dirty = None;
+            }
         }
         Ok(regions)
     }

@@ -146,6 +146,35 @@ impl ProgramLoader for Programs {
         }
         let mut code = Vec::new();
         ins(&mut code, 0x25, &[0xdead_beef]);
+        if name == b"regional" {
+            for (step, clip) in [
+                None,
+                Some([1, 0, 2, 1]),
+                Some([2, 1, 1, 0]),
+                Some([0, 1, 3, 2]),
+                None,
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                if let Some(clip) = clip {
+                    for value in [2].into_iter().chain(clip) {
+                        ins(&mut code, 0x25, &[value]);
+                    }
+                    ins(&mut code, 0x2b, &[862, 20]);
+                } else if step != 0 {
+                    ins(&mut code, 0x25, &[2]);
+                    ins(&mut code, 0x2b, &[340, 4]);
+                }
+                ins(&mut code, 0x25, &[2]);
+                ins(&mut code, 0x25, &[0]);
+                ins(&mut code, 0x2b, &[534, 8]);
+                ins(&mut code, 0x2b, &[65, 0]);
+            }
+            ins(&mut code, 0x26, &[0]);
+            ins(&mut code, 0x3b, &[]);
+            return Ok(Some(Program::from_code(&code, vec![0; 4], 128)?));
+        }
         if name == b"update gates" {
             for (native, args) in [
                 (534, vec![1, 0]),
@@ -1112,4 +1141,57 @@ fn resize_native_rebuilds_the_target_output_and_unknown_animation_slots_are_skip
         runtime.images().get(after).unwrap().info().canvas_size,
         [0, 0]
     );
+}
+
+#[test]
+fn regional_native_preserves_dirty_pixels_until_a_full_refresh() {
+    for budget in [1, 4096] {
+        let mut runtime = Runtime::new(
+            0,
+            kind::ROOT,
+            Box::new(BaseObject::new()),
+            State::new(0),
+            GraphicsFactory {
+                fallback: KcsFactory::new(Programs),
+            },
+        );
+        runtime.set_budget(budget, 10000);
+        runtime.host_mut().surface_size = [3, 2];
+        runtime.drawing_mut().target = Some(RenderTarget::new([3, 2]).unwrap());
+        let script = runtime.create(0, kind::ORDINARY, b"regional", b"").unwrap();
+        let list = runtime.create(0, kind::IMAGE_LIST, b"list", b"").unwrap();
+        assert_eq!(list, 2);
+        send(&mut runtime, list, 285, 3, 2);
+        let output = output_image(&mut runtime, list);
+        let source = runtime.images_mut().create(99, [3, 2]).unwrap();
+        for (index, pixel) in runtime
+            .images_mut()
+            .get_mut(source)
+            .unwrap()
+            .pixels_mut()
+            .chunks_exact_mut(4)
+            .enumerate()
+        {
+            pixel.copy_from_slice(&(0xff000001 + index as u32).to_le_bytes());
+        }
+        send(&mut runtime, list, 302, 0, source);
+        for step in 0..=4 {
+            runtime.update(step, 1).unwrap();
+            let image = runtime.images().get(output).unwrap().surface();
+            for y in 0..2 {
+                for x in 0..3 {
+                    let updated =
+                        step == 4 || (step >= 1 && x == 1 && y == 1) || (step >= 3 && y == 0);
+                    let expected = if updated { 0xff000001 + y * 3 + x } else { 0 };
+                    assert_eq!(image.pixel(x, y), Some(expected), "step {step} at {x},{y}");
+                }
+            }
+        }
+        runtime.update(5, 1).unwrap();
+        let vm = runtime.object(script).unwrap().interpreter().unwrap();
+        assert_eq!(
+            vm.read(0, 4).unwrap().as_ref(),
+            &0xdeadbeefu32.to_le_bytes()
+        );
+    }
 }

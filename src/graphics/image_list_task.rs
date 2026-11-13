@@ -143,9 +143,9 @@ impl ImageListObject {
         Ok(())
     }
 
-    fn update_list(&mut self, host: &mut dyn Host) -> Result<()> {
+    fn update_list(&mut self, host: &mut dyn Host, clip: Option<Rect>) -> Result<()> {
         if let Some(list) = &mut self.list {
-            host.update_image_list(list, self.submit != 0, self.force != 0)?;
+            host.update_image_list(list, self.submit != 0, self.force != 0, clip)?;
             // 原入口返回的是提交路径是否运行，与像素访问开关及脏区数量无关。
             if self.submit != 0 && (self.force != 0 || list.has_blocks()) {
                 self.force = 0;
@@ -182,7 +182,7 @@ impl TaskObject for ImageListObject {
                     return Ok(false);
                 }
             }
-            self.update_list(host)?;
+            self.update_list(host, None)?;
         }
         Ok(true)
     }
@@ -325,10 +325,27 @@ impl TaskObject for ImageListObject {
             }
             296 | 316 => {
                 self.enabled = 1;
-                if command.code == 316 && self.list.is_some() && b != 0 {
-                    return Err(Error::new(0, "图像列表局部提交裁剪尚未接入"));
-                }
-                self.update_list(host)?;
+                let clip = if command.code == 316 && self.list.is_some() {
+                    if b != 0 && buffers.data1.is_none() {
+                        return Err(Error::new(0, "图像列表局部更新缓冲区缺失"));
+                    }
+                    buffers
+                        .data1
+                        .as_deref()
+                        .map(|buffer| {
+                            let [left, top, right, bottom] = words::<4>(Some(buffer))?;
+                            Ok::<_, Error>(Rect {
+                                left: left as i32,
+                                top: top as i32,
+                                right: right as i32,
+                                bottom: bottom as i32,
+                            })
+                        })
+                        .transpose()?
+                } else {
+                    None
+                };
+                self.update_list(host, clip)?;
             }
             297 => {
                 if let Some(list) = &mut self.list {
@@ -362,7 +379,7 @@ impl TaskObject for ImageListObject {
                 self.enabled = 1;
                 if let Some(list) = &mut self.list {
                     list.invalidate_all();
-                    host.update_image_list(list, true, true)?;
+                    host.update_image_list(list, true, true, None)?;
                     self.force = 0;
                 }
             }

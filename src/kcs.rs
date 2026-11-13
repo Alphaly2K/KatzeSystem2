@@ -369,12 +369,13 @@ pub trait Host {
         0
     }
 
-    /// 更新列表并按开关提交脏区或整幅图像；返回是否复制了画布像素。
+    /// 更新列表并按开关提交脏区或整幅图像；clip 限制像素更新并保留脏区。
     fn update_image_list(
         &mut self,
         _list: &mut crate::graphics::ImageList,
         _submit: bool,
         _force: bool,
+        _clip: Option<crate::graphics::Rect>,
     ) -> Result<bool> {
         Err(Error::new(0, "宿主未提供图像列表更新服务"))
     }
@@ -615,8 +616,9 @@ impl<T: Host + ?Sized> Host for &mut T {
         list: &mut crate::graphics::ImageList,
         submit: bool,
         force: bool,
+        clip: Option<crate::graphics::Rect>,
     ) -> Result<bool> {
-        (**self).update_image_list(list, submit, force)
+        (**self).update_image_list(list, submit, force, clip)
     }
 
     fn update_image_list_animations(
