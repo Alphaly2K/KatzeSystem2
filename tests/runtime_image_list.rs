@@ -178,6 +178,7 @@ impl ProgramLoader for Programs {
                 (464, vec![1, 0]),
                 (462, vec![1, 99]),
                 (342, vec![1]),
+                (261, vec![1]),
             ] {
                 for value in &args {
                     ins(&mut code, 0x25, &[*value]);
@@ -185,6 +186,8 @@ impl ProgramLoader for Programs {
                 ins(&mut code, 0x2b, &[native, args.len() as u32 * 4]);
                 if native == 462 {
                     ins(&mut code, 0x26, &[if args[1] == 0 { 4 } else { 8 }]);
+                } else if native == 261 {
+                    ins(&mut code, 0x26, &[12]);
                 }
             }
             ins(&mut code, 0x26, &[0]);
@@ -194,7 +197,7 @@ impl ProgramLoader for Programs {
             }
             ins(&mut code, 0x2b, &[455, 8]);
             ins(&mut code, 0x2b, &[65, 0]);
-            return Ok(Some(Program::from_code(&code, vec![0; 12], 128)?));
+            return Ok(Some(Program::from_code(&code, vec![0; 16], 128)?));
         }
         for (native, args) in [
             (256, vec![1, 5, 3]),
@@ -352,9 +355,11 @@ fn ordinary_list_controls_preserve_missing_priority_and_copy_background_pixels()
         );
         assert_eq!(vm.read(4, 4).unwrap().as_ref(), &u32::MAX.to_le_bytes());
         assert_eq!(vm.read(8, 4).unwrap().as_ref(), &u32::MAX.to_le_bytes());
+        let queried = u32::from_le_bytes(vm.read(12, 4).unwrap().try_into().unwrap());
         assert!(vm.stack_bytes().is_empty());
         runtime.images_mut().release(source).unwrap();
         let image = output_image(&mut runtime, list);
+        assert_eq!(queried, image);
         let surface = runtime.images().get(image).unwrap().surface();
         assert_eq!(
             surface
@@ -368,6 +373,8 @@ fn ordinary_list_controls_preserve_missing_priority_and_copy_background_pixels()
         assert_eq!(send(&mut runtime, list, 294, 0, 0), 0);
         let plane = runtime.tree().children(list).unwrap().next().unwrap();
         assert_eq!(runtime.drawables().get(plane).unwrap().display(), 0);
+        runtime.destroy(script).unwrap();
+        assert!(runtime.images().get(image).is_ok());
     }
 }
 

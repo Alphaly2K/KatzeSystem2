@@ -96,7 +96,20 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         let count = match index {
             78 => 12,
             79 => 16,
-            80 | 83 | 89 | 91 | 98 | 99 | 107 | 340..=342 | 570 | 572 | 1065 | 1067 | 1069 => 4,
+            80
+            | 83
+            | 89
+            | 91
+            | 98
+            | 99
+            | 107
+            | 261
+            | 340..=342
+            | 570
+            | 572
+            | 1065
+            | 1067
+            | 1069 => 4,
             82 | 88 | 92 | 94 | 95 | 97 | 102 | 103 | 105 | 106 | 258 | 262 | 402 | 455 | 462
             | 464 | 466 | 534 | 653 | 848 | 849 | 1066 | 1068 => 8,
             880 => 16,
@@ -113,7 +126,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         }
         let route_zero = matches!(
             index,
-            104 | 105 | 106 | 107 | 256 | 258 | 260 | 262 | 263 | 339..=342 | 402 | 455 | 732 | 462
+            104 | 105 | 106 | 107 | 256 | 258 | 260 | 261 | 262 | 263 | 339..=342 | 402 | 455 | 732 | 462
                 ..=464 | 534 | 570 | 572 | 625 | 653 | 663 | 848 | 849 | 880 | 1065..=1069
         );
         if route_zero && arguments.len() != count {
@@ -424,6 +437,19 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             }
             258 => {
                 self.command_target(target, 287, [word(1), 0, 0])?;
+            }
+            261 => {
+                let mut image = [0; 4];
+                self.command_target_with_buffers(
+                    target,
+                    291,
+                    [0; 3],
+                    &mut CommandBuffers {
+                        data1: Some(&mut image),
+                        ..Default::default()
+                    },
+                )?;
+                return Ok(NativeReturn::Value(u32::from_le_bytes(image)));
             }
             262 | 534 => {
                 self.command_target(
