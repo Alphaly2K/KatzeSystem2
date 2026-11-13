@@ -44,11 +44,10 @@ enum Previous {
     Closing,
 }
 
-pub(super) fn parse(source: &str) -> Result<Node> {
-    if source.len() > 65536 {
+pub(super) fn parse(bytes: &[u8]) -> Result<Node> {
+    if bytes.len() > 65536 {
         return Err(Error::new(0, "表达式过长"));
     }
-    let bytes = source.as_bytes();
     let mut cursor = 0;
     let mut values = Vec::new();
     let mut operators = Vec::<(Operator, usize)>::new();
@@ -85,7 +84,10 @@ pub(super) fn parse(source: &str) -> Result<Node> {
             {
                 cursor += 1;
             }
-            values.push(Node::Named(source[at..cursor].to_owned(), None));
+            values.push(Node::Named(
+                std::str::from_utf8(&bytes[at..cursor]).unwrap().to_owned(),
+                None,
+            ));
             previous = Previous::Name;
             continue;
         }
@@ -150,7 +152,7 @@ pub(super) fn parse(source: &str) -> Result<Node> {
                     "|", "^", "<", ">", "!", "~", ",", ".", "?", ":",
                 ]
                 .into_iter()
-                .find(|text| source[cursor..].starts_with(text))
+                .find(|text| bytes[cursor..].starts_with(text.as_bytes()))
                 .ok_or_else(|| Error::new(at, "表达式词项尚未接入"))?;
                 cursor += text.len();
                 match text {

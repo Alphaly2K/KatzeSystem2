@@ -337,6 +337,56 @@ fn core_host_shares_numeric_state_and_checks_native_contracts() {
 }
 
 #[test]
+fn numeric_parameters_parse_raw_quoted_bytes_and_abort_invalid_tokens_before_writes() {
+    for external in [false, true] {
+        for budget in [1, 4096] {
+            for (source, expected) in [
+                (b"\x82\xa0+7".as_slice(), 0i32),
+                (b"(#3+=1)+\xff", 0),
+                (b"\"\x82\xa0\"+7%", 7),
+                (b"\"\xff\x81\x7c\"+7", 7),
+                (b"missing 7%", 7),
+                (b"~1+2", -4),
+                (b"NAME[2]+7", 18),
+            ] {
+                let mut code = Vec::new();
+                ins(
+                    &mut code,
+                    0x25,
+                    &[(3, if external { 0x8000_0000 } else { 0 })],
+                );
+                ins(&mut code, 0x2b, &[(3, 213), (3, 4)]);
+                ins(&mut code, 0x3b, &[]);
+                let data = [source, b"\0"].concat();
+                let (local, shared) = if external {
+                    (vec![], data)
+                } else {
+                    (data, vec![])
+                };
+                let mut vm = kcs::Interpreter::new(
+                    kcs::Program::from_code(&code, local, 64).unwrap(),
+                    shared,
+                )
+                .unwrap();
+                let mut state = katze_system2::expression::State::new(4);
+                state.shared[3] = 17;
+                state.named.insert("NAME".into(), [(2, 11)].into());
+                let mut host = kcs::CoreHost::new(&mut state);
+                loop {
+                    match vm.run(&mut host, budget).unwrap() {
+                        Step::Yield => (),
+                        Step::Halted => break,
+                        other => panic!("unexpected step: {other:?}"),
+                    }
+                }
+                assert_eq!(vm.stack_bytes(), expected.to_le_bytes());
+                assert_eq!(state.shared[3], 17);
+            }
+        }
+    }
+}
+
+#[test]
 fn ordinary_identity_keeps_zero_addresses_and_shared_fallback_distinct() {
     let identity = [
         1f32, 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.,

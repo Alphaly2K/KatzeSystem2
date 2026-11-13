@@ -3,7 +3,7 @@ use crate::kcs::{
     memory, strings,
 };
 use crate::task::TaskTree;
-use crate::{Error, Result, expression, read, text};
+use crate::{Error, Result, expression, read};
 
 pub(super) fn call(
     state: &mut expression::State,
@@ -180,8 +180,7 @@ pub(super) fn call(
         }
         213 => {
             let bytes = vm.read_string(args[0])?;
-            let source = text::ascii(&bytes)?;
-            NativeReturn::Value(expression::eval_parameter(source, state)? as u32)
+            NativeReturn::Value(expression::eval_parameter_bytes(&bytes, state)? as u32)
         }
         _ => unreachable!(),
     })

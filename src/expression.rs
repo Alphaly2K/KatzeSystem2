@@ -106,7 +106,24 @@ pub fn eval(source: &str, state: &mut State) -> Result<i32> {
 }
 
 pub(crate) fn eval_fes_fallback(source: &str, state: &mut State) -> Result<i32> {
-    evaluate_root(&fallback::parse(source)?, state)
+    evaluate_root(&fallback::parse(source.as_bytes())?, state)
+}
+
+pub(crate) fn eval_parameter_bytes(source: &[u8], state: &mut State) -> Result<i32> {
+    let source = source.strip_suffix(b"%").unwrap_or(source);
+    let node = match fallback::parse(source) {
+        Ok(node) => node,
+        // 原数值入口在引号外遇到高位字节时返回零，不执行已解析的赋值。
+        Err(error)
+            if source
+                .get(error.offset)
+                .is_some_and(|byte| !byte.is_ascii()) =>
+        {
+            return Ok(0);
+        }
+        Err(error) => return Err(error),
+    };
+    evaluate_root(&node, state)
 }
 
 fn evaluate_root(node: &Node, state: &mut State) -> Result<i32> {
