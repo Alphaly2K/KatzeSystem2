@@ -307,8 +307,8 @@ fn core_host_shares_numeric_state_and_checks_native_contracts() {
         (211, vec![3, 17]),
         (212, vec![5]),
         (213, vec![0]),
-        (213, vec![7]),
         (213, vec![8]),
+        (213, vec![9]),
         (210, vec![3]),
         (210, vec![99]),
     ] {
@@ -318,7 +318,7 @@ fn core_host_shares_numeric_state_and_checks_native_contracts() {
         ins(&mut code, 0x2b, &[(3, native), (3, args.len() as u32 * 4)]);
     }
     let mut vm = kcs::Interpreter::new(
-        kcs::Program::from_code(&code, b"#3+=@%\0\0%\0".to_vec(), 128).unwrap(),
+        kcs::Program::from_code(&code, b"#3+=+@%\0\0%\0".to_vec(), 128).unwrap(),
         vec![],
     )
     .unwrap();

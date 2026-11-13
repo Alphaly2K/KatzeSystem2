@@ -192,7 +192,6 @@ fn reduce(operator: Operator, at: usize, values: &mut Vec<Node>) -> Result<()> {
     let right = pop(values, at)?;
     let node = match operator {
         Operator::Variable(local) => Node::Variable(local, Box::new(right), at),
-        Operator::Unary("+") => Node::NoWrite(Box::new(right), None),
         Operator::Unary(op) => Node::Unary(op.into(), Box::new(right), at),
         Operator::Increment(increment, postfix) => {
             if !matches!(right, Node::Variable(..)) {
@@ -235,6 +234,9 @@ mod tests {
             ("1+(2 3)", 5, [7, 11]),
             ("~1+2", -4, [7, 11]),
             ("+($0+=1)", 0, [8, 11]),
+            ("$1=+($0+=1)", 8, [8, 8]),
+            ("+$0*3+4", 25, [7, 11]),
+            ("+$0++", 0, [7, 11]),
             ("($0)++", 7, [8, 11]),
             ("$0++", 8, [8, 11]),
             ("missing[($0+=1)]=($1+=1)", 0, [8, 12]),

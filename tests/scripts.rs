@@ -155,6 +155,21 @@ fn numeric_side_effects_keep_locations_and_do_not_short_circuit() {
     expression::eval("\\3=8", &mut state).unwrap();
     assert_eq!(state.local[3], 8);
     assert_eq!(state.shared[3], 0);
+    for (source, initial, result, slot) in [
+        ("+30", 9, 0, 9),
+        ("#3=+30", 9, 30, 30),
+        ("+(#3+=1)", 30, 0, 31),
+        ("+#3*3+4", 31, 97, 31),
+        ("+#3++", 31, 0, 31),
+    ] {
+        state.shared[3] = initial;
+        assert_eq!(
+            expression::eval(source, &mut state).unwrap(),
+            result,
+            "{source}"
+        );
+        assert_eq!(state.shared[3], slot, "{source}");
+    }
 }
 
 #[test]

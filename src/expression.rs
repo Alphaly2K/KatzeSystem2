@@ -97,7 +97,7 @@ impl Expression {
     }
 
     pub fn evaluate(&self, state: &mut State) -> Result<i32> {
-        Ok(evaluate(&self.0, state)?.load(state))
+        evaluate_root(&self.0, state)
     }
 }
 
@@ -106,7 +106,17 @@ pub fn eval(source: &str, state: &mut State) -> Result<i32> {
 }
 
 pub(crate) fn eval_fes_fallback(source: &str, state: &mut State) -> Result<i32> {
-    Ok(evaluate(&fallback::parse(source)?, state)?.load(state))
+    evaluate_root(&fallback::parse(source)?, state)
+}
+
+fn evaluate_root(node: &Node, state: &mut State) -> Result<i32> {
+    let value = evaluate(node, state)?.load(state);
+    // 正号写出供父节点读取的数值，但原求值器不更新本次调用的直接返回槽。
+    Ok(if matches!(node, Node::Unary(op, ..) if op == "+") {
+        0
+    } else {
+        value
+    })
 }
 
 /// 对应 CST 使用的数值宿主入口，移除一个末尾百分号；空参数返回零。
@@ -152,6 +162,7 @@ fn evaluate(node: &Node, state: &mut State) -> Result<Value> {
             let v = evaluate(arg, state)?;
             let n = v.load(state);
             Value::Number(match op.as_str() {
+                "+" => n,
                 "-" => n.wrapping_neg(),
                 "!" => (n == 0) as i32,
                 "~" => !n,
@@ -275,6 +286,18 @@ impl Parser<'_> {
             return Err(Error::new(self.pos, "表达式嵌套过深"));
         }
         let mut left = self.primary()?;
+        if min <= 12 {
+            for op in ["++", "--"] {
+                if self.take(op.as_bytes()) {
+                    left = if matches!(&left, Node::Unary(operator, ..) if operator == "+") {
+                        Node::NoWrite(Box::new(left), None)
+                    } else {
+                        Node::Unary(op.into(), Box::new(left), self.pos - op.len())
+                    };
+                    break;
+                }
+            }
+        }
         loop {
             self.space();
             let Some(op) = self.operator() else {
@@ -318,12 +341,16 @@ impl Parser<'_> {
         self.node()?;
         self.space();
         let at = self.pos;
-        for op in ["++", "--", "-", "!", "~"] {
+        for op in ["++", "--", "+", "-", "!", "~"] {
             if self.take(op.as_bytes()) {
-                return Ok(Node::Unary(op.into(), Box::new(self.expr(12)?), at));
+                return Ok(Node::Unary(
+                    op.into(),
+                    Box::new(self.expr(if op == "+" { 13 } else { 12 })?),
+                    at,
+                ));
             }
         }
-        let mut node = if self.take(b"(") {
+        let node = if self.take(b"(") {
             let n = self.expr(1)?;
             if !self.take(b")") {
                 return Err(Error::new(self.pos, "缺少右括号"));
@@ -370,12 +397,6 @@ impl Parser<'_> {
         } else {
             Node::Number(self.number(true)?)
         };
-        for op in ["++", "--"] {
-            if self.take(op.as_bytes()) {
-                node = Node::Unary(op.into(), Box::new(node), at);
-                break;
-            }
-        }
         Ok(node)
     }
     fn node(&mut self) -> Result<()> {
