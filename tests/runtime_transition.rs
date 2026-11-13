@@ -29,9 +29,9 @@ fn call(code: &mut Vec<u8>, index: u32, arguments: &[u32]) {
 }
 
 #[test]
-fn ordinary_transition_calls_prepare_play_query_and_finish_both_image_effects() {
+fn ordinary_transition_calls_prepare_play_query_and_finish_image_effects() {
     for budget in [1, 4096] {
-        for effect in [kind::WIPE, kind::FADE] {
+        for effect in [kind::WIPE, kind::FADE, kind::WIPE_ALPHA] {
             let mut code = Vec::new();
             instruction(&mut code, 0x25, &[0xdeadbeef]);
             call(&mut code, 196, &[0, u32::MAX]);
@@ -43,6 +43,10 @@ fn ordinary_transition_calls_prepare_play_query_and_finish_both_image_effects() 
             call(&mut code, 200, &[1]);
             instruction(&mut code, 0x26, &[4]);
             call(&mut code, 199, &[1, 128]);
+            call(&mut code, 203, &[1]);
+            call(&mut code, 200, &[1]);
+            instruction(&mut code, 0x26, &[16]);
+            call(&mut code, 197, &[1]);
             call(&mut code, 198, &[1]);
             call(&mut code, 200, &[1]);
             instruction(&mut code, 0x26, &[8]);
@@ -78,12 +82,12 @@ fn ordinary_transition_calls_prepare_play_query_and_finish_both_image_effects() 
             }
             assert_eq!(rt.create(0, effect, b"effect", b"").unwrap(), 1);
             assert_eq!(rt.create(0, kind::ORDINARY, b"caller", b"").unwrap(), 2);
-            let parameters: Vec<_> = if effect == kind::WIPE {
-                vec![
+            let parameters: Vec<_> = match effect {
+                kind::WIPE => vec![
                     2, handles[0], 0, 0, handles[1], 0, 0, handles[2], 1, 1, 1, 1, 0, 0,
-                ]
-            } else {
-                vec![2, handles[0], 0, 0, handles[1], 0, 0, 1, 1, 1, 1]
+                ],
+                kind::FADE => vec![2, handles[0], 0, 0, handles[1], 0, 0, 1, 1, 1, 1],
+                _ => vec![2, handles[1], 0, 0, handles[2], 1, 1, 1, 1, 1, 0, 0],
             }
             .into_iter()
             .flat_map(u32::to_le_bytes)
@@ -97,7 +101,7 @@ fn ordinary_transition_calls_prepare_play_query_and_finish_both_image_effects() 
             assert!(rt.update(10, 1).unwrap());
             assert!(rt.update(11, 1).unwrap());
             let vm = rt.object(2).unwrap().interpreter().unwrap();
-            for (address, expected) in [(0, 1u32), (4, 1), (8, 0), (12, 0xdeadbeef)] {
+            for (address, expected) in [(0, 1u32), (4, 1), (8, 0), (12, 0xdeadbeef), (16, 0)] {
                 assert_eq!(
                     vm.read(address, 4).unwrap().as_ref(),
                     &expected.to_le_bytes()

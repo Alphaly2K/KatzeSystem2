@@ -24,6 +24,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                 let (code, length) = match object_kind {
                     kind::WIPE => (280, 56),
                     kind::FADE => (281, 44),
+                    kind::WIPE_ALPHA => (280, 48),
                     _ => return Err(Error::new(vm.pc, "尚未接入该类型的转场准备参数")),
                 };
                 let address = read::u32_at(arguments, 4)?;
@@ -38,8 +39,8 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     },
                 )?;
             }
-            197 | 198 => {
-                self.command_target(target, index + 66, [0; 3])?;
+            197 | 198 | 203 => {
+                self.command_target(target, if index == 203 { 267 } else { index + 66 }, [0; 3])?;
             }
             199 => {
                 let address = read::u32_at(arguments, 4)?;

@@ -54,6 +54,7 @@ pub mod kind {
     pub const PARTICLE_3D: u32 = 16;
     pub const WIPE: u32 = 26;
     pub const FADE: u32 = 27;
+    pub const WIPE_ALPHA: u32 = 28;
     pub const FES: u32 = 34;
     pub const RWIPE: u32 = 39;
     pub const SCROLL2: u32 = 41;
