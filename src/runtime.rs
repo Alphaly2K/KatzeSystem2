@@ -1569,10 +1569,9 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
     ) -> Result<NativeReturn> {
         let count = match index {
             66 => 12,
-            67 | 75 | 109 | 272..=274 | 452 | 520 => 4,
-            108 | 110 | 275 | 426 | 427 | 528 | 531 | 694 => 8,
-            69 | 70 | 72 | 73 | 527 => 16,
-            530 | 905 => 20,
+            67 | 75 | 109 | 272..=274 | 452 => 4,
+            108 | 110 | 275 | 426 | 427 | 694 => 8,
+            69 | 70 | 72 | 73 => 16,
             76 => 0,
             _ => unreachable!(),
         };
@@ -1728,64 +1727,6 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             109 => Ok(NativeReturn::Value(
                 self.command_target(args[0], 96, [0; 3])?,
             )),
-            // 遮罩划扫任务协议：520 查询运行状态，527/528 写入补充参数块，530/905 写入主
-            // 配置（末位标记区分两个入口），531 设置运行状态。
-            520 => Ok(NativeReturn::Value(if args[0] == 0 {
-                0
-            } else {
-                self.command_target(args[0], 383, [0; 3])?
-            })),
-            527 => {
-                if args[0] != 0 {
-                    let mut block = arguments[4..16].to_vec();
-                    self.command_target_with_buffers(
-                        args[0],
-                        390,
-                        [0; 3],
-                        &mut CommandBuffers {
-                            data1: Some(&mut block),
-                            ..Default::default()
-                        },
-                    )?;
-                }
-                Ok(NativeReturn::Continue)
-            }
-            528 => {
-                if args[0] != 0 {
-                    self.command_target(args[0], 391, [0, args[1], 0])?;
-                }
-                Ok(NativeReturn::Continue)
-            }
-            530 | 905 => {
-                if args[0] != 0 && args[4] != 0 {
-                    // 原入口把 args[4] 当作指针解引用进配置块；此处按可解析的 VM 地址
-                    // 读取，否则保留其原始位形。
-                    let extra = vm
-                        .read(args[4], 4)
-                        .map(|bytes| read::u32_at(&bytes, 0))
-                        .unwrap_or_else(|_| Ok(args[4]))?;
-                    let mut block: Vec<u8> = arguments[8..16].to_vec();
-                    block.extend_from_slice(&arguments[4..8]);
-                    block.extend_from_slice(&extra.to_le_bytes());
-                    block.extend_from_slice(&u32::from(index == 905).to_le_bytes());
-                    self.command_target_with_buffers(
-                        args[0],
-                        393,
-                        [0; 3],
-                        &mut CommandBuffers {
-                            data1: Some(&mut block),
-                            ..Default::default()
-                        },
-                    )?;
-                }
-                Ok(NativeReturn::Continue)
-            }
-            531 => {
-                if args[0] != 0 {
-                    self.command_target(args[0], 394, [0, args[1], 0])?;
-                }
-                Ok(NativeReturn::Continue)
-            }
             108 | 110 => {
                 self.command_target(args[0], if index == 108 { 95 } else { 97 }, [0, args[1], 0])?;
                 Ok(NativeReturn::Continue)

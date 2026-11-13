@@ -319,3 +319,73 @@ fn shatter_uses_the_captured_scene_keeps_foreground_and_releases_its_target() {
         .unwrap();
     assert_eq!(output.pixel(0, 0), Some(0xff224466));
 }
+
+#[test]
+fn render_wipe_uses_image_wrappers_and_keeps_foreground_and_stopped_pixels() {
+    for native in [530, 905] {
+        let mut rt = engine();
+        let mask = rt.images_mut().create(0, [8, 6]).unwrap();
+        rt.images_mut()
+            .get_mut(mask)
+            .unwrap()
+            .fill_rect_from_bottom(
+                katze_system2::graphics::Rect::from_xywh(0, 0, 8, 6),
+                0xff20_1080,
+            );
+        execute(&mut rt, &[(858, &[1]), (859, &[0, 0, 10f32.to_bits()])]);
+        let id = rt.create(0, kind::RWIPE, b"wipe", b"").unwrap();
+        assert!(rt.compositor().auxiliary_targets().is_empty());
+        rt.drawables_mut().set_color(100, 0xffab_cdef, u32::MAX);
+        rt.drawables_mut()
+            .insert(
+                101,
+                Drawable::rectangle([2., 2., 0.], [2., 2.], 0xff55_7733),
+            )
+            .unwrap();
+        rt.drawables_mut().set_display(101, 1);
+        rt.drawables_mut().set_base_point(101, [0., 0., 20.]);
+        execute(
+            &mut rt,
+            &[
+                (native, &[id, 8, 123f32.to_bits(), 10f32.to_bits(), mask]),
+                (531, &[id, 7]),
+                (native, &[0]),
+                (native, &[id, 0, 0, 0, 0]),
+                (532, &[id]),
+            ],
+        );
+        let render = |rt: &mut Engine| {
+            let mut output = RenderTarget::new([8, 6]).unwrap();
+            rt.compose_frame()
+                .unwrap()
+                .render_into(&mut output, rt.drawing().target.as_ref())
+                .unwrap();
+            output
+        };
+        assert_eq!(render(&mut rt).pixel(0, 0), Some(0xff11_2233));
+        rt.update(4, 1).unwrap();
+        assert_eq!(state(&mut rt, id), 7);
+        let output = render(&mut rt);
+        assert_eq!(output.pixel(2, 2), Some(0xff55_7733));
+        if native == 905 {
+            assert_eq!(output.pixel(0, 0), Some(0xffab_cdef));
+        } else {
+            assert_eq!(output.pixel(0, 0), Some(0xbf5e_7891));
+        }
+        execute(&mut rt, &[(531, &[id, 0])]);
+        rt.update(6, 1).unwrap();
+        assert_eq!(render(&mut rt), output);
+        execute(&mut rt, &[(531, &[id, 3])]);
+        rt.update(14, 1).unwrap();
+        render(&mut rt);
+        assert_eq!(state(&mut rt, id), 0);
+        execute(&mut rt, &[(858, &[1]), (859, &[0, 0, 10f32.to_bits()])]);
+        assert_eq!(
+            rt.compositor().auxiliary_targets()[0].pixel(0, 0),
+            Some(0xffab_cdef)
+        );
+        rt.destroy(id).unwrap();
+        assert!(rt.compositor().auxiliary_targets().is_empty());
+        assert_eq!(render(&mut rt).pixel(0, 0), Some(0xffab_cdef));
+    }
+}

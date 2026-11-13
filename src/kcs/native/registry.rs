@@ -195,7 +195,9 @@ pub(crate) fn runtime(index: u32) -> RuntimeHandler {
         143 => RuntimeHandler::LoadProgram,
         271 | 693 => RuntimeHandler::LoadParticle,
         265..=270 | 417 | 788 | 997 | 998 => RuntimeHandler::Movie,
-        196..=200 | 203 | 853..=857 | 860 | 861 => RuntimeHandler::Transition,
+        196..=200 | 203 | 520 | 527 | 528 | 530..=532 | 853..=857 | 860 | 861 | 905 => {
+            RuntimeHandler::Transition
+        }
         633..=638 => RuntimeHandler::NameTable,
         323..=337 | 385 | 386 | 982 | 991 | 992 | 994 | 1033 | 1037 | 1038 | 1064 => {
             RuntimeHandler::Cst
@@ -248,26 +250,9 @@ pub(crate) fn runtime(index: u32) -> RuntimeHandler {
         | 862
         | 880
         | 1065..=1069 => RuntimeHandler::Graphics,
-        66
-        | 67
-        | 69
-        | 70
-        | 72
-        | 73
-        | 75
-        | 76
-        | 108..=110
-        | 272..=275
-        | 426
-        | 427
-        | 452
-        | 520
-        | 527
-        | 528
-        | 530
-        | 531
-        | 694
-        | 905 => RuntimeHandler::Task,
+        66 | 67 | 69 | 70 | 72 | 73 | 75 | 76 | 108..=110 | 272..=275 | 426 | 427 | 452 | 694 => {
+            RuntimeHandler::Task
+        }
         241 | 251 | 387 => RuntimeHandler::MediaRecord,
         111 | 112 | 114..=117 | 362 | 365 | 366 | 368 | 434..=438 | 536 | 590..=597 => {
             RuntimeHandler::Resource

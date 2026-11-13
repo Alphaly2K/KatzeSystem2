@@ -5,6 +5,7 @@ use crate::{Error, Result};
 pub(super) enum ScreenEffect {
     Mosaic(u32),
     Shatter(u32),
+    RWipe(u32),
 }
 
 /// 持有画布、绘图登记和帧视图，生成设备无关的绘制列表。
@@ -16,10 +17,17 @@ pub struct Compositor {
     pub(crate) auxiliary_targets: Vec<RenderTarget>,
     pub(crate) mosaics: super::mosaic::Mosaics,
     pub(crate) shatters: super::shatter::Shatters,
+    pub(crate) rwipes: std::collections::BTreeMap<u32, super::rwipe::RWipe>,
+    pub(crate) drawing_rect: Option<super::Rect>,
     pub(super) screen_effect: Option<ScreenEffect>,
 }
 
 impl Compositor {
+    /// 当前输出目标的绘图矩形；None 使用逻辑屏幕全幅，不影响画布面块布局。
+    pub fn set_drawing_rect(&mut self, rect: Option<super::Rect>) {
+        self.drawing_rect = rect;
+    }
+
     pub fn drawing(&self) -> &DrawingContext {
         &self.drawing
     }
@@ -88,6 +96,21 @@ impl Compositor {
     ) -> Result<DrawList> {
         if range.is_some() {
             return self.drawables.compose(&projection, parent, filter, range);
+        }
+        if let Some(ScreenEffect::RWipe(id)) = self.screen_effect {
+            let effect = self.rwipes.get_mut(&id).unwrap();
+            let far = effect.far;
+            let mut frame = self
+                .drawables
+                .compose(&projection, parent, filter, Some([0., far]))?;
+            frame.commands.splice(0..0, effect.background());
+            frame.commands.extend(effect.frame()?);
+            frame.commands.extend(
+                self.drawables
+                    .compose(&projection, parent, filter, Some([far, 1_000_000.]))?
+                    .commands,
+            );
+            return Ok(frame);
         }
         if let Some(ScreenEffect::Shatter(id)) = self.screen_effect {
             let effect = self.shatters.entries.get_mut(&id).unwrap();

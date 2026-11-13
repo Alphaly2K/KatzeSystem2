@@ -10,6 +10,77 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         arguments: &[u8],
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
+        if matches!(index, 520 | 527 | 528 | 530..=532 | 905) {
+            let target = read::u32_at(arguments, 0)?;
+            let length = match index {
+                527 => 16,
+                528 | 531 => 8,
+                530 | 905 => 20,
+                _ => 4,
+            };
+            if arguments.len() != length && !(target == 0 && arguments.len() == 4) {
+                return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+            }
+            if index == 520 {
+                return Ok(NativeReturn::Value(if target == 0 {
+                    0
+                } else {
+                    self.command_target(target, 383, [0; 3])?
+                }));
+            }
+            if target != 0 {
+                if matches!(index, 530 | 905) {
+                    let image = read::u32_at(arguments, 16)?;
+                    if image != 0 {
+                        let pixels = self.resources.images.pixel_handle(image)?;
+                        let mut record = arguments[8..16].to_vec();
+                        record.extend_from_slice(&arguments[4..8]);
+                        record.extend_from_slice(&pixels.to_le_bytes());
+                        record.extend_from_slice(&u32::from(index == 905).to_le_bytes());
+                        self.command_target_with_buffers(
+                            target,
+                            393,
+                            [0; 3],
+                            &mut CommandBuffers {
+                                data1: Some(&mut record),
+                                ..Default::default()
+                            },
+                        )?;
+                    }
+                } else if index == 527 {
+                    let mut record = arguments[8..16].to_vec();
+                    record.extend_from_slice(&arguments[4..8]);
+                    self.command_target_with_buffers(
+                        target,
+                        390,
+                        [0; 3],
+                        &mut CommandBuffers {
+                            data1: Some(&mut record),
+                            ..Default::default()
+                        },
+                    )?;
+                } else {
+                    self.command_target(
+                        target,
+                        match index {
+                            528 => 391,
+                            531 => 394,
+                            _ => 395,
+                        },
+                        [
+                            0,
+                            if index == 532 {
+                                0
+                            } else {
+                                read::u32_at(arguments, 4)?
+                            },
+                            0,
+                        ],
+                    )?;
+                }
+            }
+            return Ok(NativeReturn::Continue);
+        }
         if matches!(index, 853..=857 | 860 | 861) {
             let target = read::u32_at(arguments, 0)?;
             let length = match index {

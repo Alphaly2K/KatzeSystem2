@@ -140,3 +140,12 @@ fn interpolate(source: &Surface, at: [i32; 2]) -> Option<[u8; 4]> {
 fn bottom_offset(size: [u32; 2], x: usize, y: usize) -> usize {
     ((size[1] as usize - 1 - y) * size[0] as usize + x) * 4
 }
+
+pub(super) fn flip_rows(surface: &mut Surface) {
+    let stride = surface.stride();
+    let height = surface.size()[1] as usize;
+    for y in 0..height / 2 {
+        let (first, last) = surface.pixels_mut().split_at_mut((height - y - 1) * stride);
+        first[y * stride..(y + 1) * stride].swap_with_slice(&mut last[..stride]);
+    }
+}

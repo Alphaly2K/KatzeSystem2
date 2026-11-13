@@ -218,21 +218,12 @@ impl Mosaic {
 
 fn scale(source: &Surface, size: [u32; 2]) -> Result<Surface> {
     let mut source = source.clone();
-    flip(&mut source);
+    super::resample::flip_rows(&mut source);
     let mut image = Surface::new(size)?;
     let bounds = image.bounds();
     super::resample::copy_scaled(&mut image, Some(&source), source.bounds(), bounds)?;
-    flip(&mut image);
+    super::resample::flip_rows(&mut image);
     Ok(image)
-}
-
-fn flip(surface: &mut Surface) {
-    let stride = surface.stride();
-    let height = surface.size()[1] as usize;
-    for y in 0..height / 2 {
-        let (first, last) = surface.pixels_mut().split_at_mut((height - y - 1) * stride);
-        first[y * stride..(y + 1) * stride].swap_with_slice(&mut last[..stride]);
-    }
 }
 
 pub(crate) fn screen_commands(image: Arc<Surface>, opacity: u8) -> [DrawCommand; 2] {
