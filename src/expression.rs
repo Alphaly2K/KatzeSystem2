@@ -109,9 +109,13 @@ pub(crate) fn eval_fes_fallback(source: &str, state: &mut State) -> Result<i32> 
     Ok(evaluate(&fallback::parse(source)?, state)?.load(state))
 }
 
-/// 对应 CST 使用的数值宿主入口，移除一个末尾百分号。
+/// 对应 CST 使用的数值宿主入口，移除一个末尾百分号；空参数返回零。
 pub fn eval_parameter(source: &str, state: &mut State) -> Result<i32> {
-    eval(source.strip_suffix('%').unwrap_or(source), state)
+    let source = source.strip_suffix('%').unwrap_or(source);
+    if source.is_empty() {
+        return Ok(0);
+    }
+    eval(source, state)
 }
 
 fn evaluate(node: &Node, state: &mut State) -> Result<Value> {

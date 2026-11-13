@@ -202,6 +202,8 @@ fn core_host_shares_numeric_state_and_checks_native_contracts() {
         (211, vec![3, 17]),
         (212, vec![5]),
         (213, vec![0]),
+        (213, vec![7]),
+        (213, vec![8]),
         (210, vec![3]),
         (210, vec![99]),
     ] {
@@ -211,7 +213,7 @@ fn core_host_shares_numeric_state_and_checks_native_contracts() {
         ins(&mut code, 0x2b, &[(3, native), (3, args.len() as u32 * 4)]);
     }
     let mut vm = kcs::Interpreter::new(
-        kcs::Program::from_code(&code, b"#3+=@%\0".to_vec(), 128).unwrap(),
+        kcs::Program::from_code(&code, b"#3+=@%\0\0%\0".to_vec(), 128).unwrap(),
         vec![],
     )
     .unwrap();
@@ -220,10 +222,11 @@ fn core_host_shares_numeric_state_and_checks_native_contracts() {
     assert_eq!(vm.run(&mut host, 100).unwrap(), Step::Halted);
     assert_eq!(
         vm.stack_bytes(),
-        [22u32.to_le_bytes(), 22u32.to_le_bytes(), 0u32.to_le_bytes()].concat()
+        [22u32, 0, 0, 22, 0].map(u32::to_le_bytes).concat()
     );
     assert_eq!(host.state.shared.len(), 8);
     assert_eq!(host.state.shared[3], 22);
+    assert_eq!(host.state.current, 5);
     assert!(kcs::Host::call(&mut host, 211, &[0; 4], &mut vm).is_err());
     assert!(kcs::Host::call(&mut host, 1000, &[], &mut vm).is_err());
 }
