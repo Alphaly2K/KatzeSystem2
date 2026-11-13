@@ -174,46 +174,10 @@ fn check() -> Result<(), Box<dyn std::error::Error>> {
     let mut largest_error = 0;
     for filter in [TextureFilter::Point, TextureFilter::Linear] {
         for (case, triangles) in cases.iter().enumerate() {
-            let mut frame = DrawList {
-                passes: Vec::new(),
+            let frame = DrawList {
                 commands: triangles.clone(),
                 filter,
             };
-            if case < 8 {
-                use katze_system2::graphics::DrawPass;
-                let screen = |source| {
-                    let points = [[-0.5, -0.5], [31.5, -0.5], [-0.5, 23.5], [31.5, 23.5]];
-                    let uv = [[0., 0.], [1., 0.], [0., 1.], [1., 1.]];
-                    [[0, 1, 2], [1, 2, 3]]
-                        .map(|indices| FrameTriangle {
-                            vertices: indices.map(|i| ProjectedVertex {
-                                position: [points[i][0], points[i][1], 0.5],
-                                rhw: 1.,
-                                color: 0xffffffff,
-                            }),
-                            texture: Some(FrameTexture {
-                                source: TextureSource::Pass(source),
-                                uv: indices.map(|i| uv[i]),
-                            }),
-                            clip: None,
-                            blend_mode: 0,
-                        })
-                        .to_vec()
-                };
-                frame.passes = vec![
-                    DrawPass {
-                        size: [19, 13],
-                        clear: 0xff123456,
-                        commands: triangles.clone(),
-                    },
-                    DrawPass {
-                        size: [32, 24],
-                        clear: 0xff654321,
-                        commands: screen(0),
-                    },
-                ];
-                frame.commands = screen(1);
-            }
             let reference = SoftwareBackend.render(&frame, &mut canvas, [32, 24])?;
             let expected = reference.tiles()[0].as_ref().unwrap();
             let output = renderer.render(&frame, &mut canvas, [32, 24])?;

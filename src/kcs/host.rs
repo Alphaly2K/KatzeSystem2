@@ -284,6 +284,10 @@ impl Host for CoreHost<'_> {
         })
     }
 
+    fn random(&mut self) -> Option<&mut ScriptRandom> {
+        Some(&mut self.host.random)
+    }
+
     fn surface_size(&self) -> [u32; 2] {
         self.host.surface_size
     }

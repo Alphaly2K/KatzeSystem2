@@ -251,3 +251,71 @@ fn fading_mosaic_captures_during_creation_then_blends_over_the_live_scene() {
         rt.destroy(id).unwrap();
     }
 }
+
+#[test]
+fn shatter_uses_the_captured_scene_keeps_foreground_and_releases_its_target() {
+    let mut rt = engine();
+    execute(&mut rt, &[(858, &[1]), (859, &[0, 0, 10f32.to_bits()])]);
+    let id = rt.create(0, kind::RENDER_WBREAK, b"shatter", b"").unwrap();
+    execute(
+        &mut rt,
+        &[
+            (860, &[id, 8, 0, 10f32.to_bits(), 3, 4, 0, 0]),
+            (861, &[id, 7]),
+            (860, &[0]),
+            (861, &[0]),
+        ],
+    );
+    assert_eq!(rt.compositor().auxiliary_targets().len(), 1);
+    rt.drawables_mut()
+        .insert(101, Drawable::rectangle([2., 2., 0.], [2., 2.], 0xff557733))
+        .unwrap();
+    rt.drawables_mut().set_display(101, 1);
+    rt.drawables_mut().set_base_point(101, [0., 0., 20.]);
+    assert_eq!(state(&mut rt, id), 7);
+    for color in [0xff112233, 0xffabcdef] {
+        rt.drawables_mut().set_color(100, color, u32::MAX);
+        let frame = rt.compose_frame().unwrap();
+
+        let mut output = RenderTarget::new([8, 6]).unwrap();
+        frame
+            .render_into(&mut output, rt.drawing().target.as_ref())
+            .unwrap();
+        assert_eq!(output.pixel(0, 0), Some(0xff112233));
+        assert_eq!(output.pixel(2, 2), Some(0xff557733));
+    }
+    execute(&mut rt, &[(859, &[0, 0, 10f32.to_bits()])]);
+    let frame = rt.compose_frame().unwrap();
+    let mut output = RenderTarget::new([8, 6]).unwrap();
+    frame
+        .render_into(&mut output, rt.drawing().target.as_ref())
+        .unwrap();
+    assert_eq!(output.pixel(0, 0), Some(0xffabcdef));
+    rt.update(8, 1).unwrap();
+    let frame = rt.compose_frame().unwrap();
+    assert_eq!(state(&mut rt, id), 0);
+    let mut output = RenderTarget::new([8, 6]).unwrap();
+    frame
+        .render_into(&mut output, rt.drawing().target.as_ref())
+        .unwrap();
+    assert_eq!(output.pixel(0, 0), Some(0xffabcdef));
+    assert_eq!(output.pixel(2, 2), Some(0xff557733));
+    let fading = rt.create(0, kind::RENDER_FMOSAIC, b"fade", b"").unwrap();
+    execute(&mut rt, &[(856, &[fading, 8, 0, 10f32.to_bits(), 2, 0, 0])]);
+    rt.drawables_mut().set_color(100, 0xff224466, u32::MAX);
+    let frame = rt.compose_frame().unwrap();
+    let mut output = RenderTarget::new([8, 6]).unwrap();
+    frame
+        .render_into(&mut output, rt.drawing().target.as_ref())
+        .unwrap();
+    assert_eq!(output.pixel(0, 0), Some(0xffabcdef));
+    rt.destroy(fading).unwrap();
+    rt.destroy(id).unwrap();
+    assert!(rt.compositor().auxiliary_targets().is_empty());
+    let frame = rt.compose_frame().unwrap();
+
+    frame
+        .render_into(&mut output, rt.drawing().target.as_ref())
+        .unwrap();
+    assert_eq!(output.pixel(0, 0), Some(0xff224466));
+}

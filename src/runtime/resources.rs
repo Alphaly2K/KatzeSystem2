@@ -80,6 +80,12 @@ impl Resources {
         let Some(frame) = self.render_depth_frame(size, range)? else {
             return Ok(false);
         };
+        if index == 0 && !self.compositor.shatters.entries.is_empty() {
+            let image = frame.tiles()[0].as_ref().cloned().map(std::sync::Arc::new);
+            for effect in self.compositor.shatters.entries.values_mut() {
+                effect.source = image.clone();
+            }
+        }
         self.compositor.auxiliary_targets[index as usize] = frame;
         Ok(true)
     }

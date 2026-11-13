@@ -22,13 +22,11 @@ struct Level {
 #[derive(Default)]
 pub(crate) struct Mosaics {
     pub entries: BTreeMap<u32, Mosaic>,
-    pub selected: Option<u32>,
 }
 
 impl Mosaics {
     pub fn remove(&mut self, id: u32) {
         self.entries.remove(&id);
-        self.selected = None;
     }
 }
 

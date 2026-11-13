@@ -48,7 +48,7 @@ impl MosaicObject {
                 .entry(self.id)
                 .or_default()
                 .capture(index, image)?;
-            compositor.mosaics.selected = Some(self.id);
+            compositor.screen_effect = Some(super::compositor::ScreenEffect::Mosaic(self.id));
         } else {
             compositor.auxiliary_targets.clear();
         }
@@ -58,6 +58,7 @@ impl MosaicObject {
     fn release(&mut self, host: &mut dyn Host) -> Result<()> {
         let compositor = compositor(host)?;
         compositor.mosaics.remove(self.id);
+        compositor.screen_effect = None;
         if self.ready {
             compositor.auxiliary_targets.clear();
         }
@@ -103,7 +104,7 @@ impl TaskObject for MosaicObject {
                 .mosaics
                 .entries
                 .insert(self.id, Mosaic::fading(image));
-            compositor.mosaics.selected = Some(self.id);
+            compositor.screen_effect = Some(super::compositor::ScreenEffect::Mosaic(self.id));
         }
         Ok(())
     }

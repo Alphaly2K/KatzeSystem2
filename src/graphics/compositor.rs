@@ -1,6 +1,12 @@
 use super::{DrawList, Drawables, DrawingContext, Projection, RenderTarget, TextureFilter};
 use crate::{Error, Result};
 
+#[derive(Clone, Copy)]
+pub(super) enum ScreenEffect {
+    Mosaic(u32),
+    Shatter(u32),
+}
+
 /// 持有画布、绘图登记和帧视图，生成设备无关的绘制列表。
 #[derive(Default)]
 pub struct Compositor {
@@ -9,6 +15,8 @@ pub struct Compositor {
     pub(crate) frame_view: Option<(Projection, [f32; 16], TextureFilter)>,
     pub(crate) auxiliary_targets: Vec<RenderTarget>,
     pub(crate) mosaics: super::mosaic::Mosaics,
+    pub(crate) shatters: super::shatter::Shatters,
+    pub(super) screen_effect: Option<ScreenEffect>,
 }
 
 impl Compositor {
@@ -78,10 +86,29 @@ impl Compositor {
         filter: TextureFilter,
         range: Option<[f32; 2]>,
     ) -> Result<DrawList> {
-        if self.mosaics.selected.is_none() {
+        if range.is_some() {
             return self.drawables.compose(&projection, parent, filter, range);
         }
-        let id = self.mosaics.selected.unwrap();
+        if let Some(ScreenEffect::Shatter(id)) = self.screen_effect {
+            let effect = self.shatters.entries.get_mut(&id).unwrap();
+            let far = effect.far;
+            let mut frame = self
+                .drawables
+                .compose(&projection, parent, filter, Some([0., far]))?;
+            frame
+                .commands
+                .splice(0..0, effect.background().into_iter().flatten());
+            frame.commands.extend(effect.frame());
+            frame.commands.extend(
+                self.drawables
+                    .compose(&projection, parent, filter, Some([far, 1_000_000.]))?
+                    .commands,
+            );
+            return Ok(frame);
+        }
+        let Some(ScreenEffect::Mosaic(id)) = self.screen_effect else {
+            return self.drawables.compose(&projection, parent, filter, range);
+        };
         let effect = self.mosaics.entries.get_mut(&id).unwrap();
         let far = effect.far;
         let image = effect.frame()?;

@@ -246,6 +246,11 @@ pub struct TaskEffects {
 }
 
 pub trait Host {
+    /// 与普通脚本、运动及粒子共用的随机序列。
+    fn random(&mut self) -> Option<&mut ScriptRandom> {
+        None
+    }
+
     /// 配置通知比较的界面、主文字、副文字原始选择。
     fn language_selection(&self) -> [u32; 3] {
         [0, 0, u32::MAX]
@@ -677,6 +682,10 @@ impl<T: Host + ?Sized> Host for &mut T {
     }
     fn input_pointer_control(&self) -> bool {
         (**self).input_pointer_control()
+    }
+
+    fn random(&mut self) -> Option<&mut ScriptRandom> {
+        (**self).random()
     }
 
     fn surface_size(&self) -> [u32; 2] {

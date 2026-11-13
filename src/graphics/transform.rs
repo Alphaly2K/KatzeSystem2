@@ -172,7 +172,7 @@ fn arithmetic(op: u8, left: f32, right: f32) -> f32 {
     f32::from_bits(float_operation(op, left.to_bits(), right.to_bits()))
 }
 
-fn sin_cos(angle: f32) -> (f32, f32) {
+pub(super) fn sin_cos(angle: f32) -> (f32, f32) {
     if angle.is_nan() {
         let nan = f32::from_bits(angle.to_bits() | 0x0040_0000);
         (nan, nan)

@@ -62,6 +62,7 @@ pub mod kind {
     pub const STRING_PLANE: u32 = 48;
     pub const RENDER_WMOSAIC: u32 = 50;
     pub const RENDER_FMOSAIC: u32 = 51;
+    pub const RENDER_WBREAK: u32 = 52;
     pub const STRING_PLANE_UTF8: u32 = 63;
     pub const CAMERA_2D: u32 = 65;
     /// 粒子任务（`kcTaskParticle`）；控制属性已接入，装载、播放及绘制待接入。
@@ -1891,6 +1892,10 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
 
     fn fes_services(&mut self) -> Option<&mut dyn fes::Services> {
         Some(self)
+    }
+
+    fn random(&mut self) -> Option<&mut crate::kcs::ScriptRandom> {
+        Some(&mut self.host.random)
     }
 
     fn surface_size(&self) -> [u32; 2] {

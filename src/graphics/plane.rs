@@ -1044,6 +1044,7 @@ impl<F: ObjectFactory> ObjectFactory for GraphicsFactory<F> {
             kind::RWIPE => Ok(Box::new(super::RWipeObject::new())),
             kind::RENDER_WMOSAIC => Ok(Box::new(super::MosaicObject::new(id))),
             kind::RENDER_FMOSAIC => Ok(Box::new(super::MosaicObject::fading(id))),
+            kind::RENDER_WBREAK => Ok(Box::new(super::ShatterObject::new(id))),
             kind::CAMERA_2D => Ok(Box::new(super::Camera2DObject::new())),
             kind::PARTICLE => Ok(Box::new(super::ParticleObject::new(id))),
             kind::PARTICLE_3D => Ok(Box::new(super::Particle3DObject::new(id))),

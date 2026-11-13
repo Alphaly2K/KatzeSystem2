@@ -10,26 +10,40 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         arguments: &[u8],
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
-        if matches!(index, 853..=857) {
+        if matches!(index, 853..=857 | 860 | 861) {
             let target = read::u32_at(arguments, 0)?;
             let length = match index {
                 853 => 24,
                 854 => 4,
                 856 => 28,
+                860 => 32,
                 _ => 8,
             };
             if arguments.len() != length && !(target == 0 && arguments.len() == 4) {
                 return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
             }
             if target != 0 {
-                if matches!(index, 853 | 856) {
-                    let mut record = vec![0; if index == 853 { 20 } else { 24 }];
-                    for (bytes, offset) in record.chunks_exact_mut(4).zip([8, 12, 4, 16, 20, 24]) {
+                if matches!(index, 853 | 856 | 860) {
+                    let mut record = vec![
+                        0;
+                        match index {
+                            853 => 20,
+                            856 => 24,
+                            _ => 28,
+                        }
+                    ];
+                    for (bytes, offset) in
+                        record.chunks_exact_mut(4).zip([8, 12, 4, 16, 20, 24, 28])
+                    {
                         bytes.copy_from_slice(&arguments[offset..offset + 4]);
                     }
                     self.command_target_with_buffers(
                         target,
-                        if index == 853 { 525 } else { 528 },
+                        match index {
+                            853 => 525,
+                            856 => 528,
+                            _ => 530,
+                        },
                         [0; 3],
                         &mut CommandBuffers {
                             data1: Some(&mut record),
@@ -47,6 +61,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                         match index {
                             854 => 526,
                             855 => 527,
+                            861 => 531,
                             _ => 529,
                         },
                         [0, value, 0],
