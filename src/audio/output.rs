@@ -168,7 +168,7 @@ impl Mixer {
                         channel.resampler = super::mix::Resampler::default();
                     }
                     channel.resampler.paused = false;
-                    if let Some(pcm) = &channel.pcm {
+                    if let Some(pcm) = &channel.source {
                         channel.playback.start(pcm, count, range)?;
                     }
                 }
@@ -178,7 +178,7 @@ impl Mixer {
                 }
                 Action::Stop => {
                     channel.resampler = super::mix::Resampler::default();
-                    if let Some(pcm) = &channel.pcm {
+                    if let Some(pcm) = &channel.source {
                         channel.playback.stop(pcm)?;
                     }
                 }
@@ -190,7 +190,7 @@ impl Mixer {
             }
             self.generations[update.channel] = update.generation;
         }
-        self.sound.mix_stereo(sample_rate, output)?;
+        self.sound.mix(sample_rate, output, false)?;
         for (index, channel) in self.sound.channels.iter().enumerate() {
             if let Ok(mut status) = self.progress[index].try_lock() {
                 if status.generation == self.generations[index] {

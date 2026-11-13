@@ -32,7 +32,7 @@ impl SoundChannel {
                 continue;
             }
             let value = self.ramps.advance(slot, now);
-            if self.pcm.is_some() {
+            if self.source.is_some() {
                 if slot == 0 {
                     self.pcm_volume = value;
                 } else if stereo {

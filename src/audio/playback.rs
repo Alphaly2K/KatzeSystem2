@@ -1,4 +1,4 @@
-use super::Pcm;
+use super::Source;
 use crate::{Error, Result, read};
 use std::ops::Range;
 
@@ -9,12 +9,13 @@ pub(super) struct Playback {
     pub remaining: u32,
     pub completed: u64,
     ended: bool,
+    refill_pending: bool,
     buffered: Buffered,
     stream: Option<Stream>,
 }
 
 impl Playback {
-    pub fn new(pcm: &Pcm, whole: bool, silence_ms: u32) -> Result<Self> {
+    pub fn new(pcm: &Source, whole: bool, silence_ms: u32) -> Result<Self> {
         let frame_bytes = u32::from(pcm.channels()) * 2;
         let half_bytes = pcm.sample_rate().wrapping_mul(frame_bytes) / 2;
         let buffer_bytes = half_bytes.wrapping_mul(8);
@@ -37,6 +38,7 @@ impl Playback {
             }
             let mut stream = Stream {
                 samples: vec![0; buffer_bytes as usize / 2],
+                scratch: vec![0; half_bytes as usize / 2],
                 half_frames: (half_bytes / frame_bytes) as usize,
                 decoder,
                 loop_start: 0,
@@ -55,12 +57,13 @@ impl Playback {
         Ok(playback)
     }
 
-    pub fn start(&mut self, pcm: &Pcm, count: u32, range: [i64; 2]) -> Result<()> {
+    pub fn start(&mut self, pcm: &Source, count: u32, range: [i64; 2]) -> Result<()> {
         if let Some(stream) = &mut self.stream {
             stream.decoder.end = range[1];
             if self.playing {
                 self.position = 0;
                 stream.reset(pcm)?;
+                self.refill_pending = false;
             }
             stream.loop_start = range[0];
         } else {
@@ -94,11 +97,12 @@ impl Playback {
         self.playing = false;
     }
 
-    pub fn stop(&mut self, pcm: &Pcm) -> Result<()> {
+    pub fn stop(&mut self, pcm: &Source) -> Result<()> {
         self.pause();
         self.position = 0;
         self.completed = 0;
         self.ended = false;
+        self.refill_pending = false;
         if let Some(stream) = &mut self.stream {
             stream.reset(pcm)?;
         } else {
@@ -107,12 +111,25 @@ impl Playback {
         Ok(())
     }
 
-    pub fn read(&mut self, pcm: &Pcm, output: &mut [i16]) -> Result<()> {
+    pub fn read(&mut self, pcm: &Source, output: &mut [i16], wait: bool) -> Result<usize> {
         output.fill(0);
         let channels = pcm.channels() as usize;
         let mut position = 0;
         if let Some(stream) = &mut self.stream {
             while self.playing && position < output.len() {
+                if self.refill_pending {
+                    let Some(ended) =
+                        stream.consume(pcm, self.position, &mut self.remaining, wait)?
+                    else {
+                        break;
+                    };
+                    self.refill_pending = false;
+                    if ended {
+                        self.playing = false;
+                        self.position = 0;
+                        break;
+                    }
+                }
                 let frames = (stream.half_frames - self.position % stream.half_frames)
                     .min((output.len() - position) / channels);
                 let count = frames * channels;
@@ -121,21 +138,34 @@ impl Playback {
                     .copy_from_slice(&stream.samples[start..start + count]);
                 position += count;
                 self.position = (self.position + frames) % (stream.half_frames * 8);
-                if self.position.is_multiple_of(stream.half_frames)
-                    && stream.consume(pcm, self.position, &mut self.remaining)?
-                {
-                    self.playing = false;
-                    self.position = 0;
+                if self.position.is_multiple_of(stream.half_frames) {
+                    match stream.consume(pcm, self.position, &mut self.remaining, wait)? {
+                        Some(true) => {
+                            self.playing = false;
+                            self.position = 0;
+                        }
+                        Some(false) => (),
+                        None => {
+                            self.refill_pending = true;
+                            break;
+                        }
+                    }
                 }
             }
-            return Ok(());
+            return Ok(position / channels);
         }
         while self.playing && position < output.len() {
             let frames =
                 (self.buffered.frames - self.position).min((output.len() - position) / channels);
             let count = frames * channels;
-            self.buffered
-                .copy(pcm, self.position, &mut output[position..position + count]);
+            if !self.buffered.copy(
+                pcm,
+                self.position,
+                &mut output[position..position + count],
+                wait,
+            )? {
+                break;
+            }
             position += count;
             self.position += frames;
             if self.position >= self.buffered.frames {
@@ -152,7 +182,7 @@ impl Playback {
                 }
             }
         }
-        Ok(())
+        Ok(position / channels)
     }
 }
 
@@ -176,8 +206,8 @@ impl Default for Decoder {
 }
 
 impl Decoder {
-    fn length_bytes(&self, pcm: &Pcm) -> u32 {
-        (pcm.samples().len() as u32 * 2)
+    fn length_bytes(&self, pcm: &Source) -> u32 {
+        (pcm.frames() as u32 * u32::from(pcm.channels()) * 2)
             .wrapping_add((self.silence * i64::from(pcm.channels()) * 2) as u32)
     }
 
@@ -187,7 +217,7 @@ impl Decoder {
         self.ready = true;
     }
 
-    fn take(&mut self, pcm: &Pcm, frames: usize) -> Result<(usize, Range<usize>)> {
+    fn take(&mut self, pcm: &Source, frames: usize) -> Result<(usize, Range<usize>)> {
         let silence = self.silence.max(0).min(frames as i64) as usize;
         self.silence -= silence as i64;
         if silence == frames {
@@ -221,34 +251,39 @@ struct Buffered {
 }
 
 impl Buffered {
-    fn prefill(&mut self, pcm: &Pcm) -> Result<()> {
+    fn prefill(&mut self, pcm: &Source) -> Result<()> {
         let (silence, source) = self.decoder.take(pcm, self.frames)?;
         self.silence = silence;
         self.source_frames = source.len();
         Ok(())
     }
 
-    fn reset(&mut self, pcm: &Pcm) -> Result<()> {
+    fn reset(&mut self, pcm: &Source) -> Result<()> {
         self.decoder.rewind();
         self.prefill(pcm)
     }
 
-    fn copy(&self, pcm: &Pcm, position: usize, output: &mut [i16]) {
+    fn copy(&self, pcm: &Source, position: usize, output: &mut [i16], wait: bool) -> Result<bool> {
         // 整段缓冲区由静音、源 PCM 和尾零组成，区间表示无需复制长静音。
         let channels = pcm.channels() as usize;
         let first = position.max(self.silence);
         let last = (position + output.len() / channels).min(self.silence + self.source_frames);
         if first < last {
-            output[(first - position) * channels..(last - position) * channels].copy_from_slice(
-                &pcm.samples()[(first - self.silence) * channels..(last - self.silence) * channels],
+            return read_source(
+                pcm,
+                first - self.silence,
+                &mut output[(first - position) * channels..(last - position) * channels],
+                wait,
             );
         }
+        Ok(true)
     }
 }
 
 #[derive(Clone)]
 struct Stream {
     samples: Vec<i16>,
+    scratch: Vec<i16>,
     half_frames: usize,
     decoder: Decoder,
     loop_start: i64,
@@ -259,22 +294,24 @@ struct Stream {
 }
 
 impl Stream {
-    fn fill(&mut self, pcm: &Pcm, offset: usize, frames: usize) -> Result<usize> {
+    fn fill(&mut self, pcm: &Source, offset: usize, frames: usize) -> Result<usize> {
         let channels = pcm.channels() as usize;
         let output = &mut self.samples[offset * channels..(offset + frames) * channels];
         output.fill(0);
         let (silence, source) = self.decoder.take(pcm, frames)?;
-        output[silence * channels..(silence + source.len()) * channels]
-            .copy_from_slice(&pcm.samples()[source.start * channels..source.end * channels]);
+        pcm.read_frames(
+            source.start,
+            &mut output[silence * channels..(silence + source.len()) * channels],
+        )?;
         Ok(silence + source.len())
     }
 
-    fn prefill(&mut self, pcm: &Pcm) -> Result<()> {
+    fn prefill(&mut self, pcm: &Source) -> Result<()> {
         self.fill(pcm, 0, self.half_frames * 8)?;
         Ok(())
     }
 
-    fn reset(&mut self, pcm: &Pcm) -> Result<()> {
+    fn reset(&mut self, pcm: &Source) -> Result<()> {
         self.next_fill = 0;
         self.previous_cursor = 0;
         self.accumulated = 0;
@@ -283,38 +320,63 @@ impl Stream {
         self.prefill(pcm)
     }
 
-    fn consume(&mut self, pcm: &Pcm, cursor: usize, remaining: &mut u32) -> Result<bool> {
+    fn consume(
+        &mut self,
+        pcm: &Source,
+        cursor: usize,
+        remaining: &mut u32,
+        wait: bool,
+    ) -> Result<Option<bool>> {
         if cursor / self.half_frames == self.next_fill {
-            return Ok(false);
+            return Ok(Some(false));
         }
         let frame_bytes = u32::from(pcm.channels()) * 2;
         let offset = self.next_fill * self.half_frames;
+        let mut decoder = self.decoder.clone();
+        let mut count = *remaining;
+        let mut loops = self.prefetched_loops;
+        self.scratch.fill(0);
         let mut filled = 0;
         let mut read_sum = 0u32;
         while filled < self.half_frames {
-            filled += self.fill(pcm, offset + filled, self.half_frames - filled)?;
+            let (silence, source) = decoder.take(pcm, self.half_frames - filled)?;
+            let channels = pcm.channels() as usize;
+            if !read_source(
+                pcm,
+                source.start,
+                &mut self.scratch
+                    [(filled + silence) * channels..(filled + silence + source.len()) * channels],
+                wait,
+            )? {
+                return Ok(None);
+            }
+            filled += silence + source.len();
             read_sum = read_sum.wrapping_add(filled as u32 * frame_bytes);
-            if filled == self.half_frames || *remaining == 1 {
+            if filled == self.half_frames || count == 1 {
                 break;
             }
-            if *remaining != 0 {
-                *remaining -= 1;
-            }
+            count = count.saturating_sub(1);
             if self.loop_start < 0 || self.loop_start > pcm.frames() as i64 {
                 return Err(Error::new(0, "流式声音循环起点超出来源范围"));
             }
-            let limit = if self.decoder.end == -1 {
+            let limit = if decoder.end == -1 {
                 pcm.frames() as i64
             } else {
-                self.decoder.end.min(pcm.frames() as i64)
+                decoder.end.min(pcm.frames() as i64)
             };
             if self.loop_start >= limit {
                 return Err(Error::new(0, "流式声音循环无法继续预取"));
             }
-            self.decoder.position = self.loop_start as usize;
-            self.decoder.ready = true;
-            self.prefetched_loops = self.prefetched_loops.wrapping_add(1);
+            decoder.position = self.loop_start as usize;
+            decoder.ready = true;
+            loops = loops.wrapping_add(1);
         }
+        self.samples[offset * pcm.channels() as usize
+            ..(offset + self.half_frames) * pcm.channels() as usize]
+            .copy_from_slice(&self.scratch);
+        self.decoder = decoder;
+        self.prefetched_loops = loops;
+        *remaining = count;
         self.next_fill = (self.next_fill + 1) % 8;
         let advanced = if cursor < self.previous_cursor {
             self.half_frames * 8 - self.previous_cursor + cursor
@@ -345,23 +407,33 @@ impl Stream {
             self.prefill(pcm)?;
             self.accumulated = 0;
             self.previous_cursor = 0;
-            return Ok(true);
+            return Ok(Some(true));
         }
-        Ok(false)
+        Ok(Some(false))
+    }
+}
+
+fn read_source(pcm: &Source, offset: usize, output: &mut [i16], wait: bool) -> Result<bool> {
+    if wait {
+        pcm.read_frames(offset, output)?;
+        Ok(true)
+    } else {
+        pcm.try_read_frames(offset, output)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::audio::Pcm;
 
     #[test]
     fn buffered_silence_repeats_with_cached_audio_and_is_consumed_by_explicit_refills() {
-        let pcm = Pcm::new(10, 2, vec![1, 2, 3, 4, 5, 6]).unwrap();
+        let pcm: Source = Pcm::new(10, 2, vec![1, 2, 3, 4, 5, 6]).unwrap().into();
         let mut voice = Playback::new(&pcm, false, 200).unwrap();
         voice.start(&pcm, 2, [0, -1]).unwrap();
         let mut output = [0; 20];
-        voice.read(&pcm, &mut output).unwrap();
+        voice.read(&pcm, &mut output, true).unwrap();
         assert_eq!(
             output,
             [0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 0, 0, 0, 0, 1, 2, 3, 4, 5, 6]
@@ -369,59 +441,59 @@ mod tests {
         assert_eq!(voice.completed, 2);
         assert!(!voice.playing);
         voice.start(&pcm, 1, [0, -1]).unwrap();
-        voice.read(&pcm, &mut output[..2]).unwrap();
+        voice.read(&pcm, &mut output[..2], true).unwrap();
         assert_eq!(&output[..2], [0, 0]);
         voice.start(&pcm, 1, [0, -1]).unwrap();
-        voice.read(&pcm, &mut output[..10]).unwrap();
+        voice.read(&pcm, &mut output[..10], true).unwrap();
         assert_eq!(&output[..10], [1, 2, 3, 4, 5, 6, 0, 0, 0, 0]);
         voice.stop(&pcm).unwrap();
         voice.start(&pcm, 1, [0, -1]).unwrap();
-        voice.read(&pcm, &mut output[..10]).unwrap();
+        voice.read(&pcm, &mut output[..10], true).unwrap();
         assert_eq!(&output[..10], [1, 2, 3, 4, 5, 6, 0, 0, 0, 0]);
     }
 
     #[test]
     fn large_silence_uses_wrapped_lengths_and_signed_conversion_without_materializing_padding() {
-        let pcm = Pcm::new(44_100, 1, vec![7]).unwrap();
+        let pcm: Source = Pcm::new(44_100, 1, vec![7]).unwrap().into();
         let mut voice = Playback::new(&pcm, true, u32::MAX).unwrap();
         assert_eq!(voice.buffered.frames, 429_496_686);
         voice.start(&pcm, 1, [0, -1]).unwrap();
         let mut output = [1; 3];
-        voice.read(&pcm, &mut output).unwrap();
+        voice.read(&pcm, &mut output, true).unwrap();
         assert_eq!(output, [0; 3]);
-        let pcm = Pcm::new(u32::MAX, 1, vec![9]).unwrap();
+        let pcm: Source = Pcm::new(u32::MAX, 1, vec![9]).unwrap().into();
         let mut voice = Playback::new(&pcm, true, u32::MAX).unwrap();
         voice.start(&pcm, 1, [0, -1]).unwrap();
-        voice.read(&pcm, &mut output).unwrap();
+        voice.read(&pcm, &mut output, true).unwrap();
         assert_eq!(output, [9, 0, 0]);
     }
 
     #[test]
     fn silence_selects_streaming_and_stops_do_not_restore_consumed_padding() {
-        let short = Pcm::new(10, 1, (1..=23).collect()).unwrap();
+        let short: Source = Pcm::new(10, 1, (1..=23).collect()).unwrap().into();
         assert!(Playback::new(&short, false, 1700).unwrap().stream.is_none());
         assert!(Playback::new(&short, false, 1800).unwrap().stream.is_some());
-        let pcm = Pcm::new(10, 1, (1..=83).collect()).unwrap();
+        let pcm: Source = Pcm::new(10, 1, (1..=83).collect()).unwrap().into();
         let mut voice = Playback::new(&pcm, false, 5000).unwrap();
         voice.stop(&pcm).unwrap();
         voice.start(&pcm, 1, [0, -1]).unwrap();
         let mut output = [0; 12];
-        voice.read(&pcm, &mut output).unwrap();
+        voice.read(&pcm, &mut output, true).unwrap();
         assert_eq!(output, [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2]);
         voice.start(&pcm, 1, [0, -1]).unwrap();
-        voice.read(&pcm, &mut output).unwrap();
-        assert_eq!(output, pcm.samples()[..12]);
+        voice.read(&pcm, &mut output, true).unwrap();
+        assert_eq!(output, pcm.pcm().unwrap().samples()[..12]);
     }
 
     #[test]
     fn buffered_stereo_repeats_the_whole_source_and_empty_pcm_terminates() {
-        let pcm = Pcm::new(2, 2, (0..16).collect()).unwrap();
+        let pcm: Source = Pcm::new(2, 2, (0..16).collect()).unwrap().into();
         let mut voice = Playback::new(&pcm, false, 0).unwrap();
         voice.start(&pcm, 2, [3, 5]).unwrap();
         let mut output = [0; 34];
-        voice.read(&pcm, &mut output).unwrap();
-        assert_eq!(&output[..16], pcm.samples());
-        assert_eq!(&output[16..32], pcm.samples());
+        voice.read(&pcm, &mut output, true).unwrap();
+        assert_eq!(&output[..16], pcm.pcm().unwrap().samples());
+        assert_eq!(&output[16..32], pcm.pcm().unwrap().samples());
         assert_eq!(&output[32..], [0, 0]);
         assert_eq!(
             (voice.position, voice.remaining, voice.completed),
@@ -429,83 +501,83 @@ mod tests {
         );
         assert!(!voice.playing);
         voice.start(&pcm, 0, [0, -1]).unwrap();
-        voice.read(&pcm, &mut output).unwrap();
+        voice.read(&pcm, &mut output, true).unwrap();
         assert!(voice.playing);
         assert_eq!(&output[32..], [0, 1]);
         voice.stop(&pcm).unwrap();
-        let empty = Pcm::new(2, 2, vec![]).unwrap();
+        let empty: Source = Pcm::new(2, 2, vec![]).unwrap().into();
         voice = Playback::new(&empty, false, 0).unwrap();
         voice.start(&empty, 0, [0, -1]).unwrap();
-        voice.read(&empty, &mut output).unwrap();
+        voice.read(&empty, &mut output, true).unwrap();
         assert_eq!(output, [0; 34]);
         assert!(!voice.playing);
     }
 
     #[test]
     fn streaming_ends_on_buffer_consumption_after_the_partial_final_block() {
-        let pcm = Pcm::new(10, 2, (1..=166).collect()).unwrap();
+        let pcm: Source = Pcm::new(10, 2, (1..=166).collect()).unwrap().into();
         let mut voice = Playback::new(&pcm, false, 0).unwrap();
         voice.start(&pcm, 1, [0, -1]).unwrap();
         let mut output = [0; 166];
-        voice.read(&pcm, &mut output).unwrap();
-        assert_eq!(output, pcm.samples());
+        voice.read(&pcm, &mut output, true).unwrap();
+        assert_eq!(output, pcm.pcm().unwrap().samples());
         assert!(voice.playing);
         assert_eq!(
             (voice.position, voice.remaining, voice.completed),
             (3, 1, 0)
         );
         let mut tail = [1; 4];
-        voice.read(&pcm, &mut tail).unwrap();
+        voice.read(&pcm, &mut tail, true).unwrap();
         assert_eq!(tail, [0; 4]);
         assert!(!voice.playing);
         assert_eq!(voice.position, 0);
         voice.start(&pcm, 1, [0, -1]).unwrap();
-        voice.read(&pcm, &mut tail).unwrap();
+        voice.read(&pcm, &mut tail, true).unwrap();
         assert_eq!(tail, [1, 2, 3, 4]);
     }
 
     #[test]
     fn streaming_count_changes_and_pause_keep_the_prefetched_loop_samples() {
-        let pcm = Pcm::new(10, 1, (1..=83).collect()).unwrap();
+        let pcm: Source = Pcm::new(10, 1, (1..=83).collect()).unwrap().into();
         let mut voice = Playback::new(&pcm, false, 0).unwrap();
         voice.start(&pcm, 2, [5, 60]).unwrap();
         let mut first = [0; 25];
-        voice.read(&pcm, &mut first).unwrap();
-        assert_eq!(first, pcm.samples()[..25]);
+        voice.read(&pcm, &mut first, true).unwrap();
+        assert_eq!(first, pcm.pcm().unwrap().samples()[..25]);
         assert_eq!(voice.remaining, 1);
         let mut rest = [0; 15];
-        voice.read(&pcm, &mut rest).unwrap();
-        assert_eq!(rest, pcm.samples()[25..40]);
+        voice.read(&pcm, &mut rest, true).unwrap();
+        assert_eq!(rest, pcm.pcm().unwrap().samples()[25..40]);
         voice.pause();
         voice.change_count(1, [0, -1]);
-        voice.read(&pcm, &mut rest).unwrap();
+        voice.read(&pcm, &mut rest, true).unwrap();
         assert_eq!(rest, [0; 15]);
         assert_eq!(voice.position, 0);
         voice.start(&pcm, 1, [0, -1]).unwrap();
         let mut prefetched = [0; 40];
-        voice.read(&pcm, &mut prefetched).unwrap();
-        assert_eq!(&prefetched[..20], &pcm.samples()[40..60]);
-        assert_eq!(&prefetched[20..], &pcm.samples()[5..25]);
+        voice.read(&pcm, &mut prefetched, true).unwrap();
+        assert_eq!(&prefetched[..20], &pcm.pcm().unwrap().samples()[40..60]);
+        assert_eq!(&prefetched[20..], &pcm.pcm().unwrap().samples()[5..25]);
         voice.start(&pcm, 2, [0, -1]).unwrap();
-        voice.read(&pcm, &mut first).unwrap();
-        assert_eq!(first, pcm.samples()[..25]);
+        voice.read(&pcm, &mut first, true).unwrap();
+        assert_eq!(first, pcm.pcm().unwrap().samples()[..25]);
         voice.stop(&pcm).unwrap();
         assert_eq!(voice.position, 0);
         voice.start(&pcm, 1, [0, -1]).unwrap();
-        voice.read(&pcm, &mut rest).unwrap();
-        assert_eq!(rest, pcm.samples()[..15]);
+        voice.read(&pcm, &mut rest, true).unwrap();
+        assert_eq!(rest, pcm.pcm().unwrap().samples()[..15]);
     }
 
     #[test]
     fn invalid_streaming_blocks_and_nonprogressing_ranges_return_diagnostics() {
-        let unaligned = Pcm::new(3, 1, vec![1; 20]).unwrap();
+        let unaligned: Source = Pcm::new(3, 1, vec![1; 20]).unwrap().into();
         assert!(Playback::new(&unaligned, false, 0).is_err());
-        let pcm = Pcm::new(10, 1, vec![1; 83]).unwrap();
+        let pcm: Source = Pcm::new(10, 1, vec![1; 83]).unwrap().into();
         let mut voice = Playback::new(&pcm, false, 0).unwrap();
         voice.start(&pcm, 0, [0, 1]).unwrap();
-        assert!(voice.read(&pcm, &mut [0; 5]).is_err());
+        assert!(voice.read(&pcm, &mut [0; 5], true).is_err());
         voice.stop(&pcm).unwrap();
         voice.start(&pcm, 0, [83, -1]).unwrap();
-        assert!(voice.read(&pcm, &mut [0; 100]).is_err());
+        assert!(voice.read(&pcm, &mut [0; 100], true).is_err());
     }
 }

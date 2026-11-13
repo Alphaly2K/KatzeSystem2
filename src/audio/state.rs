@@ -68,7 +68,7 @@ impl SoundState {
             .get_mut(selected as usize)
             .ok_or_else(|| Error::new(0, "声音组选择超出物理通道容量"))?;
         sound.file.clear();
-        sound.pcm = None;
+        sound.source = None;
         sound.playback = Playback::default();
         sound.resampler = super::mix::Resampler::default();
         sound.clock.elapsed = 0;
@@ -102,7 +102,7 @@ impl SoundState {
             .get_mut(channel as usize)
             .ok_or_else(|| Error::new(0, "声音通道编号超出范围"))?;
         let pcm = sound
-            .pcm
+            .source
             .as_ref()
             .ok_or_else(|| Error::new(0, "声音通道尚未装载 PCM"))?;
         let count = frames
@@ -111,7 +111,7 @@ impl SoundState {
             .ok_or_else(|| Error::new(0, "声音采样输出超过容量上限"))?;
         let mut output = vec![0; count];
         sound.resampler = super::mix::Resampler::default();
-        sound.playback.read(pcm, &mut output)?;
+        sound.playback.read(pcm, &mut output, true)?;
         Pcm::new(pcm.sample_rate(), pcm.channels(), output)
     }
 
@@ -192,7 +192,7 @@ impl SoundState {
             let sound = &mut self.channels[index];
             sound.ramps.active &= !1;
             sound.requested_volume = volume as f32;
-            if sound.pcm.is_some() {
+            if sound.source.is_some() {
                 sound.pcm_volume = volume;
             }
         }
@@ -248,7 +248,7 @@ impl SoundState {
                 return Err(Error::new(0, "声音淡变播放尚未接入"));
             }
             sound.ramps.active = 0;
-            if let Some(pcm) = &sound.pcm {
+            if let Some(pcm) = &sound.source {
                 if sound.playback.playing || !sound.resampler.paused {
                     sound.resampler = super::mix::Resampler::default();
                 }
@@ -286,7 +286,7 @@ impl SoundState {
                 }
                 185 => {
                     sound.resampler = super::mix::Resampler::default();
-                    if let Some(pcm) = &sound.pcm {
+                    if let Some(pcm) = &sound.source {
                         sound.playback.stop(pcm)?;
                     }
                 }
@@ -329,7 +329,7 @@ impl SoundState {
         self.sync_output();
         if let Some(index) = self.property_channel(channel) {
             let sound = &mut self.channels[index];
-            if sound.pcm.is_some() {
+            if sound.source.is_some() {
                 let range = playback_range(sound, count);
                 sound.playback.change_count(count, range);
                 self.output_action(index, Action::Count(count, range));

@@ -208,7 +208,7 @@ impl TaskObject for SoundObject {
                             .map(|word| f32::from_le_bytes(word.try_into().unwrap()))
                             .collect();
                         let sound = &mut self.audio.channels[index];
-                        if sound.pcm.is_some() {
+                        if sound.source.is_some() {
                             match command.code {
                                 193 => sound.distance_range[1] = values[1],
                                 194 if host.sound_stereo() != 0 => {
@@ -336,9 +336,11 @@ mod tests {
     fn output_state() -> SoundState {
         let mut sound = SoundState::default();
         let channel = &mut sound.channels[0];
-        let pcm = Pcm::new(8, 1, vec![8192, 16384, 24576, 16384]).unwrap();
+        let pcm: crate::audio::Source = Pcm::new(8, 1, vec![8192, 16384, 24576, 16384])
+            .unwrap()
+            .into();
         channel.playback = Playback::new(&pcm, true, 0).unwrap();
-        channel.pcm = Some(pcm);
+        channel.source = Some(pcm);
         channel.requested_volume = 100.0;
         sound
     }
@@ -429,7 +431,7 @@ mod tests {
         let mut object = SoundObject::new(true);
         for index in [7, 11, 63] {
             let channel = &mut object.audio.channels[index];
-            channel.pcm = Some(Pcm::new(8000, 1, vec![1, 2]).unwrap());
+            channel.source = Some(Pcm::new(8000, 1, vec![1, 2]).unwrap().into());
             channel.playback.playing = true;
         }
         object.audio.channels[7].grouped = true;

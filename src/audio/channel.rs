@@ -1,5 +1,5 @@
-use super::Pcm;
 use super::playback::Playback;
+use super::{Pcm, Source};
 
 #[derive(Clone, Copy, Default)]
 pub(super) struct ChannelClock {
@@ -13,7 +13,7 @@ pub struct SoundChannel {
     pub(super) clock: ChannelClock,
     pub(super) file: Vec<u8>,
     pub(super) tags: std::collections::BTreeMap<Vec<u8>, u32>,
-    pub(super) pcm: Option<Pcm>,
+    pub(super) source: Option<Source>,
     pub(super) requested_volume: f32,
     pub(super) pcm_volume: i32,
     pub(super) pcm_pan: i32,
@@ -40,7 +40,7 @@ impl Default for SoundChannel {
             clock: ChannelClock::default(),
             file: Vec::new(),
             tags: Default::default(),
-            pcm: None,
+            source: None,
             requested_volume: 0.0,
             pcm_volume: 100,
             pcm_pan: 0,
@@ -73,8 +73,9 @@ impl SoundChannel {
         &self.tags
     }
 
+    /// 等待后台解码并借用完整源 PCM；解码失败时返回 None。
     pub fn pcm(&self) -> Option<&Pcm> {
-        self.pcm.as_ref()
+        self.source.as_ref().and_then(|source| source.pcm().ok())
     }
 
     /// 任务保存的音量目标；资源尚未装载时也可设置。
@@ -83,31 +84,31 @@ impl SoundChannel {
     }
 
     pub fn volume(&self) -> Option<i32> {
-        self.pcm.as_ref().map(|_| self.pcm_volume)
+        self.source.as_ref().map(|_| self.pcm_volume)
     }
 
     pub fn pan(&self) -> Option<i32> {
-        self.pcm.as_ref().map(|_| self.pcm_pan)
+        self.source.as_ref().map(|_| self.pcm_pan)
     }
 
     /// 当前资源的最小／最大声音距离，保留原始浮点位模式。
     pub fn distance_range(&self) -> Option<[f32; 2]> {
-        self.pcm.as_ref().map(|_| self.distance_range)
+        self.source.as_ref().map(|_| self.distance_range)
     }
 
     /// 当前资源的三维位置；二维播放使用其 X／Z 分量计算声像。
     pub fn position(&self) -> Option<[f32; 3]> {
-        self.pcm.as_ref().map(|_| self.position)
+        self.source.as_ref().map(|_| self.position)
     }
 
     /// 当前资源的三维速度，保留原始浮点位模式。
     pub fn velocity(&self) -> Option<[f32; 3]> {
-        self.pcm.as_ref().map(|_| self.velocity)
+        self.source.as_ref().map(|_| self.velocity)
     }
 
     /// 当前资源保存的 Doppler 系数；设备应用由播放后端负责。
     pub fn doppler_factor(&self) -> Option<f32> {
-        self.pcm.as_ref().map(|_| self.doppler_factor)
+        self.source.as_ref().map(|_| self.doppler_factor)
     }
 
     pub fn is_playing(&self) -> bool {
@@ -117,7 +118,7 @@ impl SoundChannel {
                 .unwrap_or_else(|error| error.into_inner())
                 .playing;
         }
-        self.pcm.is_some() && (self.playback.playing || self.resampler.pending())
+        self.source.is_some() && (self.playback.playing || self.resampler.pending())
     }
 
     /// 由采样读取推进的位置；流式来源返回环形缓冲区内的采样帧位置。
@@ -179,14 +180,14 @@ impl SoundChannel {
     }
 
     pub(super) fn duration_ms(&self) -> u32 {
-        self.pcm.as_ref().map_or(0, |pcm| {
+        self.source.as_ref().map_or(0, |pcm| {
             ((pcm.frames() as f64 / f64::from(pcm.sample_rate())) * 1000.0) as u64 as u32
         })
     }
 
     pub(super) fn unload(&mut self) {
         self.file.clear();
-        self.pcm = None;
+        self.source = None;
         self.playback = Playback::default();
         self.resampler = super::mix::Resampler::default();
         self.ramps.active = 0;

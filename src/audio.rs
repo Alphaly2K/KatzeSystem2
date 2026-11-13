@@ -12,6 +12,7 @@ mod pcm;
 mod playback;
 mod settings;
 mod soundconf;
+mod source;
 mod state;
 mod tags;
 mod task;
@@ -21,6 +22,7 @@ pub use decoder::VorbisDecoder;
 pub use groups::{SoundGroup, SoundGroups};
 pub use output::Mixer;
 pub use pcm::{Pcm, decode_vorbis, decode_vorbis_source};
+pub use source::Source;
 pub use state::SoundState;
 pub use task::{SoundFactory, SoundObject};
 

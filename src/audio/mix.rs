@@ -22,6 +22,10 @@ impl SoundState {
     /// 覆写交错立体声浮点采样，应用通道音量和声像并推进播放位置。
     /// 采样率转换使用连续线性插值；调用方按设备消费速度请求采样。
     pub fn mix_stereo(&mut self, sample_rate: u32, output: &mut [f32]) -> Result<()> {
+        self.mix(sample_rate, output, true)
+    }
+
+    pub(super) fn mix(&mut self, sample_rate: u32, output: &mut [f32], wait: bool) -> Result<()> {
         if self.output.is_some() {
             return Err(Error::new(0, "声音采样已交给独立混音器"));
         }
@@ -31,7 +35,7 @@ impl SoundState {
         }
         output.fill(0.0);
         for sound in &mut self.channels {
-            let Some(pcm) = &sound.pcm else { continue };
+            let Some(pcm) = &sound.source else { continue };
             if sound.resampler.paused || (!sound.playback.playing && !sound.resampler.pending()) {
                 continue;
             }
@@ -44,12 +48,15 @@ impl SoundState {
                 let mut source = [0; 1024];
                 for chunk in output.chunks_mut(1024) {
                     let source = &mut source[..chunk.len() / 2 * channels];
-                    sound.playback.read(pcm, source)?;
+                    let consumed = sound.playback.read(pcm, source, wait)?;
                     for (frame, samples) in
                         chunk.chunks_exact_mut(2).zip(source.chunks_exact(channels))
                     {
                         frame[0] += f32::from(samples[0]) / 32768.0 * gains[0];
                         frame[1] += f32::from(samples[channels - 1]) / 32768.0 * gains[1];
+                    }
+                    if consumed < source.len() / channels {
+                        break;
                     }
                 }
             } else {
@@ -61,10 +68,12 @@ impl SoundState {
                     };
                 }
                 let mut source = [0; 2];
-                for frame in output.chunks_exact_mut(2) {
+                'frames: for frame in output.chunks_exact_mut(2) {
                     if !state.primed {
                         let valid = sound.playback.playing;
-                        sound.playback.read(pcm, &mut source[..channels])?;
+                        if sound.playback.read(pcm, &mut source[..channels], wait)? == 0 && valid {
+                            break 'frames;
+                        }
                         state.current = [f32::from(source[0]), f32::from(source[channels - 1])];
                         state.previous = state.current;
                         state.primed = true;
@@ -72,7 +81,9 @@ impl SoundState {
                     }
                     while state.phase >= u64::from(sample_rate) {
                         let valid = sound.playback.playing;
-                        sound.playback.read(pcm, &mut source[..channels])?;
+                        if sound.playback.read(pcm, &mut source[..channels], wait)? == 0 && valid {
+                            break 'frames;
+                        }
                         state.previous = state.current;
                         state.current = [f32::from(source[0]), f32::from(source[channels - 1])];
                         state.phase -= u64::from(sample_rate);
@@ -102,10 +113,10 @@ mod tests {
 
     fn state(rate: u32, channels: u8, samples: Vec<i16>) -> SoundState {
         let mut state = SoundState::default();
-        let pcm = Pcm::new(rate, channels, samples).unwrap();
+        let pcm: crate::audio::Source = Pcm::new(rate, channels, samples).unwrap().into();
         let mut playback = Playback::new(&pcm, true, 0).unwrap();
         playback.start(&pcm, 1, [0, -1]).unwrap();
-        state.channels[0].pcm = Some(pcm);
+        state.channels[0].source = Some(pcm);
         state.channels[0].playback = playback;
         state
     }
@@ -152,7 +163,7 @@ mod tests {
                     let channel = &mut split.channels[0];
                     channel
                         .playback
-                        .start(channel.pcm.as_ref().unwrap(), 1, [0, -1])
+                        .start(channel.source.as_ref().unwrap(), 1, [0, -1])
                         .unwrap();
                     channel.resampler.paused = false;
                 }

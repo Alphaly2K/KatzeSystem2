@@ -1,4 +1,4 @@
-use super::{Pcm, SoundState, decode_vorbis_source, playback::Playback};
+use super::{SoundState, Source, playback::Playback};
 use crate::kcs::ResourceServices;
 use crate::resource::ResourceMode;
 use crate::{Error, Result, read};
@@ -57,12 +57,12 @@ impl SoundState {
         let services = services.ok_or_else(|| Error::new(0, "宿主未提供声音资源服务"))?;
         let sound = &mut self.channels[physical as usize];
         sound.file.clear();
-        sound.pcm = None;
+        sound.source = None;
         sound.playback = Playback::default();
         sound.resampler = super::mix::Resampler::default();
         self.output_replace(physical as usize);
         let sound = &mut self.channels[physical as usize];
-        if let Some(pcm) = load_pcm(services, name)? {
+        if let Some(pcm) = load_source(services, name, whole)? {
             let playback = Playback::new(&pcm, whole, options)?;
             sound.file.extend_from_slice(name);
             sound.pcm_volume = 100;
@@ -71,16 +71,16 @@ impl SoundState {
             sound.position = [0.0; 3];
             sound.velocity = [0.0; 3];
             sound.doppler_factor = 1.0;
-            sound.pcm = Some(pcm);
+            sound.source = Some(pcm);
             sound.playback = playback;
         }
-        if grouped && sound.pcm.is_none() {
+        if grouped && sound.source.is_none() {
             return Ok(());
         }
         *output = if grouped {
             physical
         } else {
-            u32::from(sound.pcm.is_some())
+            u32::from(sound.source.is_some())
         };
         sound.clock.elapsed = 0;
         sound.ramps.active = 0;
@@ -109,14 +109,18 @@ impl SoundState {
     }
 }
 
-fn load_pcm(services: &mut dyn ResourceServices, file: &[u8]) -> Result<Option<Pcm>> {
+fn load_source(
+    services: &mut dyn ResourceServices,
+    file: &[u8],
+    whole: bool,
+) -> Result<Option<Source>> {
     let Some(source) = services.open(file, ResourceMode::LooseFirst)? else {
         return Ok(None);
     };
     if source.is_empty()? {
         return Ok(None);
     }
-    decode_vorbis_source(source.as_ref()).map(Some)
+    Source::from_vorbis(source, whole).map(Some)
 }
 
 fn load_metadata(
