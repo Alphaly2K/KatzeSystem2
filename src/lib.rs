@@ -18,6 +18,7 @@ pub mod kcs;
 pub mod language;
 pub mod memory;
 pub mod message;
+pub mod movie;
 mod read;
 pub mod resource;
 pub mod runtime;

@@ -402,6 +402,7 @@ name = "katze-system2"
 version = "0.1.0"
 dependencies = [
  "blowfish",
+ "cc",
  "encoding_rs",
  "flate2",
  "fontdb",
