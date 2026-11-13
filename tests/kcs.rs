@@ -7,6 +7,48 @@ impl kcs::Host for NoHost {
     }
 }
 
+#[test]
+fn rectangle_intersection_uses_signed_endpoints_and_clears_empty_results() -> Result<()> {
+    use kcs::Host;
+    let mut vm = kcs::Interpreter::new(kcs::Program::from_code(&[], vec![0; 16], 64)?, vec![])?;
+    let mut numbers = katze_system2::expression::State::new(0);
+    let mut host = kcs::CoreHost::new(&mut numbers);
+    for (source, clip, expected) in [
+        ([-5, -2, 10, 20], [0, 0, 50, 15], [0, 0, 10, 15]),
+        ([0, 0, 10, 10], [10, 0, 20, 10], [0; 4]),
+        ([8, 3, 2, 10], [0, 0, 20, 20], [0; 4]),
+        ([0, 0, 20, 20], [8, 3, 2, 10], [0; 4]),
+        ([2, 3, 4, 5], [-1, -2, 10, 10], [2, 3, 4, 5]),
+        ([2, 3, 4, 3], [-1, -2, 10, 10], [0; 4]),
+        (
+            [i32::MIN, i32::MIN, i32::MAX, i32::MAX],
+            [-10, -20, 30, 40],
+            [-10, -20, 30, 40],
+        ),
+    ] {
+        let bytes: Vec<_> = source.into_iter().flat_map(i32::to_le_bytes).collect();
+        vm.write(0, &bytes)?;
+        let arguments: Vec<_> = [0]
+            .into_iter()
+            .chain(clip.map(|n| n as u32))
+            .flat_map(u32::to_le_bytes)
+            .collect();
+        assert_eq!(
+            host.call(218, &arguments, &mut vm)?,
+            kcs::NativeReturn::Continue
+        );
+        let expected: Vec<_> = expected.into_iter().flat_map(i32::to_le_bytes).collect();
+        assert_eq!(vm.read(0, 16)?, expected);
+    }
+    let before = vm.read(0, 16)?.to_vec();
+    assert!(host.call(218, &[0; 16], &mut vm).is_err());
+    let mut invalid = [0; 20];
+    invalid[..4].copy_from_slice(&0x7fff_ffffu32.to_le_bytes());
+    assert!(host.call(218, &invalid, &mut vm).is_err());
+    assert_eq!(vm.read(0, 16)?, before);
+    Ok(())
+}
+
 fn ins(code: &mut Vec<u8>, op: u8, args: &[(u8, u32)]) {
     code.push(op);
     for &(flags, n) in args {
