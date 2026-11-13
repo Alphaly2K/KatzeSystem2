@@ -1,5 +1,11 @@
 use super::SoundChannel;
 
+#[derive(Clone, Copy)]
+pub(super) enum DeferredControl {
+    Pause,
+    Stop,
+}
+
 #[derive(Clone, Default)]
 pub(super) struct Ramps {
     pub active: u8,
@@ -11,7 +17,7 @@ pub(super) struct Ramps {
 }
 
 impl Ramps {
-    fn advance(&mut self, slot: usize, now: u32) -> i32 {
+    pub(super) fn advance(&mut self, slot: usize, now: u32) -> i32 {
         self.remaining[slot] -= now.wrapping_sub(self.previous) as f32;
         if self.remaining[slot] <= 0.0 {
             self.current[slot] = self.target[slot];
@@ -26,6 +32,15 @@ impl Ramps {
 }
 
 impl SoundChannel {
+    pub(super) fn begin_fade_out(&mut self, now: u32) {
+        self.ramps.active = 0;
+        self.ramps.current[0] = self.volume().unwrap_or(0) as u32 as f32;
+        self.ramps.target[0] = 0.0;
+        self.ramps.remaining[0] = 10.0;
+        self.ramps.previous = now;
+        self.allocation_flags[1] = 0;
+    }
+
     pub(super) fn update_controls(&mut self, now: u32, stereo: bool) {
         for slot in 0..2 {
             if self.ramps.active & (1 << slot) == 0 {

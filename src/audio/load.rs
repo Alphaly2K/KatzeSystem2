@@ -99,6 +99,7 @@ impl SoundState {
         sound.linked = None;
         sound.grouped = grouped;
         sound.allocation_flags = [0; 2];
+        sound.deferred_control = None;
         if mode != 0 && (grouped || whole) {
             sound.linked = Some(physical);
         } else if mode != 0 {

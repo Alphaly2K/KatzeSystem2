@@ -301,7 +301,7 @@ mod tests {
                     .all(|frame| frame[1] == 0.0)
             );
             let position = actual.channel(0).unwrap().position_frames();
-            actual.control_pair(0, 184, 0).unwrap();
+            actual.control_pair(0, 184, 0, 0).unwrap();
             mixer.render(rate, &mut [0.0; 4]).unwrap();
             actual.start(0, 0, 0).unwrap();
             mixer.render(rate, &mut [0.0; 4]).unwrap();

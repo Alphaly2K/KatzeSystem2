@@ -1,4 +1,7 @@
-use super::{LoopPoints, Pcm, SoundChannel, SoundGroups, output::Action, playback::Playback};
+use super::{
+    LoopPoints, Pcm, SoundChannel, SoundGroups, control::DeferredControl, output::Action,
+    playback::Playback,
+};
 use crate::{Error, Result, read};
 use std::collections::BTreeMap;
 
@@ -76,6 +79,7 @@ impl SoundState {
         sound.clock.elapsed = 0;
         sound.loop_range[0] = 0;
         sound.allocation_flags = [0; 2];
+        sound.deferred_control = None;
         self.output_replace(selected as usize);
         Ok(selected)
     }
@@ -117,8 +121,22 @@ impl SoundState {
         Pcm::new(pcm.sample_rate(), pcm.channels(), output)
     }
 
-    pub(super) fn update_idle(&mut self, now: u32, stereo: bool) {
-        for channel in &mut self.channels {
+    pub(super) fn update_idle(&mut self, now: u32, stereo: bool) -> Result<()> {
+        self.sync_output();
+        for index in 0..self.channels.len() {
+            let channel = &mut self.channels[index];
+            if channel.allocation_flags[0] != 0 || channel.deferred_control.is_some() {
+                // 到达零音量后的下一次更新才执行收尾；淡出期间不累计通道时刻。
+                if channel.ramps.remaining[0] <= 0.0 {
+                    self.finish_deferred(index)?;
+                } else {
+                    let volume = channel.ramps.advance(0, now);
+                    if channel.source.is_some() {
+                        channel.pcm_volume = volume;
+                    }
+                }
+                continue;
+            }
             channel.update_controls(now, stereo);
             let clock = &mut channel.clock;
             let previous = if clock.previous == u32::MAX {
@@ -130,6 +148,50 @@ impl SoundState {
             clock.elapsed = clock.elapsed.wrapping_add(now.wrapping_sub(previous));
         }
         self.output_gains();
+        Ok(())
+    }
+
+    fn finish_deferred(&mut self, index: usize) -> Result<()> {
+        let sound = &mut self.channels[index];
+        let release = sound.allocation_flags[0] != 0;
+        let control = sound.deferred_control.take();
+        if release {
+            sound.unload();
+        } else {
+            match control {
+                Some(DeferredControl::Pause) => {
+                    sound.playback.pause();
+                    sound.resampler.paused = true;
+                }
+                Some(DeferredControl::Stop) => {
+                    sound.resampler = super::mix::Resampler::default();
+                    if let Some(pcm) = &sound.source {
+                        sound.playback.stop(pcm)?;
+                    }
+                }
+                None => (),
+            }
+            sound.started_tick = u32::MAX;
+            sound.clock = super::channel::ChannelClock::default();
+        }
+        sound.ramps.active = 0;
+        sound.allocation_flags = [0; 2];
+        sound.parameters = [0; 2];
+        sound.linked = None;
+        sound.pcm_volume = sound.requested_volume as i64 as i32;
+        if release {
+            self.output_replace(index);
+        } else {
+            self.output_action(
+                index,
+                match control {
+                    Some(DeferredControl::Pause) => Action::Pause,
+                    Some(DeferredControl::Stop) => Action::Stop,
+                    None => return Ok(()),
+                },
+            );
+        }
+        Ok(())
     }
 
     pub(super) fn configuration_changed(&mut self) {
@@ -152,7 +214,7 @@ impl SoundState {
         }
     }
 
-    pub(super) fn unload(&mut self, channel: u32) -> Result<()> {
+    pub(super) fn unload(&mut self, channel: u32, now: u32) -> Result<()> {
         let Some(sound) = self.channels.get(channel as usize) else {
             return Ok(());
         };
@@ -160,15 +222,13 @@ impl SoundState {
         for index in [Some(channel), linked].into_iter().flatten() {
             let sound = &mut self.channels[index as usize];
             if sound.grouped {
-                if sound.is_playing() {
-                    // 播放中置第一类分配标记即启动延迟释放；已有标记跳过新请求。
-                    if sound.allocation_flags[0] == 0 {
-                        sound.allocation_flags[0] = 1;
-                    }
-                    continue;
+                if sound.is_playing() && sound.allocation_flags[0] == 0 {
+                    sound.allocation_flags[0] = 1;
+                    sound.deferred_control = None;
+                    sound.begin_fade_out(now);
                 }
                 sound.started_tick = u32::MAX;
-                sound.clock.previous = 0;
+                sound.clock = super::channel::ChannelClock::default();
             } else {
                 sound.unload();
                 self.output_replace(index as usize);
@@ -250,6 +310,7 @@ impl SoundState {
                 return Err(Error::new(0, "声音淡变播放尚未接入"));
             }
             sound.ramps.active = 0;
+            sound.deferred_control = None;
             if let Some(pcm) = &sound.source {
                 if sound.playback.playing || !sound.resampler.paused {
                     sound.resampler = super::mix::Resampler::default();
@@ -270,7 +331,13 @@ impl SoundState {
         Ok(())
     }
 
-    pub(super) fn control_pair(&mut self, channel: u32, command: u32, tick: u32) -> Result<()> {
+    pub(super) fn control_pair(
+        &mut self,
+        channel: u32,
+        command: u32,
+        tick: u32,
+        now: u32,
+    ) -> Result<()> {
         self.sync_output();
         let Some(sound) = self.channels.get(channel as usize) else {
             return Ok(());
@@ -278,6 +345,16 @@ impl SoundState {
         let linked = sound.linked;
         for index in [Some(channel), linked].into_iter().flatten() {
             let sound = &mut self.channels[index as usize];
+            if sound.grouped && matches!(command, 184 | 185) {
+                sound.allocation_flags[0] = 0;
+                sound.deferred_control = Some(if command == 184 {
+                    DeferredControl::Pause
+                } else {
+                    DeferredControl::Stop
+                });
+                sound.begin_fade_out(now);
+                continue;
+            }
             if matches!(command, 184 | 185) {
                 sound.ramps.active = 0;
             }

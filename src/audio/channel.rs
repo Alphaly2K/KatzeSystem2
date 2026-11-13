@@ -30,6 +30,7 @@ pub struct SoundChannel {
     pub(super) loop_range: [i64; 2],
     pub(super) grouped: bool,
     pub(super) allocation_flags: [u32; 2],
+    pub(super) deferred_control: Option<super::control::DeferredControl>,
     pub(super) progress: Option<std::sync::Arc<std::sync::Mutex<super::output::Status>>>,
     pub(super) resampler: super::mix::Resampler,
 }
@@ -57,6 +58,7 @@ impl Default for SoundChannel {
             loop_range: [0, -1],
             grouped: false,
             allocation_flags: [0; 2],
+            deferred_control: None,
             progress: None,
             resampler: super::mix::Resampler::default(),
         }
@@ -191,6 +193,7 @@ impl SoundChannel {
         self.playback = Playback::default();
         self.resampler = super::mix::Resampler::default();
         self.ramps.active = 0;
+        self.deferred_control = None;
         self.started_tick = u32::MAX;
         self.clock = ChannelClock::default();
         self.loop_range[0] = 0;
