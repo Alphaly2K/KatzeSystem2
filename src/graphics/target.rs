@@ -153,12 +153,12 @@ impl RenderTarget {
 
     /// 以全局整数像素中心绘制纯色三角形，跨面块保留相同的亚像素边界。
     pub fn blend_triangle(&mut self, points: [[f32; 2]; 3], argb: u32) -> bool {
-        self.blend_triangle_clipped(points, argb, None)
+        self.blend_triangle_clipped(points, argb, super::raster::RasterState::default())
     }
 
     /// 以全局顶点插值颜色，跨面块保留同一组插值方程。
     pub fn blend_projected_triangle(&mut self, vertices: [ProjectedVertex; 3]) -> bool {
-        self.blend_projected_triangle_clipped(vertices, None)
+        self.blend_projected_triangle_clipped(vertices, super::raster::RasterState::default())
     }
 
     /// 在各面块上使用相同的全局覆盖、透视插值及纹理寻址。
@@ -169,25 +169,36 @@ impl RenderTarget {
         texture: &Surface,
         filter: TextureFilter,
     ) -> bool {
-        self.blend_textured_triangle_clipped(vertices, uv, texture, filter, None)
+        self.blend_textured_triangle_clipped(
+            vertices,
+            uv,
+            texture,
+            filter,
+            super::raster::RasterState::default(),
+        )
     }
 
     pub(super) fn blend_triangle_clipped(
         &mut self,
         points: [[f32; 2]; 3],
         argb: u32,
-        clip: Option<Rect>,
+        state: super::raster::RasterState,
     ) -> bool {
-        self.draw_tiles(|surface, origin| surface.blend_triangle_at(points, argb, origin, clip))
+        self.draw_tiles(|surface, origin| {
+            surface.blend_triangle_at(points, argb, super::raster::RasterState { origin, ..state })
+        })
     }
 
     pub(super) fn blend_projected_triangle_clipped(
         &mut self,
         vertices: [ProjectedVertex; 3],
-        clip: Option<Rect>,
+        state: super::raster::RasterState,
     ) -> bool {
         self.draw_tiles(|surface, origin| {
-            surface.blend_projected_triangle_at(vertices, origin, clip)
+            surface.blend_projected_triangle_at(
+                vertices,
+                super::raster::RasterState { origin, ..state },
+            )
         })
     }
 
@@ -197,10 +208,16 @@ impl RenderTarget {
         uv: [[f32; 2]; 3],
         texture: &Surface,
         filter: TextureFilter,
-        clip: Option<Rect>,
+        state: super::raster::RasterState,
     ) -> bool {
         self.draw_tiles(|surface, origin| {
-            surface.blend_textured_triangle_at(vertices, uv, texture, filter, origin, clip)
+            surface.blend_textured_triangle_at(
+                vertices,
+                uv,
+                texture,
+                filter,
+                super::raster::RasterState { origin, ..state },
+            )
         })
     }
 

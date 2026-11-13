@@ -8,44 +8,48 @@ pub enum TextureFilter {
     Linear,
 }
 
+#[derive(Clone, Copy, Default)]
+pub(super) struct RasterState {
+    pub origin: [u32; 2],
+    pub clip: Option<Rect>,
+    pub blend_mode: u32,
+}
+
 impl Surface {
     /// 按整数像素中心及左／上边包含规则绘制纯色三角形，使用设备普通 Alpha 混合。
     pub fn blend_triangle(&mut self, points: [[f32; 2]; 3], argb: u32) -> bool {
-        self.blend_triangle_at(points, argb, [0; 2], None)
+        self.blend_triangle_at(points, argb, RasterState::default())
     }
 
     pub(super) fn blend_triangle_at(
         &mut self,
         points: [[f32; 2]; 3],
         argb: u32,
-        origin: [u32; 2],
-        clip: Option<Rect>,
+        state: RasterState,
     ) -> bool {
         if argb >> 24 == 0 {
             return false;
         }
         let color = argb.to_le_bytes().map(f64::from);
-        self.rasterize(points, origin, clip, |_| Some(color))
+        self.rasterize(points, state, |_| Some(color))
     }
 
     /// 以 RHW 透视插值顶点颜色，裁掉归一化深度区间外的像素；不使用深度缓冲。
     pub fn blend_projected_triangle(&mut self, vertices: [ProjectedVertex; 3]) -> bool {
-        self.blend_projected_triangle_at(vertices, [0; 2], None)
+        self.blend_projected_triangle_at(vertices, RasterState::default())
     }
 
     pub(super) fn blend_projected_triangle_at(
         &mut self,
         vertices: [ProjectedVertex; 3],
-        origin: [u32; 2],
-        clip: Option<Rect>,
+        state: RasterState,
     ) -> bool {
         let Some(interpolation) = Interpolation::new(vertices) else {
             return false;
         };
         self.rasterize(
             vertices.map(|v| [v.position[0], v.position[1]]),
-            origin,
-            clip,
+            state,
             |point| Some(interpolation.color(interpolation.weights(point)?)),
         )
     }
@@ -58,7 +62,7 @@ impl Surface {
         texture: &Self,
         filter: TextureFilter,
     ) -> bool {
-        self.blend_textured_triangle_at(vertices, uv, texture, filter, [0; 2], None)
+        self.blend_textured_triangle_at(vertices, uv, texture, filter, RasterState::default())
     }
 
     pub(super) fn blend_textured_triangle_at(
@@ -67,8 +71,7 @@ impl Surface {
         uv: [[f32; 2]; 3],
         texture: &Self,
         filter: TextureFilter,
-        origin: [u32; 2],
-        clip: Option<Rect>,
+        state: RasterState,
     ) -> bool {
         if texture.size.contains(&0) || uv.iter().flatten().any(|n| !n.is_finite()) {
             return false;
@@ -78,8 +81,7 @@ impl Surface {
         };
         self.rasterize(
             vertices.map(|v| [v.position[0], v.position[1]]),
-            origin,
-            clip,
+            state,
             |point| {
                 let weights = interpolation.weights(point)?;
                 let coordinates = std::array::from_fn(|axis| {
@@ -102,10 +104,14 @@ impl Surface {
     fn rasterize(
         &mut self,
         points: [[f32; 2]; 3],
-        origin: [u32; 2],
-        clip: Option<Rect>,
+        state: RasterState,
         mut shade: impl FnMut([f64; 2]) -> Option<[f64; 4]>,
     ) -> bool {
+        let RasterState {
+            origin,
+            clip,
+            blend_mode,
+        } = state;
         if points.iter().flatten().any(|n| !n.is_finite()) {
             return false;
         }
@@ -175,8 +181,16 @@ impl Surface {
                 }
                 let at = (y - origin[1]) as usize * stride + (x - origin[0]) as usize * 4;
                 for (target, value) in self.pixels[at..at + 4].iter_mut().zip(source) {
-                    *target = ((value * source[3] + f64::from(*target) * (255. - source[3])) / 255.)
-                        .round() as u8;
+                    let destination = f64::from(*target);
+                    let value = match blend_mode {
+                        1 => value * source[3] / 255. + destination,
+                        2 => value + destination * (255. - source[3]) / 255.,
+                        3 => value * destination / 255.,
+                        4 => value * (255. - destination) / 255.,
+                        5 => value * destination / 255. + destination,
+                        _ => (value * source[3] + destination * (255. - source[3])) / 255.,
+                    };
+                    *target = value.clamp(0., 255.).round() as u8;
                 }
                 touched = true;
             }
@@ -372,6 +386,11 @@ pub(super) fn draw_command(
     filter: TextureFilter,
 ) -> Result<bool> {
     let vertices = command.vertices;
+    let state = RasterState {
+        clip: command.clip,
+        blend_mode: command.blend_mode,
+        ..Default::default()
+    };
     if triangle_culled(vertices) {
         return Ok(false);
     }
@@ -388,16 +407,12 @@ pub(super) fn draw_command(
             if vertices.iter().any(|v| !v.rhw.is_finite() || v.rhw <= 0.) {
                 return Err(Error::new(0, "纹理插值需要有限的正 RHW"));
             }
-            return Ok(output.blend_textured_triangle_clipped(
-                vertices,
-                source.uv,
-                texture,
-                filter,
-                command.clip,
-            ));
+            return Ok(
+                output.blend_textured_triangle_clipped(vertices, source.uv, texture, filter, state)
+            );
         }
     }
-    draw_colors(output, vertices, command.clip)
+    draw_colors(output, vertices, state)
 }
 
 fn needs_depth_clip(vertices: [ProjectedVertex; 3]) -> bool {
@@ -428,25 +443,25 @@ pub(super) fn triangle_culled(vertices: [ProjectedVertex; 3]) -> bool {
 fn draw_colors(
     target: &mut super::RenderTarget,
     vertices: [ProjectedVertex; 3],
-    clip: Option<Rect>,
+    state: RasterState,
 ) -> Result<bool> {
     if vertices.iter().all(|v| v.color == vertices[0].color) {
         if needs_depth_clip(vertices) {
             return Ok(target.blend_projected_triangle_clipped(
                 vertices.map(|v| ProjectedVertex { rhw: 1., ..v }),
-                clip,
+                state,
             ));
         }
         Ok(target.blend_triangle_clipped(
             vertices.map(|v| [v.position[0], v.position[1]]),
             vertices[0].color,
-            clip,
+            state,
         ))
     } else {
         if vertices.iter().any(|v| !v.rhw.is_finite() || v.rhw <= 0.) {
             return Err(Error::new(0, "颜色插值需要有限的正 RHW"));
         }
-        Ok(target.blend_projected_triangle_clipped(vertices, clip))
+        Ok(target.blend_projected_triangle_clipped(vertices, state))
     }
 }
 

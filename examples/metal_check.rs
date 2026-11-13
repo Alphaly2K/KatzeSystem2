@@ -15,7 +15,7 @@ fn main() {
 fn check() -> Result<(), Box<dyn std::error::Error>> {
     use katze_system2::graphics::{
         DrawList, FrameTexture, FrameTriangle, GraphicsBackend, ProjectedVertex, Rect,
-        RenderTarget, Surface, TextureFilter, TextureSource, metal::Renderer,
+        RenderTarget, SoftwareBackend, Surface, TextureFilter, TextureSource, metal::Renderer,
     };
     let mut renderer = Renderer::new()?;
     println!("Metal 设备：{}", renderer.device_name());
@@ -33,6 +33,7 @@ fn check() -> Result<(), Box<dyn std::error::Error>> {
             color: colors[i],
         }),
         texture,
+        blend_mode: 0,
         clip: None,
     };
     let background = [
@@ -151,43 +152,35 @@ fn check() -> Result<(), Box<dyn std::error::Error>> {
         }
         cases.push(vec![empty]);
     }
+    for blend_mode in 0..6 {
+        for textured in [false, true] {
+            for alpha in [0, 1, 128, 255] {
+                let mut commands = background.to_vec();
+                let mut source = triangle(
+                    [[2., 2.], [28., 2.], [2., 22.]],
+                    [(alpha << 24) | 0x90a0b0; 3],
+                    textured.then(|| FrameTexture {
+                        source: TextureSource::Image(image.clone()),
+                        uv: [[0.5; 2]; 3],
+                    }),
+                );
+                source.blend_mode = blend_mode;
+                commands.push(source);
+                cases.push(commands);
+            }
+        }
+    }
     let mut comparisons = 0;
     let mut largest_error = 0;
     for filter in [TextureFilter::Point, TextureFilter::Linear] {
         for (case, triangles) in cases.iter().enumerate() {
-            let mut expected = Surface::new([32, 24])?;
-            for triangle in triangles {
-                let before = expected.clone();
-                if let Some((source, texture)) = triangle
-                    .texture
-                    .as_ref()
-                    .and_then(|t| t.source.surface(&canvas).map(|s| (s, t)))
-                {
-                    expected.blend_textured_triangle(triangle.vertices, texture.uv, source, filter);
-                } else {
-                    expected.blend_projected_triangle(triangle.vertices);
-                }
-                if let Some(clip) = triangle.clip {
-                    for y in 0..24 {
-                        for x in 0..32 {
-                            if x < clip.left || x >= clip.right || y < clip.top || y >= clip.bottom
-                            {
-                                let at = (y * 32 + x) as usize * 4;
-                                expected.pixels_mut()[at..at + 4]
-                                    .copy_from_slice(&before.pixels()[at..at + 4]);
-                            }
-                        }
-                    }
-                }
-            }
-            let output = renderer.render(
-                &DrawList {
-                    commands: triangles.clone(),
-                    filter,
-                },
-                &mut canvas,
-                [32, 24],
-            )?;
+            let frame = DrawList {
+                commands: triangles.clone(),
+                filter,
+            };
+            let reference = SoftwareBackend.render(&frame, &mut canvas, [32, 24])?;
+            let expected = reference.tiles()[0].as_ref().unwrap();
+            let output = renderer.render(&frame, &mut canvas, [32, 24])?;
             let actual = output.tiles()[0].as_ref().unwrap();
             for (index, (&actual, &expected)) in
                 actual.pixels().iter().zip(expected.pixels()).enumerate()

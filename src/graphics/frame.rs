@@ -1,5 +1,5 @@
 use super::{Drawables, ProjectedVertex, Projection, Rect, RenderTarget, Surface, TextureFilter};
-use crate::{Error, Result};
+use crate::Result;
 use std::sync::Arc;
 
 /// 画布面块或共享的只读图像；绘制列表持有图像直到后端提交完成。
@@ -30,6 +30,8 @@ pub struct DrawCommand {
     pub vertices: [ProjectedVertex; 3],
     pub texture: Option<FrameTexture>,
     pub clip: Option<Rect>,
+    /// 0～5 对应普通、加算、预乘、乘算、反向目标及乘算加算；其他值使用普通混合。
+    pub blend_mode: u32,
 }
 
 pub type FrameTriangle = DrawCommand;
@@ -100,14 +102,11 @@ impl Drawables {
                 continue;
             }
             if let Some(mesh) = &drawable.particle_mesh {
-                if drawable.blend_mode() != 0 {
-                    return Err(Error::new(0, "粒子特殊混合模式尚未接入"));
-                }
                 let mut selected = projection.clone();
                 if let Some(camera) = self.cameras.get(&drawable.camera_id()) {
                     camera.apply_projection(&mut selected);
                 }
-                touched |= mesh.visit(&selected, &mut draw)?;
+                touched |= mesh.visit(&selected, drawable.blend_mode(), &mut draw)?;
                 continue;
             }
             drawable.prepare_canvas()?;
@@ -116,9 +115,6 @@ impl Drawables {
                 .map_or(drawable.triangles().len(), |t| t.len());
             if count == 0 {
                 continue;
-            }
-            if drawable.blend_mode() != 0 {
-                return Err(Error::new(0, "三角形特殊混合模式尚未接入"));
             }
             let clip = drawable.clip().map(|clip| projection.project_clip(clip));
             let position = drawable.transform().position();
@@ -166,6 +162,7 @@ impl Drawables {
                     vertices,
                     texture,
                     clip,
+                    blend_mode: drawable.blend_mode(),
                 })?;
             }
         }

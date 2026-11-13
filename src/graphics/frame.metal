@@ -28,5 +28,9 @@ fragment float4 frame_fragment(RasterVertex input [[stage_in]],
     if (input.depth < 0.0 || input.depth > 1.0) {
         discard_fragment();
     }
-    return image.sample(sampling, input.uv) * input.color;
+    float4 color = image.sample(sampling, input.uv) * input.color;
+    if (color.a <= 0.0) {
+        discard_fragment();
+    }
+    return color;
 }

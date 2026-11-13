@@ -6,6 +6,62 @@ use katze_system2::graphics::{
 use std::sync::Arc;
 
 #[test]
+fn draw_commands_apply_all_blend_factors_after_texture_modulation() {
+    let expected = [
+        [0xbf788898, 0xcf636368],
+        [0xffa8c0d8, 0xff7c7f88],
+        [0xffc0d8f0, 0xffb49081],
+        [0x80364658, 0x41291a11],
+        [0x005a5a58, 0x00442210],
+        [0xff96b6d8, 0xff898a91],
+    ];
+    let texture =
+        Arc::new(Surface::from_bgra([1, 1], 0x80c06030u32.to_le_bytes().to_vec()).unwrap());
+    let mut canvas = RenderTarget::new([1, 1]).unwrap();
+    let mut backend = SoftwareBackend;
+    for mode in 0..6 {
+        for textured in [false, true] {
+            let background = DrawCommand {
+                vertices: vertices().map(|v| ProjectedVertex {
+                    color: 0xff607080,
+                    ..v
+                }),
+                texture: None,
+                clip: None,
+                blend_mode: 0,
+            };
+            let foreground = DrawCommand {
+                vertices: vertices().map(|v| ProjectedVertex {
+                    color: if textured { 0x8190a0b0 } else { 0x8090a0b0 },
+                    ..v
+                }),
+                texture: textured.then(|| FrameTexture {
+                    source: TextureSource::Image(texture.clone()),
+                    uv: [[0.5; 2]; 3],
+                }),
+                clip: Some(Rect::from_xywh(2, 1, 3, 4)),
+                blend_mode: mode,
+            };
+            let mut frame = DrawList {
+                commands: vec![background, foreground],
+                filter: TextureFilter::Point,
+            };
+            let output = backend.render(&frame, &mut canvas, [8, 8]).unwrap();
+            assert_eq!(
+                output.pixel(3, 2),
+                Some(expected[mode as usize][usize::from(textured)])
+            );
+            assert_eq!(output.pixel(1, 2), Some(0xff607080));
+            for vertex in &mut frame.commands[1].vertices {
+                vertex.color &= 0xffffff;
+            }
+            let output = backend.render(&frame, &mut canvas, [8, 8]).unwrap();
+            assert_eq!(output.pixel(3, 2), Some(0xff607080));
+        }
+    }
+}
+
+#[test]
 fn image_commands_hold_their_pixels_and_mix_with_canvas_textures() {
     let mut source = Surface::new([1, 1]).unwrap();
     source.clear(0xffff0000);
@@ -21,6 +77,7 @@ fn image_commands_hold_their_pixels_and_mix_with_canvas_textures() {
                     source: TextureSource::Image(image.clone()),
                     uv: [[0.5; 2]; 3],
                 }),
+                blend_mode: 0,
                 clip: Some(Rect::from_xywh(0, 0, 4, 8)),
             },
             DrawCommand {
@@ -29,6 +86,7 @@ fn image_commands_hold_their_pixels_and_mix_with_canvas_textures() {
                     source: TextureSource::Canvas(0),
                     uv: [[0.5; 2]; 3],
                 }),
+                blend_mode: 0,
                 clip: Some(Rect::from_xywh(4, 0, 4, 8)),
             },
         ],
@@ -74,6 +132,7 @@ fn depth_clipping_keeps_visible_color_and_texture_interpolation() {
                         source: TextureSource::Image(image.clone()),
                         uv: [[0.17, 0.19], [1.13, 0.87], [-0.21, 1.31]],
                     }),
+                    blend_mode: 0,
                     clip: None,
                 }],
                 filter,

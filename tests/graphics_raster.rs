@@ -195,12 +195,19 @@ fn ordinary_rectangle_reaches_pixels_and_drawing_context_gates_frames() {
     assert_eq!(runtime.drawing().target, before);
     runtime.drawing_mut().active = true;
     runtime.drawables_mut().set_blend_mode(plane, 1);
+    let commands = runtime
+        .drawables_mut()
+        .frame_triangles(&Projection::default(), IDENTITY)
+        .unwrap();
+    assert!(commands.iter().all(|command| command.blend_mode == 1));
     assert!(
         runtime
             .render_triangles(&Projection::default(), IDENTITY)
-            .unwrap_err()
-            .message
-            .contains("特殊混合")
+            .unwrap()
+    );
+    assert_eq!(
+        runtime.drawing().target.as_ref().unwrap().pixel(2, 3),
+        Some(0x801234e0)
     );
 }
 

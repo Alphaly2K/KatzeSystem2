@@ -31,7 +31,7 @@ struct ImageTexture {
 pub struct Renderer {
     device: Device,
     queue: CommandQueue,
-    pipeline: RenderPipelineState,
+    pipelines: Vec<RenderPipelineState>,
     layer: MetalLayer,
     samplers: [SamplerState; 2],
     white: Texture,
@@ -61,13 +61,31 @@ impl Renderer {
         let color = descriptor.color_attachments().object_at(0).unwrap();
         color.set_pixel_format(MTLPixelFormat::BGRA8Unorm);
         color.set_blending_enabled(true);
-        color.set_source_rgb_blend_factor(MTLBlendFactor::SourceAlpha);
-        color.set_source_alpha_blend_factor(MTLBlendFactor::SourceAlpha);
-        color.set_destination_rgb_blend_factor(MTLBlendFactor::OneMinusSourceAlpha);
-        color.set_destination_alpha_blend_factor(MTLBlendFactor::OneMinusSourceAlpha);
-        let pipeline = device
-            .new_render_pipeline_state(&descriptor)
-            .map_err(|e| Error::new(0, e))?;
+        let mut pipelines = Vec::with_capacity(6);
+        for (source, destination) in [
+            (
+                MTLBlendFactor::SourceAlpha,
+                MTLBlendFactor::OneMinusSourceAlpha,
+            ),
+            (MTLBlendFactor::SourceAlpha, MTLBlendFactor::One),
+            (MTLBlendFactor::One, MTLBlendFactor::OneMinusSourceAlpha),
+            (MTLBlendFactor::Zero, MTLBlendFactor::SourceColor),
+            (
+                MTLBlendFactor::OneMinusDestinationColor,
+                MTLBlendFactor::Zero,
+            ),
+            (MTLBlendFactor::DestinationColor, MTLBlendFactor::One),
+        ] {
+            color.set_source_rgb_blend_factor(source);
+            color.set_source_alpha_blend_factor(alpha_factor(source));
+            color.set_destination_rgb_blend_factor(destination);
+            color.set_destination_alpha_blend_factor(alpha_factor(destination));
+            pipelines.push(
+                device
+                    .new_render_pipeline_state(&descriptor)
+                    .map_err(|e| Error::new(0, e))?,
+            );
+        }
         let samplers = [
             MTLSamplerMinMagFilter::Nearest,
             MTLSamplerMinMagFilter::Linear,
@@ -90,7 +108,7 @@ impl Renderer {
         Ok(Self {
             device,
             queue,
-            pipeline,
+            pipelines,
             layer,
             samplers,
             white,
@@ -351,7 +369,8 @@ impl Renderer {
         color.set_store_action(MTLStoreAction::Store);
         color.set_clear_color(MTLClearColor::new(0., 0., 0., 0.));
         let encoder = command.new_render_command_encoder(descriptor);
-        encoder.set_render_pipeline_state(&self.pipeline);
+        encoder.set_render_pipeline_state(&self.pipelines[0]);
+        let mut blend_mode = 0;
         encoder.set_cull_mode(MTLCullMode::None);
         encoder.set_vertex_buffer(0, self.buffer.as_deref(), 0);
         encoder.set_fragment_sampler_state(
@@ -404,6 +423,15 @@ impl Renderer {
                         .map(|image| &*image.texture),
                 })
                 .unwrap_or(&self.white);
+            let selected = if triangle.blend_mode <= 5 {
+                triangle.blend_mode
+            } else {
+                0
+            };
+            if selected != blend_mode {
+                encoder.set_render_pipeline_state(&self.pipelines[selected as usize]);
+                blend_mode = selected;
+            }
             encoder.set_fragment_texture(0, Some(texture));
             encoder.draw_primitives(MTLPrimitiveType::Triangle, index as u64 * 3, 3);
         }
@@ -472,5 +500,14 @@ fn region(size: [u32; 2]) -> MTLRegion {
             height: u64::from(size[1]),
             depth: 1,
         },
+    }
+}
+
+fn alpha_factor(factor: MTLBlendFactor) -> MTLBlendFactor {
+    match factor {
+        MTLBlendFactor::SourceColor => MTLBlendFactor::SourceAlpha,
+        MTLBlendFactor::DestinationColor => MTLBlendFactor::DestinationAlpha,
+        MTLBlendFactor::OneMinusDestinationColor => MTLBlendFactor::OneMinusDestinationAlpha,
+        _ => factor,
     }
 }

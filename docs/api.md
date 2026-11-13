@@ -505,7 +505,7 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 
 `Drawable::from_canvas(data, count)` 读取显式画布三角形，`CanvasTriangle` 保留 tag、面块索引、顶点和 UV；平面命令 83 使用显式缓冲区接入。`Drawables::render_frame` 读取画布并写入独立目标，`Runtime::render_frame` 使用运行时当前画布。提交、缺失纹理和过滤约束见[画布图元与帧](graphics.md#画布图元与独立帧提交)。
 
-`Drawables::compose(projection, parent, filter, range)` 生成设备无关的 `DrawList`，包含按显示、排序、相机、裁剪及投影准备的 `DrawCommand`。`range=None` 合成全帧，指定区间时按图元基点 Z 选择 `[lower, upper)`，非正上界返回空列表。`FrameTexture` 的 `source` 选择 `TextureSource::Canvas(tile)` 或 `TextureSource::Image(Arc<Surface>)`，`uv` 保存三个顶点的纹理坐标。`TextureSource::surface(canvas)` 借用实际像素，缺失面块返回 None；图像来源独立于画布。绘制命令及列表可克隆，共享图像保持像素寿命，修改来源时可使用 `Arc::make_mut` 保留已经生成的帧。`FrameTriangle` 保留为 `DrawCommand` 的兼容别名；既有 `frame_triangles` 返回同类命令。`Runtime::compose_frame()` 使用 `set_frame_view` 配置的视图合成全帧。
+`Drawables::compose(projection, parent, filter, range)` 生成设备无关的 `DrawList`，包含按显示、排序、相机、裁剪及投影准备的 `DrawCommand`。`range=None` 合成全帧，指定区间时按图元基点 Z 选择 `[lower, upper)`，非正上界返回空列表。`FrameTexture` 的 `source` 选择 `TextureSource::Canvas(tile)` 或 `TextureSource::Image(Arc<Surface>)`，`uv` 保存三个顶点的纹理坐标。`DrawCommand::blend_mode` 保存 0～5 的混合编号，软件与 Metal 后端均在调制之后混合，其他编号回退到零；逐通道规则见[图形接口](graphics.md)。`TextureSource::surface(canvas)` 借用实际像素，缺失面块返回 None；图像来源独立于画布。绘制命令及列表可克隆，共享图像保持像素寿命，修改来源时可使用 `Arc::make_mut` 保留已经生成的帧。`FrameTriangle` 保留为 `DrawCommand` 的兼容别名；既有 `frame_triangles` 返回同类命令。`Runtime::compose_frame()` 使用 `set_frame_view` 配置的视图合成全帧。
 
 `GraphicsBackend::render` 接收绘制列表、画布和输出尺寸，返回从透明背景开始绘制的独立完整目标。`present` 提交至宿主已附着的窗口，暂时无法呈现时返回 false，未提供窗口能力时返回诊断。`SoftwareBackend` 提供无设备的离屏实现。`Runtime::set_graphics_backend` 连接后端，`present_frame(size)` 合成并呈现；脚本画面捕获使用同一后端，捕获失败保留前次完整目标。未连接后端时，既有软件捕获和显式 `render_frame` 接口继续可用。
 

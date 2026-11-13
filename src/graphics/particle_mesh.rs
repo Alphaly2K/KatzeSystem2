@@ -128,6 +128,7 @@ impl ParticleMesh {
     pub(super) fn visit(
         &self,
         view: &Projection,
+        blend_mode: u32,
         mut draw: impl FnMut(DrawCommand) -> Result<bool>,
     ) -> Result<bool> {
         if self.opacity == 0 {
@@ -155,6 +156,7 @@ impl ParticleMesh {
                         uv: indices.map(|i| quad[i].uv),
                     }),
                     clip: None,
+                    blend_mode,
                 })?;
             }
         }
