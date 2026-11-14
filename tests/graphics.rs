@@ -42,7 +42,13 @@ fn surfaces_allow_empty_dimensions_and_reject_invalid_storage() {
     }
     assert!(Surface::from_bgra([1, 1], vec![0; 3]).is_err());
     assert!(Surface::from_bgra([1, 1], vec![0; 5]).is_err());
-    assert!(Surface::new([4097, 4096]).is_err());
+    for size in [[4097, 4096], [4752, 5277], [8192, 4096]] {
+        assert_eq!(
+            Surface::from_bgra(size, Vec::new()).unwrap_err().message,
+            "渲染面像素长度与尺寸不符"
+        );
+    }
+    assert!(Surface::new([8193, 4096]).is_err());
     assert!(Surface::new([u32::MAX, 0]).is_err());
 }
 

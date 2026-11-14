@@ -1,4 +1,4 @@
-use crate::{Error, Result, read};
+use crate::{Error, Result};
 
 mod image;
 pub use image::{Image, ImageReference, Images};
@@ -96,6 +96,8 @@ pub struct Surface {
     size: [u32; 2],
     pixels: Vec<u8>,
 }
+
+const MAX_SURFACE_BYTES: usize = 128 * 1024 * 1024;
 
 impl Surface {
     pub fn new(size: [u32; 2]) -> Result<Self> {
@@ -379,7 +381,7 @@ fn pixel_length(size: [u32; 2]) -> Result<usize> {
     let length = (size[0] as usize)
         .checked_mul(4)
         .and_then(|stride| stride.checked_mul(size[1] as usize))
-        .filter(|&length| length <= read::MAX_BYTES)
+        .filter(|&length| length <= MAX_SURFACE_BYTES)
         .ok_or_else(|| Error::new(0, "渲染面像素长度超过上限"))?;
     Ok(length)
 }

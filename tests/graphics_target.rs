@@ -98,7 +98,7 @@ fn target_layouts_reject_mismatches_overflow_and_excessive_storage() {
     assert!(RenderTarget::from_tiles([2, 2], [1, 1], vec![Some(tile(&[0; 6]))]).is_err());
     assert!(RenderTarget::from_tiles([u32::MAX, 1], [2, 0], vec![]).is_err());
     assert!(RenderTarget::from_tiles([0, 0], [1_000_001, 1], vec![]).is_err());
-    assert!(RenderTarget::new([4097, 4096]).is_err());
+    assert!(RenderTarget::new([8193, 4096]).is_err());
     for size in [[0, 0], [0, 3], [3, 0]] {
         let mut target = RenderTarget::new(size).unwrap();
         assert!(!target.clear_rect(Rect::from_xywh(-1, -1, 5, 5)));
