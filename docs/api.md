@@ -586,6 +586,8 @@ FES `strvar index text [integer ...]` 已接入共享 `expression::State::string
 
 `graphics::FadeObject` 由 `GraphicsFactory` 按类型 27 创建，接收 281 准备、263 启动、264／267 停止、265 播放状态查询及 266 来源替换。图像句柄由调用者持有，任务将过渡像素提交到 Runtime 的画布；`Host::effect_speed()` 缺省返回零，Runtime 从全局效果配置读取。参数记录、坐标、透明 RGB、时间和返回槽规则见[画布淡入淡出任务](graphics.md#画布淡入淡出任务)。FES `draw` 已连接临时 DRAW、来源截图、共享列表提交开关及完成清理；`runtime::fes::DrawState` 提供持续时间和媒体阶段查询。
 
+`graphics::PageFlipObject` 由 `GraphicsFactory` 按类型 57 创建，使用辅助捕获画面执行整页卷曲翻转。普通 967／968／969 分别发送配置、播放状态及保留标志命令，383 查询播放值；实时前景、捕获刷新和释放规则见[整页翻转](graphics.md#整页翻转)。
+
 `graphics::WipeObject` 由同一工厂按类型 26 创建，通过命令 280 准备图像遮罩转场，其余播放控制与淡入淡出任务一致。来源及遮罩由调用者持有；参数与坐标约束见[画布遮罩转场任务](graphics.md#画布遮罩转场任务)。
 
 `graphics::WipeAlphaObject` 按类型 28 创建，以来源图像的 Alpha 和独立遮罩控制显隐。它接受命令 280 的 48 字节准备记录，播放控制与其他图像转场共用；自然与强制结束的工作面提交约束见[画布 Alpha 遮罩转场任务](graphics.md#画布-alpha-遮罩转场任务)。

@@ -86,6 +86,14 @@ impl Resources {
                 effect.source = image.clone();
             }
         }
+        if index == 0 && !self.compositor.page_flips.is_empty() {
+            if let Some(image) = frame.tiles()[0].as_ref() {
+                let image = std::sync::Arc::new(image.clone());
+                for effect in self.compositor.page_flips.values_mut() {
+                    effect.set_source(image.clone());
+                }
+            }
+        }
         self.compositor.auxiliary_targets[index as usize] = frame;
         Ok(true)
     }

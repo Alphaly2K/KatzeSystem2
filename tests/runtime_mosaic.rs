@@ -42,6 +42,10 @@ fn engine() -> Engine {
 }
 
 fn execute(rt: &mut Engine, calls: &[(u32, &[u32])]) {
+    execute_at(rt, calls, 0);
+}
+
+fn execute_at(rt: &mut Engine, calls: &[(u32, &[u32])], now: u32) {
     let mut code = vec![];
     for (index, arguments) in calls {
         for value in *arguments {
@@ -57,7 +61,7 @@ fn execute(rt: &mut Engine, calls: &[(u32, &[u32])]) {
     let caller = rt.create(0, kind::ORDINARY, b"caller", b"").unwrap();
     *rt.object_mut(caller).unwrap().interpreter_mut().unwrap() =
         Interpreter::new(Program::from_code(&code, vec![], 128).unwrap(), vec![]).unwrap();
-    rt.update(0, 0).unwrap();
+    rt.update(now, 0).unwrap();
 }
 
 fn state(rt: &mut Engine, id: u32) -> u32 {
@@ -318,6 +322,70 @@ fn shatter_uses_the_captured_scene_keeps_foreground_and_releases_its_target() {
         .render_into(&mut output, rt.drawing().target.as_ref())
         .unwrap();
     assert_eq!(output.pixel(0, 0), Some(0xff224466));
+}
+
+#[test]
+fn page_flip_captures_refreshes_and_releases_the_scene_with_foreground_preserved() {
+    let mut rt = engine();
+    execute(&mut rt, &[(858, &[1]), (859, &[0, 0, 10f32.to_bits()])]);
+    let id = rt.create(0, kind::PFLIP, b"page", b"").unwrap();
+    execute(
+        &mut rt,
+        &[
+            (
+                967,
+                &[
+                    id,
+                    8,
+                    0,
+                    2f32.to_bits(),
+                    std::f32::consts::PI.to_bits(),
+                    123,
+                    10f32.to_bits(),
+                ],
+            ),
+            (968, &[id, 7]),
+            (969, &[id]),
+            (967, &[0]),
+            (968, &[0]),
+            (969, &[0]),
+        ],
+    );
+    rt.drawables_mut().set_color(100, 0xffabcdef, u32::MAX);
+    rt.drawables_mut()
+        .insert(101, Drawable::rectangle([2., 2., 0.], [2., 2.], 0xff557733))
+        .unwrap();
+    rt.drawables_mut().set_display(101, 1);
+    rt.drawables_mut().set_base_point(101, [0., 0., 20.]);
+    let render = |rt: &mut Engine| {
+        let mut output = RenderTarget::new([8, 6]).unwrap();
+        rt.compose_frame()
+            .unwrap()
+            .render_into(&mut output, rt.drawing().target.as_ref())
+            .unwrap();
+        output
+    };
+    assert_eq!(state(&mut rt, id), 7);
+    let initial = render(&mut rt);
+    assert_eq!(initial.pixel(0, 0), Some(0xff112233));
+    assert_eq!(initial.pixel(2, 2), Some(0xff557733));
+    execute(&mut rt, &[(859, &[0, 0, 10f32.to_bits()])]);
+    assert_eq!(render(&mut rt).pixel(0, 0), Some(0xffabcdef));
+    rt.update(4, 1).unwrap();
+    let curled = render(&mut rt);
+    assert_eq!(state(&mut rt, id), 7);
+    assert_eq!(curled.pixel(2, 2), Some(0xff557733));
+    execute_at(&mut rt, &[(968, &[id, 0])], 4);
+    rt.update(6, 1).unwrap();
+    assert_eq!(render(&mut rt), curled);
+    execute_at(&mut rt, &[(968, &[id, 3])], 6);
+    rt.update(14, 1).unwrap();
+    assert_eq!(state(&mut rt, id), 3);
+    render(&mut rt);
+    assert_eq!(state(&mut rt, id), 0);
+    rt.destroy(id).unwrap();
+    assert!(rt.compositor().auxiliary_targets().is_empty());
+    assert_eq!(render(&mut rt).pixel(0, 0), Some(0xffabcdef));
 }
 
 #[test]

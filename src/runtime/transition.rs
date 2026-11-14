@@ -10,6 +10,49 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         arguments: &[u8],
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
+        if matches!(index, 967..=969) {
+            let target = read::u32_at(arguments, 0)?;
+            let length = match index {
+                967 => 28,
+                968 => 8,
+                _ => 4,
+            };
+            if arguments.len() != length && !(target == 0 && arguments.len() == 4) {
+                return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+            }
+            if target != 0 {
+                if index == 967 {
+                    let mut record = Vec::with_capacity(24);
+                    for offset in [20, 24, 4, 8, 12, 16] {
+                        record.extend_from_slice(&arguments[offset..offset + 4]);
+                    }
+                    self.command_target_with_buffers(
+                        target,
+                        396,
+                        [0; 3],
+                        &mut CommandBuffers {
+                            data1: Some(&mut record),
+                            ..Default::default()
+                        },
+                    )?;
+                } else {
+                    self.command_target(
+                        target,
+                        if index == 968 { 397 } else { 398 },
+                        [
+                            0,
+                            if index == 968 {
+                                read::u32_at(arguments, 4)?
+                            } else {
+                                0
+                            },
+                            0,
+                        ],
+                    )?;
+                }
+            }
+            return Ok(NativeReturn::Continue);
+        }
         if matches!(index, 520 | 527 | 528 | 530..=532 | 905) {
             let target = read::u32_at(arguments, 0)?;
             let length = match index {

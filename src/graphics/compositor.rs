@@ -5,6 +5,7 @@ use crate::{Error, Result};
 pub(super) enum ScreenEffect {
     Mosaic(u32),
     Shatter(u32),
+    PageFlip(u32),
     RWipe(u32),
 }
 
@@ -17,6 +18,7 @@ pub struct Compositor {
     pub(crate) auxiliary_targets: Vec<RenderTarget>,
     pub(crate) mosaics: super::mosaic::Mosaics,
     pub(crate) shatters: super::shatter::Shatters,
+    pub(crate) page_flips: std::collections::BTreeMap<u32, super::page_flip::PageFlip>,
     pub(crate) rwipes: std::collections::BTreeMap<u32, super::rwipe::RWipe>,
     pub(crate) drawing_rect: Option<super::Rect>,
     pub(super) screen_effect: Option<ScreenEffect>,
@@ -125,6 +127,21 @@ impl Compositor {
             frame.commands.extend(
                 self.drawables
                     .compose(&projection, parent, filter, Some([far, 1_000_000.]))?
+                    .commands,
+            );
+            return Ok(frame);
+        }
+        if let Some(ScreenEffect::PageFlip(id)) = self.screen_effect {
+            let effect = self.page_flips.get_mut(&id).unwrap();
+            let depth = effect.depth;
+            let mut frame =
+                self.drawables
+                    .compose(&projection, parent, filter, Some([0., depth]))?;
+            frame.commands.splice(0..0, effect.background());
+            frame.commands.extend(effect.frame());
+            frame.commands.extend(
+                self.drawables
+                    .compose(&projection, parent, filter, Some([depth, 1_000_000.]))?
                     .commands,
             );
             return Ok(frame);
