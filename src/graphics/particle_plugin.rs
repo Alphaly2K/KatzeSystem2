@@ -4,6 +4,7 @@ use crate::read;
 pub(super) enum Kind {
     Rain,
     Notice,
+    Anger,
 }
 
 fn u16_at(bytes: &[u8], at: usize) -> Option<u16> {
@@ -49,6 +50,8 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
         Kind::Rain
     } else if name.eq_ignore_ascii_case(b"em_notice.ppi") {
         Kind::Notice
+    } else if name.eq_ignore_ascii_case(b"em_oko.ppi") {
+        Kind::Anger
     } else {
         return None;
     };

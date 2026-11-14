@@ -1,6 +1,8 @@
 use super::{Drawable, ParticleMesh, Surface};
-use super::{particle_notice::Notice, particle_plugin, particle_rain::Rain};
-use crate::kcs::{Host, Interpreter, ParticleHost, ParticleSource, ParticleTask, Program};
+use super::{particle_anger::Anger, particle_notice::Notice, particle_plugin, particle_rain::Rain};
+use crate::kcs::{
+    Host, Interpreter, ParticleHost, ParticleSource, ParticleTask, Program, ScriptRandom,
+};
 use crate::resource::ResourceMode;
 use crate::runtime::{BaseObject, TaskObject};
 use crate::task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock};
@@ -15,6 +17,22 @@ enum ParticleProgram {
 enum Effect {
     Rain(Rain),
     Notice(Notice),
+    Anger(Anger),
+}
+
+impl Effect {
+    fn new(
+        kind: particle_plugin::Kind,
+        host: &ParticleHost,
+        image: [f32; 2],
+        random: &mut ScriptRandom,
+    ) -> Self {
+        match kind {
+            particle_plugin::Kind::Rain => Self::Rain(Rain::new(host, image, random)),
+            particle_plugin::Kind::Notice => Self::Notice(Notice::new(host, image)),
+            particle_plugin::Kind::Anger => Self::Anger(Anger::new(host, image, random)),
+        }
+    }
 }
 
 pub(crate) fn refresh_particle_source(particles: &mut ParticleHost, drawings: &super::Drawables) {
@@ -70,18 +88,13 @@ impl ParticleRunner {
                 ..
             } => {
                 *origin = 0;
-                *effect = Some(match kind {
-                    particle_plugin::Kind::Rain => {
-                        Effect::Rain(if let Some(random) = services.random() {
-                            Rain::new(host, image, random)
-                        } else {
-                            let mut random = std::mem::take(&mut host.random);
-                            let rain = Rain::new(host, image, &mut random);
-                            host.random = random;
-                            rain
-                        })
-                    }
-                    particle_plugin::Kind::Notice => Effect::Notice(Notice::new(host, image)),
+                *effect = Some(if let Some(random) = services.random() {
+                    Effect::new(*kind, host, image, random)
+                } else {
+                    let mut random = std::mem::take(&mut host.random);
+                    let effect = Effect::new(*kind, host, image, &mut random);
+                    host.random = random;
+                    effect
                 });
             }
         }
@@ -129,6 +142,14 @@ impl ParticleRunner {
                         }
                         Effect::Notice(effect) => {
                             effect.update(delta, host.source.unwrap_or_default().position_2d);
+                            effect.write_mesh(host);
+                        }
+                        Effect::Anger(effect) => {
+                            effect.update(
+                                delta,
+                                host.source.unwrap_or_default().position_2d,
+                                services.random().unwrap_or(&mut host.random),
+                            );
                             effect.write_mesh(host);
                         }
                     }
