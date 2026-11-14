@@ -1,4 +1,4 @@
-//! 与资源名称及解码器分离的随机读取源。
+//! 随机读取源与脚本文件写入服务；目录及资源路由由宿主提供。
 
 use crate::{Error, Result};
 use std::{
@@ -9,6 +9,13 @@ use std::{
 };
 
 pub type SharedSource = Arc<dyn ReadSource>;
+
+/// 脚本文件写入；名称为 CP932 字节，目录策略独立于资源与存档路由。
+pub trait FileServices {
+    /// 在文件末尾依次尝试写入正文及 CRLF，缺失文件可创建。
+    /// 普通打开／写入失败仍正常结束；服务不可用或协议错误返回诊断。
+    fn append_line(&mut self, task_id: u32, name: &[u8], text: &[u8]) -> Result<()>;
+}
 
 /// 读取不改变共享游标；多个读取者可独立访问同一来源。
 pub trait ReadSource: Send + Sync {

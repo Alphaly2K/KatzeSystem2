@@ -330,6 +330,10 @@ impl<F: ObjectFactory> Runtime<F> {
         self.host.system_services = Some(Box::new(services));
     }
 
+    pub fn set_file_services(&mut self, services: impl crate::io::FileServices + 'static) {
+        self.host.file_services = Some(Box::new(services));
+    }
+
     pub fn set_configuration_services(
         &mut self,
         services: impl crate::settings::ConfigurationServices + 'static,

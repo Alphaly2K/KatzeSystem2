@@ -13,6 +13,17 @@ pub(super) fn call(
     arguments: &[u8],
     vm: &mut Interpreter,
 ) -> Result<NativeReturn> {
+    if index == 567 {
+        let args = super::words(arguments, 2, vm.pc)?;
+        let name = vm.read_string(args[0])?.to_vec();
+        let text = strings::format(vm, args[1], 0)?;
+        let end = text.iter().position(|&b| b == 0).unwrap_or(text.len());
+        host.file_services
+            .as_mut()
+            .ok_or_else(|| Error::new(vm.pc, "宿主未配置文件写入服务"))?
+            .append_line(host.task_id, &name, &text[..end])?;
+        return Ok(NativeReturn::Continue);
+    }
     if index == 629 {
         if arguments.len() != 12 {
             return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));

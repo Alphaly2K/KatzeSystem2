@@ -107,6 +107,7 @@ pub struct HostState {
     pub save_services: Option<Box<dyn crate::save::SaveServices>>,
     /// 普通 629 使用的同步平台打开服务；未配置时该入口返回诊断。
     pub system_services: Option<Box<dyn super::SystemServices>>,
+    pub file_services: Option<Box<dyn crate::io::FileServices>>,
     /// 外层输入宿主提供的当前逻辑画布坐标；保留画布外的值。
     pub pointer_position: [i32; 2],
     pub memory_copy_mode: MemoryCopyMode,

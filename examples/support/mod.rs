@@ -424,6 +424,32 @@ pub struct Saves {
     pub root: String,
 }
 
+pub struct Files {
+    pub root: String,
+}
+
+impl katze_system2::io::FileServices for Files {
+    fn append_line(&mut self, _: u32, name: &[u8], text: &[u8]) -> Result<()> {
+        use std::io::Write;
+
+        let Some(name) =
+            encoding_rs::SHIFT_JIS.decode_without_bom_handling_and_without_replacement(name)
+        else {
+            return Ok(());
+        };
+        let name = name.replace('\\', "/");
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(std::path::Path::new(&self.root).join(name))
+        {
+            let _ = file.write(text);
+            let _ = file.write(b"\r\n");
+        }
+        Ok(())
+    }
+}
+
 impl SaveServices for Saves {
     fn read(&mut self, _: u32, name: &[u8]) -> Result<Option<Vec<u8>>> {
         let name = encoding_rs::SHIFT_JIS
@@ -710,6 +736,7 @@ pub fn build_runtime(
     let mut fonts = katze_system2::message::Fonts::new(&root);
     fonts.discover_system();
     runtime.set_fonts(fonts);
+    runtime.set_file_services(Files { root });
     runtime.set_save_services(Saves {
         root: configuration_files.directory.to_string_lossy().into_owned(),
     });
