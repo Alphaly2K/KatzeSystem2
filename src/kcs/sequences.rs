@@ -25,6 +25,47 @@ impl SequenceData {
     pub fn record_stride(&self) -> u32 {
         self.stride
     }
+
+    fn group(&self, id: u32, name: &[u8]) -> Result<Option<(usize, u32)>> {
+        if self.bytes.is_empty() {
+            return Ok(None);
+        }
+        let name = name.split(|&byte| byte == 0).next().unwrap();
+        let mut group = 0;
+        for _ in 0..read::MAX_ITEMS {
+            let header = read::range(&self.bytes, group, 12)?;
+            if read::u32_at(header, 4)? == id {
+                let count = read::u32_at(header, 8)? as usize;
+                if count > read::MAX_ITEMS {
+                    return Err(Error::new(group, "KCS 序列文件分组数量超过上限"));
+                }
+                let mut entry = group + 12;
+                for _ in 0..count {
+                    let header = read::range(&self.bytes, entry, 72)?;
+                    if read::zstr(&self.bytes, entry + 4)?.eq_ignore_ascii_case(name) {
+                        return Ok(Some((entry + 72, read::u32_at(header, 68)?)));
+                    }
+                    let next = read::u32_at(header, 0)?;
+                    if next == 0 {
+                        break;
+                    }
+                    entry = advance(entry, next)?;
+                }
+            }
+            let next = read::u32_at(header, 0)?;
+            if next == 0 {
+                return Ok(None);
+            }
+            group = advance(group, next)?;
+        }
+        Err(Error::new(group, "KCS 序列文件分组链超过上限"))
+    }
+}
+
+fn advance(offset: usize, increment: u32) -> Result<usize> {
+    offset
+        .checked_add(increment as usize)
+        .ok_or_else(|| Error::new(offset, "KCS 序列文件偏移溢出"))
 }
 
 #[derive(Default)]
@@ -61,6 +102,22 @@ fn parse(source: &[u8]) -> Result<Option<(Vec<u8>, Vec<i8>)>> {
 }
 
 impl SequenceMap {
+    pub fn import_group(&mut self, id: u32, name: &[u8]) -> Result<()> {
+        let Some((mut offset, count)) = self.data.group(id, name)? else {
+            return Ok(());
+        };
+        if count as usize > read::MAX_ITEMS {
+            return Err(Error::new(offset, "KCS 序列文件记录数量超过上限"));
+        }
+        for _ in 0..count {
+            if let Some((name, values)) = parse(read::zstr(&self.data.bytes, offset)?)? {
+                self.insert(&name, &values)?;
+            }
+            offset = advance(offset, self.data.stride)?;
+        }
+        Ok(())
+    }
+
     pub fn load(&mut self, mut bytes: Vec<u8>) -> Result<()> {
         if bytes.len() > read::MAX_BYTES {
             return Err(Error::new(0, "KCS 序列文件超过读取上限"));

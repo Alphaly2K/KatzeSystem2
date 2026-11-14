@@ -11,6 +11,23 @@ pub(super) fn call(
     arguments: &[u8],
     vm: &mut Interpreter,
 ) -> Result<NativeReturn> {
+    if index == 459 {
+        let handle = read::u32_at(arguments, 0)?;
+        if arguments.len() != 12 && !(handle == 0 && arguments.len() == 4) {
+            return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+        }
+        if handle != 0 {
+            let name = strings::format(vm, read::u32_at(arguments, 8)?, 0)?;
+            if name.len() >= 260 {
+                return Err(Error::new(vm.pc, "KCS 序列组名超过缓冲区上限"));
+            }
+            host.sequence_maps
+                .get_mut(&handle)
+                .ok_or_else(|| Error::new(vm.pc, "KCS 序列对象句柄无效"))?
+                .import_group(read::u32_at(arguments, 4)?, &name)?;
+        }
+        return Ok(NativeReturn::Continue);
+    }
     if matches!(index, 243 | 253) {
         let handle = read::u32_at(arguments, 0)?;
         if handle == 0 {
