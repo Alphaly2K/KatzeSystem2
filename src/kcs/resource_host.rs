@@ -411,7 +411,7 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
             }
             return Ok(NativeReturn::Continue);
         }
-        if !matches!(index, 365 | 366 | 368 | 590..=597) {
+        if !matches!(index, 284 | 365 | 366 | 368 | 590..=597) {
             return self.inner.call(index, arguments, vm);
         }
         self.state
@@ -428,6 +428,7 @@ impl ResourceState {
         services: Option<&mut dyn ResourceServices>,
     ) -> Result<NativeReturn> {
         let count = match index {
+            284 => 2,
             365 | 366 | 590 | 591 | 594 | 595 => 1,
             368 | 592 | 593 => 3,
             596 | 597 => 5,
@@ -441,6 +442,18 @@ impl ResourceState {
             .chunks_exact(4)
             .map(|bytes| u32::from_le_bytes(bytes.try_into().unwrap()))
             .collect();
+        if index == 284 {
+            let mut name = strings::format(vm, args[1], 0)?;
+            name.truncate(name.iter().position(|&b| b == 0).unwrap_or(name.len()));
+            if name.is_empty() {
+                return Ok(NativeReturn::Value(0));
+            }
+            let services = services.ok_or_else(|| Error::new(vm.pc, "运行时未配置资源服务"))?;
+            let name = services.resolve(b"sound", &name)?;
+            return Ok(NativeReturn::Value(u32::from(
+                services.open(&name, ResourceMode::LooseFirst)?.is_some(),
+            )));
+        }
         if index == 594 {
             let mut name = strings::format(vm, args[0], 0)?;
             name.truncate(

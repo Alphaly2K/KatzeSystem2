@@ -43,17 +43,6 @@ pub(super) fn call(
     if index == 65 {
         return Ok(NativeReturn::YieldVoid);
     }
-    if index == 284 {
-        // 参数个数因版本而异；至少读名称与输出地址。
-        let args: Vec<_> = arguments
-            .chunks_exact(4)
-            .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
-            .collect();
-        if let Some(out) = args.get(args.len().saturating_sub(1)) {
-            vm.write(*out, &0u32.to_le_bytes())?;
-        }
-        return Ok(NativeReturn::Value(0));
-    }
     let count = match index {
         1 | 6 | 9 | 71 | 75 | 207 | 209 | 210 | 212 | 213 | 393 | 1040 => 1,
         8 | 149 | 211 | 392 | 1049 => 2,
