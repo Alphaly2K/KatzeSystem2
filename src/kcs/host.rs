@@ -42,19 +42,19 @@ pub struct WindowCloseRequest {
     pub notify: bool,
 }
 
-/// 普通任务表的持久宿主状态；数值区由 `CoreHost::state` 单独提供，
-/// 以便同一份状态在多次 native 调用之间保留集合句柄、随机序列和请求队列。
-/// 普通 869～875 的文本记录对象；0x5C 字节内部布局与后续命令语义待原入口核实。
+/// 普通 869～873 的文本记录对象；后续命令语义待原入口核实。
 #[derive(Default)]
 pub(super) struct TextRecord {
     /// 869 装入的四个格式展开字符串。
     pub strings: [Vec<u8>; 4],
     /// 873 装入的原始记录数据。
     pub payload: Vec<u8>,
-    /// 870／872／874／875 每次调用的编号及原始参数字节。
+    /// 870／872 每次调用的编号及原始参数字节。
     pub calls: Vec<(u32, Vec<u8>)>,
 }
 
+/// 普通任务表的持久宿主状态；数值区由 `CoreHost::state` 单独提供，
+/// 以便同一份状态在多次 native 调用之间保留集合句柄、随机序列和请求队列。
 #[derive(Default)]
 pub struct HostState {
     pub configured_shared_slots: u32,
@@ -117,8 +117,8 @@ pub struct HostState {
     pub(super) sequence_maps: BTreeMap<u32, super::sequences::SequenceMap>,
     pub(super) record_stacks: BTreeMap<u32, super::record_stack::RecordStack>,
     pub(super) containers: BTreeMap<u32, crate::save::DataContainer>,
-    /// 普通 869 创建的四字符串记录；原入口装入 0x5C 字节对象。
-    /// 873 装入原始数据，870／872／874／875 的调用仅记录参数，副作用待原入口核实。
+    /// 普通 869 创建的四字符串记录。
+    /// 873 装入原始数据，870／872 的调用仅记录参数，副作用待原入口核实。
     pub(super) text_records: BTreeMap<u32, TextRecord>,
     pub(super) raw_buffers: BTreeMap<u32, Vec<u8>>,
     handles: HandleAllocator,

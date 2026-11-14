@@ -15,7 +15,8 @@ pub(super) fn call(
         return Ok(NativeReturn::Value(host.random.next_float().to_bits()));
     }
     let count = match index {
-        59 | 61 | 320 | 397 => 2,
+        59 | 61 | 320 | 397 | 874 => 2,
+        875 => 3,
         218 | 318 => 5,
         _ => 1,
     };
@@ -24,6 +25,13 @@ pub(super) fn call(
         return super::spline::prepare(&args, vm);
     }
     Ok(match index {
+        874 => NativeReturn::Value((args[0] & 0xffff) | (args[1] << 16)),
+        875 => {
+            vm.write(args[1], &(args[0] as i16 as i32).to_le_bytes())?;
+            let high = (args[0] >> 16) as i16;
+            vm.write(args[2], &(high as i32).to_le_bytes())?;
+            NativeReturn::Continue
+        }
         218 => {
             let source: [i32; 4] = {
                 let bytes = vm.read(args[0], 16)?;

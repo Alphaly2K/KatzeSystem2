@@ -106,12 +106,8 @@ pub(super) fn call(
             .payload = data;
         return Ok(NativeReturn::Continue);
     }
-    if matches!(index, 870 | 872 | 874 | 875) {
-        let count = match index {
-            870 => 1,
-            872 | 874 => 2,
-            _ => 3,
-        };
+    if matches!(index, 870 | 872) {
+        let count = if index == 870 { 1 } else { 2 };
         if arguments.len() != count * 4 {
             return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
         }

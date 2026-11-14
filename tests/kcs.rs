@@ -1254,6 +1254,8 @@ fn core_scalar_math_keeps_table_mapping_sse_angle_order_and_pow_nan_signs() {
         (461, vec![1], (-44.853_47f32).to_bits()),
         (461, vec![f32::INFINITY.to_bits()], f32::INFINITY.to_bits()),
         (461, vec![0xff80_1234], 0xffc0_1234),
+        (874, vec![0x1234_8000, 0xabcd_7fff], 0x7fff_8000),
+        (874, vec![u32::MAX, 0x8000], 0x8000_ffff),
     ] {
         let arguments = arguments
             .into_iter()
@@ -1275,6 +1277,78 @@ fn core_scalar_math_keeps_table_mapping_sse_angle_order_and_pow_nan_signs() {
         kcs::NativeReturn::Value(3)
     );
     assert_eq!((host.task_origin, host.task_time), (u32::MAX, 2));
+}
+
+#[test]
+fn signed_word_unpacking_keeps_overlapping_outputs_and_argument_snapshots() -> Result<()> {
+    use kcs::{Host, NativeReturn};
+
+    let args = |words: &[u32]| {
+        words
+            .iter()
+            .flat_map(|n| n.to_le_bytes())
+            .collect::<Vec<_>>()
+    };
+    let mut numbers = katze_system2::expression::State::new(0);
+    let mut host = kcs::CoreHost::new(&mut numbers);
+    let mut vm = kcs::Interpreter::new(
+        kcs::Program::from_code(&[], vec![0x55; 16], 64)?,
+        vec![0x55; 8],
+    )?;
+    for (input, low, high) in [
+        (0, 0i32, 0i32),
+        (0x7fff_8000, -32768, 32767),
+        (0x8000_7fff, 32767, -32768),
+        (0xffff_0001, 1, -1),
+    ] {
+        assert_eq!(
+            host.call(875, &args(&[input, 1, 0x8000_0001]), &mut vm)?,
+            NativeReturn::Continue
+        );
+        assert_eq!(vm.read(1, 4)?, low.to_le_bytes());
+        assert_eq!(vm.read(0x8000_0001, 4)?, high.to_le_bytes());
+    }
+    vm.write(0, &[0x55; 16])?;
+    host.call(875, &args(&[0x7fff_8000, 1, 2]), &mut vm)?;
+    assert_eq!(vm.read(0, 7)?, [0x55, 0, 0xff, 0x7f, 0, 0, 0x55]);
+    host.call(875, &args(&[0x8000_7fff, 1, 1]), &mut vm)?;
+    assert_eq!(vm.read(1, 4)?, (-32768i32).to_le_bytes());
+    assert!(host.call(875, &args(&[1, 0]), &mut vm).is_err());
+    assert!(
+        host.call(875, &args(&[0x7fff_8000, 0, 0x8000_0008]), &mut vm)
+            .is_err()
+    );
+    assert_eq!(vm.read(0, 4)?, (-32768i32).to_le_bytes());
+
+    for target in [20, 21, 22] {
+        let mut code = Vec::new();
+        ins(&mut code, 0x25, &[(3, 0x1357_9bdf)]);
+        for value in [0x1234_8000, 0xabcd_7fff] {
+            ins(&mut code, 0x25, &[(3, value)]);
+        }
+        ins(&mut code, 0x2b, &[(3, 874), (3, 8)]);
+        ins(&mut code, 0x26, &[(3, 0)]);
+        for value in [0x7fff_8000, target, 0x8000_0001] {
+            ins(&mut code, 0x25, &[(3, value)]);
+        }
+        ins(&mut code, 0x2b, &[(3, 875), (3, 12)]);
+        code.push(0x3b);
+        for budget in [1, 4096] {
+            let mut vm = kcs::Interpreter::new(
+                kcs::Program::from_code(&code, vec![0; 16], 64)?,
+                vec![0x55; 8],
+            )?;
+            for _ in 0..20 {
+                if vm.run(&mut host, budget)? == Step::Halted {
+                    break;
+                }
+            }
+            assert_eq!(vm.stack_bytes(), 0x1357_9bdfu32.to_le_bytes());
+            assert_eq!(vm.read(0, 4)?, 0x7fff_8000u32.to_le_bytes());
+            assert_eq!(vm.read(0x8000_0001, 4)?, 32767i32.to_le_bytes());
+        }
+    }
+    Ok(())
 }
 
 #[test]
