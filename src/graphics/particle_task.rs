@@ -63,7 +63,12 @@ impl Particle3DObject {
             let services = host
                 .resource_services()
                 .ok_or_else(|| Error::new(0, "宿主未提供粒子资源服务"))?;
-            let Some(bytes) = services.read(name(4)?, ResourceMode::LooseFirst)? else {
+            let read_mode = if mode == 1 {
+                ResourceMode::File
+            } else {
+                ResourceMode::LooseFirst
+            };
+            let Some(bytes) = services.read(name(4)?, read_mode)? else {
                 return Ok(());
             };
             if mode == 1 {

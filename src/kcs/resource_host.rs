@@ -10,6 +10,11 @@ pub trait ResourceServices {
         Err(Error::new(0, "资源服务未提供类别名称补全"))
     }
 
+    /// 按类别的散装目录补全文件路径；结果由宿主的 File 读取模式解释。
+    fn resolve_file(&mut self, _category: &[u8], _name: &[u8]) -> Result<Vec<u8>> {
+        Err(Error::new(0, "资源服务未提供文件路径补全"))
+    }
+
     /// 按启动配置的类别槽位补全名称。
     ///
     /// 声音装载携带 INT 槽位而非类别名；只提供名称服务的宿主沿用 ``sound``
@@ -59,6 +64,9 @@ impl<S: ResourceServices + ?Sized> ResourceServices for &mut S {
     }
     fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
         (**self).resolve(category, name)
+    }
+    fn resolve_file(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+        (**self).resolve_file(category, name)
     }
     fn resolve_slot(&mut self, slot: u32, name: &[u8]) -> Result<Vec<u8>> {
         (**self).resolve_slot(slot, name)

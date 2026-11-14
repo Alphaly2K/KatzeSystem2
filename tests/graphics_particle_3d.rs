@@ -66,6 +66,14 @@ impl ResourceServices for Files {
         Ok([category, b"/", name].concat())
     }
     fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
+        if name.starts_with(b"file/") {
+            assert_eq!(mode, ResourceMode::File);
+            return match name {
+                b"file/test" => Ok(Some(self.0.clone())),
+                b"file/missing" => Ok(None),
+                _ => panic!("unexpected synthetic file"),
+            };
+        }
         assert_eq!(mode, ResourceMode::LooseFirst);
         match name {
             b"ptcl/test" => Ok(Some(self.0.clone())),
@@ -74,6 +82,82 @@ impl ResourceServices for Files {
             _ => panic!("unexpected synthetic resource"),
         }
     }
+}
+
+#[test]
+fn native_particle_plugin_uses_the_file_category_and_clears_a_missing_load() -> Result<()> {
+    use std::{cell::RefCell, rc::Rc};
+
+    type Reads = Rc<RefCell<Vec<(Vec<u8>, ResourceMode)>>>;
+    struct Resources {
+        reads: Reads,
+        program: Vec<u8>,
+    }
+    impl ResourceServices for Resources {
+        fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+            assert!(matches!(category, b"ptcl" | b"image"));
+            Ok([category, b"/", name].concat())
+        }
+        fn resolve_file(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+            assert_eq!(category, b"ptclpi");
+            assert_eq!(name, b"test");
+            Ok(b"files/test.ppi".to_vec())
+        }
+        fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
+            self.reads.borrow_mut().push((name.to_vec(), mode));
+            Ok((name == b"ptcl/test").then(|| self.program.clone()))
+        }
+    }
+    for budget in [1, 4096] {
+        let mut code = Vec::new();
+        for index in [271, 693] {
+            native(&mut code, index, &[1, 0, 8, 1, 5000f32.to_bits(), 32]);
+            ins(&mut code, 0x26, &[200 + u32::from(index == 693) * 4]);
+        }
+        code.push(0x3b);
+        let mut data = vec![0; 256];
+        data[..5].copy_from_slice(b"test\0");
+        data[8..15].copy_from_slice(b"sprite\0");
+        let mut runtime = Runtime::new(
+            0,
+            kind::ROOT,
+            Box::new(BaseObject::new()),
+            State::new(0),
+            GraphicsFactory {
+                fallback: KcsFactory::new(Programs(Program::from_code(&code, data, 128)?)),
+            },
+        );
+        let reads: Reads = Default::default();
+        runtime.set_resources(Resources {
+            reads: reads.clone(),
+            program: encoded(&[0x3b], 2),
+        });
+        runtime.set_budget(budget, 1 << 20);
+        runtime.host_mut().surface_size = [8, 6];
+        runtime.create(0, kind::PARTICLE_3D, b"", b"")?;
+        let caller = runtime.create(0, kind::ORDINARY, b"", b"")?;
+        runtime.update(1, 1)?;
+        assert_eq!(
+            *reads.borrow(),
+            [
+                (b"ptcl/test".to_vec(), ResourceMode::LooseFirst),
+                (b"image/sprite".to_vec(), ResourceMode::LooseFirst),
+                (b"files/test.ppi".to_vec(), ResourceMode::File),
+            ]
+        );
+        let vm = runtime.object(caller).unwrap().interpreter().unwrap();
+        assert_eq!(vm.read(200, 8)?, [1, 0, 0, 0, 1, 0, 0, 0]);
+        assert_eq!(runtime.drawables().get(1).unwrap().display(), 0);
+        assert!(
+            runtime
+                .drawables()
+                .get(1)
+                .unwrap()
+                .particle_mesh()
+                .is_none()
+        );
+    }
+    Ok(())
 }
 
 #[test]
@@ -159,7 +243,7 @@ fn particle_runtime_loads_native_packets_resumes_and_shares_random_state() -> Re
         assert_eq!(runtime.drawables().get(1).unwrap().display(), 1);
         let mut plugin = [0; 0x290];
         plugin[0] = 1;
-        plugin[4..14].copy_from_slice(b"ptcl/test\0");
+        plugin[4..14].copy_from_slice(b"file/test\0");
         assert!(
             runtime
                 .dispatch_command_with_buffers(
@@ -173,7 +257,7 @@ fn particle_runtime_loads_native_packets_resumes_and_shares_random_state() -> Re
                 .is_err()
         );
         plugin[4..132].fill(0);
-        plugin[4..17].copy_from_slice(b"ptcl/missing\0");
+        plugin[4..17].copy_from_slice(b"file/missing\0");
         runtime.dispatch_command_with_buffers(
             caller,
             command(320),

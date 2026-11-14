@@ -216,6 +216,10 @@ impl<S: ResourceServices> ResourceServices for CachedResources<S> {
         self.inner.resolve(category, name)
     }
 
+    fn resolve_file(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+        self.inner.resolve_file(category, name)
+    }
+
     fn resolve_slot(&mut self, slot: u32, name: &[u8]) -> Result<Vec<u8>> {
         self.inner.resolve_slot(slot, name)
     }

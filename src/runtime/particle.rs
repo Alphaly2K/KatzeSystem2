@@ -17,12 +17,16 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         record[..4].copy_from_slice(&u32::from(index == 693).to_le_bytes());
         for (argument, at, category) in [(4, 4, &b"ptcl"[..]), (8, 0x84, &b"image"[..])] {
             let name = format_string(vm, read::u32_at(arguments, argument)?, 0)?;
-            let name = self
+            let services = self
                 .resources
                 .services
                 .as_deref_mut()
-                .ok_or_else(|| Error::new(vm.pc, "运行时未配置粒子资源服务"))?
-                .resolve(category, &name)?;
+                .ok_or_else(|| Error::new(vm.pc, "运行时未配置粒子资源服务"))?;
+            let name = if index == 693 && argument == 4 {
+                services.resolve_file(b"ptclpi", &name)?
+            } else {
+                services.resolve(category, &name)?
+            };
             let name = &name[..name
                 .iter()
                 .position(|&byte| byte == 0)

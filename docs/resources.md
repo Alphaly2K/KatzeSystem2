@@ -18,6 +18,8 @@ assert_eq!(category.resolve(b"sample").unwrap(), b"mot/sample.kcs");
 
 `ArchiveConfig::from_xml` 读取已解码为 UTF-8 的启动 XML，`find(name)` 返回类别槽位，`resolve(category, name)` 完成类别查找及名称补全。`resolve_slot(slot, name)` 直接按 INT 槽位补全，声音装载等只携带槽位的入口使用它；带目录的名称与按名称查询一样直接返回，槽位越界诊断。资源宿主提供已装载的归档、列表和补丁顺序，`ResourceRouter` 按下述规则查找。`Category` 只处理名称；不检查文件是否存在，不访问文件系统，也不规范化目录或大小写。
 
+`ArchiveConfig::resolve_file(category, name)` 使用类别的 `dir` 和 `ext` 生成文件路径；归档虚拟前缀不参与。名称在首零结束，目录及扩展名检查按 CP932 解码后的字符进行，保留原始名称字节。带目录的名称直接返回；其他名称按配置追加目录和缺省扩展名。宿主通过 `ResourceServices::resolve_file` 提供该服务，并解释返回路径；默认实现返回未接入诊断。普通 693 使用此路径解析 `ptclpi`，其图像名称仍使用 `image` 资源类别。
+
 ## 已确认的补全规则
 
 输入、前缀和扩展名都在第一个零字节处结束。

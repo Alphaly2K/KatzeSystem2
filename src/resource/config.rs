@@ -73,6 +73,38 @@ impl ArchiveConfig {
         self.entries[index].category.resolve(name)
     }
 
+    /// 按类别的散装目录和扩展名补全相对文件路径；带目录的名称直接返回。
+    pub fn resolve_file(&self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+        let name = terminated(name);
+        if name.len() > crate::read::MAX_BYTES {
+            return Err(Error::new(0, "资源名称过长"));
+        }
+        let decoded = encoding_rs::SHIFT_JIS.decode_without_bom_handling(name).0;
+        if decoded.rfind(['/', '\\']).is_some_and(|at| at != 0) {
+            return Ok(name.to_vec());
+        }
+        let index = self
+            .find(category)
+            .ok_or_else(|| Error::new(0, "未注册的资源类别"))?;
+        let entry = &self.entries[index];
+        let directory = terminated(&entry.directory);
+        let extension = terminated(&entry.category.extension);
+        let mut path = Vec::new();
+        if !directory.is_empty() {
+            path.extend(directory);
+            path.push(b'/');
+        }
+        path.extend(name);
+        if !decoded.contains('.') {
+            path.push(b'.');
+            path.extend(extension);
+        }
+        if path.len() > crate::read::MAX_BYTES {
+            return Err(Error::new(0, "资源名称过长"));
+        }
+        Ok(path)
+    }
+
     /// 按槽位编号补全名称。
     ///
     /// 声音装载等入口携带 INT 槽位而非类别名；带目录的名称与按名称查询

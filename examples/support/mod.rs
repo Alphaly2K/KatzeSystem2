@@ -348,6 +348,9 @@ impl ResourceServices for Router {
     fn script_encoding(&self) -> &'static encoding_rs::Encoding {
         self.script_encoding
     }
+    fn resolve_file(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+        self.config.resolve_file(category, name)
+    }
     fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
         let value = if category == b"sound" {
             match self.sound_archive(name) {

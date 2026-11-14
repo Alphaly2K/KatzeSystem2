@@ -61,6 +61,23 @@ fn archive_config_merges_paths_and_resolves_labels_using_archive_prefixes() {
         config.resolve(b"MOT", b"sample").unwrap(),
         b"archive/sample.kcs"
     );
+    assert_eq!(
+        config.resolve_file(b"MOT", b"sample").unwrap(),
+        b"loose/sample.kcs"
+    );
+    assert_eq!(
+        config.resolve_file(b"MOT", b"sample.PPI").unwrap(),
+        b"loose/sample.PPI"
+    );
+    assert_eq!(
+        config.resolve_file(b"MOT", b"a\xf0\x5cb").unwrap(),
+        b"loose/a\xf0\x5cb.kcs"
+    );
+    assert_eq!(
+        config.resolve_file(b"unknown", b"folder/sample").unwrap(),
+        b"folder/sample"
+    );
+    assert!(config.resolve_file(b"unknown", b"sample").is_err());
     assert_eq!(config.required[0], 1);
     assert_eq!(config.required[1], -1);
     assert_eq!(config.required[63], 127);
