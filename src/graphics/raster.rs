@@ -257,7 +257,9 @@ impl Interpolation {
         if vertices.iter().any(|v| !v.rhw.is_finite() || v.rhw <= 0.) {
             return None;
         }
-        let points = vertices.map(|v| [f64::from(v.position[0]), f64::from(v.position[1])]);
+        let points = vertices.map(|v| {
+            [v.position[0], v.position[1]].map(|n| (f64::from(n) * 256. + 0.5).floor() / 256.)
+        });
         let area = edge(points[0], points[1], points[2]);
         if area == 0. || !area.is_finite() {
             return None;
@@ -280,7 +282,7 @@ impl Interpolation {
     }
 
     fn weights(&self, point: [f64; 2]) -> Option<[f64; 3]> {
-        // 插值使用未对齐的顶点；八位亚像素仅决定像素覆盖。
+        // 插值与覆盖测试使用相同的八位亚像素顶点。
         let mut weights = std::array::from_fn(|i| {
             edge(self.points[(i + 1) % 3], self.points[(i + 2) % 3], point) / self.area
         });

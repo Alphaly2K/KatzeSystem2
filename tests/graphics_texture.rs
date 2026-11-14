@@ -243,6 +243,41 @@ fn mirror_sampling_filtering_and_modulation_keep_fractional_channels() {
 }
 
 #[test]
+fn point_sampling_interpolates_from_the_same_subpixel_grid_as_coverage() {
+    let mut texture = Surface::new([8, 6]).unwrap();
+    for y in 0..6 {
+        texture.fill_rect(Rect::from_xywh(0, y, 8, 1), 0xff000000 | y as u32);
+    }
+    for (points, uv, pixel, expected) in [
+        (
+            [[1., 1.3000001], [3.6, 4.9], [1., 4.9]],
+            [[0., 0.], [0.375, 2. / 3.], [0., 2. / 3.]],
+            [1, 4],
+            0xff000003,
+        ),
+        (
+            [
+                [0.9, 0.9000001],
+                [-2.3000002, 0.9000013],
+                [-2.3000016, -2.6999986],
+            ],
+            [[0., 0.], [0.375, 0.], [0.375, 2. / 3.]],
+            [0, 0],
+            0xff000000,
+        ),
+    ] {
+        let vertices = points.map(|p| ProjectedVertex {
+            position: [p[0], p[1], 0.5],
+            rhw: 1.,
+            color: u32::MAX,
+        });
+        let mut target = Surface::new([8, 6]).unwrap();
+        assert!(target.blend_textured_triangle(vertices, uv, &texture, TextureFilter::Point,));
+        assert_eq!(target.pixel(pixel[0], pixel[1]), Some(expected));
+    }
+}
+
+#[test]
 fn rhw_corrects_both_texture_coordinates_and_vertex_colors() {
     let mut vertices = vertices();
     for (vertex, (rhw, color)) in
