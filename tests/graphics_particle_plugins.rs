@@ -430,3 +430,90 @@ fn anger_shares_random_initialization_updates_fades_and_restarts() -> Result<()>
     assert_random(&mut runtime, &expected);
     Ok(())
 }
+
+#[test]
+fn sigh_uses_mirrored_atlas_regions_drains_trails_and_restarts_without_random_draws() -> Result<()>
+{
+    use katze_system2::graphics::Drawable;
+
+    let mut runtime = runtime(plugin(b"em_sigh.ppi"))?;
+    let expected = ScriptRandom::seeded(17);
+    runtime.update(1, 1)?;
+    let mut parameters = [0; 128];
+    for (i, value) in [810f32, 181., 1., 60., 5., 5.].into_iter().enumerate() {
+        parameters[i * 4..i * 4 + 4].copy_from_slice(&value.to_le_bytes());
+    }
+    runtime.dispatch_command_with_buffers(
+        2,
+        command(325),
+        &mut CommandBuffers {
+            data1: Some(&mut parameters),
+            ..Default::default()
+        },
+    )?;
+    runtime.drawables_mut().insert(100, Drawable::default())?;
+    runtime.drawables_mut().set_position(100, [640., 360., 0.]);
+    let mut source = command(327);
+    source.data[1] = 100;
+    runtime.dispatch_command(2, source)?;
+    runtime.dispatch_command(2, command(321))?;
+    runtime.update(2, 1)?;
+    let view = Projection::default();
+    let mesh = runtime.drawables().get(1).unwrap().particle_mesh().unwrap();
+    let head = mesh.projected_quad(0, &view).unwrap();
+    let trail = mesh.projected_quad(1, &view).unwrap();
+    assert_eq!(head[0].uv, [0.5, 0.]);
+    assert_eq!(head[3].uv, [0., 0.5]);
+    assert_eq!(trail[0].uv, [1., 0.]);
+    assert_eq!(trail[3].uv, [0.5, 0.5]);
+    assert_eq!(head[0].color >> 24, 0);
+    assert_eq!(trail[0].color >> 24, 30);
+    assert_ne!(head[0].rhw, trail[0].rhw);
+    for frame in 3..=42 {
+        runtime.update(frame, 1)?;
+    }
+    let mesh = runtime.drawables().get(1).unwrap().particle_mesh().unwrap();
+    let head = mesh.projected_quad(0, &view).unwrap();
+    assert_eq!(head[0].color >> 24, 255);
+    for index in 1..8 {
+        assert_eq!(mesh.projected_quad(index, &view).unwrap()[0].color >> 24, 0);
+    }
+    runtime.drawables_mut().set_position(100, [650., 380., 0.]);
+    runtime.update(43, 1)?;
+    let mesh = runtime
+        .drawables()
+        .get(1)
+        .unwrap()
+        .particle_mesh()
+        .unwrap()
+        .clone();
+    assert_ne!(
+        mesh.projected_quad(0, &view).unwrap()[0].position,
+        head[0].position
+    );
+    runtime.dispatch_command(2, command(322))?;
+    runtime.update(44, 1)?;
+    assert_eq!(runtime.drawables().get(1).unwrap().display(), 0);
+    assert_eq!(
+        runtime.drawables().get(1).unwrap().particle_mesh(),
+        Some(&mesh)
+    );
+    runtime.dispatch_command(2, command(321))?;
+    runtime.update(45, 1)?;
+    let mesh = runtime.drawables().get(1).unwrap().particle_mesh().unwrap();
+    assert_eq!(mesh.projected_quad(0, &view).unwrap()[0].color >> 24, 0);
+    assert_eq!(mesh.projected_quad(1, &view).unwrap()[0].color >> 24, 30);
+    assert_eq!(runtime.dispatch_command(2, command(324))?, 1);
+    runtime.dispatch_command(2, command(323))?;
+    runtime.update(46, 1)?;
+    assert!(
+        runtime
+            .drawables()
+            .get(1)
+            .unwrap()
+            .particle_mesh()
+            .is_none()
+    );
+    assert_random(&mut runtime, &expected);
+    Ok(())
+}

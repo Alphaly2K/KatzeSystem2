@@ -57,6 +57,7 @@ mod particle_anger;
 mod particle_notice;
 mod particle_plugin;
 mod particle_rain;
+mod particle_sigh;
 pub(crate) use particle_task::refresh_particle_source;
 mod raster;
 pub use raster::TextureFilter;

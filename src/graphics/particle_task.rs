@@ -1,5 +1,8 @@
 use super::{Drawable, ParticleMesh, Surface};
-use super::{particle_anger::Anger, particle_notice::Notice, particle_plugin, particle_rain::Rain};
+use super::{
+    particle_anger::Anger, particle_notice::Notice, particle_plugin, particle_rain::Rain,
+    particle_sigh::Sigh,
+};
 use crate::kcs::{
     Host, Interpreter, ParticleHost, ParticleSource, ParticleTask, Program, ScriptRandom,
 };
@@ -18,6 +21,7 @@ enum Effect {
     Rain(Rain),
     Notice(Notice),
     Anger(Anger),
+    Sigh(Sigh),
 }
 
 impl Effect {
@@ -31,6 +35,7 @@ impl Effect {
             particle_plugin::Kind::Rain => Self::Rain(Rain::new(host, image, random)),
             particle_plugin::Kind::Notice => Self::Notice(Notice::new(host, image)),
             particle_plugin::Kind::Anger => Self::Anger(Anger::new(host, image, random)),
+            particle_plugin::Kind::Sigh => Self::Sigh(Sigh::new(host, image)),
         }
     }
 }
@@ -57,6 +62,17 @@ enum ParticleRunner {
         origin: u32,
         previous_time: u32,
     },
+}
+
+fn particle_texture(mut frame: crate::hg3::DecodedFrame) -> Result<Arc<Surface>> {
+    let [width, height] = frame.info.size.map(|n| n as usize);
+    let stride = width * 4;
+    // 粒子装载器直接上传底端起始的位图内存，UV 保留该行方向。
+    for row in 0..height / 2 {
+        let (before, after) = frame.pixels.split_at_mut((height - 1 - row) * stride);
+        before[row * stride..(row + 1) * stride].swap_with_slice(&mut after[..stride]);
+    }
+    Surface::from_bgra(frame.info.size, frame.pixels).map(Arc::new)
 }
 
 impl ParticleRunner {
@@ -150,6 +166,10 @@ impl ParticleRunner {
                                 host.source.unwrap_or_default().position_2d,
                                 services.random().unwrap_or(&mut host.random),
                             );
+                            effect.write_mesh(host);
+                        }
+                        Effect::Sigh(effect) => {
+                            effect.update(delta, host.source.unwrap_or_default().position_2d);
                             effect.write_mesh(host);
                         }
                     }
@@ -254,9 +274,7 @@ impl Particle3DObject {
         self.image_size = image
             .as_ref()
             .map_or([256.; 2], |frame| frame.info.size.map(|n| n as f32));
-        let texture = image
-            .map(|frame| Surface::from_bgra(frame.info.size, frame.pixels).map(Arc::new))
-            .transpose()?;
+        let texture = image.map(particle_texture).transpose()?;
         let depth = f32::from_bits(read::u32_at(record, 0x108)?);
         let reference = (65000. - depth) - 1000.;
         let mut particles = ParticleHost {
@@ -480,5 +498,45 @@ impl TaskObject for Particle3DObject {
     }
     fn request_delete(&mut self, host: &mut dyn Host, budget: usize) -> Result<bool> {
         self.base.request_delete(host, budget)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn particle_texture_keeps_bitmap_row_order_and_transparent_rgb() {
+        let frame = crate::hg3::DecodedFrame {
+            id: 0,
+            info: crate::hg3::StandardInfo {
+                size: [2, 3],
+                bit_depth: 32,
+                offset: [0; 2],
+                canvas_size: [2, 3],
+                reserved: 1,
+                base: [0; 2],
+            },
+            attributes: Default::default(),
+            pixels: [
+                0x0012_3456u32,
+                0xff34_5678,
+                0x8078_9abc,
+                0x409a_bcde,
+                0x20bc_def0,
+                0x10de_f012,
+            ]
+            .into_iter()
+            .flat_map(u32::to_le_bytes)
+            .collect(),
+        };
+        let texture = particle_texture(frame).unwrap();
+        assert_eq!(texture.size(), [2, 3]);
+        assert_eq!(texture.pixel(0, 0), Some(0x20bc_def0));
+        assert_eq!(texture.pixel(1, 0), Some(0x10de_f012));
+        assert_eq!(texture.pixel(0, 1), Some(0x8078_9abc));
+        assert_eq!(texture.pixel(1, 1), Some(0x409a_bcde));
+        assert_eq!(texture.pixel(0, 2), Some(0x0012_3456));
+        assert_eq!(texture.pixel(1, 2), Some(0xff34_5678));
     }
 }
