@@ -1,5 +1,6 @@
 mod persistence;
 mod platform;
+mod sound;
 pub use persistence::write_configuration;
 use persistence::{EFFECTS_FIELDS, MESSAGE_FIELDS, SOUND_FIELDS, WINDOW_FIELDS};
 pub use platform::PlatformSettings;
@@ -163,9 +164,11 @@ impl SystemSettings {
         });
     }
 
-    /// 覆盖启动 XML 的变量范围、窗口颜色及纹理布局等配置。
+    /// 覆盖启动 XML 的声音定义、变量范围、窗口颜色及纹理布局等配置。
+    /// 旧声音通道的播放开关在此阶段重置为一，再由游戏默认值或用户设置覆盖。
     pub fn apply_startup_xml(&mut self, input: &[u8]) -> crate::Result<()> {
         let xml = crate::resource::XmlDocument::parse(input)?;
+        self.apply_voice_definitions(&xml)?;
         self.auto_select = xml.integer(b"GAME/autoselect", self.auto_select)?;
         for (index, preset) in self.auto_wait_presets.iter_mut().enumerate() {
             for (field, value) in ["base", "char"].into_iter().zip(preset) {

@@ -28,6 +28,92 @@ fn arguments(values: &[u32]) -> Vec<u8> {
         .collect()
 }
 
+#[test]
+fn voice_definitions_and_native_queries_keep_directory_priority_and_raw_channel_values() {
+    let xml = br#"<?xml version="1.0" encoding="UTF-8"?><document><VOICE>
+        <v00><voice>Alpha</voice><head>ab</head><mastervol>37</mastervol>
+            <group>0x81234567</group><int>PREFIX.INT</int><play>0</play></v00>
+        <v01><head>a</head><mastervol>81</mastervol></v01>
+        <v02><int>DIR</int><mastervol>62</mastervol></v02>
+        <v03><head>dir</head><mastervol>93</mastervol></v03>
+        <v47><head>zz</head><int>OTHER</int><mastervol>17</mastervol></v47>
+        </VOICE></document>"#;
+    let mut settings = SystemSettings::default();
+    settings.apply_startup_xml(xml).unwrap();
+    assert_eq!(&settings.sound[24..30], b"Alpha\0");
+    assert_eq!(&settings.sound[104..115], b"prefix.int\0");
+    assert_eq!(
+        u32::from_le_bytes(settings.sound[100..104].try_into().unwrap()),
+        0x81234567
+    );
+    assert_eq!(&settings.sound[20..24], &1u32.to_le_bytes());
+    settings
+        .apply_game_xml(
+            br#"<?xml version="1.0" encoding="UTF-8"?><document>
+            <VOICE><play00>0x80000002</play00><play02>0</play02></VOICE></document>"#,
+        )
+        .unwrap();
+    let mut numbers = State::new(0);
+    let mut host = CoreHost::new(&mut numbers);
+    host.system_settings = Some(settings);
+    let mut vm = Interpreter::new(
+        Program::from_code(&[], vec![0xa5; 512], 16).unwrap(),
+        vec![],
+    )
+    .unwrap();
+    for (name, index, play, volume) in [
+        (b"AB01.ogg".as_slice(), 0, 0x80000002, 37),
+        (b"a", 1, 1, 81),
+        (b"DIR/zz.ogg", 2, 0, 62),
+        (b"dir.int/zz.ogg", 2, 0, 62),
+        (b"dir/sub/zz.ogg", 3, 1, 93),
+        (b"other/ab01.ogg", 47, 1, 17),
+        (b"zz01.ogg", 47, 1, 17),
+        (b"/ab01.ogg", u32::MAX, 0, 0),
+        (b"\x81\x5c/ab01.ogg", u32::MAX, 0, 0),
+        (b"", u32::MAX, 0, 0),
+    ] {
+        vm.write(16, name).unwrap();
+        vm.write(16 + name.len() as u32, &[0]).unwrap();
+        let before = vm.read(0, 512).unwrap().to_vec();
+        for (native, value) in [(844, index), (606, play), (607, volume)] {
+            assert_eq!(
+                host.call(native, &arguments(&[16, 0xdeadbeef]), &mut vm)
+                    .unwrap(),
+                NativeReturn::Value(value)
+            );
+            assert_eq!(vm.read(0, 512).unwrap(), before);
+        }
+    }
+    let settings = host.system_settings.as_mut().unwrap();
+    settings.sound[60..63].copy_from_slice(b"AB\0");
+    settings.sound[20 + 4 * 116 + 40..20 + 4 * 116 + 43].copy_from_slice(b"\x81A\0");
+    settings.sound[20 + 5 * 116 + 40..20 + 5 * 116 + 43].copy_from_slice(b"\xf0a\0");
+    for (name, index) in [(b"AB".as_slice(), 1), (b"\x81AA", 4), (b"\xf0A", 5)] {
+        vm.write(16, name).unwrap();
+        vm.write(16 + name.len() as u32, &[0]).unwrap();
+        assert_eq!(
+            host.call(844, &arguments(&[16]), &mut vm).unwrap(),
+            NativeReturn::Value(index)
+        );
+    }
+    assert!(host.call(606, &[], &mut vm).is_err());
+    assert!(host.call(607, &arguments(&[0x7fffffff]), &mut vm).is_err());
+    vm.write(16, &[b'x'; 260]).unwrap();
+    vm.write(276, &[0]).unwrap();
+    assert!(host.call(844, &arguments(&[16]), &mut vm).is_err());
+    let settings = host.system_settings.as_mut().unwrap();
+    settings
+        .apply_startup_xml(
+            br#"<?xml version="1.0" encoding="UTF-8"?><document>
+            <VOICE><v00><head></head></v00></VOICE></document>"#,
+        )
+        .unwrap();
+    assert_eq!(settings.sound[60], 0);
+    assert_eq!(&settings.sound[20..24], &1u32.to_le_bytes());
+    assert_eq!(&settings.sound[56..60], &37u32.to_le_bytes());
+}
+
 type ConfigurationWrites = std::rc::Rc<
     std::cell::RefCell<Vec<(u32, katze_system2::settings::ConfigurationFile, Vec<u8>)>>,
 >;
@@ -496,7 +582,9 @@ fn defaults_and_xml_overlays_keep_missing_values_raw_flags_and_volume_update_ord
     assert_eq!(state.local_flag_ranges[0], [9, 512]);
     assert_eq!(state.local_flag_ranges[1..], [[u32::MAX; 2]; 7]);
     assert_eq!(state.global_flag_ranges[7], [0x80000000, (-2i32) as u32]);
-    assert_eq!(state.sound, snapshot.sound);
+    let mut expected_sound = snapshot.sound;
+    expected_sound[20 + 47 * 116..24 + 47 * 116].copy_from_slice(&1u32.to_le_bytes());
+    assert_eq!(state.sound, expected_sound);
     let mut expected_message = snapshot.message;
     expected_message[12..16].copy_from_slice(&15u32.to_le_bytes());
     expected_message[16..20].copy_from_slice(&5u32.to_le_bytes());

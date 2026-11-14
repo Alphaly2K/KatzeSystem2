@@ -8,6 +8,21 @@ pub(super) fn call(
     arguments: &[u8],
     vm: &mut Interpreter,
 ) -> Result<NativeReturn> {
+    if matches!(index, 606 | 607 | 844) {
+        let name = strings::format(vm, read::u32_at(arguments, 0)?, 0)?;
+        let settings = host
+            .system_settings
+            .as_ref()
+            .ok_or_else(|| Error::new(vm.pc, "宿主未配置全局设置"))?;
+        let value = match index {
+            606 => settings.voice_file_play_enabled(&name)?,
+            607 => settings.voice_file_volume(&name)?,
+            _ => settings
+                .voice_file_index(&name)?
+                .map_or(u32::MAX, |index| index as u32),
+        };
+        return Ok(NativeReturn::Value(value));
+    }
     if index == 852 {
         let settings = host
             .system_settings
