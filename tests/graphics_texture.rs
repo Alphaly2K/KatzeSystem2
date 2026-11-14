@@ -346,7 +346,7 @@ fn textured_tiles_share_global_interpolation_and_invalid_inputs_preserve_pixels(
     }
     assert_eq!(target.dirty_tiles(), &[true, true, true, false]);
     let before = whole.clone();
-    for rhw in [0., -1., f32::INFINITY, f32::NAN] {
+    for rhw in [f32::INFINITY, f32::NEG_INFINITY, f32::NAN] {
         let mut invalid = triangle;
         invalid[1].rhw = rhw;
         assert!(!whole.blend_textured_triangle(invalid, uv, &texture(), TextureFilter::Point));
@@ -366,6 +366,134 @@ fn textured_tiles_share_global_interpolation_and_invalid_inputs_preserve_pixels(
     });
     assert!(!whole.blend_textured_triangle(transparent, uv, &texture(), TextureFilter::Linear));
     assert_eq!(whole, before);
+}
+
+#[test]
+fn camera_crossing_triangles_keep_the_visible_exterior_and_zero_rhw_fallback() {
+    let texture = Arc::new(
+        Surface::from_bgra(
+            [8, 6],
+            (0..6)
+                .flat_map(|y| {
+                    (0..8).flat_map(move |x| {
+                        (0xff00_0000u32 | (x * 0x20_3001) | (y * 0x01_0420)).to_le_bytes()
+                    })
+                })
+                .collect(),
+        )
+        .unwrap(),
+    );
+    let expected: [[u32; 4]; 3] = [
+        [0xffa0c0e0; 4],
+        [0xff4b5c58, 0xff008080, 0xff0a589d, 0xff0ace27],
+        [0xff132617, 0xff006632, 0xff03253c, 0xff071a01],
+    ];
+    let mut canvas = RenderTarget::new([8, 6]).unwrap();
+    for (mode, expected) in expected.into_iter().enumerate() {
+        for reverse in [false, true] {
+            let mut vertices = [[0., 0.], [8., 0.], [0., 6.]].map(|p| ProjectedVertex {
+                position: [p[0], p[1], 0.5],
+                rhw: 1.,
+                color: 0xffa0c0e0,
+            });
+            if mode != 0 {
+                for (v, color) in vertices
+                    .iter_mut()
+                    .zip([0xffff0000, 0xff00ff00, 0xff0000ff])
+                {
+                    v.color = color;
+                }
+            }
+            let mut uv = [[0., 0.], [1., 0.], [0., 1.]];
+            if reverse {
+                vertices.swap(1, 2);
+                uv.swap(1, 2);
+            }
+            let mut frame = DrawList {
+                commands: vec![DrawCommand {
+                    vertices,
+                    texture: (mode == 2).then(|| FrameTexture {
+                        source: TextureSource::Image(texture.clone()),
+                        uv,
+                    }),
+                    clip: None,
+                    blend_mode: 0,
+                }],
+                filter: TextureFilter::Point,
+            };
+            let reference = SoftwareBackend.render(&frame, &mut canvas, [8, 6]).unwrap();
+            for zero in [vec![0, 1, 2], vec![0], vec![1], vec![2]] {
+                frame.commands[0].vertices = vertices;
+                for i in zero {
+                    frame.commands[0].vertices[i].rhw = -0.;
+                }
+                assert_eq!(
+                    SoftwareBackend.render(&frame, &mut canvas, [8, 6]).unwrap(),
+                    reference
+                );
+            }
+            frame.commands[0].vertices = vertices;
+            frame.commands[0].vertices[0].rhw = -1.;
+            let output = SoftwareBackend.render(&frame, &mut canvas, [8, 6]).unwrap();
+            let mut tiled = RenderTarget::from_tiles(
+                [4, 3],
+                [2, 2],
+                vec![Some(Surface::new([4, 3]).unwrap()); 4],
+            )
+            .unwrap();
+            let projected = frame.commands[0].vertices;
+            if mode == 2 {
+                tiled.blend_textured_triangle(projected, uv, &texture, TextureFilter::Point);
+            } else {
+                tiled.blend_projected_triangle(projected);
+            }
+            let masks = [0, 0x80, 0xc0, 0xf0, 0xf8, 0xfc];
+            for (y, mask) in masks.into_iter().enumerate() {
+                for x in 0..8 {
+                    assert_eq!(
+                        output.pixel(x, y as u32).unwrap() != 0,
+                        mask & (1 << x) != 0
+                    );
+                    assert_eq!(output.pixel(x, y as u32), tiled.pixel(x, y as u32));
+                }
+            }
+            for ((x, y), expected) in [(7, 5), (4, 3), (3, 4), (7, 1)].into_iter().zip(expected) {
+                let actual = output.pixel(x, y).unwrap();
+                assert!(
+                    actual
+                        .to_le_bytes()
+                        .into_iter()
+                        .zip(expected.to_le_bytes())
+                        .all(|(a, b)| a.abs_diff(b) <= 1)
+                );
+            }
+            for vertex in &mut frame.commands[0].vertices {
+                vertex.rhw = -1.;
+            }
+            let output = SoftwareBackend.render(&frame, &mut canvas, [8, 6]).unwrap();
+            assert!(
+                output.tiles()[0]
+                    .as_ref()
+                    .unwrap()
+                    .pixels()
+                    .iter()
+                    .all(|&v| v == 0)
+            );
+            for (i, vertex) in frame.commands[0].vertices.iter_mut().enumerate() {
+                vertex.position = [[4., 3., 0.2], [2.5, -1., 0.7], [2.5, 6.5, 0.7]][i];
+                vertex.rhw = if i == 0 { -1. / 65536. } else { 1. };
+            }
+            if reverse {
+                frame.commands[0].vertices.swap(1, 2);
+            }
+            let output = SoftwareBackend.render(&frame, &mut canvas, [8, 6]).unwrap();
+            for y in 0..6 {
+                for x in 0..8 {
+                    assert_eq!(output.pixel(x, y).unwrap() != 0, x == 2);
+                }
+            }
+        }
+    }
 }
 
 #[test]

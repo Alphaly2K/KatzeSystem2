@@ -31,7 +31,7 @@ impl Surface {
             return false;
         }
         let color = argb.to_le_bytes().map(f64::from);
-        self.rasterize(points, state, |_| Some(color))
+        self.rasterize(points, [1.; 3], state, |_| Some(color))
     }
 
     /// 以 RHW 透视插值顶点颜色，裁掉归一化深度区间外的像素；不使用深度缓冲。
@@ -49,6 +49,7 @@ impl Surface {
         };
         self.rasterize(
             vertices.map(|v| [v.position[0], v.position[1]]),
+            vertices.map(|v| v.rhw),
             state,
             |point| Some(interpolation.color(interpolation.weights(point)?)),
         )
@@ -81,6 +82,7 @@ impl Surface {
         };
         self.rasterize(
             vertices.map(|v| [v.position[0], v.position[1]]),
+            vertices.map(|v| v.rhw),
             state,
             |point| {
                 let weights = interpolation.weights(point)?;
@@ -104,6 +106,7 @@ impl Surface {
     fn rasterize(
         &mut self,
         points: [[f32; 2]; 3],
+        mut rhw: [f32; 3],
         state: RasterState,
         mut shade: impl FnMut([f64; 2]) -> Option<[f64; 4]>,
     ) -> bool {
@@ -122,8 +125,13 @@ impl Surface {
         }
         if area < 0. {
             points.swap(1, 2);
+            rhw.swap(1, 2);
         }
+        let crosses_camera = rhw.iter().any(|&value| value < 0.);
         let lower: [u32; 2] = std::array::from_fn(|i| {
+            if crosses_camera {
+                return origin[i];
+            }
             points
                 .iter()
                 .map(|p| p[i])
@@ -132,6 +140,9 @@ impl Surface {
                 .clamp(origin[i] as f64, (origin[i] + self.size[i]) as f64) as u32
         });
         let upper: [u32; 2] = std::array::from_fn(|i| {
+            if crosses_camera {
+                return origin[i] + self.size[i];
+            }
             points
                 .iter()
                 .map(|p| p[i])
@@ -152,11 +163,17 @@ impl Surface {
         } else {
             (lower, upper)
         };
-        let edges = [
+        let mut edges = [
             (points[0], points[1]),
             (points[1], points[2]),
             (points[2], points[0]),
         ];
+        // 负 W 顶点的对边反向，投影后的可见区域可能在原三角形外。
+        for (edge, opposite) in edges.iter_mut().zip([2, 0, 1]) {
+            if rhw[opposite] < 0. {
+                *edge = (edge.1, edge.0);
+            }
+        }
         let included = edges.map(|(a, b)| b[1] < a[1] || (b[1] == a[1] && b[0] > a[0]));
         let stride = self.stride();
         let mut touched = false;
@@ -254,7 +271,7 @@ struct Interpolation {
 
 impl Interpolation {
     fn new(vertices: [ProjectedVertex; 3]) -> Option<Self> {
-        if vertices.iter().any(|v| !v.rhw.is_finite() || v.rhw <= 0.) {
+        if vertices.iter().any(|v| !v.rhw.is_finite()) || vertices.iter().all(|v| v.rhw < 0.) {
             return None;
         }
         let points = vertices.map(|v| {
@@ -266,7 +283,8 @@ impl Interpolation {
         }
         Some(Self {
             points,
-            rhw: vertices.map(|v| f64::from(v.rhw)),
+            // 设备入口把零 RHW 解释为一，负值仍参与裁剪和透视插值。
+            rhw: vertices.map(|v| if v.rhw == 0. { 1. } else { f64::from(v.rhw) }),
             colors: vertices.map(|v| v.color.to_le_bytes().map(f64::from)),
             area,
             depth: needs_depth_clip(vertices).then(|| {
@@ -406,8 +424,8 @@ pub(super) fn draw_command(
             super::TextureSource::Image(image) => Some(image.as_ref()),
         };
         if let Some(texture) = texture {
-            if vertices.iter().any(|v| !v.rhw.is_finite() || v.rhw <= 0.) {
-                return Err(Error::new(0, "纹理插值需要有限的正 RHW"));
+            if vertices.iter().any(|v| !v.rhw.is_finite()) {
+                return Err(Error::new(0, "纹理插值需要有限的 RHW"));
             }
             return Ok(
                 output.blend_textured_triangle_clipped(vertices, source.uv, texture, filter, state)
@@ -420,13 +438,14 @@ pub(super) fn draw_command(
 fn needs_depth_clip(vertices: [ProjectedVertex; 3]) -> bool {
     vertices
         .iter()
-        .any(|v| v.position[2].is_finite() && !(0.0..=1.0).contains(&v.position[2]))
+        .any(|v| v.rhw < 0. || v.position[2].is_finite() && !(0.0..=1.0).contains(&v.position[2]))
 }
 
 pub(super) fn triangle_culled(vertices: [ProjectedVertex; 3]) -> bool {
-    if vertices
-        .iter()
-        .all(|v| v.position[2].is_finite() && v.position[2] < 0.)
+    if vertices.iter().all(|v| v.rhw < 0.)
+        || vertices
+            .iter()
+            .all(|v| v.position[2].is_finite() && v.position[2] < 0.)
         || vertices
             .iter()
             .all(|v| v.position[2].is_finite() && v.position[2] > 1.)
@@ -448,6 +467,9 @@ fn draw_colors(
     state: RasterState,
 ) -> Result<bool> {
     if vertices.iter().all(|v| v.color == vertices[0].color) {
+        if vertices.iter().any(|v| v.rhw < 0.) {
+            return Ok(target.blend_projected_triangle_clipped(vertices, state));
+        }
         if needs_depth_clip(vertices) {
             return Ok(target.blend_projected_triangle_clipped(
                 vertices.map(|v| ProjectedVertex { rhw: 1., ..v }),
@@ -460,8 +482,8 @@ fn draw_colors(
             state,
         ))
     } else {
-        if vertices.iter().any(|v| !v.rhw.is_finite() || v.rhw <= 0.) {
-            return Err(Error::new(0, "颜色插值需要有限的正 RHW"));
+        if vertices.iter().any(|v| !v.rhw.is_finite()) {
+            return Err(Error::new(0, "颜色插值需要有限的 RHW"));
         }
         Ok(target.blend_projected_triangle_clipped(vertices, state))
     }

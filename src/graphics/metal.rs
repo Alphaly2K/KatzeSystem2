@@ -11,8 +11,7 @@ struct Vertex {
     position: [f32; 4],
     color: [f32; 4],
     uv: [f32; 2],
-    depth: f32,
-    padding: f32,
+    padding: [f32; 2],
 }
 
 struct Tile {
@@ -219,24 +218,29 @@ impl Renderer {
                     || triangle
                         .vertices
                         .iter()
-                        .any(|v| v.color != triangle.vertices[0].color));
-            if interpolate
-                && triangle
-                    .vertices
-                    .iter()
-                    .any(|v| !v.rhw.is_finite() || v.rhw <= 0.)
-            {
-                return Err(Error::new(0, "设备插值需要有限的正 RHW"));
+                        .any(|v| v.color != triangle.vertices[0].color || v.rhw < 0.));
+            if interpolate && triangle.vertices.iter().any(|v| !v.rhw.is_finite()) {
+                return Err(Error::new(0, "设备插值需要有限的 RHW"));
             }
             for (index, vertex) in triangle.vertices.iter().enumerate() {
-                let w = if interpolate { 1. / vertex.rhw } else { 1. };
+                let w = if interpolate && vertex.rhw != 0. {
+                    1. / vertex.rhw
+                } else {
+                    1.
+                };
                 let xy = [vertex.position[0], vertex.position[1]];
+                let depth = if vertex.position[2].is_finite() {
+                    vertex.position[2]
+                } else {
+                    0.
+                };
                 self.vertices.push(Vertex {
                     // D3D 的整数像素中心对应 Metal 的半整数中心。
                     position: [
                         ((xy[0] + 0.5) * 2. / size[0] as f32 - 1.) * w,
                         (1. - (xy[1] + 0.5) * 2. / size[1] as f32) * w,
-                        0.,
+                        // 齐次深度让设备裁剪生成的顶点保留正确的屏幕深度。
+                        depth * w,
                         w,
                     ],
                     color: [
@@ -250,12 +254,7 @@ impl Renderer {
                         .as_ref()
                         .filter(|_| textured)
                         .map_or([0.; 2], |t| t.uv[index]),
-                    depth: if vertex.position[2].is_finite() {
-                        vertex.position[2]
-                    } else {
-                        0.
-                    },
-                    padding: 0.,
+                    padding: [0.; 2],
                 });
             }
         }
