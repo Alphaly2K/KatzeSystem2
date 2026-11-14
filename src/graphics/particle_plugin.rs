@@ -6,6 +6,7 @@ pub(super) enum Kind {
     Notice,
     Anger,
     Sigh,
+    Down,
 }
 
 fn u16_at(bytes: &[u8], at: usize) -> Option<u16> {
@@ -55,6 +56,8 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
         Kind::Anger
     } else if name.eq_ignore_ascii_case(b"em_sigh.ppi") {
         Kind::Sigh
+    } else if name.eq_ignore_ascii_case(b"em_down.ppi") {
+        Kind::Down
     } else {
         return None;
     };
@@ -71,5 +74,9 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
         }
         read::u32_at(code, 1).ok()
     };
-    (constant(3)? == 0x0002_0001 && constant(4)? == 1).then_some(kind)
+    let version = match kind {
+        Kind::Down => 0x0002_0002,
+        _ => 0x0002_0001,
+    };
+    (constant(3)? == version && constant(4)? == 1).then_some(kind)
 }

@@ -33,6 +33,9 @@ fn plugin(name: &[u8]) -> Vec<u8> {
     }
     bytes[320..320 + name.len()].copy_from_slice(name);
     bytes[360..366].copy_from_slice(&[0xb8, 1, 0, 2, 0, 0xc3]);
+    if name == b"em_down.ppi" {
+        bytes[361] = 2;
+    }
     bytes[368..374].copy_from_slice(&[0xb8, 1, 0, 0, 0, 0xc3]);
     bytes
 }
@@ -235,6 +238,11 @@ fn malformed_or_unsupported_plugin_metadata_is_rejected_before_start() -> Result
     for at in [68, 88, 268, 272, 276, 284, 320, 361, 369] {
         let mut bytes = plugin(b"rain.ppi");
         bytes[at] = 0;
+        assert!(runtime(bytes)?.update(1, 1).is_err());
+    }
+    for (name, version) in [(b"rain.ppi".as_slice(), 2), (b"em_down.ppi", 1)] {
+        let mut bytes = plugin(name);
+        bytes[361] = version;
         assert!(runtime(bytes)?.update(1, 1).is_err());
     }
     Ok(())
@@ -515,5 +523,93 @@ fn sigh_uses_mirrored_atlas_regions_drains_trails_and_restarts_without_random_dr
             .is_none()
     );
     assert_random(&mut runtime, &expected);
+    Ok(())
+}
+
+#[test]
+fn down_uses_shared_random_atlas_regions_source_following_and_restart() -> Result<()> {
+    use katze_system2::graphics::Drawable;
+
+    let mut runtime = runtime(plugin(b"em_down.ppi"))?;
+    runtime.update(1, 1)?;
+    let mut expected = ScriptRandom::seeded(17);
+    let mut parameters = [0; 128];
+    for (i, value) in [1125f32, 19., 27., -60., 80., 13., 5., 80., 5., 5.]
+        .into_iter()
+        .enumerate()
+    {
+        parameters[i * 4..i * 4 + 4].copy_from_slice(&value.to_le_bytes());
+    }
+    runtime.dispatch_command_with_buffers(
+        2,
+        command(325),
+        &mut CommandBuffers {
+            data1: Some(&mut parameters),
+            ..Default::default()
+        },
+    )?;
+    runtime.drawables_mut().insert(100, Drawable::default())?;
+    runtime.drawables_mut().set_position(100, [640., 360., 0.]);
+    let mut source = command(327);
+    source.data[1] = 100;
+    runtime.dispatch_command(2, source)?;
+    runtime.dispatch_command(2, command(321))?;
+    for _ in 0..14 {
+        expected.next_float();
+    }
+    assert_random(&mut runtime, &expected);
+    let view = Projection::default();
+    runtime.update(2, 1)?;
+    let mesh = runtime.drawables().get(1).unwrap().particle_mesh().unwrap();
+    let head = mesh.projected_quad(0, &view).unwrap();
+    let line = mesh.projected_quad(1, &view).unwrap();
+    assert_eq!([head[0].uv, head[3].uv], [[0.25, 0.], [1., 0.5]]);
+    assert_eq!([line[0].uv, line[3].uv], [[0., 0.], [0.25, 1.]]);
+    assert_eq!(head[0].color >> 24, 0);
+    for frame in 3..=70 {
+        runtime.update(frame, 1)?;
+    }
+    let mesh = runtime.drawables().get(1).unwrap().particle_mesh().unwrap();
+    let head = mesh.projected_quad(0, &view).unwrap();
+    assert!(head[0].color >> 24 > 0);
+    assert_eq!(mesh.projected_quad(7, &view).unwrap()[0].color >> 24, 255);
+    runtime.drawables_mut().set_position(100, [650., 380., 0.]);
+    runtime.update(71, 1)?;
+    let mesh = runtime
+        .drawables()
+        .get(1)
+        .unwrap()
+        .particle_mesh()
+        .unwrap()
+        .clone();
+    let moved = mesh.projected_quad(0, &view).unwrap();
+    assert_eq!(moved[0].position[0] - head[0].position[0], 10.);
+    assert_eq!(moved[0].position[1] - head[0].position[1], 20.);
+    runtime.dispatch_command(2, command(322))?;
+    runtime.update(72, 1)?;
+    assert_eq!(runtime.drawables().get(1).unwrap().display(), 0);
+    assert_eq!(
+        runtime.drawables().get(1).unwrap().particle_mesh(),
+        Some(&mesh)
+    );
+    runtime.dispatch_command(2, command(321))?;
+    for _ in 0..14 {
+        expected.next_float();
+    }
+    runtime.update(73, 1)?;
+    let mesh = runtime.drawables().get(1).unwrap().particle_mesh().unwrap();
+    assert_eq!(mesh.projected_quad(0, &view).unwrap()[0].color >> 24, 0);
+    assert_eq!(mesh.projected_quad(1, &view).unwrap()[0].color >> 24, 0);
+    assert_eq!(runtime.dispatch_command(2, command(324))?, 1);
+    assert_random(&mut runtime, &expected);
+    runtime.dispatch_command(2, command(323))?;
+    assert!(
+        runtime
+            .drawables()
+            .get(1)
+            .unwrap()
+            .particle_mesh()
+            .is_none()
+    );
     Ok(())
 }
