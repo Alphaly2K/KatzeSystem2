@@ -9,6 +9,7 @@ pub(super) struct Status {
     pub position: usize,
     pub remaining: u32,
     pub completed: u64,
+    pub signal: u32,
 }
 
 pub(super) enum Action {
@@ -18,6 +19,7 @@ pub(super) enum Action {
     Stop,
     Count(u32, [i64; 2]),
     Gain(i32, i32),
+    Signal(bool),
 }
 
 enum Update {
@@ -58,6 +60,10 @@ impl SoundState {
                 position: channel.position_frames(),
                 remaining: channel.remaining_plays(),
                 completed: channel.completed_passes(),
+                signal: channel
+                    .source
+                    .as_ref()
+                    .map_or(0, |source| channel.playback.signal_level(source)),
                 ..Status::default()
             }))
         });
@@ -93,6 +99,10 @@ impl SoundState {
         status.generation = status.generation.wrapping_add(1);
         match &action {
             Action::Replace(sound) => {
+                status.signal = sound
+                    .source
+                    .as_ref()
+                    .map_or(0, |source| sound.playback.signal_level(source));
                 status.playing = sound.playback.playing;
                 status.position = sound.playback.position;
                 status.remaining = sound.playback.remaining;
@@ -105,18 +115,29 @@ impl SoundState {
                 status.playing = self.channels[channel].playback.playing;
                 status.remaining = *count;
                 status.completed = 0;
+                let sound = &self.channels[channel];
+                status.signal = sound
+                    .source
+                    .as_ref()
+                    .map_or(0, |source| sound.playback.signal_level(source));
             }
             Action::Pause => status.playing = false,
             Action::Stop => {
                 status.playing = false;
                 status.position = 0;
                 status.completed = 0;
+                let sound = &self.channels[channel];
+                status.signal = sound
+                    .source
+                    .as_ref()
+                    .map_or(0, |source| sound.playback.signal_level(source));
             }
             Action::Count(count, _) => {
                 status.remaining = *count;
                 status.completed = 0;
             }
             Action::Gain(_, _) => (),
+            Action::Signal(_) => (),
         }
         let _ = link.sender.send(Update::Channel {
             channel,
@@ -211,6 +232,10 @@ impl Mixer {
                     sound_channel.pcm_volume = volume;
                     sound_channel.pcm_pan = pan;
                 }
+                Action::Signal(enabled) => {
+                    sound_channel.signal_enabled = enabled;
+                    sound_channel.playback.set_signal_enabled(enabled);
+                }
             }
             self.generations[channel] = generation;
         }
@@ -222,6 +247,10 @@ impl Mixer {
                     status.position = channel.position_frames();
                     status.remaining = channel.remaining_plays();
                     status.completed = channel.completed_passes();
+                    status.signal = channel
+                        .source
+                        .as_ref()
+                        .map_or(0, |source| channel.playback.signal_level(source));
                 }
             }
         }

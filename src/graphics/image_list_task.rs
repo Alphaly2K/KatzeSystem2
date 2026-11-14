@@ -3,6 +3,12 @@ use crate::kcs::{Host, Interpreter};
 use crate::runtime::{BaseObject, TaskObject, kind};
 use crate::task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock};
 use crate::{Error, Result};
+use std::collections::BTreeMap;
+
+struct SoundBinding {
+    channel: u32,
+    threshold: u32,
+}
 
 /// 类型 15 的图像列表任务；接收像素、HG-3 原始数据和捕获图像来源。
 pub struct ImageListObject {
@@ -16,6 +22,7 @@ pub struct ImageListObject {
     enabled: u32,
     background: Option<u32>,
     background_active: bool,
+    sound_bindings: BTreeMap<i32, SoundBinding>,
 }
 
 impl ImageListObject {
@@ -32,6 +39,7 @@ impl ImageListObject {
             enabled: 1,
             background: None,
             background_active: false,
+            sound_bindings: BTreeMap::new(),
         }
     }
 
@@ -153,6 +161,56 @@ impl ImageListObject {
         }
         Ok(())
     }
+
+    fn sound_task(&self, host: &mut dyn Host) -> Result<u32> {
+        let mut target = 0;
+        host.dispatch_task_command(
+            Command {
+                target: 0,
+                sender: self.id,
+                code: 35,
+                data: [0; 3],
+            },
+            &mut CommandBuffers::default(),
+            &mut target,
+        )?;
+        Ok(target)
+    }
+
+    fn sound_command(
+        &self,
+        target: u32,
+        code: u32,
+        data: [u32; 3],
+        host: &mut dyn Host,
+    ) -> Result<u32> {
+        let mut output = 0;
+        host.dispatch_task_command(
+            Command {
+                target,
+                sender: self.id,
+                code,
+                data,
+            },
+            &mut CommandBuffers::default(),
+            &mut output,
+        )?;
+        Ok(output)
+    }
+
+    fn update_sound_bindings(&mut self, host: &mut dyn Host) -> Result<()> {
+        if self.sound_bindings.is_empty() {
+            return Ok(());
+        }
+        let target = self.sound_task(host)?;
+        for (&key, binding) in &self.sound_bindings {
+            let level = self.sound_command(target, 213, [binding.channel, 0, 0], host)?;
+            if let Some(list) = &mut self.list {
+                list.set_animation_variable(key as u32, 0, i32::from(level >= binding.threshold))?;
+            }
+        }
+        Ok(())
+    }
 }
 
 impl TaskObject for ImageListObject {
@@ -176,6 +234,13 @@ impl TaskObject for ImageListObject {
     }
 
     fn update_body(&mut self, host: &mut dyn Host, increment: u32, budget: usize) -> Result<bool> {
+        if !self
+            .list
+            .as_ref()
+            .is_some_and(ImageList::animations_pending)
+        {
+            self.update_sound_bindings(host)?;
+        }
         if self.enabled != 0 {
             if let Some(list) = &mut self.list {
                 if !host.update_image_list_animations(list, increment, budget)? {
@@ -481,6 +546,31 @@ impl TaskObject for ImageListObject {
                     .ok_or_else(|| Error::new(0, "图像列表尚未创建"))?
                     .set_animation_variable(key, index, value as i32)?;
             }
+            317 => {
+                let target = self.sound_task(host)?;
+                if b == u32::MAX {
+                    if let Some(binding) = self.sound_bindings.remove(&(key as i32)) {
+                        self.sound_command(target, 212, [binding.channel, 0, 0], host)?;
+                        if let Some(list) = &mut self.list {
+                            list.set_animation_variable(key, 0, 0)?;
+                        }
+                    }
+                } else {
+                    self.sound_bindings
+                        .entry(key as i32)
+                        .and_modify(|binding| binding.channel = b)
+                        .or_insert(SoundBinding {
+                            channel: b,
+                            threshold: 1000,
+                        });
+                    self.sound_command(target, 212, [b, 1, 0], host)?;
+                }
+            }
+            319 => {
+                if let Some(binding) = self.sound_bindings.get_mut(&(key as i32)) {
+                    binding.threshold = b;
+                }
+            }
             288..=308 | 310..=319 => {
                 return Err(Error::new(
                     0,
@@ -540,4 +630,127 @@ fn write(buffer: Option<&mut [u8]>, value: u32) -> Result<()> {
         .ok_or_else(|| Error::new(0, "图像列表输出缓冲区缺失或过短"))?;
     buffer[..4].copy_from_slice(&value.to_le_bytes());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::kcs::NativeReturn;
+
+    #[derive(Default)]
+    struct SoundHost {
+        level: u32,
+        controls: Vec<[u32; 3]>,
+    }
+    impl Host for SoundHost {
+        fn call(&mut self, _: u32, _: &[u8], _: &mut Interpreter) -> Result<NativeReturn> {
+            unreachable!()
+        }
+        fn dispatch_task_command(
+            &mut self,
+            command: Command,
+            _: &mut CommandBuffers<'_>,
+            output: &mut u32,
+        ) -> Result<bool> {
+            assert_eq!(command.sender, 7);
+            match command.code {
+                35 => {
+                    assert_eq!(command.target, 0);
+                    *output = 42;
+                }
+                212 => {
+                    assert_eq!(command.target, 42);
+                    self.controls.push(command.data);
+                }
+                213 => {
+                    assert_eq!(command.target, 42);
+                    *output = self.level;
+                }
+                _ => unreachable!(),
+            }
+            Ok(false)
+        }
+    }
+    fn send(
+        object: &mut ImageListObject,
+        host: &mut SoundHost,
+        sender: u32,
+        code: u32,
+        value: u32,
+    ) {
+        let mut output = 0x12345678;
+        object
+            .dispatch_command(
+                kind::IMAGE_LIST,
+                &Command {
+                    target: 7,
+                    sender,
+                    code,
+                    data: [90, value, 0],
+                },
+                &mut output,
+                host,
+                1,
+            )
+            .unwrap();
+        assert_eq!(output, 0x12345678);
+    }
+    fn variable(object: &ImageListObject, sender: u32) -> i32 {
+        object
+            .list()
+            .unwrap()
+            .animation(ImageList::key(sender, 90))
+            .unwrap()
+            .timeline
+            .as_ref()
+            .unwrap()
+            .interpreter
+            .variables[0]
+    }
+    #[test]
+    fn sound_bindings_keep_sender_keys_unsigned_thresholds_and_rebinding_cleanup() {
+        let mut images = Images::default();
+        let source = images.create(99, [1, 1]).unwrap();
+        let mut list = ImageList::new(7, [1, 1], &mut images).unwrap();
+        let mut animation = vec![0; 100];
+        animation[..4].copy_from_slice(b"ANM\0");
+        animation[8..12].copy_from_slice(&1u32.to_le_bytes());
+        for sender in [10, 11] {
+            let key = ImageList::key(sender, 90);
+            list.set(key, source, ImageListProperties::default(), &mut images)
+                .unwrap();
+            list.load_animation(key, &animation).unwrap();
+        }
+        let mut object = ImageListObject::new(7);
+        object.list = Some(list);
+        let mut host = SoundHost::default();
+        send(&mut object, &mut host, 10, 317, 16);
+        host.level = 999;
+        object.update_sound_bindings(&mut host).unwrap();
+        assert_eq!(variable(&object, 10), 0);
+        host.level = 1000;
+        object.update_sound_bindings(&mut host).unwrap();
+        assert_eq!(variable(&object, 10), 1);
+        send(&mut object, &mut host, 10, 319, u32::MAX);
+        send(&mut object, &mut host, 10, 317, 17);
+        send(&mut object, &mut host, 11, 317, 18);
+        object.update_sound_bindings(&mut host).unwrap();
+        assert_eq!(variable(&object, 10), 0);
+        assert_eq!(variable(&object, 11), 1);
+        host.level = u32::MAX;
+        object.update_sound_bindings(&mut host).unwrap();
+        assert_eq!(variable(&object, 10), 1);
+        send(&mut object, &mut host, 10, 317, u32::MAX);
+        assert_eq!(variable(&object, 10), 0);
+        host.level = 0;
+        object.update_sound_bindings(&mut host).unwrap();
+        assert_eq!(variable(&object, 11), 0);
+        assert_eq!(
+            host.controls,
+            [[16, 1, 0], [17, 1, 0], [18, 1, 0], [17, 0, 0]]
+        );
+        send(&mut object, &mut host, 10, 319, 0);
+        send(&mut object, &mut host, 10, 317, u32::MAX);
+        assert_eq!(host.controls.len(), 4);
+    }
 }

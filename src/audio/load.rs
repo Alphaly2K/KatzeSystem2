@@ -63,7 +63,8 @@ impl SoundState {
         self.output_replace(physical as usize);
         let sound = &mut self.channels[physical as usize];
         if let Some(pcm) = load_source(services, name, whole)? {
-            let playback = Playback::new(&pcm, whole, options)?;
+            let mut playback = Playback::new(&pcm, whole, options)?;
+            playback.prepare_signal(&pcm, sound.signal_enabled)?;
             sound.file.extend_from_slice(name);
             sound.pcm_volume = 100;
             sound.pcm_pan = 0;

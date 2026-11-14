@@ -11,6 +11,7 @@ pub(super) struct ChannelClock {
 #[derive(Clone)]
 pub struct SoundChannel {
     pub(super) clock: ChannelClock,
+    pub(super) signal_enabled: bool,
     pub(super) file: Vec<u8>,
     pub(super) tags: std::collections::BTreeMap<Vec<u8>, u32>,
     pub(super) source: Option<Source>,
@@ -39,6 +40,7 @@ impl Default for SoundChannel {
     fn default() -> Self {
         Self {
             clock: ChannelClock::default(),
+            signal_enabled: false,
             file: Vec::new(),
             tags: Default::default(),
             source: None,

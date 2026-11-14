@@ -1099,6 +1099,12 @@ impl ProgramLoader for Forwarding {
             push(&mut code, value);
         }
         call(&mut code, 880, 16);
+        for native in [879, 881] {
+            for value in [1, 99, u32::MAX] {
+                push(&mut code, value);
+            }
+            call(&mut code, native, 12);
+        }
         code.push(0x3b);
         Ok(Some(Program::from_code(&code, vec![0; 16], 128)?))
     }

@@ -73,6 +73,8 @@ FES SOUND 文件请求通过 `Objects::set_sound_task` 的绑定发送 180／182
 
 `SoundChannel::load_options()` 返回装载时的原始前置静音毫秒数。播放读取已包含静音，`pcm()` 仍返回原始解码来源，201 查询原音频时长；静音参与缓冲区选择及首次填充，停止、重启和循环按[播放规则](audio.md#整段缓冲区播放与采样推进)处理已有缓存及剩余静音。
 
+声音任务 212／213 及 `SoundState::set_signal_enabled`／`signal_level` 控制并查询原始 PCM 信号缓存，沿备用通道解析；关闭测量保留缓存，独立混音器发布同一查询。
+
 声音任务 183 开始整段或流式缓冲区播放，184 暂停、185 停止、186 查询播放开关，218 登记首次系统毫秒，219 修改播放次数。`SoundState::read_channel(channel, frames)` 按源格式读取物理通道 PCM 并推进播放位置；`TaskObject::audio_state_mut()` 提供可变存储。`SoundChannel::is_playing`／`position_frames`／`remaining_plays`／`completed_passes`／`started_tick` 提供相应查询，`Host::system_time_ms()` 读取共享毫秒时刻。关联、次数、输入范围、结束与未接入路径见[整段缓冲区播放](audio.md#整段缓冲区播放与采样推进)及[流式预取与循环](audio.md#流式预取与循环)。流式位置为环形缓冲内的采样帧位置，次数在预取时扣减。淡变、混音及设备输出继续接入。
 
 普通 938 直接返回 `HostState::sound_config_enabled`，不读取参数或归一化结果。该字段默认零，表示新声音分类配置的启用状态，由配置宿主同步提供，独立于声音任务的设备门控。

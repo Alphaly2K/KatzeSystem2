@@ -11,6 +11,7 @@ mod output;
 mod pcm;
 mod playback;
 mod settings;
+mod signal;
 mod soundconf;
 mod source;
 mod state;

@@ -135,6 +135,15 @@ impl TaskObject for SoundObject {
                 *output = host.sound_group_id(&name[..end])?;
                 return Ok(CommandOutcome::finished(false));
             }
+            212 => {
+                self.audio
+                    .set_signal_enabled(command.data[0], command.data[1] != 0);
+                return Ok(CommandOutcome::finished(false));
+            }
+            213 => {
+                *output = self.audio.signal_level(command.data[0]);
+                return Ok(CommandOutcome::finished(false));
+            }
             215 => {
                 *output = 0;
                 let channel = command.data[0];
