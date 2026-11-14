@@ -151,6 +151,7 @@ pub(super) fn native_math(index: u32, args: &[u32]) -> u32 {
         16 => a % b,
         17 => a.sqrt(),
         18 => a.powf(b),
+        19 => a.log10(),
         _ => unreachable!(),
     };
     if value.is_nan() {

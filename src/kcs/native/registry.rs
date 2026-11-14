@@ -43,7 +43,7 @@ pub(super) fn core(index: u32) -> CoreHandler {
         | 1046
         | 1051
         | 1063 => CoreHandler::Text,
-        33 | 34 | 50..=64 | 218 | 318..=320 | 397 => CoreHandler::Scalar,
+        33 | 34 | 50..=64 | 218 | 318..=320 | 397 | 461 => CoreHandler::Scalar,
         359..=361
         | 533
         | 565
@@ -78,7 +78,7 @@ pub(super) fn core(index: u32) -> CoreHandler {
         900 | 901 => CoreHandler::MapData,
         424 | 425 => CoreHandler::Sequence,
         863..=868 => CoreHandler::RecordStack,
-        352..=358 => CoreHandler::Vector,
+        350..=358 => CoreHandler::Vector,
         1
         | 4
         | 5

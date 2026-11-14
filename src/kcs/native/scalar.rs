@@ -70,6 +70,7 @@ pub(super) fn call(
         } else {
             numeric::native_math(12, &args)
         }),
+        461 => NativeReturn::Value(numeric::native_math(19, &args)),
         50..=61 => {
             let function = match index {
                 50..=55 => index - 44,

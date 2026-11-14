@@ -12,13 +12,28 @@ fn vector<const N: usize>(vm: &Interpreter, address: u32) -> Result<[f32; N]> {
     }))
 }
 
-fn write(vm: &mut Interpreter, address: u32, value: [f32; 4]) -> Result<()> {
+fn write<const N: usize>(vm: &mut Interpreter, address: u32, value: [f32; N]) -> Result<()> {
     let bytes: Vec<_> = value.into_iter().flat_map(f32::to_le_bytes).collect();
     vm.write(address, &bytes)
 }
 
 pub(super) fn call(index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn> {
     let target = read::u32_at(arguments, 0)?;
+    if index == 350 {
+        if let Some(value) = matrix::inverse(vector::<16>(vm, target)?) {
+            write(vm, target, value)?;
+        }
+        return Ok(NativeReturn::Continue);
+    }
+    if index == 351 {
+        let source = read::u32_at(arguments, 4)?;
+        // 原复制逐块读写，重叠区的后续块会读取先前写回的内容。
+        for offset in [0, 16, 32, 48] {
+            let bytes = vm.read(source.wrapping_add(offset), 16)?.to_vec();
+            vm.write(target.wrapping_add(offset), &bytes)?;
+        }
+        return Ok(NativeReturn::Continue);
+    }
     if matches!(index, 353 | 354) {
         let source = read::u32_at(arguments, 4)?;
         // 逐分量读取并写回，重叠来源可以看到先前分量的修改。
