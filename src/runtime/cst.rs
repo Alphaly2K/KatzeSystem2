@@ -224,6 +224,12 @@ impl CstContext {
             .map(|entry| (entry.name(), entry.value))
     }
 
+    fn registration_index(&self, name: &[u8]) -> Option<usize> {
+        self.registrations
+            .iter()
+            .position(|entry| entry.name().is_empty() || entry.name().eq_ignore_ascii_case(name))
+    }
+
     /// 按追加顺序枚举记录；相邻同名记录合并，非相邻同名记录独立保存。
     pub fn history(&self) -> impl ExactSizeIterator<Item = (&[u8], u32)> {
         self.history.iter().map(|entry| (entry.name(), entry.value))
@@ -256,6 +262,9 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             return Ok(NativeReturn::Value(handle));
         }
         let handle = read::u32_at(arguments, 0)?;
+        if index == 934 && arguments.len() != 12 && !(handle == 0 && arguments.len() == 4) {
+            return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+        }
         if index == 324 {
             if handle != 0 && self.resources.cst_contexts.remove(&handle).is_none() {
                 return Err(Error::new(vm.pc, "CST 上下文句柄无效"));
@@ -264,7 +273,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         }
         if handle == 0 {
             return Ok(match index {
-                330 | 331 => NativeReturn::Continue,
+                330 | 331 | 934 => NativeReturn::Continue,
                 329 | 982 => NativeReturn::Value(u32::MAX),
                 _ => NativeReturn::Value(0),
             });
@@ -274,6 +283,35 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             .cst_contexts
             .get_mut(&handle)
             .ok_or_else(|| Error::new(vm.pc, "CST 上下文句柄无效"))?;
+        if index == 934 {
+            let mut names = Vec::with_capacity(2);
+            for offset in [4, 8] {
+                let mut name = crate::kcs::format_string(vm, read::u32_at(arguments, offset)?, 0)?;
+                name.truncate(name.iter().position(|&b| b == 0).unwrap_or(name.len()));
+                if name.len() >= 128 {
+                    return Err(Error::new(vm.pc, "CST 格式名称超过缓冲区上限"));
+                }
+                names.push(name);
+            }
+            if let (Some(source), None) = (
+                context.registration_index(&names[0]),
+                context.registration_index(&names[1]),
+            ) {
+                if names[1].len() >= 32 {
+                    return Err(Error::new(vm.pc, "CST 登记名称超过缓冲区上限"));
+                }
+                if context.registrations.len() == read::MAX_ITEMS {
+                    return Err(Error::new(vm.pc, "CST 登记数量超过上限"));
+                }
+                context.registrations.push(Entry {
+                    name: names.pop().unwrap(),
+                    value: context.registrations[source].value,
+                    details: Vec::new(),
+                    saved_data: Vec::new(),
+                });
+            }
+            return Ok(NativeReturn::Continue);
+        }
         if index == 982 {
             return Ok(NativeReturn::Value(
                 (context.history.len() as u32).wrapping_sub(1),
@@ -387,25 +425,27 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                 }
                 if index == 332 {
                     let value = context
-                        .registrations
-                        .iter()
-                        .find(|entry| entry.name().eq_ignore_ascii_case(&name))
-                        .map_or(0, |entry| entry.value);
+                        .registration_index(&name)
+                        .filter(|&index| !context.registrations[index].name().is_empty())
+                        .map_or(0, |index| context.registrations[index].value);
                     return Ok(NativeReturn::Value(value));
                 }
                 if name.is_empty() {
                     return Ok(NativeReturn::Value(if index == 328 { 1 } else { u32::MAX }));
                 }
                 let value = read::u32_at(arguments, 8)?;
+                let registered = if index == 328 {
+                    context.registration_index(&name)
+                } else {
+                    None
+                };
                 let entries = if index == 328 {
                     &mut context.registrations
                 } else {
                     &mut context.history
                 };
                 let existing = if index == 328 {
-                    entries
-                        .iter_mut()
-                        .find(|entry| entry.name().eq_ignore_ascii_case(&name))
+                    registered.map(|index| &mut entries[index])
                 } else {
                     entries
                         .last_mut()

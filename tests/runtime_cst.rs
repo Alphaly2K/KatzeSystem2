@@ -227,6 +227,85 @@ fn cst_tables_merge_values_preserve_nonadjacent_records_and_clear_independently(
 }
 
 #[test]
+fn registration_aliases_keep_literal_names_existing_values_and_empty_name_fallback() {
+    let mut code = Vec::new();
+    instruction(&mut code, 0x25, &[(3, 0x1234_5678)]);
+    call(&mut code, 323, &[]);
+    instruction(&mut code, 0x26, &[(3, 0)]);
+    for (index, name, value) in [(328, 128, 7), (328, 192, 3), (329, 128, 99)] {
+        call(&mut code, index, &[(0x13, 0), (3, name), (3, value)]);
+        instruction(&mut code, 0x2d, &[]);
+    }
+    for (source, dest) in [
+        (160, 224),
+        (160, 192),
+        (128, 320),
+        (160, 256),
+        (224, 416),
+        (192, 352),
+    ] {
+        call(&mut code, 934, &[(0x13, 0), (3, source), (3, dest)]);
+    }
+    call(&mut code, 328, &[(0x13, 0), (3, 288), (3, 0x8000_0000)]);
+    instruction(&mut code, 0x2d, &[]);
+    call(&mut code, 934, &[(3, 0)]);
+    call(&mut code, 934, &[(3, 0), (3, u32::MAX), (3, u32::MAX)]);
+    for (slot, name) in [(4, 384), (8, 224), (12, 192)] {
+        call(&mut code, 332, &[(0x13, 0), (3, name)]);
+        instruction(&mut code, 0x26, &[(3, slot)]);
+    }
+    code.push(0x3b);
+    let mut data = vec![0; 448];
+    for (address, name) in [
+        (128, b"alpha.cst".as_slice()),
+        (160, b"ALPHA"),
+        (192, b"beta"),
+        (224, b"copy"),
+        (256, b"copy.ext"),
+        (288, b"unknown.cst"),
+        (320, b"literal"),
+        (352, b"after"),
+        (384, b"missing"),
+    ] {
+        data[address..address + name.len()].copy_from_slice(name);
+    }
+    let program = Program::from_code(&code, data, 64).unwrap();
+    for budget in [1, 4096] {
+        let mut runtime = Runtime::new(
+            0,
+            kind::ROOT,
+            Box::new(BaseObject::new()),
+            State::new(0),
+            KcsFactory::new(Loader(program.clone())),
+        );
+        runtime.set_budget(budget, 1 << 20);
+        let task = runtime.create(0, kind::ORDINARY, b"aliases", b"").unwrap();
+        runtime.update(0, 1).unwrap();
+        let context = runtime.cst_context(1).unwrap();
+        assert_eq!(
+            context.registrations().collect::<Vec<_>>(),
+            [
+                (b"alpha".as_slice(), 7),
+                (b"beta", 3),
+                (b"copy", 7),
+                (b"copy.ext", 7),
+                (b"", 0x8000_0000),
+            ]
+        );
+        assert_eq!(
+            context.history().collect::<Vec<_>>(),
+            [(b"alpha".as_slice(), 99)]
+        );
+        let vm = runtime.object(task).unwrap().interpreter().unwrap();
+        assert_eq!(
+            vm.read(4, 12).unwrap().as_ref(),
+            [0u32, 7, 3].map(u32::to_le_bytes).concat()
+        );
+        assert_eq!(vm.stack_bytes(), 0x1234_5678u32.to_le_bytes());
+    }
+}
+
+#[test]
 fn cst_record_storage_keeps_details_data_and_first_matching_container_record() {
     for budget in [1, 4096] {
         for legacy in [false, true] {

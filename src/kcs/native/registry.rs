@@ -210,7 +210,7 @@ pub(crate) fn runtime(index: u32) -> RuntimeHandler {
             RuntimeHandler::Transition
         }
         633..=638 => RuntimeHandler::NameTable,
-        323..=337 | 385 | 386 | 982 | 991 | 992 | 994 | 1033 | 1037 | 1038 | 1064 => {
+        323..=337 | 385 | 386 | 934 | 982 | 991 | 992 | 994 | 1033 | 1037 | 1038 | 1064 => {
             RuntimeHandler::Cst
         }
         294..=317 | 388 | 440 | 535 | 586 => RuntimeHandler::Motion,
