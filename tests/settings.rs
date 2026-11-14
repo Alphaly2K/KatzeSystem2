@@ -118,6 +118,70 @@ type ConfigurationWrites = std::rc::Rc<
     std::cell::RefCell<Vec<(u32, katze_system2::settings::ConfigurationFile, Vec<u8>)>>,
 >;
 
+#[test]
+fn legacy_file_volumes_follow_voice_groups_cached_category_gains_and_mute_order() {
+    use katze_system2::audio::SoundGroups;
+    let xml = br#"<?xml version="1.0" encoding="UTF-8"?><document>
+        <SOUNDGROUP>
+            <group00><id>42</id><type>BGM</type></group00>
+            <group01><id>42</id><type>se</type></group01>
+            <group02><id>44</id><type>other</type></group02>
+            <group07><id>43</id><type>SYSVOICE</type></group07>
+        </SOUNDGROUP><VOICE>
+            <v00><head>ab</head><group>42</group><mastervol>37</mastervol></v00>
+            <v01><head>v</head><group>43</group><int>dir</int></v01>
+            <v02><head>u</head><group>44</group></v02>
+        </VOICE></document>"#;
+    let mut settings = SystemSettings::default();
+    settings.apply_startup_xml(xml).unwrap();
+    for (index, value) in [0x81234567u32, 73, 91].into_iter().enumerate() {
+        settings.sound[index * 4..index * 4 + 4].copy_from_slice(&value.to_le_bytes());
+    }
+    let mut numbers = State::new(0);
+    let mut host = CoreHost::new(&mut numbers);
+    host.system_settings = Some(settings);
+    host.sound_groups = Some(SoundGroups::from_startup_xml(xml).unwrap());
+    let mut vm =
+        Interpreter::new(Program::from_code(&[], vec![0; 512], 16).unwrap(), vec![]).unwrap();
+    for (name, expected) in [
+        (b"AB01.ogg".as_slice(), 0x81234567),
+        (b"other/AB01.ogg", 0x81234567),
+        (b"\x81\x5cAB01.ogg", 0x81234567),
+        (b"dir/AB01.ogg", 91),
+        (b"v01.ogg", 91),
+        (b"u01.ogg", 100),
+        (b"missing.ogg", 100),
+    ] {
+        vm.write(16, name).unwrap();
+        vm.write(16 + name.len() as u32, &[0]).unwrap();
+        assert_eq!(
+            host.call(605, &arguments(&[16]), &mut vm).unwrap(),
+            NativeReturn::Value(expected)
+        );
+    }
+    host.system_settings.as_mut().unwrap().sound[0x15f4..0x15f8]
+        .copy_from_slice(&0x80000000u32.to_le_bytes());
+    vm.write(16, b"v01.ogg\0").unwrap();
+    assert_eq!(
+        host.call(605, &arguments(&[16]), &mut vm).unwrap(),
+        NativeReturn::Value(0)
+    );
+    host.sound_groups = None;
+    assert_eq!(
+        host.call(605, &arguments(&[16]), &mut vm).unwrap(),
+        NativeReturn::Value(100)
+    );
+    host.system_settings.as_mut().unwrap().sound[0x15e8..0x15ec]
+        .copy_from_slice(&1u32.to_le_bytes());
+    vm.write(16, &[b'x'; 300]).unwrap();
+    vm.write(316, &[0]).unwrap();
+    assert_eq!(
+        host.call(605, &arguments(&[16]), &mut vm).unwrap(),
+        NativeReturn::Value(0)
+    );
+    assert!(host.call(605, &arguments(&[0x7fffffff]), &mut vm).is_err());
+}
+
 struct ConfigurationSink(ConfigurationWrites);
 
 impl katze_system2::settings::ConfigurationServices for ConfigurationSink {

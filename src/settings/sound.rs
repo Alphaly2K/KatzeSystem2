@@ -29,10 +29,13 @@ impl SystemSettings {
     }
 
     pub(crate) fn voice_file_index(&self, name: &[u8]) -> Result<Option<usize>> {
-        let name = terminated(name);
-        if name.len() >= 260 {
-            return Err(Error::new(0, "声音名称超过查询缓冲区容量"));
-        }
+        let name = file_name(name)?;
+        Ok(self
+            .voice_directory_index(name)
+            .or_else(|| self.voice_prefix_index(name)))
+    }
+
+    fn voice_directory_index(&self, name: &[u8]) -> Option<usize> {
         let mut position = 0;
         let mut separator = 0;
         while position < name.len() {
@@ -56,16 +59,65 @@ impl SystemSettings {
                 terminated(&self.sound[20 + index * 116 + 84..20 + (index + 1) * 116])
                     .eq_ignore_ascii_case(directory)
             }) {
-                return Ok(Some(index));
+                return Some(index);
             }
         }
+        None
+    }
+
+    fn voice_prefix_index(&self, name: &[u8]) -> Option<usize> {
         let mut name = name.to_vec();
         lowercase(&mut name);
-        Ok((0..48).find(|&index| {
+        (0..48).find(|&index| {
             let start = 20 + index * 116 + 40;
             let prefix = terminated(&self.sound[start..start + 40]);
             !prefix.is_empty() && name.starts_with(prefix)
-        }))
+        })
+    }
+
+    fn voice_file_group(&self, name: &[u8]) -> Result<Option<u32>> {
+        let name = file_name(name)?;
+        let index = self.voice_directory_index(name).or_else(|| {
+            // 分类查询的文件名提取按原始字节找分隔符，与目录扫描分别处理。
+            let start = name
+                .iter()
+                .rposition(|byte| matches!(byte, b'/' | b'\\'))
+                .filter(|&position| position != 0)
+                .map_or(0, |position| position + 1);
+            self.voice_prefix_index(&name[start..])
+        });
+        Ok(index
+            .map(|index| word(&self.sound, 20 + index * 116 + 80))
+            .filter(|&group| group != u32::MAX))
+    }
+
+    pub(crate) fn legacy_file_volume(
+        &self,
+        name: &[u8],
+        groups: Option<&crate::audio::SoundGroups>,
+    ) -> Result<u32> {
+        if word(&self.sound, 0x15e8) != 0 {
+            return Ok(0);
+        }
+        let Some(id) = self.voice_file_group(name)? else {
+            return Ok(100);
+        };
+        let Some(group) =
+            groups.and_then(|groups| groups.entries.iter().find(|group| group.id == id))
+        else {
+            return Ok(100);
+        };
+        let slot = match crate::audio::SoundGroups::legacy_id(&group.label) {
+            0 => 0,
+            1 => 1,
+            2 | 3 => 2,
+            _ => return Ok(100),
+        };
+        Ok(if word(&self.sound, 0x15ec + slot * 4) != 0 {
+            0
+        } else {
+            word(&self.sound, slot * 4)
+        })
     }
 
     pub(crate) fn voice_file_play_enabled(&self, name: &[u8]) -> Result<u32> {
@@ -81,6 +133,14 @@ impl SystemSettings {
             .voice_file_index(name)?
             .map_or(0, |index| word(&self.sound, 20 + index * 116 + offset)))
     }
+}
+
+fn file_name(bytes: &[u8]) -> Result<&[u8]> {
+    let name = terminated(bytes);
+    if name.len() >= 260 {
+        return Err(Error::new(0, "声音名称超过查询缓冲区容量"));
+    }
+    Ok(name)
 }
 
 fn terminated(bytes: &[u8]) -> &[u8] {

@@ -84,6 +84,41 @@ const CONFIG: &str = r#"<?xml version="1.0" encoding="utf-8"?>
 </document>"#;
 
 #[test]
+fn startup_sound_groups_keep_slot_keys_duplicate_ids_and_raw_type_ranges() {
+    let xml = br#"<?xml version="1.0" encoding="UTF-8"?><document><SOUNDGROUP>
+        <group07><id>42</id><type>VOICE</type><min>48</min><max>63</max></group07>
+        <group01><id>42</id><type>A&amp;B</type><min>-3</min></group01>
+        <group00><id>-1</id><type>disabled</type></group00>
+        <group02><id></id><type></type><max></max></group02>
+        <group08><id>9</id><type>ignored</type></group08>
+        </SOUNDGROUP></document>"#;
+    let groups = SoundGroups::from_startup_xml(xml).unwrap();
+    assert_eq!(groups.entries.len(), 3);
+    assert_eq!(
+        groups
+            .entries
+            .iter()
+            .map(|group| group.key)
+            .collect::<Vec<_>>(),
+        [1, 2, 7]
+    );
+    assert_eq!(groups.entries[0].id, 42);
+    assert_eq!(groups.entries[0].label, b"A&amp;B");
+    assert_eq!(groups.entries[0].range, [-3, -1]);
+    assert_eq!(groups.entries[1].id, 0);
+    assert_eq!(groups.entries[1].range, [-1, 0]);
+    assert_eq!(groups.entries[2].label, b"VOICE");
+    assert_eq!(groups.entries[2].range, [48, 63]);
+    assert_eq!(groups.id(b"VOICE"), 42);
+    assert_eq!(groups.id(b"voice"), 0);
+    let mut sound = katze_system2::audio::SoundState::default();
+    sound.set_groups(&groups).unwrap();
+    assert_eq!(sound.group_range(7), Some([48, 63]));
+    assert_eq!(sound.group_range(1), Some([-3, -1]));
+    assert_eq!(sound.group_range(0), None);
+}
+
+#[test]
 fn soundconf_restores_master_groups_tree_and_child_inheritance() {
     let config = SoundConfig::from_xml(CONFIG.as_bytes()).unwrap();
     assert_eq!(config.master_volume, Some(100));

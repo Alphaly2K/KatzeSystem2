@@ -646,6 +646,9 @@ pub fn build_runtime(
         },
     );
     let startup_xml = katze_system2::resource::XmlDocument::parse(startup.as_bytes())?;
+    runtime.host_mut().sound_groups = Some(katze_system2::audio::SoundGroups::from_startup_xml(
+        startup.as_bytes(),
+    )?);
     let configuration_files = ConfigurationFiles::new(&root, &startup_xml)?;
     let user_settings =
         configuration_files.read(katze_system2::settings::ConfigurationFile::Main)?;

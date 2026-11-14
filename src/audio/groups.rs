@@ -17,6 +17,35 @@ pub struct SoundGroups {
 }
 
 impl SoundGroups {
+    /// 读取启动文档的八个固定声音组槽位，跳过编号为全一的停用项。
+    /// 表键保留槽位编号，标签取 type，物理通道范围包含两端。
+    pub fn from_startup_xml(bytes: &[u8]) -> crate::Result<Self> {
+        let xml = crate::resource::XmlDocument::parse(bytes)?;
+        let mut entries = Vec::new();
+        for key in 0..8 {
+            let path = format!("SOUNDGROUP/group{key:02}");
+            let id = xml.integer(format!("{path}/id").as_bytes(), u32::MAX)?;
+            let label = xml
+                .text(format!("{path}/type").as_bytes())?
+                .unwrap_or_default();
+            if label.len() >= 16 {
+                return Err(crate::Error::new(0, "声音组类别名称超过基线容量"));
+            }
+            if id != u32::MAX {
+                entries.push(SoundGroup {
+                    key,
+                    id,
+                    label: label.to_vec(),
+                    range: [
+                        xml.integer(format!("{path}/min").as_bytes(), u32::MAX)? as i32,
+                        xml.integer(format!("{path}/max").as_bytes(), u32::MAX)? as i32,
+                    ],
+                });
+            }
+        }
+        Ok(Self { entries })
+    }
+
     /// 新配置按原始标签精确查首项，缺失返回零；名称在首零结束。
     pub fn id(&self, label: &[u8]) -> u32 {
         let label = terminated(label);

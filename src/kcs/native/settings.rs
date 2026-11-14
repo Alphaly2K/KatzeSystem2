@@ -8,13 +8,14 @@ pub(super) fn call(
     arguments: &[u8],
     vm: &mut Interpreter,
 ) -> Result<NativeReturn> {
-    if matches!(index, 606 | 607 | 844) {
+    if matches!(index, 605..=607 | 844) {
         let name = strings::format(vm, read::u32_at(arguments, 0)?, 0)?;
         let settings = host
             .system_settings
             .as_ref()
             .ok_or_else(|| Error::new(vm.pc, "宿主未配置全局设置"))?;
         let value = match index {
+            605 => settings.legacy_file_volume(&name, host.sound_groups.as_ref())?,
             606 => settings.voice_file_play_enabled(&name)?,
             607 => settings.voice_file_volume(&name)?,
             _ => settings

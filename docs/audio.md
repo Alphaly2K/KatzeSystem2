@@ -72,6 +72,8 @@ FES `getsndconfex output_index volume name` 将该结果写入共享槽，只读
 
 旧声音记录的 606／607／844 查询使用 `SystemSettings` 中的目录与前缀定义，分别返回播放开关、mastervol 和记录编号；匹配及覆盖规则见[全局设置](settings.md#普通调用)。这些查询独立于新声音分类配置的启用开关。
 
+605 按声音定义的 group 和启动声音组查询旧分类有效音量，使用已经换算的分类缓存及静音值；sysvoice 与 voice 共用语音音量，未知类别返回 100。它使用的文件名提取及主静音门控见同一[调用契约](settings.md#普通调用)。
+
 普通 939～964 已接入 `CoreHost` 及 Runtime，不检查新配置启用字段，也不修改配置刷新标记。939／940／941 分别查询独立主音量、主播放开关和主系统语音开关；942 查询主静音，原值 −1 返回零。这四项不读取参数。
 
 943～963 接受一个待格式展开的名称地址，允许普通区和外部区，额外参数忽略。按以下三种方式查首个分类，返回节点自身字段，不乘祖先或主音量；名称到首零结束，正文须短于 512 字节。
@@ -291,7 +293,9 @@ FES 任务的配置通知在场景更新后另行刷新 SOUND：标记属性失�
 
 ### 声音组与分组装载
 
-声音组独立于音量分类树。宿主通过 `HostState::sound_groups: Option<SoundGroups>` 提供按配置顺序保存的 `SoundGroup { key, id, label, range }`；key 为任务表键，id 为声音分类编号，label 为完整原始字节串，range 为包含两端的带符号物理通道范围。新配置将 key 与 id 设为同值；旧配置可将不同表键映射到同一分类编号。配置读取和缺省值处理仍由宿主承担。
+声音组独立于音量分类树。宿主通过 `HostState::sound_groups: Option<SoundGroups>` 提供按配置顺序保存的 `SoundGroup { key, id, label, range }`；key 为任务表键，id 为声音分类编号，label 为完整原始字节串，range 为包含两端的带符号物理通道范围。新配置将 key 与 id 设为同值；旧配置可将不同表键映射到同一分类编号。
+
+`SoundGroups::from_startup_xml` 读取启动文档的 `SOUNDGROUP/group00`～`group07`，表键按槽号保留，id 取分类编号，label 取原始 type，range 取 min／max。id、min、max 缺失时均为全一；id 为全一的槽位停用，其他编号及重复编号按槽号顺序保留，type 至多十五字节。启动示例先装载这些组，成功装载独立新声音配置时再使用其组表。
 
 210 从 data1 接收零结尾组名，写回组编号。新配置开关 `sound_config_enabled` 非零时，按完整标签长度及字节精确查首项，区分大小写，缺失返回零；查询输入在首零结束。开关为零时，忽略 ASCII 大小写识别 bgm／se／voice／sysvoice，分别返回 0／1／2／3，其他名称返回 5。`SoundGroups::id`、`legacy_id` 提供相同查询，`Host::sound_group_id` 将其传给声音任务；新模式缺少宿主配置时诊断。
 
