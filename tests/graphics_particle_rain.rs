@@ -1,0 +1,241 @@
+use katze_system2::{
+    Result,
+    expression::State,
+    graphics::{GraphicsFactory, Projection},
+    kcs::{Program, ResourceServices, ScriptRandom},
+    resource::ResourceMode,
+    runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, kind},
+    task::{Command, CommandBuffers},
+};
+
+fn plugin() -> Vec<u8> {
+    let mut bytes = vec![0; 512];
+    bytes[..2].copy_from_slice(b"MZ");
+    bytes[64..68].copy_from_slice(b"PE\0\0");
+    for (at, value) in [(68, 0x14cu16), (70, 1), (84, 112), (88, 0x10b)] {
+        bytes[at..at + 2].copy_from_slice(&value.to_le_bytes());
+    }
+    for (at, value) in [
+        (60, 64u32),
+        (180, 1),
+        (184, 0x1000),
+        (212, 0x1000),
+        (216, 256),
+        (220, 256),
+        (268, 0x1040),
+        (272, 1),
+        (276, 4),
+        (284, 0x1054),
+        (348, 0x1068),
+        (352, 0x1070),
+    ] {
+        bytes[at..at + 4].copy_from_slice(&value.to_le_bytes());
+    }
+    bytes[320..329].copy_from_slice(b"rain.ppi\0");
+    bytes[360..366].copy_from_slice(&[0xb8, 1, 0, 2, 0, 0xc3]);
+    bytes[368..374].copy_from_slice(&[0xb8, 1, 0, 0, 0, 0xc3]);
+    bytes
+}
+
+struct Files(Vec<u8>);
+impl ResourceServices for Files {
+    fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+        assert_eq!(category, b"image");
+        assert!(name.is_empty());
+        Ok(Vec::new())
+    }
+
+    fn resolve_file(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+        assert_eq!(category, b"ptclpi");
+        Ok(name.to_vec())
+    }
+    fn read(&mut self, _: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
+        assert_eq!(mode, ResourceMode::File);
+        Ok(Some(self.0.clone()))
+    }
+}
+
+struct Programs(Program);
+impl ProgramLoader for Programs {
+    fn load(&mut self, _: &[u8]) -> Result<Option<Program>> {
+        Ok(Some(self.0.clone()))
+    }
+}
+
+fn runtime(bytes: Vec<u8>) -> Result<Runtime<GraphicsFactory<KcsFactory<Programs>>>> {
+    let mut code = Vec::new();
+    for value in [1u32, 0, 16, 8, 5000f32.to_bits(), 32] {
+        code.extend([0x25, 3]);
+        code.extend(value.to_le_bytes());
+    }
+    code.extend([0x2b, 3]);
+    code.extend(693u32.to_le_bytes());
+    code.push(3);
+    code.extend(24u32.to_le_bytes());
+    code.push(0x3b);
+    let mut data = vec![0; 256];
+    data[..10].copy_from_slice(b"effect.ppi");
+    for (i, value) in [20f32, 0., 5., 10., 60., 8., 1.].into_iter().enumerate() {
+        data[32 + i * 4..36 + i * 4].copy_from_slice(&value.to_le_bytes());
+    }
+    let mut runtime = Runtime::new(
+        0,
+        kind::ROOT,
+        Box::new(BaseObject::new()),
+        State::new(0),
+        GraphicsFactory {
+            fallback: KcsFactory::new(Programs(Program::from_code(&code, data, 128)?)),
+        },
+    );
+    runtime.host_mut().surface_size = [1280, 720];
+    runtime.host_mut().random = ScriptRandom::seeded(17);
+    runtime.set_resources(Files(bytes));
+    runtime.create(0, kind::PARTICLE_3D, b"", b"")?;
+    runtime.create(0, kind::ORDINARY, b"", b"")?;
+    Ok(runtime)
+}
+
+fn command(code: u32) -> Command {
+    Command {
+        target: 1,
+        sender: 2,
+        code,
+        data: [0; 3],
+    }
+}
+
+fn assert_random(
+    runtime: &mut Runtime<GraphicsFactory<KcsFactory<Programs>>>,
+    expected: &ScriptRandom,
+) {
+    let mut actual = runtime.host_mut().random.clone();
+    let mut expected = expected.clone();
+    assert_eq!(actual.next_integer(), expected.next_integer());
+    assert_eq!(actual.next_float(), expected.next_float());
+}
+
+#[test]
+fn rain_shares_random_state_projects_motion_and_restarts_with_current_parameters() -> Result<()> {
+    let mut runtime = runtime(plugin())?;
+    let mut expected = ScriptRandom::seeded(17);
+    runtime.update(1, 1)?;
+    assert_eq!(runtime.dispatch_command(2, command(324))?, 0);
+    assert!(runtime.object(1).unwrap().interpreter().is_none());
+    assert_random(&mut runtime, &expected);
+    for i in 0..8 {
+        expected.next_integer();
+        expected.next_integer();
+        for _ in 0..4 + usize::from(i < 4) {
+            expected.next_float();
+        }
+    }
+    runtime.dispatch_command(2, command(321))?;
+    assert_eq!(runtime.dispatch_command(2, command(324))?, 1);
+    assert_random(&mut runtime, &expected);
+    let view = Projection::default();
+    runtime.update(2, 1)?;
+    expected.next_integer();
+    let first = runtime
+        .drawables()
+        .get(1)
+        .unwrap()
+        .particle_mesh()
+        .unwrap()
+        .projected_quad(0, &view)
+        .unwrap();
+    assert_eq!(first[0].color >> 24, 0);
+    assert_ne!(first[0].position[1], first[1].position[1]);
+    assert!(
+        first
+            .iter()
+            .all(|v| v.rhw > 0. && v.uv.iter().all(|&n| (0.0..=1.0).contains(&n)))
+    );
+    runtime.update(3, 1)?;
+    expected.next_integer();
+    assert_random(&mut runtime, &expected);
+    let mesh = runtime
+        .drawables()
+        .get(1)
+        .unwrap()
+        .particle_mesh()
+        .unwrap()
+        .clone();
+    let second = mesh.projected_quad(0, &view).unwrap();
+    assert!(second[0].position[1] > first[0].position[1]);
+    assert!(second[0].color >> 24 >= 50);
+    runtime.dispatch_command(2, command(322))?;
+    runtime.update(4, 1)?;
+    assert_random(&mut runtime, &expected);
+    assert_eq!(runtime.drawables().get(1).unwrap().display(), 0);
+    assert_eq!(
+        runtime.drawables().get(1).unwrap().particle_mesh(),
+        Some(&mesh)
+    );
+    let mut parameters = [0; 128];
+    for (i, value) in [80f32, 0., 0., 0., 60., 8., 0.].into_iter().enumerate() {
+        parameters[i * 4..i * 4 + 4].copy_from_slice(&value.to_le_bytes());
+    }
+    runtime.dispatch_command_with_buffers(
+        2,
+        command(325),
+        &mut CommandBuffers {
+            data1: Some(&mut parameters),
+            ..Default::default()
+        },
+    )?;
+    runtime.dispatch_command(2, command(321))?;
+    for _ in 0..16 {
+        expected.next_integer();
+    }
+    for _ in 0..32 {
+        expected.next_float();
+    }
+    runtime.update(5, 1)?;
+    expected.next_integer();
+    let restarted = runtime
+        .drawables()
+        .get(1)
+        .unwrap()
+        .particle_mesh()
+        .unwrap()
+        .projected_quad(0, &view)
+        .unwrap();
+    assert_eq!(restarted[0].color >> 24, 0);
+    assert_eq!(restarted[0].position[1], restarted[1].position[1]);
+    runtime.dispatch_command(2, command(323))?;
+    assert!(
+        runtime
+            .drawables()
+            .get(1)
+            .unwrap()
+            .particle_mesh()
+            .is_none()
+    );
+    assert_eq!(runtime.dispatch_command(2, command(324))?, 0);
+    runtime.update(6, 1)?;
+    assert_random(&mut runtime, &expected);
+    Ok(())
+}
+
+#[test]
+fn malformed_or_unsupported_plugin_metadata_is_rejected_before_start() -> Result<()> {
+    let bytes = plugin();
+    for length in [0, 1, 63, 87, 199, 239, 295, 328, 351, 365, 373] {
+        let mut runtime = runtime(bytes[..length].to_vec())?;
+        assert!(runtime.update(1, 1).is_err());
+        assert!(
+            runtime
+                .drawables()
+                .get(1)
+                .unwrap()
+                .particle_mesh()
+                .is_none()
+        );
+    }
+    for at in [68, 88, 268, 272, 276, 284, 320, 361, 369] {
+        let mut bytes = plugin();
+        bytes[at] = 0;
+        assert!(runtime(bytes)?.update(1, 1).is_err());
+    }
+    Ok(())
+}

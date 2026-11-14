@@ -1,4 +1,5 @@
 use super::{Drawable, ParticleMesh, Surface};
+use super::{particle_plugin, particle_rain::Rain};
 use crate::kcs::{Host, Interpreter, ParticleHost, ParticleTask, Program};
 use crate::resource::ResourceMode;
 use crate::runtime::{BaseObject, TaskObject};
@@ -6,12 +7,98 @@ use crate::task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock};
 use crate::{Error, Result, read};
 use std::sync::Arc;
 
-/// 类型 16 的 KCS 三维粒子对象，与类型 38 的控制对象分别装载。
+enum ParticleRunner {
+    Script(Box<ParticleTask>),
+    Rain {
+        host: Box<ParticleHost>,
+        effect: Option<Rain>,
+        origin: u32,
+        previous_time: u32,
+    },
+}
+
+impl ParticleRunner {
+    fn host(&self) -> &ParticleHost {
+        match self {
+            Self::Script(task) => &task.host,
+            Self::Rain { host, .. } => host,
+        }
+    }
+
+    fn host_mut(&mut self) -> &mut ParticleHost {
+        match self {
+            Self::Script(task) => &mut task.host,
+            Self::Rain { host, .. } => host,
+        }
+    }
+
+    fn start(&mut self, image: [f32; 2], services: &mut dyn Host) -> Result<()> {
+        let particles = self.host_mut();
+        particles.reset_quads(particles.quads.len(), image)?;
+        particles.active = true;
+        match self {
+            Self::Script(task) => task.origin = 0,
+            Self::Rain {
+                host,
+                effect,
+                origin,
+                ..
+            } => {
+                *origin = 0;
+                *effect = Some(if let Some(random) = services.random() {
+                    Rain::new(host, image, random)
+                } else {
+                    let mut random = std::mem::take(&mut host.random);
+                    let rain = Rain::new(host, image, &mut random);
+                    host.random = random;
+                    rain
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn update(&mut self, services: &mut dyn Host, now: u32, budget: usize) -> Result<bool> {
+        match self {
+            Self::Script(task) => services.update_particle(task, now, budget),
+            Self::Rain {
+                host,
+                effect,
+                origin,
+                previous_time,
+            } => {
+                if !host.active {
+                    return Ok(true);
+                }
+                if host.object_id != -1 {
+                    return Err(Error::new(0, "粒子外部来源查询尚未接入"));
+                }
+                if *origin == 0 {
+                    *origin = now;
+                    host.elapsed = 0;
+                    host.previous_elapsed = u32::MAX;
+                } else {
+                    host.elapsed = host.elapsed.wrapping_add(now.wrapping_sub(*previous_time));
+                }
+                *previous_time = now;
+                if let Some(effect) = effect {
+                    let delta = host.elapsed.wrapping_sub(host.previous_elapsed);
+                    effect.update(delta, services.random().unwrap_or(&mut host.random));
+                    effect.write_mesh(host);
+                }
+                host.previous_elapsed = host.elapsed;
+                Ok(true)
+            }
+        }
+    }
+}
+
+/// 类型 16 的三维粒子对象，支持 KCS 脚本及已识别的内置效果。
 pub struct Particle3DObject {
     id: u32,
     base: BaseObject,
     context: Vec<u8>,
-    task: Option<ParticleTask>,
+    task: Option<ParticleRunner>,
     image_size: [f32; 2],
     parameters: [u32; 32],
     opacity: u32,
@@ -33,7 +120,10 @@ impl Particle3DObject {
     }
 
     pub fn task(&self) -> Option<&ParticleTask> {
-        self.task.as_ref()
+        match &self.task {
+            Some(ParticleRunner::Script(task)) => Some(task),
+            _ => None,
+        }
     }
 
     fn clear(&mut self, host: &mut dyn Host) -> Result<()> {
@@ -71,10 +161,14 @@ impl Particle3DObject {
             let Some(bytes) = services.read(name(4)?, read_mode)? else {
                 return Ok(());
             };
-            if mode == 1 {
-                return Err(Error::new(0, "粒子插件装载尚未接入"));
-            }
-            let program = Program::parse(&bytes)?;
+            let program = if mode == 1 {
+                if !particle_plugin::is_rain(&bytes) {
+                    return Err(Error::new(0, "粒子插件类型或版本尚未接入"));
+                }
+                None
+            } else {
+                Some(Program::parse(&bytes)?)
+            };
             let image = if name(0x84)?.is_empty() {
                 None
             } else {
@@ -108,7 +202,17 @@ impl Particle3DObject {
         };
         particles.reset_quads(read::u32_at(record, 0x104)? as usize, self.image_size)?;
         let mesh = ParticleMesh::new(&particles, texture, reference)?;
-        self.task = Some(ParticleTask::new(program, particles)?);
+        self.task = Some(match program {
+            Some(program) => {
+                ParticleRunner::Script(Box::new(ParticleTask::new(program, particles)?))
+            }
+            None => ParticleRunner::Rain {
+                host: Box::new(particles),
+                effect: None,
+                origin: 0,
+                previous_time: 0,
+            },
+        });
         let drawings = host.drawables().unwrap();
         drawings.update(self.id, |drawable| {
             drawable.particle_mesh = Some(mesh);
@@ -121,6 +225,7 @@ impl Particle3DObject {
         let Some(task) = &self.task else {
             return Ok(());
         };
+        let particles = task.host();
         let drawings = host
             .drawables()
             .ok_or_else(|| Error::new(0, "宿主未提供粒子绘图服务"))?;
@@ -129,11 +234,11 @@ impl Particle3DObject {
             .get_mut(&self.id)
             .ok_or_else(|| Error::new(0, "粒子绘图登记缺失"))?;
         if let Some(mesh) = &mut drawable.particle_mesh {
-            mesh.update(&task.host)?;
+            mesh.update(particles)?;
             mesh.opacity = self.opacity;
         }
-        drawable.display = u32::from(task.host.active);
-        drawable.blend_mode = task.host.render_mode;
+        drawable.display = u32::from(particles.active);
+        drawable.blend_mode = particles.render_mode;
         Ok(())
     }
 }
@@ -149,10 +254,13 @@ impl TaskObject for Particle3DObject {
         self.base.state()
     }
     fn interpreter(&self) -> Option<&Interpreter> {
-        self.task.as_ref().map(|task| &task.interpreter)
+        self.task().map(|task| &task.interpreter)
     }
     fn interpreter_mut(&mut self) -> Option<&mut Interpreter> {
-        self.task.as_mut().map(|task| &mut task.interpreter)
+        match &mut self.task {
+            Some(ParticleRunner::Script(task)) => Some(&mut task.interpreter),
+            _ => None,
+        }
     }
     fn creation_context(&self) -> Option<&[u8]> {
         Some(&self.context)
@@ -168,7 +276,7 @@ impl TaskObject for Particle3DObject {
 
     fn update_body(&mut self, host: &mut dyn Host, _: u32, budget: usize) -> Result<bool> {
         if let Some(task) = &mut self.task {
-            if !host.update_particle(task, self.base.clock.elapsed(), budget)? {
+            if !task.update(host, self.base.clock.elapsed(), budget)? {
                 return Ok(false);
             }
         }
@@ -216,21 +324,18 @@ impl TaskObject for Particle3DObject {
             )?,
             321 => {
                 if let Some(task) = &mut self.task {
-                    task.host
-                        .reset_quads(task.host.quads.len(), self.image_size)?;
-                    task.host.active = true;
-                    task.origin = 0;
+                    task.start(self.image_size, host)?;
                 }
                 self.sync(host)?;
             }
             322 => {
                 if let Some(task) = &mut self.task {
-                    task.host.active = false;
+                    task.host_mut().active = false;
                 }
                 self.sync(host)?;
             }
             323 => self.clear(host)?,
-            324 => *output = u32::from(self.task.as_ref().is_some_and(|task| task.host.active)),
+            324 => *output = u32::from(self.task.as_ref().is_some_and(|task| task.host().active)),
             325 => {
                 let bytes = buffers
                     .data1
@@ -241,7 +346,7 @@ impl TaskObject for Particle3DObject {
                     u32::from_le_bytes(bytes[i * 4..i * 4 + 4].try_into().unwrap())
                 });
                 if let Some(task) = &mut self.task {
-                    task.host.parameters = self.parameters;
+                    task.host_mut().parameters = self.parameters;
                 }
             }
             326 => {
@@ -259,7 +364,7 @@ impl TaskObject for Particle3DObject {
                     command.data[1] as i32
                 };
                 if let Some(task) = &mut self.task {
-                    task.host.object_id = self.source;
+                    task.host_mut().object_id = self.source;
                 }
             }
             591 => {

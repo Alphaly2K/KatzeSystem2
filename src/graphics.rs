@@ -53,6 +53,8 @@ mod particle_mesh;
 pub use particle_mesh::ParticleMesh;
 mod particle_task;
 pub use particle_task::Particle3DObject;
+mod particle_plugin;
+mod particle_rain;
 mod raster;
 pub use raster::TextureFilter;
 mod frame;
