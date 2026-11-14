@@ -8,7 +8,7 @@ use katze_system2::{
     task::{Command, CommandBuffers},
 };
 
-fn plugin() -> Vec<u8> {
+fn plugin(name: &[u8]) -> Vec<u8> {
     let mut bytes = vec![0; 512];
     bytes[..2].copy_from_slice(b"MZ");
     bytes[64..68].copy_from_slice(b"PE\0\0");
@@ -31,7 +31,7 @@ fn plugin() -> Vec<u8> {
     ] {
         bytes[at..at + 4].copy_from_slice(&value.to_le_bytes());
     }
-    bytes[320..329].copy_from_slice(b"rain.ppi\0");
+    bytes[320..320 + name.len()].copy_from_slice(name);
     bytes[360..366].copy_from_slice(&[0xb8, 1, 0, 2, 0, 0xc3]);
     bytes[368..374].copy_from_slice(&[0xb8, 1, 0, 0, 0, 0xc3]);
     bytes
@@ -116,7 +116,7 @@ fn assert_random(
 
 #[test]
 fn rain_shares_random_state_projects_motion_and_restarts_with_current_parameters() -> Result<()> {
-    let mut runtime = runtime(plugin())?;
+    let mut runtime = runtime(plugin(b"rain.ppi"))?;
     let mut expected = ScriptRandom::seeded(17);
     runtime.update(1, 1)?;
     assert_eq!(runtime.dispatch_command(2, command(324))?, 0);
@@ -219,7 +219,7 @@ fn rain_shares_random_state_projects_motion_and_restarts_with_current_parameters
 
 #[test]
 fn malformed_or_unsupported_plugin_metadata_is_rejected_before_start() -> Result<()> {
-    let bytes = plugin();
+    let bytes = plugin(b"rain.ppi");
     for length in [0, 1, 63, 87, 199, 239, 295, 328, 351, 365, 373] {
         let mut runtime = runtime(bytes[..length].to_vec())?;
         assert!(runtime.update(1, 1).is_err());
@@ -233,9 +233,104 @@ fn malformed_or_unsupported_plugin_metadata_is_rejected_before_start() -> Result
         );
     }
     for at in [68, 88, 268, 272, 276, 284, 320, 361, 369] {
-        let mut bytes = plugin();
+        let mut bytes = plugin(b"rain.ppi");
         bytes[at] = 0;
         assert!(runtime(bytes)?.update(1, 1).is_err());
     }
+    Ok(())
+}
+
+#[test]
+fn notice_follows_source_positions_retains_missing_sources_and_keeps_random_state() -> Result<()> {
+    use katze_system2::graphics::Drawable;
+
+    let mut runtime = runtime(plugin(b"em_notice.ppi"))?;
+    runtime.update(1, 1)?;
+    let expected = ScriptRandom::seeded(17);
+    let mut parameters = [0; 128];
+    for (i, value) in [810f32, 181., 1., 50., 1., 1., 1., 1., 1.]
+        .into_iter()
+        .enumerate()
+    {
+        parameters[i * 4..i * 4 + 4].copy_from_slice(&value.to_le_bytes());
+    }
+    runtime.dispatch_command_with_buffers(
+        2,
+        command(325),
+        &mut CommandBuffers {
+            data1: Some(&mut parameters),
+            ..Default::default()
+        },
+    )?;
+    runtime.drawables_mut().insert(100, Drawable::default())?;
+    runtime.drawables_mut().set_position(100, [640., 360., 0.]);
+    let mut source = command(327);
+    source.data[1] = 100;
+    runtime.dispatch_command(2, source)?;
+    runtime.dispatch_command(2, command(321))?;
+    let view = Projection::default();
+    runtime.update(2, 1)?;
+    let quad = runtime
+        .drawables()
+        .get(1)
+        .unwrap()
+        .particle_mesh()
+        .unwrap()
+        .projected_quad(0, &view)
+        .unwrap();
+    assert_eq!(quad[0].position[..2], [874., 117.]);
+    assert_eq!(quad[1].position[..2], [746., 117.]);
+    assert_eq!(quad[0].color, u32::MAX);
+    runtime.drawables_mut().set_position(100, [656., 352., 99.]);
+    runtime.update(3, 1)?;
+    let moved = runtime
+        .drawables()
+        .get(1)
+        .unwrap()
+        .particle_mesh()
+        .unwrap()
+        .projected_quad(0, &view)
+        .unwrap();
+    assert_eq!(moved[0].position[..2], [890., 109.]);
+    runtime.drawables_mut().remove(100);
+    runtime.update(4, 1)?;
+    assert_eq!(
+        runtime
+            .drawables()
+            .get(1)
+            .unwrap()
+            .particle_mesh()
+            .unwrap()
+            .projected_quad(0, &view)
+            .unwrap(),
+        moved
+    );
+    source.data[1] = 0;
+    runtime.dispatch_command(2, source)?;
+    runtime.update(5, 1)?;
+    let unbound = runtime
+        .drawables()
+        .get(1)
+        .unwrap()
+        .particle_mesh()
+        .unwrap()
+        .projected_quad(0, &view)
+        .unwrap();
+    assert_eq!(unbound[0].position[..2], [234., -243.]);
+    assert_eq!(unbound[0].color >> 24, 0);
+    assert_random(&mut runtime, &expected);
+    runtime.dispatch_command(2, command(322))?;
+    runtime.update(6, 1)?;
+    assert_eq!(runtime.dispatch_command(2, command(324))?, 0);
+    assert_random(&mut runtime, &expected);
+    runtime.dispatch_command(2, command(323))?;
+    assert!(
+        runtime
+            .drawables()
+            .get(1)
+            .unwrap()
+            .particle_mesh()
+            .is_none()
+    );
     Ok(())
 }

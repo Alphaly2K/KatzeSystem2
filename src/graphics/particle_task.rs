@@ -1,17 +1,41 @@
 use super::{Drawable, ParticleMesh, Surface};
-use super::{particle_plugin, particle_rain::Rain};
-use crate::kcs::{Host, Interpreter, ParticleHost, ParticleTask, Program};
+use super::{particle_notice::Notice, particle_plugin, particle_rain::Rain};
+use crate::kcs::{Host, Interpreter, ParticleHost, ParticleSource, ParticleTask, Program};
 use crate::resource::ResourceMode;
 use crate::runtime::{BaseObject, TaskObject};
 use crate::task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock};
 use crate::{Error, Result, read};
 use std::sync::Arc;
 
+enum ParticleProgram {
+    Script(Program),
+    Builtin(particle_plugin::Kind),
+}
+
+enum Effect {
+    Rain(Rain),
+    Notice(Notice),
+}
+
+pub(crate) fn refresh_particle_source(particles: &mut ParticleHost, drawings: &super::Drawables) {
+    if particles.object_id == -1 {
+        particles.source = None;
+    } else if let Some(drawable) = drawings.get(particles.object_id as u32) {
+        let position = drawable.transform().position();
+        particles.source = Some(ParticleSource {
+            color: drawable.color().0,
+            position_2d: [position[0], position[1]],
+            position_3d: drawable.transform().base_point(),
+        });
+    }
+}
+
 enum ParticleRunner {
     Script(Box<ParticleTask>),
-    Rain {
+    Builtin {
+        kind: particle_plugin::Kind,
         host: Box<ParticleHost>,
-        effect: Option<Rain>,
+        effect: Option<Effect>,
         origin: u32,
         previous_time: u32,
     },
@@ -21,14 +45,14 @@ impl ParticleRunner {
     fn host(&self) -> &ParticleHost {
         match self {
             Self::Script(task) => &task.host,
-            Self::Rain { host, .. } => host,
+            Self::Builtin { host, .. } => host,
         }
     }
 
     fn host_mut(&mut self) -> &mut ParticleHost {
         match self {
             Self::Script(task) => &mut task.host,
-            Self::Rain { host, .. } => host,
+            Self::Builtin { host, .. } => host,
         }
     }
 
@@ -38,20 +62,26 @@ impl ParticleRunner {
         particles.active = true;
         match self {
             Self::Script(task) => task.origin = 0,
-            Self::Rain {
+            Self::Builtin {
+                kind,
                 host,
                 effect,
                 origin,
                 ..
             } => {
                 *origin = 0;
-                *effect = Some(if let Some(random) = services.random() {
-                    Rain::new(host, image, random)
-                } else {
-                    let mut random = std::mem::take(&mut host.random);
-                    let rain = Rain::new(host, image, &mut random);
-                    host.random = random;
-                    rain
+                *effect = Some(match kind {
+                    particle_plugin::Kind::Rain => {
+                        Effect::Rain(if let Some(random) = services.random() {
+                            Rain::new(host, image, random)
+                        } else {
+                            let mut random = std::mem::take(&mut host.random);
+                            let rain = Rain::new(host, image, &mut random);
+                            host.random = random;
+                            rain
+                        })
+                    }
+                    particle_plugin::Kind::Notice => Effect::Notice(Notice::new(host, image)),
                 });
             }
         }
@@ -61,17 +91,26 @@ impl ParticleRunner {
     fn update(&mut self, services: &mut dyn Host, now: u32, budget: usize) -> Result<bool> {
         match self {
             Self::Script(task) => services.update_particle(task, now, budget),
-            Self::Rain {
+            Self::Builtin {
                 host,
                 effect,
                 origin,
                 previous_time,
+                ..
             } => {
                 if !host.active {
                     return Ok(true);
                 }
-                if host.object_id != -1 {
-                    return Err(Error::new(0, "粒子外部来源查询尚未接入"));
+                host.surface_size = services.surface_size();
+                if host.object_id == -1 {
+                    host.source = None;
+                } else {
+                    refresh_particle_source(
+                        host,
+                        services
+                            .drawables()
+                            .ok_or_else(|| Error::new(0, "宿主未提供粒子来源查询服务"))?,
+                    );
                 }
                 if *origin == 0 {
                     *origin = now;
@@ -83,8 +122,16 @@ impl ParticleRunner {
                 *previous_time = now;
                 if let Some(effect) = effect {
                     let delta = host.elapsed.wrapping_sub(host.previous_elapsed);
-                    effect.update(delta, services.random().unwrap_or(&mut host.random));
-                    effect.write_mesh(host);
+                    match effect {
+                        Effect::Rain(effect) => {
+                            effect.update(delta, services.random().unwrap_or(&mut host.random));
+                            effect.write_mesh(host);
+                        }
+                        Effect::Notice(effect) => {
+                            effect.update(delta, host.source.unwrap_or_default().position_2d);
+                            effect.write_mesh(host);
+                        }
+                    }
                 }
                 host.previous_elapsed = host.elapsed;
                 Ok(true)
@@ -162,12 +209,12 @@ impl Particle3DObject {
                 return Ok(());
             };
             let program = if mode == 1 {
-                if !particle_plugin::is_rain(&bytes) {
-                    return Err(Error::new(0, "粒子插件类型或版本尚未接入"));
-                }
-                None
+                ParticleProgram::Builtin(
+                    particle_plugin::identify(&bytes)
+                        .ok_or_else(|| Error::new(0, "粒子插件类型或版本尚未接入"))?,
+                )
             } else {
-                Some(Program::parse(&bytes)?)
+                ParticleProgram::Script(Program::parse(&bytes)?)
             };
             let image = if name(0x84)?.is_empty() {
                 None
@@ -203,10 +250,11 @@ impl Particle3DObject {
         particles.reset_quads(read::u32_at(record, 0x104)? as usize, self.image_size)?;
         let mesh = ParticleMesh::new(&particles, texture, reference)?;
         self.task = Some(match program {
-            Some(program) => {
+            ParticleProgram::Script(program) => {
                 ParticleRunner::Script(Box::new(ParticleTask::new(program, particles)?))
             }
-            None => ParticleRunner::Rain {
+            ParticleProgram::Builtin(kind) => ParticleRunner::Builtin {
+                kind,
                 host: Box::new(particles),
                 effect: None,
                 origin: 0,

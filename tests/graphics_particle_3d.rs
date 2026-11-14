@@ -327,3 +327,82 @@ fn particle_mesh_projects_offsets_and_preserves_texture_lifetime_and_quad_flags(
     assert_eq!(image.pixels(), [3, 2, 1, 255]);
     Ok(())
 }
+
+#[test]
+fn particle_scripts_query_source_color_position_and_base_with_missing_source_retention()
+-> Result<()> {
+    let mut particle_code = Vec::new();
+    native(&mut particle_code, 47, &[]);
+    ins(&mut particle_code, 0x26, &[0]);
+    native(&mut particle_code, 48, &[4, 8]);
+    native(&mut particle_code, 49, &[12, 16, 20]);
+    particle_code.push(0x3b);
+    let mut code = Vec::new();
+    native(&mut code, 271, &[1, 0, 8, 1, 5000f32.to_bits(), 32]);
+    native(&mut code, 272, &[1]);
+    code.push(0x3b);
+    let mut data = vec![0; 256];
+    data[..5].copy_from_slice(b"test\0");
+    data[8..15].copy_from_slice(b"sprite\0");
+    let mut runtime = Runtime::new(
+        0,
+        kind::ROOT,
+        Box::new(BaseObject::new()),
+        State::new(0),
+        GraphicsFactory {
+            fallback: KcsFactory::new(Programs(Program::from_code(&code, data, 128)?)),
+        },
+    );
+    runtime.set_resources(Files(encoded(&particle_code, 2)));
+    runtime.create(0, kind::PARTICLE_3D, b"", b"")?;
+    let caller = runtime.create(0, kind::ORDINARY, b"", b"")?;
+    runtime.update(1, 1)?;
+    runtime.drawables_mut().insert(100, Drawable::default())?;
+    runtime.drawables_mut().set_color(100, 0x1234_5678, 0);
+    runtime.drawables_mut().set_position(100, [101., -27., 17.]);
+    runtime.drawables_mut().set_base_point(100, [3., 7., 5000.]);
+    let mut source = Command {
+        target: 1,
+        sender: caller,
+        code: 327,
+        data: [0, 100, 0],
+    };
+    runtime.dispatch_command(caller, source)?;
+    let expected: Vec<u8> = [
+        0x1234_5678,
+        101f32.to_bits(),
+        (-27f32).to_bits(),
+        3f32.to_bits(),
+        7f32.to_bits(),
+        5000f32.to_bits(),
+    ]
+    .into_iter()
+    .flat_map(u32::to_le_bytes)
+    .collect();
+    for frame in [2, 3] {
+        runtime.update(frame, 1)?;
+        assert_eq!(
+            runtime
+                .object(1)
+                .unwrap()
+                .interpreter()
+                .unwrap()
+                .read(0, 24)?,
+            expected
+        );
+        runtime.drawables_mut().remove(100);
+    }
+    source.data[1] = 0;
+    runtime.dispatch_command(caller, source)?;
+    runtime.update(4, 1)?;
+    assert_eq!(
+        runtime
+            .object(1)
+            .unwrap()
+            .interpreter()
+            .unwrap()
+            .read(0, 24)?,
+        [0; 24]
+    );
+    Ok(())
+}

@@ -62,9 +62,10 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             .as_ref()
             .map_or(60, |settings| settings.window_fps);
         task.host.surface_size = self.host.surface_size;
-        if task.host.object_id != -1 {
-            return Err(Error::new(0, "粒子外部来源查询尚未接入"));
-        }
+        crate::graphics::refresh_particle_source(
+            &mut task.host,
+            &self.resources.compositor.drawables,
+        );
         std::mem::swap(&mut self.host.random, &mut task.host.random);
         let result = task.update(now, budget);
         std::mem::swap(&mut self.host.random, &mut task.host.random);
