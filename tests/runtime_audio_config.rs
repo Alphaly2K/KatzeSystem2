@@ -69,7 +69,7 @@ fn native_configuration_queries_keep_three_lookup_modes_and_stack_results_across
         ],
         ..Default::default()
     };
-    let expected: [i32; 36] = [
+    let expected: [i32; 38] = [
         47,
         -2,
         -3,
@@ -106,6 +106,8 @@ fn native_configuration_queries_keep_three_lookup_modes_and_stack_results_across
         -7,
         0,
         -1,
+        25,
+        47,
     ];
     for budget in [1, 4096] {
         for address in [64, 0x8000_0040] {
@@ -121,6 +123,8 @@ fn native_configuration_queries_keep_three_lookup_modes_and_stack_results_across
                 (1001, address),
                 (1000, missing),
                 (1001, missing),
+                (995, address),
+                (995, missing),
             ]);
             for (i, (index, address)) in queries.into_iter().enumerate() {
                 ins(&mut code, 0x25, &[address]);

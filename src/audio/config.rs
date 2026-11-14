@@ -173,13 +173,27 @@ impl SoundConfig {
 
     /// 按文件前缀命中分支，自内向外应用分类音量与倍率，再应用独立主音量。
     pub fn effective_file_volume(&self, name: &[u8]) -> Result<i32> {
+        self.effective_volume(name, false)
+    }
+
+    /// 按文件前缀应用语音期间的分类音量、两种静音开关及主音量。
+    pub fn effective_file_voice_volume(&self, name: &[u8]) -> Result<i32> {
+        self.effective_volume(name, true)
+    }
+
+    fn effective_volume(&self, name: &[u8], voice: bool) -> Result<i32> {
         if self.master_mute() != 0 {
             return Ok(0);
         }
         let mut volume = 100i32;
         for part in self.find_path(name, Match::Prefix)?.iter().rev() {
-            volume = if part.mute == 0 {
-                part.volume.wrapping_mul(volume) / 100
+            volume = if part.mute == 0 && (!voice || part.voice_mute == 0) {
+                let value = if voice {
+                    part.voice_volume
+                } else {
+                    part.volume
+                };
+                value.wrapping_mul(volume) / 100
             } else {
                 0
             };

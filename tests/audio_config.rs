@@ -175,11 +175,13 @@ fn effective_volume_applies_the_matched_branch_inside_out_with_per_stage_wrappin
             name: b"parent".to_vec(),
             master_volume: 33,
             volume: 37,
+            voice_volume: 61,
             mute: 0,
             children: vec![SoundPart {
                 file_prefix: b"AB".to_vec(),
                 master_volume: 65,
                 volume: 83,
+                voice_volume: 79,
                 mute: 0,
                 ..Default::default()
             }],
@@ -188,6 +190,14 @@ fn effective_volume_applies_the_matched_branch_inside_out_with_per_stage_wrappin
         ..Default::default()
     };
     assert_eq!(config.effective_file_volume(b"ab.ogg").unwrap(), 2);
+    assert_eq!(config.effective_file_voice_volume(b"ab.ogg").unwrap(), 4);
+    config.parts[0].children[0].voice_mute = 1;
+    assert_eq!(config.effective_file_voice_volume(b"ab.ogg").unwrap(), 0);
+    assert_eq!(config.effective_file_volume(b"ab.ogg").unwrap(), 2);
+    config.parts[0].children[0].voice_mute = 0;
+    config.parts[0].voice_mute = 1;
+    assert_eq!(config.effective_file_voice_volume(b"ab.ogg").unwrap(), 0);
+    config.parts[0].voice_mute = 0;
     assert_eq!(config.file_volume(b"ab.ogg").unwrap(), 83);
     assert_eq!(config.effective_file_volume(b"missing").unwrap(), 47);
     config.parts[0].file_prefix = b"AB".to_vec();
