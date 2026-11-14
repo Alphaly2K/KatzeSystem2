@@ -528,6 +528,13 @@ impl TaskObject for ImageListObject {
                 }
             }
             310 => self.enabled = b,
+            313 => {
+                write(buffers.data1.as_deref_mut(), 0)?;
+                if let Some(list) = &self.list {
+                    let pixels = list.source_pixels(key, images(host)?)?;
+                    write(buffers.data1.as_deref_mut(), pixels)?;
+                }
+            }
             314 => {
                 if let Some(list) = &mut self.list {
                     let size = [a, b];

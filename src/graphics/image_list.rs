@@ -458,6 +458,13 @@ impl ImageList {
             .min_by_key(|&key| key as i32)
     }
 
+    /// 查询条目的当前像素来源；缺失时返回零，不增加引用或推进动画。
+    pub fn source_pixels(&self, key: u32, images: &Images) -> Result<u32> {
+        self.entries
+            .get(&key)
+            .map_or(Ok(0), |entry| images.pixel_handle(entry.image))
+    }
+
     /// 按有符号 key 查找当前像素身份；不增加引用或推进动画。
     pub fn find_pixels(&self, pixels: u32, images: &Images) -> Result<Option<u32>> {
         let mut found = None;

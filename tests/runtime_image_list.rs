@@ -780,6 +780,31 @@ fn failed_child_creation_preserves_the_list_until_reinitialization_and_retries_t
 
 #[test]
 fn pixel_lookup_uses_signed_keys_and_preserves_missing_output_and_buffer_tails() {
+    fn source<F: ObjectFactory>(
+        runtime: &mut Runtime<F>,
+        list: u32,
+        slot: u32,
+        sender: u32,
+    ) -> u32 {
+        let mut buffer = [0xa5; 8];
+        let mut query = command(list, 313, slot, 0);
+        query.sender = sender;
+        assert_eq!(
+            runtime
+                .dispatch_command_with_buffers(
+                    0,
+                    query,
+                    &mut CommandBuffers {
+                        data1: Some(&mut buffer),
+                        ..Default::default()
+                    },
+                )
+                .unwrap(),
+            0
+        );
+        assert_eq!(buffer[4..], [0xa5; 4]);
+        u32::from_le_bytes(buffer[..4].try_into().unwrap())
+    }
     let mut runtime = Runtime::new(
         0,
         kind::ROOT,
@@ -790,9 +815,10 @@ fn pixel_lookup_uses_signed_keys_and_preserves_missing_output_and_buffer_tails()
     runtime.host_mut().surface_size = [2, 2];
     runtime.drawing_mut().target = Some(RenderTarget::new([2, 2]).unwrap());
     let list = runtime.create(0, kind::IMAGE_LIST, b"list", b"").unwrap();
+    assert_eq!(source(&mut runtime, list, 7, 0), 0);
     send(&mut runtime, list, 285, 2, 2);
-    let source = runtime.images_mut().create(99, [1, 1]).unwrap();
-    let pixels = runtime.images().pixel_handle(source).unwrap();
+    let image = runtime.images_mut().create(99, [1, 1]).unwrap();
+    let pixels = runtime.images().pixel_handle(image).unwrap();
     let mut record: Vec<_> = [
         pixels,
         0,
@@ -826,7 +852,17 @@ fn pixel_lookup_uses_signed_keys_and_preserves_missing_output_and_buffer_tails()
             )
             .unwrap();
     }
-    runtime.images_mut().release(source).unwrap();
+    runtime.images_mut().release(image).unwrap();
+    for (slot, sender, expected) in [
+        (7, 0, pixels),
+        (0x8002, 0, pixels),
+        (0x10007, 0, pixels),
+        (2, 0x8000_0000, pixels),
+        (99, 0, 0),
+        (7, 1, 0),
+    ] {
+        assert_eq!(source(&mut runtime, list, slot, sender), expected);
+    }
     for (query, expected) in [(0, None), (pixels, Some(0x8002)), (u32::MAX, None)] {
         let mut slot = [0xa5; 8];
         let found = runtime
@@ -848,6 +884,7 @@ fn pixel_lookup_uses_signed_keys_and_preserves_missing_output_and_buffer_tails()
         assert_eq!(slot[4..], [0xa5; 4]);
     }
     send(&mut runtime, list, 287, 0x8002, 0);
+    assert_eq!(source(&mut runtime, list, 0x8002, 0), 0);
     let mut slot = [0; 4];
     assert_eq!(
         runtime
@@ -866,6 +903,68 @@ fn pixel_lookup_uses_signed_keys_and_preserves_missing_output_and_buffer_tails()
     assert_eq!(u32::from_le_bytes(slot), 7);
     send(&mut runtime, list, 287, 7, 0);
     assert_eq!(send(&mut runtime, list, 307, pixels, 0), 0);
+}
+
+#[test]
+fn ordinary_source_query_uses_sender_keys_and_returns_current_pixels() -> Result<()> {
+    struct Queries;
+    impl ProgramLoader for Queries {
+        fn load(&mut self, _: &[u8]) -> Result<Option<Program>> {
+            let mut code = Vec::new();
+            push(&mut code, 0xdead_beef);
+            for (index, values) in [[1, 7], [1, 99], [0, 7]].into_iter().enumerate() {
+                for value in values {
+                    push(&mut code, value);
+                }
+                call(&mut code, 657, 8);
+                code.extend([0x26, 3]);
+                code.extend((index as u32 * 4).to_le_bytes());
+            }
+            code.push(0x3b);
+            Ok(Some(Program::from_code(&code, vec![0; 12], 64)?))
+        }
+    }
+    for budget in [1, 4096] {
+        let mut runtime = Runtime::new(
+            0,
+            kind::ROOT,
+            Box::new(BaseObject::new()),
+            State::new(0),
+            GraphicsFactory {
+                fallback: KcsFactory::new(Queries),
+            },
+        );
+        runtime.set_budget(budget, 10000);
+        runtime.host_mut().surface_size = [2, 2];
+        runtime.drawing_mut().target = Some(RenderTarget::new([2, 2])?);
+        let list = runtime.create(0, kind::IMAGE_LIST, b"list", b"")?;
+        assert_eq!(list, 1);
+        send(&mut runtime, list, 285, 2, 2);
+        let script = runtime.create(0, kind::ORDINARY, b"queries", b"")?;
+        let image = runtime.images_mut().create(99, [1, 1])?;
+        let pixels = runtime.images().pixel_handle(image)?;
+        let mut record = [0; 60];
+        record[..4].copy_from_slice(&pixels.to_le_bytes());
+        let mut register = command(list, 286, 7, 0);
+        register.sender = script;
+        runtime.dispatch_command_with_buffers(
+            0,
+            register,
+            &mut CommandBuffers {
+                data1: Some(&mut record),
+                ..Default::default()
+            },
+        )?;
+        runtime.images_mut().release(image)?;
+        runtime.update(1, 1)?;
+        let vm = runtime.object(script).unwrap().interpreter().unwrap();
+        assert_eq!(
+            vm.read(0, 12)?,
+            [pixels, 0, 0].map(u32::to_le_bytes).concat()
+        );
+        assert_eq!(vm.stack_bytes(), 0xdead_beefu32.to_le_bytes());
+    }
+    Ok(())
 }
 
 fn buffer_command<F: ObjectFactory>(

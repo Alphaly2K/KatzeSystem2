@@ -136,7 +136,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             | 1067
             | 1069 => 4,
             82 | 88 | 92 | 94 | 95 | 97 | 102 | 103 | 105 | 106 | 258 | 262 | 402 | 455 | 462
-            | 464 | 466 | 534 | 653 | 848 | 849 | 1066 | 1068 => 8,
+            | 464 | 466 | 534 | 653 | 657 | 848 | 849 | 1066 | 1068 => 8,
             880 => 16,
             339 => 24,
             84 | 87 | 93 | 101 | 345 | 862 => 20,
@@ -152,7 +152,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         let route_zero = matches!(
             index,
             104 | 105 | 106 | 107 | 256 | 258 | 260 | 261 | 262 | 263 | 339..=342 | 402 | 455 | 732 | 462
-                ..=464 | 534 | 570 | 572 | 625 | 653 | 663 | 848 | 849 | 862 | 879..=881 | 1065..=1069
+                ..=464 | 534 | 570 | 572 | 625 | 653 | 657 | 663 | 848 | 849 | 862 | 879..=881 | 1065..=1069
         );
         if route_zero && arguments.len() != count {
             return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
@@ -487,6 +487,19 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     },
                 )?;
                 return Ok(NativeReturn::Value(u32::from_le_bytes(image)));
+            }
+            657 => {
+                let mut pixels = [0; 4];
+                self.command_target_with_buffers(
+                    target,
+                    313,
+                    [word(1), 0, 0],
+                    &mut CommandBuffers {
+                        data1: Some(&mut pixels),
+                        ..Default::default()
+                    },
+                )?;
+                return Ok(NativeReturn::Value(u32::from_le_bytes(pixels)));
             }
             262 | 534 => {
                 self.command_target(
