@@ -10,14 +10,14 @@ use std::sync::{
 
 const CLIP: &[u8] = include_bytes!("fixtures/movie/clip.mpg");
 
-struct ShortReads(Arc<AtomicUsize>);
+struct ShortReads(&'static [u8], Arc<AtomicUsize>);
 impl ReadSource for ShortReads {
     fn len(&self) -> Result<u64> {
-        Ok(CLIP.len() as u64)
+        Ok(self.0.len() as u64)
     }
     fn read_at(&self, offset: u64, output: &mut [u8]) -> Result<usize> {
-        self.0.fetch_max(output.len(), Ordering::Relaxed);
-        let bytes = CLIP.get(offset as usize..).unwrap_or_default();
+        self.1.fetch_max(output.len(), Ordering::Relaxed);
+        let bytes = self.0.get(offset as usize..).unwrap_or_default();
         let count = bytes.len().min(output.len()).min(79);
         output[..count].copy_from_slice(&bytes[..count]);
         Ok(count)
@@ -27,7 +27,7 @@ impl ReadSource for ShortReads {
 #[test]
 fn streaming_movie_detects_undeclared_audio_and_preserves_frames_samples_and_eof() {
     let largest = Arc::new(AtomicUsize::new(0));
-    let mut decoder = Decoder::new(Arc::new(ShortReads(largest.clone()))).unwrap();
+    let mut decoder = Decoder::new(Arc::new(ShortReads(CLIP, largest.clone()))).unwrap();
     let metadata = decoder.metadata();
     assert_eq!(metadata.size, [32, 32]);
     assert_eq!(metadata.frame_rate, 25.);
@@ -82,6 +82,61 @@ fn streaming_movie_detects_undeclared_audio_and_preserves_frames_samples_and_eof
             > 10000
     );
     assert!(largest.load(Ordering::Relaxed) <= 32768);
+}
+
+#[test]
+fn mp3_movie_streams_keep_variable_frames_mono_stereo_and_replay_state() {
+    for (bytes, mono) in [
+        (
+            include_bytes!("fixtures/movie/clip-mp3.mpg").as_slice(),
+            false,
+        ),
+        (
+            include_bytes!("fixtures/movie/clip-mp3-mono.mpg").as_slice(),
+            true,
+        ),
+    ] {
+        let largest = Arc::new(AtomicUsize::new(0));
+        let mut decoder = Decoder::new(Arc::new(ShortReads(bytes, largest.clone()))).unwrap();
+        let metadata = decoder.metadata();
+        assert_eq!(metadata.size, [32, 32]);
+        assert_eq!(metadata.frame_rate, 25.);
+        assert_eq!(metadata.sample_rate, 44100);
+        let mut reference = None;
+        for pass in 0..2 {
+            let mut frames = Vec::new();
+            let mut samples = Vec::new();
+            let mut ended = false;
+            for _ in 0..120 {
+                let decoded = decoder.advance(1. / 60.).unwrap();
+                if let Some(video) = decoded.video {
+                    frames.push(video.time);
+                }
+                if let Some(audio) = decoded.audio {
+                    assert!((audio.time - samples.len() as f64 / 2. / 44100.).abs() < 1e-9);
+                    samples.extend(audio.samples);
+                }
+                if decoded.ended {
+                    ended = true;
+                    break;
+                }
+            }
+            assert!(ended);
+            assert_eq!(frames, [0., 0.04, 0.08, 0.12]);
+            assert!(samples.iter().all(|s| s.is_finite() && s.abs() <= 1.));
+            assert!(samples.iter().filter(|&&s| s.abs() > 0.01).count() > 6000);
+            assert_eq!(samples.chunks_exact(2).all(|p| p[0] == p[1]), mono);
+            if let Some(reference) = &reference {
+                assert_eq!(&samples, reference);
+            } else {
+                reference = Some(samples);
+            }
+            if pass == 0 {
+                decoder.rewind().unwrap();
+            }
+        }
+        assert!(largest.load(Ordering::Relaxed) <= 32768);
+    }
 }
 
 struct Broken(u8);

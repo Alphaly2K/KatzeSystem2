@@ -1,5 +1,10 @@
 #include <stddef.h>
+#define MINIMP3_ONLY_MP3
+#define MINIMP3_FLOAT_OUTPUT
+#define MINIMP3_IMPLEMENTATION
+#include "minimp3.h"
 #define PLM_NO_STDIO
+#define PLM_AUDIO_MP3
 #define PL_MPEG_IMPLEMENTATION
 #include "pl_mpeg.h"
 

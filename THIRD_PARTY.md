@@ -75,4 +75,6 @@ macOS 图形后端使用 Metal 的 Rust 绑定。以下依赖选择 MIT 分支�
 
 SDL2 使用 bundled／static-link 构建，设备由同一套跨平台接口选择。CMake 4 构建旧版 SDL 时，需要最低策略版本 3.5；Cargo 配置提供可覆盖的默认环境值。
 
-MPEG-1／MP2 解码使用 [PL_MPEG](https://github.com/phoboslab/pl_mpeg)，固定修订 `c871f2be022ece7ef4f64230b4fb8e1fb9eb6023`。未修改的头文件保留上游作者及 MIT 声明，源码存于 `vendor/pl_mpeg`，分发时保留[许可与来源](licenses/pl_mpeg)。MIT 与本项目的 LGPL-2.1 兼容，无额外源码公开义务；本项目自身的 LGPL 分发义务继续适用。构建依赖 cc 1.11.1 选择上表的 MIT 分支，最低 Rust 版本为 1.65，适用于项目的 Rust 1.87；其传递构建依赖已列于上表。解码器通过回调读取资源，不启用标准文件接口，也不调用外部媒体程序。
+MPEG-1／MP2 解码使用 [PL_MPEG](https://github.com/phoboslab/pl_mpeg)，固定修订 `c871f2be022ece7ef4f64230b4fb8e1fb9eb6023`。头文件保留上游作者及 MIT 声明，本地扩展加入 MPEG-1 Layer III 音轨支持，源码存于 `vendor/pl_mpeg`，分发时保留[许可与来源](licenses/pl_mpeg)。MIT 与本项目的 LGPL-2.1 兼容，无额外源码公开义务；本项目自身的 LGPL 分发义务继续适用。构建依赖 cc 1.11.1 选择上表的 MIT 分支，最低 Rust 版本为 1.65，适用于项目的 Rust 1.87；其传递构建依赖已列于上表。解码器通过回调读取资源，不启用标准文件接口，也不调用外部媒体程序。
+
+MP3 音轨使用 [minimp3](https://github.com/lieff/minimp3)，固定修订 `ea99364f61c14656440e8d77e9c233ccf3124633`。未修改的头文件存于 `vendor/minimp3`，采用 [CC0 1.0](licenses/minimp3/LICENSE-CC0)，[来源](licenses/minimp3/SOURCE.md)随代码保留。CC0 允许复制、修改和分发，无署名或源码提供条件，与项目的 LGPL-2.1 兼容；项目自身的 LGPL 分发义务继续适用。

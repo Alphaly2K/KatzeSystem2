@@ -1,4 +1,4 @@
-//! MPEG-1 视频与 MP2 立体声的流式解码；输入不依赖平台文件路径。
+//! MPEG-1 视频与 MP2／MP3 立体声的流式解码；输入不依赖平台文件路径。
 
 mod ffi;
 mod playback;
@@ -96,7 +96,7 @@ impl Decoder {
         };
         decoder.check_error()?;
         if !valid {
-            return Err(Error::new(0, "电影缺少可解码的 MPEG-1／MP2 流头"));
+            return Err(Error::new(0, "电影缺少可解码的 MPEG-1／MP2／MP3 流头"));
         }
         let metadata = unsafe {
             Metadata {

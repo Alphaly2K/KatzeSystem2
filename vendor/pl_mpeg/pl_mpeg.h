@@ -4,6 +4,8 @@ SPDX-License-Identifier: MIT
 
 Dominic Szablewski - https://phoboslab.org
 
+Local extension: optional MPEG-1 Layer III audio through minimp3.
+
 
 -- Synopsis
 
@@ -3881,6 +3883,9 @@ struct plm_audio_t {
 	float D[1024];
 	float V[2][1024];
 	float U[32];
+	#ifdef PLM_AUDIO_MP3
+	mp3dec_t mp3;
+	#endif
 };
 
 int plm_audio_find_frame_sync(plm_audio_t *self);
@@ -3945,6 +3950,9 @@ void plm_audio_rewind(plm_audio_t *self) {
 	self->time = 0;
 	self->samples_decoded = 0;
 	self->next_frame_data_size = 0;
+	#ifdef PLM_AUDIO_MP3
+	mp3dec_init(&self->mp3);
+	#endif
 }
 
 int plm_audio_has_ended(plm_audio_t *self) {
@@ -3984,7 +3992,11 @@ int plm_audio_find_frame_sync(plm_audio_t *self) {
 	for (i = self->buffer->bit_index >> 3; i < self->buffer->length-1; i++) {
 		if (
 			self->buffer->bytes[i] == 0xFF &&
-			(self->buffer->bytes[i+1] & 0xFE) == 0xFC
+			((self->buffer->bytes[i+1] & 0xFE) == 0xFC
+			#ifdef PLM_AUDIO_MP3
+			|| (self->buffer->bytes[i+1] & 0xFE) == 0xFA
+			#endif
+			)
 		) {
 			self->buffer->bit_index = ((i+1) << 3) + 3;
 			return TRUE;
@@ -4020,13 +4032,17 @@ int plm_audio_decode_header(plm_audio_t *self) {
 
 	if (
 		self->version != PLM_AUDIO_MPEG_1 ||
-		self->layer != PLM_AUDIO_LAYER_II
+		(self->layer != PLM_AUDIO_LAYER_II
+		#ifdef PLM_AUDIO_MP3
+		&& self->layer != PLM_AUDIO_LAYER_III
+		#endif
+		)
 	) {
 		return 0;
 	}
 
 	int bitrate_index = plm_buffer_read(self->buffer, 4) - 1;
-	if (bitrate_index > 13) {
+	if (bitrate_index < 0 || bitrate_index > 13) {
 		return 0;
 	}
 
@@ -4043,9 +4059,12 @@ int plm_audio_decode_header(plm_audio_t *self) {
 	// are still the same, otherwise we might have missed sync.
 	if (
 		self->has_header && (
-			self->bitrate_index != bitrate_index ||
 			self->samplerate_index != samplerate_index ||
-			self->mode != mode
+			(
+			#ifdef PLM_AUDIO_MP3
+			self->layer != PLM_AUDIO_LAYER_III &&
+			#endif
+			(self->bitrate_index != bitrate_index || self->mode != mode))
 		)
 	) {
 		return 0;
@@ -4074,12 +4093,50 @@ int plm_audio_decode_header(plm_audio_t *self) {
 	// Compute frame size, check if we have enough data to decode the whole
 	// frame.
 	int bitrate = PLM_AUDIO_BIT_RATE[self->bitrate_index];
+	#ifdef PLM_AUDIO_MP3
+	if (self->layer == PLM_AUDIO_LAYER_III) {
+		static const short rates[] = {
+			32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320
+		};
+		bitrate = rates[self->bitrate_index];
+	}
+	#endif
 	int samplerate = PLM_AUDIO_SAMPLE_RATE[self->samplerate_index];
 	int frame_size = (144000 * bitrate / samplerate) + padding;
+	#ifdef PLM_AUDIO_MP3
+	if (self->layer == PLM_AUDIO_LAYER_III) {
+		// minimp3 consumes the complete frame, including its header and CRC.
+		self->buffer->bit_index -= hasCRC ? 48 : 32;
+		return frame_size;
+	}
+	#endif
 	return frame_size - (hasCRC ? 6 : 4);
 }
 
 void plm_audio_decode_frame(plm_audio_t *self) {
+	#ifdef PLM_AUDIO_MP3
+	if (self->layer == PLM_AUDIO_LAYER_III) {
+		float pcm[MINIMP3_MAX_SAMPLES_PER_FRAME];
+		mp3dec_frame_info_t info = {0};
+		int count = mp3dec_decode_frame(
+			&self->mp3, self->buffer->bytes + (self->buffer->bit_index >> 3),
+			self->next_frame_data_size, pcm, &info
+		);
+		for (int i = 0; i < PLM_AUDIO_SAMPLES_PER_FRAME; i++) {
+			float left = i < count ? pcm[i * info.channels] : 0;
+			float right = i < count ? pcm[i * info.channels + (info.channels == 2)] : 0;
+			#ifdef PLM_AUDIO_SEPARATE_CHANNELS
+			self->samples.left[i] = left;
+			self->samples.right[i] = right;
+			#else
+			self->samples.interleaved[i * 2] = left;
+			self->samples.interleaved[i * 2 + 1] = right;
+			#endif
+		}
+		self->buffer->bit_index += self->next_frame_data_size << 3;
+		return;
+	}
+	#endif
 	// Prepare the quantizer table lookups
 	int tab3 = 0;
 	int sblimit = 0;

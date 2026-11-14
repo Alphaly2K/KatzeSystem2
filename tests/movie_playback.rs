@@ -70,23 +70,31 @@ fn movie_clock_follows_audio_and_restarts_full_passes_without_touching_sound_cha
 
 #[test]
 fn connected_mixer_consumes_movie_audio_with_volume_and_continuous_resampling() {
-    let mut player = Player::new(source()).unwrap();
-    let mut sound = SoundState::default();
-    let mut mixer = sound.connect_output().unwrap();
-    sound.set_movie_output(Some(player.audio_output()));
-    player.set_volume(0);
-    player.play(1).unwrap();
-    let mut muted = [0.; 2048];
-    mixer.render(44100, &mut muted).unwrap();
-    assert!(muted.iter().all(|&sample| sample == 0.));
-    assert!(player.time() > 0.);
-    player.set_volume(50);
-    let mut output = [0.; 128];
-    mixer.render(44100, &mut output).unwrap();
-    assert!(output.iter().any(|&sample| sample.abs() > 0.01));
-    assert!(output.iter().all(|sample| sample.abs() < 0.2));
-    player.stop().unwrap();
-    output.fill(1.);
-    mixer.render(44100, &mut output).unwrap();
-    assert!(output.iter().all(|&sample| sample == 0.));
+    for bytes in [
+        include_bytes!("fixtures/movie/clip.mpg").as_slice(),
+        include_bytes!("fixtures/movie/clip-mp3.mpg").as_slice(),
+    ] {
+        for rate in [44100, 48000] {
+            let mut player = Player::new(Arc::new(bytes.to_vec())).unwrap();
+            let mut sound = SoundState::default();
+            let mut mixer = sound.connect_output().unwrap();
+            sound.set_movie_output(Some(player.audio_output()));
+            player.set_volume(0);
+            player.play(1).unwrap();
+            // 先消费两种编码片段的起始延迟，再检查恢复音量后的输出。
+            let mut muted = [0.; 4096];
+            mixer.render(rate, &mut muted).unwrap();
+            assert!(muted.iter().all(|&sample| sample == 0.));
+            assert!(player.time() > 0.);
+            player.set_volume(50);
+            let mut output = [0.; 128];
+            mixer.render(rate, &mut output).unwrap();
+            assert!(output.iter().any(|&sample| sample.abs() > 0.01));
+            assert!(output.iter().all(|sample| sample.abs() < 0.2));
+            player.stop().unwrap();
+            output.fill(1.);
+            mixer.render(rate, &mut output).unwrap();
+            assert!(output.iter().all(|&sample| sample == 0.));
+        }
+    }
 }
