@@ -389,6 +389,70 @@ fn page_flip_captures_refreshes_and_releases_the_scene_with_foreground_preserved
 }
 
 #[test]
+fn cell_flip_uses_both_captures_keeps_foreground_and_releases_the_targets() {
+    let mut rt = engine();
+    capture(&mut rt);
+    let id = rt.create(0, kind::CFLIP, b"cells", b"").unwrap();
+    execute(
+        &mut rt,
+        &[
+            (970, &[id]),
+            (
+                971,
+                &[
+                    id,
+                    8,
+                    3,
+                    2,
+                    0,
+                    3f32.to_bits(),
+                    std::f32::consts::FRAC_PI_2.to_bits(),
+                    0xff778899,
+                    123,
+                    10f32.to_bits(),
+                ],
+            ),
+            (972, &[id, 7]),
+            (973, &[id]),
+            (970, &[0]),
+            (971, &[0]),
+            (972, &[0]),
+            (973, &[0]),
+        ],
+    );
+    rt.drawables_mut().set_color(100, 0xff224466, u32::MAX);
+    rt.drawables_mut()
+        .insert(101, Drawable::rectangle([2., 2., 0.], [2., 2.], 0xff557733))
+        .unwrap();
+    rt.drawables_mut().set_display(101, 1);
+    rt.drawables_mut().set_base_point(101, [0., 0., 20.]);
+    let render = |rt: &mut Engine| {
+        let mut output = RenderTarget::new([8, 6]).unwrap();
+        rt.compose_frame()
+            .unwrap()
+            .render_into(&mut output, rt.drawing().target.as_ref())
+            .unwrap();
+        output
+    };
+    assert_eq!(state(&mut rt, id), 7);
+    assert_eq!(render(&mut rt).pixel(0, 0), Some(0xff112233));
+    rt.update(2, 1).unwrap();
+    let flipped = render(&mut rt);
+    assert_eq!(flipped.pixel(0, 0), Some(0xff778899));
+    assert_eq!(flipped.pixel(2, 2), Some(0xff557733));
+    rt.update(8, 1).unwrap();
+    assert_eq!(state(&mut rt, id), 7);
+    let finished = render(&mut rt);
+    assert_eq!(state(&mut rt, id), 0);
+    assert_eq!(finished.pixel(0, 0), Some(0xffabcdef));
+    execute_at(&mut rt, &[(859, &[1, 0, 10f32.to_bits()])], 8);
+    assert_eq!(render(&mut rt).pixel(0, 0), Some(0xff224466));
+    rt.destroy(id).unwrap();
+    assert!(rt.compositor().auxiliary_targets().is_empty());
+    assert_eq!(render(&mut rt).pixel(0, 0), Some(0xff224466));
+}
+
+#[test]
 fn render_wipe_uses_image_wrappers_and_keeps_foreground_and_stopped_pixels() {
     for native in [530, 905] {
         let mut rt = engine();

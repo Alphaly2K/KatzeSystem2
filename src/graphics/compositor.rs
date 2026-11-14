@@ -6,6 +6,7 @@ pub(super) enum ScreenEffect {
     Mosaic(u32),
     Shatter(u32),
     PageFlip(u32),
+    CellFlip(u32),
     RWipe(u32),
 }
 
@@ -19,6 +20,7 @@ pub struct Compositor {
     pub(crate) mosaics: super::mosaic::Mosaics,
     pub(crate) shatters: super::shatter::Shatters,
     pub(crate) page_flips: std::collections::BTreeMap<u32, super::page_flip::PageFlip>,
+    pub(crate) cell_flips: std::collections::BTreeMap<u32, super::cell_flip::CellFlip>,
     pub(crate) rwipes: std::collections::BTreeMap<u32, super::rwipe::RWipe>,
     pub(crate) drawing_rect: Option<super::Rect>,
     pub(super) screen_effect: Option<ScreenEffect>,
@@ -138,6 +140,22 @@ impl Compositor {
                 self.drawables
                     .compose(&projection, parent, filter, Some([0., depth]))?;
             frame.commands.splice(0..0, effect.background());
+            frame.commands.extend(effect.frame());
+            frame.commands.extend(
+                self.drawables
+                    .compose(&projection, parent, filter, Some([depth, 1_000_000.]))?
+                    .commands,
+            );
+            return Ok(frame);
+        }
+        if let Some(ScreenEffect::CellFlip(id)) = self.screen_effect {
+            let effect = self.cell_flips.get_mut(&id).unwrap();
+            let depth = effect.depth;
+            let mut frame =
+                self.drawables
+                    .compose(&projection, parent, filter, Some([0., depth]))?;
+            frame.commands.splice(0..0, effect.clear());
+            frame.commands.extend(effect.background());
             frame.commands.extend(effect.frame());
             frame.commands.extend(
                 self.drawables

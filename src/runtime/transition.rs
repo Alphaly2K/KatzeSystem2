@@ -10,25 +10,31 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         arguments: &[u8],
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
-        if matches!(index, 967..=969) {
+        if matches!(index, 967..=973) {
             let target = read::u32_at(arguments, 0)?;
             let length = match index {
                 967 => 28,
-                968 => 8,
+                971 => 40,
+                968 | 972 => 8,
                 _ => 4,
             };
             if arguments.len() != length && !(target == 0 && arguments.len() == 4) {
                 return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
             }
             if target != 0 {
-                if index == 967 {
-                    let mut record = Vec::with_capacity(24);
-                    for offset in [20, 24, 4, 8, 12, 16] {
+                if matches!(index, 967 | 971) {
+                    let offsets: &[usize] = if index == 967 {
+                        &[20, 24, 4, 8, 12, 16]
+                    } else {
+                        &[32, 36, 4, 8, 12, 16, 20, 24, 28]
+                    };
+                    let mut record = Vec::with_capacity(offsets.len() * 4);
+                    for &offset in offsets {
                         record.extend_from_slice(&arguments[offset..offset + 4]);
                     }
                     self.command_target_with_buffers(
                         target,
-                        396,
+                        if index == 967 { 396 } else { 400 },
                         [0; 3],
                         &mut CommandBuffers {
                             data1: Some(&mut record),
@@ -38,10 +44,16 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                 } else {
                     self.command_target(
                         target,
-                        if index == 968 { 397 } else { 398 },
+                        match index {
+                            968 => 397,
+                            969 => 398,
+                            970 => 399,
+                            972 => 401,
+                            _ => 402,
+                        },
                         [
                             0,
-                            if index == 968 {
+                            if matches!(index, 968 | 972) {
                                 read::u32_at(arguments, 4)?
                             } else {
                                 0

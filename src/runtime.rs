@@ -64,6 +64,7 @@ pub mod kind {
     pub const RENDER_FMOSAIC: u32 = 51;
     pub const RENDER_WBREAK: u32 = 52;
     pub const PFLIP: u32 = 57;
+    pub const CFLIP: u32 = 58;
     pub const STRING_PLANE_UTF8: u32 = 63;
     pub const CAMERA_2D: u32 = 65;
     /// 粒子任务（`kcTaskParticle`）；控制属性已接入，装载、播放及绘制待接入。
