@@ -13,6 +13,36 @@ pub(super) fn call(
     arguments: &[u8],
     vm: &mut Interpreter,
 ) -> Result<NativeReturn> {
+    if matches!(index, 609 | 610) {
+        super::words(arguments, 0, vm.pc)?;
+        let count = state.shared.len();
+        if count == 0 {
+            return Ok(NativeReturn::Continue);
+        }
+        if index == 609 {
+            // 原入口直接以标志数量作为复制字节数，不乘 DWORD 大小。
+            host.flag_backup = Some(
+                state
+                    .shared
+                    .iter()
+                    .flat_map(|value| value.to_le_bytes())
+                    .take(count)
+                    .collect(),
+            );
+        } else {
+            let bytes = host
+                .flag_backup
+                .as_ref()
+                .filter(|bytes| bytes.len() == count)
+                .ok_or_else(|| Error::new(vm.pc, "数值区尚无匹配的备份"))?;
+            for (slot, bytes) in state.shared.iter_mut().zip(bytes.chunks(4)) {
+                let mut word = slot.to_le_bytes();
+                word[..bytes.len()].copy_from_slice(bytes);
+                *slot = i32::from_le_bytes(word);
+            }
+        }
+        return Ok(NativeReturn::Continue);
+    }
     if index == 567 {
         let args = super::words(arguments, 2, vm.pc)?;
         let name = vm.read_string(args[0])?.to_vec();

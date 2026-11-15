@@ -96,6 +96,19 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                 Ok(NativeReturn::Continue)
             }
             RuntimeHandler::SharedRecord => self.shared_record(index, arguments, vm),
+            RuntimeHandler::FlagBackup => {
+                if !arguments.is_empty() {
+                    return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+                }
+                if !self
+                    .running
+                    .get(&self.host.task_id)
+                    .is_some_and(|task| task.shared_numbers == Some(true))
+                {
+                    return Ok(NativeReturn::Continue);
+                }
+                call_native(self.numbers, self.host, None, index, arguments, vm)
+            }
             RuntimeHandler::SoundLoop => self.load_sound_loop_table(arguments, vm),
             RuntimeHandler::SoundControl => self.control_sound_native(index, arguments, vm),
             RuntimeHandler::SoundLoad => self.load_sound_native(index, arguments, vm),

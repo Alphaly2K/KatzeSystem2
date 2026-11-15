@@ -102,6 +102,8 @@ pub(super) fn core(index: u32) -> CoreHandler {
         | 392
         | 393
         | 465
+        | 609
+        | 610
         | 629
         | 1040
         | 1049 => CoreHandler::System,
@@ -186,6 +188,7 @@ pub(crate) enum RuntimeHandler {
     Motion,
     SequenceFile,
     SharedRecord,
+    FlagBackup,
     SoundLoop,
     SoundControl,
     SoundLoad,
@@ -221,6 +224,7 @@ pub(crate) fn runtime(index: u32) -> RuntimeHandler {
         294..=317 | 388 | 440 | 514 | 535 | 586 => RuntimeHandler::Motion,
         458 => RuntimeHandler::SequenceFile,
         240 | 250 => RuntimeHandler::SharedRecord,
+        609 | 610 => RuntimeHandler::FlagBackup,
         400 => RuntimeHandler::SoundLoop,
         156..=168 | 347..=349 | 903 => RuntimeHandler::SoundControl,
         604 | 935 | 936 => RuntimeHandler::SoundLoad,

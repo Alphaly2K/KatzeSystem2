@@ -100,3 +100,125 @@ fn native_output_can_rewrite_the_popped_index_before_reading_the_count() {
         .unwrap();
     assert_eq!(vm.read(0x80000000, 4).unwrap(), 11u32.to_le_bytes());
 }
+
+#[test]
+fn flag_backup_copies_the_slot_count_in_bytes_and_keeps_other_banks() {
+    let mut numbers = State::new(9);
+    let mut host = CoreHost::new(&mut numbers);
+    let mut vm = Interpreter::new(Program::from_code(&[], vec![], 0).unwrap(), vec![]).unwrap();
+    host.state.shared[..3].copy_from_slice(&[0x11223344, 0x55667788, 0x99aabbccu32 as i32]);
+    host.state.local[0] = 12;
+    host.state.current = 34;
+    host.state.strings.insert(0, b"saved".to_vec());
+    assert!(host.call(610, &[], &mut vm).is_err());
+    assert_eq!(
+        host.call(609, &[], &mut vm).unwrap(),
+        NativeReturn::Continue
+    );
+    host.state.shared.fill(0xdeadbeefu32 as i32);
+    assert!(host.call(609, &[0; 4], &mut vm).is_err());
+    for _ in 0..2 {
+        assert_eq!(
+            host.call(610, &[], &mut vm).unwrap(),
+            NativeReturn::Continue
+        );
+        assert_eq!(
+            host.state.shared[..3],
+            [0x11223344, 0x55667788, 0xdeadbeccu32 as i32]
+        );
+        assert_eq!(host.state.shared[3..], [0xdeadbeefu32 as i32; 6]);
+        host.state.shared[0] = 0;
+    }
+    host.state.shared[0] = 99;
+    host.call(609, &[], &mut vm).unwrap();
+    host.state.shared[0] = 100;
+    host.call(610, &[], &mut vm).unwrap();
+    assert_eq!(host.state.shared[0], 99);
+    assert_eq!(host.state.local[0], 12);
+    assert_eq!(host.state.current, 34);
+    assert_eq!(host.state.strings[&0], b"saved");
+    assert_eq!(host.configured_shared_slots, 9);
+    host.state.shared.push(0);
+    assert!(host.call(610, &[], &mut vm).is_err());
+    let mut empty = State::new(0);
+    assert_eq!(
+        CoreHost::new(&mut empty).call(610, &[], &mut vm).unwrap(),
+        NativeReturn::Continue
+    );
+}
+
+#[test]
+fn runtime_flag_backup_is_shared_between_tasks_and_skips_unbound_callers() {
+    use katze_system2::{
+        Result,
+        runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, kind},
+        task::{Command, CommandBuffers},
+    };
+    struct Loader;
+    impl ProgramLoader for Loader {
+        fn load(&mut self, name: &[u8]) -> Result<Option<Program>> {
+            let natives: &[u32] = match name {
+                b"backup" => &[609],
+                b"restore" => &[610],
+                _ => &[610, 609],
+            };
+            let mut code = Vec::new();
+            for native in natives {
+                code.extend([0x2b, 3]);
+                code.extend(native.to_le_bytes());
+                code.push(3);
+                code.extend(0u32.to_le_bytes());
+            }
+            code.push(0x3b);
+            Ok(Some(Program::from_code(&code, vec![], 16)?))
+        }
+    }
+    for budget in [1, 4096] {
+        let mut runtime = Runtime::new(
+            0,
+            kind::ROOT,
+            Box::new(BaseObject::new()),
+            State::new(5),
+            KcsFactory::new(Loader),
+        );
+        runtime.set_budget(budget, 1 << 20);
+        runtime
+            .numbers_mut()
+            .shared
+            .copy_from_slice(&[0x11223344, 0x55667788, 3, 4, 5]);
+        let creator = runtime.create(0, kind::ORDINARY, b"backup", b"").unwrap();
+        runtime.update(0, 0).unwrap();
+        runtime.destroy(creator).unwrap();
+        runtime.numbers_mut().shared.fill(0xaabbccddu32 as i32);
+        let unbound = runtime.create_unloaded_ordinary(0, b"").unwrap();
+        runtime
+            .dispatch_command_with_buffers(
+                0,
+                Command {
+                    target: unbound,
+                    sender: 0,
+                    code: 161,
+                    data: [0, 1, 0],
+                },
+                &mut CommandBuffers {
+                    data1: Some(&mut b"unbound\0".to_vec()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        runtime.update(1, 0).unwrap();
+        assert_eq!(runtime.numbers().shared, [0xaabbccddu32 as i32; 5]);
+        runtime.create(0, kind::ORDINARY, b"restore", b"").unwrap();
+        runtime.update(2, 0).unwrap();
+        assert_eq!(
+            runtime.numbers().shared,
+            [
+                0x11223344,
+                0xaabbcc88u32 as i32,
+                0xaabbccddu32 as i32,
+                0xaabbccddu32 as i32,
+                0xaabbccddu32 as i32
+            ]
+        );
+    }
+}

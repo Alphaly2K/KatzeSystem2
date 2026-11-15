@@ -58,6 +58,7 @@ pub(super) struct TextRecord {
 #[derive(Default)]
 pub struct HostState {
     pub configured_shared_slots: u32,
+    pub(super) flag_backup: Option<Vec<u8>>,
     pub debug_messages: Vec<Vec<u8>>,
     /// 普通 1040 输出的 UTF-16 调试文字，包含末尾换行。
     pub unicode_debug_messages: Vec<Vec<u16>>,
