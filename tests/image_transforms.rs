@@ -128,6 +128,62 @@ fn blur_keeps_transparent_colors_and_integer_rounding_between_passes() {
 }
 
 #[test]
+fn blur_keeps_quantized_weights_across_long_rows_and_columns() {
+    for (transpose, mixed, expected) in [
+        (false, false, 0x4438_db87_d1b0_0fdcu64),
+        (false, true, 0x9557_3cd1_9507_82c4),
+        (true, false, 0xead2_6455_4f3a_1e99),
+        (true, true, 0xbc8d_cc2c_2676_9615),
+    ] {
+        let size = if transpose { [3, 1027] } else { [1027, 3] };
+        let mut pixels = Vec::new();
+        for y in 0..size[1] as usize {
+            for x in 0..size[0] as usize {
+                let (a, b) = if transpose { (y, x) } else { (x, y) };
+                let alpha = if mixed && a == 1022 {
+                    0
+                } else if mixed && a == 1025 {
+                    128
+                } else {
+                    255
+                };
+                pixels.extend([
+                    (a * 17 + b * 29) as u8,
+                    (a * 7 + b * 11) as u8,
+                    (a * 3 + b * 5) as u8,
+                    alpha,
+                ]);
+            }
+        }
+        let mut image = Image::from_frame(DecodedFrame {
+            id: 0,
+            info: StandardInfo {
+                size,
+                bit_depth: 32,
+                offset: [0; 2],
+                canvas_size: size,
+                reserved: 1,
+                base: [-7, 9],
+            },
+            pixels,
+            attributes: Default::default(),
+        })
+        .unwrap();
+        image.blur(if transpose { [7, 4] } else { [4, 7] }).unwrap();
+        let actual = image
+            .surface()
+            .pixels()
+            .iter()
+            .fold(0xcbf2_9ce4_8422_2325u64, |hash, &byte| {
+                (hash ^ u64::from(byte)).wrapping_mul(0x100_0000_01b3)
+            });
+        assert_eq!(actual, expected, "transpose={transpose}, mixed={mixed}");
+        assert_eq!(image.info().size, size);
+        assert_eq!(image.info().base, [-7, 9]);
+    }
+}
+
+#[test]
 fn canvas_resize_keeps_bottom_sampling_and_distinct_metadata_conversions() {
     let mut image = image();
     assert!(image.resize_canvas([22, 39]).unwrap());

@@ -39,6 +39,9 @@ impl Image {
             before[axis] = (radius[axis] as u32).min(offset);
             size[axis] += before[axis] + (radius[axis] as u32).min(remaining);
         }
+        if size == self.info.size {
+            return Ok(true);
+        }
         let mut surface = Surface::new(size)?;
         let top = size[1] - self.info.size[1] - before[1];
         for y in 0..self.info.size[1] as usize {
@@ -57,6 +60,18 @@ impl Image {
     }
 }
 
+#[derive(Clone, Copy, Default)]
+struct LineSum {
+    colors: [u32; 3],
+    visible: u32,
+    opaque: u32,
+}
+
+fn rounded(sum: u32, factor: u32) -> u8 {
+    let fixed = sum.wrapping_mul(factor);
+    ((fixed >> 24) + ((fixed >> 23) & 1)) as u8
+}
+
 fn blur_axis(source: &Surface, axis: usize, radius: usize) -> Result<Surface> {
     let size = source.size().map(|value| value as usize);
     let mut output = if axis == 0 {
@@ -71,53 +86,109 @@ fn blur_axis(source: &Surface, axis: usize, radius: usize) -> Result<Surface> {
         })
         .collect();
     let factor = 65536 / (radius + 1) as u32;
-    for y in 0..size[1] {
-        for x in 0..size[0] {
-            let pixel = |index: usize| {
-                let mut point = [x, y];
-                point[axis] = (point[axis] + index)
-                    .saturating_sub(radius)
-                    .min(size[axis] - 1);
-                let at = point[1] * source.stride() + point[0] * 4;
-                &source.pixels()[at..at + 4]
+    let slope = weights[0] as i32;
+    // 整数权重由线性三角核及少量同心窗口修正组成，保留量化后的每项权重。
+    let corrections: Vec<_> = (0..=radius)
+        .filter_map(|distance| {
+            let current =
+                weights[radius + distance] as i32 - slope * (radius + 1 - distance) as i32;
+            let next = if distance == radius {
+                0
+            } else {
+                weights[radius + distance + 1] as i32 - slope * (radius - distance) as i32
             };
-            let mut mean = [0u32; 3];
-            let mut count = 0;
-            for index in 0..weights.len() {
-                let pixel = pixel(index);
+            (current != next).then_some((distance, current - next))
+        })
+        .collect();
+    let opaque_alpha = weights.iter().sum::<u32>() * 255;
+    let (lines, length, line_stride, pixel_stride) = if axis == 0 {
+        (size[1], size[0], source.stride(), 4)
+    } else {
+        (size[0], size[1], 4, source.stride())
+    };
+    // 分块限制细长图像的临时行缓存，边缘仍从完整来源钳制取样。
+    let capacity = length.min(1024) + radius * 2;
+    let mut pixels = vec![[0u8; 4]; capacity];
+    let mut prefix = vec![LineSum::default(); capacity + 1];
+    let width = radius + 1;
+    for line in 0..lines {
+        let base = line * line_stride;
+        for start in (0..length).step_by(1024) {
+            let count = (length - start).min(1024);
+            let padded = count + radius * 2;
+            prefix[0] = LineSum::default();
+            for i in 0..padded {
+                let point = (start + i).saturating_sub(radius).min(length - 1);
+                let at = base + point * pixel_stride;
+                let pixel: [u8; 4] = source.pixels()[at..at + 4].try_into().unwrap();
+                pixels[i] = pixel;
+                let mut sum = prefix[i];
                 if pixel[3] != 0 {
-                    count += 1;
-                    for channel in 0..3 {
-                        mean[channel] += u32::from(pixel[channel]);
+                    sum.visible += 1;
+                    for (channel, color) in pixel[..3].iter().enumerate() {
+                        sum.colors[channel] += u32::from(*color);
                     }
                 }
+                sum.opaque += u32::from(pixel[3] == 255);
+                prefix[i + 1] = sum;
             }
-            if count == 0 {
-                continue;
-            }
-            for value in &mut mean {
-                *value /= count;
-            }
-            let mut sums = [0u32; 4];
-            for (index, weight) in weights.iter().enumerate() {
-                let pixel = pixel(index);
-                let alpha = u32::from(pixel[3]);
-                for channel in 0..3 {
-                    let color = match alpha {
-                        0 => mean[channel],
-                        255 => u32::from(pixel[channel]),
-                        _ => {
-                            (u32::from(pixel[channel]) * alpha + mean[channel] * (255 - alpha)) >> 8
-                        }
-                    };
-                    sums[channel] += color * weight;
+            let mut triangle = [0u32; 3];
+            for i in 0..width {
+                for (channel, sum) in triangle.iter_mut().enumerate() {
+                    *sum += prefix[i + width].colors[channel] - prefix[i].colors[channel];
                 }
-                sums[3] += alpha * weight;
             }
-            let at = y * output.stride() + x * 4;
-            for (channel, sum) in sums.into_iter().enumerate() {
-                let fixed = sum.wrapping_mul(factor);
-                output.pixels_mut()[at + channel] = ((fixed >> 24) + ((fixed >> 23) & 1)) as u8;
+            for x in 0..count {
+                let left = prefix[x];
+                let right = prefix[x + weights.len()];
+                let visible = right.visible - left.visible;
+                if visible != 0 {
+                    let sums = if right.opaque - left.opaque == weights.len() as u32 {
+                        let mut sums = triangle.map(|value| value as i32 * slope);
+                        for &(distance, coefficient) in &corrections {
+                            let left = prefix[x + radius - distance];
+                            let right = prefix[x + radius + distance + 1];
+                            for (channel, sum) in sums.iter_mut().enumerate() {
+                                *sum += (right.colors[channel] - left.colors[channel]) as i32
+                                    * coefficient;
+                            }
+                        }
+                        [sums[0] as u32, sums[1] as u32, sums[2] as u32, opaque_alpha]
+                    } else {
+                        let mean: [u32; 3] =
+                            std::array::from_fn(|i| (right.colors[i] - left.colors[i]) / visible);
+                        let mut sums = [0u32; 4];
+                        for (pixel, weight) in pixels[x..x + weights.len()].iter().zip(&weights) {
+                            let alpha = u32::from(pixel[3]);
+                            for channel in 0..3 {
+                                let color = match alpha {
+                                    0 => mean[channel],
+                                    255 => u32::from(pixel[channel]),
+                                    _ => {
+                                        (u32::from(pixel[channel]) * alpha
+                                            + mean[channel] * (255 - alpha))
+                                            >> 8
+                                    }
+                                };
+                                sums[channel] += color * weight;
+                            }
+                            sums[3] += alpha * weight;
+                        }
+                        sums
+                    };
+                    let at = base + (start + x) * pixel_stride;
+                    for (channel, sum) in sums.into_iter().enumerate() {
+                        output.pixels_mut()[at + channel] = rounded(sum, factor);
+                    }
+                }
+                if x + 1 < count {
+                    for (channel, sum) in triangle.iter_mut().enumerate() {
+                        *sum = *sum
+                            + (prefix[x + width * 2].colors[channel]
+                                - prefix[x + width].colors[channel])
+                            - (prefix[x + width].colors[channel] - prefix[x].colors[channel]);
+                    }
+                }
             }
         }
     }
