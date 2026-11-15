@@ -1650,3 +1650,89 @@ fn ice_uses_additive_transparent_start_shared_randomness_and_task_controls() -> 
     );
     Ok(())
 }
+
+#[test]
+fn scene_sparkle_initializes_transparently_and_restarts_with_shared_randomness() -> Result<()> {
+    let mut runtime = runtime_with_count(plugin(b"s_040101.ppi"), 1)?;
+    runtime.update(1, 1)?;
+    let mut parameters = [0; 128];
+    for (i, n) in [
+        9f32, 12.5, -8., -35., 220., 137., 7.8, 782., 169., 44., -120., -60., -3., 137., 15.25,
+        7.8, 0., 3.5, 45., 1.,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        parameters[i * 4..i * 4 + 4].copy_from_slice(&n.to_le_bytes());
+    }
+    runtime.dispatch_command_with_buffers(
+        2,
+        command(325),
+        &mut CommandBuffers {
+            data1: Some(&mut parameters),
+            ..Default::default()
+        },
+    )?;
+    let mut expected = ScriptRandom::seeded(17);
+    let view = Projection::default();
+    let mut positions = Vec::new();
+    for start in [2, 20] {
+        runtime.dispatch_command(2, command(321))?;
+        for _ in 0..5 {
+            expected.next_integer();
+        }
+        for _ in 0..21 {
+            expected.next_float();
+        }
+        assert_random(&mut runtime, &expected);
+        assert_eq!(runtime.dispatch_command(2, command(324))?, 1);
+        let drawable = runtime.drawables().get(1).unwrap();
+        assert_eq!(drawable.blend_mode(), 1);
+        let quad = drawable
+            .particle_mesh()
+            .unwrap()
+            .projected_quad(0, &view)
+            .unwrap();
+        assert!(quad.iter().all(|v| v.color >> 24 == 0));
+        positions.push(quad[0].position);
+        for frame in start..=start + 4 {
+            runtime.update(frame, 1)?;
+        }
+        let mesh = runtime
+            .drawables()
+            .get(1)
+            .unwrap()
+            .particle_mesh()
+            .unwrap()
+            .clone();
+        let quad = mesh.projected_quad(0, &view).unwrap();
+        assert_eq!(quad[0].color >> 24, 73);
+        assert_eq!(
+            [quad[0].uv, quad[3].uv],
+            if start == 2 {
+                [[0., 0.], [0.5, 0.5]]
+            } else {
+                [[0., 0.5], [0.5, 1.]]
+            }
+        );
+        runtime.dispatch_command(2, command(322))?;
+        runtime.update(start + 5, 1)?;
+        assert_eq!(runtime.drawables().get(1).unwrap().display(), 0);
+        assert_eq!(
+            runtime.drawables().get(1).unwrap().particle_mesh(),
+            Some(&mesh)
+        );
+        assert_random(&mut runtime, &expected);
+    }
+    assert_ne!(positions[0], positions[1]);
+    runtime.dispatch_command(2, command(323))?;
+    assert!(
+        runtime
+            .drawables()
+            .get(1)
+            .unwrap()
+            .particle_mesh()
+            .is_none()
+    );
+    Ok(())
+}

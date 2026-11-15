@@ -56,6 +56,7 @@ pub(super) enum Kind {
     Dark,
     Sakura,
     Ice,
+    SceneSparkle,
 }
 
 fn u16_at(bytes: &[u8], at: usize) -> Option<u16> {
@@ -159,6 +160,8 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
         Kind::Dark
     } else if name.eq_ignore_ascii_case(b"o_150102.ppi") {
         Kind::Ice
+    } else if name.eq_ignore_ascii_case(b"s_040101.ppi") {
+        Kind::SceneSparkle
     } else if name.eq_ignore_ascii_case(b"sakura.ppi") {
         Kind::Sakura
     } else if name.eq_ignore_ascii_case(b"protect.ppi") {
