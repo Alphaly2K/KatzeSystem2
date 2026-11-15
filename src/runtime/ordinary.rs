@@ -449,17 +449,19 @@ impl TaskObject for OrdinaryObject {
                     return Err(Error::new(0, "普通任务装载命令尚未完成"));
                 }
                 if let Some(task) = &mut self.task {
-                    return task.dispatch_control(kind, command, output, &mut host, budget);
+                    return task.dispatch_control_with_buffers(
+                        kind, command, buffers, output, &mut host, budget,
+                    );
                 }
                 match command.code {
                     19 => {
                         self.unloaded.language_selection = host.language_selection();
                         *output = 1;
                     }
-                    4 | 18 | 22 | 25 | 26 | 30 | 31 | 64 | 162 | 163 => (),
+                    4 | 6 | 18 | 22 | 25 | 26 | 30 | 31 | 64 | 162 | 163 => (),
                     9 | 10 => *output = 0,
                     20 | 21 | 65 => *output = 1,
-                    6 | 164..=179 | 336 | 452 => {
+                    164..=179 | 336 | 452 => {
                         return Err(Error::new(
                             0,
                             format!("未支持的未装载普通任务命令 {}", command.code),

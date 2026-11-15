@@ -2,7 +2,7 @@ use katze_system2::{
     Step,
     expression::State,
     kcs::{CoreHost, OrdinaryTask, Program},
-    task::Command,
+    task::{Command, CommandBuffers},
 };
 
 fn ins(code: &mut Vec<u8>, opcode: u8, args: &[u32]) {
@@ -30,6 +30,7 @@ fn receiver(ending: &[u8]) -> OrdinaryTask {
 fn control_notifications_translate_messages_without_changing_the_task_clock() {
     let cases = [
         (4, [7, 0xffff_0001, 12, 34], 99),
+        (6, [7, 0xffff_0002, 0xfffe_ffff, 0x8000_5678], 99),
         (9, [7, 0xffff_0003, 12, 34], 0),
         (10, [7, 0xffff_0004, 12, 34], 0),
         (18, [u32::MAX, 0xffff_0016, 0, 0], 99),
@@ -57,16 +58,45 @@ fn control_notifications_translate_messages_without_changing_the_task_clock() {
                     data: [12, 34, 1],
                 };
                 let mut output = 99;
+                let mut previous = [-1i32, -2]
+                    .into_iter()
+                    .flat_map(i32::to_le_bytes)
+                    .collect::<Vec<_>>();
+                let mut current = [0x1234_5678i32, 0x8000]
+                    .into_iter()
+                    .flat_map(i32::to_le_bytes)
+                    .collect::<Vec<_>>();
+                if code == 6 {
+                    assert!(
+                        task.dispatch_control(12, &command, &mut output, &mut host, budget)
+                            .is_err()
+                    );
+                    assert!(!task.is_pending());
+                    assert_eq!(output, 99);
+                }
                 let mut done = false;
                 for _ in 0..30 {
                     let result = task
-                        .dispatch_control(12, &command, &mut output, &mut host, budget)
+                        .dispatch_control_with_buffers(
+                            12,
+                            &command,
+                            &mut CommandBuffers {
+                                data0: Some(&mut previous),
+                                data1: Some(&mut current),
+                                ..Default::default()
+                            },
+                            &mut output,
+                            &mut host,
+                            budget,
+                        )
                         .unwrap();
                     assert!(!result.propagate);
                     if result.done {
                         done = true;
                         break;
                     }
+                    previous.fill(0);
+                    current.fill(0);
                     assert_eq!(
                         output,
                         if matches!(code, 9 | 10 | 30 | 31 | 65) {

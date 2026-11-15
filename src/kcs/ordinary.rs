@@ -1,5 +1,5 @@
 use super::{Host, Interpreter, Program, TaskClock};
-use crate::task::{Command, CommandOutcome, Control};
+use crate::task::{Command, CommandBuffers, CommandOutcome, Control};
 use crate::{Error, Result, Step, read};
 
 enum UpdatePhase {
@@ -196,6 +196,26 @@ impl OrdinaryTask {
         host: &mut impl Host,
         budget: usize,
     ) -> Result<CommandOutcome> {
+        self.dispatch_control_with_buffers(
+            kind,
+            command,
+            &mut CommandBuffers::default(),
+            output,
+            host,
+            budget,
+        )
+    }
+
+    /// 命令 6 的 data0／data1 各提供两个小端 i32 坐标，通知只保留每轴的低十六位。
+    pub fn dispatch_control_with_buffers(
+        &mut self,
+        kind: u32,
+        command: &Command,
+        buffers: &mut CommandBuffers<'_>,
+        output: &mut u32,
+        host: &mut impl Host,
+        budget: usize,
+    ) -> Result<CommandOutcome> {
         if command.code == 3 {
             return Ok(if self.request_delete(host, budget)? {
                 CommandOutcome::finished(false)
@@ -203,8 +223,11 @@ impl OrdinaryTask {
                 CommandOutcome::RESUME
             });
         }
-        if matches!(command.code, 4 | 9 | 10 | 18 | 22 | 30 | 31 | 64 | 65 | 452) {
-            return self.dispatch_notification(command, output, host, budget);
+        if matches!(
+            command.code,
+            4 | 6 | 9 | 10 | 18 | 22 | 30 | 31 | 64 | 65 | 452
+        ) {
+            return self.dispatch_notification(command, buffers, output, host, budget);
         }
         self.require_idle()?;
         if self.control.deletion_requested != 0 {
@@ -251,7 +274,7 @@ impl OrdinaryTask {
                     self.set_creation_context(Some(&context))?;
                 }
             }
-            6 | 161 | 164..=179 | 336 => {
+            161 | 164..=179 | 336 => {
                 return Err(Error::new(
                     self.interpreter.pc,
                     format!("未支持的普通任务控制命令 {}", command.code),
@@ -274,6 +297,7 @@ impl OrdinaryTask {
     fn dispatch_notification(
         &mut self,
         command: &Command,
+        buffers: &mut CommandBuffers<'_>,
         output: &mut u32,
         host: &mut impl Host,
         budget: usize,
@@ -292,6 +316,7 @@ impl OrdinaryTask {
                 }
                 let kind = match command.code {
                     4 => 1,
+                    6 => 2,
                     9 => 3,
                     10 => 4,
                     18 => 0x16,
@@ -304,6 +329,21 @@ impl OrdinaryTask {
                     _ => unreachable!(),
                 };
                 let (sender, first, second) = match command.code {
+                    6 => {
+                        let pack = |bytes: Option<&[u8]>| -> Result<u32> {
+                            let bytes = bytes
+                                .ok_or_else(|| Error::new(0, "普通任务指针移动缺少坐标缓冲区"))?;
+                            Ok(
+                                (read::u32_at(bytes, 0)? & 0xffff)
+                                    | (read::u32_at(bytes, 4)? << 16),
+                            )
+                        };
+                        (
+                            command.sender,
+                            pack(buffers.data0.as_deref())?,
+                            pack(buffers.data1.as_deref())?,
+                        )
+                    }
                     18 => (u32::MAX, 0, 0),
                     22 | 452 => (command.sender, 0, command.data[1]),
                     _ => (command.sender, command.data[0], command.data[1]),

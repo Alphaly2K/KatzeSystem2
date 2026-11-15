@@ -43,7 +43,7 @@ impl ObjectFactory for ReceiverFactory {
 }
 
 #[test]
-fn button_selection_press_and_release_reach_a_waiting_ordinary_vm() -> Result<()> {
+fn button_selection_press_motion_and_release_reach_a_waiting_ordinary_vm() -> Result<()> {
     for budget in [1, 4096] {
         let mut runtime = Runtime::new(
             0,
@@ -134,6 +134,34 @@ fn button_selection_press_and_release_reach_a_waiting_ordinary_vm() -> Result<()
                 runtime.input_state(input).unwrap().events().captures()[0],
                 if pressed != 0 { button } else { 0 }
             );
+            if pressed != 0 {
+                let mut previous = [-1i32, -2]
+                    .into_iter()
+                    .flat_map(i32::to_le_bytes)
+                    .collect::<Vec<_>>();
+                let mut current = [0x1234_5678i32, 0x1_0001]
+                    .into_iter()
+                    .flat_map(i32::to_le_bytes)
+                    .collect::<Vec<_>>();
+                runtime.dispatch_command_with_buffers(
+                    input,
+                    Command {
+                        target: button,
+                        sender: input,
+                        code: 6,
+                        data: [0; 3],
+                    },
+                    &mut CommandBuffers {
+                        data0: Some(&mut previous),
+                        data1: Some(&mut current),
+                        ..Default::default()
+                    },
+                )?;
+                assert_eq!(
+                    message(&runtime),
+                    [button, 0xffff_0002, 0xfffe_ffff, 0x0001_5678]
+                );
+            }
             assert!(
                 runtime
                     .object(receiver)

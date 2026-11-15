@@ -307,6 +307,8 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 
 `OrdinaryTask::dispatch_control(kind, command, output, host, budget)` 接收基类控制、25／26、162／163，以及 4／9／10／18／20／21／22／30／31／64／65／452 的消息通知。25 把创建上下文正文和一个结尾零写到第二数据项指向的地址，26 从该地址读取零结尾正文；零指针跳过。kind 来自任务树节点；返回 `task::CommandOutcome`：`done` 为 false 表示通知仍需以同一命令及 output 续跑，`propagate` 表示是否允许按 `data[2]` 继续传播。已处理的普通命令和已有删除标记的对象返回 `propagate = false`；其他编号交给基类，尚未实现的已知专属编号返回诊断。同步通知不受 running 限制，20／21 复制入队；消息映射、返回槽和预算规则见 [KCS 普通任务](kcs.md#普通任务与跨任务宿主)。
 
+`dispatch_control_with_buffers` 另接收显式命令缓冲区，支持指针移动通知 6：data0／data1 各提供两个小端 i32，按每轴低十六位打包前后点并同步投递。预算续跑保留首次坐标，不重复读取缓冲区，返回槽保持。Runtime 的普通对象通过该入口接收输入按钮转发的移动事件。
+
 `set_creation_context(Some(bytes))` 对应命令 26，保存首个零之前的原始字节，正文最多 31 字节；`copy_creation_context(Some(buffer))` 对应 25，写入正文及一个结尾零，保留输出其余字节。两方法的 None 均跳过，删除后的任务也跳过；预算续跑期间返回诊断。输入或输出容量不足时保留原状态，直接使用公开上下文字段时由调用者保持正文容量约束。
 
 `OrdinaryTask::dispatch_message(message, output, host, budget)` 同步投递消息，完成后把活动结果写入 output；未等待时写零，已有删除标记时保留 output。投递不受 running 限制，也不修改时钟、running 或累计增量。`request_delete(host, budget)` 先向等待中的 VM 同步投递内部删除通知，再把 `control.deletion_requested` 设为 1。两方法均以 false 表示预算续跑，只能继续同一入口；消息分派需继续传入同一消息和 output。删除后的更新只更新时间，外层负责移除任务及回收子树。
