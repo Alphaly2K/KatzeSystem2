@@ -789,6 +789,10 @@ fn deterministic_emotions_preserve_randomness_task_controls_and_source_offsets()
             b"em_angry.ppi".as_slice(),
             [735f32, 192., 60., 4., 6., 70., 5., 5.].as_slice(),
         ),
+        (
+            b"em_exclamation.ppi".as_slice(),
+            [735f32, 159., 1., 60., 3., 5., 7., 60., 80.].as_slice(),
+        ),
     ] {
         let mut runtime = runtime(plugin(name))?;
         runtime.update(1, 1)?;
