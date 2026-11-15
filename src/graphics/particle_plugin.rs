@@ -1,7 +1,10 @@
 use crate::{Result, read, text};
 use std::{
     collections::BTreeMap,
-    sync::{Arc, Weak, atomic::AtomicU32},
+    sync::{
+        Arc, Weak,
+        atomic::{AtomicU32, Ordering},
+    },
 };
 
 #[derive(Default)]
@@ -19,6 +22,15 @@ impl ModuleStates {
         self.0.insert(key, Arc::downgrade(&state));
         Ok(state)
     }
+}
+
+pub(super) fn next_c_random(state: &AtomicU32) -> u32 {
+    let previous = state
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| {
+            Some(n.wrapping_mul(214013).wrapping_add(2531011))
+        })
+        .unwrap();
+    (previous.wrapping_mul(214013).wrapping_add(2531011) >> 16) & 0x7fff
 }
 
 #[derive(Clone, Copy)]
@@ -59,6 +71,7 @@ pub(super) enum Kind {
     SceneSparkle,
     Spark,
     Thunder,
+    Paper,
 }
 
 fn u16_at(bytes: &[u8], at: usize) -> Option<u16> {
@@ -168,6 +181,8 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
         Kind::Spark
     } else if name.eq_ignore_ascii_case(b"thunder.ppi") {
         Kind::Thunder
+    } else if name.eq_ignore_ascii_case(b"paper.ppi") {
+        Kind::Paper
     } else if name.eq_ignore_ascii_case(b"sakura.ppi") {
         Kind::Sakura
     } else if name.eq_ignore_ascii_case(b"protect.ppi") {

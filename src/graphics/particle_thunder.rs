@@ -1,6 +1,6 @@
 use crate::kcs::ParticleHost;
 use crate::kcs::ScriptRandom;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::AtomicU32;
 
 struct Sprite {
     position: [f32; 3],
@@ -75,12 +75,7 @@ impl Thunder {
         let heads = (0..count)
             .map(|_| {
                 // 图块使用模块自己的 C 随机流，缩放才消费宿主浮点随机流。
-                let previous = module_state
-                    .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| {
-                        Some(n.wrapping_mul(214013).wrapping_add(2531011))
-                    })
-                    .unwrap();
-                let region = (previous.wrapping_mul(214013).wrapping_add(2531011) >> 16) & 3;
+                let region = super::particle_plugin::next_c_random(module_state) & 3;
                 let scale = [
                     (((random.next_float() * 0.5) * scale) as f64 + scale as f64 * 0.7) as f32,
                     scale * 3.,
@@ -213,6 +208,7 @@ impl Thunder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::Ordering;
 
     #[test]
     fn grouped_flash_keeps_strict_phases_update_based_trails_and_module_randomness()

@@ -5,8 +5,8 @@ use super::{
     particle_digi_ring::DigiRing, particle_dis::Dis, particle_double::Double, particle_down::Down,
     particle_energy::Energy, particle_exclamation::Exclamation, particle_film_noise::FilmNoise,
     particle_flower_burst::FlowerBurst, particle_glint::Glint, particle_hadou::Hadou,
-    particle_ice::Ice, particle_note::Note, particle_notice::Notice, particle_plugin,
-    particle_protect::Protect, particle_question::Question, particle_rain::Rain,
+    particle_ice::Ice, particle_note::Note, particle_notice::Notice, particle_paper::Paper,
+    particle_plugin, particle_protect::Protect, particle_question::Question, particle_rain::Rain,
     particle_rising::Rising, particle_sakura::Sakura, particle_scene_sparkle::SceneSparkle,
     particle_shy::Shy, particle_sigh::Sigh, particle_silent::Silent, particle_spark::Spark,
     particle_sparkle::Sparkle, particle_surprise::Surprise, particle_sweat::Sweat,
@@ -62,6 +62,7 @@ enum Effect {
     SceneSparkle(SceneSparkle),
     Spark(Box<Spark>),
     Thunder(Thunder),
+    Paper(Paper),
 }
 
 impl Effect {
@@ -114,6 +115,9 @@ impl Effect {
             particle_plugin::Kind::Spark => Self::Spark(Box::new(Spark::new(host, image, random))),
             particle_plugin::Kind::Thunder => {
                 Self::Thunder(Thunder::new(host, image, random, &module_state))
+            }
+            particle_plugin::Kind::Paper => {
+                Self::Paper(Paper::new(host, image, random, module_state))
             }
             particle_plugin::Kind::SceneSparkle => {
                 Self::SceneSparkle(SceneSparkle::new(host, image, random))
@@ -209,6 +213,7 @@ impl ParticleRunner {
                     Some(Effect::SceneSparkle(effect)) => effect.write_mesh(host),
                     Some(Effect::Spark(effect)) => effect.write_mesh(host),
                     Some(Effect::Thunder(effect)) => effect.write_mesh(host),
+                    Some(Effect::Paper(effect)) => effect.write_mesh(host),
                     _ => {}
                 }
             }
@@ -252,6 +257,10 @@ impl ParticleRunner {
                 if let Some(effect) = effect {
                     let delta = host.elapsed.wrapping_sub(host.previous_elapsed);
                     match effect {
+                        Effect::Paper(effect) => {
+                            effect.update(delta, services.random().unwrap_or(&mut host.random));
+                            effect.write_mesh(host);
+                        }
                         Effect::Thunder(effect) => {
                             effect.update(delta, host.source.unwrap_or_default().position_2d);
                             effect.write_mesh(host);

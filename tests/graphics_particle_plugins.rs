@@ -1870,3 +1870,81 @@ fn thunder_finishes_hides_and_preserves_module_randomness_across_restarts() -> R
     assert!(runtime.drawables().get(1).is_none());
     Ok(())
 }
+
+#[test]
+fn paper_shares_randomness_keeps_finite_particles_loaded_and_supports_task_controls() -> Result<()>
+{
+    let mut runtime = runtime_with_count(plugin(b"paper.ppi"), 3)?;
+    runtime.update(1, 1)?;
+    let mut parameters = [0; 128];
+    for (i, n) in [1f32, 8., 65., 60., 1., 1., 0.].into_iter().enumerate() {
+        parameters[i * 4..i * 4 + 4].copy_from_slice(&n.to_le_bytes());
+    }
+    runtime.dispatch_command_with_buffers(
+        2,
+        command(325),
+        &mut CommandBuffers {
+            data1: Some(&mut parameters),
+            ..Default::default()
+        },
+    )?;
+    let view = Projection::default();
+    let mut starts = Vec::new();
+    for start in [2, 50] {
+        let before = runtime.host_mut().random.clone();
+        runtime.dispatch_command(2, command(321))?;
+        let mut random = runtime.host_mut().random.clone();
+        let mut before = before;
+        assert_ne!(random.next_integer(), before.next_integer());
+        assert_ne!(random.next_float(), before.next_float());
+        let drawable = runtime.drawables().get(1).unwrap();
+        assert_eq!(drawable.blend_mode(), 0);
+        let quad = drawable
+            .particle_mesh()
+            .unwrap()
+            .projected_quad(0, &view)
+            .unwrap();
+        assert_eq!(quad[0].color >> 24, 0);
+        starts.push(quad[0].position);
+        let mut visible = false;
+        for now in start..start + 35 {
+            runtime.update(now, 1)?;
+            let quad = runtime
+                .drawables()
+                .get(1)
+                .unwrap()
+                .particle_mesh()
+                .unwrap()
+                .projected_quad(0, &view)
+                .unwrap();
+            visible |= quad[0].color >> 24 != 0;
+        }
+        assert!(visible);
+        assert_eq!(runtime.dispatch_command(2, command(324))?, 1);
+        let mesh = runtime.drawables().get(1).unwrap().particle_mesh().unwrap();
+        assert!((0..3).all(|i| {
+            mesh.projected_quad(i, &view)
+                .unwrap()
+                .iter()
+                .all(|v| v.color >> 24 == 0)
+        }));
+        runtime.dispatch_command(2, command(322))?;
+        let stopped_random = runtime.host_mut().random.clone();
+        runtime.update(start + 36, 1)?;
+        assert_random(&mut runtime, &stopped_random);
+        assert_eq!(runtime.drawables().get(1).unwrap().display(), 0);
+    }
+    assert_ne!(starts[0], starts[1]);
+    runtime.dispatch_command(2, command(323))?;
+    assert!(
+        runtime
+            .drawables()
+            .get(1)
+            .unwrap()
+            .particle_mesh()
+            .is_none()
+    );
+    runtime.destroy(1)?;
+    assert!(runtime.drawables().get(1).is_none());
+    Ok(())
+}

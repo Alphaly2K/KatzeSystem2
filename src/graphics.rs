@@ -74,6 +74,7 @@ mod particle_hadou;
 mod particle_ice;
 mod particle_note;
 mod particle_notice;
+mod particle_paper;
 mod particle_plugin;
 mod particle_protect;
 mod particle_question;
