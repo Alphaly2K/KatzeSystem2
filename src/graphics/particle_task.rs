@@ -510,14 +510,24 @@ impl Particle3DObject {
             } else {
                 ResourceMode::LooseFirst
             };
-            let Some(bytes) = services.read(name(4)?, read_mode)? else {
+            let program_name = name(4)?;
+            let Some(bytes) = services.read(program_name, read_mode)? else {
                 return Ok(());
             };
             let program = if mode == 1 {
-                ParticleProgram::Builtin(
-                    particle_plugin::identify(&bytes)
-                        .ok_or_else(|| Error::new(0, "粒子插件类型或版本尚未接入"))?,
-                )
+                ParticleProgram::Builtin(particle_plugin::identify(&bytes).ok_or_else(|| {
+                    let filename = program_name
+                        .rsplit(|&b| matches!(b, b'/' | b'\\'))
+                        .next()
+                        .unwrap_or_default();
+                    Error::new(
+                        0,
+                        format!(
+                            "粒子插件类型或版本尚未接入：{}",
+                            String::from_utf8_lossy(filename)
+                        ),
+                    )
+                })?)
             } else {
                 ParticleProgram::Script(Program::parse(&bytes)?)
             };
