@@ -33,7 +33,7 @@ fn plugin(name: &[u8]) -> Vec<u8> {
     }
     bytes[320..320 + name.len()].copy_from_slice(name);
     bytes[360..366].copy_from_slice(&[0xb8, 1, 0, 2, 0, 0xc3]);
-    if name == b"em_down.ppi" {
+    if name == b"em_down.ppi" || name == b"em_silent.ppi" {
         bytes[361] = 2;
     }
     bytes[368..374].copy_from_slice(&[0xb8, 1, 0, 0, 0, 0xc3]);
@@ -66,8 +66,15 @@ impl ProgramLoader for Programs {
 }
 
 fn runtime(bytes: Vec<u8>) -> Result<Runtime<GraphicsFactory<KcsFactory<Programs>>>> {
+    runtime_with_count(bytes, 8)
+}
+
+fn runtime_with_count(
+    bytes: Vec<u8>,
+    count: u32,
+) -> Result<Runtime<GraphicsFactory<KcsFactory<Programs>>>> {
     let mut code = Vec::new();
-    for value in [1u32, 0, 16, 8, 5000f32.to_bits(), 32] {
+    for value in [1u32, 0, 16, count, 5000f32.to_bits(), 32] {
         code.extend([0x25, 3]);
         code.extend(value.to_le_bytes());
     }
@@ -221,7 +228,7 @@ fn rain_shares_random_state_projects_motion_and_restarts_with_current_parameters
 }
 
 #[test]
-fn malformed_or_unsupported_plugin_metadata_is_rejected_before_start() -> Result<()> {
+fn invalid_plugin_metadata_and_layout_are_rejected_before_start() -> Result<()> {
     let bytes = plugin(b"rain.ppi");
     for length in [0, 1, 63, 87, 199, 239, 295, 328, 351, 365, 373] {
         let mut runtime = runtime(bytes[..length].to_vec())?;
@@ -240,10 +247,26 @@ fn malformed_or_unsupported_plugin_metadata_is_rejected_before_start() -> Result
         bytes[at] = 0;
         assert!(runtime(bytes)?.update(1, 1).is_err());
     }
-    for (name, version) in [(b"rain.ppi".as_slice(), 2), (b"em_down.ppi", 1)] {
+    for (name, version) in [
+        (b"rain.ppi".as_slice(), 2),
+        (b"em_down.ppi", 1),
+        (b"em_silent.ppi", 1),
+    ] {
         let mut bytes = plugin(name);
         bytes[361] = version;
         assert!(runtime(bytes)?.update(1, 1).is_err());
+    }
+    for count in [0, 5] {
+        let mut runtime = runtime_with_count(plugin(b"em_silent.ppi"), count)?;
+        assert!(runtime.update(1, 1).is_err());
+        assert!(
+            runtime
+                .drawables()
+                .get(1)
+                .unwrap()
+                .particle_mesh()
+                .is_none()
+        );
     }
     Ok(())
 }
@@ -780,25 +803,39 @@ fn dis_shares_jitter_randomness_and_restores_mirrored_geometry_on_restart() -> R
 fn deterministic_emotions_preserve_randomness_task_controls_and_source_offsets() -> Result<()> {
     use katze_system2::graphics::Drawable;
 
-    for (name, values) in [
+    for (name, values, count, uv) in [
         (
             b"em_common.ppi".as_slice(),
             [782f32, 169., 1., 60., 5., 8.].as_slice(),
+            8,
+            [[0., 0.], [1., 1.]],
         ),
         (
             b"em_angry.ppi".as_slice(),
             [735f32, 192., 60., 4., 6., 70., 5., 5.].as_slice(),
+            8,
+            [[0., 0.], [1., 1.]],
         ),
         (
             b"em_exclamation.ppi".as_slice(),
             [735f32, 159., 1., 60., 3., 5., 7., 60., 80.].as_slice(),
+            8,
+            [[0., 0.], [1., 1.]],
         ),
         (
             b"em_suprise.ppi".as_slice(),
             [804f32, 140., 1., 78., 10., 35.].as_slice(),
+            8,
+            [[0., 0.], [1., 1.]],
+        ),
+        (
+            b"em_silent.ppi".as_slice(),
+            [804f32, 78., 1., 40., 13., 10., 80., 5., 5.].as_slice(),
+            4,
+            [[1., 0.], [0., 0.75]],
         ),
     ] {
-        let mut runtime = runtime(plugin(name))?;
+        let mut runtime = runtime_with_count(plugin(name), count)?;
         runtime.update(1, 1)?;
         let expected = ScriptRandom::seeded(17);
         let mut parameters = [0; 128];
@@ -830,7 +867,7 @@ fn deterministic_emotions_preserve_randomness_task_controls_and_source_offsets()
             .projected_quad(0, &view)
             .unwrap();
         assert_eq!(first[0].color >> 24, 0);
-        assert_eq!([first[0].uv, first[3].uv], [[0., 0.], [1., 1.]]);
+        assert_eq!([first[0].uv, first[3].uv], uv);
         for frame in 3..=30 {
             runtime.update(frame, 1)?;
         }

@@ -17,6 +17,7 @@ pub(super) enum Kind {
     FilmNoise,
     Asease,
     Surprise,
+    Silent,
 }
 
 fn u16_at(bytes: &[u8], at: usize) -> Option<u16> {
@@ -88,6 +89,8 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
         Kind::Asease
     } else if name.eq_ignore_ascii_case(b"em_suprise.ppi") {
         Kind::Surprise
+    } else if name.eq_ignore_ascii_case(b"em_silent.ppi") {
+        Kind::Silent
     } else {
         return None;
     };
@@ -105,7 +108,7 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
         read::u32_at(code, 1).ok()
     };
     let version = match kind {
-        Kind::Down => 0x0002_0002,
+        Kind::Down | Kind::Silent => 0x0002_0002,
         _ => 0x0002_0001,
     };
     (constant(3)? == version && constant(4)? == 1).then_some(kind)

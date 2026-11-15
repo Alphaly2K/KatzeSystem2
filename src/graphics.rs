@@ -67,6 +67,7 @@ mod particle_notice;
 mod particle_plugin;
 mod particle_rain;
 mod particle_sigh;
+mod particle_silent;
 mod particle_surprise;
 mod particle_sweat;
 pub(crate) use particle_task::refresh_particle_source;

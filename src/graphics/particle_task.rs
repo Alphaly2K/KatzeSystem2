@@ -4,7 +4,7 @@ use super::{
     particle_dis::Dis, particle_down::Down, particle_exclamation::Exclamation,
     particle_film_noise::FilmNoise, particle_flower_burst::FlowerBurst, particle_note::Note,
     particle_notice::Notice, particle_plugin, particle_rain::Rain, particle_sigh::Sigh,
-    particle_surprise::Surprise, particle_sweat::Sweat,
+    particle_silent::Silent, particle_surprise::Surprise, particle_sweat::Sweat,
 };
 use crate::kcs::{
     Host, Interpreter, ParticleHost, ParticleSource, ParticleTask, Program, ScriptRandom,
@@ -36,6 +36,7 @@ enum Effect {
     FilmNoise(FilmNoise),
     Asease(Asease),
     Surprise(Surprise),
+    Silent(Silent),
 }
 
 impl Effect {
@@ -65,6 +66,7 @@ impl Effect {
             }
             particle_plugin::Kind::Asease => Self::Asease(Asease::new(host, image, random)),
             particle_plugin::Kind::Surprise => Self::Surprise(Surprise::new(host, image)),
+            particle_plugin::Kind::Silent => Self::Silent(Silent::new(host, image)),
         }
     }
 }
@@ -261,6 +263,10 @@ impl ParticleRunner {
                             effect.update(delta, host.source.unwrap_or_default().position_2d);
                             effect.write_mesh(host);
                         }
+                        Effect::Silent(effect) => {
+                            effect.update(delta, host.source.unwrap_or_default().position_2d);
+                            effect.write_mesh(host);
+                        }
                     }
                 }
                 host.previous_elapsed = host.elapsed;
@@ -325,6 +331,7 @@ impl Particle3DObject {
             return Err(Error::new(0x18c, "粒子外部绘图模式尚未接入"));
         }
         self.clear(host)?;
+        let count = read::u32_at(record, 0x104)? as usize;
         let name = |at| -> Result<&[u8]> { read::zstr(&record[..at + 128], at) };
         let (program, image) = {
             let services = host
@@ -346,6 +353,13 @@ impl Particle3DObject {
             } else {
                 ParticleProgram::Script(Program::parse(&bytes)?)
             };
+            if matches!(
+                &program,
+                ParticleProgram::Builtin(particle_plugin::Kind::Silent)
+            ) && !(1..=4).contains(&count)
+            {
+                return Err(Error::new(0, "静默标记需要一个主体及至多三个附加点"));
+            }
             let image = if name(0x84)?.is_empty() {
                 None
             } else {
@@ -375,7 +389,7 @@ impl Particle3DObject {
             parameters: self.parameters,
             ..ParticleHost::default()
         };
-        particles.reset_quads(read::u32_at(record, 0x104)? as usize, self.image_size)?;
+        particles.reset_quads(count, self.image_size)?;
         let mesh = ParticleMesh::new(&particles, texture, reference)?;
         self.task = Some(match program {
             ParticleProgram::Script(program) => {
