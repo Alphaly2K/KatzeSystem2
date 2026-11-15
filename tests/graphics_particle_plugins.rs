@@ -1269,6 +1269,16 @@ fn scatter_effects_use_shared_randomness_and_preserve_task_lifecycle() -> Result
             0,
         ),
         (
+            b"hadou.ppi".as_slice(),
+            [4f32, 640., 360., 1., 800., 50., 50., 20., 120., 220.].as_slice(),
+            0,
+            0,
+            [[0., 0.], [1., 1.]],
+            0,
+            0,
+            0,
+        ),
+        (
             b"concent.ppi".as_slice(),
             [4f32, 50., 15., 800., 345., 1500., 900.].as_slice(),
             4,
@@ -1403,8 +1413,8 @@ fn scatter_effects_use_shared_randomness_and_preserve_task_lifecycle() -> Result
             Some(&mesh)
         );
         assert_random(&mut runtime, &expected);
-        if name == b"concent.ppi" {
-            let width = parameters[20..24].to_vec();
+        if matches!(name, b"concent.ppi" | b"hadou.ppi") {
+            let value = parameters[20..24].to_vec();
             parameters[20..24].fill(0);
             runtime.dispatch_command_with_buffers(
                 2,
@@ -1418,7 +1428,7 @@ fn scatter_effects_use_shared_randomness_and_preserve_task_lifecycle() -> Result
             assert_eq!(runtime.dispatch_command(2, command(324))?, 0);
             assert_eq!(runtime.drawables().get(1).unwrap().display(), 0);
             assert_random(&mut runtime, &expected);
-            parameters[20..24].copy_from_slice(&width);
+            parameters[20..24].copy_from_slice(&value);
             runtime.dispatch_command_with_buffers(
                 2,
                 command(325),
