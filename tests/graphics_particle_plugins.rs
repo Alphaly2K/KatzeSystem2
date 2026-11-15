@@ -1283,6 +1283,16 @@ fn scatter_effects_use_shared_randomness_and_preserve_task_lifecycle() -> Result
             0,
         ),
         (
+            b"sakura.ppi".as_slice(),
+            [8f32, 20., 120., 500., 0.].as_slice(),
+            14,
+            43,
+            [[0., 0.], [0.5, 0.5]],
+            0,
+            1,
+            3,
+        ),
+        (
             b"hadou.ppi".as_slice(),
             [4f32, 640., 360., 1., 800., 50., 50., 20., 120., 220.].as_slice(),
             0,
@@ -1489,7 +1499,7 @@ fn scatter_effects_use_shared_randomness_and_preserve_task_lifecycle() -> Result
             .unwrap();
         if matches!(
             name,
-            b"digi.ppi" | b"digiring.ppi" | b"rising4.ppi" | b"rising3.ppi"
+            b"digi.ppi" | b"digiring.ppi" | b"rising4.ppi" | b"rising3.ppi" | b"sakura.ppi"
         ) {
             assert!(restarted[0].color >> 24 > 0);
         } else {

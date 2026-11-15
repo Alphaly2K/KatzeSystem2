@@ -1,8 +1,5 @@
-use crate::kcs::{ParticleHost, ScriptRandom, ieee_float_operation, transform_vector};
-
-fn arithmetic(op: u8, left: f32, right: f32) -> f32 {
-    f32::from_bits(ieee_float_operation(op, left.to_bits(), right.to_bits()))
-}
+use super::particle_curve::Path;
+use crate::kcs::{ParticleHost, ScriptRandom, transform_vector};
 
 fn integer(value: f32) -> i32 {
     if (-2147483648.0..2147483648.0).contains(&value) {
@@ -39,90 +36,6 @@ fn rotate(vector: [f32; 3], angle: f32) -> [f32; 3] {
         ((matrix[i] * vector[0] + matrix[i + 4] * vector[1]) + matrix[i + 8] * vector[2])
             + matrix[i + 12]
     })
-}
-
-struct Path {
-    points: Vec<[f32; 3]>,
-    tangents: Vec<[f32; 3]>,
-    lengths: Vec<f32>,
-    total: f32,
-    duration: f32,
-}
-
-impl Path {
-    fn new(points: Vec<[f32; 3]>, duration: f32, strength: f32) -> Self {
-        let lengths: Vec<_> = std::iter::once(0.)
-            .chain(
-                points
-                    .windows(2)
-                    .map(|p| length(std::array::from_fn(|j| p[1][j] - p[0][j]))),
-            )
-            .collect();
-        let total = lengths.iter().copied().fold(0., |a, b| a + b);
-        let tangents = (0..points.len())
-            .map(|i| {
-                if duration == 0. {
-                    [0.; 3]
-                } else {
-                    let delta = if i == 0 {
-                        std::array::from_fn(|j| points[1][j] - points[0][j])
-                    } else if i + 1 == points.len() {
-                        std::array::from_fn(|j| points[i][j] - points[i - 1][j])
-                    } else {
-                        std::array::from_fn(|j| {
-                            (points[i + 1][j] - points[i][j]) - (points[i - 1][j] - points[i][j])
-                        })
-                    };
-                    let n = length(delta);
-                    delta.map(|v| arithmetic(3, arithmetic(4, v, n), strength))
-                }
-            })
-            .collect();
-        Self {
-            points,
-            tangents,
-            lengths,
-            total,
-            duration,
-        }
-    }
-
-    fn at(&self, mut time: f32) -> [f32; 3] {
-        if time <= 0. {
-            return self.points[0];
-        }
-        if time >= self.duration {
-            time = self.duration;
-        }
-        let distance = (time / self.duration) * self.total;
-        let mut previous = 0.;
-        for i in 0..self.points.len() - 1 {
-            let next = previous + self.lengths[i + 1];
-            if next > distance {
-                let t = (distance - previous) / self.lengths[i + 1];
-                let square = t * t;
-                let cube = square * t;
-                let basis = [
-                    [2., -2., 1., 1.],
-                    [-3., 3., -2., -1.],
-                    [0., 0., 1., 0.],
-                    [1., 0., 0., 0.],
-                ];
-                let c = basis.map(|r| {
-                    std::array::from_fn::<_, 3, _>(|j| {
-                        ((self.points[i][j] * r[0] + self.points[i + 1][j] * r[1])
-                            + self.tangents[i][j] * r[2])
-                            + self.tangents[i + 1][j] * r[3]
-                    })
-                });
-                return std::array::from_fn(|j| {
-                    ((c[0][j] * cube + c[1][j] * square) + c[2][j] * t) + c[3][j]
-                });
-            }
-            previous = next;
-        }
-        *self.points.last().unwrap()
-    }
 }
 
 struct Particle {
