@@ -1,11 +1,12 @@
 use super::{Drawable, ParticleMesh, Surface};
 use super::{
     particle_anger::Anger, particle_angry::Angry, particle_asease::Asease, particle_common::Common,
-    particle_concentration::Concentration, particle_digi::Digi, particle_dis::Dis,
-    particle_down::Down, particle_energy::Energy, particle_exclamation::Exclamation,
-    particle_film_noise::FilmNoise, particle_flower_burst::FlowerBurst, particle_glint::Glint,
-    particle_note::Note, particle_notice::Notice, particle_plugin, particle_question::Question,
-    particle_rain::Rain, particle_sigh::Sigh, particle_silent::Silent, particle_sparkle::Sparkle,
+    particle_concentration::Concentration, particle_digi::Digi, particle_digi_ring::DigiRing,
+    particle_dis::Dis, particle_down::Down, particle_energy::Energy,
+    particle_exclamation::Exclamation, particle_film_noise::FilmNoise,
+    particle_flower_burst::FlowerBurst, particle_glint::Glint, particle_note::Note,
+    particle_notice::Notice, particle_plugin, particle_question::Question, particle_rain::Rain,
+    particle_sigh::Sigh, particle_silent::Silent, particle_sparkle::Sparkle,
     particle_surprise::Surprise, particle_sweat::Sweat,
 };
 use crate::kcs::{
@@ -45,6 +46,7 @@ enum Effect {
     Glint(Glint),
     Energy(Energy),
     Digi(Digi),
+    DigiRing(DigiRing),
 }
 
 impl Effect {
@@ -84,6 +86,7 @@ impl Effect {
             particle_plugin::Kind::Glint => Self::Glint(Glint::new(host, image)),
             particle_plugin::Kind::Energy => Self::Energy(Energy::new(host, image, random)),
             particle_plugin::Kind::Digi => Self::Digi(Digi::new(host, image, random)),
+            particle_plugin::Kind::DigiRing => Self::DigiRing(DigiRing::new(host, image, random)),
         })
     }
 }
@@ -310,6 +313,14 @@ impl ParticleRunner {
                             effect.write_mesh(host);
                         }
                         Effect::Digi(effect) => {
+                            effect.update(
+                                delta,
+                                host.source.unwrap_or_default().position_2d,
+                                services.random().unwrap_or(&mut host.random),
+                            );
+                            effect.write_mesh(host);
+                        }
+                        Effect::DigiRing(effect) => {
                             effect.update(
                                 delta,
                                 host.source.unwrap_or_default().position_2d,

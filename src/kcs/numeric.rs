@@ -133,7 +133,7 @@ pub(super) fn convert(op: u8, n: u32) -> u32 {
     }
 }
 
-pub(super) fn native_math(index: u32, args: &[u32]) -> u32 {
+pub(crate) fn native_math(index: u32, args: &[u32]) -> u32 {
     // 原宿主将 f32 升为 double 调用 CRT，然后舍入回 f32。
     let a = f32::from_bits(args[0]) as f64;
     let b = args.get(1).map_or(0.0, |&n| f32::from_bits(n) as f64);

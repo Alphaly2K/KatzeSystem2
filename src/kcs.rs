@@ -45,6 +45,7 @@ pub use motion::{MotionHost, MotionState, MotionTask};
 pub(crate) use native::{RuntimeHandler, call_native, runtime_native_handler};
 pub(crate) use numeric::float as float_operation;
 pub(crate) use numeric::float_ieee as ieee_float_operation;
+pub(crate) use numeric::native_math as native_float_math;
 pub(crate) use numeric::native_triangle;
 pub use ordinary::OrdinaryTask;
 pub use particle::{ParticleHost, ParticleSource, ParticleTask, ParticleVertex};
