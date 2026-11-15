@@ -3,10 +3,10 @@ use super::{
     particle_anger::Anger, particle_angry::Angry, particle_asease::Asease, particle_common::Common,
     particle_concentration::Concentration, particle_dis::Dis, particle_down::Down,
     particle_exclamation::Exclamation, particle_film_noise::FilmNoise,
-    particle_flower_burst::FlowerBurst, particle_note::Note, particle_notice::Notice,
-    particle_plugin, particle_question::Question, particle_rain::Rain, particle_sigh::Sigh,
-    particle_silent::Silent, particle_sparkle::Sparkle, particle_surprise::Surprise,
-    particle_sweat::Sweat,
+    particle_flower_burst::FlowerBurst, particle_glint::Glint, particle_note::Note,
+    particle_notice::Notice, particle_plugin, particle_question::Question, particle_rain::Rain,
+    particle_sigh::Sigh, particle_silent::Silent, particle_sparkle::Sparkle,
+    particle_surprise::Surprise, particle_sweat::Sweat,
 };
 use crate::kcs::{
     Host, Interpreter, ParticleHost, ParticleSource, ParticleTask, Program, ScriptRandom,
@@ -42,6 +42,7 @@ enum Effect {
     Question(Question),
     Sparkle(Sparkle),
     Concentration(Concentration),
+    Glint(Glint),
 }
 
 impl Effect {
@@ -78,6 +79,7 @@ impl Effect {
             particle_plugin::Kind::Concentration => {
                 Self::Concentration(Concentration::new(host, image, random, activation)?)
             }
+            particle_plugin::Kind::Glint => Self::Glint(Glint::new(host, image)),
         })
     }
 }
@@ -289,6 +291,14 @@ impl ParticleRunner {
                         }
                         Effect::Concentration(effect) => {
                             effect.update(delta, services.random().unwrap_or(&mut host.random));
+                            effect.write_mesh(host);
+                        }
+                        Effect::Glint(effect) => {
+                            effect.update(
+                                delta,
+                                host.source.unwrap_or_default().position_2d,
+                                services.random().unwrap_or(&mut host.random),
+                            );
                             effect.write_mesh(host);
                         }
                         Effect::Question(effect) => {

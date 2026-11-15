@@ -33,7 +33,7 @@ fn plugin(name: &[u8]) -> Vec<u8> {
     }
     bytes[320..320 + name.len()].copy_from_slice(name);
     bytes[360..366].copy_from_slice(&[0xb8, 1, 0, 2, 0, 0xc3]);
-    if name == b"em_down.ppi" || name == b"em_silent.ppi" {
+    if name == b"em_down.ppi" || name == b"em_silent.ppi" || name == b"em_kyupin.ppi" {
         bytes[361] = 2;
     }
     bytes[368..374].copy_from_slice(&[0xb8, 1, 0, 0, 0, 0xc3]);
@@ -804,6 +804,12 @@ fn deterministic_emotions_preserve_randomness_task_controls_and_source_offsets()
     use katze_system2::graphics::Drawable;
 
     for (name, values, count, uv) in [
+        (
+            b"em_kyupin.ppi".as_slice(),
+            [494f32, 100., 0., 48., 8., 5., 20., 5., 5.].as_slice(),
+            1,
+            [[0., 0.], [1., 1.]],
+        ),
         (
             b"em_common.ppi".as_slice(),
             [782f32, 169., 1., 60., 5., 8.].as_slice(),
