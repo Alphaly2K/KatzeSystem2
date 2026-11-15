@@ -75,7 +75,11 @@ impl Hadou {
             return Err(Error::new(0, "波动粒子的激活间隔不能为零"));
         }
         let group = integer(p[0]) as u32 as usize;
-        let count = host.quads.len().checked_div(group).unwrap_or(host.quads.len());
+        let count = host
+            .quads
+            .len()
+            .checked_div(group)
+            .unwrap_or(host.quads.len());
         let scale = [p[3], p[4]].map(|n| {
             let n = n / 100.;
             if n < 0.001 { 0.001 } else { n }

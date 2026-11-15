@@ -33,6 +33,9 @@ fn plugin(name: &[u8]) -> Vec<u8> {
     }
     bytes[320..320 + name.len()].copy_from_slice(name);
     bytes[360..366].copy_from_slice(&[0xb8, 1, 0, 2, 0, 0xc3]);
+    if name == b"rising3.ppi" {
+        bytes[361] = 0;
+    }
     if matches!(
         name,
         b"em_down.ppi"
@@ -1339,6 +1342,16 @@ fn scatter_effects_use_shared_randomness_and_preserve_task_lifecycle() -> Result
             4,
         ),
         (
+            b"rising3.ppi".as_slice(),
+            [640f32, 360., 0., 80., 1., 15., 640., -80., 0.].as_slice(),
+            0,
+            1,
+            [[0., 0.5], [0.5, 1.]],
+            0,
+            0,
+            4,
+        ),
+        (
             b"em_shy.ppi".as_slice(),
             [
                 10f32, 30., 0., 90., 15., 10., 20., 10., 15., 100., 100., 612., 165., 652., 165.,
@@ -1463,7 +1476,10 @@ fn scatter_effects_use_shared_randomness_and_preserve_task_lifecycle() -> Result
             .unwrap()
             .projected_quad(mesh_index, &Projection::default())
             .unwrap();
-        if matches!(name, b"digi.ppi" | b"digiring.ppi" | b"rising4.ppi") {
+        if matches!(
+            name,
+            b"digi.ppi" | b"digiring.ppi" | b"rising4.ppi" | b"rising3.ppi"
+        ) {
             assert!(restarted[0].color >> 24 > 0);
         } else {
             assert_eq!(restarted[0].color >> 24, 0);

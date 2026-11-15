@@ -94,6 +94,9 @@ impl Effect {
             particle_plugin::Kind::Digi => Self::Digi(Digi::new(host, image, random)),
             particle_plugin::Kind::DigiRing => Self::DigiRing(DigiRing::new(host, image, random)),
             particle_plugin::Kind::Rising => Self::Rising(Rising::new(host, image, random)),
+            particle_plugin::Kind::Rising3 => {
+                Self::Rising(Rising::new_rising3(host, image, random))
+            }
             particle_plugin::Kind::Double => Self::Double(Double::new(host, image)),
             particle_plugin::Kind::Shy => Self::Shy(Box::new(Shy::new(host, image, random))),
             particle_plugin::Kind::Warukira => Self::Warukira(Warukira::new(host, image, random)),

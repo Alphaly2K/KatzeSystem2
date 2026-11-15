@@ -51,6 +51,7 @@ pub(super) enum Kind {
     Shy,
     Warukira,
     Hadou,
+    Rising3,
 }
 
 fn u16_at(bytes: &[u8], at: usize) -> Option<u16> {
@@ -148,6 +149,8 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
         Kind::Warukira
     } else if name.eq_ignore_ascii_case(b"hadou.ppi") {
         Kind::Hadou
+    } else if name.eq_ignore_ascii_case(b"rising3.ppi") {
+        Kind::Rising3
     } else {
         return None;
     };
@@ -165,6 +168,7 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
         read::u32_at(code, 1).ok()
     };
     let version = match kind {
+        Kind::Rising3 => 0x0002_0000,
         Kind::Down
         | Kind::Silent
         | Kind::Glint

@@ -43,11 +43,18 @@ struct Trail {
     alpha: u32,
 }
 
+#[derive(Clone, Copy)]
+enum Variant {
+    Rising3,
+    Rising4,
+}
+
 pub(super) struct Rising {
     scale: f32,
     image: [f32; 2],
     head: Option<Head>,
     trails: Vec<Trail>,
+    variant: Variant,
 }
 
 impl Rising {
@@ -78,7 +85,18 @@ impl Rising {
             image,
             head,
             trails,
+            variant: Variant::Rising4,
         }
+    }
+
+    pub(super) fn new_rising3(
+        host: &ParticleHost,
+        image: [f32; 2],
+        random: &mut ScriptRandom,
+    ) -> Self {
+        let mut effect = Self::new(host, image, random);
+        effect.variant = Variant::Rising3;
+        effect
     }
 
     pub(super) fn update(&mut self, delta: u32, parameters: &[u32; 32], random: &mut ScriptRandom) {
@@ -87,7 +105,15 @@ impl Rising {
         };
         let elapsed = integer(delta as f32);
         match head.phase {
-            0 => head.rotation += head.spin,
+            0 => {
+                head.rotation += head.spin;
+                if matches!(self.variant, Variant::Rising3)
+                    && head.age as f64 > f32::from_bits(parameters[4]) as f64
+                {
+                    head.phase = 1;
+                    head.phase_time = head.age;
+                }
+            }
             1 => {
                 let p = parameters.map(f32::from_bits);
                 let start = head.phase_time as f32;
@@ -95,7 +121,11 @@ impl Rising {
                 head.position =
                     std::array::from_fn(|i| linear(p[i], p[i + 6], start, end, head.age as f32));
                 head.rotation += head.spin;
-                if head.age as f32 > end {
+                let past_end = match self.variant {
+                    Variant::Rising3 => head.age as f64 > head.phase_time as f64 + p[5] as f64,
+                    Variant::Rising4 => head.age as f32 > end,
+                };
+                if past_end {
                     head.phase = 2;
                     head.phase_time = head.age;
                 }
@@ -105,14 +135,17 @@ impl Rising {
         let count = self.trails.len();
         if head.phase <= 2 {
             if let Some(trail) = self.trails.iter_mut().find(|trail| !trail.active) {
-                let target = head
-                    .position
-                    .map(|n| (random.next_float() * 500. + n) - 250.);
-                trail.path = Some(TwoPointPath::new(
-                    [head.position, target],
-                    count as f32,
-                    100.,
-                ));
+                let target = head.position.map(|n| match self.variant {
+                    Variant::Rising3 => {
+                        (random.next_float() as f64 * 500. + n as f64 - 250.) as f32
+                    }
+                    Variant::Rising4 => (random.next_float() * 500. + n) - 250.,
+                });
+                let points = [head.position, target];
+                trail.path = Some(match self.variant {
+                    Variant::Rising3 => TwoPointPath::new_extended(points, count as f32, 100.),
+                    Variant::Rising4 => TwoPointPath::new(points, count as f32, 100.),
+                });
                 trail.position = head.position;
                 trail.rotation = head.rotation;
                 trail.scale = self.scale;
@@ -302,6 +335,156 @@ mod tests {
         let mut expected = ScriptRandom::seeded(17);
         expected.next_float();
         assert_eq!(random.next_float(), expected.next_float());
+        Ok(())
+    }
+
+    #[test]
+    fn rising3_moves_after_delay_and_keeps_extended_paths_and_shared_randomness()
+    -> crate::Result<()> {
+        use crate::graphics::{ParticleMesh, Projection};
+        let mut host = host(8, &[640., 360., 0., 80., 1., 15., 640., -80., 0.])?;
+        host.surface_size = [1280, 720];
+        let mut random = ScriptRandom::seeded(17);
+        let mut effect = Rising::new_rising3(&host, [64., 128.], &mut random);
+        for step in 1u32..160 {
+            let delta = if step.is_multiple_of(9) {
+                7
+            } else if step.is_multiple_of(7) {
+                0
+            } else {
+                1
+            };
+            effect.update(delta, &host.parameters, &mut random);
+            let expected = match step {
+                1 => Some((
+                    [
+                        1, 0, 0, 0x44200000, 0x43b40000, 0x3e8cd0de, 1, 1, 0x44200000, 0x43b40000,
+                        0, 0x4397c3cb, 255,
+                    ],
+                    5,
+                )),
+                3 => Some((
+                    [
+                        3, 2, 1, 0x44200000, 0x43b40000, 0xbfc07192, 3, 1, 0x44161445, 0x43b81bab,
+                        0xc25efe59, 0x4397c3cb, 182,
+                    ],
+                    13,
+                )),
+                12 => Some((
+                    [
+                        17, 2, 1, 0x44200000, 0xc24aaaa8, 0x3e48bb84, 3, 1, 0x44135522, 0x4211103d,
+                        0x3fbe842c, 0x4378a433, 182,
+                    ],
+                    45,
+                )),
+                40 => Some((
+                    [
+                        59, 18, 2, 0x44200000, 0xc2a00000, 0x3eb6ee1e, 4, 1, 0x44195718,
+                        0xc1d7518b, 0x41b4b1e7, 0x43188f62, 145,
+                    ],
+                    141,
+                )),
+                159 => Some((
+                    [
+                        241, 18, 2, 0x44200000, 0xc2a00000, 0x3eb6ee1e, 5, 1, 0x44051500,
+                        0xc28e3951, 0x416453b1, 0x433979c4, 109,
+                    ],
+                    561,
+                )),
+                _ => None,
+            };
+            if let Some((expected, floats)) = expected {
+                let h = effect.head.as_ref().unwrap();
+                let t = &effect.trails[0];
+                assert_eq!(
+                    [
+                        h.age as u32,
+                        h.phase_time as u32,
+                        h.phase,
+                        h.position[0].to_bits(),
+                        h.position[1].to_bits(),
+                        h.rotation.to_bits(),
+                        t.age as u32,
+                        u32::from(t.active),
+                        t.position[0].to_bits(),
+                        t.position[1].to_bits(),
+                        t.position[2].to_bits(),
+                        t.path.as_ref().unwrap().length.to_bits(),
+                        t.alpha,
+                    ],
+                    expected,
+                    "step {step}"
+                );
+                let mut expected = ScriptRandom::seeded(17);
+                for _ in 0..floats {
+                    expected.next_float();
+                }
+                let mut actual = random.clone();
+                assert_eq!(actual.next_integer(), expected.next_integer());
+                assert_eq!(
+                    actual.next_float().to_bits(),
+                    expected.next_float().to_bits()
+                );
+            }
+            if step == 40 {
+                effect.write_mesh(&mut host);
+                host.depth_offset = 5000.;
+                let mesh = ParticleMesh::new(&host, None, 59000.)?;
+                for (index, expected) in [
+                    [0x441e7b12, 0xc308eb7c, 0x3f6c4ec5, 0x3a83126f, 0xffffffff],
+                    [0x44182a9f, 0xc2942098, 0x3f6c3800, 0x3a8619ce, 0x91ffffff],
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    let q = mesh.projected_quad(index, &Projection::default()).unwrap();
+                    assert_eq!(
+                        [
+                            q[0].position[0].to_bits(),
+                            q[0].position[1].to_bits(),
+                            q[0].position[2].to_bits(),
+                            q[0].rhw.to_bits(),
+                            q[0].color
+                        ],
+                        expected
+                    );
+                    assert_eq!([q[0].uv, q[3].uv], [[0., 0.5], [0.5, 1.]]);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn rising3_reads_live_targets_and_preserves_integer_phase_deadlines() -> crate::Result<()> {
+        let mut host = host(1, &[1., 3., 5., 25., 2., 4., 9., 11., 13.])?;
+        let mut random = ScriptRandom::seeded(17);
+        let mut effect = Rising::new_rising3(&host, [64., 128.], &mut random);
+        effect.head.as_mut().unwrap().age = 2;
+        effect.update(0, &host.parameters, &mut random);
+        assert_eq!(effect.head.as_ref().unwrap().phase, 0);
+        effect.head.as_mut().unwrap().age = 3;
+        effect.update(0, &host.parameters, &mut random);
+        assert_eq!(effect.head.as_ref().unwrap().phase, 1);
+        effect.head.as_mut().unwrap().age = 5;
+        effect.update(0, &host.parameters, &mut random);
+        assert_eq!(effect.head.as_ref().unwrap().position, [5., 7., 9.]);
+        host.parameters[7] = 19f32.to_bits();
+        effect.update(0, &host.parameters, &mut random);
+        assert_eq!(effect.head.as_ref().unwrap().position, [5., 11., 9.]);
+        let head = effect.head.as_mut().unwrap();
+        head.phase_time = 16_777_216;
+        head.age = 16_777_217;
+        host.parameters[5] = 0.5f32.to_bits();
+        effect.update(0, &host.parameters, &mut random);
+        assert_eq!(effect.head.as_ref().unwrap().phase, 2);
+        let mut expected = ScriptRandom::seeded(17);
+        expected.next_float();
+        assert_eq!(random.next_integer(), expected.next_integer());
+        assert_eq!(
+            random.next_float().to_bits(),
+            expected.next_float().to_bits()
+        );
         Ok(())
     }
 }
