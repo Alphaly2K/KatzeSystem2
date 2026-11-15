@@ -33,7 +33,10 @@ fn plugin(name: &[u8]) -> Vec<u8> {
     }
     bytes[320..320 + name.len()].copy_from_slice(name);
     bytes[360..366].copy_from_slice(&[0xb8, 1, 0, 2, 0, 0xc3]);
-    if name == b"em_down.ppi" || name == b"em_silent.ppi" || name == b"em_kyupin.ppi" {
+    if matches!(
+        name,
+        b"em_down.ppi" | b"em_silent.ppi" | b"em_kyupin.ppi" | b"energy.ppi"
+    ) {
         bytes[361] = 2;
     }
     bytes[368..374].copy_from_slice(&[0xb8, 1, 0, 0, 0, 0xc3]);
@@ -1222,7 +1225,7 @@ fn film_noise_culls_hidden_layers_ignores_source_motion_and_restarts_randomness(
 
 #[test]
 fn scatter_effects_use_shared_randomness_and_preserve_task_lifecycle() -> Result<()> {
-    for (name, values, integers, floats, uv, mesh_index) in [
+    for (name, values, integers, floats, uv, mesh_index, update_integers) in [
         (
             b"asease.ppi".as_slice(),
             [782f32, 169., 62., 30., 15., 80., 120.].as_slice(),
@@ -1230,6 +1233,7 @@ fn scatter_effects_use_shared_randomness_and_preserve_task_lifecycle() -> Result
             48,
             [[0., 0.], [1., 1.]],
             0,
+            1,
         ),
         (
             b"kirakira.ppi".as_slice(),
@@ -1238,6 +1242,7 @@ fn scatter_effects_use_shared_randomness_and_preserve_task_lifecycle() -> Result
             16,
             [[0., 0.5], [0.5, 1.]],
             0,
+            1,
         ),
         (
             b"concent.ppi".as_slice(),
@@ -1246,6 +1251,19 @@ fn scatter_effects_use_shared_randomness_and_preserve_task_lifecycle() -> Result
             4,
             [[0., 0.], [1., 1.]],
             3,
+            1,
+        ),
+        (
+            b"energy.ppi".as_slice(),
+            [
+                -40f32, 390., 640., 780., 90., 30., 600., 120., 40., 50., 30.,
+            ]
+            .as_slice(),
+            8,
+            40,
+            [[0., 0.], [0.5, 0.5]],
+            0,
+            96,
         ),
     ] {
         let mut runtime = runtime(plugin(name))?;
@@ -1280,7 +1298,9 @@ fn scatter_effects_use_shared_randomness_and_preserve_task_lifecycle() -> Result
         assert_random(&mut runtime, &expected);
         for frame in 2..=10 {
             runtime.update(frame, 1)?;
-            expected.next_integer();
+            for _ in 0..update_integers {
+                expected.next_integer();
+            }
         }
         assert_random(&mut runtime, &expected);
         let mesh = runtime
@@ -1336,7 +1356,9 @@ fn scatter_effects_use_shared_randomness_and_preserve_task_lifecycle() -> Result
             expected.next_float();
         }
         runtime.update(12, 1)?;
-        expected.next_integer();
+        for _ in 0..update_integers {
+            expected.next_integer();
+        }
         assert_random(&mut runtime, &expected);
         let restarted = runtime
             .drawables()

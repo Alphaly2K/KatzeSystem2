@@ -61,6 +61,7 @@ mod particle_concentration;
 mod particle_curve;
 mod particle_dis;
 mod particle_down;
+mod particle_energy;
 mod particle_exclamation;
 mod particle_film_noise;
 mod particle_flower_burst;

@@ -81,7 +81,7 @@ pub(crate) fn float(op: u8, left: u32, right: u32) -> u32 {
     float_ieee(op, left, right)
 }
 
-pub(super) fn float_ieee(op: u8, left: u32, right: u32) -> u32 {
+pub(crate) fn float_ieee(op: u8, left: u32, right: u32) -> u32 {
     let a = f32::from_bits(left);
     let b = f32::from_bits(right);
     if a.is_nan() {

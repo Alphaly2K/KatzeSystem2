@@ -43,6 +43,7 @@ pub(super) enum Kind {
     Sparkle,
     Concentration,
     Glint,
+    Energy,
 }
 
 fn u16_at(bytes: &[u8], at: usize) -> Option<u16> {
@@ -124,6 +125,8 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
         Kind::Concentration
     } else if name.eq_ignore_ascii_case(b"em_kyupin.ppi") {
         Kind::Glint
+    } else if name.eq_ignore_ascii_case(b"energy.ppi") {
+        Kind::Energy
     } else {
         return None;
     };
@@ -141,7 +144,7 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
         read::u32_at(code, 1).ok()
     };
     let version = match kind {
-        Kind::Down | Kind::Silent | Kind::Glint => 0x0002_0002,
+        Kind::Down | Kind::Silent | Kind::Glint | Kind::Energy => 0x0002_0002,
         _ => 0x0002_0001,
     };
     (constant(3)? == version && constant(4)? == 1).then_some(kind)
