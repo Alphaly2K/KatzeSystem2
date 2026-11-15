@@ -74,7 +74,7 @@ impl InputDevice for ScriptedDevice {
             .find(|(round, _)| self.polls >= *round && self.polls < round + 4);
         Ok(PointerSample {
             position: click.map_or([640, 360], |(_, position)| *position),
-            active: u32::from(click.is_some_and(|(round, _)| self.polls < round + 2)),
+            active: 1,
         })
     }
     fn key(&mut self, key: u32, group: u32, repeat: bool) -> Result<KeySample> {
