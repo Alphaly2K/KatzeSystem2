@@ -22,7 +22,14 @@ impl ProgramLoader for Loader {
 struct Resources;
 impl ResourceServices for Resources {
     fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
-        assert_eq!(category, b"movie");
+        assert_eq!(
+            category,
+            if name.starts_with(b"effect_") {
+                b"veff".as_slice()
+            } else {
+                b"movie".as_slice()
+            }
+        );
         Ok(name.to_vec())
     }
     fn read(&mut self, _: &[u8], _: ResourceMode) -> Result<Option<Vec<u8>>> {
@@ -34,7 +41,7 @@ impl ResourceServices for Resources {
         mode: ResourceMode,
     ) -> Result<Option<katze_system2::io::SharedSource>> {
         assert_eq!(mode, ResourceMode::LooseFirst);
-        Ok((name == b"clip_7.mpg")
+        Ok(matches!(name, b"clip_7.mpg" | b"effect_7.mpg")
             .then(|| Arc::new(include_bytes!("fixtures/movie/clip.mpg").to_vec()) as _))
     }
 }
@@ -142,6 +149,23 @@ fn plane_movie_loads_without_exclusive_playback_or_audio_and_keeps_native_return
     assert!(audio.iter().all(|&sample| sample == 0.));
     runtime.destroy(3).unwrap();
     assert!(runtime.drawables().get(3).is_none());
+
+    let mut code = Vec::new();
+    call(&mut code, 988, &[0, u32::MAX], false);
+    call(&mut code, 988, &[3, 64], false);
+    instruction(&mut code, 0x3b, &[]);
+    let mut runtime = setup(code, 4096, b"effect_%u[G128].mpg\0");
+    runtime.host_mut().platform_settings = Some(katze_system2::settings::PlatformSettings {
+        etc_disablemovie: 1,
+        ..Default::default()
+    });
+    runtime.create(0, kind::PLANE, b"effect", b"").unwrap();
+    runtime.update(0, 1).unwrap();
+    assert_eq!(
+        runtime.drawables().get(3).unwrap().bounds()[1],
+        [32., 32., 0.]
+    );
+    assert!(runtime.drawing().enabled);
 
     let mut code = Vec::new();
     call(&mut code, 654, &[0, 192, u32::MAX], false);
@@ -387,4 +411,10 @@ fn plane_movie_sources_release_on_replacement_failure_and_task_cleanup() {
     send(&mut plane, &mut host, 43, 0, &mut record(b"clip.mpg"));
     assert_eq!(host.opens, previous);
     assert!(host.drawings.get(7).is_none());
+    send(&mut plane, &mut host, 44, 0, &mut record(b"clip.mpg"));
+    assert_eq!(host.opens, previous + 1);
+    assert_eq!(plane.shape_kind(), 4);
+    assert_eq!(Arc::strong_count(&host.source), 2);
+    send(&mut plane, &mut host, 68, 0, &mut []);
+    assert_eq!(Arc::strong_count(&host.source), 1);
 }

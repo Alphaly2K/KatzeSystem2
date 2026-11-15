@@ -136,7 +136,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             | 1067
             | 1069 => 4,
             82 | 88 | 92 | 94 | 95 | 97 | 102 | 103 | 105 | 106 | 258 | 262 | 402 | 455 | 462
-            | 464 | 466 | 534 | 653 | 657 | 701 | 848 | 849 | 1066 | 1068 => 8,
+            | 464 | 466 | 534 | 653 | 657 | 701 | 848 | 849 | 988 | 1066 | 1068 => 8,
             880 => 16,
             339 => 24,
             84 | 87 | 93 | 101 | 345 | 862 => 20,
@@ -186,7 +186,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     },
                 )?;
             }
-            701 => {
+            701 | 988 => {
                 let formatted = format_string(vm, word(1), 0)?;
                 let name = &formatted[..formatted
                     .iter()
@@ -197,7 +197,8 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     .services
                     .as_mut()
                     .ok_or_else(|| Error::new(vm.pc, "运行时未配置资源服务"))?;
-                let mut name = services.resolve(b"movie", name)?;
+                let mut name =
+                    services.resolve(if index == 701 { b"movie" } else { b"veff" }, name)?;
                 name.truncate(
                     name.iter()
                         .position(|&byte| byte == 0)
@@ -211,7 +212,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                 record.push(0);
                 self.command_target_with_buffers(
                     target,
-                    43,
+                    if index == 701 { 43 } else { 44 },
                     [0; 3],
                     &mut CommandBuffers {
                         data1: Some(&mut record),

@@ -666,7 +666,7 @@ impl TaskObject for PlaneObject {
                     drawings(host)?.insert(id, drawable)?;
                 }
             }
-            43 => {
+            43 | 44 => {
                 self.movie = None;
                 drawings(host)?.remove(id);
                 let record = buffers
@@ -678,7 +678,7 @@ impl TaskObject for PlaneObject {
                 if name.len() >= 260 {
                     return Err(Error::new(0, "电影资源名超过基线缓冲区范围"));
                 }
-                if self.creation_flags == 1 && host.movie_enabled() {
+                if self.creation_flags == 1 && (command.code == 44 || host.movie_enabled()) {
                     let services = host
                         .resource_services()
                         .ok_or_else(|| Error::new(0, "宿主未提供资源服务"))?;
@@ -703,7 +703,7 @@ impl TaskObject for PlaneObject {
                         self.size = std::array::from_fn(|i| {
                             arithmetic(2, geometry.bounds[1][i], geometry.bounds[0][i]).abs()
                         });
-                        self.shape_kind = 3;
+                        self.shape_kind = command.code - 40;
                         drawings(host)?.insert(id, geometry)?;
                         self.movie = Some(movie);
                     }
