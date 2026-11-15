@@ -157,24 +157,7 @@ fn blur_axis(source: &Surface, axis: usize, radius: usize) -> Result<Surface> {
                     } else {
                         let mean: [u32; 3] =
                             std::array::from_fn(|i| (right.colors[i] - left.colors[i]) / visible);
-                        let mut sums = [0u32; 4];
-                        for (pixel, weight) in pixels[x..x + weights.len()].iter().zip(&weights) {
-                            let alpha = u32::from(pixel[3]);
-                            for channel in 0..3 {
-                                let color = match alpha {
-                                    0 => mean[channel],
-                                    255 => u32::from(pixel[channel]),
-                                    _ => {
-                                        (u32::from(pixel[channel]) * alpha
-                                            + mean[channel] * (255 - alpha))
-                                            >> 8
-                                    }
-                                };
-                                sums[channel] += color * weight;
-                            }
-                            sums[3] += alpha * weight;
-                        }
-                        sums
+                        mixed_sum(&pixels[x..x + weights.len()], &weights, mean)
                     };
                     let at = base + (start + x) * pixel_stride;
                     for (channel, sum) in sums.into_iter().enumerate() {
@@ -193,4 +176,22 @@ fn blur_axis(source: &Surface, axis: usize, radius: usize) -> Result<Surface> {
         }
     }
     Ok(output)
+}
+
+// 单独编译混合窗口的归约，保持不透明窗口快速路径的性能。
+#[inline(never)]
+fn mixed_sum(pixels: &[[u8; 4]], weights: &[u32], mean: [u32; 3]) -> [u32; 4] {
+    let mut sums = [0u32; 4];
+    for (pixel, weight) in pixels.iter().zip(weights) {
+        let alpha = u32::from(pixel[3]);
+        // 两个端点直接保留原色或平均色，其余 Alpha 继续使用 255 份混合及截断。
+        let foreground = alpha + u32::from(alpha == 255);
+        let background = 255 - alpha + u32::from(alpha == 0);
+        for channel in 0..3 {
+            let color = (u32::from(pixel[channel]) * foreground + mean[channel] * background) >> 8;
+            sums[channel] += color * weight;
+        }
+        sums[3] += alpha * weight;
+    }
+    sums
 }
