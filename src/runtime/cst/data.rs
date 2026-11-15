@@ -6,7 +6,7 @@ use crate::{Error, Result, read, save::DataContainer};
 impl CstContext {
     fn clear_entry_data(&mut self) {
         for entry in self.registrations.iter_mut().chain(&mut self.history) {
-            entry.saved_data.clear();
+            entry.saved_data = Vec::new();
         }
     }
 }
