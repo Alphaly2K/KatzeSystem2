@@ -45,6 +45,7 @@ fn plugin(name: &[u8]) -> Vec<u8> {
             | b"digi.ppi"
             | b"digiring.ppi"
             | b"em_shy.ppi"
+            | b"thunder.ppi"
             | b"protect.ppi"
     ) {
         bytes[361] = 2;
@@ -1807,5 +1808,65 @@ fn spark_path_variant_registers_restarts_stops_and_rejects_the_other_layout() ->
     let mut other = plugin(b"spark.ppi");
     other[400..403].copy_from_slice(&[0x6a, 0x40, 0xe8]);
     assert!(runtime_with_count(other, 3)?.update(1, 1).is_err());
+    Ok(())
+}
+
+#[test]
+fn thunder_finishes_hides_and_preserves_module_randomness_across_restarts() -> Result<()> {
+    let mut runtime = runtime_with_count(plugin(b"thunder.ppi"), 3)?;
+    runtime.update(1, 1)?;
+    let mut parameters = [0; 128];
+    for (i, n) in [3f32, 640., 360., 100., 4., 3., 5.].into_iter().enumerate() {
+        parameters[i * 4..i * 4 + 4].copy_from_slice(&n.to_le_bytes());
+    }
+    runtime.dispatch_command_with_buffers(
+        2,
+        command(325),
+        &mut CommandBuffers {
+            data1: Some(&mut parameters),
+            ..Default::default()
+        },
+    )?;
+    let view = Projection::default();
+    let mut expected = ScriptRandom::seeded(17);
+    for (start, region) in [(2, 0.25), (30, 0.75)] {
+        runtime.dispatch_command(2, command(321))?;
+        expected.next_float();
+        assert_random(&mut runtime, &expected);
+        let drawable = runtime.drawables().get(1).unwrap();
+        assert_eq!(drawable.blend_mode(), 1);
+        let quad = drawable
+            .particle_mesh()
+            .unwrap()
+            .projected_quad(0, &view)
+            .unwrap();
+        assert_eq!(quad[0].uv, [region, 0.]);
+        assert_eq!(quad[0].color >> 24, 0);
+        let mut visible = false;
+        for now in start..start + 24 {
+            runtime.update(now, 1)?;
+            let drawable = runtime.drawables().get(1).unwrap();
+            visible |= drawable
+                .particle_mesh()
+                .unwrap()
+                .projected_quad(0, &view)
+                .unwrap()[0]
+                .color
+                >> 24
+                != 0;
+        }
+        assert!(visible);
+        assert_eq!(runtime.dispatch_command(2, command(324))?, 0);
+        assert_eq!(runtime.drawables().get(1).unwrap().display(), 0);
+        assert_random(&mut runtime, &expected);
+    }
+    runtime.dispatch_command(2, command(321))?;
+    expected.next_float();
+    runtime.dispatch_command(2, command(322))?;
+    runtime.update(60, 1)?;
+    assert_random(&mut runtime, &expected);
+    assert_eq!(runtime.drawables().get(1).unwrap().display(), 0);
+    runtime.destroy(1)?;
+    assert!(runtime.drawables().get(1).is_none());
     Ok(())
 }

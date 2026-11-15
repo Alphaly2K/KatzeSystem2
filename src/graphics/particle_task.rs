@@ -10,7 +10,7 @@ use super::{
     particle_rising::Rising, particle_sakura::Sakura, particle_scene_sparkle::SceneSparkle,
     particle_shy::Shy, particle_sigh::Sigh, particle_silent::Silent, particle_spark::Spark,
     particle_sparkle::Sparkle, particle_surprise::Surprise, particle_sweat::Sweat,
-    particle_warukira::Warukira,
+    particle_thunder::Thunder, particle_warukira::Warukira,
 };
 use crate::kcs::{
     Host, Interpreter, ParticleHost, ParticleSource, ParticleTask, Program, ScriptRandom,
@@ -61,6 +61,7 @@ enum Effect {
     Ice(Ice),
     SceneSparkle(SceneSparkle),
     Spark(Box<Spark>),
+    Thunder(Thunder),
 }
 
 impl Effect {
@@ -69,7 +70,7 @@ impl Effect {
         host: &ParticleHost,
         image: [f32; 2],
         random: &mut ScriptRandom,
-        activation: Arc<AtomicU32>,
+        module_state: Arc<AtomicU32>,
     ) -> Result<Self> {
         Ok(match kind {
             particle_plugin::Kind::Rain => Self::Rain(Rain::new(host, image, random)),
@@ -95,7 +96,7 @@ impl Effect {
             particle_plugin::Kind::Question => Self::Question(Question::new(host, image)),
             particle_plugin::Kind::Sparkle => Self::Sparkle(Sparkle::new(host, image, random)),
             particle_plugin::Kind::Concentration => {
-                Self::Concentration(Concentration::new(host, image, random, activation)?)
+                Self::Concentration(Concentration::new(host, image, random, module_state)?)
             }
             particle_plugin::Kind::Glint => Self::Glint(Glint::new(host, image)),
             particle_plugin::Kind::Energy => Self::Energy(Energy::new(host, image, random)),
@@ -111,6 +112,9 @@ impl Effect {
             particle_plugin::Kind::Hadou => Self::Hadou(Hadou::new(host, image)?),
             particle_plugin::Kind::Ice => Self::Ice(Ice::new(host, image, random)),
             particle_plugin::Kind::Spark => Self::Spark(Box::new(Spark::new(host, image, random))),
+            particle_plugin::Kind::Thunder => {
+                Self::Thunder(Thunder::new(host, image, random, &module_state))
+            }
             particle_plugin::Kind::SceneSparkle => {
                 Self::SceneSparkle(SceneSparkle::new(host, image, random))
             }
@@ -142,7 +146,7 @@ enum ParticleRunner {
         effect: Option<Effect>,
         origin: u32,
         previous_time: u32,
-        activation: Arc<AtomicU32>,
+        module_state: Arc<AtomicU32>,
     },
 }
 
@@ -183,16 +187,16 @@ impl ParticleRunner {
                 host,
                 effect,
                 origin,
-                activation,
+                module_state,
                 ..
             } => {
                 *origin = 0;
                 *effect = None;
                 let next = if let Some(random) = services.random() {
-                    Effect::new(*kind, host, image, random, activation.clone())
+                    Effect::new(*kind, host, image, random, module_state.clone())
                 } else {
                     let mut random = std::mem::take(&mut host.random);
-                    let effect = Effect::new(*kind, host, image, &mut random, activation.clone());
+                    let effect = Effect::new(*kind, host, image, &mut random, module_state.clone());
                     host.random = random;
                     effect
                 };
@@ -204,6 +208,7 @@ impl ParticleRunner {
                     Some(Effect::Ice(effect)) => effect.write_mesh(host),
                     Some(Effect::SceneSparkle(effect)) => effect.write_mesh(host),
                     Some(Effect::Spark(effect)) => effect.write_mesh(host),
+                    Some(Effect::Thunder(effect)) => effect.write_mesh(host),
                     _ => {}
                 }
             }
@@ -247,6 +252,10 @@ impl ParticleRunner {
                 if let Some(effect) = effect {
                     let delta = host.elapsed.wrapping_sub(host.previous_elapsed);
                     match effect {
+                        Effect::Thunder(effect) => {
+                            effect.update(delta, host.source.unwrap_or_default().position_2d);
+                            effect.write_mesh(host);
+                        }
                         Effect::Rain(effect) => {
                             effect.update(delta, services.random().unwrap_or(&mut host.random));
                             effect.write_mesh(host);
@@ -579,10 +588,10 @@ impl Particle3DObject {
                 effect: None,
                 origin: 0,
                 previous_time: 0,
-                activation: host
+                module_state: host
                     .drawables()
                     .unwrap()
-                    .particle_activations
+                    .particle_module_states
                     .load(name(4)?)?,
             },
         });

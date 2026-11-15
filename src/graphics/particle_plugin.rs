@@ -5,10 +5,10 @@ use std::{
 };
 
 #[derive(Default)]
-// 装载程序持有强引用，停止效果不卸载共享激活状态。
-pub(super) struct Activations(BTreeMap<String, Weak<AtomicU32>>);
+// 装载程序持有强引用，停止效果不卸载模块静态状态。
+pub(super) struct ModuleStates(BTreeMap<String, Weak<AtomicU32>>);
 
-impl Activations {
+impl ModuleStates {
     pub(super) fn load(&mut self, name: &[u8]) -> Result<Arc<AtomicU32>> {
         let key = text::cp932(name)?.replace('\\', "/").to_uppercase();
         self.0.retain(|_, state| state.strong_count() != 0);
@@ -58,6 +58,7 @@ pub(super) enum Kind {
     Ice,
     SceneSparkle,
     Spark,
+    Thunder,
 }
 
 fn u16_at(bytes: &[u8], at: usize) -> Option<u16> {
@@ -165,6 +166,8 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
         Kind::SceneSparkle
     } else if name.eq_ignore_ascii_case(b"spark.ppi") {
         Kind::Spark
+    } else if name.eq_ignore_ascii_case(b"thunder.ppi") {
+        Kind::Thunder
     } else if name.eq_ignore_ascii_case(b"sakura.ppi") {
         Kind::Sakura
     } else if name.eq_ignore_ascii_case(b"protect.ppi") {
@@ -207,6 +210,7 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
         | Kind::Digi
         | Kind::DigiRing
         | Kind::Shy
+        | Kind::Thunder
         | Kind::Protect => 0x0002_0002,
         _ => 0x0002_0001,
     };
@@ -220,7 +224,7 @@ mod tests {
 
     #[test]
     fn activation_is_shared_until_the_last_loaded_program_is_released() -> Result<()> {
-        let mut states = Activations::default();
+        let mut states = ModuleStates::default();
         let first = states.load(b"\x83\x5c\\Concent.ppi")?;
         assert_eq!(first.load(Ordering::Relaxed), 1);
         first.store(20, Ordering::Relaxed);
@@ -244,7 +248,7 @@ mod tests {
         assert_eq!(reloaded.load(Ordering::Relaxed), 1);
         assert_eq!(states.0.len(), 1);
         assert_eq!(
-            Activations::default()
+            ModuleStates::default()
                 .load(b"\x83\x5c/concent.ppi")?
                 .load(Ordering::Relaxed),
             1

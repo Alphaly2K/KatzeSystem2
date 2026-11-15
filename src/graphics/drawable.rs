@@ -256,7 +256,7 @@ pub struct Drawables {
     order_dirty: bool,
     pub(super) cameras: BTreeMap<u32, super::Camera2D>,
     pub(super) next_camera: u32,
-    pub(super) particle_activations: super::particle_plugin::Activations,
+    pub(super) particle_module_states: super::particle_plugin::ModuleStates,
 }
 
 impl Drawables {
