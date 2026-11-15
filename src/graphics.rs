@@ -59,6 +59,7 @@ mod particle_common;
 mod particle_dis;
 mod particle_down;
 mod particle_exclamation;
+mod particle_film_noise;
 mod particle_flower_burst;
 mod particle_note;
 mod particle_notice;

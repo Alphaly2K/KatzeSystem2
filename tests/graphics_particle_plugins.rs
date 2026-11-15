@@ -1071,3 +1071,98 @@ fn flower_burst_shares_both_random_streams_and_preserves_task_lifecycle() -> Res
     );
     Ok(())
 }
+
+#[test]
+fn film_noise_culls_hidden_layers_ignores_source_motion_and_restarts_randomness() -> Result<()> {
+    use katze_system2::graphics::{Drawable, TextureFilter};
+    let mut runtime = runtime(plugin(b"filmnoise.ppi"))?;
+    runtime.update(1, 1)?;
+    runtime.drawables_mut().insert(100, Drawable::default())?;
+    let mut source = command(327);
+    source.data[1] = 100;
+    runtime.dispatch_command(2, source)?;
+    runtime.dispatch_command(2, command(321))?;
+    let mut expected = ScriptRandom::seeded(17);
+    for _ in 0..30 {
+        expected.next_integer();
+    }
+    for _ in 0..22 {
+        expected.next_float();
+    }
+    assert_random(&mut runtime, &expected);
+    runtime.update(2, 1)?;
+    expected.next_integer();
+    let view = Projection::default();
+    let first = runtime
+        .drawables()
+        .get(1)
+        .unwrap()
+        .particle_mesh()
+        .unwrap()
+        .projected_quad(2, &view)
+        .unwrap();
+    assert_eq!([first[0].uv, first[3].uv], [[0.75, 0.5], [1., 1.]]);
+    assert_ne!(first[0].color, first[1].color);
+    runtime
+        .drawables_mut()
+        .set_position(100, [1000., 1000., 0.]);
+    runtime.update(3, 1)?;
+    expected.next_integer();
+    assert_random(&mut runtime, &expected);
+    let mesh = runtime
+        .drawables()
+        .get(1)
+        .unwrap()
+        .particle_mesh()
+        .unwrap()
+        .clone();
+    assert_eq!(mesh.projected_quad(2, &view).unwrap(), first);
+    let identity = std::array::from_fn(|i| if i % 5 == 0 { 1. } else { 0. });
+    assert_eq!(
+        runtime
+            .drawables_mut()
+            .compose(&view, identity, TextureFilter::Point, None)?
+            .commands
+            .len(),
+        2
+    );
+    runtime.dispatch_command(2, command(322))?;
+    runtime.update(4, 1)?;
+    assert_eq!(runtime.drawables().get(1).unwrap().display(), 0);
+    assert_eq!(
+        runtime.drawables().get(1).unwrap().particle_mesh(),
+        Some(&mesh)
+    );
+    assert_random(&mut runtime, &expected);
+    runtime.dispatch_command(2, command(321))?;
+    for _ in 0..30 {
+        expected.next_integer();
+    }
+    for _ in 0..22 {
+        expected.next_float();
+    }
+    runtime.update(5, 1)?;
+    expected.next_integer();
+    assert_random(&mut runtime, &expected);
+    assert_ne!(
+        runtime
+            .drawables()
+            .get(1)
+            .unwrap()
+            .particle_mesh()
+            .unwrap()
+            .projected_quad(2, &view)
+            .unwrap(),
+        first
+    );
+    runtime.dispatch_command(2, command(323))?;
+    assert!(
+        runtime
+            .drawables()
+            .get(1)
+            .unwrap()
+            .particle_mesh()
+            .is_none()
+    );
+    Ok(())
+}

@@ -1,9 +1,9 @@
 use super::{Drawable, ParticleMesh, Surface};
 use super::{
     particle_anger::Anger, particle_angry::Angry, particle_common::Common, particle_dis::Dis,
-    particle_down::Down, particle_exclamation::Exclamation, particle_flower_burst::FlowerBurst,
-    particle_note::Note, particle_notice::Notice, particle_plugin, particle_rain::Rain,
-    particle_sigh::Sigh, particle_sweat::Sweat,
+    particle_down::Down, particle_exclamation::Exclamation, particle_film_noise::FilmNoise,
+    particle_flower_burst::FlowerBurst, particle_note::Note, particle_notice::Notice,
+    particle_plugin, particle_rain::Rain, particle_sigh::Sigh, particle_sweat::Sweat,
 };
 use crate::kcs::{
     Host, Interpreter, ParticleHost, ParticleSource, ParticleTask, Program, ScriptRandom,
@@ -32,6 +32,7 @@ enum Effect {
     Angry(Angry),
     FlowerBurst(FlowerBurst),
     Exclamation(Exclamation),
+    FilmNoise(FilmNoise),
 }
 
 impl Effect {
@@ -56,6 +57,9 @@ impl Effect {
                 Self::FlowerBurst(FlowerBurst::new(host, image, random))
             }
             particle_plugin::Kind::Exclamation => Self::Exclamation(Exclamation::new(host, image)),
+            particle_plugin::Kind::FilmNoise => {
+                Self::FilmNoise(FilmNoise::new(host, image, random))
+            }
         }
     }
 }
@@ -234,6 +238,10 @@ impl ParticleRunner {
                                 host.source.unwrap_or_default().position_2d,
                                 services.random().unwrap_or(&mut host.random),
                             );
+                            effect.write_mesh(host);
+                        }
+                        Effect::FilmNoise(effect) => {
+                            effect.update(delta, services.random().unwrap_or(&mut host.random));
                             effect.write_mesh(host);
                         }
                     }

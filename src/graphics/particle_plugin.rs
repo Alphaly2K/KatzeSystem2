@@ -14,6 +14,7 @@ pub(super) enum Kind {
     Angry,
     FlowerBurst,
     Exclamation,
+    FilmNoise,
 }
 
 fn u16_at(bytes: &[u8], at: usize) -> Option<u16> {
@@ -79,6 +80,8 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
         Kind::FlowerBurst
     } else if name.eq_ignore_ascii_case(b"em_exclamation.ppi") {
         Kind::Exclamation
+    } else if name.eq_ignore_ascii_case(b"filmnoise.ppi") {
+        Kind::FilmNoise
     } else {
         return None;
     };
