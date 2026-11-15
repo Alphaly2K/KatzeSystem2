@@ -8,8 +8,9 @@ use super::{
     particle_ice::Ice, particle_note::Note, particle_notice::Notice, particle_plugin,
     particle_protect::Protect, particle_question::Question, particle_rain::Rain,
     particle_rising::Rising, particle_sakura::Sakura, particle_scene_sparkle::SceneSparkle,
-    particle_shy::Shy, particle_sigh::Sigh, particle_silent::Silent, particle_sparkle::Sparkle,
-    particle_surprise::Surprise, particle_sweat::Sweat, particle_warukira::Warukira,
+    particle_shy::Shy, particle_sigh::Sigh, particle_silent::Silent, particle_spark::Spark,
+    particle_sparkle::Sparkle, particle_surprise::Surprise, particle_sweat::Sweat,
+    particle_warukira::Warukira,
 };
 use crate::kcs::{
     Host, Interpreter, ParticleHost, ParticleSource, ParticleTask, Program, ScriptRandom,
@@ -59,6 +60,7 @@ enum Effect {
     Sakura(Sakura),
     Ice(Ice),
     SceneSparkle(SceneSparkle),
+    Spark(Box<Spark>),
 }
 
 impl Effect {
@@ -108,6 +110,7 @@ impl Effect {
             particle_plugin::Kind::Warukira => Self::Warukira(Warukira::new(host, image, random)),
             particle_plugin::Kind::Hadou => Self::Hadou(Hadou::new(host, image)?),
             particle_plugin::Kind::Ice => Self::Ice(Ice::new(host, image, random)),
+            particle_plugin::Kind::Spark => Self::Spark(Box::new(Spark::new(host, image, random))),
             particle_plugin::Kind::SceneSparkle => {
                 Self::SceneSparkle(SceneSparkle::new(host, image, random))
             }
@@ -200,6 +203,7 @@ impl ParticleRunner {
                     Some(Effect::Sakura(effect)) => effect.write_mesh(host),
                     Some(Effect::Ice(effect)) => effect.write_mesh(host),
                     Some(Effect::SceneSparkle(effect)) => effect.write_mesh(host),
+                    Some(Effect::Spark(effect)) => effect.write_mesh(host),
                     _ => {}
                 }
             }
@@ -357,6 +361,10 @@ impl ParticleRunner {
                                 host.source.unwrap_or_default().position_2d,
                                 services.random().unwrap_or(&mut host.random),
                             );
+                            effect.write_mesh(host);
+                        }
+                        Effect::Spark(effect) => {
+                            effect.update(delta, services.random().unwrap_or(&mut host.random));
                             effect.write_mesh(host);
                         }
                         Effect::SceneSparkle(effect) => {

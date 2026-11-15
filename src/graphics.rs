@@ -84,6 +84,7 @@ mod particle_scene_sparkle;
 mod particle_shy;
 mod particle_sigh;
 mod particle_silent;
+mod particle_spark;
 mod particle_sparkle;
 mod particle_surprise;
 mod particle_sweat;

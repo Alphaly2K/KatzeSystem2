@@ -57,6 +57,7 @@ pub(super) enum Kind {
     Sakura,
     Ice,
     SceneSparkle,
+    Spark,
 }
 
 fn u16_at(bytes: &[u8], at: usize) -> Option<u16> {
@@ -162,6 +163,8 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
         Kind::Ice
     } else if name.eq_ignore_ascii_case(b"s_040101.ppi") {
         Kind::SceneSparkle
+    } else if name.eq_ignore_ascii_case(b"spark.ppi") {
+        Kind::Spark
     } else if name.eq_ignore_ascii_case(b"sakura.ppi") {
         Kind::Sakura
     } else if name.eq_ignore_ascii_case(b"protect.ppi") {
@@ -172,6 +175,19 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
     let base = read::u32_at(exports, 16).ok()?;
     let count = read::u32_at(exports, 20).ok()?;
     let functions_at = offset(read::u32_at(exports, 28).ok()?)?;
+    if matches!(kind, Kind::Spark) {
+        let index = 1u32.checked_sub(base).filter(|&i| i < count)? as usize;
+        let at = functions_at.checked_add(index.checked_mul(4)?)?;
+        let code_at = offset(read::u32_at(bytes, at).ok()?)?;
+        let code = bytes.get(code_at..code_at.checked_add(40)?)?;
+        // 相同标识及版本存在两种布局，仅接入已核实的路径粒子变体。
+        if code[..3] != [0x55, 0x8b, 0xec]
+            || code[35] != 0x68
+            || read::u32_at(code, 36).ok()? != 0x324
+        {
+            return None;
+        }
+    }
     let constant = |ordinal: u32| -> Option<u32> {
         let index = ordinal.checked_sub(base).filter(|&i| i < count)? as usize;
         let at = functions_at.checked_add(index.checked_mul(4)?)?;

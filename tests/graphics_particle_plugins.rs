@@ -50,6 +50,12 @@ fn plugin(name: &[u8]) -> Vec<u8> {
         bytes[361] = 2;
     }
     bytes[368..374].copy_from_slice(&[0xb8, 1, 0, 0, 0, 0xc3]);
+    if name == b"spark.ppi" {
+        bytes[340..344].copy_from_slice(&0x1090u32.to_le_bytes());
+        bytes[400..403].copy_from_slice(&[0x55, 0x8b, 0xec]);
+        bytes[435] = 0x68;
+        bytes[436..440].copy_from_slice(&0x324u32.to_le_bytes());
+    }
     bytes
 }
 
@@ -1734,5 +1740,72 @@ fn scene_sparkle_initializes_transparently_and_restarts_with_shared_randomness()
             .particle_mesh()
             .is_none()
     );
+    Ok(())
+}
+
+#[test]
+fn spark_path_variant_registers_restarts_stops_and_rejects_the_other_layout() -> Result<()> {
+    let mut runtime = runtime_with_count(plugin(b"spark.ppi"), 3)?;
+    runtime.update(1, 1)?;
+    let mut parameters = [0; 128];
+    for (i, n) in [
+        125f32, -70., 530., 410., 65., 15., 3., 8., 5., 20., 70., 2., 80., 60., 1., 0., 1.,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        parameters[i * 4..i * 4 + 4].copy_from_slice(&n.to_le_bytes());
+    }
+    runtime.dispatch_command_with_buffers(
+        2,
+        command(325),
+        &mut CommandBuffers {
+            data1: Some(&mut parameters),
+            ..Default::default()
+        },
+    )?;
+    let view = Projection::default();
+    let mut starts = Vec::new();
+    for start in [2, 20] {
+        runtime.dispatch_command(2, command(321))?;
+        assert_eq!(runtime.dispatch_command(2, command(324))?, 1);
+        let drawable = runtime.drawables().get(1).unwrap();
+        assert_eq!(drawable.blend_mode(), 1);
+        let quad = drawable
+            .particle_mesh()
+            .unwrap()
+            .projected_quad(0, &view)
+            .unwrap();
+        assert!(quad.iter().all(|v| v.color >> 24 == 0));
+        starts.push(quad[0].position);
+        for now in start..=start + 5 {
+            runtime.update(now, 1)?;
+        }
+        assert!(
+            runtime
+                .drawables()
+                .get(1)
+                .unwrap()
+                .particle_mesh()
+                .unwrap()
+                .projected_quad(0, &view)
+                .unwrap()[0]
+                .color
+                >> 24
+                != 0
+        );
+        runtime.dispatch_command(2, command(322))?;
+        let random = runtime.host_mut().random.clone();
+        runtime.update(start + 6, 1)?;
+        assert_random(&mut runtime, &random);
+        assert_eq!(runtime.drawables().get(1).unwrap().display(), 0);
+    }
+    assert_ne!(starts[0], starts[1]);
+    runtime.destroy(1)?;
+    assert!(runtime.drawables().get(1).is_none());
+
+    let mut other = plugin(b"spark.ppi");
+    other[400..403].copy_from_slice(&[0x6a, 0x40, 0xe8]);
+    assert!(runtime_with_count(other, 3)?.update(1, 1).is_err());
     Ok(())
 }
