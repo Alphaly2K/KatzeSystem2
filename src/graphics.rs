@@ -71,6 +71,7 @@ mod particle_film_noise;
 mod particle_flower_burst;
 mod particle_glint;
 mod particle_hadou;
+mod particle_ice;
 mod particle_note;
 mod particle_notice;
 mod particle_plugin;

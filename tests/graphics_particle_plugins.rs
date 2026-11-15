@@ -1574,3 +1574,79 @@ fn protect_initializes_without_a_flash_and_preserves_blending_when_restarted() -
     );
     Ok(())
 }
+
+#[test]
+fn ice_uses_additive_transparent_start_shared_randomness_and_task_controls() -> Result<()> {
+    let mut runtime = runtime_with_count(plugin(b"o_150102.ppi"), 21)?;
+    runtime.update(1, 1)?;
+    let mut parameters = [0; 128];
+    for (i, n) in [210f32, 560., 900., -800., 15., 10.]
+        .into_iter()
+        .enumerate()
+    {
+        parameters[i * 4..i * 4 + 4].copy_from_slice(&n.to_le_bytes());
+    }
+    runtime.dispatch_command_with_buffers(
+        2,
+        command(325),
+        &mut CommandBuffers {
+            data1: Some(&mut parameters),
+            ..Default::default()
+        },
+    )?;
+    let mut expected = ScriptRandom::seeded(17);
+    for frame in [2, 20] {
+        runtime.dispatch_command(2, command(321))?;
+        for _ in 0..14 {
+            expected.next_integer();
+            expected.next_float();
+        }
+        assert_random(&mut runtime, &expected);
+        let drawable = runtime.drawables().get(1).unwrap();
+        assert_eq!(drawable.blend_mode(), 1);
+        let mesh = drawable.particle_mesh().unwrap();
+        assert!((0..21).all(|i| {
+            mesh.projected_quad(i, &Projection::default())
+                .unwrap()
+                .iter()
+                .all(|v| v.color >> 24 == 0)
+        }));
+        runtime.update(frame, 1)?;
+        for _ in 0..14 {
+            expected.next_integer();
+        }
+        for _ in 0..140 {
+            expected.next_float();
+        }
+        assert_random(&mut runtime, &expected);
+        let mesh = runtime
+            .drawables()
+            .get(1)
+            .unwrap()
+            .particle_mesh()
+            .unwrap()
+            .clone();
+        assert!(
+            (7..21).any(
+                |i| mesh.projected_quad(i, &Projection::default()).unwrap()[0].color >> 24 > 0
+            )
+        );
+        runtime.dispatch_command(2, command(322))?;
+        runtime.update(frame + 1, 1)?;
+        let drawable = runtime.drawables().get(1).unwrap();
+        assert_eq!(drawable.display(), 0);
+        assert_eq!(drawable.particle_mesh(), Some(&mesh));
+        assert_random(&mut runtime, &expected);
+    }
+    assert_eq!(runtime.dispatch_command(2, command(324))?, 0);
+    runtime.dispatch_command(2, command(323))?;
+    assert!(
+        runtime
+            .drawables()
+            .get(1)
+            .unwrap()
+            .particle_mesh()
+            .is_none()
+    );
+    Ok(())
+}

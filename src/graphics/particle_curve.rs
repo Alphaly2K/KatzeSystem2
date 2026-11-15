@@ -124,16 +124,35 @@ pub(super) struct Path {
     pub(super) lengths: Vec<f32>,
     pub(super) total: f32,
     pub(super) duration: f32,
+    extended_intermediates: bool,
 }
 
 impl Path {
     pub(super) fn new(points: Vec<[f32; 3]>, duration: f32, strength: f32) -> Self {
+        Self::with_rounding(points, duration, strength, false)
+    }
+
+    pub(super) fn new_extended(points: Vec<[f32; 3]>, duration: f32, strength: f32) -> Self {
+        Self::with_rounding(points, duration, strength, true)
+    }
+
+    fn with_rounding(
+        points: Vec<[f32; 3]>,
+        duration: f32,
+        strength: f32,
+        extended_intermediates: bool,
+    ) -> Self {
         let lengths: Vec<_> = std::iter::once(0.)
-            .chain(
-                points
-                    .windows(2)
-                    .map(|p| length(std::array::from_fn(|j| p[1][j] - p[0][j]))),
-            )
+            .chain(points.windows(2).map(|p| {
+                let delta = std::array::from_fn(|j| p[1][j] - p[0][j]);
+                if extended_intermediates {
+                    let squares = delta.map(|n| n * n);
+                    let sum = ((squares[0] as f64 + squares[1] as f64) + squares[2] as f64) as f32;
+                    (sum as f64).sqrt() as f32
+                } else {
+                    length(delta)
+                }
+            }))
             .collect();
         let total = lengths.iter().copied().fold(0., |a, b| a + b);
         let tangents = (0..points.len())
@@ -150,7 +169,13 @@ impl Path {
                             (points[i + 1][j] - points[i][j]) - (points[i - 1][j] - points[i][j])
                         })
                     };
-                    let n = length(delta);
+                    let n = if extended_intermediates {
+                        let squares = delta.map(|n| n as f64 * n as f64);
+                        let sum = ((squares[0] + squares[1]) + squares[2]) as f32;
+                        (sum as f64).sqrt() as f32
+                    } else {
+                        length(delta)
+                    };
                     delta.map(|v| arithmetic(3, arithmetic(4, v, n), strength))
                 }
             })
@@ -161,6 +186,7 @@ impl Path {
             lengths,
             total,
             duration,
+            extended_intermediates,
         }
     }
 
@@ -171,14 +197,26 @@ impl Path {
         if time >= self.duration {
             time = self.duration;
         }
-        let distance = (time / self.duration) * self.total;
-        let mut previous = 0.;
+        let distance = if self.extended_intermediates {
+            (time as f64 / self.duration as f64 * self.total as f64) as f32
+        } else {
+            (time / self.duration) * self.total
+        };
+        let mut previous = 0f32;
         for i in 0..self.points.len() - 1 {
-            let next = previous + self.lengths[i + 1];
-            if next > distance {
+            let next = if self.extended_intermediates {
+                previous as f64 + self.lengths[i + 1] as f64
+            } else {
+                (previous + self.lengths[i + 1]) as f64
+            };
+            if next > distance as f64 {
                 let t = (distance - previous) / self.lengths[i + 1];
                 let square = t * t;
-                let cube = square * t;
+                let cube = if self.extended_intermediates {
+                    (t as f64 * t as f64 * t as f64) as f32
+                } else {
+                    square * t
+                };
                 let basis = [
                     [2., -2., 1., 1.],
                     [-3., 3., -2., -1.],
@@ -187,16 +225,30 @@ impl Path {
                 ];
                 let c = basis.map(|r| {
                     std::array::from_fn::<_, 3, _>(|j| {
-                        ((self.points[i][j] * r[0] + self.points[i + 1][j] * r[1])
-                            + self.tangents[i][j] * r[2])
-                            + self.tangents[i + 1][j] * r[3]
+                        if self.extended_intermediates {
+                            (((self.points[i][j] as f64 * r[0] as f64
+                                + self.points[i + 1][j] as f64 * r[1] as f64)
+                                + self.tangents[i][j] as f64 * r[2] as f64)
+                                + self.tangents[i + 1][j] as f64 * r[3] as f64)
+                                as f32
+                        } else {
+                            ((self.points[i][j] * r[0] + self.points[i + 1][j] * r[1])
+                                + self.tangents[i][j] * r[2])
+                                + self.tangents[i + 1][j] * r[3]
+                        }
                     })
                 });
                 return std::array::from_fn(|j| {
-                    ((c[0][j] * cube + c[1][j] * square) + c[2][j] * t) + c[3][j]
+                    if self.extended_intermediates {
+                        (((c[0][j] as f64 * cube as f64 + c[1][j] as f64 * square as f64)
+                            + c[2][j] as f64 * t as f64)
+                            + c[3][j] as f64) as f32
+                    } else {
+                        ((c[0][j] * cube + c[1][j] * square) + c[2][j] * t) + c[3][j]
+                    }
                 });
             }
-            previous = next;
+            previous = next as f32;
         }
         *self.points.last().unwrap()
     }
