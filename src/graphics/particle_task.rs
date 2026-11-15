@@ -6,8 +6,8 @@ use super::{
     particle_exclamation::Exclamation, particle_film_noise::FilmNoise,
     particle_flower_burst::FlowerBurst, particle_glint::Glint, particle_note::Note,
     particle_notice::Notice, particle_plugin, particle_question::Question, particle_rain::Rain,
-    particle_sigh::Sigh, particle_silent::Silent, particle_sparkle::Sparkle,
-    particle_surprise::Surprise, particle_sweat::Sweat,
+    particle_rising::Rising, particle_sigh::Sigh, particle_silent::Silent,
+    particle_sparkle::Sparkle, particle_surprise::Surprise, particle_sweat::Sweat,
 };
 use crate::kcs::{
     Host, Interpreter, ParticleHost, ParticleSource, ParticleTask, Program, ScriptRandom,
@@ -47,6 +47,7 @@ enum Effect {
     Energy(Energy),
     Digi(Digi),
     DigiRing(DigiRing),
+    Rising(Rising),
 }
 
 impl Effect {
@@ -87,6 +88,7 @@ impl Effect {
             particle_plugin::Kind::Energy => Self::Energy(Energy::new(host, image, random)),
             particle_plugin::Kind::Digi => Self::Digi(Digi::new(host, image, random)),
             particle_plugin::Kind::DigiRing => Self::DigiRing(DigiRing::new(host, image, random)),
+            particle_plugin::Kind::Rising => Self::Rising(Rising::new(host, image, random)),
         })
     }
 }
@@ -310,6 +312,14 @@ impl ParticleRunner {
                         }
                         Effect::Energy(effect) => {
                             effect.update(delta, services.random().unwrap_or(&mut host.random));
+                            effect.write_mesh(host);
+                        }
+                        Effect::Rising(effect) => {
+                            effect.update(
+                                delta,
+                                &host.parameters,
+                                services.random().unwrap_or(&mut host.random),
+                            );
                             effect.write_mesh(host);
                         }
                         Effect::Digi(effect) => {

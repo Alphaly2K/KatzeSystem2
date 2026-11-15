@@ -46,6 +46,7 @@ pub(super) enum Kind {
     Energy,
     Digi,
     DigiRing,
+    Rising,
 }
 
 fn u16_at(bytes: &[u8], at: usize) -> Option<u16> {
@@ -133,6 +134,8 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
         Kind::Digi
     } else if name.eq_ignore_ascii_case(b"digiring.ppi") {
         Kind::DigiRing
+    } else if name.eq_ignore_ascii_case(b"rising4.ppi") {
+        Kind::Rising
     } else {
         return None;
     };

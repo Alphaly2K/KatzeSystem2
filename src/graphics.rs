@@ -73,6 +73,7 @@ mod particle_notice;
 mod particle_plugin;
 mod particle_question;
 mod particle_rain;
+mod particle_rising;
 mod particle_sigh;
 mod particle_silent;
 mod particle_sparkle;

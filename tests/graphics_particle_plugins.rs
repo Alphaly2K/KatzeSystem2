@@ -1230,7 +1230,7 @@ fn film_noise_culls_hidden_layers_ignores_source_motion_and_restarts_randomness(
 
 #[test]
 fn scatter_effects_use_shared_randomness_and_preserve_task_lifecycle() -> Result<()> {
-    for (name, values, integers, floats, uv, mesh_index, update_integers) in [
+    for (name, values, integers, floats, uv, mesh_index, update_integers, update_floats) in [
         (
             b"asease.ppi".as_slice(),
             [782f32, 169., 62., 30., 15., 80., 120.].as_slice(),
@@ -1239,6 +1239,7 @@ fn scatter_effects_use_shared_randomness_and_preserve_task_lifecycle() -> Result
             [[0., 0.], [1., 1.]],
             0,
             1,
+            0,
         ),
         (
             b"kirakira.ppi".as_slice(),
@@ -1248,6 +1249,7 @@ fn scatter_effects_use_shared_randomness_and_preserve_task_lifecycle() -> Result
             [[0., 0.5], [0.5, 1.]],
             0,
             1,
+            0,
         ),
         (
             b"concent.ppi".as_slice(),
@@ -1257,6 +1259,7 @@ fn scatter_effects_use_shared_randomness_and_preserve_task_lifecycle() -> Result
             [[0., 0.], [1., 1.]],
             3,
             1,
+            0,
         ),
         (
             b"energy.ppi".as_slice(),
@@ -1269,6 +1272,7 @@ fn scatter_effects_use_shared_randomness_and_preserve_task_lifecycle() -> Result
             [[0., 0.], [0.5, 0.5]],
             0,
             96,
+            0,
         ),
         (
             b"digi.ppi".as_slice(),
@@ -1279,6 +1283,7 @@ fn scatter_effects_use_shared_randomness_and_preserve_task_lifecycle() -> Result
             48,
             72,
             [[0., 0.], [0.5, 0.5]],
+            0,
             0,
             0,
         ),
@@ -1294,6 +1299,17 @@ fn scatter_effects_use_shared_randomness_and_preserve_task_lifecycle() -> Result
             [[0., 0.], [0.5, 0.5]],
             0,
             0,
+            0,
+        ),
+        (
+            b"rising4.ppi".as_slice(),
+            [580f32, 500., 0., 40., 0., 0., 580., -40., 0.].as_slice(),
+            0,
+            1,
+            [[0., 0.5], [0.5, 1.]],
+            0,
+            0,
+            4,
         ),
     ] {
         let mut runtime = runtime(plugin(name))?;
@@ -1330,6 +1346,9 @@ fn scatter_effects_use_shared_randomness_and_preserve_task_lifecycle() -> Result
             runtime.update(frame, 1)?;
             for _ in 0..update_integers {
                 expected.next_integer();
+            }
+            for _ in 0..update_floats {
+                expected.next_float();
             }
         }
         assert_random(&mut runtime, &expected);
@@ -1389,6 +1408,9 @@ fn scatter_effects_use_shared_randomness_and_preserve_task_lifecycle() -> Result
         for _ in 0..update_integers {
             expected.next_integer();
         }
+        for _ in 0..update_floats {
+            expected.next_float();
+        }
         assert_random(&mut runtime, &expected);
         let restarted = runtime
             .drawables()
@@ -1398,7 +1420,7 @@ fn scatter_effects_use_shared_randomness_and_preserve_task_lifecycle() -> Result
             .unwrap()
             .projected_quad(mesh_index, &Projection::default())
             .unwrap();
-        if matches!(name, b"digi.ppi" | b"digiring.ppi") {
+        if matches!(name, b"digi.ppi" | b"digiring.ppi" | b"rising4.ppi") {
             assert!(restarted[0].color >> 24 > 0);
         } else {
             assert_eq!(restarted[0].color >> 24, 0);
