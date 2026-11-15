@@ -41,6 +41,7 @@ fn plugin(name: &[u8]) -> Vec<u8> {
             | b"energy.ppi"
             | b"digi.ppi"
             | b"digiring.ppi"
+            | b"em_shy.ppi"
     ) {
         bytes[361] = 2;
     }
@@ -1317,6 +1318,20 @@ fn scatter_effects_use_shared_randomness_and_preserve_task_lifecycle() -> Result
             0,
             4,
         ),
+        (
+            b"em_shy.ppi".as_slice(),
+            [
+                10f32, 30., 0., 90., 15., 10., 20., 10., 15., 100., 100., 612., 165., 652., 165.,
+                60., 60., 0.,
+            ]
+            .as_slice(),
+            32,
+            78,
+            [[0., 0.], [0.5, 0.5]],
+            0,
+            1,
+            0,
+        ),
     ] {
         let mut runtime = runtime(plugin(name))?;
         runtime.update(1, 1)?;
@@ -1407,7 +1422,9 @@ fn scatter_effects_use_shared_randomness_and_preserve_task_lifecycle() -> Result
         for _ in 0..integers {
             expected.next_integer();
         }
-        for _ in 0..floats {
+        // 曲线分支使用共享整数序列，重启时的浮点消费量随其当前位置变化。
+        let restart_floats = if name == b"em_shy.ppi" { 80 } else { floats };
+        for _ in 0..restart_floats {
             expected.next_float();
         }
         runtime.update(12, 1)?;
