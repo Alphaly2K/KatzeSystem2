@@ -32,7 +32,7 @@ pub struct Renderer {
     queue: CommandQueue,
     pipelines: Vec<RenderPipelineState>,
     layer: MetalLayer,
-    samplers: [SamplerState; 2],
+    samplers: [SamplerState; 8],
     white: Texture,
     tiles: Vec<Option<Tile>>,
     images: BTreeMap<usize, ImageTexture>,
@@ -85,16 +85,21 @@ impl Renderer {
                     .map_err(|e| Error::new(0, e))?,
             );
         }
-        let samplers = [
-            MTLSamplerMinMagFilter::Nearest,
-            MTLSamplerMinMagFilter::Linear,
-        ]
-        .map(|filter| {
+        let samplers = std::array::from_fn(|index| {
             let descriptor = SamplerDescriptor::new();
+            let filter = if index & 1 == 0 {
+                MTLSamplerMinMagFilter::Nearest
+            } else {
+                MTLSamplerMinMagFilter::Linear
+            };
+            let modes = [
+                MTLSamplerAddressMode::MirrorRepeat,
+                MTLSamplerAddressMode::Repeat,
+            ];
             descriptor.set_min_filter(filter);
             descriptor.set_mag_filter(filter);
-            descriptor.set_address_mode_s(MTLSamplerAddressMode::MirrorRepeat);
-            descriptor.set_address_mode_t(MTLSamplerAddressMode::MirrorRepeat);
+            descriptor.set_address_mode_s(modes[(index >> 1) & 1]);
+            descriptor.set_address_mode_t(modes[(index >> 2) & 1]);
             device.new_sampler(&descriptor)
         });
         let layer = MetalLayer::new();
@@ -370,12 +375,9 @@ impl Renderer {
         let encoder = command.new_render_command_encoder(descriptor);
         encoder.set_render_pipeline_state(&self.pipelines[0]);
         let mut blend_mode = 0;
+        let mut sampler_index = usize::MAX;
         encoder.set_cull_mode(MTLCullMode::None);
         encoder.set_vertex_buffer(0, self.buffer.as_deref(), 0);
-        encoder.set_fragment_sampler_state(
-            0,
-            Some(&self.samplers[usize::from(filter == TextureFilter::Linear)]),
-        );
         let bounds = Rect::from_xywh(0, 0, target.width() as i32, target.height() as i32);
         for (index, triangle) in triangles.iter().enumerate() {
             if super::raster::triangle_culled(triangle.vertices) {
@@ -430,6 +432,18 @@ impl Renderer {
             if selected != blend_mode {
                 encoder.set_render_pipeline_state(&self.pipelines[selected as usize]);
                 blend_mode = selected;
+            }
+            let address = triangle
+                .texture
+                .as_ref()
+                .map(|t| t.address)
+                .unwrap_or_default();
+            let sampler = usize::from(filter == TextureFilter::Linear)
+                | (usize::from(address[0] == super::TextureAddress::Wrap) << 1)
+                | (usize::from(address[1] == super::TextureAddress::Wrap) << 2);
+            if sampler != sampler_index {
+                encoder.set_fragment_sampler_state(0, Some(&self.samplers[sampler]));
+                sampler_index = sampler;
             }
             encoder.set_fragment_texture(0, Some(texture));
             encoder.draw_primitives(MTLPrimitiveType::Triangle, index as u64 * 3, 3);

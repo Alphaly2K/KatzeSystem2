@@ -45,6 +45,7 @@ pub struct ParticleHost {
     pub object_id: i32,
     pub source: Option<ParticleSource>,
     pub render_mode: u32,
+    pub texture_address: [crate::graphics::TextureAddress; 2],
     pub random: ScriptRandom,
     pub debug_messages: Vec<Vec<u8>>,
 }
@@ -68,6 +69,7 @@ impl Default for ParticleHost {
             object_id: -1,
             source: None,
             render_mode: 0,
+            texture_address: Default::default(),
             random: ScriptRandom::default(),
             debug_messages: Vec::new(),
         }

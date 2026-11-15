@@ -79,6 +79,7 @@ fn quad(output: &mut DrawList, rectangle: Rect, image: Option<Arc<Surface>>, col
                 color,
             }),
             texture: image.as_ref().map(|image| FrameTexture {
+                address: Default::default(),
                 source: TextureSource::Image(image.clone()),
                 uv: indices.map(|i| uv[i]),
             }),

@@ -1,7 +1,7 @@
 use super::{Drawables, ProjectedVertex, Projection, Rect, Surface};
 use crate::{Error, Result};
 
-/// 对归一化 UV 使用镜像寻址的单级纹理过滤。
+/// 单级纹理过滤。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TextureFilter {
     Point,
@@ -13,6 +13,7 @@ pub(super) struct RasterState {
     pub origin: [u32; 2],
     pub clip: Option<Rect>,
     pub blend_mode: u32,
+    pub address: [super::TextureAddress; 2],
 }
 
 impl Surface {
@@ -96,7 +97,7 @@ impl Surface {
                 if coordinates.iter().any(|n: &f64| !n.is_finite()) {
                     return None;
                 }
-                let sample = texture.sample(coordinates, filter);
+                let sample = texture.sample(coordinates, filter, state.address);
                 let color = interpolation.color(weights);
                 Some(std::array::from_fn(|i| sample[i] * color[i] / 255.))
             },
@@ -114,6 +115,7 @@ impl Surface {
             origin,
             clip,
             blend_mode,
+            ..
         } = state;
         if points.iter().flatten().any(|n| !n.is_finite()) {
             return false;
@@ -215,12 +217,17 @@ impl Surface {
         touched
     }
 
-    fn sample(&self, uv: [f64; 2], filter: TextureFilter) -> [f64; 4] {
+    fn sample(
+        &self,
+        uv: [f64; 2],
+        filter: TextureFilter,
+        address: [super::TextureAddress; 2],
+    ) -> [f64; 4] {
         // 先缩到镜像的两个周期内，避免大 UV 乘以尺寸后超出索引范围。
         let position: [f64; 2] =
             std::array::from_fn(|i| uv[i].rem_euclid(2.) * self.size[i] as f64);
         if filter == TextureFilter::Point {
-            return self.texel(position.map(|v| v.floor() as i64));
+            return self.texel(position.map(|v| v.floor() as i64), address);
         }
         let position = position.map(|v| v - 0.5);
         let lower = position.map(|v| v.floor() as i64);
@@ -237,7 +244,7 @@ impl Surface {
                 } else {
                     fraction[1]
                 };
-                let texel = self.texel([lower[0] + x, lower[1] + y]);
+                let texel = self.texel([lower[0] + x, lower[1] + y], address);
                 for (value, texel) in sample.iter_mut().zip(texel) {
                     *value += texel * weight;
                 }
@@ -246,9 +253,12 @@ impl Surface {
         sample
     }
 
-    fn texel(&self, at: [i64; 2]) -> [f64; 4] {
+    fn texel(&self, at: [i64; 2], address: [super::TextureAddress; 2]) -> [f64; 4] {
         let at: [usize; 2] = std::array::from_fn(|i| {
             let size = i64::from(self.size[i]);
+            if address[i] == super::TextureAddress::Wrap {
+                return at[i].rem_euclid(size) as usize;
+            }
             let value = at[i].rem_euclid(size * 2);
             if value < size {
                 value as usize
@@ -415,6 +425,10 @@ pub(super) fn draw_command(
         return Ok(false);
     }
     if let Some(source) = &command.texture {
+        let state = RasterState {
+            address: source.address,
+            ..state
+        };
         let texture = match &source.source {
             super::TextureSource::Canvas(tile) => canvas
                 .ok_or_else(|| Error::new(0, "纹理图元需要独立画布输入与帧输出"))?

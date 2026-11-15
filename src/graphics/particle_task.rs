@@ -5,10 +5,10 @@ use super::{
     particle_dis::Dis, particle_double::Double, particle_down::Down, particle_energy::Energy,
     particle_exclamation::Exclamation, particle_film_noise::FilmNoise,
     particle_flower_burst::FlowerBurst, particle_glint::Glint, particle_hadou::Hadou,
-    particle_note::Note, particle_notice::Notice, particle_plugin, particle_question::Question,
-    particle_rain::Rain, particle_rising::Rising, particle_shy::Shy, particle_sigh::Sigh,
-    particle_silent::Silent, particle_sparkle::Sparkle, particle_surprise::Surprise,
-    particle_sweat::Sweat, particle_warukira::Warukira,
+    particle_note::Note, particle_notice::Notice, particle_plugin, particle_protect::Protect,
+    particle_question::Question, particle_rain::Rain, particle_rising::Rising, particle_shy::Shy,
+    particle_sigh::Sigh, particle_silent::Silent, particle_sparkle::Sparkle,
+    particle_surprise::Surprise, particle_sweat::Sweat, particle_warukira::Warukira,
 };
 use crate::kcs::{
     Host, Interpreter, ParticleHost, ParticleSource, ParticleTask, Program, ScriptRandom,
@@ -53,6 +53,7 @@ enum Effect {
     Shy(Box<Shy>),
     Warukira(Warukira),
     Hadou(Hadou),
+    Protect(Box<Protect>),
 }
 
 impl Effect {
@@ -101,6 +102,7 @@ impl Effect {
             particle_plugin::Kind::Shy => Self::Shy(Box::new(Shy::new(host, image, random))),
             particle_plugin::Kind::Warukira => Self::Warukira(Warukira::new(host, image, random)),
             particle_plugin::Kind::Hadou => Self::Hadou(Hadou::new(host, image)?),
+            particle_plugin::Kind::Protect => Self::Protect(Box::new(Protect::new(host))),
         })
     }
 }
@@ -181,6 +183,9 @@ impl ParticleRunner {
                     effect
                 };
                 *effect = Some(next?);
+                if let Some(Effect::Protect(effect)) = effect {
+                    effect.write_mesh(host);
+                }
             }
         }
         self.host_mut().active = true;
@@ -328,6 +333,10 @@ impl ParticleRunner {
                                 host.source.unwrap_or_default().position_2d,
                                 services.random().unwrap_or(&mut host.random),
                             );
+                            effect.write_mesh(host);
+                        }
+                        Effect::Protect(effect) => {
+                            effect.update(delta);
                             effect.write_mesh(host);
                         }
                         Effect::Hadou(effect) => {

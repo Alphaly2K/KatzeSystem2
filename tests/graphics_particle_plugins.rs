@@ -45,6 +45,7 @@ fn plugin(name: &[u8]) -> Vec<u8> {
             | b"digi.ppi"
             | b"digiring.ppi"
             | b"em_shy.ppi"
+            | b"protect.ppi"
     ) {
         bytes[361] = 2;
     }
@@ -1496,5 +1497,60 @@ fn scatter_effects_use_shared_randomness_and_preserve_task_lifecycle() -> Result
                 .is_none()
         );
     }
+    Ok(())
+}
+
+#[test]
+fn protect_initializes_without_a_flash_and_restarts_its_blending_and_uv_motion() -> Result<()> {
+    let mut runtime = runtime_with_count(plugin(b"protect.ppi"), 26)?;
+    runtime.update(1, 1)?;
+    let mut parameters = [0; 128];
+    for (i, value) in [390f32, 360., 170., -400., 400., 0.]
+        .into_iter()
+        .enumerate()
+    {
+        parameters[i * 4..i * 4 + 4].copy_from_slice(&value.to_le_bytes());
+    }
+    runtime.dispatch_command_with_buffers(
+        2,
+        command(325),
+        &mut CommandBuffers {
+            data1: Some(&mut parameters),
+            ..Default::default()
+        },
+    )?;
+    let expected = ScriptRandom::seeded(17);
+    for start in [2, 202] {
+        runtime.dispatch_command(2, command(321))?;
+        let drawable = runtime.drawables().get(1).unwrap();
+        assert_eq!(drawable.blend_mode(), 0);
+        let mesh = drawable.particle_mesh().unwrap();
+        let quad = mesh.projected_quad(1, &Projection::default()).unwrap();
+        assert!(quad.iter().all(|v| v.position == quad[0].position));
+        for frame in start..start + 200 {
+            runtime.update(frame, 1)?;
+        }
+        let drawable = runtime.drawables().get(1).unwrap();
+        assert_eq!(drawable.blend_mode(), 1);
+        let quad = drawable
+            .particle_mesh()
+            .unwrap()
+            .projected_quad(13, &Projection::default())
+            .unwrap();
+        assert!(quad.iter().all(|v| v.color >> 24 == 0));
+        assert_eq!(runtime.dispatch_command(2, command(324))?, 1);
+        assert_random(&mut runtime, &expected);
+        runtime.dispatch_command(2, command(322))?;
+        assert_eq!(runtime.drawables().get(1).unwrap().display(), 0);
+    }
+    runtime.dispatch_command(2, command(323))?;
+    assert!(
+        runtime
+            .drawables()
+            .get(1)
+            .unwrap()
+            .particle_mesh()
+            .is_none()
+    );
     Ok(())
 }

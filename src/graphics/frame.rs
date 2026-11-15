@@ -18,10 +18,19 @@ impl TextureSource {
     }
 }
 
+/// 归一化纹理坐标越界时的取样方式；U、V 分别指定。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TextureAddress {
+    #[default]
+    Mirror,
+    Wrap,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct FrameTexture {
     pub source: TextureSource,
     pub uv: [[f32; 2]; 3],
+    pub address: [TextureAddress; 2],
 }
 
 /// 已按图元顺序、相机和投影准备的设备输入。
@@ -165,6 +174,7 @@ impl Drawables {
                             true,
                         ),
                         Some(FrameTexture {
+                            address: Default::default(),
                             source: TextureSource::Canvas(triangle.tile),
                             uv: triangle.uv,
                         }),
@@ -175,6 +185,7 @@ impl Drawables {
                             .projected_triangle(index, parent, &selected, origin, true)
                             .unwrap(),
                         drawable.image_texture.as_ref().map(|texture| FrameTexture {
+                            address: Default::default(),
                             source: TextureSource::Image(texture.surface.as_ref().unwrap().clone()),
                             uv: texture.uv[index],
                         }),

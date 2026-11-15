@@ -73,6 +73,7 @@ mod particle_hadou;
 mod particle_note;
 mod particle_notice;
 mod particle_plugin;
+mod particle_protect;
 mod particle_question;
 mod particle_rain;
 mod particle_rising;
@@ -87,7 +88,9 @@ pub(crate) use particle_task::refresh_particle_source;
 mod raster;
 pub use raster::TextureFilter;
 mod frame;
-pub use frame::{DrawCommand, DrawList, FrameTexture, FrameTriangle, TextureSource};
+pub use frame::{
+    DrawCommand, DrawList, FrameTexture, FrameTriangle, TextureAddress, TextureSource,
+};
 mod compositor;
 pub use compositor::Compositor;
 mod backend;

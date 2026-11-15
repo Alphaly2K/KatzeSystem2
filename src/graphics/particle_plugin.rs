@@ -52,6 +52,7 @@ pub(super) enum Kind {
     Warukira,
     Hadou,
     Rising3,
+    Protect,
 }
 
 fn u16_at(bytes: &[u8], at: usize) -> Option<u16> {
@@ -151,6 +152,8 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
         Kind::Hadou
     } else if name.eq_ignore_ascii_case(b"rising3.ppi") {
         Kind::Rising3
+    } else if name.eq_ignore_ascii_case(b"protect.ppi") {
+        Kind::Protect
     } else {
         return None;
     };
@@ -175,7 +178,8 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
         | Kind::Energy
         | Kind::Digi
         | Kind::DigiRing
-        | Kind::Shy => 0x0002_0002,
+        | Kind::Shy
+        | Kind::Protect => 0x0002_0002,
         _ => 0x0002_0001,
     };
     (constant(3)? == version && constant(4)? == 1).then_some(kind)

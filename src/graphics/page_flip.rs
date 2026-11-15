@@ -201,6 +201,7 @@ impl PageFlip {
             .map(|vertices| DrawCommand {
                 vertices: std::array::from_fn(|i| vertices[i].current),
                 texture: Some(FrameTexture {
+                    address: Default::default(),
                     source: TextureSource::Image(self.source.clone()),
                     uv: std::array::from_fn(|i| vertices[i].uv),
                 }),

@@ -36,6 +36,7 @@ fn draw_commands_apply_all_blend_factors_after_texture_modulation() {
                     ..v
                 }),
                 texture: textured.then(|| FrameTexture {
+                    address: Default::default(),
                     source: TextureSource::Image(texture.clone()),
                     uv: [[0.5; 2]; 3],
                 }),
@@ -74,6 +75,7 @@ fn image_commands_hold_their_pixels_and_mix_with_canvas_textures() {
             DrawCommand {
                 vertices: vertices(),
                 texture: Some(FrameTexture {
+                    address: Default::default(),
                     source: TextureSource::Image(image.clone()),
                     uv: [[0.5; 2]; 3],
                 }),
@@ -83,6 +85,7 @@ fn image_commands_hold_their_pixels_and_mix_with_canvas_textures() {
             DrawCommand {
                 vertices: vertices(),
                 texture: Some(FrameTexture {
+                    address: Default::default(),
                     source: TextureSource::Canvas(0),
                     uv: [[0.5; 2]; 3],
                 }),
@@ -129,6 +132,7 @@ fn depth_clipping_keeps_visible_color_and_texture_interpolation() {
                 commands: vec![DrawCommand {
                     vertices: triangle,
                     texture: (mode == 2).then(|| FrameTexture {
+                        address: Default::default(),
                         source: TextureSource::Image(image.clone()),
                         uv: [[0.17, 0.19], [1.13, 0.87], [-0.21, 1.31]],
                     }),
@@ -240,6 +244,88 @@ fn mirror_sampling_filtering_and_modulation_keep_fractional_channels() {
                 .all(|p| p == expected.to_le_bytes())
         );
     }
+}
+
+#[test]
+fn command_addressing_wraps_each_axis_and_filters_across_texture_seams() {
+    use katze_system2::graphics::TextureAddress::{Mirror, Wrap};
+    let image = Arc::new(
+        Surface::from_bgra(
+            [2, 2],
+            [0xffff0000u32, 0xff00ff00, 0xff0000ff, 0xffffffff]
+                .into_iter()
+                .flat_map(u32::to_le_bytes)
+                .collect(),
+        )
+        .unwrap(),
+    );
+    let cases = [
+        ([Mirror, Mirror], [-0.25, -0.25], 0xffff0000),
+        ([Wrap, Mirror], [-0.25, -0.25], 0xff00ff00),
+        ([Mirror, Wrap], [-0.25, -0.25], 0xff0000ff),
+        ([Wrap, Wrap], [-0.25, -0.25], 0xffffffff),
+        ([Wrap, Wrap], [2.25, -1.75], 0xffff0000),
+    ];
+    let mut canvas = RenderTarget::new([8, 8]).unwrap();
+    for filter in [TextureFilter::Point, TextureFilter::Linear] {
+        for (address, uv, expected) in cases {
+            let frame = DrawList {
+                commands: vec![DrawCommand {
+                    vertices: vertices(),
+                    texture: Some(FrameTexture {
+                        source: TextureSource::Image(image.clone()),
+                        address,
+                        uv: [uv; 3],
+                    }),
+                    clip: None,
+                    blend_mode: 0,
+                }],
+                filter,
+            };
+            let output = SoftwareBackend.render(&frame, &mut canvas, [8, 8]).unwrap();
+            assert_eq!(output.pixel(3, 2), Some(expected));
+        }
+    }
+    for (address, uv, expected) in [
+        ([Mirror, Mirror], [0., 0.], 0xffff0000),
+        ([Wrap, Mirror], [0., 0.25], 0xff808000),
+        ([Mirror, Wrap], [0.25, 0.], 0xff800080),
+        ([Wrap, Wrap], [0., 0.], 0xff808080),
+    ] {
+        let frame = DrawList {
+            commands: vec![DrawCommand {
+                vertices: vertices(),
+                texture: Some(FrameTexture {
+                    source: TextureSource::Image(image.clone()),
+                    address,
+                    uv: [uv; 3],
+                }),
+                clip: None,
+                blend_mode: 0,
+            }],
+            filter: TextureFilter::Linear,
+        };
+        let output = SoftwareBackend.render(&frame, &mut canvas, [8, 8]).unwrap();
+        assert_eq!(output.pixel(3, 2), Some(expected));
+    }
+    // 横跨整个纹理周期时，先插值 UV 再寻址，保留三角形内部的滚动方向。
+    let frame = DrawList {
+        commands: vec![DrawCommand {
+            vertices: vertices(),
+            texture: Some(FrameTexture {
+                source: TextureSource::Image(image),
+                address: [Wrap, Mirror],
+                uv: [[-0.25, 0.25], [2.75, 0.25], [-0.25, 0.25]],
+            }),
+            clip: None,
+            blend_mode: 0,
+        }],
+        filter: TextureFilter::Point,
+    };
+    let output = SoftwareBackend.render(&frame, &mut canvas, [8, 8]).unwrap();
+    assert_eq!(output.pixel(0, 0), Some(0xffff0000));
+    assert_eq!(output.pixel(3, 0), Some(0xff00ff00));
+    assert_eq!(output.pixel(7, 0), Some(0xffff0000));
 }
 
 #[test]
@@ -413,6 +499,7 @@ fn camera_crossing_triangles_keep_the_visible_exterior_and_zero_rhw_fallback() {
                 commands: vec![DrawCommand {
                     vertices,
                     texture: (mode == 2).then(|| FrameTexture {
+                        address: Default::default(),
                         source: TextureSource::Image(texture.clone()),
                         uv,
                     }),

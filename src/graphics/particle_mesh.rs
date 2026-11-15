@@ -12,6 +12,7 @@ pub struct ParticleMesh {
     flags: Vec<u32>,
     order: Vec<usize>,
     texture: Option<Arc<Surface>>,
+    address: [super::TextureAddress; 2],
     viewport: [u32; 2],
     depth: f32,
     reference_depth: f32,
@@ -30,6 +31,7 @@ impl ParticleMesh {
             flags: Vec::new(),
             order: Vec::new(),
             texture,
+            address: particles.texture_address,
             viewport: particles.surface_size,
             depth: particles.depth_offset,
             reference_depth,
@@ -51,6 +53,7 @@ impl ParticleMesh {
         self.quads.clone_from(&particles.quads);
         self.offsets.clone_from(&particles.offsets);
         self.flags.clone_from(&particles.quad_flags);
+        self.address = particles.texture_address;
         self.depth = particles.depth_offset;
         self.viewport = particles.surface_size;
         self.order.clear();
@@ -152,6 +155,7 @@ impl ParticleMesh {
                 touched |= draw(DrawCommand {
                     vertices,
                     texture: self.texture.as_ref().map(|image| FrameTexture {
+                        address: self.address,
                         source: TextureSource::Image(image.clone()),
                         uv: indices.map(|i| quad[i].uv),
                     }),
