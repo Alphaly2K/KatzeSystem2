@@ -54,6 +54,22 @@ impl Bits<'_> {
     }
 
     fn gamma(&mut self) -> Result<usize> {
+        let byte = self.position / 8;
+        let shift = self.position % 8;
+        // 完整码字一次取位；跨字边界及短尾沿用逐位路径的截断诊断。
+        if let Some(bytes) = self.bytes.get(byte..byte + 8) {
+            let word = u64::from_le_bytes(bytes.try_into().unwrap()) >> shift;
+            if word & 1 != 0 {
+                self.position += 1;
+                return Ok(1);
+            }
+            let zeros = word.trailing_zeros() as usize;
+            if zeros < 32 && zeros * 2 < 64 - shift {
+                self.position += zeros * 2 + 1;
+                let tail = ((word >> (zeros + 1)) as u32).reverse_bits() >> (32 - zeros);
+                return Ok((1usize << zeros) | tail as usize);
+            }
+        }
         let mut zeros = 0;
         while !self.bit()? {
             zeros += 1;
@@ -178,6 +194,57 @@ impl BitWriter {
         self.bit(true);
         for bit in (0..highest).rev() {
             self.bit(value & (1 << bit) != 0);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gamma_keeps_unaligned_suffix_order_long_codes_and_tail_errors() {
+        let bytes = [
+            45, 83, 136, 128, 127, 0, 192, 255, 63, 0, 0, 0, 32, 0, 0, 0, 0, 0, 0, 0, 240, 255,
+            255, 255, 15, 0, 0, 0, 0, 0, 0, 0, 0,
+        ];
+        let mut bits = Bits {
+            bytes: &bytes,
+            position: 3,
+        };
+        for (value, position) in [
+            (1, 4),
+            (2, 7),
+            (3, 10),
+            (5, 15),
+            (17, 24),
+            (255, 39),
+            (65535, 70),
+            (0x8000_0000, 133),
+            (0xffff_ffff, 196),
+        ] {
+            assert_eq!(bits.gamma().unwrap(), value);
+            assert_eq!(bits.position, position);
+        }
+        for (bytes, value) in [
+            ([0, 0, 0, 128, 0, 0, 0, 0], 0x8000_0000),
+            ([0, 0, 0, 128, 255, 255, 255, 127], 0xffff_ffff),
+        ] {
+            let mut bits = Bits {
+                bytes: &bytes,
+                position: 0,
+            };
+            assert_eq!(bits.gamma().unwrap(), value);
+            assert_eq!(bits.position, 63);
+        }
+        for (bytes, position, offset) in [
+            ([0u8; 8].as_slice(), 32, 4),
+            ([0u8; 2].as_slice(), 16, 2),
+            ([128u8].as_slice(), 8, 1),
+        ] {
+            let mut bits = Bits { bytes, position: 0 };
+            assert_eq!(bits.gamma().unwrap_err().offset, offset);
+            assert_eq!(bits.position, position);
         }
     }
 }
