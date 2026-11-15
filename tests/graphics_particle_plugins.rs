@@ -35,7 +35,7 @@ fn plugin(name: &[u8]) -> Vec<u8> {
     bytes[360..366].copy_from_slice(&[0xb8, 1, 0, 2, 0, 0xc3]);
     if matches!(
         name,
-        b"em_down.ppi" | b"em_silent.ppi" | b"em_kyupin.ppi" | b"energy.ppi"
+        b"em_down.ppi" | b"em_silent.ppi" | b"em_kyupin.ppi" | b"energy.ppi" | b"digi.ppi"
     ) {
         bytes[361] = 2;
     }
@@ -1265,6 +1265,18 @@ fn scatter_effects_use_shared_randomness_and_preserve_task_lifecycle() -> Result
             0,
             96,
         ),
+        (
+            b"digi.ppi".as_slice(),
+            [
+                640f32, 730., 640., -50., 42., 50., 50., 100., 50., 250., 5., 1000., 200., 1.,
+            ]
+            .as_slice(),
+            48,
+            72,
+            [[0., 0.], [0.5, 0.5]],
+            0,
+            0,
+        ),
     ] {
         let mut runtime = runtime(plugin(name))?;
         runtime.update(1, 1)?;
@@ -1368,7 +1380,11 @@ fn scatter_effects_use_shared_randomness_and_preserve_task_lifecycle() -> Result
             .unwrap()
             .projected_quad(mesh_index, &Projection::default())
             .unwrap();
-        assert_eq!(restarted[0].color >> 24, 0);
+        if name == b"digi.ppi" {
+            assert!(restarted[0].color >> 24 > 0);
+        } else {
+            assert_eq!(restarted[0].color >> 24, 0);
+        }
         assert_ne!(restarted[0].position, quad[0].position);
         assert_eq!(runtime.dispatch_command(2, command(324))?, 1);
         runtime.dispatch_command(2, command(323))?;

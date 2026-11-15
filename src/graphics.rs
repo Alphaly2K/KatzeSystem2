@@ -59,6 +59,7 @@ mod particle_asease;
 mod particle_common;
 mod particle_concentration;
 mod particle_curve;
+mod particle_digi;
 mod particle_dis;
 mod particle_down;
 mod particle_energy;
