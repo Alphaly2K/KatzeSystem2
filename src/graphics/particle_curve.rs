@@ -5,6 +5,65 @@ fn length(vector: [f32; 3]) -> f32 {
     (((squares[0] + squares[1]) + squares[2]) as f64).sqrt() as f32
 }
 
+fn extended_distance(time: f32, duration: f32, length: f32) -> f32 {
+    let quotient = time as f64 / duration as f64;
+    let high = quotient * length as f64;
+    let result = high as f32;
+    let adjacent = if high > result as f64 {
+        result.next_up()
+    } else {
+        result.next_down()
+    };
+    let midpoint = (result as f64 + adjacent as f64) * 0.5;
+    if !high.is_finite() || (high - midpoint).abs() > high.abs() * f64::EPSILON {
+        return result;
+    }
+    // 单精度中点需保留除法、乘法各自的 64 位有效数舍入方向。
+    let parts = |value: f32| {
+        let bits = value.to_bits() & 0x7fff_ffff;
+        let exponent = (bits >> 23) as i32;
+        if exponent == 0 {
+            (bits as u128, -149)
+        } else {
+            (((bits & 0x7f_ffff) | 0x80_0000) as u128, exponent - 150)
+        }
+    };
+    let rounded_ratio = |numerator: u128, denominator: u128| {
+        let quotient = numerator / denominator;
+        let remainder = (numerator % denominator) * 2;
+        quotient
+            + u128::from(remainder > denominator || (remainder == denominator && quotient & 1 != 0))
+    };
+    let (a, ae) = parts(time);
+    let (b, be) = parts(duration);
+    let (c, ce) = parts(length);
+    let exponent = ((quotient.to_bits() >> 52) & 0x7ff) as i32 - 1023;
+    let significand = rounded_ratio(a << (ae - be - exponent + 63), b);
+    let product = significand * c;
+    let shift = (128 - product.leading_zeros()).saturating_sub(64);
+    let wide = rounded_ratio(product, 1 << shift);
+    let scale = f64::from_bits(((exponent - 63 + ce + shift as i32 + 1023) as u64) << 52);
+    let midpoint_significand = (midpoint.abs() / scale) as u128;
+    let direction = if high.is_sign_negative() {
+        midpoint_significand.cmp(&wide)
+    } else {
+        wide.cmp(&midpoint_significand)
+    };
+    if direction.is_eq() {
+        if result.to_bits() & 1 == 0 {
+            result
+        } else {
+            adjacent
+        }
+    } else if (midpoint > result as f64 && direction.is_gt())
+        || (midpoint < result as f64 && direction.is_lt())
+    {
+        adjacent
+    } else {
+        result
+    }
+}
+
 pub(super) struct TwoPointPath {
     pub(super) points: [[f32; 3]; 2],
     pub(super) tangent: [f32; 3],
@@ -66,7 +125,7 @@ impl TwoPointPath {
             time = self.duration;
         }
         let distance = if self.extended_intermediates {
-            (time as f64 / self.duration as f64 * self.length as f64) as f32
+            extended_distance(time, self.duration, self.length)
         } else {
             (time / self.duration) * self.length
         };
@@ -198,7 +257,7 @@ impl Path {
             time = self.duration;
         }
         let distance = if self.extended_intermediates {
-            (time as f64 / self.duration as f64 * self.total as f64) as f32
+            extended_distance(time, self.duration, self.total)
         } else {
             (time / self.duration) * self.total
         };
@@ -251,5 +310,31 @@ impl Path {
             previous = next as f32;
         }
         *self.points.last().unwrap()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extended_distance_keeps_the_division_residual_at_single_precision_midpoints() {
+        for (time, duration, length, expected) in [
+            (130., 200., 1110770263, 0x41eb_4fd7),
+            (130., 200., 1111656083, 0x41fc_e225),
+            (11., 10., 1159911431, 0x4533_20d4),
+            (41., 10., 1153398508, 0x45c4_404c),
+        ] {
+            let length = f32::from_bits(length);
+            assert_eq!(
+                extended_distance(time, duration, length).to_bits(),
+                expected
+            );
+            assert_eq!(
+                extended_distance(time, duration, -length).to_bits(),
+                expected | 0x8000_0000
+            );
+        }
+        assert_eq!(extended_distance(1., 2., 10.), 5.);
     }
 }
