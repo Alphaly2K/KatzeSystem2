@@ -3,6 +3,13 @@ use crate::kcs::float_operation;
 use crate::{Error, Result, read};
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
+use std::sync::Arc;
+
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct ImageTexture {
+    pub surface: Option<Arc<super::Surface>>,
+    pub uv: [[[f32; 2]; 3]; 2],
+}
 
 /// 不带纹理的三角形顶点；颜色保留原始 ARGB DWORD。
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -18,6 +25,7 @@ pub struct Drawable {
     pub(super) triangles: Vec<[Vertex; 3]>,
     pub(super) canvas_triangles: Option<Vec<CanvasTriangle>>,
     pub(super) canvas_source: Option<Box<super::canvas::CanvasSource>>,
+    pub(super) image_texture: Option<ImageTexture>,
     pub(crate) particle_mesh: Option<super::ParticleMesh>,
     pub(super) bounds: [[f32; 3]; 2],
     pub(super) color: u32,
@@ -36,6 +44,7 @@ impl Default for Drawable {
             triangles: Vec::new(),
             canvas_triangles: None,
             canvas_source: None,
+            image_texture: None,
             particle_mesh: None,
             bounds: [[0.0; 3]; 2],
             color: u32::MAX,
@@ -50,6 +59,28 @@ impl Default for Drawable {
 }
 
 impl Drawable {
+    /// 创建独立图像纹理矩形；set_image 提供画面前不提交绘制。
+    pub fn image_rectangle(at: [f32; 3], size: [f32; 2]) -> Self {
+        let mut drawable = Self::rectangle(at, size, u32::MAX);
+        drawable.image_texture = Some(ImageTexture {
+            surface: None,
+            uv: [
+                [[0., 0.], [1., 0.], [1., 1.]],
+                [[0., 0.], [0., 1.], [1., 1.]],
+            ],
+        });
+        drawable
+    }
+
+    /// 更新独立纹理画面，保留矩形与全部绘图属性；其他图元返回 false。
+    pub fn set_image(&mut self, surface: Option<Arc<super::Surface>>) -> bool {
+        let Some(texture) = &mut self.image_texture else {
+            return false;
+        };
+        texture.surface = surface;
+        true
+    }
+
     pub fn from_particle_mesh(mesh: super::ParticleMesh) -> Self {
         Self {
             particle_mesh: Some(mesh),
@@ -261,6 +292,13 @@ impl Drawables {
         }
         self.order.retain(|&item| item != id);
         true
+    }
+
+    /// 更新指定图元的独立图像纹理，不改变绘图顺序与变换。
+    pub fn set_image(&mut self, id: u32, surface: Option<Arc<super::Surface>>) -> bool {
+        self.entries
+            .get_mut(&id)
+            .is_some_and(|drawable| drawable.set_image(surface))
     }
 
     /// 按基点 Z 从小到大稳定归并，保留相等值及 NaN 的原比较顺序。

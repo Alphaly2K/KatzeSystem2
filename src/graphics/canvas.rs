@@ -31,7 +31,7 @@ pub(super) struct CanvasSource {
 impl Drawable {
     /// 保留非纹理源几何及独立的包装变换；源变化后在 prepare_canvas 中重新切割。
     pub fn from_canvas_source(source: Self, layout: CanvasLayout) -> Result<Self> {
-        if source.canvas_triangles.is_some() {
+        if source.canvas_triangles.is_some() || source.image_texture.is_some() {
             return Err(Error::new(0, "画布包装需要非纹理源几何"));
         }
         let mut drawable = Self {

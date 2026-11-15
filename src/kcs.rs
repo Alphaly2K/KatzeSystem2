@@ -436,6 +436,26 @@ pub trait Host {
         true
     }
 
+    /// 从共享来源装载目标平面的停止影片，返回视频尺寸；effect 选择视频特效来源。
+    fn load_plane_movie(
+        &mut self,
+        _owner: u32,
+        _source: crate::io::SharedSource,
+        _effect: bool,
+    ) -> Result<[u32; 2]> {
+        Err(Error::new(0, "宿主未提供平面电影服务"))
+    }
+
+    /// 查询平面对应来源的播放器句柄，未装载时返回零。
+    fn plane_movie_handle(&self, _owner: u32, _effect: bool) -> u32 {
+        0
+    }
+
+    /// 释放所属平面的影片与音轨；没有影片时无需操作。
+    fn release_plane_movies(&mut self, _owner: u32) -> Result<()> {
+        Ok(())
+    }
+
     fn input_device(&mut self) -> Option<&mut dyn crate::input::InputDevice> {
         None
     }
@@ -682,6 +702,23 @@ impl<T: Host + ?Sized> Host for &mut T {
 
     fn movie_enabled(&self) -> bool {
         (**self).movie_enabled()
+    }
+
+    fn load_plane_movie(
+        &mut self,
+        owner: u32,
+        source: crate::io::SharedSource,
+        effect: bool,
+    ) -> Result<[u32; 2]> {
+        (**self).load_plane_movie(owner, source, effect)
+    }
+
+    fn plane_movie_handle(&self, owner: u32, effect: bool) -> u32 {
+        (**self).plane_movie_handle(owner, effect)
+    }
+
+    fn release_plane_movies(&mut self, owner: u32) -> Result<()> {
+        (**self).release_plane_movies(owner)
     }
 
     fn input_device(&mut self) -> Option<&mut dyn crate::input::InputDevice> {

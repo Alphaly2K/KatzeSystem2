@@ -1,4 +1,4 @@
-use super::{ObjectFactory, ObjectHost, Resources};
+use super::{ObjectFactory, ObjectHost, Resources, TaskObject};
 use crate::graphics::{
     DrawCommand, DrawList, FrameTexture, ProjectedVertex, Rect, Surface, TextureFilter,
     TextureSource,
@@ -6,6 +6,7 @@ use crate::graphics::{
 use crate::kcs::{Interpreter, NativeReturn, format_string};
 use crate::movie::Player;
 use crate::{Error, Result, read};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 pub(super) struct Movie {
@@ -16,6 +17,8 @@ pub(super) struct Movie {
     exclusive: bool,
     pub surface_size: [u32; 2],
     tick: u32,
+    owner: Option<(u32, bool)>,
+    audio_task: Option<u32>,
 }
 
 impl Movie {
@@ -86,11 +89,77 @@ fn quad(output: &mut DrawList, rectangle: Rect, image: Option<Arc<Surface>>, col
 }
 
 impl Resources {
+    pub(super) fn advance_movies(&mut self, now: u32) -> Result<()> {
+        if let Some(movie) = &mut self.movie {
+            movie.advance(now)?;
+        }
+        for movie in self.plane_movies.values_mut() {
+            movie.advance(now)?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn update_plane_movie_frames(&mut self) -> Result<()> {
+        for movie in self.plane_movies.values_mut() {
+            if let Some(frame) = movie.player.take_video()? {
+                let frame = Arc::new(frame.surface);
+                self.compositor
+                    .drawables
+                    .set_image(movie.owner.unwrap().0, Some(frame.clone()));
+                movie.frame = Some(frame);
+            }
+        }
+        Ok(())
+    }
+
+    fn remove_plane_movie(
+        &mut self,
+        objects: &mut BTreeMap<u32, Box<dyn TaskObject>>,
+        handle: u32,
+    ) -> bool {
+        let Some(movie) = self.plane_movies.remove(&handle) else {
+            return false;
+        };
+        if let Some(sound) = movie.audio_task.and_then(|id| objects.get_mut(&id)) {
+            if let Some(state) = sound.audio_state_mut() {
+                state.set_movie_track(handle, None);
+            }
+        }
+        self.compositor
+            .drawables
+            .set_image(movie.owner.unwrap().0, None);
+        true
+    }
+
+    pub(super) fn release_plane_movies(
+        &mut self,
+        objects: &mut BTreeMap<u32, Box<dyn TaskObject>>,
+        owner: u32,
+    ) {
+        let handles: Vec<_> = self
+            .plane_movies
+            .iter()
+            .filter(|(_, movie)| movie.owner.is_some_and(|value| value.0 == owner))
+            .map(|(&handle, _)| handle)
+            .collect();
+        for handle in handles {
+            self.remove_plane_movie(objects, handle);
+        }
+    }
+
+    pub(super) fn plane_movie_handle(&self, owner: u32, effect: bool) -> u32 {
+        self.plane_movies
+            .values()
+            .find(|movie| movie.owner == Some((owner, effect)))
+            .map_or(0, |movie| movie.handle)
+    }
+
     pub fn movie_frame(
         &mut self,
         size: [u32; 2],
         filter: TextureFilter,
     ) -> Result<Option<DrawList>> {
+        self.update_plane_movie_frames()?;
         match &mut self.movie {
             Some(movie) => movie.compose(size, filter),
             None => Ok(None),
@@ -125,31 +194,51 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                 NativeReturn::Continue
             });
         }
-        let movie = self
-            .resources
-            .movie
-            .as_mut()
-            .filter(|movie| movie.handle == handle)
-            .ok_or_else(|| Error::new(vm.pc, "电影句柄不存在"))?;
+        let layer = self.resources.plane_movies.contains_key(&handle);
+        if index == 268 {
+            if layer {
+                self.resources.remove_plane_movie(self.objects, handle);
+            } else {
+                let movie = self
+                    .resources
+                    .movie
+                    .as_mut()
+                    .filter(|movie| movie.handle == handle)
+                    .ok_or_else(|| Error::new(vm.pc, "电影句柄不存在"))?;
+                movie.player.stop()?;
+                self.set_movie_audio(None)?;
+                self.resources.movie = None;
+            }
+            self.resources.compositor.drawing.enabled = true;
+            let input = self.command_target(0, 34, [0; 3])?;
+            self.command_target(input, 144, [0, 1, 0])?;
+            return Ok(NativeReturn::Value(1));
+        }
+        if layer && index == 266 {
+            self.connect_plane_movie_audio(handle)?;
+        }
+        let movie = if layer {
+            self.resources.plane_movies.get_mut(&handle)
+        } else {
+            self.resources
+                .movie
+                .as_mut()
+                .filter(|movie| movie.handle == handle)
+        }
+        .ok_or_else(|| Error::new(vm.pc, "电影句柄不存在"))?;
         let result = match index {
             266 => {
                 let result = movie.player.play(read::u32_at(arguments, 4)?)?;
                 if result {
                     movie.frame = None;
                     movie.tick = self.host.system_time_ms;
+                    if let Some((owner, _)) = movie.owner {
+                        self.resources.compositor.drawables.set_image(owner, None);
+                    }
                 }
                 u32::from(result)
             }
             267 => u32::from(movie.player.stop()?),
-            268 => {
-                movie.player.stop()?;
-                self.set_movie_audio(None)?;
-                self.resources.movie = None;
-                self.resources.compositor.drawing.enabled = true;
-                let input = self.command_target(0, 34, [0; 3])?;
-                self.command_target(input, 144, [0, 1, 0])?;
-                1
-            }
             269 => u32::from(movie.player.is_playing()?),
             // 电影沿宿主窗口呈现，现有活动窗口即为影片的前台目标。
             270 => 0,
@@ -206,6 +295,53 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         Ok(())
     }
 
+    fn connect_plane_movie_audio(&mut self, handle: u32) -> Result<()> {
+        let movie = &self.resources.plane_movies[&handle];
+        if movie.player.metadata().sample_rate == 0 {
+            return Ok(());
+        }
+        let output = movie.player.audio_output();
+        let sound = self.command_target(0, 35, [0; 3])?;
+        let state = self
+            .objects
+            .get_mut(&sound)
+            .and_then(|object| object.audio_state_mut())
+            .ok_or_else(|| Error::new(0, "电影播放需要可达的声音任务"))?;
+        state.set_movie_track(handle, Some(output));
+        self.resources
+            .plane_movies
+            .get_mut(&handle)
+            .unwrap()
+            .audio_task = Some(sound);
+        Ok(())
+    }
+
+    pub(super) fn create_plane_movie(
+        &mut self,
+        owner: u32,
+        source: crate::io::SharedSource,
+        effect: bool,
+    ) -> Result<[u32; 2]> {
+        let player = Player::new(source)?;
+        let size = player.metadata().size;
+        let handle = self.host.handle_allocator().allocate()?;
+        self.resources.plane_movies.insert(
+            handle,
+            Movie {
+                handle,
+                player,
+                frame: None,
+                rectangle: None,
+                exclusive: false,
+                surface_size: self.host.surface_size,
+                tick: self.host.system_time_ms,
+                owner: Some((owner, effect)),
+                audio_task: None,
+            },
+        );
+        Ok(size)
+    }
+
     fn load_movie(&mut self, address: u32, vm: &mut Interpreter) -> Result<NativeReturn> {
         if self
             .host
@@ -250,6 +386,8 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                 exclusive: true,
                 surface_size: self.host.surface_size,
                 tick: self.host.system_time_ms,
+                owner: None,
+                audio_task: None,
             }))
         })();
         match result {

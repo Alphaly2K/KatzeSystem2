@@ -471,9 +471,7 @@ impl<F: ObjectFactory> Runtime<F> {
     /// 完成一轮树更新后广播配置变更并清除标记。
     /// 通知失败后先续完原轮次，不重复推进时钟和主体。
     pub fn update(&mut self, now: u32, increment: u32) -> Result<bool> {
-        if let Some(movie) = &mut self.resources.movie {
-            movie.advance(self.host.system_time_ms)?;
-        }
+        self.resources.advance_movies(self.host.system_time_ms)?;
         if self.configuration_notification.is_some() {
             return self.finish_configuration_notification();
         }
@@ -2043,6 +2041,24 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
             .is_none_or(|settings| settings.etc_disablemovie == 0)
     }
 
+    fn load_plane_movie(
+        &mut self,
+        owner: u32,
+        source: crate::io::SharedSource,
+        effect: bool,
+    ) -> Result<[u32; 2]> {
+        self.create_plane_movie(owner, source, effect)
+    }
+
+    fn plane_movie_handle(&self, owner: u32, effect: bool) -> u32 {
+        self.resources.plane_movie_handle(owner, effect)
+    }
+
+    fn release_plane_movies(&mut self, owner: u32) -> Result<()> {
+        self.resources.release_plane_movies(self.objects, owner);
+        Ok(())
+    }
+
     fn next_task_child(&self, previous: Option<u32>) -> Result<Option<u32>> {
         Ok(self
             .tree
@@ -2255,6 +2271,7 @@ impl<F: ObjectFactory> Lifecycle for TaskLifecycle<'_, F> {
             .get_mut(&id)
             .ok_or_else(|| Error::new(0, "任务对象不存在"))?;
         object.release()?;
+        self.resources.release_plane_movies(self.objects, id);
         self.resources.images.release_resources(id)?;
         self.resources.images.release_owner(id);
         self.resources.raw.release_owner(id);

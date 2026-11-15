@@ -194,6 +194,23 @@ impl<H: Host, S: SystemServices> Host for SystemHost<'_, H, S> {
         self.inner.movie_enabled()
     }
 
+    fn load_plane_movie(
+        &mut self,
+        owner: u32,
+        source: crate::io::SharedSource,
+        effect: bool,
+    ) -> Result<[u32; 2]> {
+        self.inner.load_plane_movie(owner, source, effect)
+    }
+
+    fn plane_movie_handle(&self, owner: u32, effect: bool) -> u32 {
+        self.inner.plane_movie_handle(owner, effect)
+    }
+
+    fn release_plane_movies(&mut self, owner: u32) -> Result<()> {
+        self.inner.release_plane_movies(owner)
+    }
+
     fn set_task_clock(&mut self, clock: &TaskClock) {
         self.inner.set_task_clock(clock);
     }

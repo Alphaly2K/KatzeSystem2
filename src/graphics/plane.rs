@@ -25,7 +25,7 @@ pub struct PlaneObject {
     parent_offset: Option<[f32; 3]>,
     shape_kind: u32,
     geometry_name: Vec<u8>,
-    movie: Option<crate::movie::Decoder>,
+    movie: bool,
     echo: Option<super::echo::Echo>,
     echo_paused: bool,
 }
@@ -52,7 +52,7 @@ impl PlaneObject {
             parent_offset: None,
             shape_kind: 0,
             geometry_name: Vec::new(),
-            movie: None,
+            movie: false,
             echo: None,
             echo_paused: false,
         }
@@ -93,6 +93,14 @@ impl PlaneObject {
     fn stop_echo(&mut self, host: &mut dyn Host) -> Result<()> {
         if let Some(mut echo) = self.echo.take() {
             echo.release(self.id, drawings(host)?);
+        }
+        Ok(())
+    }
+
+    fn release_movie(&mut self, host: &mut dyn Host) -> Result<()> {
+        if self.movie {
+            host.release_plane_movies(self.id)?;
+            self.movie = false;
         }
         Ok(())
     }
@@ -550,7 +558,7 @@ impl TaskObject for PlaneObject {
         let id = self.id;
         match command.code {
             3 | 68 => {
-                self.movie = None;
+                self.release_movie(host)?;
                 drawings(host)?.remove(id);
                 if command.code == 68 {
                     self.size = [0.0; 2];
@@ -619,7 +627,7 @@ impl TaskObject for PlaneObject {
                 }
             }
             41 | 42 | 45 => {
-                self.movie = None;
+                self.release_movie(host)?;
                 drawings(host)?.remove(id);
                 let drawable = if command.code != 45 {
                     let words = words::<8>(buffers.data1.as_deref())?;
@@ -667,7 +675,7 @@ impl TaskObject for PlaneObject {
                 }
             }
             43 | 44 => {
-                self.movie = None;
+                self.release_movie(host)?;
                 drawings(host)?.remove(id);
                 let record = buffers
                     .data1
@@ -679,33 +687,21 @@ impl TaskObject for PlaneObject {
                     return Err(Error::new(0, "电影资源名超过基线缓冲区范围"));
                 }
                 if self.creation_flags == 1 && (command.code == 44 || host.movie_enabled()) {
-                    let services = host
+                    let source = host
                         .resource_services()
-                        .ok_or_else(|| Error::new(0, "宿主未提供资源服务"))?;
-                    if let Some(source) =
-                        services.open(name, crate::resource::ResourceMode::LooseFirst)?
-                    {
-                        let movie = crate::movie::Decoder::new(source)?;
-                        let size = movie.metadata().size.map(|value| value as f32);
-                        // 装载只连接停止的电影；未收到画面前不提交纹理三角形。
-                        let geometry = Drawable {
-                            bounds: [
-                                [position[0], position[1], 0.],
-                                [
-                                    arithmetic(1, position[0], size[0]),
-                                    arithmetic(1, position[1], size[1]),
-                                    0.,
-                                ],
-                            ],
-                            ..Drawable::default()
-                        };
+                        .ok_or_else(|| Error::new(0, "宿主未提供资源服务"))?
+                        .open(name, crate::resource::ResourceMode::LooseFirst)?;
+                    if let Some(source) = source {
+                        let size = host.load_plane_movie(id, source, command.code == 44)?;
+                        let geometry =
+                            Drawable::image_rectangle(position, size.map(|value| value as f32));
                         self.offset = [0.; 2];
                         self.size = std::array::from_fn(|i| {
                             arithmetic(2, geometry.bounds[1][i], geometry.bounds[0][i]).abs()
                         });
                         self.shape_kind = command.code - 40;
                         drawings(host)?.insert(id, geometry)?;
-                        self.movie = Some(movie);
+                        self.movie = true;
                     }
                 }
             }
@@ -720,7 +716,7 @@ impl TaskObject for PlaneObject {
                 if name.len() >= 260 {
                     return Err(Error::new(0, "几何资源名超过基线缓冲区范围"));
                 }
-                self.movie = None;
+                self.release_movie(host)?;
                 drawings(host)?.remove(id);
                 if self.creation_flags == 1 {
                     let services = host
@@ -744,7 +740,7 @@ impl TaskObject for PlaneObject {
                 }
             }
             83 => {
-                self.movie = None;
+                self.release_movie(host)?;
                 drawings(host)?.remove(id);
                 let drawable = Drawable::from_canvas(
                     buffers.data1.as_deref().unwrap_or(&[]),
@@ -957,6 +953,12 @@ impl TaskObject for PlaneObject {
                 drawings(host)?.set_projection_origin_mode(id, command.data[1]);
             }
             84 => self.creation_flags = command.data[1],
+            87 | 88 => {
+                write_words(
+                    buffers.data1.as_deref_mut(),
+                    &[host.plane_movie_handle(id, command.code == 88)],
+                )?;
+            }
             57 => {
                 let value = words::<16>(buffers.data1.as_deref())?.map(f32::from_bits);
                 drawings(host)?.set_geometry_matrix(id, value, command.data[0] != 0);
@@ -1031,7 +1033,7 @@ impl TaskObject for PlaneObject {
 
     fn request_delete(&mut self, host: &mut dyn Host, _budget: usize) -> Result<bool> {
         self.stop_echo(host)?;
-        self.movie = None;
+        self.release_movie(host)?;
         drawings(host)?.remove(self.id);
         self.unregister_input(0, host)?;
         self.control.deletion_requested = 1;
@@ -1040,7 +1042,7 @@ impl TaskObject for PlaneObject {
 
     fn prepare_release(&mut self, host: &mut dyn Host, _budget: usize) -> Result<bool> {
         self.stop_echo(host)?;
-        self.movie = None;
+        self.release_movie(host)?;
         Ok(true)
     }
 }

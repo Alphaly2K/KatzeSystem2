@@ -26,10 +26,12 @@ pub(super) struct Resources {
     pub cst_contexts: std::collections::BTreeMap<u32, super::CstContext>,
     pub emocon: std::collections::BTreeMap<u32, super::emocon::EmoconState>,
     pub movie: Option<super::movie::Movie>,
+    pub plane_movies: std::collections::BTreeMap<u32, super::movie::Movie>,
 }
 
 impl Resources {
     pub fn compose_frame(&mut self, range: Option<[f32; 2]>) -> Result<crate::graphics::DrawList> {
+        self.update_plane_movie_frames()?;
         if range.is_none() {
             let size = self.movie.as_ref().map(|movie| movie.surface_size);
             if let Some(size) = size {

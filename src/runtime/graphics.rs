@@ -132,6 +132,8 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             | 340..=342
             | 570
             | 572
+            | 702
+            | 989
             | 1065
             | 1067
             | 1069 => 4,
@@ -152,7 +154,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         let route_zero = matches!(
             index,
             104 | 105 | 106 | 107 | 256 | 258 | 260 | 261 | 262 | 263 | 339..=342 | 402 | 455 | 732 | 462
-                ..=464 | 534 | 570 | 572 | 625 | 653 | 654 | 657 | 663 | 848 | 849 | 862 | 879..=881 | 1065..=1069
+                ..=464 | 534 | 570 | 572 | 625 | 653 | 654 | 657 | 663 | 702 | 989 | 848 | 849 | 862 | 879..=881 | 1065..=1069
         );
         if route_zero && arguments.len() != count {
             return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
@@ -170,6 +172,19 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         }
         let word = |i: usize| u32::from_le_bytes(arguments[i * 4..i * 4 + 4].try_into().unwrap());
         match index {
+            702 | 989 => {
+                let mut handle = [0; 4];
+                self.command_target_with_buffers(
+                    target,
+                    if index == 702 { 87 } else { 88 },
+                    [0; 3],
+                    &mut CommandBuffers {
+                        data1: Some(&mut handle),
+                        ..Default::default()
+                    },
+                )?;
+                return Ok(NativeReturn::Value(u32::from_le_bytes(handle)));
+            }
             654 => {
                 let mut first = format_string(vm, word(1), 0)?;
                 let mut second = format_string(vm, word(2), 0)?;

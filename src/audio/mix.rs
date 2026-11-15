@@ -99,7 +99,7 @@ impl SoundState {
                 }
             }
         }
-        if let Some(movie) = &self.movie {
+        for movie in self.movies.values() {
             movie.mix(sample_rate, output, wait)?;
         }
         for sample in output {

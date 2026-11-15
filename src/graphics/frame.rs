@@ -116,6 +116,13 @@ impl Drawables {
             if drawable.display() == 0 {
                 continue;
             }
+            if drawable
+                .image_texture
+                .as_ref()
+                .is_some_and(|texture| texture.surface.is_none())
+            {
+                continue;
+            }
             if let Some(mesh) = &drawable.particle_mesh {
                 let mut selected = projection.clone();
                 if let Some(camera) = self.cameras.get(&drawable.camera_id()) {
@@ -167,7 +174,10 @@ impl Drawables {
                         drawable
                             .projected_triangle(index, parent, &selected, origin, true)
                             .unwrap(),
-                        None,
+                        drawable.image_texture.as_ref().map(|texture| FrameTexture {
+                            source: TextureSource::Image(texture.surface.as_ref().unwrap().clone()),
+                            uv: texture.uv[index],
+                        }),
                     )
                 };
                 if super::raster::triangle_culled(vertices) {

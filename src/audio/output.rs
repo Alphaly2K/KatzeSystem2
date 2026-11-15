@@ -28,7 +28,7 @@ enum Update {
         generation: u64,
         action: Action,
     },
-    Movie(Option<crate::movie::AudioOutput>),
+    Movie(u32, Option<crate::movie::AudioOutput>),
 }
 
 pub(super) struct Link {
@@ -69,7 +69,7 @@ impl SoundState {
         });
         let sound = SoundState {
             channels: self.channels.clone(),
-            movie: self.movie.clone(),
+            movies: self.movies.clone(),
             ..SoundState::default()
         };
         for (channel, progress) in self.channels.iter_mut().zip(&progress) {
@@ -148,9 +148,19 @@ impl SoundState {
 
     /// 设置独立电影音轨；不占用脚本的六十四个物理声音通道。
     pub fn set_movie_output(&mut self, movie: Option<crate::movie::AudioOutput>) {
-        self.movie = movie.clone();
+        self.set_movie_track(0, movie);
+    }
+
+    /// 按播放器句柄登记独立音轨；零号为 set_movie_output 使用的默认音轨。
+    /// 替换或移除一个句柄不改变其他音轨，连接设备后同样有效。
+    pub fn set_movie_track(&mut self, handle: u32, movie: Option<crate::movie::AudioOutput>) {
+        if let Some(output) = &movie {
+            self.movies.insert(handle, output.clone());
+        } else {
+            self.movies.remove(&handle);
+        }
         if let Some(link) = &self.output {
-            let _ = link.sender.send(Update::Movie(movie));
+            let _ = link.sender.send(Update::Movie(handle, movie));
         }
     }
 
@@ -199,10 +209,10 @@ impl Mixer {
                 action,
             } = update
             else {
-                let Update::Movie(movie) = update else {
+                let Update::Movie(handle, movie) = update else {
                     unreachable!()
                 };
-                self.sound.movie = movie;
+                self.sound.set_movie_track(handle, movie);
                 continue;
             };
             let sound_channel = &mut self.sound.channels[channel];

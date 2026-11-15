@@ -72,11 +72,13 @@ fn call(code: &mut Vec<u8>, index: u32, args: &[u32], handle: bool) {
 type MovieRuntime = Runtime<SoundFactory<GraphicsFactory<KcsFactory<Loader>>>>;
 
 fn setup(code: Vec<u8>, budget: usize, name: &[u8]) -> MovieRuntime {
-    let mut data = vec![0; 256];
+    let mut data = vec![0; 512];
     data[64..64 + name.len()].copy_from_slice(name);
     data[128..132].copy_from_slice(&7u32.to_le_bytes());
     data[192..197].copy_from_slice(b"play\0");
     data[224..233].copy_from_slice(b"%u[G128]\0");
+    let effect = b"effect_%u[G128].mpg\0";
+    data[256..256 + effect.len()].copy_from_slice(effect);
     let mut runtime = Runtime::new(
         0,
         kind::ROOT,
@@ -94,7 +96,11 @@ fn setup(code: Vec<u8>, budget: usize, name: &[u8]) -> MovieRuntime {
     runtime.set_resources(Resources);
     runtime.drawing_mut().target = Some(RenderTarget::new([32; 2]).unwrap());
     runtime.drawing_mut().enabled = true;
-    runtime.set_frame_view(Projection::default(), [0.; 16], TextureFilter::Point);
+    runtime.set_frame_view(
+        Projection::default(),
+        *katze_system2::graphics::Transform::default().matrix(),
+        TextureFilter::Point,
+    );
     assert_eq!(runtime.create(0, kind::SOUND, b"sound", b"").unwrap(), 1);
     assert_eq!(
         runtime.create(0, kind::ORDINARY, b"caller", b"").unwrap(),
@@ -136,7 +142,8 @@ fn plane_movie_loads_without_exclusive_playback_or_audio_and_keeps_native_return
     assert!(runtime.drawing().enabled);
     let movie = runtime.drawables().get(3).unwrap();
     assert_eq!(movie.bounds(), [[0.; 3], [32., 32., 0.]]);
-    assert!(movie.triangles().is_empty());
+    assert_eq!(movie.triangles().len(), 2);
+    runtime.drawables_mut().set_display(3, 1);
     assert!(runtime.compose_frame().unwrap().commands.is_empty());
     let mut audio = [1.; 2048];
     runtime
@@ -308,6 +315,7 @@ fn plane_movie_sources_release_on_replacement_failure_and_task_cleanup() {
         source: Arc<Vec<u8>>,
         enabled: bool,
         opens: usize,
+        movie: Option<Decoder>,
     }
     impl ResourceServices for HostState {
         fn read(&mut self, _: &[u8], _: ResourceMode) -> Result<Option<Vec<u8>>> {
@@ -333,6 +341,21 @@ fn plane_movie_sources_release_on_replacement_failure_and_task_cleanup() {
         fn movie_enabled(&self) -> bool {
             self.enabled
         }
+        fn load_plane_movie(
+            &mut self,
+            _: u32,
+            source: katze_system2::io::SharedSource,
+            _: bool,
+        ) -> Result<[u32; 2]> {
+            let movie = Decoder::new(source)?;
+            let size = movie.metadata().size;
+            self.movie = Some(movie);
+            Ok(size)
+        }
+        fn release_plane_movies(&mut self, _: u32) -> Result<()> {
+            self.movie = None;
+            Ok(())
+        }
         fn drawables(&mut self) -> Option<&mut Drawables> {
             Some(&mut self.drawings)
         }
@@ -345,6 +368,7 @@ fn plane_movie_sources_release_on_replacement_failure_and_task_cleanup() {
         source: Arc::new(include_bytes!("fixtures/movie/clip.mpg").to_vec()),
         enabled: true,
         opens: 0,
+        movie: None,
     };
     let mut plane = PlaneObject::new(7);
     let send = |plane: &mut PlaneObject, host: &mut HostState, code, value, record: &mut [u8]| {
@@ -417,4 +441,168 @@ fn plane_movie_sources_release_on_replacement_failure_and_task_cleanup() {
     assert_eq!(Arc::strong_count(&host.source), 2);
     send(&mut plane, &mut host, 68, 0, &mut []);
     assert_eq!(Arc::strong_count(&host.source), 1);
+}
+
+#[test]
+fn plane_movie_handles_play_transform_mix_and_release_independently() {
+    use katze_system2::{
+        audio::SoundState,
+        graphics::{TextureSource, Transform},
+        movie::Player,
+    };
+    fn stored(code: &mut Vec<u8>, index: u32, address: u32, args: &[u32]) {
+        code.extend([0x25, 0x13]);
+        code.extend(address.to_le_bytes());
+        for &arg in args {
+            instruction(code, 0x25, &[arg]);
+        }
+        instruction(code, 0x2b, &[index, (args.len() as u32 + 1) * 4]);
+    }
+    fn audio(
+        runtime: &mut MovieRuntime,
+        mixer: &mut Option<katze_system2::audio::Mixer>,
+        output: &mut [f32],
+    ) {
+        if let Some(mixer) = mixer {
+            mixer.render(48000, output).unwrap();
+        } else {
+            runtime
+                .object_mut(1)
+                .unwrap()
+                .audio_state_mut()
+                .unwrap()
+                .mix_stereo(48000, output)
+                .unwrap();
+        }
+    }
+    for connected in [false, true] {
+        let mut code = Vec::new();
+        call(&mut code, 701, &[3, 64], false);
+        call(&mut code, 988, &[4, 256], false);
+        for (native, target, address) in [(702, 3, 0), (989, 4, 4), (702, 0, 8), (989, 3, 12)] {
+            call(&mut code, native, &[target], false);
+            instruction(&mut code, 0x26, &[address]);
+        }
+        stored(&mut code, 417, 0, &[20]);
+        stored(&mut code, 417, 4, &[35]);
+        for (handle, address) in [(0, 16), (4, 20)] {
+            stored(&mut code, 266, handle, &[0]);
+            instruction(&mut code, 0x26, &[address]);
+        }
+        stored(&mut code, 998, 0, &[]);
+        instruction(&mut code, 0x26, &[40]);
+        call(&mut code, 65, &[], false);
+        stored(&mut code, 267, 0, &[]);
+        instruction(&mut code, 0x26, &[24]);
+        call(&mut code, 83, &[3], false);
+        call(&mut code, 702, &[3], false);
+        instruction(&mut code, 0x26, &[32]);
+        stored(&mut code, 269, 4, &[]);
+        instruction(&mut code, 0x26, &[28]);
+        call(&mut code, 65, &[], false);
+        call(&mut code, 83, &[4], false);
+        call(&mut code, 989, &[4], false);
+        instruction(&mut code, 0x26, &[36]);
+        instruction(&mut code, 0x3b, &[]);
+        let mut runtime = setup(code, 4096, b"clip_%u[G128].mpg\0");
+        runtime.create(0, kind::PLANE, b"movie", b"").unwrap();
+        runtime.create(0, kind::PLANE, b"effect", b"").unwrap();
+        let source = || {
+            Arc::new(include_bytes!("fixtures/movie/clip.mpg").to_vec())
+                as katze_system2::io::SharedSource
+        };
+        let mut global = Player::new(source()).unwrap();
+        global.set_volume(15);
+        global.play(0).unwrap();
+        let sound = runtime.object_mut(1).unwrap().audio_state_mut().unwrap();
+        sound.set_movie_output(Some(global.audio_output()));
+        let mut mixer = connected.then(|| sound.connect_output().unwrap());
+        let mut reference = Player::new(source()).unwrap();
+        reference.set_volume(70);
+        reference.play(0).unwrap();
+        let mut expected_sound = SoundState::default();
+        expected_sound.set_movie_output(Some(reference.audio_output()));
+        runtime.update(0, 1).unwrap();
+        assert_ne!(word(&runtime, 0), 0);
+        assert_ne!(word(&runtime, 0), word(&runtime, 4));
+        assert_eq!(word(&runtime, 8), 0);
+        assert_eq!(word(&runtime, 12), 0);
+        assert_eq!([word(&runtime, 16), word(&runtime, 20)], [1, 1]);
+        assert_eq!(
+            word(&runtime, 40),
+            (reference.metadata().duration * 1000.) as u32
+        );
+        assert!(runtime.drawing().enabled);
+        for (id, x) in [(3, 3.), (4, 17.)] {
+            runtime.drawables_mut().set_display(id, 1);
+            runtime.drawables_mut().set_position(id, [x, 4., 0.]);
+            runtime.drawables_mut().set_scale(id, [0.5, 0.5, 1.]);
+        }
+        let frame = runtime.compose_frame().unwrap();
+        assert_eq!(frame.commands.len(), 4);
+        assert_eq!(&frame.commands[0].vertices[0].position[..2], &[3., 4.]);
+        assert_eq!(&frame.commands[2].vertices[0].position[..2], &[17., 4.]);
+        let expected_frame = reference.take_video().unwrap().unwrap();
+        for command in &frame.commands {
+            let TextureSource::Image(image) = &command.texture.as_ref().unwrap().source else {
+                panic!("plane movie must use its decoded image");
+            };
+            assert_eq!(image.as_ref(), &expected_frame.surface);
+        }
+        assert_eq!(
+            frame.commands[0].texture.as_ref().unwrap().uv,
+            [[0., 0.], [1., 0.], [1., 1.]]
+        );
+        let mut drawn = RenderTarget::new([32; 2]).unwrap();
+        assert!(frame.render_into(&mut drawn, None).unwrap());
+        let mut direct = RenderTarget::new([32; 2]).unwrap();
+        runtime
+            .render_frame(
+                &mut direct,
+                &Projection::default(),
+                *Transform::default().matrix(),
+                TextureFilter::Point,
+            )
+            .unwrap();
+        assert_eq!(drawn.tiles(), direct.tiles());
+        assert_eq!(drawn.tiles()[0].as_ref().unwrap().pixel(0, 0), Some(0));
+        assert_ne!(drawn.tiles()[0].as_ref().unwrap().pixel(8, 8), Some(0));
+        for (stage, volume) in [(0, 70), (1, 50), (2, 15)] {
+            if stage != 0 {
+                runtime.update(stage, 1).unwrap();
+                assert_eq!(
+                    runtime.compose_frame().unwrap().commands.len(),
+                    if stage == 1 { 2 } else { 0 }
+                );
+            }
+            reference.set_volume(volume);
+            let mut expected = [0.; 2048];
+            let mut actual = [0.; 2048];
+            expected_sound.mix_stereo(48000, &mut expected).unwrap();
+            audio(&mut runtime, &mut mixer, &mut actual);
+            assert!(actual.iter().any(|&sample| sample.abs() > 0.001));
+            assert!(
+                actual
+                    .iter()
+                    .zip(expected)
+                    .all(|(a, b)| (*a - b).abs() < 1e-6),
+                "audio stage {stage}, connected={connected}"
+            );
+        }
+        assert_eq!(word(&runtime, 24), 1);
+        assert_eq!(word(&runtime, 28), 1);
+        assert_eq!(word(&runtime, 32), 0);
+        assert_eq!(word(&runtime, 36), 0);
+        assert!(global.is_playing().unwrap());
+        runtime
+            .object_mut(1)
+            .unwrap()
+            .audio_state_mut()
+            .unwrap()
+            .set_movie_output(None);
+        global.stop().unwrap();
+        let mut silence = [1.; 32];
+        audio(&mut runtime, &mut mixer, &mut silence);
+        assert_eq!(silence, [0.; 32]);
+    }
 }
