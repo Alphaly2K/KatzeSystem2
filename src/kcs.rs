@@ -22,6 +22,7 @@ mod random;
 mod record_stack;
 mod resource_cache;
 mod resource_host;
+mod section_table;
 mod sequences;
 mod sse;
 mod strings;

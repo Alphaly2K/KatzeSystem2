@@ -42,7 +42,7 @@ pub(crate) fn call_native(
     }
 }
 
-fn words(arguments: &[u8], count: usize, pc: usize) -> Result<Vec<u32>> {
+pub(super) fn words(arguments: &[u8], count: usize, pc: usize) -> Result<Vec<u32>> {
     if arguments.len() != count * 4 {
         return Err(Error::new(pc, "KCS native 参数字节数不匹配"));
     }
@@ -52,7 +52,7 @@ fn words(arguments: &[u8], count: usize, pc: usize) -> Result<Vec<u32>> {
         .collect())
 }
 
-fn write_string(
+pub(super) fn write_string(
     vm: &mut Interpreter,
     address: u32,
     bytes: &[u8],

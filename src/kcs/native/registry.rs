@@ -181,6 +181,7 @@ pub(crate) enum RuntimeHandler {
     Movie,
     Transition,
     NameTable,
+    SectionTable,
     Cst,
     Motion,
     SequenceFile,
@@ -213,6 +214,7 @@ pub(crate) fn runtime(index: u32) -> RuntimeHandler {
             RuntimeHandler::Transition
         }
         633..=640 => RuntimeHandler::NameTable,
+        683..=685 => RuntimeHandler::SectionTable,
         323..=337 | 385 | 386 | 934 | 982 | 991..=994 | 1033 | 1037 | 1038 | 1064 => {
             RuntimeHandler::Cst
         }

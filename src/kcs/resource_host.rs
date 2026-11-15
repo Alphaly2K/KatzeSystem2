@@ -111,7 +111,7 @@ pub(crate) fn load_sequence_file(
         .map(|bytes| (handle, bytes)))
 }
 
-/// 为已有宿主提供图像原始数据、XML、三整数分组表、名称表及句柄生命周期。
+/// 为已有宿主提供图像原始数据、XML、三整数分组表、名称表、节表及句柄生命周期。
 pub struct ResourceHost<'a, H, S> {
     pub inner: &'a mut H,
     pub services: CachedResources<&'a mut S>,
@@ -124,6 +124,7 @@ pub(crate) struct ResourceState {
     images: BTreeMap<u32, ImageData>,
     triples: BTreeMap<u32, super::triples::TripleTable>,
     pub(super) name_tables: BTreeMap<u32, super::name_table::NameTable>,
+    pub(super) section_tables: BTreeMap<u32, super::section_table::SectionTable>,
     handles: HandleAllocator,
 }
 
@@ -215,7 +216,11 @@ impl ResourceState {
     }
 
     pub(super) fn allocate_handle(&mut self, offset: usize) -> Result<u32> {
-        if self.xml.len() + self.images.len() + self.triples.len() + self.name_tables.len()
+        if self.xml.len()
+            + self.images.len()
+            + self.triples.len()
+            + self.name_tables.len()
+            + self.section_tables.len()
             >= read::MAX_ITEMS
         {
             return Err(Error::new(offset, "KCS 资源对象数量超过上限"));
@@ -422,6 +427,11 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn> {
         if matches!(index, 434..=438) {
             return super::prefetch_call(index, arguments, vm, Some(&mut self.services));
+        }
+        if matches!(index, 683..=685) {
+            return self
+                .state
+                .section_table_call(index, arguments, vm, Some(&mut self.services));
         }
         if matches!(index, 633..=640) {
             return self.state.name_table_call(
