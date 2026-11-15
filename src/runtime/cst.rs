@@ -262,6 +262,42 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             return Ok(NativeReturn::Value(handle));
         }
         let handle = read::u32_at(arguments, 0)?;
+        if index == 993 {
+            if arguments.len() != 8 && !(handle == 0 && arguments.len() == 4) {
+                return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+            }
+            if handle == 0 {
+                return Ok(NativeReturn::Continue);
+            }
+            let source = read::u32_at(arguments, 4)?;
+            if source == 0 {
+                return Ok(NativeReturn::Continue);
+            }
+            let history = if source == handle {
+                // 复制入口先清空目标；同一上下文因此得到空历史。
+                Vec::new()
+            } else {
+                self.resources
+                    .cst_contexts
+                    .get(&source)
+                    .ok_or_else(|| Error::new(vm.pc, "CST 上下文句柄无效"))?
+                    .history
+                    .iter()
+                    .map(|entry| Entry {
+                        name: entry.name().to_vec(),
+                        value: entry.value,
+                        details: Vec::new(),
+                        saved_data: Vec::new(),
+                    })
+                    .collect()
+            };
+            self.resources
+                .cst_contexts
+                .get_mut(&handle)
+                .ok_or_else(|| Error::new(vm.pc, "CST 上下文句柄无效"))?
+                .history = history;
+            return Ok(NativeReturn::Continue);
+        }
         if index == 934 && arguments.len() != 12 && !(handle == 0 && arguments.len() == 4) {
             return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
         }

@@ -268,6 +268,97 @@ fn pruning_older_history_keeps_the_original_write_to_last_entry_before_truncatio
 }
 
 #[test]
+fn history_copy_replaces_names_and_values_without_copying_snapshots_or_strings() {
+    let mut code = prefix();
+    register(&mut code, 128);
+    save(&mut code, 10);
+    call(
+        &mut code,
+        334,
+        &[(0x13, 0), (3, 0), (3, 10), (3, 1), (3, 80)],
+    );
+    ins(&mut code, 0x2d, &[]);
+    call(&mut code, 328, &[(0x13, 0), (3, 128), (3, 42)]);
+    ins(&mut code, 0x2d, &[]);
+    call(&mut code, 323, &[]);
+    ins(&mut code, 0x26, &[(3, 8)]);
+    call(&mut code, 329, &[(0x13, 8), (3, 144), (3, 77)]);
+    ins(&mut code, 0x2d, &[]);
+    call(&mut code, 328, &[(0x13, 8), (3, 144), (3, 9)]);
+    ins(&mut code, 0x2d, &[]);
+    let ready = pause(&mut code);
+    call(&mut code, 993, &[(0x13, 8), (0x13, 0)]);
+    call(&mut code, 993, &[(3, 0), (3, u32::MAX)]);
+    call(&mut code, 993, &[(3, u32::MAX), (3, 0)]);
+    call(
+        &mut code,
+        385,
+        &[(0x13, 4), (3, 18), (0x13, 8), (3, 1), (3, 1)],
+    );
+    ins(&mut code, 0x2d, &[]);
+    export(&mut code, 19);
+    let copied = pause(&mut code);
+    call(&mut code, 993, &[(0x13, 0), (0x13, 0)]);
+    call(&mut code, 993, &[(0x13, 8), (0x13, 0)]);
+    let cleared = pause(&mut code);
+
+    for budget in [1, 4096] {
+        let (mut runtime, task, forbid) = engine(&code, budget, false);
+        advance(&mut runtime, task, ready);
+        forbid.set(true);
+        runtime.cst_context_mut(1).unwrap().set_position(12, 3);
+        runtime.cst_context_mut(3).unwrap().set_position(5, 2);
+        advance(&mut runtime, task, copied);
+        for handle in [1, 3] {
+            let context = runtime.cst_context(handle).unwrap();
+            assert_eq!(
+                context.history().collect::<Vec<_>>(),
+                [(b"first".as_slice(), 0)]
+            );
+        }
+        assert_eq!(runtime.cst_context(1).unwrap().position(), [12, 3]);
+        assert_eq!(runtime.cst_context(3).unwrap().position(), [5, 2]);
+        assert_eq!(
+            runtime
+                .cst_context(1)
+                .unwrap()
+                .registrations()
+                .collect::<Vec<_>>(),
+            [(b"first".as_slice(), 42)]
+        );
+        assert_eq!(
+            runtime
+                .cst_context(3)
+                .unwrap()
+                .registrations()
+                .collect::<Vec<_>>(),
+            [(b"second".as_slice(), 9)]
+        );
+        let container = runtime.host().data_container(2).unwrap();
+        let copied_data = container.record(18).unwrap().unwrap();
+        let source_data = container.record(19).unwrap().unwrap();
+        assert_eq!(copied_data.len(), 52);
+        assert_eq!(&copied_data[40..], &[0; 12]);
+        assert_eq!(word(source_data, 40), 1);
+        assert!(word(source_data, 44) > 20);
+        advance(&mut runtime, task, cleared);
+        assert_eq!(runtime.cst_context(1).unwrap().history().len(), 0);
+        assert_eq!(runtime.cst_context(3).unwrap().history().len(), 0);
+        assert_eq!(runtime.cst_context(1).unwrap().registrations().len(), 1);
+        assert_eq!(runtime.cst_context(3).unwrap().registrations().len(), 1);
+        assert_eq!(
+            runtime
+                .object(task)
+                .unwrap()
+                .interpreter()
+                .unwrap()
+                .stack_bytes(),
+            0x1234_5678u32.to_le_bytes()
+        );
+    }
+}
+
+#[test]
 fn an_unbound_shared_number_store_saves_zeroes_and_skips_number_restoration() {
     use std::io::Read;
     let mut code = prefix();
