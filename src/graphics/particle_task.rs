@@ -114,6 +114,7 @@ impl Effect {
             particle_plugin::Kind::Warukira => Self::Warukira(Warukira::new(host, image, random)),
             particle_plugin::Kind::Hadou => Self::Hadou(Hadou::new(host, image)?),
             particle_plugin::Kind::Ice => Self::Ice(Ice::new(host, image, random)),
+            particle_plugin::Kind::Star => Self::Ice(Ice::new_star(host, image, random)),
             particle_plugin::Kind::Spark => Self::Spark(Box::new(Spark::new(host, image, random))),
             particle_plugin::Kind::Thunder => {
                 Self::Thunder(Thunder::new(host, image, random, &module_state))

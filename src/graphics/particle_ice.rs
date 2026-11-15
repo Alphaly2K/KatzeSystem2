@@ -23,9 +23,9 @@ fn integer(n: f64) -> i32 {
     }
 }
 
-fn spawn_points(from: [f32; 3], to: [f32; 3], index: usize) -> Vec<[f32; 3]> {
+fn spawn_points(from: [f32; 3], to: [f32; 3], index: usize, span: f32) -> Vec<[f32; 3]> {
     let delta = std::array::from_fn::<_, 3, _>(|j| to[j] - from[j]);
-    let rad = (140f64 * std::f32::consts::PI as f64 / 180.) as f32;
+    let rad = (span as f64 * std::f32::consts::PI as f64 / 180.) as f32;
     let low = rad * -0.5;
     let high = rad * 0.5;
     let time = (index as f64 * 16.666666f32 as f64) as f32;
@@ -121,11 +121,33 @@ struct Head {
 pub(super) struct Ice {
     life: i32,
     image: [f32; 2],
+    trail_life: i32,
+    emission_limit: i32,
+    scale_decay: f64,
+    spin_step: f64,
+    relative_wait: bool,
     heads: Vec<Head>,
 }
 
 impl Ice {
     pub(super) fn new(host: &ParticleHost, image: [f32; 2], random: &mut ScriptRandom) -> Self {
+        Self::new_variant(host, image, random, false)
+    }
+
+    pub(super) fn new_star(
+        host: &ParticleHost,
+        image: [f32; 2],
+        random: &mut ScriptRandom,
+    ) -> Self {
+        Self::new_variant(host, image, random, true)
+    }
+
+    fn new_variant(
+        host: &ParticleHost,
+        image: [f32; 2],
+        random: &mut ScriptRandom,
+        star: bool,
+    ) -> Self {
         let count = host.quads.len();
         let parameters = host.parameters.map(f32::from_bits);
         let group = count / 7;
@@ -139,7 +161,8 @@ impl Ice {
         ];
         let heads = (0..groups)
             .map(|i| {
-                let points = spawn_points(anchor, target, i);
+                let points =
+                    spawn_points(anchor, target, i, if star { parameters[6] } else { 140. });
                 let total = points
                     .windows(2)
                     .map(|p| segment(std::array::from_fn(|j| p[1][j] - p[0][j])))
@@ -178,23 +201,41 @@ impl Ice {
                 }
             })
             .collect();
-        Self { life, image, heads }
+        Self {
+            life,
+            image,
+            trail_life: if star { 200 } else { 120 },
+            emission_limit: if star {
+                integer(parameters[7] as f64)
+            } else {
+                16
+            },
+            scale_decay: if star { 0.99f32 as f64 } else { 0.94f32 as f64 },
+            spin_step: if star { 0.04f32 as f64 } else { 0.04 },
+            relative_wait: star,
+            heads,
+        }
     }
 
     pub(super) fn update(&mut self, delta: u32, random: &mut ScriptRandom) {
         let step = integer(delta as f32 as f64);
         for h in &mut self.heads {
+            let waiting_age = if self.relative_wait {
+                h.age.wrapping_sub(h.phase_time)
+            } else {
+                h.age
+            };
             if h.phase == 0 {
                 h.sprite.position = h.path.at(h.age as f32);
                 if h.age > self.life {
                     h.phase = 1;
                     h.phase_time = h.age;
                 }
-            } else if h.phase == 1 && h.age as f64 > 60. {
+            } else if h.phase == 1 && waiting_age as f64 > 60. {
                 h.phase = 2;
                 h.phase_time = h.age;
             }
-            h.scale = (h.scale as f64 * 0.94f32 as f64) as f32;
+            h.scale = (h.scale as f64 * self.scale_decay) as f32;
             if h.phase == 0 {
                 let mut emitted = 0;
                 for t in &mut h.trails {
@@ -241,7 +282,7 @@ impl Ice {
                     let len = segment(std::array::from_fn(|i| end[i] - start[i]));
                     t.path = Some(TwoPointPath::new_extended(
                         [start, end],
-                        120.,
+                        self.trail_life as f32,
                         (len as f64 / 10.) as f32,
                     ));
                     let s = if t.sprite.region == Some(3) {
@@ -254,7 +295,7 @@ impl Ice {
                     t.opacity = random.next_integer() % 200;
                     t.active = true;
                     emitted += 1;
-                    if emitted > 16 {
+                    if emitted > self.emission_limit {
                         break;
                     }
                 }
@@ -264,12 +305,18 @@ impl Ice {
                     continue;
                 }
                 t.sprite.position = t.path.as_ref().unwrap().at(t.age as f32);
-                t.angle = (random.next_float() as f64 * 0.04 + t.angle as f64) as f32;
+                t.angle = (random.next_float() as f64 * self.spin_step + t.angle as f64) as f32;
                 t.sprite.angle = t.angle;
                 for n in &mut t.sprite.scale[..2] {
                     *n = (*n as f64 * 0.99f32 as f64) as f32;
                 }
-                let opacity = integer(linear(t.opacity as f32, 0., 0., 120., t.age as f32) as f64);
+                let opacity = integer(linear(
+                    t.opacity as f32,
+                    0.,
+                    0.,
+                    self.trail_life as f32,
+                    t.age as f32,
+                ) as f64);
                 let alpha = integer(
                     (random.next_float() as f64 * 0.6f32 as f64) * opacity as f64
                         + opacity as f64 * 0.4f32 as f64,
@@ -277,7 +324,7 @@ impl Ice {
                     & 255;
                 t.sprite.color = (t.sprite.color & 0xffffff) | (alpha << 24);
                 t.age = t.age.wrapping_add(step);
-                if t.age >= 120 {
+                if t.age >= self.trail_life {
                     t.age = 0;
                     t.active = false;
                     t.sprite.color &= 0xffffff;
@@ -361,6 +408,72 @@ mod tests {
             actual.next_float().to_bits(),
             expected.next_float().to_bits()
         );
+    }
+
+    #[test]
+    fn star_uses_configured_fan_and_emission_limit_with_relative_wait_and_longer_trails() {
+        let mut host = host(140, 15., 10.);
+        for (i, n) in [0f32, 620., 640., 100., 15., 10., 100., 5.]
+            .into_iter()
+            .enumerate()
+        {
+            host.parameters[i] = n.to_bits();
+        }
+        let mut random = ScriptRandom::seeded(17);
+        let mut effect = Ice::new_star(&host, [64., 128.], &mut random);
+        assert_eq!(effect.heads.len(), 7);
+        assert!(effect.heads.iter().all(|h| h.trails.len() == 19));
+        assert_eq!(
+            effect.heads[0].path.points[4].map(f32::to_bits),
+            [1096811233, 3278208536, 0]
+        );
+        effect.update(0, &mut random);
+        assert!(
+            effect
+                .heads
+                .iter()
+                .all(|h| { h.age == 0 && h.trails.iter().filter(|t| t.active).count() == 6 })
+        );
+        assert_eq!(
+            effect.heads[0].scale,
+            (0.15f32 as f64 * 0.99f32 as f64) as f32
+        );
+        for delta in [10, 1, 0] {
+            effect.update(delta, &mut random);
+        }
+        assert!(
+            effect
+                .heads
+                .iter()
+                .all(|h| h.phase == 1 && h.phase_time == 11)
+        );
+        for delta in [60, 1] {
+            effect.update(delta, &mut random);
+            assert!(effect.heads.iter().all(|h| h.phase == 1));
+        }
+        effect.update(0, &mut random);
+        assert!(
+            effect
+                .heads
+                .iter()
+                .all(|h| h.phase == 2 && h.phase_time == 72)
+        );
+        effect.update(137, &mut random);
+        assert!(
+            effect
+                .heads
+                .iter()
+                .all(|h| h.trails.iter().any(|t| t.active))
+        );
+        effect.update(1, &mut random);
+        assert!(effect.heads.iter().all(|h| {
+            h.trails
+                .iter()
+                .all(|t| !t.active && t.age == 0 && t.sprite.color >> 24 == 0)
+        }));
+        effect.write_mesh(&mut host);
+        assert_eq!(host.render_mode, 1);
+        assert!(host.quads.iter().flatten().all(|v| v.color >> 24 == 0));
     }
 
     #[test]

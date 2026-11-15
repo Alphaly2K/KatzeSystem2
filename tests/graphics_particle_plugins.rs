@@ -1659,6 +1659,76 @@ fn ice_uses_additive_transparent_start_shared_randomness_and_task_controls() -> 
 }
 
 #[test]
+fn star_registers_with_transparent_start_configured_emission_and_restart_randomness() -> Result<()>
+{
+    let mut runtime = runtime_with_count(plugin(b"star.ppi"), 140)?;
+    runtime.update(1, 1)?;
+    let mut parameters = [0; 128];
+    for (i, n) in [0f32, 620., 640., 100., 15., 10., 100., 5.]
+        .into_iter()
+        .enumerate()
+    {
+        parameters[i * 4..i * 4 + 4].copy_from_slice(&n.to_le_bytes());
+    }
+    runtime.dispatch_command_with_buffers(
+        2,
+        command(325),
+        &mut CommandBuffers {
+            data1: Some(&mut parameters),
+            ..Default::default()
+        },
+    )?;
+    let mut expected = ScriptRandom::seeded(17);
+    let view = Projection::default();
+    for start in [2, 300] {
+        runtime.dispatch_command(2, command(321))?;
+        for _ in 0..133 {
+            expected.next_integer();
+            expected.next_float();
+        }
+        assert_random(&mut runtime, &expected);
+        let drawable = runtime.drawables().get(1).unwrap();
+        assert_eq!(drawable.blend_mode(), 1);
+        assert!((0..140).all(|i| {
+            drawable
+                .particle_mesh()
+                .unwrap()
+                .projected_quad(i, &view)
+                .unwrap()[0]
+                .color
+                >> 24
+                == 0
+        }));
+        runtime.update(start, 1)?;
+        for _ in 0..42 {
+            expected.next_integer();
+        }
+        for _ in 0..420 {
+            expected.next_float();
+        }
+        assert_random(&mut runtime, &expected);
+        let mesh = runtime.drawables().get(1).unwrap().particle_mesh().unwrap();
+        assert!((7..140).any(|i| mesh.projected_quad(i, &view).unwrap()[0].color >> 24 > 0));
+        runtime.dispatch_command(2, command(322))?;
+        runtime.update(start + 1, 1)?;
+        assert_eq!(runtime.drawables().get(1).unwrap().display(), 0);
+        assert_random(&mut runtime, &expected);
+    }
+    runtime.dispatch_command(2, command(323))?;
+    assert!(
+        runtime
+            .drawables()
+            .get(1)
+            .unwrap()
+            .particle_mesh()
+            .is_none()
+    );
+    runtime.destroy(1)?;
+    assert!(runtime.drawables().get(1).is_none());
+    Ok(())
+}
+
+#[test]
 fn scene_sparkle_initializes_transparently_and_restarts_with_shared_randomness() -> Result<()> {
     let mut runtime = runtime_with_count(plugin(b"s_040101.ppi"), 1)?;
     runtime.update(1, 1)?;
