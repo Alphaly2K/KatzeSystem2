@@ -1,5 +1,48 @@
 use katze_system2::hg3;
+use katze_system2::{Result, io::ReadSource};
 use std::io::Write;
+use std::{
+    ops::Range,
+    sync::atomic::{AtomicUsize, Ordering},
+};
+
+struct ShortSource<'a> {
+    bytes: &'a [u8],
+    forbidden: Vec<Range<usize>>,
+    read: AtomicUsize,
+}
+
+impl<'a> ShortSource<'a> {
+    fn new(bytes: &'a [u8]) -> Self {
+        Self {
+            bytes,
+            forbidden: Vec::new(),
+            read: AtomicUsize::new(0),
+        }
+    }
+}
+
+impl ReadSource for ShortSource<'_> {
+    fn len(&self) -> Result<u64> {
+        Ok(self.bytes.len() as u64)
+    }
+    fn read_at(&self, offset: u64, output: &mut [u8]) -> Result<usize> {
+        let offset = offset as usize;
+        let count = output
+            .len()
+            .min(3)
+            .min(self.bytes.len().saturating_sub(offset));
+        let end = offset + count;
+        assert!(
+            self.forbidden
+                .iter()
+                .all(|range| end <= range.start || offset >= range.end)
+        );
+        output[..count].copy_from_slice(&self.bytes[offset..end]);
+        self.read.fetch_add(count, Ordering::Relaxed);
+        Ok(count)
+    }
+}
 
 fn image() -> Vec<u8> {
     let mut out = b"HG-3".to_vec();
@@ -43,12 +86,20 @@ fn metadata_preserves_frame_order_and_uses_first_duplicate_id() {
 fn metadata_rejects_truncated_or_overlapping_frame_and_tag_ranges() {
     let valid = image();
     for end in [0, 4, 12, 19, 30, valid.len() - 1] {
-        assert!(hg3::Metadata::parse(&valid[..end]).is_err());
+        let expected = hg3::Metadata::parse(&valid[..end]).unwrap_err();
+        assert_eq!(
+            hg3::Metadata::read(&ShortSource::new(&valid[..end])).unwrap_err(),
+            expected
+        );
     }
     for (at, value) in [(12, 7u32), (12, u32::MAX), (28, 16), (32, 89), (56, 39)] {
         let mut invalid = valid.clone();
         invalid[at..at + 4].copy_from_slice(&value.to_le_bytes());
         assert!(hg3::Metadata::parse(&invalid).is_err(), "{at} {value}");
+        assert_eq!(
+            hg3::Metadata::read(&ShortSource::new(&invalid)),
+            hg3::Metadata::parse(&invalid)
+        );
     }
 }
 
@@ -182,6 +233,10 @@ fn attributes_keep_integer_prefix_ids_last_values_and_decoded_image_records() {
     continued.extend(b"unknown\0");
     continued.extend([0; 8]);
     let metadata = hg3::Metadata::parse(&continued).unwrap();
+    assert_eq!(
+        hg3::Metadata::read(&ShortSource::new(&continued)).unwrap(),
+        metadata
+    );
     assert_eq!(metadata.frames[0].attributes[&(123450u32 as u16)][0], 7);
     assert!(!metadata.frames[0].attributes.contains_key(&12345));
     bytes[last + 12..last + 16].copy_from_slice(&19u32.to_le_bytes());
@@ -238,5 +293,101 @@ fn native_pixels_reject_bad_runs_dimensions_streams_and_unsupported_encodings() 
             hg3::decode_frame(bytes, 0x8000_0001u32 as i32).is_err(),
             "case {index}"
         );
+        assert_eq!(
+            hg3::decode_frame_from(&ShortSource::new(bytes), Some(0x8000_0001u32 as i32)),
+            hg3::decode_frame(bytes, 0x8000_0001u32 as i32),
+            "case {index}"
+        );
     }
+}
+
+#[test]
+fn selective_reads_skip_unselected_pixels_and_keep_unsigned_and_duplicate_selection() {
+    let mut bytes = pixel_image([2, 3], LITERALS, COMMANDS)[..12].to_vec();
+    let mut payloads = Vec::new();
+    let mut padding = Vec::new();
+    for (index, id) in [9u32, 2, 2, u32::MAX].into_iter().enumerate() {
+        let start = bytes.len();
+        let mut frame = pixel_image([2, 3], LITERALS, COMMANDS);
+        let image_end = frame.len();
+        frame[16..20].copy_from_slice(&id.to_le_bytes());
+        frame[48..52].copy_from_slice(&(index as u32 * 10).to_le_bytes());
+        frame[84..88].copy_from_slice(&((image_end - 76) as u32).to_le_bytes());
+        frame.extend(b"unknown\0");
+        frame.extend(0u32.to_le_bytes());
+        frame.extend(8192u32.to_le_bytes());
+        frame.extend([0xff; 8192]);
+        if index != 3 {
+            let length = frame.len() - 12;
+            frame[12..16].copy_from_slice(&(length as u32).to_le_bytes());
+        }
+        payloads.push(start + 80..start + image_end - 12);
+        padding.push(start + image_end + 4..start + frame.len() - 12);
+        bytes.extend(&frame[12..]);
+    }
+    for (id, selected) in [
+        (None, Some(1)),
+        (Some(2), Some(1)),
+        (Some(9), Some(0)),
+        (Some(-1), Some(3)),
+        (Some(99), None),
+    ] {
+        let mut source = ShortSource::new(&bytes);
+        source.forbidden = padding.clone();
+        source.forbidden.extend(
+            payloads
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| Some(*i) != selected)
+                .map(|(_, range)| range.clone()),
+        );
+        let actual = hg3::decode_frame_from(&source, id).unwrap();
+        let expected = hg3::decode_frame(&bytes, id.unwrap_or(2)).unwrap();
+        assert_eq!(actual, expected);
+        if let Some(selected) = selected {
+            assert_eq!(actual.unwrap().info.offset[0], selected as i32 * 10);
+        }
+        assert!(source.read.load(Ordering::Relaxed) < bytes.len() / 10);
+    }
+    let last = hg3::Metadata::parse(&bytes).unwrap().frames[3].offset;
+    for (at, value, offset) in [
+        (last, 7u32, last),
+        (last + 20, 39, 0),
+        (last + 76, u32::MAX, last + 76),
+    ] {
+        let mut invalid = bytes.clone();
+        invalid[at..at + 4].copy_from_slice(&value.to_le_bytes());
+        let expected = hg3::Metadata::parse(&invalid).unwrap_err();
+        assert_eq!(expected.offset, offset);
+        assert_eq!(
+            hg3::decode_frame_from(&ShortSource::new(&invalid), Some(2)).unwrap_err(),
+            expected
+        );
+    }
+}
+
+#[test]
+fn source_length_limits_and_read_failures_report_diagnostics() {
+    struct Declared<'a>(&'a [u8], u64);
+    impl ReadSource for Declared<'_> {
+        fn len(&self) -> Result<u64> {
+            Ok(self.1)
+        }
+        fn read_at(&self, offset: u64, output: &mut [u8]) -> Result<usize> {
+            self.0.read_at(offset, output)
+        }
+    }
+    let bytes = image();
+    for length in [64 * 1024 * 1024 + 1, u64::MAX] {
+        let error = hg3::Metadata::read(&Declared(&[], length)).unwrap_err();
+        assert_eq!(
+            (error.offset, error.message.as_str()),
+            (0, "无效 HG-3 容器")
+        );
+    }
+    let error = hg3::Metadata::read(&Declared(&bytes[..10], bytes.len() as u64)).unwrap_err();
+    assert_eq!(
+        (error.offset, error.message.as_str()),
+        (10, "读取源提前结束")
+    );
 }

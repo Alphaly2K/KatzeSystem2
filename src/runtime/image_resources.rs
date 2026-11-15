@@ -76,11 +76,12 @@ impl Resources {
                     .is_some();
                 layer.push(b'.');
                 layer.extend_from_slice(extension);
-                let Some(bytes) = services.read(&layer, ResourceMode::LooseFirst)? else {
+                let Some(source) = services.open(&layer, ResourceMode::LooseFirst)? else {
                     continue;
                 };
-                if !bytes.is_empty() {
-                    if let Some(image) = source_snapshot(&bytes, (!animated).then_some(0))? {
+                if !source.is_empty()? {
+                    if let Some(image) = source_snapshot(source.as_ref(), (!animated).then_some(0))?
+                    {
                         layers.push(image);
                     }
                 }
@@ -92,13 +93,13 @@ impl Resources {
             .read(&animation_name, ResourceMode::LooseFirst)?
             .is_some();
         let reference = ImageReference::parse(name)?;
-        let Some(bytes) = services.read(&reference.name, ResourceMode::LooseFirst)? else {
+        let Some(source) = services.open(&reference.name, ResourceMode::LooseFirst)? else {
             return Ok(None);
         };
-        if bytes.is_empty() {
+        if source.is_empty()? {
             return Ok(None);
         }
-        let image = source_snapshot(&bytes, (!animated).then_some(reference.frame))?;
+        let image = source_snapshot(source.as_ref(), (!animated).then_some(reference.frame))?;
         Ok(image.map(|image| {
             let has_alpha = image.info().reserved != 0;
             (image, Some(has_alpha))
@@ -106,18 +107,11 @@ impl Resources {
     }
 }
 
-fn source_snapshot(bytes: &[u8], frame: Option<i32>) -> Result<Option<Image>> {
-    // ANM 来源初始暂停，显示多帧缓存的最小无符号 ID；静态来源按指定 ID 查询。
-    let frame = match frame {
-        Some(frame) => frame,
-        None => crate::hg3::Metadata::parse(bytes)?
-            .frames
-            .iter()
-            .map(|frame| frame.id)
-            .min()
-            .unwrap_or(0) as i32,
-    };
-    crate::hg3::decode_frame(bytes, frame)?
+fn source_snapshot(
+    source: &dyn crate::io::ReadSource,
+    frame: Option<i32>,
+) -> Result<Option<Image>> {
+    crate::hg3::decode_frame_from(source, frame)?
         .map(Image::from_frame)
         .transpose()
 }

@@ -204,11 +204,11 @@ FES 内部执行宏声明，初始化按以下顺序交给宿主：
 
 `fes::ImageReference::parse` 将 POS2／SIZE2 的值拆为资源名称字节和帧 ID。省略帧号时取 0，冒号后读取带可选符号的十进制／十六进制整数前缀，非法前缀取零，不运行表达式。
 
-`hg3::Metadata::parse` 读取 HG-3 0x300 的帧顺序及 stdinfo，保留裁剪尺寸、偏移、完整画布尺寸和绘制基点。`frame(id)` 返回第一个匹配 ID 的帧；ID 与数组下标分别保存。`StandardInfo::reserved` 保存 stdinfo 的 Alpha 标记，零表示不透明，非零表示使用 Alpha。该接口检查帧及标签范围，不解码像素。
+`hg3::Metadata::parse` 从切片读取 HG-3 0x300 的帧顺序及 stdinfo；`Metadata::read(&source)` 接收 `io::ReadSource`，读取相同元数据并跳过像素正文。两者保留裁剪尺寸、偏移、完整画布尺寸和绘制基点。`frame(id)` 返回第一个匹配 ID 的帧；ID 与数组下标分别保存。`StandardInfo::reserved` 保存 stdinfo 的 Alpha 标记，零表示不透明，非零表示使用 Alpha。两个接口均校验全部帧及标签范围，不解码像素，容器上限为 64 MiB。
 
-`hg3::decode_frame(bytes, id)` 解码首个匹配 ID 的原生 32 位完整帧，缺失 ID 返回 `None`。`DecodedFrame` 包含 `id`、标准元数据 `info`、`attributes: BTreeMap<u16, [u32; 5]>` 和从上到下紧密排列的 BGRA8 `pixels`，Alpha 保持独立，不应用裁剪偏移或绘制基点。`Frame::attributes` 提供相同属性记录，`Image::attribute(id)` 查询编号低十六位，未命中返回 `None`。支持范围与约束见 [图像接口](graphics.md)。
+`hg3::decode_frame(bytes, id)` 解码首个匹配 ID 的原生 32 位完整帧，缺失 ID 返回 `None`。`decode_frame_from(&source, Some(id))` 校验全部元数据后仅读取选中帧的像素正文；参数为 `None` 时取最小无符号 ID，重复 ID 仍取首帧。读取源可短读，提前结束或读取失败返回诊断。`DecodedFrame` 包含 `id`、标准元数据 `info`、`attributes: BTreeMap<u16, [u32; 5]>` 和从上到下紧密排列的 BGRA8 `pixels`，Alpha 保持独立，不应用裁剪偏移或绘制基点。`Frame::attributes` 提供相同属性记录，`Image::attribute(id)` 查询编号低十六位，未命中返回 `None`。支持范围与约束见 [图像接口](graphics.md)。
 
-`Runtime::image_resource(handle)` 查询普通 710 静态装载或 733 创建的独立图像资源，句柄与普通图像包装、像素句柄分别检查类型。`retain_image_resource`／`release_image_resource_reference` 管理额外使用者的配对持有，最后释放后句柄失效；任务销毁和程序重装只回收仍有登记的任务引用。`image_resource_updated(handle, clear)` 读取更新标记，`clear=true` 同时为所有使用者清零。普通资源入口提供几何设置／查询、Alpha 分类、属性、附加值、矩形填充、RGB 百分比、直角旋转、翻转、模糊、缩放、资源间拷贝及颜色滤镜；`Image::blur` 对画布内图像扩边后依次执行水平、垂直滤波，半径钳制到 0～255；`Image::resize_canvas` 按原始画布比例同步像素和元数据，`copy_scaled_from`／`copy_scaled_within` 提供独立裁剪的 BGRA 拷贝及重采样；`Image::auxiliary_value()` 查询 728 保存的 DWORD。参数和零句柄规则见[独立图像资源](graphics.md#独立图像资源)。DIFIMAGE 捕获／引用与列表共用同一资源表；动画／组合装载尚未接入。
+`Runtime::image_resource(handle)` 查询普通 710 静态装载或 733 创建的独立图像资源，句柄与普通图像包装、像素句柄分别检查类型。`retain_image_resource`／`release_image_resource_reference` 管理额外使用者的配对持有，最后释放后句柄失效；任务销毁和程序重装只回收仍有登记的任务引用。`image_resource_updated(handle, clear)` 读取更新标记，`clear=true` 同时为所有使用者清零。普通资源入口提供几何设置／查询、Alpha 分类、属性、附加值、矩形填充、RGB 百分比、直角旋转、翻转、模糊、缩放、资源间拷贝及颜色滤镜；`Image::blur` 对画布内图像扩边后依次执行水平、垂直滤波，半径钳制到 0～255；`Image::resize_canvas` 按原始画布比例同步像素和元数据，`copy_scaled_from`／`copy_scaled_within` 提供独立裁剪的 BGRA 拷贝及重采样；`Image::auxiliary_value()` 查询 728 保存的 DWORD。参数和零句柄规则见[独立图像资源](graphics.md#独立图像资源)。DIFIMAGE 捕获／引用与列表共用同一资源表；710 的单图与组合图层使用 `ResourceServices::open` 按帧读取，保留预读缓存优先级。伴随动画来源提供初始快照，资源层动画控制尚未接入。
 
 `fes::CImageState` 保存 CIMAGE 的坐标、尺寸、颜色、平面引用和显示属性。宿主按具体银行调用 `apply(&attributes, bank)`；返回本次是否使显示属性失效，供宿主递归标记后代。此接口仅应用该类型的有效列，不用于 IMAGE 等其他对象。父子对象关系应由宿主先处理，资源查找和绘制也由宿主负责。
 

@@ -1,8 +1,10 @@
 use crate::{Error, Result, read};
 use std::collections::BTreeMap;
 
+mod input;
 mod pixels;
-pub use pixels::{DecodedFrame, decode_frame};
+use input::Input;
+pub use pixels::{DecodedFrame, decode_frame, decode_frame_from};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StandardInfo {
@@ -31,10 +33,19 @@ pub struct Metadata {
 
 impl Metadata {
     pub fn parse(data: &[u8]) -> Result<Self> {
-        if data.get(..4) != Some(b"HG-3") || data.len() > read::MAX_BYTES {
+        Self::parse_input(Input::Bytes(data))
+    }
+
+    /// 从随机读取源读取全部帧与标签元数据，跳过像素正文。
+    pub fn read(source: &dyn crate::io::ReadSource) -> Result<Self> {
+        Self::parse_input(Input::source(source)?)
+    }
+
+    fn parse_input(data: Input<'_>) -> Result<Self> {
+        if data.len() < 4 || data.len() > read::MAX_BYTES || data.array::<4>(0)? != *b"HG-3" {
             return Err(Error::new(0, "无效 HG-3 容器"));
         }
-        if read::u32_at(data, 4)? != 12 || read::u32_at(data, 8)? != 0x300 {
+        if data.u32_at(4)? != 12 || data.u32_at(8)? != 0x300 {
             return Err(Error::new(4, "未支持的 HG-3 头或版本"));
         }
         let mut frames = Vec::new();
@@ -44,19 +55,19 @@ impl Metadata {
             if frames.len() == read::MAX_ITEMS {
                 return Err(Error::new(position, "HG-3 帧数超过读取上限"));
             }
-            let next = read::sized(read::u32_at(data, position)?, position)?;
+            let next = read::sized(data.u32_at(position)?, position)?;
             let end = if next == 0 {
                 data.len()
             } else {
                 if next < 8 {
                     return Err(Error::new(position, "HG-3 帧偏移与帧头重叠"));
                 }
-                read::range(data, position, next)?;
+                data.check(position, next)?;
                 position + next
             };
             let mut frame = Frame {
                 offset: position,
-                id: read::u32_at(data, position + 4)?,
+                id: data.u32_at(position + 4)?,
                 info: None,
                 attributes: BTreeMap::new(),
             };
@@ -66,12 +77,16 @@ impl Metadata {
                     return Err(Error::new(tag, "HG-3 标签数超过读取上限"));
                 }
                 tags += 1;
-                let header = read::range(&data[..end], tag, 16)?;
-                let next_tag = read::sized(read::u32_at(header, 8)?, tag + 8)?;
-                let length = read::sized(read::u32_at(header, 12)?, tag + 12)?;
-                let payload = read::range(&data[..end], tag + 16, length)?;
+                let bounded = data.bounded(end);
+                let header = bounded.array::<16>(tag)?;
+                let next_tag = read::sized(read::u32_at(&header, 8)?, tag + 8)?;
+                let length = read::sized(read::u32_at(&header, 12)?, tag + 12)?;
+                bounded.check(tag + 16, length)?;
                 if header[..8] == *b"stdinfo\0" && frame.info.is_none() {
-                    read::range(payload, 0, 40)?;
+                    if length < 40 {
+                        return Err(Error::new(0, "输入范围越界"));
+                    }
+                    let payload = &bounded.array::<40>(tag + 16)?;
                     frame.info = Some(StandardInfo {
                         size: [read::u32_at(payload, 0)?, read::u32_at(payload, 4)?],
                         bit_depth: read::u32_at(payload, 8)?,
@@ -88,9 +103,12 @@ impl Metadata {
                     });
                 }
                 if header[..3] == *b"ats" {
-                    // 未终止的编号可继续读取标签头后续字节。
-                    if let Some((_, id)) = crate::text::integer_prefix(&data[tag + 3..end]) {
-                        let bytes = read::range(payload, 0, 20)?;
+                    // 编号可越过名称末尾；已校验的 next_tag 高字节会终止前缀。
+                    if let Some((_, id)) = crate::text::integer_prefix(&header[3..12]) {
+                        if length < 20 {
+                            return Err(Error::new(0, "输入范围越界"));
+                        }
+                        let bytes = bounded.array::<20>(tag + 16)?;
                         frame.attributes.insert(
                             id as u16,
                             std::array::from_fn(|i| {
@@ -105,7 +123,7 @@ impl Metadata {
                 if next_tag < 16 + length {
                     return Err(Error::new(tag + 8, "HG-3 标签偏移与当前标签重叠"));
                 }
-                read::range(&data[..end], tag, next_tag)?;
+                bounded.check(tag, next_tag)?;
                 tag += next_tag;
             }
             frames.push(frame);

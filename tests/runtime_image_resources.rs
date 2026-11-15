@@ -384,6 +384,65 @@ fn failed_loads_skip_allocation_and_validate_name_sources() {
 }
 
 #[test]
+fn snapshot_loading_uses_open_and_preserves_prefetched_image_precedence() {
+    struct Sources(Rc<RefCell<usize>>);
+    impl ResourceServices for Sources {
+        fn resolve(&mut self, _: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+            Ok([name, b".hg3"].concat())
+        }
+        fn read(&mut self, name: &[u8], _: ResourceMode) -> Result<Option<Vec<u8>>> {
+            if name.ends_with(b".anm") {
+                return Ok(None);
+            }
+            assert_eq!(name, b"art.hg3");
+            let mut bytes = blob();
+            bytes[48..52].copy_from_slice(&13i32.to_le_bytes());
+            Ok(Some(bytes))
+        }
+        fn open(
+            &mut self,
+            name: &[u8],
+            _: ResourceMode,
+        ) -> Result<Option<katze_system2::io::SharedSource>> {
+            assert_eq!(name, b"art.hg3");
+            *self.0.borrow_mut() += 1;
+            Ok(Some(std::sync::Arc::new(blob())))
+        }
+    }
+    for prefetched in [false, true] {
+        let opens = Rc::new(RefCell::new(0));
+        let mut sources = katze_system2::kcs::CachedResources::new(Sources(opens.clone()));
+        if prefetched {
+            let cache = sources.resource_cache().unwrap();
+            cache.enqueue(b"art.hg3", 1).unwrap();
+            cache.start();
+            assert!(cache.advance(&mut sources).unwrap());
+        }
+        let mut code = Vec::new();
+        call(&mut code, 710, &[64]);
+        ins(&mut code, 0x26, &[0]);
+        call(&mut code, 65, &[]);
+        let mut runtime = runtime(&code, 1);
+        runtime.set_resources(sources);
+        let task = runtime.create(0, kind::ORDINARY, b"snapshot", b"").unwrap();
+        runtime
+            .object_mut(task)
+            .unwrap()
+            .interpreter_mut()
+            .unwrap()
+            .write(64, b"art:7\0")
+            .unwrap();
+        runtime.update(0, 1).unwrap();
+        let handle = word(vm(&runtime, task), 0);
+        assert_eq!(
+            runtime.image_resource(handle).unwrap().info().offset[0],
+            if prefetched { 13 } else { -2 }
+        );
+        assert_eq!(*opens.borrow(), usize::from(!prefetched));
+    }
+}
+
+#[test]
 fn animation_sources_start_with_the_smallest_cached_frame_for_single_and_layered_snapshots() {
     struct Animated {
         sidecar: Option<Vec<u8>>,

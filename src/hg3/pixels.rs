@@ -1,4 +1,4 @@
-use super::{Metadata, StandardInfo};
+use super::{Frame, Input, Metadata, StandardInfo};
 use crate::{Error, Result, read};
 
 /// 从上到下、紧密排列的 BGRA8 像素；Alpha 保持独立通道。
@@ -12,8 +12,25 @@ pub struct DecodedFrame {
 
 /// 解码首个匹配 ID 的原生 32 位完整帧；缺失 ID 返回 None。
 pub fn decode_frame(data: &[u8], id: i32) -> Result<Option<DecodedFrame>> {
-    let metadata = Metadata::parse(data)?;
-    let Some(frame) = metadata.frame(id) else {
+    decode_input(Input::Bytes(data), Some(id))
+}
+
+/// 校验全部元数据后仅读取选中帧的像素；None 选择最小无符号 ID。
+/// 重复 ID 始终取文件中第一帧，缺失 ID 返回 None。
+pub fn decode_frame_from(
+    source: &dyn crate::io::ReadSource,
+    id: Option<i32>,
+) -> Result<Option<DecodedFrame>> {
+    decode_input(Input::source(source)?, id)
+}
+
+fn decode_input(data: Input<'_>, id: Option<i32>) -> Result<Option<DecodedFrame>> {
+    let metadata = Metadata::parse_input(data)?;
+    let frame = match id {
+        Some(id) => metadata.frame(id),
+        None => metadata.frames.iter().min_by_key(|frame| frame.id),
+    };
+    let Some(frame) = frame else {
         return Ok(None);
     };
     let info = frame
@@ -23,7 +40,7 @@ pub fn decode_frame(data: &[u8], id: i32) -> Result<Option<DecodedFrame>> {
         return Err(Error::new(frame.offset, "未支持的 HG-3 像素位深"));
     }
     crate::hg_pixels::byte_size(info.size)?;
-    let next = read::u32_at(data, frame.offset)? as usize;
+    let next = data.u32_at(frame.offset)? as usize;
     let end = if next == 0 {
         data.len()
     } else {
@@ -32,10 +49,10 @@ pub fn decode_frame(data: &[u8], id: i32) -> Result<Option<DecodedFrame>> {
     let mut position = frame.offset + 8;
     let mut image = None;
     loop {
-        let header = read::range(&data[..end], position, 16)?;
+        let header = data.bounded(end).array::<16>(position)?;
         let name = &header[..8];
-        let next = read::u32_at(header, 8)? as usize;
-        let length = read::u32_at(header, 12)? as usize;
+        let next = read::u32_at(&header, 8)? as usize;
+        let length = read::u32_at(&header, 12)? as usize;
         if matches!(name, b"img_jpg\0" | b"img_wbp\0" | b"img_jpa\0") {
             return Err(Error::new(position, "未支持的 HG-3 图像编码"));
         }
@@ -54,7 +71,16 @@ pub fn decode_frame(data: &[u8], id: i32) -> Result<Option<DecodedFrame>> {
     }
     let (offset, length) =
         image.ok_or_else(|| Error::new(frame.offset, "HG-3 帧缺少原生像素数据"))?;
-    let payload = read::range(data, offset, length)?;
+    let payload = data.bytes(offset, length)?;
+    decode_payload(&payload, offset, frame, info).map(Some)
+}
+
+fn decode_payload(
+    payload: &[u8],
+    offset: usize,
+    frame: &Frame,
+    info: StandardInfo,
+) -> Result<DecodedFrame> {
     let start = read::u32_at(payload, 0)?;
     let rows = read::u32_at(payload, 4)?;
     if start != 0 || rows != info.size[1] {
@@ -70,10 +96,10 @@ pub fn decode_frame(data: &[u8], id: i32) -> Result<Option<DecodedFrame>> {
         command_size,
     )?;
     let pixels = crate::hg_pixels::decode(&literals, &commands, info.size)?;
-    Ok(Some(DecodedFrame {
+    Ok(DecodedFrame {
         id: frame.id,
         info,
         pixels,
         attributes: frame.attributes.clone(),
-    }))
+    })
 }
