@@ -3,6 +3,16 @@ use crate::Result;
 use crate::graphics::Surface;
 
 impl Image {
+    pub(crate) fn multiply_color(&mut self, argb: u32) {
+        self.filter_revision = self.filter_revision.wrapping_add(1);
+        let factors = argb.to_le_bytes();
+        for pixel in self.pixels_mut().chunks_exact_mut(4) {
+            for (value, factor) in pixel.iter_mut().zip(factors) {
+                *value = (u32::from(*value) * u32::from(factor) / 255) as u8;
+            }
+        }
+    }
+
     /// RGB 依次按无符号百分比调整；DWORD 乘法回绕后除以一百，结果钳制到字节。
     pub fn adjust_rgb_percent(&mut self, rgb: [u32; 3]) {
         if rgb == [100; 3] {

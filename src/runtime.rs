@@ -27,6 +27,7 @@ mod movie;
 mod native;
 mod particle;
 pub use motion::MotionSnapshot;
+mod image_data;
 mod image_resources;
 mod object;
 mod ordinary;

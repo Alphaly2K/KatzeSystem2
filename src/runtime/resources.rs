@@ -222,6 +222,9 @@ impl Resources {
         arguments: &[u8],
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
+        if matches!(index, 362 | 363 | 369 | 372 | 373 | 1026) {
+            return self.image_data_native(index, arguments, vm);
+        }
         if matches!(index, 434..=438) {
             return crate::kcs::prefetch_call(
                 index,
@@ -246,7 +249,6 @@ impl Resources {
         let valid = match index {
             111 | 114 => length == 4,
             112 => length == 8,
-            362 => length == 12,
             116 => length == 40,
             115 => {
                 length == 40
@@ -264,24 +266,6 @@ impl Resources {
         let mut args = [0; 10];
         for (arg, bytes) in args.iter_mut().zip(arguments.chunks_exact(4)) {
             *arg = u32::from_le_bytes(bytes.try_into().unwrap());
-        }
-        if index == 362 {
-            vm.read(args[1], 4)?;
-            vm.read(args[2], 4)?;
-            vm.write(args[1], &[0; 4])?;
-            vm.write(args[2], &[0; 4])?;
-            if args[0] != 0 {
-                let info = self.images.get(args[0])?.info();
-                for (axis, address) in args[1..3].iter().enumerate() {
-                    let extent = if info.canvas_size[axis] == 0 {
-                        info.size[axis]
-                    } else {
-                        info.canvas_size[axis]
-                    };
-                    vm.write(*address, &extent.to_le_bytes())?;
-                }
-            }
-            return Ok(NativeReturn::Continue);
         }
         if index == 536 {
             if args[0] == 0 {

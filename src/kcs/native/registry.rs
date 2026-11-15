@@ -296,9 +296,22 @@ pub(crate) fn runtime(index: u32) -> RuntimeHandler {
             RuntimeHandler::Task
         }
         241 | 251 | 387 => RuntimeHandler::MediaRecord,
-        111 | 112 | 114..=117 | 284 | 362 | 365 | 366 | 368 | 434..=438 | 536 | 590..=597 => {
-            RuntimeHandler::Resource
-        }
+        111
+        | 112
+        | 114..=117
+        | 284
+        | 362
+        | 363
+        | 365
+        | 366
+        | 368
+        | 369
+        | 372
+        | 373
+        | 434..=438
+        | 536
+        | 590..=597
+        | 1026 => RuntimeHandler::Resource,
         710..=715 | 717..=724 | 726..=728 | 730 | 733 | 735..=737 => RuntimeHandler::ImageResource,
         _ => RuntimeHandler::Core,
     }
