@@ -6,8 +6,8 @@
 |:--|:--|:--|:--|
 |flate2|1.1.9|MIT|[许可](licenses/flate2-1.1.9/LICENSE-MIT)|
 |encoding_rs|0.8.35|MIT + BSD-3-Clause|[MIT](licenses/encoding_rs-0.8.35/LICENSE-MIT)、[WHATWG](licenses/encoding_rs-0.8.35/LICENSE-WHATWG)、[版权](licenses/encoding_rs-0.8.35/COPYRIGHT)|
+|zlib-rs|0.6.8|Zlib|[许可](licenses/zlib-rs-0.6.8/LICENSE)|
 |miniz_oxide|0.8.9|Zlib|[许可](licenses/miniz_oxide-0.8.9/LICENSE-ZLIB.md)|
-|crc32fast|1.5.3|MIT|[许可](licenses/crc32fast-1.5.3/LICENSE-MIT)|
 |cfg-if|1.0.5|MIT|[许可](licenses/cfg-if-1.0.5/LICENSE-MIT)|
 |adler2|2.0.1|MIT|[许可](licenses/adler2-2.0.1/LICENSE-MIT)|
 |simd-adler32|0.3.10|MIT|[许可](licenses/simd-adler32-0.3.10/LICENSE.md)|
@@ -32,7 +32,7 @@
 |typenum|1.20.1|MIT|[许可](licenses/typenum-1.20.1/LICENSE-MIT)|
 |version_check|0.9.5|MIT|[许可](licenses/version_check-0.9.5/LICENSE-MIT)|
 
-依赖版本与校验值由 `Cargo.lock` 固定。Zlib 解压采用 Rust 后端，不要求系统 Zlib。字体服务使用 fontdb 统一发现、fontdue 栅格化和 ttf-parser 元数据解析；fontdb 启用 fs／fontconfig，fontconfig-parser 使用纯 Rust 解析配置，关闭 memmap。新增依赖采用上表的 MIT 或 Zlib 许可，分发时保留许可及版权声明；slotmap 的来源与修改标记义务按其 Zlib 许可执行。未引入先行实现的源码或资源。
+依赖版本与校验值由 `Cargo.lock` 固定。Zlib 解压使用 zlib-rs 纯 Rust 后端，不要求系统 Zlib。flate2 在 WebAssembly 目标仍声明 miniz_oxide 依赖，相关许可继续保留。zlib-rs 最低 Rust 版本为 1.75，兼容项目的 Rust 1.87，分发时保留版权与 Zlib 声明，修改上游源码时明确标记。字体服务使用 fontdb 统一发现、fontdue 栅格化和 ttf-parser 元数据解析；fontdb 启用 fs／fontconfig，fontconfig-parser 使用纯 Rust 解析配置，关闭 memmap。新增依赖采用上表的 MIT 或 Zlib 许可，分发时保留许可及版权声明；slotmap 的来源与修改标记义务按其 Zlib 许可执行。未引入先行实现的源码或资源。
 
 启动示例使用开发依赖 `libc` 0.2.191 调用平台本地日期转换，选择 MIT 许可，兼容项目 LGPL-2.1；分发示例时保留其[版权及许可声明](licenses/libc-0.2.191/LICENSE-MIT)。
 

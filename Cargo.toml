@@ -9,7 +9,7 @@ description = "CatSystem2 2.6.1.90 script readers and interpreters"
 [dependencies]
 blowfish = "0.9.1"
 encoding_rs = "0.8.35"
-flate2 = { version = "1.1.9", default-features = false, features = ["rust_backend"] }
+flate2 = { version = "1.1.9", default-features = false, features = ["zlib-rs"] }
 fontdue = { version = "=0.9.3", default-features = false, features = ["std"] }
 fontdb = { version = "=0.23.0", default-features = false, features = ["fs", "fontconfig"] }
 ttf-parser = { version = "=0.25.1", default-features = false, features = ["std"] }
