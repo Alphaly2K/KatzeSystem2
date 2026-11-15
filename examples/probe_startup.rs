@@ -423,7 +423,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         let system_time_ms = (u64::from(now) * 1000 / 60) as u32;
         if let Err(error) = advance_frame(&mut runtime, now, system_time_ms) {
             println!("第 {frame} 帧 pc {}：{}", error.offset, error.message);
-            for id in 0..160 {
+            for id in task_ids(&runtime) {
                 if let Some(vm) = runtime.object(id).and_then(|object| object.interpreter()) {
                     println!("  任务 {id} pc {}", vm.pc);
                     if (id == task
@@ -468,7 +468,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             }
         });
         if dump_frame {
-            for id in 0..160 {
+            for id in task_ids(&runtime) {
                 if let Some(node) = runtime.tree().node(id) {
                     let object = runtime.object(id);
                     let pc = object
@@ -512,47 +512,54 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                             }
                         }
                         if let Some(spec) = std::env::var_os("KATZE_PROBE_FESOBJ") {
-                            for name in spec.to_string_lossy().split(',') {
-                                for bank in 0..8 {
-                                    if let Some(handle) = scene.objects().lookup(name, bank) {
-                                        let object = scene.objects().get(handle).unwrap();
-                                        let state = &object.state;
-                                        let display = match state {
-                                            katze_system2::runtime::fes::ObjectState::Plane(p) => {
-                                                Some(p.base.display())
-                                            }
-                                            katze_system2::runtime::fes::ObjectState::CPlane(p) => {
-                                                Some(p.display())
-                                            }
-                                            katze_system2::runtime::fes::ObjectState::String(s) => {
-                                                Some(s.layout.base.base.display())
-                                            }
-                                            katze_system2::runtime::fes::ObjectState::Image(i) => {
-                                                Some(i.base.display)
-                                            }
-                                            _ => None,
-                                        };
-                                        println!(
-                                            "    FES {id} {name}[{bank}] 句柄 {} 状态 {} 显示 {:?}",
-                                            object.handle(),
-                                            state.kind(),
-                                            display
-                                        );
-                                        if let katze_system2::runtime::fes::ObjectState::Image(
-                                            image,
-                                        ) = state
-                                        {
-                                            println!(
-                                                "      文件 {:?} 帧 {} 透明度 {} 掩码 {} 图像 {:?}",
-                                                String::from_utf8_lossy(&image.file),
-                                                image.image_number,
-                                                image.base.blend,
-                                                image.base.mask,
-                                                object.image_handle(),
-                                            );
-                                        }
-                                        break;
+                            let spec = spec.to_string_lossy();
+                            let handles: Vec<_> = if spec == "*" {
+                                scene.objects().update_order().collect()
+                            } else {
+                                spec.split(',')
+                                    .filter_map(|name| {
+                                        (0..8).find_map(|bank| scene.objects().lookup(name, bank))
+                                    })
+                                    .collect()
+                            };
+                            for handle in handles {
+                                let object = scene.objects().get(handle).unwrap();
+                                let state = &object.state;
+                                let name = object.name();
+                                let bank = object.bank();
+                                let display = match state {
+                                    katze_system2::runtime::fes::ObjectState::Plane(p) => {
+                                        Some(p.base.display())
                                     }
+                                    katze_system2::runtime::fes::ObjectState::CPlane(p) => {
+                                        Some(p.display())
+                                    }
+                                    katze_system2::runtime::fes::ObjectState::String(s) => {
+                                        Some(s.layout.base.base.display())
+                                    }
+                                    katze_system2::runtime::fes::ObjectState::Image(i) => {
+                                        Some(i.base.display)
+                                    }
+                                    _ => None,
+                                };
+                                println!(
+                                    "    FES {id} {name}[{bank}] 句柄 {} 状态 {} 显示 {:?}",
+                                    object.handle(),
+                                    state.kind(),
+                                    display
+                                );
+                                if let katze_system2::runtime::fes::ObjectState::Image(image) =
+                                    state
+                                {
+                                    println!(
+                                        "      文件 {:?} 帧 {} 透明度 {} 掩码 {} 图像 {:?} 属性 {:?}",
+                                        String::from_utf8_lossy(&image.file),
+                                        image.image_number,
+                                        image.base.blend,
+                                        image.base.mask,
+                                        object.image_handle(),
+                                        image.base,
+                                    );
                                 }
                             }
                         }
@@ -583,7 +590,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             }
-            for id in 0..160 {
+            for id in task_ids(&runtime) {
                 if let Some(page) = runtime.object(id).and_then(|o| o.message_page()) {
                     println!(
                         "    消息页 {id}: 文本 {:?} 字符数 {} 剩余 {:?} 显示时间 {:?}",
@@ -595,7 +602,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 }
             }
             if std::env::var_os("KATZE_PROBE_REGIONS").is_some() {
-                for id in 0..160 {
+                for id in task_ids(&runtime) {
                     if let Some(state) = runtime.input_state(id) {
                         for region in state.regions().records() {
                             let b = region.bounds();
@@ -624,7 +631,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 dump(vm);
             }
             if let Ok(spec) = std::env::var("KATZE_PROBE_MEM") {
-                for id in 0..160 {
+                for id in task_ids(&runtime) {
                     let Some(vm) = runtime.object(id).and_then(|object| object.interpreter())
                     else {
                         continue;
@@ -650,16 +657,17 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 }
             }
             {
+                let ids = runtime.drawables_mut().order().to_vec();
                 let drawables = runtime.drawables();
                 let mut count = 0;
                 let mut detail = Vec::new();
-                for id in 0..256 {
+                for id in ids {
                     let Some(entry) = drawables.get(id) else {
                         continue;
                     };
                     count += 1;
                     detail.push(format!(
-                        "{id} 显示 {} 三角形 {} 画布 {:?} 界限 {:?} 位置 {:?} 色 {:08x}/{:08x} 混合 {} 裁剪 {:?}",
+                        "{id} 显示 {} 三角形 {} 画布 {:?} 界限 {:?} 位置 {:?} 色 {:08x}/{:08x} 混合 {} 裁剪 {:?} 比例 {:?} 基点 {:?} 相机 {} 投影原点 {} 源变换 {:?}",
                         entry.display(),
                         entry.triangles().len(),
                         entry.canvas_triangles().map(|t| t.len()),
@@ -669,6 +677,11 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                         entry.color().1,
                         entry.blend_mode(),
                         entry.clip(),
+                        entry.transform().scale(),
+                        entry.transform().base_point(),
+                        entry.camera_id(),
+                        entry.projection_origin_mode(),
+                        entry.geometry_transform(true).map(|source| (source.base_point(), source.position(), source.scale())),
                     ));
                     if std::env::var_os("KATZE_PROBE_TRIANGLES").is_some() {
                         for (index, triangle) in entry.triangles().iter().take(2).enumerate() {
@@ -704,7 +717,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         if frame % 120 == 0 {
             if let Some(vm) = runtime.object(task).and_then(|object| object.interpreter()) {
                 println!("第 {frame} 帧 pc {} 栈 {}", vm.pc, vm.stack_bytes().len());
-                for id in 0..160 {
+                for id in task_ids(&runtime) {
                     if let Some(other) = runtime.object(id).and_then(|object| object.interpreter())
                     {
                         if id != task {
@@ -770,4 +783,11 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         );
     }
     Ok(())
+}
+
+fn task_ids(runtime: &katze_system2::runtime::Runtime<support::Factory>) -> Vec<u32> {
+    let root = runtime.tree().root_id();
+    std::iter::once(root)
+        .chain(runtime.tree().descendants(root).unwrap())
+        .collect()
 }
