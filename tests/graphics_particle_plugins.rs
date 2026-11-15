@@ -831,6 +831,12 @@ fn deterministic_emotions_preserve_randomness_task_controls_and_source_offsets()
             [[0., 0.], [1., 1.]],
         ),
         (
+            b"em_double.ppi".as_slice(),
+            [810f32, 181., 1., 60., 5., 5., 5., 5., 5.].as_slice(),
+            8,
+            [[0., 0.], [1., 1.]],
+        ),
+        (
             b"em_exclamation.ppi".as_slice(),
             [735f32, 159., 1., 60., 3., 5., 7., 60., 80.].as_slice(),
             8,

@@ -2,7 +2,7 @@ use super::{Drawable, ParticleMesh, Surface};
 use super::{
     particle_anger::Anger, particle_angry::Angry, particle_asease::Asease, particle_common::Common,
     particle_concentration::Concentration, particle_digi::Digi, particle_digi_ring::DigiRing,
-    particle_dis::Dis, particle_down::Down, particle_energy::Energy,
+    particle_dis::Dis, particle_double::Double, particle_down::Down, particle_energy::Energy,
     particle_exclamation::Exclamation, particle_film_noise::FilmNoise,
     particle_flower_burst::FlowerBurst, particle_glint::Glint, particle_note::Note,
     particle_notice::Notice, particle_plugin, particle_question::Question, particle_rain::Rain,
@@ -48,6 +48,7 @@ enum Effect {
     Digi(Digi),
     DigiRing(DigiRing),
     Rising(Rising),
+    Double(Double),
 }
 
 impl Effect {
@@ -89,6 +90,7 @@ impl Effect {
             particle_plugin::Kind::Digi => Self::Digi(Digi::new(host, image, random)),
             particle_plugin::Kind::DigiRing => Self::DigiRing(DigiRing::new(host, image, random)),
             particle_plugin::Kind::Rising => Self::Rising(Rising::new(host, image, random)),
+            particle_plugin::Kind::Double => Self::Double(Double::new(host, image)),
         })
     }
 }
@@ -251,6 +253,10 @@ impl ParticleRunner {
                             effect.write_mesh(host);
                         }
                         Effect::Angry(effect) => {
+                            effect.update(delta, host.source.unwrap_or_default().position_2d);
+                            effect.write_mesh(host);
+                        }
+                        Effect::Double(effect) => {
                             effect.update(delta, host.source.unwrap_or_default().position_2d);
                             effect.write_mesh(host);
                         }
