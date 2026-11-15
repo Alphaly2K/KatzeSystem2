@@ -179,6 +179,19 @@ impl HostState {
             .ok_or_else(|| Error::new(0, "KCS 数据容器句柄无效"))
     }
 
+    pub(crate) fn insert_data_container(
+        &mut self,
+        container: crate::save::DataContainer,
+        offset: usize,
+    ) -> Result<u32> {
+        if self.containers.len() >= crate::read::MAX_ITEMS {
+            return Err(Error::new(offset, "KCS 数据容器数量超过上限"));
+        }
+        let handle = self.handles.allocate_at(offset)?;
+        self.containers.insert(handle, container);
+        Ok(handle)
+    }
+
     pub(crate) fn data_container_mut(
         &mut self,
         handle: u32,

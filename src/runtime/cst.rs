@@ -4,6 +4,7 @@ use crate::{Error, Result, read};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
+mod data;
 mod details;
 mod save;
 mod snapshot;
@@ -243,6 +244,9 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         arguments: &[u8],
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
+        if matches!(index, 978 | 979 | 981) {
+            return self.cst_data_native(index, arguments, vm);
+        }
         if matches!(index, 991 | 992 | 994) {
             return self.cst_snapshot_native(index, arguments, vm);
         }

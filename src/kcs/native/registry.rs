@@ -218,9 +218,19 @@ pub(crate) fn runtime(index: u32) -> RuntimeHandler {
         }
         633..=640 => RuntimeHandler::NameTable,
         683..=685 => RuntimeHandler::SectionTable,
-        323..=337 | 385 | 386 | 934 | 982 | 991..=994 | 1033 | 1037 | 1038 | 1064 => {
-            RuntimeHandler::Cst
-        }
+        323..=337
+        | 385
+        | 386
+        | 934
+        | 978
+        | 979
+        | 981
+        | 982
+        | 991..=994
+        | 1033
+        | 1037
+        | 1038
+        | 1064 => RuntimeHandler::Cst,
         294..=317 | 388 | 440 | 514 | 535 | 586 => RuntimeHandler::Motion,
         458 => RuntimeHandler::SequenceFile,
         240 | 250 => RuntimeHandler::SharedRecord,

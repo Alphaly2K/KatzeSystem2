@@ -68,12 +68,9 @@ pub(super) fn call(
             };
             container
         };
-        if host.containers.len() >= read::MAX_ITEMS {
-            return Err(Error::new(vm.pc, "KCS 数据容器数量超过上限"));
-        }
-        let handle = host.handle_allocator().allocate_at(vm.pc)?;
-        host.containers.insert(handle, container);
-        return Ok(NativeReturn::Value(handle));
+        return Ok(NativeReturn::Value(
+            host.insert_data_container(container, vm.pc)?,
+        ));
     }
     if index == 246 {
         if first != 0 && host.containers.remove(&first).is_none() {
