@@ -4,7 +4,7 @@ use super::{
     particle_dis::Dis, particle_down::Down, particle_exclamation::Exclamation,
     particle_film_noise::FilmNoise, particle_flower_burst::FlowerBurst, particle_note::Note,
     particle_notice::Notice, particle_plugin, particle_rain::Rain, particle_sigh::Sigh,
-    particle_sweat::Sweat,
+    particle_surprise::Surprise, particle_sweat::Sweat,
 };
 use crate::kcs::{
     Host, Interpreter, ParticleHost, ParticleSource, ParticleTask, Program, ScriptRandom,
@@ -35,6 +35,7 @@ enum Effect {
     Exclamation(Exclamation),
     FilmNoise(FilmNoise),
     Asease(Asease),
+    Surprise(Surprise),
 }
 
 impl Effect {
@@ -63,6 +64,7 @@ impl Effect {
                 Self::FilmNoise(FilmNoise::new(host, image, random))
             }
             particle_plugin::Kind::Asease => Self::Asease(Asease::new(host, image, random)),
+            particle_plugin::Kind::Surprise => Self::Surprise(Surprise::new(host, image)),
         }
     }
 }
@@ -253,6 +255,10 @@ impl ParticleRunner {
                                 host.source.unwrap_or_default().position_2d,
                                 services.random().unwrap_or(&mut host.random),
                             );
+                            effect.write_mesh(host);
+                        }
+                        Effect::Surprise(effect) => {
+                            effect.update(delta, host.source.unwrap_or_default().position_2d);
                             effect.write_mesh(host);
                         }
                     }

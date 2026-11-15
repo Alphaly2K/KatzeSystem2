@@ -793,6 +793,10 @@ fn deterministic_emotions_preserve_randomness_task_controls_and_source_offsets()
             b"em_exclamation.ppi".as_slice(),
             [735f32, 159., 1., 60., 3., 5., 7., 60., 80.].as_slice(),
         ),
+        (
+            b"em_suprise.ppi".as_slice(),
+            [804f32, 140., 1., 78., 10., 35.].as_slice(),
+        ),
     ] {
         let mut runtime = runtime(plugin(name))?;
         runtime.update(1, 1)?;
@@ -859,8 +863,9 @@ fn deterministic_emotions_preserve_randomness_task_controls_and_source_offsets()
             .projected_quad(0, &view)
             .unwrap();
         assert_eq!(restarted[0].color >> 24, 0);
-        assert_eq!(restarted[0].position[0] - first[0].position[0], 10.);
-        assert_eq!(restarted[0].position[1] - first[0].position[1], 20.);
+        for (i, shift) in [10., 20.].into_iter().enumerate() {
+            assert!((restarted[0].position[i] - first[0].position[i] - shift).abs() < 0.0001);
+        }
         assert_random(&mut runtime, &expected);
         runtime.dispatch_command(2, command(323))?;
         assert!(
