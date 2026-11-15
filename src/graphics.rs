@@ -54,6 +54,7 @@ pub use particle_mesh::ParticleMesh;
 mod particle_task;
 pub use particle_task::Particle3DObject;
 mod particle_anger;
+mod particle_dis;
 mod particle_down;
 mod particle_notice;
 mod particle_plugin;
