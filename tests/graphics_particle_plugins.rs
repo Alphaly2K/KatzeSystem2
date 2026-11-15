@@ -777,86 +777,97 @@ fn dis_shares_jitter_randomness_and_restores_mirrored_geometry_on_restart() -> R
 }
 
 #[test]
-fn common_moves_and_holds_without_random_draws_and_restarts_at_the_source() -> Result<()> {
+fn deterministic_emotions_preserve_randomness_task_controls_and_source_offsets() -> Result<()> {
     use katze_system2::graphics::Drawable;
 
-    let mut runtime = runtime(plugin(b"em_common.ppi"))?;
-    runtime.update(1, 1)?;
-    let expected = ScriptRandom::seeded(17);
-    let mut parameters = [0; 128];
-    for (i, value) in [782f32, 169., 1., 60., 5., 8.].into_iter().enumerate() {
-        parameters[i * 4..i * 4 + 4].copy_from_slice(&value.to_le_bytes());
-    }
-    runtime.dispatch_command_with_buffers(
-        2,
-        command(325),
-        &mut CommandBuffers {
-            data1: Some(&mut parameters),
-            ..Default::default()
-        },
-    )?;
-    runtime.drawables_mut().insert(100, Drawable::default())?;
-    runtime.drawables_mut().set_position(100, [640., 360., 0.]);
-    let mut source = command(327);
-    source.data[1] = 100;
-    runtime.dispatch_command(2, source)?;
-    runtime.dispatch_command(2, command(321))?;
-    runtime.update(2, 1)?;
-    let view = Projection::default();
-    let first = runtime
-        .drawables()
-        .get(1)
-        .unwrap()
-        .particle_mesh()
-        .unwrap()
-        .projected_quad(0, &view)
-        .unwrap();
-    assert_eq!(first[0].color >> 24, 0);
-    assert_eq!([first[0].uv, first[3].uv], [[0., 0.], [1., 1.]]);
-    for frame in 3..=30 {
-        runtime.update(frame, 1)?;
-    }
-    let mesh = runtime
-        .drawables()
-        .get(1)
-        .unwrap()
-        .particle_mesh()
-        .unwrap()
-        .clone();
-    let held = mesh.projected_quad(0, &view).unwrap();
-    assert_eq!(held[0].color >> 24, 255);
-    assert_ne!(held[0].position, first[0].position);
-    runtime.dispatch_command(2, command(322))?;
-    runtime.update(31, 1)?;
-    assert_eq!(runtime.drawables().get(1).unwrap().display(), 0);
-    assert_eq!(
-        runtime.drawables().get(1).unwrap().particle_mesh(),
-        Some(&mesh)
-    );
-    runtime.drawables_mut().set_position(100, [650., 380., 0.]);
-    runtime.dispatch_command(2, command(321))?;
-    runtime.update(32, 1)?;
-    let restarted = runtime
-        .drawables()
-        .get(1)
-        .unwrap()
-        .particle_mesh()
-        .unwrap()
-        .projected_quad(0, &view)
-        .unwrap();
-    assert_eq!(restarted[0].color >> 24, 0);
-    assert_eq!(restarted[0].position[0] - first[0].position[0], 10.);
-    assert_eq!(restarted[0].position[1] - first[0].position[1], 20.);
-    assert_random(&mut runtime, &expected);
-    runtime.dispatch_command(2, command(323))?;
-    assert!(
-        runtime
+    for (name, values) in [
+        (
+            b"em_common.ppi".as_slice(),
+            [782f32, 169., 1., 60., 5., 8.].as_slice(),
+        ),
+        (
+            b"em_angry.ppi".as_slice(),
+            [735f32, 192., 60., 4., 6., 70., 5., 5.].as_slice(),
+        ),
+    ] {
+        let mut runtime = runtime(plugin(name))?;
+        runtime.update(1, 1)?;
+        let expected = ScriptRandom::seeded(17);
+        let mut parameters = [0; 128];
+        for (i, value) in values.iter().copied().enumerate() {
+            parameters[i * 4..i * 4 + 4].copy_from_slice(&value.to_le_bytes());
+        }
+        runtime.dispatch_command_with_buffers(
+            2,
+            command(325),
+            &mut CommandBuffers {
+                data1: Some(&mut parameters),
+                ..Default::default()
+            },
+        )?;
+        runtime.drawables_mut().insert(100, Drawable::default())?;
+        runtime.drawables_mut().set_position(100, [640., 360., 0.]);
+        let mut source = command(327);
+        source.data[1] = 100;
+        runtime.dispatch_command(2, source)?;
+        runtime.dispatch_command(2, command(321))?;
+        runtime.update(2, 1)?;
+        let view = Projection::default();
+        let first = runtime
             .drawables()
             .get(1)
             .unwrap()
             .particle_mesh()
-            .is_none()
-    );
+            .unwrap()
+            .projected_quad(0, &view)
+            .unwrap();
+        assert_eq!(first[0].color >> 24, 0);
+        assert_eq!([first[0].uv, first[3].uv], [[0., 0.], [1., 1.]]);
+        for frame in 3..=30 {
+            runtime.update(frame, 1)?;
+        }
+        let mesh = runtime
+            .drawables()
+            .get(1)
+            .unwrap()
+            .particle_mesh()
+            .unwrap()
+            .clone();
+        let held = mesh.projected_quad(0, &view).unwrap();
+        assert_eq!(held[0].color >> 24, 255);
+        assert_ne!(held[0].position, first[0].position);
+        runtime.dispatch_command(2, command(322))?;
+        runtime.update(31, 1)?;
+        assert_eq!(runtime.drawables().get(1).unwrap().display(), 0);
+        assert_eq!(
+            runtime.drawables().get(1).unwrap().particle_mesh(),
+            Some(&mesh)
+        );
+        runtime.drawables_mut().set_position(100, [650., 380., 0.]);
+        runtime.dispatch_command(2, command(321))?;
+        runtime.update(32, 1)?;
+        let restarted = runtime
+            .drawables()
+            .get(1)
+            .unwrap()
+            .particle_mesh()
+            .unwrap()
+            .projected_quad(0, &view)
+            .unwrap();
+        assert_eq!(restarted[0].color >> 24, 0);
+        assert_eq!(restarted[0].position[0] - first[0].position[0], 10.);
+        assert_eq!(restarted[0].position[1] - first[0].position[1], 20.);
+        assert_random(&mut runtime, &expected);
+        runtime.dispatch_command(2, command(323))?;
+        assert!(
+            runtime
+                .drawables()
+                .get(1)
+                .unwrap()
+                .particle_mesh()
+                .is_none()
+        );
+    }
     Ok(())
 }
 

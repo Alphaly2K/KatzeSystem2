@@ -11,6 +11,7 @@ pub(super) enum Kind {
     Dis,
     Common,
     Note,
+    Angry,
 }
 
 fn u16_at(bytes: &[u8], at: usize) -> Option<u16> {
@@ -70,6 +71,8 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
         Kind::Common
     } else if name.eq_ignore_ascii_case(b"em_note.ppi") {
         Kind::Note
+    } else if name.eq_ignore_ascii_case(b"em_angry.ppi") {
+        Kind::Angry
     } else {
         return None;
     };

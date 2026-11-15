@@ -42,6 +42,7 @@ pub(crate) use memory::{MemoryLoan, copy_loan};
 pub use motion::{MotionHost, MotionState, MotionTask};
 pub(crate) use native::{RuntimeHandler, call_native, runtime_native_handler};
 pub(crate) use numeric::float as float_operation;
+pub(crate) use numeric::native_triangle;
 pub use ordinary::OrdinaryTask;
 pub use particle::{ParticleHost, ParticleSource, ParticleTask, ParticleVertex};
 pub use queue::MotionQueue;

@@ -172,7 +172,7 @@ pub(super) fn native_math(index: u32, args: &[u32]) -> u32 {
     }
 }
 
-pub(super) fn native_triangle(input: f32, period: f32) -> f32 {
+pub(crate) fn native_triangle(input: f32, period: f32) -> f32 {
     let input = input.abs();
     let period = period.abs();
     let phase = if input > 0.0 { input % period } else { 0.0 };

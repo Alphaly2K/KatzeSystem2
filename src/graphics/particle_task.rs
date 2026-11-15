@@ -1,8 +1,8 @@
 use super::{Drawable, ParticleMesh, Surface};
 use super::{
-    particle_anger::Anger, particle_common::Common, particle_dis::Dis, particle_down::Down,
-    particle_note::Note, particle_notice::Notice, particle_plugin, particle_rain::Rain,
-    particle_sigh::Sigh, particle_sweat::Sweat,
+    particle_anger::Anger, particle_angry::Angry, particle_common::Common, particle_dis::Dis,
+    particle_down::Down, particle_note::Note, particle_notice::Notice, particle_plugin,
+    particle_rain::Rain, particle_sigh::Sigh, particle_sweat::Sweat,
 };
 use crate::kcs::{
     Host, Interpreter, ParticleHost, ParticleSource, ParticleTask, Program, ScriptRandom,
@@ -28,6 +28,7 @@ enum Effect {
     Dis(Dis),
     Common(Common),
     Note(Note),
+    Angry(Angry),
 }
 
 impl Effect {
@@ -47,6 +48,7 @@ impl Effect {
             particle_plugin::Kind::Dis => Self::Dis(Dis::new(host, image)),
             particle_plugin::Kind::Common => Self::Common(Common::new(host, image)),
             particle_plugin::Kind::Note => Self::Note(Note::new(host, image, random)),
+            particle_plugin::Kind::Angry => Self::Angry(Angry::new(host, image)),
         }
     }
 }
@@ -200,6 +202,10 @@ impl ParticleRunner {
                             effect.write_mesh(host);
                         }
                         Effect::Common(effect) => {
+                            effect.update(delta, host.source.unwrap_or_default().position_2d);
+                            effect.write_mesh(host);
+                        }
+                        Effect::Angry(effect) => {
                             effect.update(delta, host.source.unwrap_or_default().position_2d);
                             effect.write_mesh(host);
                         }
