@@ -219,11 +219,13 @@ pub(crate) fn runtime(index: u32) -> RuntimeHandler {
         633..=640 => RuntimeHandler::NameTable,
         683..=685 => RuntimeHandler::SectionTable,
         323..=337
+        | 608
         | 385
         | 386
         | 934
         | 978
         | 979
+        | 980
         | 981
         | 982
         | 991..=994

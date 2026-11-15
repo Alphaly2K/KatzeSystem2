@@ -265,6 +265,9 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             self.resources.cst_contexts.insert(handle, context);
             return Ok(NativeReturn::Value(handle));
         }
+        if matches!(index, 608 | 980) && arguments.len() != 4 {
+            return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+        }
         let handle = read::u32_at(arguments, 0)?;
         if index == 993 {
             if arguments.len() != 8 && !(handle == 0 && arguments.len() == 4) {
@@ -323,6 +326,23 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             .cst_contexts
             .get_mut(&handle)
             .ok_or_else(|| Error::new(vm.pc, "CST 上下文句柄无效"))?;
+        if matches!(index, 608 | 980) {
+            let value = if index == 608 {
+                context
+                    .script
+                    .as_ref()
+                    .map_or(u32::MAX, |script| script.inputs().len() as u32)
+            } else {
+                context.script.as_ref().map_or(0, |script| {
+                    script
+                        .records()
+                        .iter()
+                        .filter(|record| record.kind == 0x20)
+                        .count() as u32
+                })
+            };
+            return Ok(NativeReturn::Value(value));
+        }
         if index == 934 {
             let mut names = Vec::with_capacity(2);
             for offset in [4, 8] {

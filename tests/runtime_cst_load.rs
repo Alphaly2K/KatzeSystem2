@@ -224,8 +224,13 @@ fn localized_scene_and_name_table_use_resource_encoding_for_unicode_outputs() {
 fn loading_preserves_missing_state_clears_failed_payload_and_rebinds_languages() {
     let mut code = vec![];
     call(&mut code, 323, &[], Some(400));
+    for (native, handle, output) in [(608, 1, 8), (980, 1, 12), (608, 0, 16), (980, 0, 20)] {
+        call(&mut code, native, &[handle], Some(output));
+    }
     for _ in 0..6 {
         call(&mut code, 325, &[1, 64], Some(0));
+        call(&mut code, 608, &[1], Some(24));
+        call(&mut code, 980, &[1], Some(28));
         call(&mut code, 65, &[], None);
     }
     for budget in [1, 4096] {
@@ -289,6 +294,33 @@ fn loading_preserves_missing_state_clears_failed_payload_and_rebinds_languages()
                     .unwrap(),
             );
             assert_eq!(result, u32::from(matches!(stage, 0 | 4 | 5)));
+            let counts: Vec<_> = rt
+                .object(task)
+                .unwrap()
+                .interpreter()
+                .unwrap()
+                .read(8, 24)
+                .unwrap()
+                .chunks_exact(4)
+                .map(|bytes| u32::from_le_bytes(bytes.try_into().unwrap()))
+                .collect();
+            assert_eq!(
+                counts,
+                [
+                    u32::MAX,
+                    0,
+                    0,
+                    0,
+                    if stage == 3 {
+                        u32::MAX
+                    } else if stage == 5 {
+                        0
+                    } else {
+                        2
+                    },
+                    if matches!(stage, 3 | 5) { 0 } else { 3 }
+                ]
+            );
             assert_eq!(context.script().is_some(), stage != 3);
             assert_eq!(
                 context.bound_languages().collect::<Vec<_>>(),
