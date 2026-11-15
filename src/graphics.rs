@@ -57,6 +57,7 @@ mod particle_anger;
 mod particle_common;
 mod particle_dis;
 mod particle_down;
+mod particle_note;
 mod particle_notice;
 mod particle_plugin;
 mod particle_rain;
