@@ -32,7 +32,7 @@ impl ProgramLoader for Source {
                 instruction(&mut code, 0x25, &[*arg]);
             }
             instruction(&mut code, 0x2b, &[*index, args.len() as u32 * 4]);
-            if matches!(index, 160 | 162 | 165 | 349 | 903 | 935 | 936) {
+            if matches!(index, 160 | 162 | 165 | 349 | 604 | 903 | 935 | 936) {
                 instruction(&mut code, 0x26, &[256 + i as u32 * 4]);
             }
         }
@@ -191,11 +191,54 @@ fn native_loads_preserve_unsigned_options_and_reach_all_four_group_variants() {
 }
 
 #[test]
+fn legacy_group_loads_replay_audio_without_adding_leading_silence() {
+    for budget in [1, 4096] {
+        for address in [64, 0x8000_0040] {
+            for (key, by_key, selector, channel) in [
+                (65536, 1, 1, 4),
+                (65537, u32::MAX, 2, 10),
+                (7, 0, 1, 9),
+                (7, 0, 2, 9),
+            ] {
+                let mut rt = setup(vec![
+                    (604, vec![key, u32::MAX, address, by_key, selector]),
+                    (157, vec![channel, 1]),
+                    (160, vec![channel]),
+                ]);
+                rt.set_budget(budget, 1 << 20);
+                rt.update(0, 0).unwrap();
+                let vm = rt.object(2).unwrap().interpreter().unwrap();
+                assert_eq!(vm.read(256, 4).unwrap(), channel.to_le_bytes());
+                assert_eq!(vm.read(264, 4).unwrap(), 1u32.to_le_bytes());
+                assert_eq!(vm.read(0, 4).unwrap(), 0xdeadbeefu32.to_le_bytes());
+                assert!(vm.stack_bytes().is_empty());
+                let sound = rt.object_mut(1).unwrap().audio_state_mut().unwrap();
+                let loaded = sound.channel(channel).unwrap();
+                assert!(loaded.is_grouped());
+                assert_eq!(loaded.file(), b"sound/tone_17.ogg");
+                assert_eq!(loaded.load_options(), 0);
+                assert_eq!(loaded.load_parameters(), [0, 0]);
+                assert!(
+                    sound
+                        .read_channel(channel, 512)
+                        .unwrap()
+                        .samples()
+                        .iter()
+                        .any(|&sample| sample != 0)
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn native_loads_diagnose_uninitialized_results_and_short_arguments() {
     for (index, args, message) in [
         (935, vec![5, 0, 64, 0, 1], "选择器"),
         (936, vec![7, 0, 64, 1, 3, 1], "选择器"),
         (935, vec![5, 0, 64, 1], "范围"),
+        (604, vec![2, 0, 64, 1, 0], "选择器"),
+        (604, vec![2, 0, 64, 1], "范围"),
     ] {
         let mut rt = setup(vec![(index, args)]);
         let Error {

@@ -95,7 +95,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         arguments: &[u8],
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
-        let arguments = read::range(arguments, 0, if index == 935 { 20 } else { 24 })?;
+        let arguments = read::range(arguments, 0, if index == 936 { 24 } else { 20 })?;
         let sound = self.command_target(0, 35, [0; 3])?;
         let name = format_string(vm, read::u32_at(arguments, 8)?, 0)?;
         let name = terminated(&name);
@@ -127,7 +127,11 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         } else {
             (
                 read::u32_at(arguments, 16)?,
-                read::u32_at(arguments, 20)?,
+                if index == 604 {
+                    0
+                } else {
+                    read::u32_at(arguments, 20)?
+                },
                 if read::u32_at(arguments, 12)? == 0 {
                     208
                 } else {
