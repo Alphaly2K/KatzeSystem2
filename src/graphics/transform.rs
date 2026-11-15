@@ -182,37 +182,4 @@ fn arithmetic(op: u8, left: f32, right: f32) -> f32 {
     f32::from_bits(float_operation(op, left.to_bits(), right.to_bits()))
 }
 
-pub(super) fn sin_cos(angle: f32) -> (f32, f32) {
-    if angle.is_nan() {
-        let nan = f32::from_bits(angle.to_bits() | 0x0040_0000);
-        (nan, nan)
-    } else if angle.is_infinite() {
-        let nan = f32::from_bits(0xffc0_0000);
-        (nan, nan)
-    } else {
-        let bits = angle.to_bits();
-        let magnitude = bits & 0x7fff_ffff;
-        if magnitude >= 0x5f00_0000 {
-            // FSINCOS 越过 2^63 时不压入第二个结果，随后读空栈得到负 indefinite。
-            return (f32::from_bits(0xffc0_0000), angle);
-        }
-        let mut reduced = angle as f64;
-        if magnitude >= 0x3f80_0000 {
-            // 原 x87 用 66 位 π 约化；先做整数取余，避免大角度丢失低位。
-            const PI: u128 = 0x3_243f_6a88_85a3_08d3;
-            let exponent = (magnitude >> 23) as usize;
-            let significand = ((magnitude & 0x7f_ffff) | 0x80_0000) as u128;
-            let remainder = (significand << (exponent - 86)) % (2 * PI);
-            let remainder = if remainder > PI {
-                remainder as i128 - (2 * PI) as i128
-            } else {
-                remainder as i128
-            };
-            reduced = remainder as f64 / 18_446_744_073_709_551_616.0;
-            if bits >> 31 != 0 {
-                reduced = -reduced;
-            }
-        }
-        (reduced.sin() as f32, reduced.cos() as f32)
-    }
-}
+pub(super) use crate::kcs::matrix_sin_cos as sin_cos;

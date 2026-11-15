@@ -35,7 +35,8 @@ pub(crate) use configuration::save_configuration;
 pub(crate) use host::hierarchy_query;
 pub use host::{CoreHost, HostState, MenuItemRequest, WindowCloseRequest};
 pub(crate) use matrix::{
-    multiply as multiply_matrix, normalize4 as normalize_vector, transform as transform_vector,
+    multiply as multiply_matrix, normalize4 as normalize_vector, sin_cos as matrix_sin_cos,
+    transform as transform_vector,
 };
 pub use memory::MemoryCopyMode;
 pub(crate) use memory::copy as copy_memory;

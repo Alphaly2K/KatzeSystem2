@@ -2,6 +2,7 @@ use super::{HostState, Interpreter, NativeReturn};
 use crate::task::TaskTree;
 use crate::{Error, Result, expression};
 
+mod matrix;
 mod registry;
 pub(crate) use registry::{RuntimeHandler, runtime as runtime_native_handler};
 mod scalar;
@@ -27,6 +28,7 @@ pub(crate) fn call_native(
         registry::CoreHandler::Settings => settings::call(host, index, arguments, vm),
         registry::CoreHandler::Storage => storage::call(state, host, index, arguments, vm),
         registry::CoreHandler::System => system::call(state, host, task_tree, index, arguments, vm),
+        registry::CoreHandler::Matrix => matrix::call(host, index, arguments, vm),
         registry::CoreHandler::Data => super::data::call(host, index, arguments, vm),
         registry::CoreHandler::MapData => super::map_data::call(host, index, arguments, vm),
         registry::CoreHandler::Sequence => super::sequences::call(host, index, arguments, vm),

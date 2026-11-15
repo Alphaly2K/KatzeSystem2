@@ -26,10 +26,14 @@ pub(crate) fn multiply(left: [f32; 16], right: [f32; 16]) -> [f32; 16] {
     std::array::from_fn(|i| {
         let row = i / 4;
         let col = i % 4;
-        let p = mul(
-            std::array::from_fn(|j| left[row * 4 + j]),
-            std::array::from_fn(|j| right[j * 4 + col]),
-        );
+        let left = std::array::from_fn(|j| left[row * 4 + j]);
+        let right = std::array::from_fn(|j| right[j * 4 + col]);
+        // 最后一行以右矩阵为 SSE 目的操作数，保留其 NaN 载荷优先级。
+        let p = if row == 3 {
+            mul(right, left)
+        } else {
+            mul(left, right)
+        };
         if row == 0 || row == 3 {
             scalar(1, scalar(1, p[0], p[1]), scalar(1, p[2], p[3]))
         } else {
@@ -260,4 +264,51 @@ pub(super) fn yaw_pitch_roll(angles: [f32; 3]) -> [f32; 16] {
         0.0,
         1.0,
     ]
+}
+
+pub(crate) fn sin_cos(angle: f32) -> (f32, f32) {
+    if angle.is_nan() {
+        let nan = f32::from_bits(angle.to_bits() | 0x0040_0000);
+        (nan, nan)
+    } else if angle.is_infinite() {
+        let nan = f32::from_bits(0xffc0_0000);
+        (nan, nan)
+    } else {
+        let bits = angle.to_bits();
+        let magnitude = bits & 0x7fff_ffff;
+        if magnitude >= 0x5f00_0000 {
+            // FSINCOS 越过 2^63 时不压入第二个结果，随后读空栈得到负 indefinite。
+            return (f32::from_bits(0xffc0_0000), angle);
+        }
+        let mut reduced = angle as f64;
+        if magnitude >= 0x3f80_0000 {
+            // 原 x87 用 66 位 π 约化；先做整数取余，避免大角度丢失低位。
+            const PI: u128 = 0x3_243f_6a88_85a3_08d3;
+            let exponent = (magnitude >> 23) as usize;
+            let significand = ((magnitude & 0x7f_ffff) | 0x80_0000) as u128;
+            let remainder = (significand << (exponent - 86)) % (2 * PI);
+            let remainder = if remainder > PI {
+                remainder as i128 - (2 * PI) as i128
+            } else {
+                remainder as i128
+            };
+            reduced = remainder as f64 / 18_446_744_073_709_551_616.0;
+            if bits >> 31 != 0 {
+                reduced = -reduced;
+            }
+        }
+        (reduced.sin() as f32, reduced.cos() as f32)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn multiply_last_row_preserves_right_nan_priority() {
+        let left = [f32::from_bits(0xffc0_1234); 16];
+        let right = [f32::from_bits(0x7fc0_5678); 16];
+        let result = super::multiply(left, right).map(f32::to_bits);
+        assert_eq!(&result[..12], &[0xffc0_1234; 12]);
+        assert_eq!(&result[12..], &[0x7fc0_5678; 4]);
+    }
 }

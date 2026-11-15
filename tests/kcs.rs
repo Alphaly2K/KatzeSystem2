@@ -419,7 +419,7 @@ fn numeric_parameters_parse_raw_quoted_bytes_and_abort_invalid_tokens_before_wri
 }
 
 #[test]
-fn ordinary_identity_keeps_zero_addresses_and_shared_fallback_distinct() {
+fn ordinary_matrices_keep_transform_order_zero_addresses_and_shared_fallback_distinct() {
     let identity = [
         1f32, 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.,
     ]
@@ -431,7 +431,7 @@ fn ordinary_identity_keeps_zero_addresses_and_shared_fallback_distinct() {
     let mut state = katze_system2::expression::State::new(0);
     let mut host = kcs::CoreHost::new(&mut state);
     assert_eq!(host.implicit_matrix, [0; 16]);
-    for address in [0u32, 0x8000_0001, u32::MAX] {
+    for address in [0u32, 1, 0x8000_0001, u32::MAX] {
         let mut vm = kcs::Interpreter::new(
             kcs::Program::from_code(&[], vec![0xa5; 80], 0).unwrap(),
             vec![0xb6; 80],
@@ -444,12 +444,57 @@ fn ordinary_identity_keeps_zero_addresses_and_shared_fallback_distinct() {
         let mut memory = vec![0xa5; 80];
         let mut external = vec![0xb6; 80];
         match address {
-            0 => memory[..64].copy_from_slice(&bytes),
+            0 | 1 => memory[address as usize..address as usize + 64].copy_from_slice(&bytes),
             0x8000_0001 => external[1..65].copy_from_slice(&bytes),
             _ => assert_eq!(host.implicit_matrix, identity),
         }
         if address != u32::MAX {
             assert_eq!(host.implicit_matrix, [0; 16]);
+        }
+        assert_eq!(vm.read(0, 80).unwrap(), memory);
+        assert_eq!(vm.read(0x8000_0000, 80).unwrap(), external);
+        for (native, values) in [
+            (206, [2.0f32, -3.0, 4.0]),
+            (204, [0.25, -0.5, 0.75]),
+            (205, [5.0, 6.0, 7.0]),
+        ] {
+            let arguments: Vec<_> = [address]
+                .into_iter()
+                .chain(values.map(f32::to_bits))
+                .flat_map(u32::to_le_bytes)
+                .collect();
+            assert_eq!(
+                kcs::Host::call(&mut host, native, &arguments, &mut vm).unwrap(),
+                kcs::NativeReturn::Continue
+            );
+            assert!(kcs::Host::call(&mut host, native, &[0; 4], &mut vm).is_err());
+        }
+        let expected: [u32; 16] = [
+            0x3fa4_61ce,
+            0x3f99_2343,
+            0x3f75_7744,
+            0,
+            0x400f_781b,
+            0xbff1_2ff5,
+            0xbf26_bf04,
+            0,
+            0xbf2f_5ad8,
+            0xbffe_cd18,
+            0x4059_ad4d,
+            0,
+            0x40a0_0000,
+            0x40c0_0000,
+            0x40e0_0000,
+            0x3f80_0000,
+        ];
+        let bytes: Vec<_> = expected
+            .iter()
+            .flat_map(|value| value.to_le_bytes())
+            .collect();
+        match address {
+            0 | 1 => memory[address as usize..address as usize + 64].copy_from_slice(&bytes),
+            0x8000_0001 => external[1..65].copy_from_slice(&bytes),
+            _ => assert_eq!(host.implicit_matrix, expected),
         }
         assert_eq!(vm.read(0, 80).unwrap(), memory);
         assert_eq!(vm.read(0x8000_0000, 80).unwrap(), external);

@@ -5,6 +5,7 @@ pub(super) enum CoreHandler {
     Settings,
     Storage,
     System,
+    Matrix,
     Data,
     MapData,
     Sequence,
@@ -80,6 +81,7 @@ pub(super) fn core(index: u32) -> CoreHandler {
         424 | 425 => CoreHandler::Sequence,
         863..=868 => CoreHandler::RecordStack,
         350..=358 => CoreHandler::Vector,
+        204..=207 => CoreHandler::Matrix,
         1
         | 4
         | 5
@@ -94,7 +96,6 @@ pub(super) fn core(index: u32) -> CoreHandler {
         | 75
         | 76
         | 149
-        | 207
         | 209..=213
         | 567
         | 787

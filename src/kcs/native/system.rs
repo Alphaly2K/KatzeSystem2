@@ -55,7 +55,7 @@ pub(super) fn call(
         return Ok(NativeReturn::YieldVoid);
     }
     let count = match index {
-        1 | 6 | 9 | 71 | 75 | 207 | 209 | 210 | 212 | 213 | 393 | 1040 => 1,
+        1 | 6 | 9 | 71 | 75 | 209 | 210 | 212 | 213 | 393 | 1040 => 1,
         8 | 149 | 211 | 392 | 1049 => 2,
         35 | 36 => 3,
         787 => 4,
@@ -88,19 +88,6 @@ pub(super) fn call(
         }
         392 | 1049 => return crate::kcs::message_text::call(index, &args, vm),
 
-        207 => {
-            let identity = std::array::from_fn(|i| if i % 5 == 0 { 1f32.to_bits() } else { 0 });
-            if vm.read(args[0], 1).is_ok() {
-                let bytes: Vec<_> = identity
-                    .iter()
-                    .flat_map(|value| value.to_le_bytes())
-                    .collect();
-                vm.write(args[0], &bytes)?;
-            } else {
-                host.implicit_matrix = identity;
-            }
-            NativeReturn::Continue
-        }
         1 | 1040 => return crate::kcs::debug::call(host, index, args[0], vm),
         6 => NativeReturn::Value(args[0]),
         9 => {
