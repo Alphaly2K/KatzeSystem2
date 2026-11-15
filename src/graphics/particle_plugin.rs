@@ -9,6 +9,7 @@ pub(super) enum Kind {
     Down,
     Sweat,
     Dis,
+    Common,
 }
 
 fn u16_at(bytes: &[u8], at: usize) -> Option<u16> {
@@ -64,6 +65,8 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
         Kind::Sweat
     } else if name.eq_ignore_ascii_case(b"em_dis.ppi") {
         Kind::Dis
+    } else if name.eq_ignore_ascii_case(b"em_common.ppi") {
+        Kind::Common
     } else {
         return None;
     };
