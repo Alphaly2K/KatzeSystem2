@@ -55,6 +55,7 @@ mod particle_task;
 pub use particle_task::Particle3DObject;
 mod particle_anger;
 mod particle_angry;
+mod particle_asease;
 mod particle_common;
 mod particle_dis;
 mod particle_down;
