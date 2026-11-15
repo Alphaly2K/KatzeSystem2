@@ -61,8 +61,7 @@ pub struct Image {
     info: StandardInfo,
     surface: Surface,
     attributes: BTreeMap<u16, [u32; 5]>,
-    alpha_mask: u32,
-    pub(crate) auxiliary: u32,
+    pub(crate) alpha_mask: u32,
     pub(super) filter_revision: u64,
 }
 
@@ -82,7 +81,6 @@ impl Image {
             surface: Surface::new(size)?,
             attributes: BTreeMap::new(),
             alpha_mask: 0,
-            auxiliary: 0,
             filter_revision: 0,
         })
     }
@@ -97,7 +95,6 @@ impl Image {
             surface: Surface::from_bgra(frame.info.size, frame.pixels)?,
             attributes: frame.attributes,
             alpha_mask: 0,
-            auxiliary: 0,
             filter_revision: 0,
         })
     }
@@ -123,9 +120,9 @@ impl Image {
         &mut self.info
     }
 
-    /// 普通 728 保存的附加 DWORD，构造时为零。
-    pub fn auxiliary_value(&self) -> u32 {
-        self.auxiliary
+    /// 列表合成使用的 Alpha 掩码通道；普通 728 保留原始 DWORD。
+    pub fn alpha_mask(&self) -> u32 {
+        self.alpha_mask
     }
 
     /// 查询低十六位编号对应的五 DWORD 属性记录。
@@ -224,12 +221,15 @@ impl Image {
         opacity: u32,
         clip: Rect,
         has_alpha: &mut Option<bool>,
-    ) {
+    ) -> Result<()> {
         let Some(region) = self.list_region(source, position, base, clip) else {
-            return;
+            return Ok(());
         };
         if source.alpha_mask != 0 {
             let channel = source.alpha_mask as usize - 1;
+            if channel >= 4 {
+                return Err(Error::new(0, "图像 Alpha 掩码通道须为零至四"));
+            }
             let stride = self.surface.stride();
             let source_stride = source.surface.stride();
             for row in 0..region.height {
@@ -243,7 +243,7 @@ impl Image {
                     self.surface.pixels_mut()[target] = ((alpha * weight - 1) >> 8) as u8;
                 }
             }
-            return;
+            return Ok(());
         }
         let has_alpha = *has_alpha.get_or_insert_with(|| {
             source
@@ -267,6 +267,7 @@ impl Image {
             self.surface
                 .blend_region_raw(&source.surface, region, opacity);
         }
+        Ok(())
     }
 
     /// 普通 111 的后续图像合成，保留首图几何、零透明度和独立裁剪规则。
@@ -832,7 +833,8 @@ impl Images {
         if let Some(geometry) = source.1 {
             source_image.image.info.offset = geometry.offset;
         }
-        self.data
+        let result = self
+            .data
             .get_mut(&target_data)
             .unwrap()
             .image
@@ -846,7 +848,7 @@ impl Images {
             );
         source_image.image.info = original_info;
         self.data.insert(source_data, source_image);
-        Ok(())
+        result
     }
 
     pub(crate) fn list_bounds(

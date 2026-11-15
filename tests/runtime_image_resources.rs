@@ -1025,6 +1025,53 @@ fn difimage_references_hold_resources_copy_cached_base_and_query_current_attribu
 }
 
 #[test]
+fn resource_mask_controls_list_alpha_and_can_return_to_color_compositing() {
+    use katze_system2::graphics::{ImageList, ImageListProperties};
+
+    for budget in [1, 4096] {
+        let mut code = Vec::new();
+        call(&mut code, 733, &[2, 1]);
+        ins(&mut code, 0x26, &[0]);
+        handle_call(&mut code, 736, &[0, 0, 1, 1, 0xff80_8080]);
+        handle_call(&mut code, 736, &[1, 0, 1, 1, 0x0080_8080]);
+        handle_call(&mut code, 728, &[4]);
+        call(&mut code, 65, &[]);
+        handle_call(&mut code, 728, &[0]);
+        call(&mut code, 65, &[]);
+        let mut runtime = runtime(&code, budget);
+        let task = runtime.create(0, kind::ORDINARY, b"mask", b"").unwrap();
+        runtime.update(0, 1).unwrap();
+        let resource = word(vm(&runtime, task), 0);
+
+        let images = runtime.images_mut();
+        let background = images.create(99, [2, 1]).unwrap();
+        images
+            .get_mut(background)
+            .unwrap()
+            .pixels_mut()
+            .copy_from_slice(&[0xff12_3456u32, 0xffab_cdef].map(u32::to_le_bytes).concat());
+        let mut list = ImageList::new(99, [2, 1], images).unwrap();
+        list.set(0, background, ImageListProperties::default(), images)
+            .unwrap();
+        list.set_resource(1, resource, ImageListProperties::default(), images)
+            .unwrap();
+        list.redraw(images).unwrap();
+        assert_eq!(
+            images.get(list.image()).unwrap().surface().pixels(),
+            [0xff12_3456u32, 0x00ab_cdef].map(u32::to_le_bytes).concat()
+        );
+
+        runtime.update(1, 1).unwrap();
+        let images = runtime.images_mut();
+        list.redraw(images).unwrap();
+        assert_eq!(
+            images.get(list.image()).unwrap().surface().pixels(),
+            [0xff80_8080u32, 0xffab_cdef].map(u32::to_le_bytes).concat()
+        );
+    }
+}
+
+#[test]
 fn resource_controls_preserve_alpha_cache_geometry_pixel_origin_and_return_stack() {
     for budget in [1, 4096] {
         for width in [0, 2] {
@@ -1105,7 +1152,7 @@ fn resource_controls_preserve_alpha_cache_geometry_pixel_origin_and_return_stack
             assert_eq!(word(vm, 56), 0xdead_beef);
             assert!(vm.stack_bytes().is_empty());
             let image = runtime.image_resource(word(vm, 0)).unwrap();
-            assert_eq!(image.auxiliary_value(), 0xfedc_ba98);
+            assert_eq!(image.alpha_mask(), 0xfedc_ba98);
             if width == 0 {
                 assert!(image.surface().pixels().is_empty());
             } else {

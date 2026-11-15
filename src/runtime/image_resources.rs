@@ -347,7 +347,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             let image = self.resources.images.get_mut(image_handle)?;
             let a = read::u32_at(arguments, 4)?;
             if index == 728 {
-                image.auxiliary = a;
+                image.alpha_mask = a;
                 return Ok(NativeReturn::Continue);
             }
             let b = read::u32_at(arguments, 8)?;
