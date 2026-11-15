@@ -60,6 +60,7 @@ mod particle_common;
 mod particle_concentration;
 mod particle_curve;
 mod particle_dark;
+mod particle_dash;
 mod particle_digi;
 mod particle_digi_ring;
 mod particle_dis;

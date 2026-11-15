@@ -72,6 +72,7 @@ pub(super) enum Kind {
     Spark,
     Thunder,
     Paper,
+    Dash,
 }
 
 fn u16_at(bytes: &[u8], at: usize) -> Option<u16> {
@@ -183,6 +184,8 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
         Kind::Thunder
     } else if name.eq_ignore_ascii_case(b"paper.ppi") {
         Kind::Paper
+    } else if name.eq_ignore_ascii_case(b"dash.ppi") {
+        Kind::Dash
     } else if name.eq_ignore_ascii_case(b"sakura.ppi") {
         Kind::Sakura
     } else if name.eq_ignore_ascii_case(b"protect.ppi") {
