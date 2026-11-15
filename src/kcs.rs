@@ -431,6 +431,11 @@ pub trait Host {
         None
     }
 
+    /// 是否允许图形对象装载电影；关闭时仍执行图元替换和名称补全。
+    fn movie_enabled(&self) -> bool {
+        true
+    }
+
     fn input_device(&mut self) -> Option<&mut dyn crate::input::InputDevice> {
         None
     }
@@ -673,6 +678,10 @@ impl<T: Host + ?Sized> Host for &mut T {
 
     fn resource_services(&mut self) -> Option<&mut dyn ResourceServices> {
         (**self).resource_services()
+    }
+
+    fn movie_enabled(&self) -> bool {
+        (**self).movie_enabled()
     }
 
     fn input_device(&mut self) -> Option<&mut dyn crate::input::InputDevice> {

@@ -225,6 +225,10 @@ impl<H: Host, S: TaskServices> Host for TaskHost<'_, H, S> {
         self.inner.resource_services()
     }
 
+    fn movie_enabled(&self) -> bool {
+        self.inner.movie_enabled()
+    }
+
     fn set_task_clock(&mut self, clock: &TaskClock) {
         self.inner.set_task_clock(clock);
     }

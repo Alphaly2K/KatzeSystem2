@@ -25,6 +25,7 @@ pub struct PlaneObject {
     parent_offset: Option<[f32; 3]>,
     shape_kind: u32,
     geometry_name: Vec<u8>,
+    movie: Option<crate::movie::Decoder>,
     echo: Option<super::echo::Echo>,
     echo_paused: bool,
 }
@@ -51,6 +52,7 @@ impl PlaneObject {
             parent_offset: None,
             shape_kind: 0,
             geometry_name: Vec::new(),
+            movie: None,
             echo: None,
             echo_paused: false,
         }
@@ -548,6 +550,7 @@ impl TaskObject for PlaneObject {
         let id = self.id;
         match command.code {
             3 | 68 => {
+                self.movie = None;
                 drawings(host)?.remove(id);
                 if command.code == 68 {
                     self.size = [0.0; 2];
@@ -616,6 +619,7 @@ impl TaskObject for PlaneObject {
                 }
             }
             41 | 42 | 45 => {
+                self.movie = None;
                 drawings(host)?.remove(id);
                 let drawable = if command.code != 45 {
                     let words = words::<8>(buffers.data1.as_deref())?;
@@ -662,6 +666,49 @@ impl TaskObject for PlaneObject {
                     drawings(host)?.insert(id, drawable)?;
                 }
             }
+            43 => {
+                self.movie = None;
+                drawings(host)?.remove(id);
+                let record = buffers
+                    .data1
+                    .as_deref()
+                    .ok_or_else(|| Error::new(0, "对象命令输入缓冲区缺失"))?;
+                let position = words::<3>(Some(record))?.map(f32::from_bits);
+                let name = crate::read::zstr(record, 12)?;
+                if name.len() >= 260 {
+                    return Err(Error::new(0, "电影资源名超过基线缓冲区范围"));
+                }
+                if self.creation_flags == 1 && host.movie_enabled() {
+                    let services = host
+                        .resource_services()
+                        .ok_or_else(|| Error::new(0, "宿主未提供资源服务"))?;
+                    if let Some(source) =
+                        services.open(name, crate::resource::ResourceMode::LooseFirst)?
+                    {
+                        let movie = crate::movie::Decoder::new(source)?;
+                        let size = movie.metadata().size.map(|value| value as f32);
+                        // 装载只连接停止的电影；未收到画面前不提交纹理三角形。
+                        let geometry = Drawable {
+                            bounds: [
+                                [position[0], position[1], 0.],
+                                [
+                                    arithmetic(1, position[0], size[0]),
+                                    arithmetic(1, position[1], size[1]),
+                                    0.,
+                                ],
+                            ],
+                            ..Drawable::default()
+                        };
+                        self.offset = [0.; 2];
+                        self.size = std::array::from_fn(|i| {
+                            arithmetic(2, geometry.bounds[1][i], geometry.bounds[0][i]).abs()
+                        });
+                        self.shape_kind = 3;
+                        drawings(host)?.insert(id, geometry)?;
+                        self.movie = Some(movie);
+                    }
+                }
+            }
             70 => {
                 let name = crate::read::zstr(
                     buffers
@@ -673,6 +720,7 @@ impl TaskObject for PlaneObject {
                 if name.len() >= 260 {
                     return Err(Error::new(0, "几何资源名超过基线缓冲区范围"));
                 }
+                self.movie = None;
                 drawings(host)?.remove(id);
                 if self.creation_flags == 1 {
                     let services = host
@@ -696,6 +744,7 @@ impl TaskObject for PlaneObject {
                 }
             }
             83 => {
+                self.movie = None;
                 drawings(host)?.remove(id);
                 let drawable = Drawable::from_canvas(
                     buffers.data1.as_deref().unwrap_or(&[]),
@@ -982,6 +1031,7 @@ impl TaskObject for PlaneObject {
 
     fn request_delete(&mut self, host: &mut dyn Host, _budget: usize) -> Result<bool> {
         self.stop_echo(host)?;
+        self.movie = None;
         drawings(host)?.remove(self.id);
         self.unregister_input(0, host)?;
         self.control.deletion_requested = 1;
@@ -990,6 +1040,7 @@ impl TaskObject for PlaneObject {
 
     fn prepare_release(&mut self, host: &mut dyn Host, _budget: usize) -> Result<bool> {
         self.stop_echo(host)?;
+        self.movie = None;
         Ok(true)
     }
 }

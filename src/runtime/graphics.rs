@@ -136,12 +136,12 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             | 1067
             | 1069 => 4,
             82 | 88 | 92 | 94 | 95 | 97 | 102 | 103 | 105 | 106 | 258 | 262 | 402 | 455 | 462
-            | 464 | 466 | 534 | 653 | 657 | 848 | 849 | 1066 | 1068 => 8,
+            | 464 | 466 | 534 | 653 | 657 | 701 | 848 | 849 | 1066 | 1068 => 8,
             880 => 16,
             339 => 24,
             84 | 87 | 93 | 101 | 345 | 862 => 20,
             85 | 86 => 16,
-            96 | 100 | 256 | 260 | 263 | 343 | 344 | 463 | 625 | 663 | 879 | 881 => 12,
+            96 | 100 | 256 | 260 | 263 | 343 | 344 | 463 | 625 | 654 | 663 | 879 | 881 => 12,
             104 => 28,
             732 => 52,
             _ => unreachable!(),
@@ -152,7 +152,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         let route_zero = matches!(
             index,
             104 | 105 | 106 | 107 | 256 | 258 | 260 | 261 | 262 | 263 | 339..=342 | 402 | 455 | 732 | 462
-                ..=464 | 534 | 570 | 572 | 625 | 653 | 657 | 663 | 848 | 849 | 862 | 879..=881 | 1065..=1069
+                ..=464 | 534 | 570 | 572 | 625 | 653 | 654 | 657 | 663 | 848 | 849 | 862 | 879..=881 | 1065..=1069
         );
         if route_zero && arguments.len() != count {
             return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
@@ -170,6 +170,55 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         }
         let word = |i: usize| u32::from_le_bytes(arguments[i * 4..i * 4 + 4].try_into().unwrap());
         match index {
+            654 => {
+                let mut first = format_string(vm, word(1), 0)?;
+                let mut second = format_string(vm, word(2), 0)?;
+                first.push(0);
+                second.push(0);
+                self.command_target_with_buffers(
+                    target,
+                    85,
+                    [0; 3],
+                    &mut CommandBuffers {
+                        data0: Some(&mut first),
+                        data1: Some(&mut second),
+                        external: None,
+                    },
+                )?;
+            }
+            701 => {
+                let formatted = format_string(vm, word(1), 0)?;
+                let name = &formatted[..formatted
+                    .iter()
+                    .position(|&byte| byte == 0)
+                    .unwrap_or(formatted.len())];
+                let services = self
+                    .resources
+                    .services
+                    .as_mut()
+                    .ok_or_else(|| Error::new(vm.pc, "运行时未配置资源服务"))?;
+                let mut name = services.resolve(b"movie", name)?;
+                name.truncate(
+                    name.iter()
+                        .position(|&byte| byte == 0)
+                        .unwrap_or(name.len()),
+                );
+                if name.len() >= 260 {
+                    return Err(Error::new(vm.pc, "电影资源名超过基线缓冲区范围"));
+                }
+                let mut record = vec![0; 12];
+                record.extend(name);
+                record.push(0);
+                self.command_target_with_buffers(
+                    target,
+                    43,
+                    [0; 3],
+                    &mut CommandBuffers {
+                        data1: Some(&mut record),
+                        ..Default::default()
+                    },
+                )?;
+            }
             862 => {
                 let mut rectangle = arguments[4..20].to_vec();
                 self.command_target_with_buffers(

@@ -2036,6 +2036,13 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         }
     }
 
+    fn movie_enabled(&self) -> bool {
+        self.host
+            .platform_settings
+            .as_ref()
+            .is_none_or(|settings| settings.etc_disablemovie == 0)
+    }
+
     fn next_task_child(&self, previous: Option<u32>) -> Result<Option<u32>> {
         Ok(self
             .tree

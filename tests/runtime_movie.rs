@@ -2,7 +2,9 @@ use katze_system2::{
     Result,
     audio::SoundFactory,
     expression::State,
-    graphics::{GraphicsBackend, Projection, RenderTarget, SoftwareBackend, TextureFilter},
+    graphics::{
+        GraphicsBackend, GraphicsFactory, Projection, RenderTarget, SoftwareBackend, TextureFilter,
+    },
     kcs::{Program, ResourceServices},
     movie::Decoder,
     resource::ResourceMode,
@@ -60,10 +62,14 @@ fn call(code: &mut Vec<u8>, index: u32, args: &[u32], handle: bool) {
     );
 }
 
-fn setup(code: Vec<u8>, budget: usize, name: &[u8]) -> Runtime<SoundFactory<KcsFactory<Loader>>> {
+type MovieRuntime = Runtime<SoundFactory<GraphicsFactory<KcsFactory<Loader>>>>;
+
+fn setup(code: Vec<u8>, budget: usize, name: &[u8]) -> MovieRuntime {
     let mut data = vec![0; 256];
     data[64..64 + name.len()].copy_from_slice(name);
     data[128..132].copy_from_slice(&7u32.to_le_bytes());
+    data[192..197].copy_from_slice(b"play\0");
+    data[224..233].copy_from_slice(b"%u[G128]\0");
     let mut runtime = Runtime::new(
         0,
         kind::ROOT,
@@ -71,7 +77,9 @@ fn setup(code: Vec<u8>, budget: usize, name: &[u8]) -> Runtime<SoundFactory<KcsF
         State::new(0),
         SoundFactory {
             enabled: true,
-            fallback: KcsFactory::new(Loader(Program::from_code(&code, data, 128).unwrap())),
+            fallback: GraphicsFactory {
+                fallback: KcsFactory::new(Loader(Program::from_code(&code, data, 128).unwrap())),
+            },
         },
     );
     runtime.set_budget(budget, 1 << 20);
@@ -88,7 +96,7 @@ fn setup(code: Vec<u8>, budget: usize, name: &[u8]) -> Runtime<SoundFactory<KcsF
     runtime
 }
 
-fn word(runtime: &Runtime<SoundFactory<KcsFactory<Loader>>>, address: u32) -> u32 {
+fn word(runtime: &MovieRuntime, address: u32) -> u32 {
     u32::from_le_bytes(
         runtime
             .object(2)
@@ -100,6 +108,45 @@ fn word(runtime: &Runtime<SoundFactory<KcsFactory<Loader>>>, address: u32) -> u3
             .try_into()
             .unwrap(),
     )
+}
+
+#[test]
+fn plane_movie_loads_without_exclusive_playback_or_audio_and_keeps_native_return_slot() {
+    let mut code = Vec::new();
+    instruction(&mut code, 0x25, &[0xdead_beef]);
+    call(&mut code, 701, &[0, u32::MAX], false);
+    instruction(&mut code, 0x26, &[0]);
+    instruction(&mut code, 0x25, &[0xdead_beef]);
+    call(&mut code, 701, &[3, 64], false);
+    call(&mut code, 654, &[3, 192, 224], false);
+    instruction(&mut code, 0x26, &[4]);
+    instruction(&mut code, 0x3b, &[]);
+    let mut runtime = setup(code, 4096, b"clip_%u[G128].mpg\0");
+    assert_eq!(runtime.create(0, kind::PLANE, b"layer", b"").unwrap(), 3);
+    runtime.update(0, 1).unwrap();
+    assert_eq!(word(&runtime, 0), 0xdead_beef);
+    assert_eq!(word(&runtime, 4), 0xdead_beef);
+    assert!(runtime.drawing().enabled);
+    let movie = runtime.drawables().get(3).unwrap();
+    assert_eq!(movie.bounds(), [[0.; 3], [32., 32., 0.]]);
+    assert!(movie.triangles().is_empty());
+    assert!(runtime.compose_frame().unwrap().commands.is_empty());
+    let mut audio = [1.; 2048];
+    runtime
+        .object_mut(1)
+        .unwrap()
+        .audio_state_mut()
+        .unwrap()
+        .mix_stereo(48000, &mut audio)
+        .unwrap();
+    assert!(audio.iter().all(|&sample| sample == 0.));
+    runtime.destroy(3).unwrap();
+    assert!(runtime.drawables().get(3).is_none());
+
+    let mut code = Vec::new();
+    call(&mut code, 654, &[0, 192, u32::MAX], false);
+    let mut runtime = setup(code, 4096, b"unused\0");
+    assert!(runtime.update(0, 1).is_err());
 }
 
 #[test]
@@ -222,4 +269,122 @@ fn missing_and_disabled_movies_preserve_the_return_protocol_and_restore_drawing(
         assert_eq!(word(&runtime, 4), 0xdead_beef);
         assert!(runtime.drawing().enabled);
     }
+}
+
+#[test]
+fn plane_movie_sources_release_on_replacement_failure_and_task_cleanup() {
+    use katze_system2::{
+        graphics::{Drawable, Drawables, PlaneObject},
+        kcs::{Host, Interpreter, NativeReturn},
+        runtime::TaskObject,
+        task::{Command, CommandBuffers},
+    };
+    struct HostState {
+        drawings: Drawables,
+        source: Arc<Vec<u8>>,
+        enabled: bool,
+        opens: usize,
+    }
+    impl ResourceServices for HostState {
+        fn read(&mut self, _: &[u8], _: ResourceMode) -> Result<Option<Vec<u8>>> {
+            Ok(None)
+        }
+        fn open(
+            &mut self,
+            name: &[u8],
+            mode: ResourceMode,
+        ) -> Result<Option<katze_system2::io::SharedSource>> {
+            assert_eq!(mode, ResourceMode::LooseFirst);
+            self.opens += 1;
+            Ok((name == b"clip.mpg").then(|| self.source.clone() as _))
+        }
+    }
+    impl Host for HostState {
+        fn call(&mut self, _: u32, _: &[u8], _: &mut Interpreter) -> Result<NativeReturn> {
+            unreachable!()
+        }
+        fn resource_services(&mut self) -> Option<&mut dyn ResourceServices> {
+            Some(self)
+        }
+        fn movie_enabled(&self) -> bool {
+            self.enabled
+        }
+        fn drawables(&mut self) -> Option<&mut Drawables> {
+            Some(&mut self.drawings)
+        }
+        fn canvas_layout(&self) -> Result<Option<katze_system2::graphics::CanvasLayout>> {
+            katze_system2::graphics::CanvasLayout::new([32; 2], [1; 2], [32; 2]).map(Some)
+        }
+    }
+    let mut host = HostState {
+        drawings: Drawables::default(),
+        source: Arc::new(include_bytes!("fixtures/movie/clip.mpg").to_vec()),
+        enabled: true,
+        opens: 0,
+    };
+    let mut plane = PlaneObject::new(7);
+    let send = |plane: &mut PlaneObject, host: &mut HostState, code, value, record: &mut [u8]| {
+        let mut output = 0xdead_beef;
+        plane
+            .dispatch_command_with_buffers(
+                kind::PLANE,
+                &Command {
+                    target: 7,
+                    sender: 19,
+                    code,
+                    data: [0, value, 0],
+                },
+                &mut CommandBuffers {
+                    data1: Some(record),
+                    ..Default::default()
+                },
+                &mut output,
+                host,
+                4096,
+            )
+            .unwrap();
+        assert_eq!(output, 0xdead_beef);
+    };
+    let record = |name: &[u8]| {
+        let mut bytes: Vec<_> = [-5.25f32, 13.5, 777.]
+            .into_iter()
+            .flat_map(f32::to_le_bytes)
+            .collect();
+        bytes.extend(name);
+        bytes.push(0);
+        bytes
+    };
+    for clear in [41, 42, 45, 68, 70, 83, 0] {
+        send(&mut plane, &mut host, 43, 0, &mut record(b"clip.mpg"));
+        assert_eq!(Arc::strong_count(&host.source), 2);
+        assert_eq!(plane.size(), [32.; 2]);
+        assert_eq!(plane.offset(), [0.; 2]);
+        assert_eq!(plane.shape_kind(), 3);
+        assert_eq!(
+            host.drawings.get(7).unwrap().bounds(),
+            [[-5.25, 13.5, 0.], [26.75, 45.5, 0.]]
+        );
+        if clear == 0 {
+            plane.prepare_release(&mut host, 4096).unwrap();
+        } else {
+            send(&mut plane, &mut host, clear, 0, &mut [0; 32]);
+        }
+        assert_eq!(Arc::strong_count(&host.source), 1);
+    }
+    for flags in [0, 1, 2, u32::MAX] {
+        send(&mut plane, &mut host, 43, 0, &mut record(b"clip.mpg"));
+        send(&mut plane, &mut host, 84, flags, &mut []);
+        let previous = host.opens;
+        send(&mut plane, &mut host, 43, 0, &mut record(b"missing"));
+        assert_eq!(host.opens - previous, usize::from(flags == 1));
+        assert!(host.drawings.get(7).is_none());
+        assert_eq!(Arc::strong_count(&host.source), 1);
+        send(&mut plane, &mut host, 84, 1, &mut []);
+    }
+    host.enabled = false;
+    host.drawings.insert(7, Drawable::default()).unwrap();
+    let previous = host.opens;
+    send(&mut plane, &mut host, 43, 0, &mut record(b"clip.mpg"));
+    assert_eq!(host.opens, previous);
+    assert!(host.drawings.get(7).is_none());
 }
