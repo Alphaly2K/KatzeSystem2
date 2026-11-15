@@ -1273,6 +1273,16 @@ fn scatter_effects_use_shared_randomness_and_preserve_task_lifecycle() -> Result
             0,
         ),
         (
+            b"dark.ppi".as_slice(),
+            [570f32, 220., 20., 40., 50., 0.].as_slice(),
+            8,
+            72,
+            [[0., 0.], [0.5, 0.5]],
+            0,
+            0,
+            0,
+        ),
+        (
             b"hadou.ppi".as_slice(),
             [4f32, 640., 360., 1., 800., 50., 50., 20., 120., 220.].as_slice(),
             0,

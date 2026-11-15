@@ -1,9 +1,9 @@
 use super::{Drawable, ParticleMesh, Surface};
 use super::{
     particle_anger::Anger, particle_angry::Angry, particle_asease::Asease, particle_common::Common,
-    particle_concentration::Concentration, particle_digi::Digi, particle_digi_ring::DigiRing,
-    particle_dis::Dis, particle_double::Double, particle_down::Down, particle_energy::Energy,
-    particle_exclamation::Exclamation, particle_film_noise::FilmNoise,
+    particle_concentration::Concentration, particle_dark::Dark, particle_digi::Digi,
+    particle_digi_ring::DigiRing, particle_dis::Dis, particle_double::Double, particle_down::Down,
+    particle_energy::Energy, particle_exclamation::Exclamation, particle_film_noise::FilmNoise,
     particle_flower_burst::FlowerBurst, particle_glint::Glint, particle_hadou::Hadou,
     particle_note::Note, particle_notice::Notice, particle_plugin, particle_protect::Protect,
     particle_question::Question, particle_rain::Rain, particle_rising::Rising, particle_shy::Shy,
@@ -54,6 +54,7 @@ enum Effect {
     Warukira(Warukira),
     Hadou(Hadou),
     Protect(Box<Protect>),
+    Dark(Dark),
 }
 
 impl Effect {
@@ -102,6 +103,7 @@ impl Effect {
             particle_plugin::Kind::Shy => Self::Shy(Box::new(Shy::new(host, image, random))),
             particle_plugin::Kind::Warukira => Self::Warukira(Warukira::new(host, image, random)),
             particle_plugin::Kind::Hadou => Self::Hadou(Hadou::new(host, image)?),
+            particle_plugin::Kind::Dark => Self::Dark(Dark::new(host, image, random)),
             particle_plugin::Kind::Protect => Self::Protect(Box::new(Protect::new(host))),
         })
     }
@@ -183,8 +185,10 @@ impl ParticleRunner {
                     effect
                 };
                 *effect = Some(next?);
-                if let Some(Effect::Protect(effect)) = effect {
-                    effect.write_mesh(host);
+                match effect {
+                    Some(Effect::Protect(effect)) => effect.write_mesh(host),
+                    Some(Effect::Dark(effect)) => effect.write_mesh(host),
+                    _ => {}
                 }
             }
         }
@@ -328,6 +332,14 @@ impl ParticleRunner {
                             effect.write_mesh(host);
                         }
                         Effect::Warukira(effect) => {
+                            effect.update(
+                                delta,
+                                host.source.unwrap_or_default().position_2d,
+                                services.random().unwrap_or(&mut host.random),
+                            );
+                            effect.write_mesh(host);
+                        }
+                        Effect::Dark(effect) => {
                             effect.update(
                                 delta,
                                 host.source.unwrap_or_default().position_2d,
