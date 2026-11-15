@@ -49,6 +49,7 @@ pub(super) enum Kind {
     Rising,
     Double,
     Shy,
+    Warukira,
 }
 
 fn u16_at(bytes: &[u8], at: usize) -> Option<u16> {
@@ -142,6 +143,8 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
         Kind::Double
     } else if name.eq_ignore_ascii_case(b"em_shy.ppi") {
         Kind::Shy
+    } else if name.eq_ignore_ascii_case(b"warukira.ppi") {
+        Kind::Warukira
     } else {
         return None;
     };

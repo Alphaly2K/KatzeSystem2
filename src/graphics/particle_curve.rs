@@ -1,3 +1,5 @@
+use crate::kcs::ieee_float_operation;
+
 fn length(vector: [f32; 3]) -> f32 {
     let squares = vector.map(|n| n * n);
     (((squares[0] + squares[1]) + squares[2]) as f64).sqrt() as f32
@@ -17,7 +19,10 @@ impl TwoPointPath {
         let tangent = if duration == 0. {
             [0.; 3]
         } else {
-            delta.map(|n| (n / length) * strength)
+            delta.map(|n| {
+                let quotient = ieee_float_operation(4, n.to_bits(), length.to_bits());
+                f32::from_bits(ieee_float_operation(3, quotient, strength.to_bits()))
+            })
         };
         Self {
             points,

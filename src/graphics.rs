@@ -81,6 +81,7 @@ mod particle_silent;
 mod particle_sparkle;
 mod particle_surprise;
 mod particle_sweat;
+mod particle_warukira;
 pub(crate) use particle_task::refresh_particle_source;
 mod raster;
 pub use raster::TextureFilter;

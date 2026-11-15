@@ -1259,6 +1259,16 @@ fn scatter_effects_use_shared_randomness_and_preserve_task_lifecycle() -> Result
             0,
         ),
         (
+            b"warukira.ppi".as_slice(),
+            [671f32, 193., 54., 230., 40., 190., 20., 15.].as_slice(),
+            0,
+            32,
+            [[0., 0.], [1., 1.]],
+            0,
+            1,
+            0,
+        ),
+        (
             b"concent.ppi".as_slice(),
             [4f32, 50., 15., 800., 345., 1500., 900.].as_slice(),
             4,

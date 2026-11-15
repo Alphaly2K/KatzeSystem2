@@ -8,6 +8,7 @@ use super::{
     particle_notice::Notice, particle_plugin, particle_question::Question, particle_rain::Rain,
     particle_rising::Rising, particle_shy::Shy, particle_sigh::Sigh, particle_silent::Silent,
     particle_sparkle::Sparkle, particle_surprise::Surprise, particle_sweat::Sweat,
+    particle_warukira::Warukira,
 };
 use crate::kcs::{
     Host, Interpreter, ParticleHost, ParticleSource, ParticleTask, Program, ScriptRandom,
@@ -50,6 +51,7 @@ enum Effect {
     Rising(Rising),
     Double(Double),
     Shy(Box<Shy>),
+    Warukira(Warukira),
 }
 
 impl Effect {
@@ -93,6 +95,7 @@ impl Effect {
             particle_plugin::Kind::Rising => Self::Rising(Rising::new(host, image, random)),
             particle_plugin::Kind::Double => Self::Double(Double::new(host, image)),
             particle_plugin::Kind::Shy => Self::Shy(Box::new(Shy::new(host, image, random))),
+            particle_plugin::Kind::Warukira => Self::Warukira(Warukira::new(host, image, random)),
         })
     }
 }
@@ -307,6 +310,14 @@ impl ParticleRunner {
                             effect.write_mesh(host);
                         }
                         Effect::Sparkle(effect) => {
+                            effect.update(
+                                delta,
+                                host.source.unwrap_or_default().position_2d,
+                                services.random().unwrap_or(&mut host.random),
+                            );
+                            effect.write_mesh(host);
+                        }
+                        Effect::Warukira(effect) => {
                             effect.update(
                                 delta,
                                 host.source.unwrap_or_default().position_2d,
