@@ -1,4 +1,25 @@
-use crate::read;
+use crate::{Result, read, text};
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, Weak, atomic::AtomicU32},
+};
+
+#[derive(Default)]
+// 装载程序持有强引用，停止效果不卸载共享激活状态。
+pub(super) struct Activations(BTreeMap<String, Weak<AtomicU32>>);
+
+impl Activations {
+    pub(super) fn load(&mut self, name: &[u8]) -> Result<Arc<AtomicU32>> {
+        let key = text::cp932(name)?.replace('\\', "/").to_uppercase();
+        self.0.retain(|_, state| state.strong_count() != 0);
+        if let Some(state) = self.0.get(&key).and_then(Weak::upgrade) {
+            return Ok(state);
+        }
+        let state = Arc::new(AtomicU32::new(1));
+        self.0.insert(key, Arc::downgrade(&state));
+        Ok(state)
+    }
+}
 
 #[derive(Clone, Copy)]
 pub(super) enum Kind {
@@ -20,6 +41,7 @@ pub(super) enum Kind {
     Silent,
     Question,
     Sparkle,
+    Concentration,
 }
 
 fn u16_at(bytes: &[u8], at: usize) -> Option<u16> {
@@ -97,6 +119,8 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
         Kind::Question
     } else if name.eq_ignore_ascii_case(b"kirakira.ppi") {
         Kind::Sparkle
+    } else if name.eq_ignore_ascii_case(b"concent.ppi") {
+        Kind::Concentration
     } else {
         return None;
     };
@@ -118,4 +142,44 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
         _ => 0x0002_0001,
     };
     (constant(3)? == version && constant(4)? == 1).then_some(kind)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::Ordering;
+
+    #[test]
+    fn activation_is_shared_until_the_last_loaded_program_is_released() -> Result<()> {
+        let mut states = Activations::default();
+        let first = states.load(b"\x83\x5c\\Concent.ppi")?;
+        assert_eq!(first.load(Ordering::Relaxed), 1);
+        first.store(20, Ordering::Relaxed);
+        let second = states.load(b"\x83\x5c/concent.PPI")?;
+        assert!(Arc::ptr_eq(&first, &second));
+        let effect = first.clone();
+        drop(first);
+        drop(effect);
+        assert_eq!(
+            states
+                .load(b"\x83\x5c/CONCENT.ppi")?
+                .load(Ordering::Relaxed),
+            20
+        );
+        assert_eq!(
+            states.load(b"other/concent.ppi")?.load(Ordering::Relaxed),
+            1
+        );
+        drop(second);
+        let reloaded = states.load(b"\x83\x5c/concent.ppi")?;
+        assert_eq!(reloaded.load(Ordering::Relaxed), 1);
+        assert_eq!(states.0.len(), 1);
+        assert_eq!(
+            Activations::default()
+                .load(b"\x83\x5c/concent.ppi")?
+                .load(Ordering::Relaxed),
+            1
+        );
+        Ok(())
+    }
 }

@@ -57,6 +57,8 @@ mod particle_anger;
 mod particle_angry;
 mod particle_asease;
 mod particle_common;
+mod particle_concentration;
+mod particle_curve;
 mod particle_dis;
 mod particle_down;
 mod particle_exclamation;

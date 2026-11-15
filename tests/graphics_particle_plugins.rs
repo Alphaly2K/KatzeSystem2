@@ -1216,13 +1216,14 @@ fn film_noise_culls_hidden_layers_ignores_source_motion_and_restarts_randomness(
 
 #[test]
 fn scatter_effects_use_shared_randomness_and_preserve_task_lifecycle() -> Result<()> {
-    for (name, values, integers, floats, uv) in [
+    for (name, values, integers, floats, uv, mesh_index) in [
         (
             b"asease.ppi".as_slice(),
             [782f32, 169., 62., 30., 15., 80., 120.].as_slice(),
             0,
             48,
             [[0., 0.], [1., 1.]],
+            0,
         ),
         (
             b"kirakira.ppi".as_slice(),
@@ -1230,6 +1231,15 @@ fn scatter_effects_use_shared_randomness_and_preserve_task_lifecycle() -> Result
             4,
             16,
             [[0., 0.5], [0.5, 1.]],
+            0,
+        ),
+        (
+            b"concent.ppi".as_slice(),
+            [4f32, 50., 15., 800., 345., 1500., 900.].as_slice(),
+            4,
+            4,
+            [[0., 0.], [1., 1.]],
+            3,
         ),
     ] {
         let mut runtime = runtime(plugin(name))?;
@@ -1274,7 +1284,9 @@ fn scatter_effects_use_shared_randomness_and_preserve_task_lifecycle() -> Result
             .particle_mesh()
             .unwrap()
             .clone();
-        let quad = mesh.projected_quad(0, &Projection::default()).unwrap();
+        let quad = mesh
+            .projected_quad(mesh_index, &Projection::default())
+            .unwrap();
         assert!(quad[0].color >> 24 > 0);
         assert_eq!([quad[0].uv, quad[3].uv], uv);
         runtime.dispatch_command(2, command(322))?;
@@ -1285,6 +1297,31 @@ fn scatter_effects_use_shared_randomness_and_preserve_task_lifecycle() -> Result
             Some(&mesh)
         );
         assert_random(&mut runtime, &expected);
+        if name == b"concent.ppi" {
+            let width = parameters[20..24].to_vec();
+            parameters[20..24].fill(0);
+            runtime.dispatch_command_with_buffers(
+                2,
+                command(325),
+                &mut CommandBuffers {
+                    data1: Some(&mut parameters),
+                    ..Default::default()
+                },
+            )?;
+            assert!(runtime.dispatch_command(2, command(321)).is_err());
+            assert_eq!(runtime.dispatch_command(2, command(324))?, 0);
+            assert_eq!(runtime.drawables().get(1).unwrap().display(), 0);
+            assert_random(&mut runtime, &expected);
+            parameters[20..24].copy_from_slice(&width);
+            runtime.dispatch_command_with_buffers(
+                2,
+                command(325),
+                &mut CommandBuffers {
+                    data1: Some(&mut parameters),
+                    ..Default::default()
+                },
+            )?;
+        }
         runtime.dispatch_command(2, command(321))?;
         for _ in 0..integers {
             expected.next_integer();
@@ -1301,7 +1338,7 @@ fn scatter_effects_use_shared_randomness_and_preserve_task_lifecycle() -> Result
             .unwrap()
             .particle_mesh()
             .unwrap()
-            .projected_quad(0, &Projection::default())
+            .projected_quad(mesh_index, &Projection::default())
             .unwrap();
         assert_eq!(restarted[0].color >> 24, 0);
         assert_ne!(restarted[0].position, quad[0].position);

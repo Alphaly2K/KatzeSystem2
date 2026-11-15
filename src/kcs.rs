@@ -34,7 +34,9 @@ pub use crate::task::TaskClock;
 pub(crate) use configuration::save_configuration;
 pub(crate) use host::hierarchy_query;
 pub use host::{CoreHost, HostState, MenuItemRequest, WindowCloseRequest};
-pub(crate) use matrix::{multiply as multiply_matrix, transform as transform_vector};
+pub(crate) use matrix::{
+    multiply as multiply_matrix, normalize4 as normalize_vector, transform as transform_vector,
+};
 pub use memory::MemoryCopyMode;
 pub(crate) use memory::copy as copy_memory;
 pub(crate) use memory::copy_between as copy_memory_between;

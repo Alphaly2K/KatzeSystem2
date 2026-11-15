@@ -45,7 +45,7 @@ pub(crate) fn transform(v: V, matrix: [f32; 16]) -> V {
     })
 }
 
-pub(super) fn normalize4(v: V) -> V {
+pub(crate) fn normalize4(v: V) -> V {
     let square = (v[0] * v[0] + v[1] * v[1]) + (v[2] * v[2] + v[3] * v[3]);
     let seed = sse::reciprocal_sqrt(square);
     let mut factor = (3.0 - square * (seed * seed)) * 0.5 * seed;

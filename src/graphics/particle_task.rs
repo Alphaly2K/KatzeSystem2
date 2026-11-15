@@ -1,11 +1,12 @@
 use super::{Drawable, ParticleMesh, Surface};
 use super::{
     particle_anger::Anger, particle_angry::Angry, particle_asease::Asease, particle_common::Common,
-    particle_dis::Dis, particle_down::Down, particle_exclamation::Exclamation,
-    particle_film_noise::FilmNoise, particle_flower_burst::FlowerBurst, particle_note::Note,
-    particle_notice::Notice, particle_plugin, particle_question::Question, particle_rain::Rain,
-    particle_sigh::Sigh, particle_silent::Silent, particle_sparkle::Sparkle,
-    particle_surprise::Surprise, particle_sweat::Sweat,
+    particle_concentration::Concentration, particle_dis::Dis, particle_down::Down,
+    particle_exclamation::Exclamation, particle_film_noise::FilmNoise,
+    particle_flower_burst::FlowerBurst, particle_note::Note, particle_notice::Notice,
+    particle_plugin, particle_question::Question, particle_rain::Rain, particle_sigh::Sigh,
+    particle_silent::Silent, particle_sparkle::Sparkle, particle_surprise::Surprise,
+    particle_sweat::Sweat,
 };
 use crate::kcs::{
     Host, Interpreter, ParticleHost, ParticleSource, ParticleTask, Program, ScriptRandom,
@@ -14,7 +15,7 @@ use crate::resource::ResourceMode;
 use crate::runtime::{BaseObject, TaskObject};
 use crate::task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock};
 use crate::{Error, Result, read};
-use std::sync::Arc;
+use std::sync::{Arc, atomic::AtomicU32};
 
 enum ParticleProgram {
     Script(Program),
@@ -40,6 +41,7 @@ enum Effect {
     Silent(Silent),
     Question(Question),
     Sparkle(Sparkle),
+    Concentration(Concentration),
 }
 
 impl Effect {
@@ -48,8 +50,9 @@ impl Effect {
         host: &ParticleHost,
         image: [f32; 2],
         random: &mut ScriptRandom,
-    ) -> Self {
-        match kind {
+        activation: Arc<AtomicU32>,
+    ) -> Result<Self> {
+        Ok(match kind {
             particle_plugin::Kind::Rain => Self::Rain(Rain::new(host, image, random)),
             particle_plugin::Kind::Notice => Self::Notice(Notice::new(host, image)),
             particle_plugin::Kind::Anger => Self::Anger(Anger::new(host, image, random)),
@@ -72,7 +75,10 @@ impl Effect {
             particle_plugin::Kind::Silent => Self::Silent(Silent::new(host, image)),
             particle_plugin::Kind::Question => Self::Question(Question::new(host, image)),
             particle_plugin::Kind::Sparkle => Self::Sparkle(Sparkle::new(host, image, random)),
-        }
+            particle_plugin::Kind::Concentration => {
+                Self::Concentration(Concentration::new(host, image, random, activation)?)
+            }
+        })
     }
 }
 
@@ -97,6 +103,7 @@ enum ParticleRunner {
         effect: Option<Effect>,
         origin: u32,
         previous_time: u32,
+        activation: Arc<AtomicU32>,
     },
 }
 
@@ -129,7 +136,7 @@ impl ParticleRunner {
     fn start(&mut self, image: [f32; 2], services: &mut dyn Host) -> Result<()> {
         let particles = self.host_mut();
         particles.reset_quads(particles.quads.len(), image)?;
-        particles.active = true;
+        particles.active = false;
         match self {
             Self::Script(task) => task.origin = 0,
             Self::Builtin {
@@ -137,19 +144,23 @@ impl ParticleRunner {
                 host,
                 effect,
                 origin,
+                activation,
                 ..
             } => {
                 *origin = 0;
-                *effect = Some(if let Some(random) = services.random() {
-                    Effect::new(*kind, host, image, random)
+                *effect = None;
+                let next = if let Some(random) = services.random() {
+                    Effect::new(*kind, host, image, random, activation.clone())
                 } else {
                     let mut random = std::mem::take(&mut host.random);
-                    let effect = Effect::new(*kind, host, image, &mut random);
+                    let effect = Effect::new(*kind, host, image, &mut random, activation.clone());
                     host.random = random;
                     effect
-                });
+                };
+                *effect = Some(next?);
             }
         }
+        self.host_mut().active = true;
         Ok(())
     }
 
@@ -274,6 +285,10 @@ impl ParticleRunner {
                                 host.source.unwrap_or_default().position_2d,
                                 services.random().unwrap_or(&mut host.random),
                             );
+                            effect.write_mesh(host);
+                        }
+                        Effect::Concentration(effect) => {
+                            effect.update(delta, services.random().unwrap_or(&mut host.random));
                             effect.write_mesh(host);
                         }
                         Effect::Question(effect) => {
@@ -418,6 +433,11 @@ impl Particle3DObject {
                 effect: None,
                 origin: 0,
                 previous_time: 0,
+                activation: host
+                    .drawables()
+                    .unwrap()
+                    .particle_activations
+                    .load(name(4)?)?,
             },
         });
         let drawings = host.drawables().unwrap();
@@ -530,10 +550,12 @@ impl TaskObject for Particle3DObject {
                 host,
             )?,
             321 => {
-                if let Some(task) = &mut self.task {
-                    task.start(self.image_size, host)?;
-                }
+                let result = self
+                    .task
+                    .as_mut()
+                    .map_or(Ok(()), |task| task.start(self.image_size, host));
                 self.sync(host)?;
+                result?;
             }
             322 => {
                 if let Some(task) = &mut self.task {

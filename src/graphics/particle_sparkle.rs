@@ -1,3 +1,4 @@
+use super::particle_curve::TwoPointPath;
 use crate::kcs::{ParticleHost, ScriptRandom, native_triangle, transform_vector};
 
 fn integer(value: f32) -> i32 {
@@ -23,70 +24,12 @@ fn fade(from: f32, to: f32, duration: f32, time: f32) -> f32 {
     }
 }
 
-struct Path {
-    points: [[f32; 3]; 2],
-    tangent: [f32; 3],
-    length: f32,
-    duration: f32,
-}
-
-impl Path {
-    fn new(points: [[f32; 3]; 2], duration: f32) -> Self {
-        let delta = std::array::from_fn(|i| points[1][i] - points[0][i]);
-        let length = length(delta);
-        let tangent = if duration == 0. {
-            [0.; 3]
-        } else {
-            delta.map(|n| (n / length) * 1.)
-        };
-        Self {
-            points,
-            tangent,
-            length,
-            duration,
-        }
-    }
-
-    fn at(&self, mut time: f32) -> [f32; 3] {
-        if time <= 0. {
-            return self.points[0];
-        }
-        if time >= self.duration {
-            time = self.duration;
-        }
-        let distance = (time / self.duration) * self.length;
-        if self.length <= distance || distance.is_nan() {
-            return self.points[1];
-        }
-        let t = (distance - 0.) / self.length;
-        let square = t * t;
-        let cube = square * t;
-        let basis = [
-            [2., -2., 1., 1.],
-            [-3., 3., -2., -1.],
-            [0., 0., 1., 0.],
-            [1., 0., 0., 0.],
-        ];
-        let coefficients = basis.map(|row| {
-            std::array::from_fn::<_, 3, _>(|i| {
-                ((self.points[0][i] * row[0] + self.points[1][i] * row[1])
-                    + self.tangent[i] * row[2])
-                    + self.tangent[i] * row[3]
-            })
-        });
-        std::array::from_fn(|i| {
-            ((coefficients[0][i] * cube + coefficients[1][i] * square) + coefficients[2][i] * t)
-                + coefficients[3][i]
-        })
-    }
-}
-
 struct Particle {
     age: i32,
     phase_time: i32,
     phase: u32,
     scale: f32,
-    path: Path,
+    path: TwoPointPath,
     position: [f32; 3],
     current_scale: [f32; 2],
     alpha: u32,
@@ -176,7 +119,7 @@ impl Sparkle {
             phase_time: 0,
             phase: 0,
             scale,
-            path: Path::new([self.anchor, endpoint], duration),
+            path: TwoPointPath::new([self.anchor, endpoint], duration, 1.),
             position: self.anchor,
             current_scale: [scale; 2],
             alpha: 0,
