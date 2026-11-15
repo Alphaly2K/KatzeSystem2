@@ -423,7 +423,7 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
         if matches!(index, 434..=438) {
             return super::prefetch_call(index, arguments, vm, Some(&mut self.services));
         }
-        if matches!(index, 633..=638) {
+        if matches!(index, 633..=640) {
             return self.state.name_table_call(
                 index,
                 arguments,

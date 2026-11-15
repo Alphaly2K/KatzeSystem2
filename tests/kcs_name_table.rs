@@ -16,6 +16,7 @@ impl ResourceServices for Files {
     fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
         assert_eq!(mode, ResourceMode::LooseFirst);
         Ok(match name {
+            b"formats" => Some(b"1\tFirst\tAb\t%s\n2\tMask\tA?\t%s\n3\tAny\t*\t%n\n4\tFormat\tpre\t%f%c%r\n5\tBytes\t\t%s%c\n".to_vec()),
             b"names" => Some(
                 b"#header\r\n1\t\"\x82\xa0\"tail\tV\tC\talias\n2\tBob\t\"V\nW\"\t\talias\n"
                     .to_vec(),
@@ -126,6 +127,64 @@ fn name_tables_preserve_rows_aliases_encoding_and_output_shortcuts() {
 }
 
 #[test]
+fn name_patterns_and_expansion_preserve_case_output_offsets_and_termination() {
+    let mut state = State::new(0);
+    let mut core = CoreHost::new(&mut state);
+    let mut inner = &mut core;
+    let mut files = Files;
+    let mut host = ResourceHost::new(&mut inner, &mut files);
+    let mut vm = Interpreter::new(
+        Program::from_code(&[], vec![0; 256], 0).unwrap(),
+        vec![0; 64],
+    )
+    .unwrap();
+    vm.write(0, b"formats\0").unwrap();
+    let NativeReturn::Value(handle) = call(&mut host, &mut vm, 633, &[0]) else {
+        panic!()
+    };
+    for (name, row, expected) in [
+        (b"Abc".as_slice(), 0, 1),
+        (b"abc", 0, 0),
+        (b"Abc", 1, 1),
+        (b"abc", 1, 0),
+        (b"", 2, 1),
+    ] {
+        vm.write(16, &[name, b"\0"].concat()).unwrap();
+        assert_eq!(
+            call(&mut host, &mut vm, 639, &[handle, row, 16]),
+            NativeReturn::Value(expected)
+        );
+    }
+    vm.write(16, b"Abc12\0").unwrap();
+    assert_eq!(
+        call(&mut host, &mut vm, 640, &[handle, 3, 16, 0x8000_0000]),
+        NativeReturn::Value(1)
+    );
+    assert_eq!(vm.read_string(0x8000_0000).unwrap(), b"pre12");
+    vm.write(16, b"abc,2\0").unwrap();
+    call(&mut host, &mut vm, 640, &[handle, 0, 16, 128]);
+    assert_eq!(vm.read_string(128).unwrap(), b"abc,2,2");
+    vm.write(16, b"\x82\xa0,2\0").unwrap();
+    call(&mut host, &mut vm, 640, &[handle, 0, 16, 128]);
+    assert_eq!(vm.read_string(128).unwrap(), b"\x82\xa0,2");
+    vm.write(16, b"Q\0").unwrap();
+    vm.write(128, &[0xa5; 8]).unwrap();
+    call(&mut host, &mut vm, 640, &[handle, 4, 16, 128]);
+    assert_eq!(vm.read(128, 4).unwrap(), b"Q\0\0\xa5");
+    for index in [639, 640] {
+        assert_eq!(
+            call(&mut host, &mut vm, index, &[0]),
+            NativeReturn::Value(0)
+        );
+        let args: Vec<_> = [handle, 99, 16, 128][..if index == 639 { 3 } else { 4 }]
+            .iter()
+            .flat_map(|n| n.to_le_bytes())
+            .collect();
+        assert!(host.call(index, &args, &mut vm).is_err());
+    }
+}
+
+#[test]
 fn runtime_name_tables_survive_the_creator_and_resource_service_replacement() {
     use katze_system2::runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, kind};
 
@@ -150,6 +209,16 @@ fn runtime_name_tables_survive_the_creator_and_resource_service_replacement() {
                 }
                 instruction(0x2b, &[(3, 637), (3, 12)]);
                 instruction(0x26, &[(3, 4)]);
+                for arg in [(0x13, 0), (3, 0), (3, 32)] {
+                    instruction(0x25, &[arg]);
+                }
+                instruction(0x2b, &[(3, 639), (3, 12)]);
+                instruction(0x26, &[(3, 8)]);
+                for arg in [(0x13, 0), (3, 0), (3, 32), (3, 48)] {
+                    instruction(0x25, &[arg]);
+                }
+                instruction(0x2b, &[(3, 640), (3, 16)]);
+                instruction(0x26, &[(3, 12)]);
                 instruction(0x25, &[(0x13, 0)]);
                 instruction(0x2b, &[(3, 634), (3, 4)]);
             }
@@ -203,6 +272,9 @@ fn runtime_name_tables_survive_the_creator_and_resource_service_replacement() {
         let vm = runtime.object(reader).unwrap().interpreter().unwrap();
         assert_eq!(vm.read_string(32).unwrap(), "あ".as_bytes());
         assert_eq!(vm.read(4, 4).unwrap(), 1u32.to_le_bytes());
+        assert_eq!(vm.read(8, 4).unwrap(), 0u32.to_le_bytes());
+        assert_eq!(vm.read(12, 4).unwrap(), 1u32.to_le_bytes());
+        assert_eq!(vm.read_string(48).unwrap(), b"C");
         assert!(vm.stack_bytes().is_empty());
     }
 }

@@ -11,13 +11,60 @@ pub(super) fn call(
 ) -> Result<NativeReturn> {
     let count = match index {
         17 | 18 | 25 | 26 | 40 | 47 | 48 | 278 => 1,
-        13..=16 | 19..=24 | 46 | 276 | 277 | 540 | 598 | 1002 | 1045 | 1046 | 1051 | 1063 => 2,
+        13..=16
+        | 19..=24
+        | 46
+        | 49
+        | 276
+        | 277
+        | 540
+        | 598
+        | 904
+        | 1002
+        | 1045
+        | 1046
+        | 1051
+        | 1063 => 2,
         37 | 41..=43 | 519 | 539 => 3,
         38 | 44 | 45 => 4,
         _ => unreachable!(),
     };
     let args = words(arguments, count, vm.pc)?;
     Ok(match index {
+        49 => {
+            let source = vm.read_string(args[0])?;
+            let needle = vm.read_string(args[1])?;
+            let mut offset = 0;
+            while offset < source.len() && !source[offset..].starts_with(&needle) {
+                offset += strings::character_width(&source[offset..]);
+            }
+            NativeReturn::Value(offset as u32)
+        }
+        904 => {
+            let old = strings::split(&vm.read_string(args[0])?, b",");
+            let template = strings::split(&strings::format(vm, args[1], 0)?, b",");
+            if old.len() > 2048 || template.len() > 2048 {
+                return Err(Error::new(vm.pc, "KCS 逗号词项表超过缓冲区上限"));
+            }
+            let old: Vec<_> = old.split(|&b| b == 0).filter(|s| !s.is_empty()).collect();
+            let mut output = Vec::new();
+            for (i, token) in template
+                .split(|&b| b == 0)
+                .filter(|s| !s.is_empty())
+                .enumerate()
+            {
+                if i != 0 {
+                    output.push(b',');
+                }
+                output.extend_from_slice(if token == b"@" {
+                    old.get(i).copied().unwrap_or(b"0")
+                } else {
+                    token
+                });
+            }
+            write_string(vm, args[0], &output, 1)?;
+            NativeReturn::Continue
+        }
         37 => {
             let value = args[1] as i32;
             let mut digits = Vec::new();

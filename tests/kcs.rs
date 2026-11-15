@@ -8,6 +8,38 @@ impl kcs::Host for NoHost {
 }
 
 #[test]
+fn substring_search_skips_double_byte_tails_and_comma_merge_keeps_positional_tokens() -> Result<()>
+{
+    use kcs::{Host, NativeReturn};
+    let mut state = katze_system2::expression::State::new(0);
+    let mut host = kcs::CoreHost::new(&mut state);
+    let mut vm =
+        kcs::Interpreter::new(kcs::Program::from_code(&[], vec![0; 128], 0)?, vec![0; 128])?;
+    let arguments: Vec<_> = [0x8000_0000u32, 32]
+        .into_iter()
+        .flat_map(u32::to_le_bytes)
+        .collect();
+    for (needle, expected) in [(b"A".as_slice(), 2), (b"\xa0", 3), (b"", 0), (b"Z", 3)] {
+        vm.write(0x8000_0000, b"\x82\xa0A\0")?;
+        vm.write(32, &[needle, b"\0"].concat())?;
+        assert_eq!(
+            host.call(49, &arguments, &mut vm)?,
+            NativeReturn::Value(expected)
+        );
+    }
+    vm.write(0x8000_0000, b"1,,2,3\0")?;
+    vm.write(32, b"@,9,@,@\0")?;
+    assert_eq!(host.call(904, &arguments, &mut vm)?, NativeReturn::Continue);
+    assert_eq!(vm.read_string(0x8000_0000)?, b"1,9,3,0");
+    vm.write(32, b"\0")?;
+    host.call(904, &arguments, &mut vm)?;
+    assert_eq!(vm.read_string(0x8000_0000)?, b"");
+    assert!(host.call(49, &[0; 4], &mut vm).is_err());
+    assert!(host.call(904, &[0; 4], &mut vm).is_err());
+    Ok(())
+}
+
+#[test]
 fn rectangle_intersection_uses_signed_endpoints_and_clears_empty_results() -> Result<()> {
     use kcs::Host;
     let mut vm = kcs::Interpreter::new(kcs::Program::from_code(&[], vec![0; 16], 64)?, vec![])?;

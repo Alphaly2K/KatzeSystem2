@@ -32,7 +32,7 @@ pub(super) fn core(index: u32) -> CoreHandler {
         13..=26
         | 37
         | 38
-        | 40..=48
+        | 40..=49
         | 276..=278
         | 519
         | 539
@@ -43,6 +43,7 @@ pub(super) fn core(index: u32) -> CoreHandler {
         | 1046
         | 1051
         | 1063 => CoreHandler::Text,
+        904 => CoreHandler::Text,
         33 | 34 | 50..=64 | 218 | 318..=320 | 397 | 461 | 874 | 875 => CoreHandler::Scalar,
         359..=361
         | 533
@@ -210,7 +211,7 @@ pub(crate) fn runtime(index: u32) -> RuntimeHandler {
         196..=200 | 203 | 520 | 527 | 528 | 530..=532 | 853..=857 | 860 | 861 | 905 | 967..=973 => {
             RuntimeHandler::Transition
         }
-        633..=638 => RuntimeHandler::NameTable,
+        633..=640 => RuntimeHandler::NameTable,
         323..=337 | 385 | 386 | 934 | 982 | 991..=994 | 1033 | 1037 | 1038 | 1064 => {
             RuntimeHandler::Cst
         }
