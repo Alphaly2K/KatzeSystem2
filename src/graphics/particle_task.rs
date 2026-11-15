@@ -4,8 +4,8 @@ use super::{
     particle_dis::Dis, particle_down::Down, particle_exclamation::Exclamation,
     particle_film_noise::FilmNoise, particle_flower_burst::FlowerBurst, particle_note::Note,
     particle_notice::Notice, particle_plugin, particle_question::Question, particle_rain::Rain,
-    particle_sigh::Sigh, particle_silent::Silent, particle_surprise::Surprise,
-    particle_sweat::Sweat,
+    particle_sigh::Sigh, particle_silent::Silent, particle_sparkle::Sparkle,
+    particle_surprise::Surprise, particle_sweat::Sweat,
 };
 use crate::kcs::{
     Host, Interpreter, ParticleHost, ParticleSource, ParticleTask, Program, ScriptRandom,
@@ -39,6 +39,7 @@ enum Effect {
     Surprise(Surprise),
     Silent(Silent),
     Question(Question),
+    Sparkle(Sparkle),
 }
 
 impl Effect {
@@ -70,6 +71,7 @@ impl Effect {
             particle_plugin::Kind::Surprise => Self::Surprise(Surprise::new(host, image)),
             particle_plugin::Kind::Silent => Self::Silent(Silent::new(host, image)),
             particle_plugin::Kind::Question => Self::Question(Question::new(host, image)),
+            particle_plugin::Kind::Sparkle => Self::Sparkle(Sparkle::new(host, image, random)),
         }
     }
 }
@@ -264,6 +266,14 @@ impl ParticleRunner {
                         }
                         Effect::Surprise(effect) => {
                             effect.update(delta, host.source.unwrap_or_default().position_2d);
+                            effect.write_mesh(host);
+                        }
+                        Effect::Sparkle(effect) => {
+                            effect.update(
+                                delta,
+                                host.source.unwrap_or_default().position_2d,
+                                services.random().unwrap_or(&mut host.random),
+                            );
                             effect.write_mesh(host);
                         }
                         Effect::Question(effect) => {
