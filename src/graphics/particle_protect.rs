@@ -75,7 +75,11 @@ impl Protect {
             phase_time: 0.,
             phase: 0,
             alpha: 0,
-            mode: u32::from(integer(p[5]) != 0),
+            mode: if integer(p[5]) != 0 {
+                1
+            } else {
+                host.render_mode
+            },
             updated: false,
             uv: std::array::from_fn(|index| [index % 5, index / 5].map(|n| n as f32 / 5.)),
         }

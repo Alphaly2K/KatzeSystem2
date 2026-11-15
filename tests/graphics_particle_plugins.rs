@@ -1501,7 +1501,7 @@ fn scatter_effects_use_shared_randomness_and_preserve_task_lifecycle() -> Result
 }
 
 #[test]
-fn protect_initializes_without_a_flash_and_restarts_its_blending_and_uv_motion() -> Result<()> {
+fn protect_initializes_without_a_flash_and_preserves_blending_when_restarted() -> Result<()> {
     let mut runtime = runtime_with_count(plugin(b"protect.ppi"), 26)?;
     runtime.update(1, 1)?;
     let mut parameters = [0; 128];
@@ -1523,7 +1523,7 @@ fn protect_initializes_without_a_flash_and_restarts_its_blending_and_uv_motion()
     for start in [2, 202] {
         runtime.dispatch_command(2, command(321))?;
         let drawable = runtime.drawables().get(1).unwrap();
-        assert_eq!(drawable.blend_mode(), 0);
+        assert_eq!(drawable.blend_mode(), u32::from(start != 2));
         let mesh = drawable.particle_mesh().unwrap();
         let quad = mesh.projected_quad(1, &Projection::default()).unwrap();
         assert!(quad.iter().all(|v| v.position == quad[0].position));
