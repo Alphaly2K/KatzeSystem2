@@ -214,7 +214,7 @@ pub(crate) fn runtime(index: u32) -> RuntimeHandler {
         323..=337 | 385 | 386 | 934 | 982 | 991..=994 | 1033 | 1037 | 1038 | 1064 => {
             RuntimeHandler::Cst
         }
-        294..=317 | 388 | 440 | 535 | 586 => RuntimeHandler::Motion,
+        294..=317 | 388 | 440 | 514 | 535 | 586 => RuntimeHandler::Motion,
         458 => RuntimeHandler::SequenceFile,
         240 | 250 => RuntimeHandler::SharedRecord,
         400 => RuntimeHandler::SoundLoop,

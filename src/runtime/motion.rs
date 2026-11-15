@@ -38,6 +38,41 @@ impl MotionSnapshot {
 }
 
 impl<F: ObjectFactory> ObjectHost<'_, F> {
+    fn motion_name_native(&mut self, arguments: &[u8], vm: &Interpreter) -> Result<NativeReturn> {
+        let handle = read::u32_at(arguments, 0)?;
+        if handle == 0 {
+            return Ok(NativeReturn::Value(0));
+        }
+        if arguments.len() != 8 {
+            return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+        }
+        if !self.resources.motion_controllers.contains_key(&handle) {
+            return Err(Error::new(vm.pc, "运动控制器句柄无效"));
+        }
+        let name = format_string(vm, read::u32_at(arguments, 4)?, 0)?;
+        let name = self
+            .resources
+            .services
+            .as_deref_mut()
+            .ok_or_else(|| Error::new(vm.pc, "运行时未配置运动资源服务"))?
+            .resolve(b"mot", &name)?;
+        let name = &name[..name
+            .iter()
+            .position(|&byte| byte == 0)
+            .unwrap_or(name.len())];
+        if name.len() >= 260 {
+            return Err(Error::new(vm.pc, "运动资源名称超过缓冲区上限"));
+        }
+        let name = text::cp932(name)?.encode_utf16().collect::<Vec<_>>();
+        let found = self
+            .resources
+            .motion_controllers
+            .get_mut(&handle)
+            .unwrap()
+            .contains_name(&name)?;
+        Ok(NativeReturn::Value(u32::from(found)))
+    }
+
     fn motion_restore_native(
         &mut self,
         arguments: &[u8],
@@ -300,6 +335,9 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         arguments: &[u8],
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
+        if index == 514 {
+            return self.motion_name_native(arguments, vm);
+        }
         if index == 388 {
             return self.motion_restore_native(arguments, vm);
         }

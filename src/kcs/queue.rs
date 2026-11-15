@@ -89,6 +89,24 @@ impl MotionQueue {
         &self.properties
     }
 
+    /// 按不区分大小写的 UTF-16 名称查询，并从基准重建当前属性。
+    pub fn contains_name(&mut self, name: &[u16]) -> Result<bool> {
+        self.require_idle()?;
+        self.properties = self.base_properties;
+        let key = |name: &[u16]| {
+            let end = name
+                .iter()
+                .position(|&unit| unit == 0)
+                .unwrap_or(name.len());
+            String::from_utf16_lossy(&name[..end]).to_uppercase()
+        };
+        let name = key(name);
+        Ok(self
+            .entries
+            .values()
+            .any(|entry| key(&entry.task.snapshot_name) == name))
+    }
+
     /// 捕获运动名称、分组、参数、相对时刻、控制值和登记的保存数据。
     pub fn snapshot(&self, now: u32) -> Result<Vec<u8>> {
         self.require_idle()?;

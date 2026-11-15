@@ -56,6 +56,29 @@ fn counter(queue: &MotionQueue, id: u32) -> u32 {
 }
 
 #[test]
+fn name_queries_reset_properties_and_keep_path_and_character_width_distinct() {
+    let mut queue = MotionQueue::default();
+    let wide = |name: &str| name.encode_utf16().collect::<Vec<_>>();
+    queue.set_properties([7; 36]).unwrap();
+    assert!(!queue.contains_name(&wide("move")).unwrap());
+    assert_eq!(queue.properties(), &queue.base_properties);
+    let mut named = task(1.0, 0.0, 1, 0);
+    named.snapshot_name = wide("ＭＯＶＥΩ\0ignored");
+    queue.insert(named, 0).unwrap();
+    queue.set_properties([8; 36]).unwrap();
+    assert!(queue.contains_name(&wide("ｍｏｖｅω")).unwrap());
+    assert_eq!(queue.properties(), &queue.base_properties);
+    for name in ["MOVEω", "path/ＭＯＶＥΩ", "other"] {
+        assert!(!queue.contains_name(&wide(name)).unwrap());
+    }
+    let mut named = task(1.0, 0.0, 1, 0);
+    named.snapshot_name = wide("straße");
+    queue.insert(named, 0).unwrap();
+    assert!(queue.contains_name(&wide("STRASSE")).unwrap());
+    assert_eq!(queue.len(), 2);
+}
+
+#[test]
 fn creation_order_and_object_cleanup_keep_completed_tasks_until_every_task_stops() {
     let mut queue = MotionQueue::default();
     let mut host = MotionHost::default();

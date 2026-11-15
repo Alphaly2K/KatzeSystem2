@@ -178,6 +178,7 @@ fn motion_loading_copies_parameters_and_saved_data_and_reuses_programs() {
         bytes.copy_from_slice(&value.to_le_bytes());
     }
     data[1152..1160].copy_from_slice(b"missing\0");
+    data[1180..1186].copy_from_slice(b"mOvE7\0");
     data[1200..1208].copy_from_slice(b"abcdefgh");
     let mut code = Vec::new();
     ins(&mut code, 0x25, &[(3, 0xdead_beef)]);
@@ -228,6 +229,12 @@ fn motion_loading_copies_parameters_and_saved_data_and_reuses_programs() {
         ],
     );
     store(&mut code, 12);
+    for (slot, name) in [(1232, 1180), (1236, 96), (1240, 1152)] {
+        call(&mut code, 514, &[(3, 1), (3, name)]);
+        store(&mut code, slot);
+    }
+    call(&mut code, 514, &[(3, 0), (3, u32::MAX)]);
+    store(&mut code, 1244);
     call(&mut code, 65, &[]);
     call(&mut code, 36, &[(3, 1200), (3, 0xff), (3, 8)]);
     call(&mut code, 307, &[(3, 1), (3, 100), (3, 0)]);
@@ -270,6 +277,11 @@ fn motion_loading_copies_parameters_and_saved_data_and_reuses_programs() {
         let task = runtime.create(0, kind::ORDINARY, b"motion", b"").unwrap();
         runtime.update(0, 1).unwrap();
         let queue = runtime.motion_controller(1).unwrap();
+        let vm = runtime.object(task).unwrap().interpreter().unwrap();
+        assert_eq!(
+            [1232, 1236, 1240, 1244].map(|at| word(vm, at)),
+            [1, 0, 0, 0]
+        );
         assert_eq!(
             (queue.len(), queue.group(1), queue.group(2)),
             (2, Some(-3), Some(7))
