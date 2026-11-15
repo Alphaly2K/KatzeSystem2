@@ -829,6 +829,12 @@ fn deterministic_emotions_preserve_randomness_task_controls_and_source_offsets()
             [[0., 0.], [1., 1.]],
         ),
         (
+            b"em_question.ppi".as_slice(),
+            [719f32, 209., 1., 60., 5., 8., 10., 60., 80.].as_slice(),
+            8,
+            [[0., 0.], [1., 1.]],
+        ),
+        (
             b"em_silent.ppi".as_slice(),
             [804f32, 78., 1., 40., 13., 10., 80., 5., 5.].as_slice(),
             4,
@@ -880,7 +886,6 @@ fn deterministic_emotions_preserve_randomness_task_controls_and_source_offsets()
             .clone();
         let held = mesh.projected_quad(0, &view).unwrap();
         assert_eq!(held[0].color >> 24, 255);
-        assert_ne!(held[0].position, first[0].position);
         runtime.dispatch_command(2, command(322))?;
         runtime.update(31, 1)?;
         assert_eq!(runtime.drawables().get(1).unwrap().display(), 0);

@@ -18,6 +18,7 @@ pub(super) enum Kind {
     Asease,
     Surprise,
     Silent,
+    Question,
 }
 
 fn u16_at(bytes: &[u8], at: usize) -> Option<u16> {
@@ -91,6 +92,8 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
         Kind::Surprise
     } else if name.eq_ignore_ascii_case(b"em_silent.ppi") {
         Kind::Silent
+    } else if name.eq_ignore_ascii_case(b"em_question.ppi") {
+        Kind::Question
     } else {
         return None;
     };

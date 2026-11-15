@@ -3,8 +3,9 @@ use super::{
     particle_anger::Anger, particle_angry::Angry, particle_asease::Asease, particle_common::Common,
     particle_dis::Dis, particle_down::Down, particle_exclamation::Exclamation,
     particle_film_noise::FilmNoise, particle_flower_burst::FlowerBurst, particle_note::Note,
-    particle_notice::Notice, particle_plugin, particle_rain::Rain, particle_sigh::Sigh,
-    particle_silent::Silent, particle_surprise::Surprise, particle_sweat::Sweat,
+    particle_notice::Notice, particle_plugin, particle_question::Question, particle_rain::Rain,
+    particle_sigh::Sigh, particle_silent::Silent, particle_surprise::Surprise,
+    particle_sweat::Sweat,
 };
 use crate::kcs::{
     Host, Interpreter, ParticleHost, ParticleSource, ParticleTask, Program, ScriptRandom,
@@ -37,6 +38,7 @@ enum Effect {
     Asease(Asease),
     Surprise(Surprise),
     Silent(Silent),
+    Question(Question),
 }
 
 impl Effect {
@@ -67,6 +69,7 @@ impl Effect {
             particle_plugin::Kind::Asease => Self::Asease(Asease::new(host, image, random)),
             particle_plugin::Kind::Surprise => Self::Surprise(Surprise::new(host, image)),
             particle_plugin::Kind::Silent => Self::Silent(Silent::new(host, image)),
+            particle_plugin::Kind::Question => Self::Question(Question::new(host, image)),
         }
     }
 }
@@ -260,6 +263,10 @@ impl ParticleRunner {
                             effect.write_mesh(host);
                         }
                         Effect::Surprise(effect) => {
+                            effect.update(delta, host.source.unwrap_or_default().position_2d);
+                            effect.write_mesh(host);
+                        }
+                        Effect::Question(effect) => {
                             effect.update(delta, host.source.unwrap_or_default().position_2d);
                             effect.write_mesh(host);
                         }

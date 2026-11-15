@@ -65,6 +65,7 @@ mod particle_flower_burst;
 mod particle_note;
 mod particle_notice;
 mod particle_plugin;
+mod particle_question;
 mod particle_rain;
 mod particle_sigh;
 mod particle_silent;
