@@ -2008,6 +2008,69 @@ fn dash_keeps_module_activation_across_restarts_and_preserves_task_controls() ->
 }
 
 #[test]
+fn explosion_restarts_with_shared_activation_and_preserves_task_controls() -> Result<()> {
+    let mut runtime = runtime_with_count(plugin(b"exprode.ppi"), 12)?;
+    runtime.update(1, 1)?;
+    let mut parameters = [0; 128];
+    for (i, n) in [640f32, 300., 100., 50., 5., 20., 15.]
+        .into_iter()
+        .enumerate()
+    {
+        parameters[i * 4..i * 4 + 4].copy_from_slice(&n.to_le_bytes());
+    }
+    runtime.dispatch_command_with_buffers(
+        2,
+        command(325),
+        &mut CommandBuffers {
+            data1: Some(&mut parameters),
+            ..Default::default()
+        },
+    )?;
+    let view = Projection::default();
+    for (start, last_alpha) in [(2, 0), (30, 51)] {
+        runtime.dispatch_command(2, command(321))?;
+        let drawable = runtime.drawables().get(1).unwrap();
+        assert_eq!(drawable.blend_mode(), 0);
+        assert!((0..12).all(|i| {
+            drawable
+                .particle_mesh()
+                .unwrap()
+                .projected_quad(i, &view)
+                .unwrap()[0]
+                .color
+                >> 24
+                == 0
+        }));
+        runtime.update(start, 1)?;
+        runtime.update(start + 1, 1)?;
+        let mesh = runtime.drawables().get(1).unwrap().particle_mesh().unwrap();
+        assert_eq!(mesh.projected_quad(0, &view).unwrap()[0].color >> 24, 51);
+        assert_eq!(
+            mesh.projected_quad(11, &view).unwrap()[0].color >> 24,
+            last_alpha
+        );
+        assert_eq!(runtime.dispatch_command(2, command(324))?, 1);
+        runtime.dispatch_command(2, command(322))?;
+        let stopped = runtime.host_mut().random.clone();
+        runtime.update(start + 2, 1)?;
+        assert_random(&mut runtime, &stopped);
+        assert_eq!(runtime.drawables().get(1).unwrap().display(), 0);
+    }
+    runtime.dispatch_command(2, command(323))?;
+    assert!(
+        runtime
+            .drawables()
+            .get(1)
+            .unwrap()
+            .particle_mesh()
+            .is_none()
+    );
+    runtime.destroy(1)?;
+    assert!(runtime.drawables().get(1).is_none());
+    Ok(())
+}
+
+#[test]
 fn paper_shares_randomness_keeps_finite_particles_loaded_and_supports_task_controls() -> Result<()>
 {
     let mut runtime = runtime_with_count(plugin(b"paper.ppi"), 3)?;
