@@ -120,6 +120,54 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             }
             return Ok(NativeReturn::Continue);
         }
+        if index == 740 {
+            if arguments.len() != 8 {
+                return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+            }
+            let addresses = [
+                u32::from_le_bytes(arguments[..4].try_into().unwrap()),
+                u32::from_le_bytes(arguments[4..].try_into().unwrap()),
+            ];
+            for address in addresses {
+                vm.read(address, 4)?;
+            }
+            let settings = self
+                .host
+                .platform_settings
+                .as_ref()
+                .ok_or_else(|| Error::new(vm.pc, "宿主未配置平台设置"))?;
+            let mapping = self.resources.input_coordinates;
+            vm.write(addresses[0], &[0; 4])?;
+            let height = match settings.full_screen_full_pos {
+                0 => {
+                    let bottom = self
+                        .host
+                        .window_content_rect
+                        .map_or(self.host.surface_size[1] as i32, |rectangle| {
+                            rectangle.bottom
+                        });
+                    let offset = if self.resources.compositor.drawing.mode == 0
+                        && self.resources.compositor.drawing.enabled
+                    {
+                        mapping.truncated_device_offset()[1]
+                    } else {
+                        0
+                    };
+                    bottom.wrapping_add(offset)
+                }
+                1 => i32::from(settings.fullscreen_size[1]),
+                2 => i32::from(settings.window_size[1]),
+                _ => return Ok(NativeReturn::Continue),
+            };
+            vm.write(addresses[1], &height.to_le_bytes())?;
+            if settings.full_screen_full_pos != 2 {
+                for (axis, address) in addresses.into_iter().enumerate() {
+                    let value = i32::from_le_bytes(vm.read(address, 4)?.try_into().unwrap());
+                    vm.write(address, &mapping.logical_axis(axis, value).to_le_bytes())?;
+                }
+            }
+            return Ok(NativeReturn::Continue);
+        }
         if index == 739 {
             if arguments.len() != 8 {
                 return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
