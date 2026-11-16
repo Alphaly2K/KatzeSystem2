@@ -2,7 +2,7 @@ use katze_system2::{
     Result,
     expression::State,
     kcs::{
-        CoreHost, Database, Host, Interpreter, NativeReturn, Program, ResourceHost,
+        CoreHost, Database, Host, HostState, Interpreter, NativeReturn, Program, ResourceHost,
         ResourceServices,
     },
     resource::ResourceMode,
@@ -46,6 +46,146 @@ fn table() -> Vec<u8> {
         }
     }
     pack(&plain)
+}
+
+fn dictionary_runtime(budget: usize) -> Runtime<KcsFactory<Loader>> {
+    let mut runtime = Runtime::new(
+        0,
+        kind::ROOT,
+        Box::new(BaseObject::new()),
+        State::new(64),
+        KcsFactory::new(Loader(Program::from_code(&[], vec![], 0).unwrap())),
+    );
+    runtime.set_budget(budget, 10000);
+    let mut numbers = State::new(0);
+    let mut core = CoreHost::new(&mut numbers);
+    core.host = HostState::with_handles(runtime.host().handle_allocator());
+    let database =
+        Database::from_bytes(&table(), [b"<br>".to_vec(), b"]".to_vec(), b"[".to_vec()]).unwrap();
+    let handle = core.create_database(database).unwrap();
+    let mut vm = Interpreter::new(
+        Program::from_code(&[], b"alpha\0\x82\xaa\0".to_vec(), 64).unwrap(),
+        vec![],
+    )
+    .unwrap();
+    for bit in [0, 23, 30] {
+        call(&mut core, &mut vm, 871, &[handle, bit, 0]);
+    }
+    call(&mut core, &mut vm, 871, &[handle, 0, 6]);
+    *runtime.host_mut() = core.host;
+    runtime.numbers_mut().shared[0] = handle as i32;
+    runtime
+}
+
+fn update_dictionary(
+    runtime: &mut Runtime<KcsFactory<Loader>>,
+    scene: &mut katze_system2::runtime::fes::Scene,
+) -> Result<()> {
+    for _ in 0..256 {
+        if runtime.update_fes_scene(0, scene, 100)? {
+            return Ok(());
+        }
+    }
+    panic!("dictionary scene did not finish");
+}
+
+#[test]
+fn dictionary_queries_share_native_marks_across_main_system_and_event_handlers() {
+    use katze_system2::{fes, runtime::fes::Scene};
+    let source = b"#DEFINE\nBASE obj\n#START\ndic_appear $0 1 alpha\ndic_max_appear $0 2 alpha\ndic_id $0 3 alpha\ndic_ind $0 4 alpha\ndic_title $0 5 6 alpha\ndic_update $0 7 8 alpha\ndic_find $0 9 10 0 A z\ndic_title $0 11 11 alpha\ndic_update $0 12 12 alpha\ndic_title $0 13 14 absent\ndic_ind $0 15 absent\ndic_find $0 16 17 99 A z\nwait 999\n#_FES_SLEEP_\ndic_update_clear $0 alpha\ndic_update $0 18 19 alpha\ndic_appear $0 20 alpha\n#obj.PUSH_L\ndic_title $0 21 21 $str99;\ndic_update_clear $0\ndic_update $0 22 23 $str99;\ndic_appear $0 24 $str99;\n";
+    for budget in [1, 4096] {
+        let mut runtime = dictionary_runtime(budget);
+        runtime
+            .numbers_mut()
+            .strings
+            .insert(99, b"\x82\xa9".to_vec());
+        let mut scene = Scene::new(
+            fes::Program::from_text(source).unwrap(),
+            runtime.host().handle_allocator(),
+        )
+        .unwrap();
+        update_dictionary(&mut runtime, &mut scene).unwrap();
+        assert_eq!(&runtime.numbers().shared[1..4], &[0x40800001, 0x800001, 2]);
+        assert_eq!(&runtime.numbers().shared[7..10], &[1, 0x40800001, 1]);
+        assert_eq!(runtime.numbers().shared[12], 0x40800001);
+        assert_eq!(runtime.numbers().shared[16], 0);
+        for (index, text) in [
+            (4, b"[one<br>two][last]".as_slice()),
+            (5, b"title"),
+            (6, b"short"),
+            (10, b"ALPHA"),
+            (11, b"short"),
+            (13, b""),
+            (14, b""),
+            (15, b""),
+            (17, b""),
+        ] {
+            assert_eq!(runtime.numbers().strings[&index], text);
+        }
+        for _ in 0..256 {
+            if runtime
+                .dispatch_fes_system_block(0, &mut scene, "_FES_SLEEP_")
+                .unwrap()
+            {
+                break;
+            }
+        }
+        assert_eq!(&runtime.numbers().shared[18..21], &[0, 0, 0x40800001]);
+        let target = fes::ObjectReference {
+            name: "obj".into(),
+            bank: 0,
+        };
+        let mut finished = false;
+        for _ in 0..256 {
+            if runtime
+                .dispatch_fes_event(0, &mut scene, Some(&target), 2)
+                .unwrap()
+                .is_some()
+            {
+                finished = true;
+                break;
+            }
+        }
+        assert!(finished);
+        assert_eq!(runtime.numbers().strings[&21], b"short");
+        assert_eq!(&runtime.numbers().shared[22..25], &[0, 0, 1]);
+        assert!(
+            runtime
+                .host()
+                .database(runtime.numbers().shared[0] as u32)
+                .unwrap()
+                .is_dirty()
+        );
+    }
+}
+
+#[test]
+fn dictionary_missing_arguments_keep_numeric_effects_and_zero_find_skips_outputs() {
+    use katze_system2::{fes, runtime::fes::Scene};
+    let source = b"#START\ndic_find 0 ($10+=100) ($10+=100) ($10+=100) A z\ndic_title 9999 ($11+=1)\ndic_update $0 ($12+=1) ($13+=1)\ndic_appear $0 ($14+=1)\ndic_id\nwait 999\n#_FES_SLEEP_\ndic_appear 9999 ($15+=1) alpha\n";
+    for budget in [1, 4096] {
+        let mut runtime = dictionary_runtime(budget);
+        let mut scene = Scene::new(
+            fes::Program::from_text(source).unwrap(),
+            runtime.host().handle_allocator(),
+        )
+        .unwrap();
+        update_dictionary(&mut runtime, &mut scene).unwrap();
+        assert_eq!(&runtime.numbers().shared[10..16], &[0, 1, 1, 1, 1, 0]);
+        let mut error = None;
+        for _ in 0..256 {
+            match runtime.dispatch_fes_system_block(0, &mut scene, "_FES_SLEEP_") {
+                Err(found) => {
+                    error = Some(found);
+                    break;
+                }
+                Ok(false) => (),
+                Ok(true) => panic!("invalid database accepted"),
+            }
+        }
+        assert!(error.unwrap().message.contains("数据库句柄无效"));
+        assert_eq!(runtime.numbers().shared[15], 1);
+    }
 }
 
 fn pack(plain: &[u8]) -> Vec<u8> {

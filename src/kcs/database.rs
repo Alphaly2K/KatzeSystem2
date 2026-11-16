@@ -58,6 +58,19 @@ fn key(name: &[u8]) -> Vec<u8> {
     name
 }
 
+fn first_character(bytes: &[u8]) -> u16 {
+    match text(bytes) {
+        [lead, trail, ..]
+            if matches!(lead, 0x81..=0x9f | 0xe0..=0xef)
+                && matches!(trail, 0x40..=0x7e | 0x80..=0xfc) =>
+        {
+            u16::from(*lead) << 8 | u16::from(*trail)
+        }
+        [byte, ..] => u16::from(*byte),
+        [] => 0,
+    }
+}
+
 fn replace_newlines(bytes: &[u8], replacement: &[u8]) -> Result<Vec<u8>> {
     let mut output = Vec::new();
     let mut at = 0;
@@ -191,6 +204,73 @@ impl Database {
         self.dirty != 0
     }
 
+    pub(crate) fn find(&self, from: &[u8], to: &[u8], nth: u32) -> Option<&[u8]> {
+        let (from, to) = (first_character(from), first_character(to));
+        self.entries
+            .keys()
+            .skip_while(|name| {
+                let first = first_character(name);
+                first < from || first > to
+            })
+            // 首项之后只检查上界，保持全角与半角名称交错时的遍历顺序。
+            .take_while(|name| first_character(name) <= to)
+            .nth(nth as usize)
+            .map(Vec::as_slice)
+    }
+
+    pub(crate) fn position(&self, name: &[u8]) -> u32 {
+        let name = key(name);
+        self.entries
+            .keys()
+            .position(|key| *key == name)
+            .map_or(0, |i| i as u32 + 1)
+    }
+
+    pub(crate) fn max_appear(&self, name: &[u8]) -> u32 {
+        self.record(name).map_or(0, |record| {
+            record
+                .terms
+                .iter()
+                .enumerate()
+                .fold(0, |mask, (i, term)| mask | (u32::from(term.is_some()) << i))
+        })
+    }
+
+    pub(crate) fn visible_terms(&self, name: &[u8]) -> Result<Vec<u8>> {
+        let mut output = Vec::new();
+        if let Some(record) = self.record(name) {
+            for (i, term) in record.terms.iter().enumerate() {
+                if let Some(term) = term.as_ref().filter(|_| record.seen & (1 << i) != 0) {
+                    let length = self.formatting[2].len() + term.len() + self.formatting[1].len();
+                    if output.len() + length >= 2560 {
+                        return Err(Error::new(0, "数据库索引输出超过固定缓冲区上限"));
+                    }
+                    output.extend_from_slice(&self.formatting[2]);
+                    output.extend_from_slice(term);
+                    output.extend_from_slice(&self.formatting[1]);
+                }
+            }
+        }
+        Ok(output)
+    }
+
+    pub(crate) fn clear_updates(&mut self, name: Option<&[u8]>) {
+        match name {
+            Some(name) => {
+                if let Some(record) = self.entries.get_mut(&key(name)) {
+                    record.pending = 0;
+                    record.first_seen = 0;
+                }
+            }
+            None => {
+                for record in self.entries.values_mut() {
+                    record.pending = 0;
+                    record.first_seen = 0;
+                }
+            }
+        }
+    }
+
     pub(super) fn mark(&mut self, name: &[u8], bit: u32) {
         if let Some(record) = self.entries.get_mut(&key(name)) {
             if record.seen == 0 {
@@ -277,4 +357,31 @@ pub(crate) fn load(
     let bytes = services.read(&name, ResourceMode::LooseFirst)?;
     let formatting = [values[1].clone(), values[2].clone(), values[3].clone()];
     Database::from_bytes(bytes.as_deref().unwrap_or_default(), formatting)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn range_walk_keeps_halfwidth_names_after_the_first_fullwidth_match() {
+        let mut database = Database::default();
+        for name in [b"A".as_slice(), b"\x82\xa9", b"\x82\xe2", b"\xa6half"] {
+            database
+                .entries
+                .insert(name.to_vec(), DatabaseRecord::default());
+        }
+        assert_eq!(
+            database.find(b"\x82\xa9", b"\x82\xfc", 2),
+            Some(b"\xa6half".as_slice())
+        );
+        assert_eq!(database.find(b"\x82\xaa", b"\x82\xaa", 0), None);
+        assert_eq!(database.find(b"z", b"A", 0), None);
+        let record = database.entries.get_mut(b"A".as_slice()).unwrap();
+        record.terms[0] = Some(Vec::new());
+        record.seen = 1;
+        database.formatting = [Vec::new(), b"]".to_vec(), b"[".to_vec()];
+        assert_eq!(database.max_appear(b"A"), 1);
+        assert_eq!(database.visible_terms(b"A").unwrap(), b"[]");
+    }
 }

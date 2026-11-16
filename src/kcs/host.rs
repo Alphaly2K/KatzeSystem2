@@ -121,6 +121,12 @@ impl HostState {
             .ok_or_else(|| Error::new(0, "数据库句柄无效"))
     }
 
+    pub(crate) fn database_mut(&mut self, handle: u32) -> Result<&mut super::Database> {
+        self.databases
+            .get_mut(&handle)
+            .ok_or_else(|| Error::new(0, "数据库句柄无效"))
+    }
+
     pub(crate) fn create_database(&mut self, database: super::Database) -> Result<u32> {
         if self.databases.len() >= crate::read::MAX_ITEMS {
             return Err(Error::new(0, "数据库数量超过上限"));
