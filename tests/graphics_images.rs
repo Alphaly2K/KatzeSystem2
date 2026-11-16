@@ -624,10 +624,102 @@ fn runtime_load_and_fill_preserve_stack_and_release_images_with_the_task() {
         );
         runtime.update(2, 1).unwrap();
         assert!(runtime.images().get(h1).is_err());
-        assert_eq!(requests.borrow().len(), 3);
+        assert_eq!(requests.borrow().len(), 1);
         runtime.destroy(0).unwrap();
         assert!(runtime.images().get(h2).is_err());
     }
+}
+
+#[test]
+fn image_preloads_survive_owner_release_and_disabled_automatic_insertion() {
+    struct CachePrograms;
+    impl ProgramLoader for CachePrograms {
+        fn load(&mut self, name: &[u8]) -> Result<Option<Program>> {
+            let mut code = Vec::new();
+            ins(&mut code, 0x25, &[0xdead_beef]);
+            for (native, value) in [(682, 0), (681, 64), (681, 64), (111, 80), (111, 64)] {
+                if name != b"warm" && native == 681 {
+                    continue;
+                }
+                ins(&mut code, 0x25, &[value]);
+                ins(&mut code, 0x2b, &[native, 4]);
+                if native == 111 {
+                    ins(&mut code, 0x26, &[if value == 80 { 0 } else { 4 }]);
+                }
+            }
+            ins(&mut code, 0x26, &[8]);
+            ins(&mut code, 0x3b, &[]);
+            let mut data = vec![0; 128];
+            data[64..70].copy_from_slice(b"second");
+            data[80..86].copy_from_slice(b"SECOND");
+            Ok(Some(Program::from_code(&code, data, 128)?))
+        }
+    }
+    for budget in [1, 4096] {
+        let requests = Requests::default();
+        let mut runtime = Runtime::new(
+            0,
+            kind::ROOT,
+            Box::new(BaseObject::new()),
+            katze_system2::expression::State::new(0),
+            KcsFactory::new(CachePrograms),
+        );
+        runtime.set_budget(budget, 1 << 20);
+        runtime.set_resources(Files {
+            requests: requests.clone(),
+        });
+        for (now, name) in [b"warm".as_slice(), b"load"].into_iter().enumerate() {
+            let task = runtime.create(0, kind::ORDINARY, name, b"").unwrap();
+            runtime.update(now as u32, 1).unwrap();
+            let vm = runtime.object(task).unwrap().interpreter().unwrap();
+            let words = vm.read(0, 12).unwrap().to_vec();
+            let first = u32::from_le_bytes(words[..4].try_into().unwrap());
+            let second = u32::from_le_bytes(words[4..8].try_into().unwrap());
+            assert_eq!(&words[8..12], &0xdead_beefu32.to_le_bytes());
+            assert!(vm.stack_bytes().is_empty());
+            assert_ne!(first, second);
+            runtime
+                .images_mut()
+                .get_mut(first)
+                .unwrap()
+                .pixels_mut()
+                .fill(0);
+            assert_eq!(
+                runtime.images().get(second).unwrap().surface().pixel(0, 0),
+                Some(0xff12_3456)
+            );
+            runtime.destroy(task).unwrap();
+            assert!(runtime.images().get(first).is_err());
+            assert!(runtime.images().get(second).is_err());
+        }
+        assert_eq!(*requests.borrow(), [b"graphics/second.hg3".to_vec()]);
+    }
+}
+
+#[test]
+fn decoded_image_budget_evicts_oldest_entries_without_invalidating_live_images() {
+    let requests = Requests::default();
+    let mut files = Files {
+        requests: requests.clone(),
+    };
+    let mut images = Images::default();
+    images.set_cache_limit(8);
+    let first = images.load(1, b"first:7.hg3", &mut files).unwrap();
+    let second = images.load(2, b"second", &mut files).unwrap();
+    assert_eq!(requests.borrow().len(), 2);
+    images.load(3, b"SECOND", &mut files).unwrap();
+    assert_eq!(requests.borrow().len(), 2);
+    images.load(3, b"first:7.hg3", &mut files).unwrap();
+    assert_eq!(requests.borrow().len(), 3);
+    images.set_cache_limit(0);
+    images.load(3, b"first:7.hg3", &mut files).unwrap();
+    images.load(3, b"first:7.hg3", &mut files).unwrap();
+    assert_eq!(requests.borrow().len(), 5);
+    assert_eq!(images.get(first).unwrap().id(), 7);
+    assert_eq!(
+        images.get(second).unwrap().surface().pixel(0, 0),
+        Some(0xff12_3456)
+    );
 }
 
 #[test]

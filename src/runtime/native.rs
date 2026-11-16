@@ -30,6 +30,14 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             index,
             std::env::var_os("KATZE_TRACE_TIMING").map(|_| std::time::Instant::now()),
         );
+        self.resources.images.set_cache_limit(
+            (self
+                .host
+                .platform_settings
+                .as_ref()
+                .map_or(32, |s| s.etc_imgcache) as usize)
+                .saturating_mul(1 << 20),
+        );
         match runtime_native_handler(index) {
             RuntimeHandler::FileOpen => crate::kcs::open_file_native(
                 self.host,

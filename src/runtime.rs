@@ -473,6 +473,14 @@ impl<F: ObjectFactory> Runtime<F> {
     /// 完成一轮树更新后广播配置变更并清除标记。
     /// 通知失败后先续完原轮次，不重复推进时钟和主体。
     pub fn update(&mut self, now: u32, increment: u32) -> Result<bool> {
+        self.resources.images.set_cache_limit(
+            (self
+                .host
+                .platform_settings
+                .as_ref()
+                .map_or(32, |s| s.etc_imgcache) as usize)
+                .saturating_mul(1 << 20),
+        );
         self.resources.advance_movies(self.host.system_time_ms)?;
         if self.configuration_notification.is_some() {
             return self.finish_configuration_notification();

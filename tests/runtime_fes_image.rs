@@ -1004,13 +1004,7 @@ fn duplicate_media_records_keep_source_wrappers_distinct_and_release_all_binding
                 assert_eq!(runtime.images().pixel_handle(wrappers[1]).unwrap(), 0);
                 assert_eq!(
                     reads.borrow().len(),
-                    if kind_name == "CIMAGE" {
-                        0
-                    } else if now == 100 {
-                        1
-                    } else {
-                        2
-                    }
+                    if kind_name == "CIMAGE" { 0 } else { 1 }
                 );
                 assert_eq!(
                     send(&mut runtime, list, 294, 0, 0),
@@ -1184,16 +1178,7 @@ fn button_locks_keep_rebuild_regions_and_attribute_updates_use_the_captured_anch
                     _ => Rect::from_xywh(4, 3, 4, 3),
                 }
             );
-            assert_eq!(
-                reads.borrow().len(),
-                if now == 100 {
-                    1
-                } else if now == 104 {
-                    3
-                } else {
-                    2
-                }
-            );
+            assert_eq!(reads.borrow().len(), 1);
             send(&mut runtime, list, 298, 0, 0);
             assert_rectangle(
                 runtime.drawing().target.as_ref().unwrap(),
@@ -1338,7 +1323,7 @@ fn fes_buttons_retry_input_after_image_loading_and_update_real_regions_and_pixel
                 assert!(mask.contains([0, 0], [0, 0]));
                 assert!(!mask.contains([0, 0], [1, 0]));
             }
-            assert_eq!(reads.borrow().len(), if now == 102 { 3 } else { 2 });
+            assert_eq!(reads.borrow().len(), 1);
             send(&mut runtime, list, 298, 0, 0);
             for (x, color) in [
                 (1, 0xffff_0000),
@@ -2263,8 +2248,8 @@ fn scene_object_commands_select_frames_reload_sizes_and_update_final_pixels() {
             (100, 0xffff_0000, [1, 1], 1, [1, 1]),
             (101, 0xff00_ff00, [1, 1], 2, [1, 2]),
             (102, 0xff00_ff00, [1, 1], 2, [1, 2]),
-            (103, 0xff00_ff00, [3, 2], 4, [1, 1]),
-            (104, 0, [3, 2], 4, [1, 1]),
+            (103, 0xff00_ff00, [3, 2], 3, [1, 1]),
+            (104, 0, [3, 2], 3, [1, 1]),
         ] {
             let mut complete = false;
             for _ in 0..64 {
@@ -2293,7 +2278,6 @@ fn scene_object_commands_select_frames_reload_sizes_and_update_final_pixels() {
             &*reads.borrow(),
             &[
                 b"texture".to_vec(),
-                b"replacement".to_vec(),
                 b"replacement".to_vec(),
                 b"position".to_vec()
             ]

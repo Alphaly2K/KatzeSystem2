@@ -6,6 +6,7 @@ use crate::{Error, HandleAllocator, Result, hg3, read};
 use std::collections::BTreeMap;
 
 mod blur;
+mod cache;
 mod layers;
 mod resize;
 mod resource;
@@ -336,6 +337,7 @@ pub struct Images {
     data: BTreeMap<u32, ImageData>,
     resources: BTreeMap<u32, ImageResource>,
     handles: HandleAllocator,
+    cache: cache::DecodedCache,
 }
 
 impl Images {
@@ -346,6 +348,7 @@ impl Images {
             data: BTreeMap::new(),
             resources: BTreeMap::new(),
             handles,
+            cache: cache::DecodedCache::default(),
         }
     }
 
@@ -481,16 +484,9 @@ impl Images {
         for token in names.split(|&b| b == b' ').filter(|s| !s.is_empty()) {
             let reference = ImageReference::parse(token)?;
             let name = services.resolve(b"image", &reference.name)?;
-            let Some(bytes) = services.read(&name, ResourceMode::LooseFirst)? else {
+            let Some(next) = self.decode(&name, Some(reference.frame), false, services)? else {
                 continue;
             };
-            if bytes.is_empty() {
-                continue;
-            }
-            let Some(frame) = hg3::decode_frame(&bytes, reference.frame)? else {
-                continue;
-            };
-            let next = Image::from_frame(frame)?;
             if let Some(image) = &mut image {
                 image.composite(&next);
             } else {
@@ -529,16 +525,22 @@ impl Images {
             } else {
                 services.resolve(b"image", token)?
             };
-            let Some(bytes) = services.read(&name, ResourceMode::LooseFirst)? else {
+            let next = if direct {
+                let Some(bytes) = services.read(&name, ResourceMode::LooseFirst)? else {
+                    continue;
+                };
+                if bytes.is_empty() {
+                    continue;
+                }
+                hg3::decode_frame(&bytes, frame)?
+                    .map(Image::from_frame)
+                    .transpose()?
+            } else {
+                self.decode(&name, Some(frame), false, services)?
+            };
+            let Some(next) = next else {
                 continue;
             };
-            if bytes.is_empty() {
-                continue;
-            }
-            let Some(frame) = hg3::decode_frame(&bytes, frame)? else {
-                continue;
-            };
-            let next = Image::from_frame(frame)?;
             if self.pixel_handle(handle)? != 0 {
                 self.get_mut(handle)?.composite(&next);
             } else {

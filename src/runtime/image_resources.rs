@@ -27,7 +27,11 @@ impl<F: ObjectFactory> Runtime<F> {
 }
 
 impl Resources {
-    fn load_image_resource(&mut self, name: &[u8]) -> Result<Option<(Image, Option<bool>)>> {
+    fn load_image_resource(
+        &mut self,
+        name: &[u8],
+        preload: bool,
+    ) -> Result<Option<(Image, Option<bool>)>> {
         if name.len() >= 260 {
             return Err(Error::new(0, "图像资源名超过基线缓冲区范围"));
         }
@@ -71,49 +75,45 @@ impl Resources {
                     return Err(Error::new(0, "图层资源名超过基线缓冲区范围"));
                 }
                 let animation_name = [&layer, b".anm".as_slice()].concat();
-                let animated = services
-                    .read(&animation_name, ResourceMode::LooseFirst)?
-                    .is_some();
+                let animated = !preload
+                    && services
+                        .read(&animation_name, ResourceMode::LooseFirst)?
+                        .is_some();
                 layer.push(b'.');
                 layer.extend_from_slice(extension);
-                let Some(source) = services.open(&layer, ResourceMode::LooseFirst)? else {
-                    continue;
-                };
-                if !source.is_empty()? {
-                    if let Some(image) = source_snapshot(source.as_ref(), (!animated).then_some(0))?
-                    {
-                        layers.push(image);
-                    }
+                if let Some(image) =
+                    self.images
+                        .decode(&layer, (!animated).then_some(0), preload, services)?
+                {
+                    layers.push(image);
                 }
             }
             return Ok(Image::from_layers(&layers)?.map(|image| (image, None)));
         }
         let animation_name = [&name[..end], b".anm"].concat();
-        let animated = services
-            .read(&animation_name, ResourceMode::LooseFirst)?
-            .is_some();
-        let reference = ImageReference::parse(name)?;
-        let Some(source) = services.open(&reference.name, ResourceMode::LooseFirst)? else {
-            return Ok(None);
+        let animated = !preload
+            && services
+                .read(&animation_name, ResourceMode::LooseFirst)?
+                .is_some();
+        let reference = if preload {
+            ImageReference {
+                name: name.to_vec(),
+                frame: 0,
+            }
+        } else {
+            ImageReference::parse(name)?
         };
-        if source.is_empty()? {
-            return Ok(None);
-        }
-        let image = source_snapshot(source.as_ref(), (!animated).then_some(reference.frame))?;
+        let image = self.images.decode(
+            &reference.name,
+            (!animated).then_some(reference.frame),
+            preload,
+            services,
+        )?;
         Ok(image.map(|image| {
             let has_alpha = image.info().reserved != 0;
             (image, Some(has_alpha))
         }))
     }
-}
-
-fn source_snapshot(
-    source: &dyn crate::io::ReadSource,
-    frame: Option<i32>,
-) -> Result<Option<Image>> {
-    crate::hg3::decode_frame_from(source, frame)?
-        .map(Image::from_frame)
-        .transpose()
 }
 
 impl<F: ObjectFactory> ObjectHost<'_, F> {
@@ -123,6 +123,30 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         arguments: &[u8],
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
+        if matches!(index, 681 | 682) {
+            if arguments.len() != 4 {
+                return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+            }
+            let value = read::u32_at(arguments, 0)?;
+            if index == 682 {
+                self.resources.images.set_automatic_cache(value != 0);
+            } else {
+                let mut name = format_string(vm, value, 0)?;
+                name.truncate(
+                    name.iter()
+                        .position(|&byte| byte == 0)
+                        .unwrap_or(name.len()),
+                );
+                let name = self
+                    .resources
+                    .services
+                    .as_deref_mut()
+                    .ok_or_else(|| Error::new(vm.pc, "运行时未配置资源服务"))?
+                    .resolve(b"image", &name)?;
+                self.resources.load_image_resource(&name, true)?;
+            }
+            return Ok(NativeReturn::Continue);
+        }
         if matches!(index, 710 | 733) {
             if arguments.len() != if index == 710 { 4 } else { 8 } {
                 return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
@@ -162,7 +186,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     .as_deref_mut()
                     .ok_or_else(|| Error::new(vm.pc, "运行时未配置资源服务"))?;
                 let name = services.resolve(b"image", &name)?;
-                let Some(image) = self.resources.load_image_resource(&name)? else {
+                let Some(image) = self.resources.load_image_resource(&name, false)? else {
                     return Ok(NativeReturn::Value(0));
                 };
                 image
