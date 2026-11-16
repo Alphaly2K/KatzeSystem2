@@ -76,6 +76,7 @@ pub(super) enum Kind {
     Star,
     Explosion,
     Roundy,
+    Roundz,
 }
 
 fn u16_at(bytes: &[u8], at: usize) -> Option<u16> {
@@ -195,6 +196,8 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
         Kind::Explosion
     } else if name.eq_ignore_ascii_case(b"roundy.ppi") {
         Kind::Roundy
+    } else if name.eq_ignore_ascii_case(b"roundz.ppi") {
+        Kind::Roundz
     } else if name.eq_ignore_ascii_case(b"sakura.ppi") {
         Kind::Sakura
     } else if name.eq_ignore_ascii_case(b"protect.ppi") {
