@@ -138,6 +138,40 @@ fn runtime(code: &[u8], budget: usize) -> (Runtime<KcsFactory<Loader>>, u32, Fil
 }
 
 #[test]
+fn reader_metadata_keeps_reserved_fields_after_load_and_skips_null_outputs() {
+    let mut code = vec![];
+    call(&mut code, 323, &[], Some(32));
+    call(&mut code, 338, &[1, 200], Some(0));
+    call(&mut code, 325, &[1, 64], Some(4));
+    call(&mut code, 338, &[1, 0x8000_0020], Some(8));
+    call(&mut code, 338, &[0, u32::MAX], Some(12));
+    call(&mut code, 338, &[0], Some(16));
+    code.push(0x3b);
+    for budget in [1, 4096] {
+        let (mut runtime, task, _, _) = runtime(&code, budget);
+        runtime
+            .object_mut(task)
+            .unwrap()
+            .interpreter_mut()
+            .unwrap()
+            .write(0x8000_0020, &[0x66; 4])
+            .unwrap();
+        runtime.update(0, 1).unwrap();
+        let vm = runtime.object(task).unwrap().interpreter().unwrap();
+        let values: Vec<_> = vm
+            .read(0, 20)
+            .unwrap()
+            .chunks_exact(4)
+            .map(|bytes| u32::from_le_bytes(bytes.try_into().unwrap()))
+            .collect();
+        assert_eq!(values, [0, 1, 0, 0, 0]);
+        assert_eq!(vm.read(200, 4).unwrap(), [0, 0x5a, 0x5a, 0x5a]);
+        assert_eq!(vm.read(0x8000_0020, 4).unwrap(), [0, 0x66, 0x66, 0x66]);
+        assert!(runtime.cst_context(1).unwrap().script().is_some());
+    }
+}
+
+#[test]
 fn localized_scene_and_name_table_use_resource_encoding_for_unicode_outputs() {
     struct TranslatedSources(Vec<u8>);
     impl ResourceServices for TranslatedSources {

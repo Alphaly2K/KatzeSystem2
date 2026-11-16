@@ -269,6 +269,9 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
         }
         let handle = read::u32_at(arguments, 0)?;
+        if index == 338 && arguments.len() != 8 && !(handle == 0 && arguments.len() == 4) {
+            return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+        }
         if index == 993 {
             if arguments.len() != 8 && !(handle == 0 && arguments.len() == 4) {
                 return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
@@ -326,6 +329,11 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             .cst_contexts
             .get_mut(&handle)
             .ok_or_else(|| Error::new(vm.pc, "CST 上下文句柄无效"))?;
+        if index == 338 {
+            // 基线读取器的预留名称和附加值不随 CST 装载更新。
+            vm.write(read::u32_at(arguments, 4)?, &[0])?;
+            return Ok(NativeReturn::Value(0));
+        }
         if matches!(index, 608 | 980) {
             let value = if index == 608 {
                 context
