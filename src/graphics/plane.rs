@@ -705,7 +705,7 @@ impl TaskObject for PlaneObject {
                     }
                 }
             }
-            70 => {
+            69 | 70 => {
                 let name = crate::read::zstr(
                     buffers
                         .data1
@@ -727,12 +727,20 @@ impl TaskObject for PlaneObject {
                     {
                         if data.get(..4) == Some(b"KX2\0") {
                             let drawable = Drawable::from_kx2(&data)?;
+                            let drawable = if command.code == 69 {
+                                let layout = host
+                                    .canvas_layout()?
+                                    .ok_or_else(|| Error::new(0, "宿主未提供画布纹理布局"))?;
+                                Drawable::from_canvas_source(drawable, layout)?
+                            } else {
+                                drawable
+                            };
                             let bounds = drawable.bounds();
                             self.offset = [bounds[0][0], bounds[0][1]];
                             self.size = std::array::from_fn(|i| {
                                 arithmetic(2, bounds[1][i], bounds[0][i]).abs()
                             });
-                            self.shape_kind = 7;
+                            self.shape_kind = command.code - 63;
                             self.geometry_name = name.to_vec();
                             drawings(host)?.insert(id, drawable)?;
                         }

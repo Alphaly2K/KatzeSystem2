@@ -2,7 +2,8 @@ use katze_system2::{
     Error, Result,
     expression::State,
     graphics::{
-        Drawable, Drawables, DrawingContext, GraphicsFactory, PlaneObject, Projection, RenderTarget,
+        CanvasLayout, Drawable, Drawables, DrawingContext, GraphicsFactory, PlaneObject,
+        Projection, RenderTarget, TextureFilter,
     },
     kcs::{Host, Interpreter, NativeReturn, Program, ResourceServices},
     resource::ResourceMode,
@@ -130,6 +131,7 @@ impl ResourceServices for Files {
 struct GeometryHost {
     drawables: Drawables,
     files: Files,
+    layout: Option<CanvasLayout>,
 }
 
 impl Host for GeometryHost {
@@ -139,6 +141,10 @@ impl Host for GeometryHost {
 
     fn drawables(&mut self) -> Option<&mut Drawables> {
         Some(&mut self.drawables)
+    }
+
+    fn canvas_layout(&self) -> Result<Option<CanvasLayout>> {
+        Ok(self.layout)
     }
 
     fn resource_services(&mut self) -> Option<&mut dyn ResourceServices> {
@@ -180,85 +186,137 @@ fn send(
 
 #[test]
 fn plane_geometry_replacement_preserves_failed_metadata_and_resource_read_gates() {
-    let mut host = GeometryHost {
-        drawables: Drawables::default(),
-        files: Files {
-            data: Some(mesh()),
-            requests: Rc::default(),
-        },
-    };
-    let mut plane = PlaneObject::new(7);
-    send(
-        &mut plane,
-        &mut host,
-        70,
-        0,
-        Some(&mut b"mesh.kx2\0".to_vec()),
-    )
-    .unwrap();
-    assert_eq!(plane.shape_kind(), 7);
-    assert_eq!(plane.geometry_name(), b"mesh.kx2");
-    assert_eq!(plane.offset(), [-7., 9.]);
-    assert_eq!(plane.size(), [10., 14.]);
-    assert_eq!(
-        host.drawables.get(7).unwrap().triangles()[0][0].position,
-        [0.; 3]
-    );
-    host.drawables.set_position(7, [3., 4., 5.]);
-    host.files.data = None;
-    send(
-        &mut plane,
-        &mut host,
-        70,
-        0,
-        Some(&mut b"missing\0".to_vec()),
-    )
-    .unwrap();
-    assert!(host.drawables.get(7).is_none());
-    assert_eq!(plane.size(), [10., 14.]);
-    assert_eq!(plane.offset(), [-7., 9.]);
-    assert_eq!(plane.shape_kind(), 7);
-    assert_eq!(plane.geometry_name(), b"mesh.kx2");
-    host.files.data = Some(b"unsupported".to_vec());
-    send(&mut plane, &mut host, 70, 0, Some(&mut b"wrong\0".to_vec())).unwrap();
-    assert!(host.drawables.get(7).is_none());
-    host.files.data = Some(mesh()[..30].to_vec());
-    assert!(send(&mut plane, &mut host, 70, 0, Some(&mut b"short\0".to_vec())).is_err());
-    for flags in [0, 2, u32::MAX] {
-        send(&mut plane, &mut host, 84, flags, None).unwrap();
-        send(&mut plane, &mut host, 70, 0, Some(&mut b"skip\0".to_vec())).unwrap();
-    }
-    assert_eq!(host.files.requests.borrow().len(), 4);
-    host.files.data = Some(geometry([0; 4], &[]));
-    send(&mut plane, &mut host, 84, 1, None).unwrap();
-    send(
-        &mut plane,
-        &mut host,
-        70,
-        0,
-        Some(&mut b"empty.kx2\0".to_vec()),
-    )
-    .unwrap();
-    assert_eq!(plane.size(), [0.; 2]);
-    assert_eq!(
-        host.drawables.get(7).unwrap().transform().position(),
-        [0.; 3]
-    );
-    send(&mut plane, &mut host, 68, 0, None).unwrap();
-    assert_eq!(plane.geometry_name(), b"empty.kx2");
-    assert!(
+    for code in [69, 70] {
+        let mut host = GeometryHost {
+            drawables: Drawables::default(),
+            layout: Some(CanvasLayout::new([2, 2], [2, 2], [2, 2]).unwrap()),
+            files: Files {
+                data: Some(mesh()),
+                requests: Rc::default(),
+            },
+        };
+        let mut plane = PlaneObject::new(7);
         send(
             &mut plane,
             &mut host,
-            70,
+            code,
             0,
-            Some(&mut b"no terminator".to_vec())
+            Some(&mut b"mesh.kx2\0".to_vec()),
         )
-        .is_err()
-    );
-    send(&mut plane, &mut host, 3, 0, None).unwrap();
-    send(&mut plane, &mut host, 70, 0, None).unwrap();
-    assert_eq!(host.files.requests.borrow().len(), 5);
+        .unwrap();
+        assert_eq!(plane.shape_kind(), code - 63);
+        assert_eq!(plane.geometry_name(), b"mesh.kx2");
+        assert_eq!(plane.offset(), [-7., 9.]);
+        assert_eq!(plane.size(), [10., 14.]);
+        let drawable = host.drawables.get(7).unwrap();
+        if code == 69 {
+            assert_eq!(drawable.canvas_triangles().unwrap().len(), 4);
+            assert!(drawable.triangles().is_empty());
+            assert!(drawable.geometry_transform(true).is_some());
+        } else {
+            assert_eq!(drawable.triangles()[0][0].position, [0.; 3]);
+            assert!(drawable.canvas_triangles().is_none());
+        }
+        host.drawables.set_position(7, [3., 4., 5.]);
+        host.layout = None;
+        host.files.data = None;
+        send(
+            &mut plane,
+            &mut host,
+            code,
+            0,
+            Some(&mut b"missing\0".to_vec()),
+        )
+        .unwrap();
+        assert!(host.drawables.get(7).is_none());
+        assert_eq!(plane.size(), [10., 14.]);
+        assert_eq!(plane.offset(), [-7., 9.]);
+        assert_eq!(plane.shape_kind(), code - 63);
+        assert_eq!(plane.geometry_name(), b"mesh.kx2");
+        host.files.data = Some(b"unsupported".to_vec());
+        send(
+            &mut plane,
+            &mut host,
+            code,
+            0,
+            Some(&mut b"wrong\0".to_vec()),
+        )
+        .unwrap();
+        assert!(host.drawables.get(7).is_none());
+        host.files.data = Some(mesh()[..30].to_vec());
+        assert!(
+            send(
+                &mut plane,
+                &mut host,
+                code,
+                0,
+                Some(&mut b"short\0".to_vec())
+            )
+            .is_err()
+        );
+        for flags in [0, 2, u32::MAX] {
+            send(&mut plane, &mut host, 84, flags, None).unwrap();
+            send(
+                &mut plane,
+                &mut host,
+                code,
+                0,
+                Some(&mut b"skip\0".to_vec()),
+            )
+            .unwrap();
+        }
+        assert_eq!(host.files.requests.borrow().len(), 4);
+        if code == 69 {
+            host.files.data = Some(mesh());
+            send(&mut plane, &mut host, 84, 1, None).unwrap();
+            assert!(
+                send(
+                    &mut plane,
+                    &mut host,
+                    code,
+                    0,
+                    Some(&mut b"layout\0".to_vec())
+                )
+                .is_err()
+            );
+            assert!(host.drawables.get(7).is_none());
+            assert_eq!(plane.geometry_name(), b"mesh.kx2");
+        }
+        host.layout = Some(CanvasLayout::new([2, 2], [2, 2], [2, 2]).unwrap());
+        host.files.data = Some(geometry([0; 4], &[]));
+        send(&mut plane, &mut host, 84, 1, None).unwrap();
+        send(
+            &mut plane,
+            &mut host,
+            code,
+            0,
+            Some(&mut b"empty.kx2\0".to_vec()),
+        )
+        .unwrap();
+        assert_eq!(plane.size(), [0.; 2]);
+        assert_eq!(
+            host.drawables.get(7).unwrap().transform().position(),
+            [0.; 3]
+        );
+        send(&mut plane, &mut host, 68, 0, None).unwrap();
+        assert_eq!(plane.geometry_name(), b"empty.kx2");
+        assert!(
+            send(
+                &mut plane,
+                &mut host,
+                code,
+                0,
+                Some(&mut b"no terminator".to_vec())
+            )
+            .is_err()
+        );
+        send(&mut plane, &mut host, 3, 0, None).unwrap();
+        send(&mut plane, &mut host, code, 0, None).unwrap();
+        assert_eq!(
+            host.files.requests.borrow().len(),
+            if code == 69 { 6 } else { 5 }
+        );
+    }
 }
 
 struct Programs(Program);
@@ -278,80 +336,108 @@ fn ins(code: &mut Vec<u8>, op: u8, args: &[u32]) {
 
 #[test]
 fn ordinary_kx2_load_formats_resolves_routes_and_reaches_cpu_pixels() {
-    let mut code = vec![];
-    ins(&mut code, 0x25, &[0xdeadbeef]);
-    for args in [&[0u32][..], &[99, 0], &[1, 0], &[1, 32]] {
-        for arg in args {
-            ins(&mut code, 0x25, &[*arg]);
+    for native in [81, 82] {
+        let mut code = vec![];
+        ins(&mut code, 0x25, &[0xdeadbeef]);
+        for args in [&[0u32][..], &[99, 0], &[1, 0], &[1, 32]] {
+            for arg in args {
+                ins(&mut code, 0x25, &[*arg]);
+            }
+            ins(&mut code, 0x2b, &[native, args.len() as u32 * 4]);
         }
-        ins(&mut code, 0x2b, &[82, args.len() as u32 * 4]);
-    }
-    ins(&mut code, 0x26, &[40]);
-    ins(&mut code, 0x3b, &[]);
-    let mut data = vec![0; 64];
-    data[..11].copy_from_slice(b"mesh%u[G16]");
-    data[16..20].copy_from_slice(&7u32.to_le_bytes());
-    let program = Program::from_code(&code, data, 64).unwrap();
-    for budget in [1, 4096] {
-        let requests = Requests::default();
-        let mut runtime = Runtime::new(
-            0,
-            kind::ROOT,
-            Box::new(BaseObject::new()),
-            State::new(0),
-            GraphicsFactory {
-                fallback: KcsFactory::new(Programs(program.clone())),
-            },
-        );
-        runtime.set_budget(budget, katze_system2::runtime::DEFAULT_LIMIT);
-        let plane = runtime.create(0, kind::PLANE, b"plane", b"").unwrap();
-        let task = runtime.create(0, kind::ORDINARY, b"load", b"").unwrap();
-        runtime.set_resources(Files {
-            data: Some(mesh()),
-            requests: requests.clone(),
-        });
-        runtime.update(1, 1).unwrap();
-        assert_eq!(
-            *requests.borrow(),
-            [
-                (true, b"mesh7".to_vec()),
-                (true, b"mesh7".to_vec()),
-                (false, b"geometry/mesh.kx2".to_vec()),
-                (true, vec![]),
-                (false, b"geometry/mesh.kx2".to_vec()),
-            ]
-        );
-        assert_eq!(
-            runtime
-                .object(task)
-                .unwrap()
-                .interpreter()
-                .unwrap()
-                .read(40, 4)
-                .unwrap(),
-            0xdeadbeefu32.to_le_bytes()
-        );
-        assert_eq!(
-            runtime.drawables().get(plane).unwrap().bounds(),
-            [[-7., 9., 0.], [3., -5., 0.]]
-        );
-        runtime.drawables_mut().set_display(plane, 1);
-        *runtime.drawing_mut() = DrawingContext {
-            mode: 0,
-            enabled: true,
-            active: true,
-            target: Some(RenderTarget::new([4, 4]).unwrap()),
-        };
-        let identity = std::array::from_fn(|i| if i % 5 == 0 { 1. } else { 0. });
-        assert!(
-            runtime
-                .render_triangles(&Projection::default(), identity)
-                .unwrap()
-        );
-        let target = runtime.drawing().target.as_ref().unwrap();
-        assert_eq!(target.pixel(0, 0), Some(0x40091a70));
-        assert_eq!(target.pixel(3, 3), Some(0));
-        runtime.destroy(plane).unwrap();
-        assert!(runtime.drawables().get(plane).is_none());
+        ins(&mut code, 0x26, &[40]);
+        ins(&mut code, 0x3b, &[]);
+        let mut data = vec![0; 64];
+        data[..11].copy_from_slice(b"mesh%u[G16]");
+        data[16..20].copy_from_slice(&7u32.to_le_bytes());
+        let program = Program::from_code(&code, data, 64).unwrap();
+        for budget in [1, 4096] {
+            let requests = Requests::default();
+            let mut runtime = Runtime::new(
+                0,
+                kind::ROOT,
+                Box::new(BaseObject::new()),
+                State::new(0),
+                GraphicsFactory {
+                    fallback: KcsFactory::new(Programs(program.clone())),
+                },
+            );
+            runtime.set_budget(budget, katze_system2::runtime::DEFAULT_LIMIT);
+            let plane = runtime.create(0, kind::PLANE, b"plane", b"").unwrap();
+            let task = runtime.create(0, kind::ORDINARY, b"load", b"").unwrap();
+            runtime.set_resources(Files {
+                data: Some(mesh()),
+                requests: requests.clone(),
+            });
+            *runtime.drawing_mut() = DrawingContext {
+                mode: 0,
+                enabled: true,
+                active: true,
+                target: Some(
+                    RenderTarget::from_tiles(
+                        [2, 2],
+                        [2, 2],
+                        (0..4)
+                            .map(|_| {
+                                let mut surface =
+                                    katze_system2::graphics::Surface::new([2, 2]).unwrap();
+                                surface.clear(0xff204060);
+                                Some(surface)
+                            })
+                            .collect(),
+                    )
+                    .unwrap(),
+                ),
+            };
+            runtime.update(1, 1).unwrap();
+            assert_eq!(
+                *requests.borrow(),
+                [
+                    (true, b"mesh7".to_vec()),
+                    (true, b"mesh7".to_vec()),
+                    (false, b"geometry/mesh.kx2".to_vec()),
+                    (true, vec![]),
+                    (false, b"geometry/mesh.kx2".to_vec()),
+                ]
+            );
+            assert_eq!(
+                runtime
+                    .object(task)
+                    .unwrap()
+                    .interpreter()
+                    .unwrap()
+                    .read(40, 4)
+                    .unwrap(),
+                0xdeadbeefu32.to_le_bytes()
+            );
+            assert_eq!(
+                runtime.drawables().get(plane).unwrap().bounds(),
+                [[-7., 9., 0.], [3., -5., 0.]]
+            );
+            runtime.drawables_mut().set_display(plane, 1);
+            let identity = std::array::from_fn(|i| if i % 5 == 0 { 1. } else { 0. });
+            let drawable = runtime.drawables().get(plane).unwrap();
+            assert_eq!(drawable.canvas_triangles().is_some(), native == 81);
+            let canvas = runtime.drawing().target.clone();
+            let mut output = RenderTarget::new([4, 4]).unwrap();
+            assert!(
+                runtime
+                    .render_frame(
+                        &mut output,
+                        &Projection::default(),
+                        identity,
+                        TextureFilter::Point
+                    )
+                    .unwrap()
+            );
+            assert_eq!(
+                output.pixel(0, 0),
+                Some(if native == 81 { 0x4001072a } else { 0x40091a70 })
+            );
+            assert_eq!(output.pixel(3, 3), Some(0));
+            assert_eq!(runtime.drawing().target, canvas);
+            runtime.destroy(plane).unwrap();
+            assert!(runtime.drawables().get(plane).is_none());
+        }
     }
 }

@@ -151,8 +151,8 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             | 1065
             | 1067
             | 1069 => 4,
-            82 | 88 | 92 | 94 | 95 | 97 | 102 | 103 | 105 | 106 | 258 | 262 | 402 | 455 | 462
-            | 464 | 466 | 534 | 653 | 655 | 657 | 701 | 848 | 849 | 988 | 1066 | 1068 => 8,
+            81 | 82 | 88 | 92 | 94 | 95 | 97 | 102 | 103 | 105 | 106 | 258 | 262 | 402 | 455
+            | 462 | 464 | 466 | 534 | 653 | 655 | 657 | 701 | 848 | 849 | 988 | 1066 | 1068 => 8,
             880 => 16,
             339 => 24,
             84 | 87 | 93 | 101 | 345 | 862 => 20,
@@ -359,7 +359,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                 };
                 self.command_target(target, code, [0; 3])?;
             }
-            82 => {
+            81 | 82 => {
                 let formatted = format_string(vm, word(1), 0)?;
                 let name = &formatted[..formatted
                     .iter()
@@ -375,7 +375,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                 name.push(0);
                 self.command_target_with_buffers(
                     target,
-                    70,
+                    if index == 81 { 69 } else { 70 },
                     [0; 3],
                     &mut CommandBuffers {
                         data0: None,
