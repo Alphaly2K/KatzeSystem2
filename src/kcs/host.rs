@@ -98,6 +98,7 @@ pub struct HostState {
     /// 普通 629 使用的同步平台打开服务；未配置时该入口返回诊断。
     pub system_services: Option<Box<dyn super::SystemServices>>,
     pub file_services: Option<Box<dyn crate::io::FileServices>>,
+    pub(super) files: BTreeMap<u32, super::files::OpenedFile>,
     /// 外层输入宿主提供的当前逻辑画布坐标；保留画布外的值。
     pub pointer_position: [i32; 2],
     pub memory_copy_mode: MemoryCopyMode,
@@ -258,6 +259,9 @@ impl std::ops::DerefMut for CoreHost<'_> {
 }
 
 impl Host for CoreHost<'_> {
+    fn register_file_source(&mut self, source: crate::io::SharedSource) -> Result<u32> {
+        self.host.register_file_source(source)
+    }
     fn language_selection(&self) -> [u32; 3] {
         self.host.languages.selection()
     }

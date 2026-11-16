@@ -4,6 +4,7 @@ pub(super) enum CoreHandler {
     Scalar,
     Settings,
     Storage,
+    File,
     Database,
     System,
     Matrix,
@@ -34,6 +35,7 @@ pub(super) fn canonical(index: u32) -> u32 {
 
 pub(super) fn core(index: u32) -> CoreHandler {
     match index {
+        29..=32 => CoreHandler::File,
         13..=26
         | 37
         | 38
@@ -169,6 +171,7 @@ pub(super) fn core(index: u32) -> CoreHandler {
 
 #[derive(Clone, Copy)]
 pub(crate) enum RuntimeHandler {
+    FileOpen,
     Property,
     Configuration,
     Emocon,
@@ -202,6 +205,7 @@ pub(crate) enum RuntimeHandler {
 
 pub(crate) fn runtime(index: u32) -> RuntimeHandler {
     match index {
+        29 => RuntimeHandler::FileOpen,
         453 => RuntimeHandler::Property,
         361 => RuntimeHandler::Configuration,
         1055..=1061 => RuntimeHandler::Emocon,

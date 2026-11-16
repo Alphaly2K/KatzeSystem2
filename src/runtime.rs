@@ -1812,6 +1812,9 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
 }
 
 impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
+    fn register_file_source(&mut self, source: crate::io::SharedSource) -> Result<u32> {
+        self.host.register_file_source(source)
+    }
     fn update_particle(
         &mut self,
         task: &mut crate::kcs::ParticleTask,

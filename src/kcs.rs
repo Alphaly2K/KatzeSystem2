@@ -6,6 +6,7 @@ mod configuration;
 mod data;
 mod database;
 mod debug;
+mod files;
 mod host;
 mod map_data;
 mod matrix;
@@ -36,6 +37,7 @@ pub use crate::task::TaskClock;
 pub(crate) use configuration::save_configuration;
 pub(crate) use database::load as load_database;
 pub use database::{Database, DatabaseRecord};
+pub(crate) use files::open_native as open_file_native;
 pub(crate) use host::hierarchy_query;
 pub use host::{CoreHost, HostState, MenuItemRequest, WindowCloseRequest};
 pub(crate) use matrix::{
@@ -257,6 +259,10 @@ pub struct TaskEffects {
 }
 
 pub trait Host {
+    /// 登记从资源服务打开的独立文件游标，由普通 30 读取、32 释放。
+    fn register_file_source(&mut self, _source: crate::io::SharedSource) -> Result<u32> {
+        Err(Error::new(0, "宿主未提供文件句柄存储"))
+    }
     /// 与普通脚本、运动及粒子共用的随机序列。
     fn random(&mut self) -> Option<&mut ScriptRandom> {
         None
@@ -550,6 +556,9 @@ pub trait Host {
 }
 
 impl<T: Host + ?Sized> Host for &mut T {
+    fn register_file_source(&mut self, source: crate::io::SharedSource) -> Result<u32> {
+        (**self).register_file_source(source)
+    }
     fn language_selection(&self) -> [u32; 3] {
         (**self).language_selection()
     }

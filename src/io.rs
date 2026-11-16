@@ -12,6 +12,11 @@ pub type SharedSource = Arc<dyn ReadSource>;
 
 /// 脚本文件写入；名称为 CP932 字节，目录策略独立于资源与存档路由。
 pub trait FileServices {
+    /// 创建或截断文件并打开顺序写入端；普通打开失败返回 None。
+    fn create(&mut self, _task_id: u32, _name: &[u8]) -> Result<Option<Box<dyn std::io::Write>>> {
+        Err(Error::new(0, "宿主未提供文件创建服务"))
+    }
+
     /// 在文件末尾依次尝试写入正文及 CRLF，缺失文件可创建。
     /// 普通打开／写入失败仍正常结束；服务不可用或协议错误返回诊断。
     fn append_line(&mut self, task_id: u32, name: &[u8], text: &[u8]) -> Result<()>;

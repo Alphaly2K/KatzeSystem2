@@ -230,6 +230,9 @@ impl ResourceState {
 }
 
 impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
+    fn register_file_source(&mut self, source: crate::io::SharedSource) -> Result<u32> {
+        self.inner.register_file_source(source)
+    }
     fn language_selection(&self) -> [u32; 3] {
         self.inner.language_selection()
     }
@@ -428,6 +431,16 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
     }
 
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn> {
+        if index == 29 {
+            let request = super::files::request(arguments, vm)?;
+            if let Some(mode) = request.mode {
+                let handle = match self.services.open(&request.name, mode)? {
+                    Some(source) => self.inner.register_file_source(source)?,
+                    None => 0,
+                };
+                return Ok(NativeReturn::Value(handle));
+            }
+        }
         if matches!(index, 434..=438) {
             return super::prefetch_call(index, arguments, vm, Some(&mut self.services));
         }

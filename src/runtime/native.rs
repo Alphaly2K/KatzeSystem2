@@ -31,6 +31,15 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             std::env::var_os("KATZE_TRACE_TIMING").map(|_| std::time::Instant::now()),
         );
         match runtime_native_handler(index) {
+            RuntimeHandler::FileOpen => crate::kcs::open_file_native(
+                self.host,
+                arguments,
+                vm,
+                self.resources
+                    .services
+                    .as_mut()
+                    .map(|services| services.as_mut() as _),
+            ),
             RuntimeHandler::Property => {
                 if arguments.len() != 4 {
                     return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));

@@ -28,6 +28,7 @@ pub(crate) fn call_native(
         registry::CoreHandler::Scalar => scalar::call(host, index, arguments, vm),
         registry::CoreHandler::Settings => settings::call(host, index, arguments, vm),
         registry::CoreHandler::Storage => storage::call(state, host, index, arguments, vm),
+        registry::CoreHandler::File => super::files::call(host, index, arguments, vm),
         registry::CoreHandler::Database => database::call(host, index, arguments, vm),
         registry::CoreHandler::System => system::call(state, host, task_tree, index, arguments, vm),
         registry::CoreHandler::Matrix => matrix::call(host, index, arguments, vm),

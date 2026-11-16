@@ -19,7 +19,7 @@
 |`anm`|容器、全部 18 种指令、随机源、时间调度、重启、图像动画装载及属性组合|资源名称请求、图像选帧及主循环衔接|
 |`kcs`|容器、全部有效指令、地址／类型运算、调用帧、调试元数据、普通任务／消息／跨任务服务包装、数值／字符串／集合／XML／图像数据宿主、运动与粒子宿主|扩展分配区、其余普通 native 及图形／音频等具体服务|
 |`resource`|启动归档类别配置、名称补全、目录索引、KIF 解密及虚拟名路由；kcs 资源服务提供共享预读缓存|自动挂载、列表读取、补丁发现及别名|
-|`io`|可共享的随机读取源、标准 Read／Seek 适配、文件源及脚本文件追加服务|宿主按需提供其他存储源|
+|`io`|可共享的随机读取源、标准 Read／Seek 适配、文件源及脚本顺序文件创建／读写／追加服务|宿主按需提供其他存储源|
 |`hg3`|0x300 帧目录、标准元数据、五 DWORD 属性、按 ID 选帧及原生 32 位完整帧像素解码|其他位深、切片及其他图像编码|
 |`graphics`|BGRA8 渲染面、裁剪填充／复制／普通混合，图像装载与持有、绘图变换／投影／三角形及排序、KX2 几何装载、显式画布图元、画布矩形／源变换／延迟切割及独立帧提交、基础二维任务及图元脚本接口、纯色／渐变三角形和纹理 CPU 核心、分块渲染目标、绘图状态及画布淡入淡出任务|完整帧自动驱动、缩放／特殊混合、输入绑定、缓存和设备呈现|
 |`input`|两级双向坐标转换、区域和键命令、物理按钮配置映射、四组扫描与重复、捕获、位图及图像 Alpha 生成／绑定、指针通知、滚轮、移动阈值、平滑定位、自动光标、快照查询；对象、显式入口及同步设备更新|平台设备采集、配置自动装载及其他导航路径|
@@ -94,6 +94,8 @@ FES SOUND 文件请求通过 `Objects::set_sound_task` 的绑定发送 180／182
 `PlatformSettings::apply_startup_xml(bytes, adjust_fullscreen)` 读取启动的 SCREEN、GENERAL、APP 等平台字段，回调按平台模式调整已截取低十六位的候选尺寸。
 
 FES `getconf screen` 查询 `SystemSettings::fullscreen`，`getconf iswindow` 查询平台同步的 `HostState::windowed_mode`，两者保留独立的原始 DWORD。当前窗口模式为 None 时返回诊断；窗口示例在成功创建窗口后设置为一。
+
+普通 29～32 通过 `ResourceServices::open` 和 `io::FileServices::create` 连接顺序文件读写。`create(task_id, name)` 接受格式展开后的 CP932 名称，返回可选的 `Write` 端；普通创建失败返回 None，服务未提供时诊断。30／31 返回实际字节数，32 释放读取源或写入端；默认方法不改变已有追加服务的实现。完整模式、游标及失败契约见[文件读写](kcs.md#文件读写)。
 
 普通 361 使用 `settings::ConfigurationServices` 同步保存主配置，并按新声音分类开关保存声音配置。通过 `Runtime::set_configuration_services` 或 `HostState::configuration_services` 安装；输入设备可通过 `key_configuration()` 提供当前按键绑定。普通文件失败与诊断的约定见[平台配置](settings.md#平台配置与完整文档)。
 
