@@ -13,6 +13,16 @@ pub(super) fn call(
     arguments: &[u8],
     vm: &mut Interpreter,
 ) -> Result<NativeReturn> {
+    if index == 445 {
+        return super::super::system_host::message_box(
+            host.system_services
+                .as_mut()
+                .map(|services| services.as_mut() as _),
+            host.task_id,
+            arguments,
+            vm,
+        );
+    }
     if matches!(index, 609 | 610) {
         super::words(arguments, 0, vm.pc)?;
         let count = state.shared.len();

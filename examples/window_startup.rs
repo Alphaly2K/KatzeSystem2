@@ -9,6 +9,8 @@ mod audio_output;
 #[path = "support/clipboard_output.rs"]
 mod clipboard_output;
 mod support;
+#[path = "support/system_output.rs"]
+mod system_output;
 
 use katze_system2::{
     Result,
@@ -337,6 +339,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         },
         [1280, 720],
     )?;
+    runtime.set_system_services(system_output::Output);
     let shared = Rc::new(RefCell::new(Shared::default()));
     let keys = runtime
         .host_mut()

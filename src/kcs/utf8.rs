@@ -66,7 +66,7 @@ fn width(vm: &Interpreter, address: u32) -> Result<i32> {
     }
 }
 
-fn cp932(source: &[u8]) -> Vec<u8> {
+pub(super) fn cp932(source: &[u8]) -> Vec<u8> {
     let mut result = String::new();
     let mut position = 0;
     while let Some(&value) = source.get(position) {

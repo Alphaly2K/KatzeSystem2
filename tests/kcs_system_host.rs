@@ -153,3 +153,87 @@ fn system_open_formats_each_field_and_completes_the_service_before_vm_continuati
     };
     assert_eq!(services.0, [expected.clone(), expected]);
 }
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct DialogCall(u32, Vec<u16>);
+#[derive(Clone, Default)]
+struct Dialogs(std::rc::Rc<std::cell::RefCell<Vec<DialogCall>>>);
+impl SystemServices for Dialogs {
+    fn message_box(&mut self, task_id: u32, text: &[u16]) -> Result<()> {
+        self.0.borrow_mut().push(DialogCall(task_id, text.to_vec()));
+        Ok(())
+    }
+}
+
+#[test]
+fn message_box_services_keep_cp932_literals_and_void_returns_in_both_hosts() -> Result<()> {
+    fn finish(task: &mut OrdinaryTask, host: &mut impl Host, budget: usize) -> Result<()> {
+        for _ in 0..32 {
+            if task.update(0, 1, host, budget)? {
+                return Ok(());
+            }
+        }
+        panic!("合成任务未完成")
+    }
+    let mut code = Vec::new();
+    ins(&mut code, 0x25, &[0x1357_9bdf]);
+    for address in [128, 0x8000_0000] {
+        ins(&mut code, 0x25, &[address]);
+        ins(&mut code, 0x2b, &[445, 4]);
+    }
+    code.push(0x3b);
+    let mut data = vec![0; 256];
+    data[32..36].copy_from_slice(&7u32.to_le_bytes());
+    let source = b"\x82\xa0\\n%u[G32]%% %c[G36]ignored\0";
+    data[128..128 + source.len()].copy_from_slice(source);
+    let external = b"%c[G36]ignored\0".to_vec();
+    let program = Program::from_code(&code, data.clone(), 64)?;
+    for wrapped in [false, true] {
+        for budget in [1, 100] {
+            let mut task = OrdinaryTask::new(program.clone(), external.clone())?;
+            task.task_id = 42;
+            let mut state = State::new(0);
+            let mut core = CoreHost::new(&mut state);
+            let mut dialogs = Dialogs::default();
+            if wrapped {
+                let mut host = SystemHost::new(&mut core, &mut dialogs);
+                finish(&mut task, &mut host, budget)?;
+            } else {
+                core.system_services = Some(Box::new(dialogs.clone()));
+                finish(&mut task, &mut core, budget)?;
+            }
+            assert_eq!(
+                *dialogs.0.borrow(),
+                [
+                    DialogCall(42, vec![0x3042, 92, 110, 55, 37, 32]),
+                    DialogCall(42, vec![])
+                ]
+            );
+            assert_eq!(task.interpreter.stack_bytes(), 0x1357_9bdfu32.to_le_bytes());
+            assert_eq!(task.interpreter.read(0, 256)?, data);
+            assert_eq!(
+                task.interpreter.read(0x8000_0000, external.len())?,
+                external
+            );
+        }
+    }
+    let mut state = State::new(0);
+    let mut host = CoreHost::new(&mut state);
+    let dialogs = Dialogs::default();
+    host.system_services = Some(Box::new(dialogs.clone()));
+    let mut vm = Interpreter::new(Program::from_code(&[0x3b], vec![0; 4096], 0)?, vec![])?;
+    vm.write(0, &[vec![b'x'; 1023], vec![0]].concat())?;
+    assert_eq!(
+        host.call(445, &0u32.to_le_bytes(), &mut vm)?,
+        NativeReturn::Continue
+    );
+    assert_eq!(dialogs.0.borrow()[0].1, vec![u16::from(b'x'); 1023]);
+    vm.write(0, &[vec![b'x'; 1024], vec![0]].concat())?;
+    assert!(host.call(445, &0u32.to_le_bytes(), &mut vm).is_err());
+    assert!(host.call(445, &[], &mut vm).is_err());
+    assert_eq!(dialogs.0.borrow().len(), 1);
+    host.system_services = None;
+    vm.write(0, &[0])?;
+    assert!(host.call(445, &0u32.to_le_bytes(), &mut vm).is_err());
+    Ok(())
+}

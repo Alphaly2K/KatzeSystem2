@@ -102,7 +102,7 @@ pub struct HostState {
     pub string_tables: crate::language::StringTables,
     pub script_replacements: BTreeMap<Vec<u8>, Vec<u8>>,
     pub save_services: Option<Box<dyn crate::save::SaveServices>>,
-    /// 普通 629 使用的同步平台打开服务；未配置时该入口返回诊断。
+    /// 普通 445／629 使用的同步系统服务；未配置时对应入口返回诊断。
     pub system_services: Option<Box<dyn super::SystemServices>>,
     /// None 对应未建立成就管理器；命名和解锁状态由服务维护。
     pub achievement_services: Option<Box<dyn super::AchievementServices>>,

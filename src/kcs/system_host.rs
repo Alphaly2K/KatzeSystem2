@@ -6,14 +6,43 @@ pub trait SystemServices {
     /// 按系统 open 操作提交请求；平台返回的启动结果不参与 VM 返回值。
     fn open(
         &mut self,
-        task_id: u32,
-        target: &[u8],
-        parameters: &[u8],
-        directory: &[u8],
-    ) -> Result<()>;
+        _task_id: u32,
+        _target: &[u8],
+        _parameters: &[u8],
+        _directory: &[u8],
+    ) -> Result<()> {
+        Err(Error::new(0, "系统打开服务尚未接入"))
+    }
+
+    /// 显示标题为 system error 的单按钮对话框，关闭后返回；文字不含末尾零。
+    /// 平台显示失败也正常结束；Err 用于宿主集成诊断。
+    fn message_box(&mut self, _task_id: u32, _text: &[u16]) -> Result<()> {
+        Err(Error::new(0, "系统对话框服务尚未接入"))
+    }
 }
 
-/// 为已有宿主接入普通表的系统打开请求。
+pub(super) fn message_box(
+    services: Option<&mut dyn SystemServices>,
+    task_id: u32,
+    arguments: &[u8],
+    vm: &Interpreter,
+) -> Result<NativeReturn> {
+    let args = super::native::words(arguments, 1, vm.pc)?;
+    let source = strings::format(vm, args[0], 0)?;
+    let text: Vec<_> = String::from_utf8(super::utf8::cp932(&source))
+        .unwrap()
+        .encode_utf16()
+        .collect();
+    if text.len() >= 1024 {
+        return Err(Error::new(vm.pc, "系统对话框文字超过基线缓冲区范围"));
+    }
+    services
+        .ok_or_else(|| Error::new(vm.pc, "宿主未配置系统对话框服务"))?
+        .message_box(task_id, &text)?;
+    Ok(NativeReturn::Continue)
+}
+
+/// 为已有宿主接入普通表的系统对话框及打开请求。
 pub struct SystemHost<'a, H, S> {
     pub inner: &'a mut H,
     pub services: &'a mut S,
@@ -244,6 +273,9 @@ impl<H: Host, S: SystemServices> Host for SystemHost<'_, H, S> {
     }
 
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn> {
+        if index == 445 {
+            return message_box(Some(self.services), self.task_id, arguments, vm);
+        }
         if index != 629 {
             return self.inner.call(index, arguments, vm);
         }
