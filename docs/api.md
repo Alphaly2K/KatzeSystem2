@@ -297,6 +297,10 @@ Runtime 的普通 279～283／287／288 路由开发调试命令。279／280／2
 
 Runtime 的普通 690／692 依次展开首参数之后的路径，并经 `ResourceServices::resolve` 补全 `export` 类别，以命令 516 发送。690 通过 `CommandBuffers::data1` 携带第一条路径；692 另以 `data0` 携带第二条，第一条仍在 `data1`。路径保留原始字节并附零，补全结果最多 259 字节；空名称仍补全和转发。两项状态二，忽略接收者返回值。691 接受目标任务，发送 517，以状态一返回完整 DWORD；`data1` 提供临时工作缓冲，导出任务的原查询处理不使用其内容。零目标正常路由，不可达目标的查询返回零。默认导出任务类型及实际文件导出仍待接入，自定义宿主可提供命令接收者。
 
+普通 600 接受目标、资源名称格式地址、附加文字格式地址。名称先按 CP932 转为 UTF-16，再经 `ResourceServices::resolve_utf16` 补全 `export` 类别；补全结果最多 259 个单元，附加文字最多 259 字节。命令 453 的第一数据项为二，`data1` 携带 780 字节记录：前 520 字节为零结束的 UTF-16 名称，后 260 字节为零结束的附加文字。601 接受目标，发送 454 并返回完整任务结果。
+
+普通 1020／1023 接受目标及文字格式地址，分别以命令 585／588 的 `data1` 携带零结束的原始字节文字；1022 接受目标，发送 587 并返回完整任务结果。600／1020／1023 状态二，601／1022 状态一；零目标仍路由，不可达目标查询返回零。默认系统更改及网络任务类型尚未接入；这些入口提供可供宿主任务处理的请求协议。
+
 普通 1042／1043 分别通过 `AchievementServices::unlock`、`is_unlocked` 提交成就解锁及查询。两项都先展开一个格式地址，保留原始字节和大小写，字面换行不转换。1042 状态二，1043 状态一返回零或一。`HostState::achievement_services` 未配置时分别正常结束、返回零，仍执行格式验证；Runtime 可用 `set_achievement_services` 接入同一服务。服务负责已登记名称、本地解锁状态及平台可用性：未知或重复解锁不发请求，首次解锁先更新本地状态再请求平台解锁及保存，平台拒绝不回退该状态。当前库提供调用接入，平台 SDK 及其初始化由宿主提供。
 
 普通 445 展开一个格式地址，以 CP932 转换为 UTF-16，经 `SystemServices::message_box` 同步显示标题为 `system error` 的单按钮对话框。字面换行保持原样，文字最多 1,023 个 UTF-16 单元，不附末尾零。状态二，不压值；普通平台显示失败不影响脚本续跑，缺失服务及集成错误诊断。`CoreHost`、Runtime 与 `SystemHost` 共用同一协议，窗口示例复用 SDL 对话框服务。系统服务的方法缺省均提供未接入诊断，可只实现所需能力。
@@ -372,6 +376,8 @@ Runtime 的普通 740 向两个地址写回指针退出位置，不移动指针�
 普通 284 查询声音资源是否存在：两个 DWORD 中首项保留，第二项为格式字符串地址。名称按 `sound` 类别补全后，以 `LooseFirst` 打开读取源；成功返回一，未找到返回零，查询不改写名称或解码声音，也不登记持有句柄。Runtime 和 ResourceHost 共用此契约。
 
 `kcs::CachedResources<S>` 为已有同步资源服务增加共享的原始字节缓存，保留 `inner` 及对底层服务的访问；克隆包装时沿用同一 `ResourceCache`。程序装载器和 Runtime 可使用同一包装的克隆，共用预读结果。`ResourceServices::resource_cache()` 默认返回 None，包装提供共享缓存句柄。`ResourceServices::resolve_slot(slot, name)` 默认退回 `resolve(b"sound", name)`，包装与 `&mut S` 转发到底层服务，`ArchiveConfig::resolve_slot` 提供按 INT 槽位补全的实现。`ResourceHost::new` 和 `Runtime::set_resources` 自动包装输入服务，输入已有缓存时继续沿用。
+
+`ResourceServices::resolve_utf16(category, name)` 接受首零结束的宽字符名称，返回补全后的 UTF-16。默认桥接现有 CP932 `resolve`，保留 Windows 私有字符映射；输入不能表示为 CP932 时诊断，宿主可覆盖此方法提供完整宽字符补全。缓存包装和借用包装均保留覆盖实现。
 
 `ResourceCache` 的 `enqueue(full_name, life)` 登记完整名称；`start()` 排序并重置完成等级，`advance(&mut services)` 推进一个工作段，返回 true 表示遍历至末尾。`is_ready(priority)` 查询等级，`len()`／`is_empty()` 查询保留条目数量，`read_cached(name)` 返回成功预读的独立副本。`age()` 推进寿命，`clear()` 撤销缓存持有；`with_enabled(false)` 创建关闭预读的配置。普通 434～438 使用这一缓存；当前同步宿主的 436 完成全部读取后返回。名称、寿命及失败重试契约见 [资源预读](kcs.md#资源预读与缓存)。
 

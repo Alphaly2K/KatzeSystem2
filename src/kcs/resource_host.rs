@@ -10,6 +10,25 @@ pub trait ResourceServices {
         Err(Error::new(0, "资源服务未提供类别名称补全"))
     }
 
+    /// 宽字符类别名称补全；默认桥接 CP932，其他字符由宿主覆盖此方法。
+    fn resolve_utf16(&mut self, category: &[u8], name: &[u16]) -> Result<Vec<u16>> {
+        let name = &name[..name
+            .iter()
+            .position(|&unit| unit == 0)
+            .unwrap_or(name.len())];
+        let name =
+            String::from_utf16(name).map_err(|_| Error::new(0, "资源名称包含无效 UTF-16"))?;
+        let name = crate::text::cp932_encoded(&name)?;
+        let resolved = self.resolve(category, &name)?;
+        let resolved = &resolved[..resolved
+            .iter()
+            .position(|&byte| byte == 0)
+            .unwrap_or(resolved.len())];
+        Ok(crate::text::cp932_replacing(resolved)
+            .encode_utf16()
+            .collect())
+    }
+
     /// 按类别的散装目录补全文件路径；结果由宿主的 File 读取模式解释。
     fn resolve_file(&mut self, _category: &[u8], _name: &[u8]) -> Result<Vec<u8>> {
         Err(Error::new(0, "资源服务未提供文件路径补全"))
@@ -64,6 +83,9 @@ impl<S: ResourceServices + ?Sized> ResourceServices for &mut S {
     }
     fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
         (**self).resolve(category, name)
+    }
+    fn resolve_utf16(&mut self, category: &[u8], name: &[u16]) -> Result<Vec<u16>> {
+        (**self).resolve_utf16(category, name)
     }
     fn resolve_file(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
         (**self).resolve_file(category, name)

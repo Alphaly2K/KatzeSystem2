@@ -32,6 +32,28 @@ impl ResourceServices for Services {
     }
 }
 
+#[test]
+fn cached_borrowed_resources_preserve_wide_resolution_overrides() -> Result<()> {
+    struct Wide;
+    impl ResourceServices for Wide {
+        fn resolve_utf16(&mut self, category: &[u8], name: &[u16]) -> Result<Vec<u16>> {
+            assert_eq!(category, b"export");
+            assert_eq!(name, "art".encode_utf16().collect::<Vec<_>>());
+            Ok("📁/art".encode_utf16().collect())
+        }
+        fn read(&mut self, _: &[u8], _: ResourceMode) -> Result<Option<Vec<u8>>> {
+            unreachable!()
+        }
+    }
+    let mut service = Wide;
+    let mut cached = katze_system2::kcs::CachedResources::new(&mut service);
+    assert_eq!(
+        cached.resolve_utf16(b"export", &"art".encode_utf16().collect::<Vec<_>>())?,
+        "📁/art".encode_utf16().collect::<Vec<_>>()
+    );
+    Ok(())
+}
+
 fn call(host: &mut impl Host, vm: &mut Interpreter, index: u32, args: &[u32]) -> NativeReturn {
     host.call(
         index,

@@ -8,6 +8,54 @@ pub fn cp932(bytes: &[u8]) -> Result<String> {
         .ok_or_else(|| Error::new(0, "无效 CP932 文本"))
 }
 
+pub(crate) fn cp932_replacing(source: &[u8]) -> String {
+    let mut result = String::new();
+    let mut position = 0;
+    while let Some(&value) = source.get(position) {
+        match value {
+            0..=0x80 => result.push(char::from(value)),
+            0xa0 => result.push('\u{f8f0}'),
+            0xa1..=0xdf => result.push(char::from_u32(0xff61 + u32::from(value - 0xa1)).unwrap()),
+            0xfd..=0xff => result.push(char::from_u32(0xf8f1 + u32::from(value - 0xfd)).unwrap()),
+            _ => {
+                let end = (position + 2).min(source.len());
+                if let Some(decoded) = encoding_rs::SHIFT_JIS
+                    .decode_without_bom_handling_and_without_replacement(&source[position..end])
+                {
+                    result.push_str(&decoded);
+                } else {
+                    result.push('\u{30fb}');
+                }
+                position = end;
+                continue;
+            }
+        }
+        position += 1;
+    }
+    result
+}
+
+pub(crate) fn cp932_encoded(source: &str) -> Result<Vec<u8>> {
+    let mut result = Vec::new();
+    for character in source.chars() {
+        match character {
+            '\u{80}' => result.push(0x80),
+            '\u{f8f0}' => result.push(0xa0),
+            '\u{f8f1}'..='\u{f8f3}' => result.push((character as u32 - 0xf8f1) as u8 + 0xfd),
+            _ => {
+                let mut bytes = [0; 4];
+                let (encoded, _, errors) =
+                    encoding_rs::SHIFT_JIS.encode(character.encode_utf8(&mut bytes));
+                if errors {
+                    return Err(Error::new(0, "资源服务需要宽字符名称补全能力"));
+                }
+                result.extend_from_slice(&encoded);
+            }
+        }
+    }
+    Ok(result)
+}
+
 pub(crate) fn decode_script(
     bytes: &[u8],
     encoding: &'static encoding_rs::Encoding,

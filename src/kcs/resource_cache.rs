@@ -216,6 +216,10 @@ impl<S: ResourceServices> ResourceServices for CachedResources<S> {
         self.inner.resolve(category, name)
     }
 
+    fn resolve_utf16(&mut self, category: &[u8], name: &[u16]) -> Result<Vec<u16>> {
+        self.inner.resolve_utf16(category, name)
+    }
+
     fn resolve_file(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
         self.inner.resolve_file(category, name)
     }

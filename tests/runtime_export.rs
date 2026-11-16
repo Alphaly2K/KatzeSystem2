@@ -83,11 +83,13 @@ impl TaskObject for Receiver {
         host: &mut dyn Host,
         budget: usize,
     ) -> Result<CommandOutcome> {
-        if matches!(command.code, 516 | 517) {
+        if matches!(command.code, 453 | 454 | 516 | 517 | 585 | 587 | 588) {
             let name = |bytes: &[u8]| bytes[..bytes.iter().position(|&b| b == 0).unwrap()].to_vec();
             self.events.borrow_mut().push(Event {
                 command: *command,
-                first: if command.code == 516 {
+                first: if command.code == 453 {
+                    buffers.data1.as_deref().unwrap().to_vec()
+                } else if matches!(command.code, 516 | 585 | 588) {
                     name(buffers.data1.as_deref().unwrap())
                 } else {
                     Vec::new()
@@ -276,6 +278,117 @@ fn export_natives_route_ordered_paths_and_keep_status_results_without_files() ->
                 assert_eq!(resolutions, expected);
             }
         }
+    }
+    Ok(())
+}
+
+#[test]
+fn system_task_natives_route_wide_records_text_and_full_query_results() -> Result<()> {
+    for (name, normalized) in [
+        (b"art%u[G16]".as_slice(), b"art7".as_slice()),
+        (
+            &[0x80, 0xa0, 0xfd, 0xfe, 0xff],
+            &[0x80, 0xa0, 0xfd, 0xfe, 0xff],
+        ),
+        (&[0x81, 0x7f], &[0x81, 0x45]),
+    ] {
+        let mut data = vec![0; 1024];
+        data[16..20].copy_from_slice(&7u32.to_le_bytes());
+        data[64..64 + name.len()].copy_from_slice(name);
+        data[512..536].copy_from_slice(b"body%c[G24]ignored\0xxxxx");
+        let mut record = vec![0; 780];
+        let private = "export/\u{80}\u{f8f0}\u{f8f1}\u{f8f2}\u{f8f3}";
+        let wide: Vec<_> = match normalized.first() {
+            Some(0x80) => private.encode_utf16().collect(),
+            Some(0x81) => "export/・".encode_utf16().collect(),
+            _ => "export/art7".encode_utf16().collect(),
+        };
+        for (bytes, unit) in record.chunks_exact_mut(2).zip(wide) {
+            bytes.copy_from_slice(&unit.to_le_bytes());
+        }
+        record[520..524].copy_from_slice(b"body");
+        for external in [0, 0x8000_0000] {
+            let mut code = Vec::new();
+            instruction(&mut code, 0x25, &[0x1357_9bdf]);
+            for target in [7, u32::MAX, 0] {
+                for (index, arguments, output) in [
+                    (600, vec![target, external | 64, external | 512], None),
+                    (1020, vec![target, external | 512], None),
+                    (1023, vec![target, external | 512], None),
+                    (
+                        601,
+                        vec![target],
+                        Some(if target == u32::MAX { 4 } else { 0 }),
+                    ),
+                    (
+                        1022,
+                        vec![target],
+                        Some(if target == u32::MAX { 4 } else { 8 }),
+                    ),
+                ] {
+                    for &value in &arguments {
+                        instruction(&mut code, 0x25, &[value]);
+                    }
+                    instruction(&mut code, 0x2b, &[index, arguments.len() as u32 * 4]);
+                    if let Some(output) = output {
+                        instruction(&mut code, 0x26, &[output]);
+                    }
+                }
+            }
+            code.push(0x3b);
+            for budget in [1, 4096] {
+                for reply in [0, 1, 0xabcdef01] {
+                    let (events, resolutions) = run(&code, &data, budget, reply)?;
+                    let expected: Vec<_> = [7, 0]
+                        .into_iter()
+                        .flat_map(|target| {
+                            [453, 585, 588, 454, 587]
+                                .into_iter()
+                                .map(|code| Event {
+                                    command: Command {
+                                        sender: 8,
+                                        target,
+                                        code,
+                                        data: if code == 453 { [2, 0, 0] } else { [0; 3] },
+                                    },
+                                    first: match code {
+                                        453 => record.clone(),
+                                        585 | 588 => b"body".to_vec(),
+                                        _ => Vec::new(),
+                                    },
+                                    second: None,
+                                })
+                                .collect::<Vec<_>>()
+                        })
+                        .collect();
+                    assert_eq!(events, expected);
+                    assert_eq!(
+                        resolutions,
+                        vec![Resolution(b"export".to_vec(), normalized.to_vec()); 3]
+                    );
+                }
+            }
+        }
+    }
+    for (name_length, text_length, expected) in [
+        (253, 0, "资源名称超过字段容量"),
+        (3, 260, "文字超过字段容量"),
+    ] {
+        let mut data = vec![0; 1024];
+        data[64..64 + name_length].fill(b'a');
+        data[512..512 + text_length].fill(b'b');
+        let mut code = Vec::new();
+        for value in [7, 64, 512] {
+            instruction(&mut code, 0x25, &[value]);
+        }
+        instruction(&mut code, 0x2b, &[600, 12]);
+        code.push(0x3b);
+        assert!(
+            run(&code, &data, 4096, 0)
+                .unwrap_err()
+                .to_string()
+                .contains(expected)
+        );
     }
     Ok(())
 }

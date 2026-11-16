@@ -67,30 +67,7 @@ fn width(vm: &Interpreter, address: u32) -> Result<i32> {
 }
 
 pub(super) fn cp932(source: &[u8]) -> Vec<u8> {
-    let mut result = String::new();
-    let mut position = 0;
-    while let Some(&value) = source.get(position) {
-        match value {
-            0..=0x80 => result.push(char::from(value)),
-            0xa0 => result.push('\u{f8f0}'),
-            0xa1..=0xdf => result.push(char::from_u32(0xff61 + u32::from(value - 0xa1)).unwrap()),
-            0xfd..=0xff => result.push(char::from_u32(0xf8f1 + u32::from(value - 0xfd)).unwrap()),
-            _ => {
-                let end = (position + 2).min(source.len());
-                if let Some(decoded) = encoding_rs::SHIFT_JIS
-                    .decode_without_bom_handling_and_without_replacement(&source[position..end])
-                {
-                    result.push_str(&decoded);
-                } else {
-                    result.push('\u{30fb}');
-                }
-                position = end;
-                continue;
-            }
-        }
-        position += 1;
-    }
-    result.into_bytes()
+    crate::text::cp932_replacing(source).into_bytes()
 }
 
 fn truncate(vm: &mut Interpreter, address: u32, limit: u32, bytes: bool) -> Result<NativeReturn> {
