@@ -929,13 +929,25 @@ fn run_nested<F: ObjectFactory>(
     }
     if let Some(task) = running.get_mut(&target) {
         if let Execution::Command {
-            command, propagate, ..
+            command,
+            output,
+            propagate,
+            ..
         } = &mut execution
         {
-            if command.code == 29 {
+            if matches!(command.code, 23 | 24 | 29) {
                 if !task.deleted {
-                    task.clock.paused = command.data[1] as i32;
-                    task.paused_changed = Some(command.data[1] as i32);
+                    match command.code {
+                        23 => **output = task.property,
+                        24 => {
+                            task.property = command.data[1];
+                            task.property_changed = true;
+                        }
+                        _ => {
+                            task.clock.paused = command.data[1] as i32;
+                            task.paused_changed = Some(command.data[1] as i32);
+                        }
+                    }
                 }
                 **propagate = false;
                 return Ok(());
@@ -1574,7 +1586,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
     ) -> Result<NativeReturn> {
         let count = match index {
             66 => 12,
-            67 | 75 | 109 | 272..=274 | 452 | 454 => 4,
+            67 | 75 | 109 | 272..=274 | 452 | 454 | 651 => 4,
             108 | 110 | 275 | 426 | 427 | 694 => 8,
             69 | 70 | 72 | 73 => 16,
             76 => 0,
@@ -1588,6 +1600,10 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             *arg = u32::from_le_bytes(bytes.try_into().unwrap());
         }
         match index {
+            651 => {
+                self.command_target(args[0], 24, [0, u32::MAX, 0])?;
+                Ok(NativeReturn::Continue)
+            }
             454 => {
                 crate::kcs::write_task_context(vm, args[0], &self.context)?;
                 Ok(NativeReturn::Continue)

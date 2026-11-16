@@ -925,29 +925,44 @@ fn delete_native_marks_a_new_child_for_destruction_on_the_next_update() {
 fn current_task_property_is_visible_during_execution_and_survives_later_errors() {
     for budget in [1, 1024] {
         for value in [0, 1000, 0x8000_0000, u32::MAX] {
-            for fail in [false, true] {
-                let mut asm = Asm::default();
-                asm.ins(0x25, &[0x1234_5678])
-                    .ins(0x25, &[value])
-                    .ins(0x2b, &[453, 4])
-                    .ins(0x25, &[1])
-                    .ins(0x2b, &[452, 4])
-                    .ins(0x26, &[0]);
-                if fail {
-                    asm.ins(0x2b, &[9999, 0]);
+            for reset in [false, true] {
+                for fail in [false, true] {
+                    let mut asm = Asm::default();
+                    asm.ins(0x25, &[0x1234_5678])
+                        .ins(0x25, &[value])
+                        .ins(0x2b, &[453, 4])
+                        .ins(0x25, &[1])
+                        .ins(0x2b, &[452, 4])
+                        .ins(0x26, &[0]);
+                    if reset {
+                        asm.ins(0x25, &[1])
+                            .ins(0x2b, &[651, 4])
+                            .ins(0x25, &[1])
+                            .ins(0x2b, &[452, 4])
+                            .ins(0x26, &[4]);
+                    }
+                    if fail {
+                        asm.ins(0x2b, &[9999, 0]);
+                    }
+                    asm.ins(0x3b, &[]);
+                    let mut source = Source::new();
+                    source.add(b"property", asm.build(), data());
+                    let mut rt = runtime(source);
+                    rt.set_budget(budget, 1 << 20);
+                    let task = rt.create(0, kind::ORDINARY, b"property", b"").unwrap();
+                    assert_eq!(rt.update(0, 1).is_err(), fail);
+                    assert_eq!(
+                        rt.object(task).unwrap().control().property,
+                        if reset { u32::MAX } else { value }
+                    );
+                    assert_eq!(rt.object(0).unwrap().control().property, u32::MAX);
+                    let vm = rt.object(task).unwrap().interpreter().unwrap();
+                    assert_eq!(words(vm, 0, 1), [value]);
+                    if reset {
+                        assert_eq!(words(vm, 4, 1), [u32::MAX]);
+                    }
+                    assert_eq!(vm.stack_bytes(), 0x1234_5678u32.to_le_bytes());
                 }
-                asm.ins(0x3b, &[]);
-                let mut source = Source::new();
-                source.add(b"property", asm.build(), data());
-                let mut rt = runtime(source);
-                rt.set_budget(budget, 1 << 20);
-                let task = rt.create(0, kind::ORDINARY, b"property", b"").unwrap();
-                assert_eq!(rt.update(0, 1).is_err(), fail);
-                assert_eq!(rt.object(task).unwrap().control().property, value);
-                assert_eq!(rt.object(0).unwrap().control().property, u32::MAX);
-                let vm = rt.object(task).unwrap().interpreter().unwrap();
-                assert_eq!(words(vm, 0, 1), [value]);
-                assert_eq!(vm.stack_bytes(), 0x1234_5678u32.to_le_bytes());
             }
         }
     }
@@ -1127,6 +1142,10 @@ fn scalar_native_packets_keep_sender_data_and_the_callers_stack_value() {
         .ins(0x25, &[0x1122_3344])
         .ins(0x2b, &[110, 8])
         .ins(0x25, &[1])
+        .ins(0x2b, &[651, 4])
+        .ins(0x25, &[u32::MAX])
+        .ins(0x2b, &[651, 4])
+        .ins(0x25, &[1])
         .ins(0x2b, &[572, 4])
         .ins(0x25, &[u32::MAX])
         .ins(0x2b, &[572, 4])
@@ -1173,6 +1192,12 @@ fn scalar_native_packets_keep_sender_data_and_the_callers_stack_value() {
                 sender,
                 code: 97,
                 data: [0, 0x1122_3344, 0],
+            },
+            Command {
+                target,
+                sender,
+                code: 24,
+                data: [0, u32::MAX, 0],
             },
             Command {
                 target,
