@@ -1,4 +1,4 @@
-use super::Image;
+use super::{Image, ImageRegion};
 use crate::graphics::{Rect, Surface, resample};
 use crate::{Error, Result};
 
@@ -61,6 +61,39 @@ impl Image {
         resample::copy_scaled(&mut self.surface, None, from, to)
     }
 
+    pub(crate) fn blend_clipped_from(&mut self, source: &Self, from: Rect, to: Rect) -> bool {
+        let Some(region) = self.clipped_blend_region(source, from, to) else {
+            return false;
+        };
+        self.surface.blend_region(&source.surface, region, 255);
+        true
+    }
+
+    pub(crate) fn blend_clipped_within(&mut self, from: Rect, to: Rect) -> bool {
+        let Some(region) = self.clipped_blend_region(self, from, to) else {
+            return false;
+        };
+        self.surface.blend_region_within(region, 255);
+        true
+    }
+
+    fn clipped_blend_region(&self, source: &Self, from: Rect, to: Rect) -> Option<ImageRegion> {
+        let (from, to) = self.clipped_regions(source, from, to)?;
+        // 367 只保留目标裁剪后的起点；混合尺寸来自来源，再由像素边界限制。
+        let size = [
+            (from.right - from.left).min(self.info.size[0] as i32 - to.left),
+            (from.bottom - from.top).min(self.info.size[1] as i32 - to.top),
+        ];
+        Some(ImageRegion {
+            x: to.left as usize,
+            y: self.info.size[1] as usize - to.top as usize - size[1] as usize,
+            source_x: from.left as usize,
+            source_y: source.info.size[1] as usize - from.top as usize - size[1] as usize,
+            width: size[0] as usize,
+            height: size[1] as usize,
+        })
+    }
+
     fn scaled_regions(&self, source: &Self, from: Rect, to: Rect) -> Option<(Rect, Rect)> {
         let extent = |rect: Rect| {
             [
@@ -69,6 +102,17 @@ impl Image {
             ]
         };
         let equal = extent(from) == extent(to);
+        let (mut from, mut to) = self.clipped_regions(source, from, to)?;
+        if equal {
+            let size: [i32; 2] =
+                std::array::from_fn(|axis| extent(from)[axis].min(extent(to)[axis]));
+            from = Rect::from_xywh(from.left, from.top, size[0], size[1]);
+            to = Rect::from_xywh(to.left, to.top, size[0], size[1]);
+        }
+        Some((from, to))
+    }
+
+    fn clipped_regions(&self, source: &Self, from: Rect, to: Rect) -> Option<(Rect, Rect)> {
         let translate = |rect: Rect, offset: [i32; 2]| Rect {
             left: rect.left.wrapping_add(offset[0]),
             right: rect.right.wrapping_add(offset[0]),
@@ -86,15 +130,10 @@ impl Image {
             rect.intersect(bounds)
                 .map(|rect| translate(rect, offset.map(i32::wrapping_neg)))
         };
-        let mut from = clip(source, from)?;
-        let mut to = clip(self, translate(to, source.info.offset))?;
-        if equal {
-            let size: [i32; 2] =
-                std::array::from_fn(|axis| extent(from)[axis].min(extent(to)[axis]));
-            from = Rect::from_xywh(from.left, from.top, size[0], size[1]);
-            to = Rect::from_xywh(to.left, to.top, size[0], size[1]);
-        }
-        Some((from, to))
+        Some((
+            clip(source, from)?,
+            clip(self, translate(to, source.info.offset))?,
+        ))
     }
 }
 

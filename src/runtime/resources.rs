@@ -250,7 +250,7 @@ impl Resources {
             111 | 114 => length == 4,
             112 => length == 8,
             116 => length == 40,
-            115 => {
+            115 | 367 => {
                 length == 40
                     || ((24..40).contains(&length)
                         && length.is_multiple_of(4)
@@ -325,7 +325,7 @@ impl Resources {
             }
             return Ok(NativeReturn::Continue);
         }
-        if index == 115 {
+        if matches!(index, 115 | 367) {
             if args[5] == 0 {
                 return Ok(NativeReturn::Continue);
             }
@@ -340,6 +340,18 @@ impl Resources {
                 self.compositor
                     .drawing
                     .copy_image(self.images.get(args[5])?, source_rect, at);
+            } else if index == 367 {
+                self.images.blend_clipped(
+                    args[0],
+                    args[5],
+                    source_rect,
+                    Rect::from_xywh(
+                        args[1] as i32,
+                        args[2] as i32,
+                        args[3] as i32,
+                        args[4] as i32,
+                    ),
+                )?;
             } else {
                 self.images.blend(args[0], at, args[5], source_rect)?;
             }
