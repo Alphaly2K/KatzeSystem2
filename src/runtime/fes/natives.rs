@@ -56,6 +56,19 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             449 => {
                 self.command_target(target, 340, [0, read::u32_at(arguments, 4)?, 0])?;
             }
+            450 => {
+                let mut name = format_string(vm, read::u32_at(arguments, 4)?, 0)?;
+                name.push(0);
+                return Ok(NativeReturn::Value(self.command_target_with_buffers(
+                    target,
+                    341,
+                    [0; 3],
+                    &mut CommandBuffers {
+                        data1: Some(&mut name),
+                        ..CommandBuffers::default()
+                    },
+                )?));
+            }
             451 => {
                 self.command_target(target, 342, [0, read::u32_at(arguments, 4)?, 0])?;
             }

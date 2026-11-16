@@ -150,6 +150,17 @@ impl ObjectFactory for Factory {
                 ins(&mut code, 0x2b, &[452, 4]);
                 ins(&mut code, 0x26, &[address]);
             }
+            for (target, name, address) in [
+                (3, 112, 56),
+                (3, 160, 60),
+                (0, 112, 224),
+                (u32::MAX, 112, 228),
+            ] {
+                ins(&mut code, 0x25, &[target]);
+                ins(&mut code, 0x25, &[name]);
+                ins(&mut code, 0x2b, &[450, 8]);
+                ins(&mut code, 0x26, &[address]);
+            }
             for (index, address) in [(2, 16), (511, 20), (512, 24), (u32::MAX, 28)] {
                 ins(&mut code, 0x25, &[3]);
                 ins(&mut code, 0x25, &[index]);
@@ -1120,6 +1131,9 @@ fn ordinary_natives_bind_load_and_start_fes_with_shared_values_and_pixels() {
             for (address, expected) in [(4, 37u32), (8, u32::MAX), (12, u32::MAX)] {
                 assert_eq!(vm.read(address, 4).unwrap(), expected.to_le_bytes());
             }
+            for (address, expected) in [(56, 1u32), (60, 0), (224, 0), (228, 0)] {
+                assert_eq!(vm.read(address, 4).unwrap(), expected.to_le_bytes());
+            }
             for (address, expected) in [(16, 17u32), (20, 0x8000_0001), (24, 0), (28, 0)] {
                 assert_eq!(vm.read(address, 4).unwrap(), expected.to_le_bytes());
             }
@@ -1233,6 +1247,68 @@ fn local_parameter_records_preserve_prefixes_waits_and_call_returns() {
                 runtime.numbers().shared[5..8],
                 [i32::from(!load), 1, if load { 0x1103_0201 } else { 0 }]
             );
+        }
+    }
+}
+
+#[test]
+fn block_selection_preserves_wait_frame_origin_call_stack_and_exit_value() {
+    for budget in [1, 4096] {
+        for wait in ["1000", "frame 1000", "privateflag 0"] {
+            let source = format!(
+                "#START\n$0+=1\ncall MAIN\n$2+=1\nwait 10000\n#MAIN\nexit 37\nwait {wait}\n$3=999\n#NEXT\n$1=_FRAME_\nexit 77\n"
+            );
+            let mut runtime = setup(budget, source.as_bytes()).runtime;
+            let target = runtime.create(0, kind::FES, b"blocks", b"").unwrap();
+            send(&mut runtime, target, 337, 0, 0);
+            file(&mut runtime, target, b"complete.fes").unwrap();
+            send(&mut runtime, target, 339, 0, 0);
+            runtime.update(100, 1).unwrap();
+            let deadline = runtime
+                .object(target)
+                .unwrap()
+                .fes_scene()
+                .unwrap()
+                .deadline();
+            for (block, expected) in [("missing", 0), ("next", 0), ("NEXT", 1)] {
+                let mut block = format!("{block}\0ignored").into_bytes();
+                assert_eq!(
+                    runtime
+                        .dispatch_command_with_buffers(
+                            0,
+                            command(target, 341, 0, 0),
+                            &mut CommandBuffers {
+                                data1: Some(&mut block),
+                                ..Default::default()
+                            },
+                        )
+                        .unwrap(),
+                    expected
+                );
+            }
+            assert_eq!(
+                runtime
+                    .object(target)
+                    .unwrap()
+                    .fes_scene()
+                    .unwrap()
+                    .deadline(),
+                deadline
+            );
+            assert_eq!(runtime.object(target).unwrap().control().property, 37);
+            runtime.update(101, 1).unwrap();
+            assert_eq!(&runtime.numbers().shared[..4], &[1, 0, 0, 0]);
+            let now = match wait {
+                "1000" => 1100,
+                "frame 1000" => 999,
+                _ => {
+                    send(&mut runtime, target, 346, 0, 1);
+                    102
+                }
+            };
+            runtime.update(now, 1).unwrap();
+            assert_eq!(&runtime.numbers().shared[..4], &[1, now as i32 + 1, 1, 0]);
+            assert_eq!(runtime.object(target).unwrap().control().property, 77);
         }
     }
 }

@@ -1185,6 +1185,23 @@ impl TaskObject for FesObject {
                 self.offset = [i32::from_le_bytes(x), i32::from_le_bytes(y)];
                 self.bind()?;
             }
+            341 => {
+                let scene = self
+                    .scene
+                    .as_mut()
+                    .ok_or_else(|| Error::new(0, "FES 块选择需要已初始化对象"))?;
+                if scene.is_pending() {
+                    return Err(Error::new(0, "FES 本轮推进尚未完成"));
+                }
+                let block = crate::text::cp932(name(
+                    buffers
+                        .data1
+                        .as_deref()
+                        .ok_or_else(|| Error::new(0, "FES 块名缓冲区缺失"))?,
+                    usize::MAX,
+                )?)?;
+                *output = u32::from(scene.interpreter.restart_block(&block)?);
+            }
             343 => {
                 if !self.initialized {
                     return Err(Error::new(0, "FES 块分派需要已初始化对象"));
@@ -1333,7 +1350,7 @@ impl TaskObject for FesObject {
                     *output = 0;
                 }
             }
-            178 | 341 | 344 | 345 | 351..=356 => {
+            178 | 344 | 345 | 351..=356 => {
                 return Err(Error::new(0, "FES 专属命令尚未接入"));
             }
             _ => {
