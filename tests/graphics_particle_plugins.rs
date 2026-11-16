@@ -47,6 +47,7 @@ fn plugin(name: &[u8]) -> Vec<u8> {
             | b"em_shy.ppi"
             | b"thunder.ppi"
             | b"protect.ppi"
+            | b"mirror.ppi"
     ) {
         bytes[361] = 2;
     }
@@ -1992,6 +1993,74 @@ fn dash_keeps_module_activation_across_restarts_and_preserves_task_controls() ->
         runtime.update(start + 20, 1)?;
         assert_random(&mut runtime, &stopped);
         assert_eq!(runtime.drawables().get(1).unwrap().display(), 0);
+    }
+    runtime.dispatch_command(2, command(323))?;
+    assert!(
+        runtime
+            .drawables()
+            .get(1)
+            .unwrap()
+            .particle_mesh()
+            .is_none()
+    );
+    runtime.destroy(1)?;
+    assert!(runtime.drawables().get(1).is_none());
+    Ok(())
+}
+
+#[test]
+fn mirror_initializes_colored_vertices_and_preserves_randomness_blending_and_task_controls()
+-> Result<()> {
+    let mut runtime = runtime_with_count(plugin(b"mirror.ppi"), 3)?;
+    runtime.update(1, 1)?;
+    let mut parameters = [0; 128];
+    for (i, value) in [
+        640f32, 360., 90., 30., 2., 1., 400., 40., 100., 120., 30., 10., 30., 1.,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        parameters[i * 4..i * 4 + 4].copy_from_slice(&value.to_le_bytes());
+    }
+    let view = Projection::default();
+    for start in [2, 30] {
+        runtime.dispatch_command_with_buffers(
+            2,
+            command(325),
+            &mut CommandBuffers {
+                data1: Some(&mut parameters),
+                ..Default::default()
+            },
+        )?;
+        let mut expected = runtime.host_mut().random.clone();
+        for _ in 0..24 {
+            expected.next_integer();
+        }
+        for _ in 0..27 {
+            expected.next_float();
+        }
+        runtime.dispatch_command(2, command(321))?;
+        assert_random(&mut runtime, &expected);
+        let drawable = runtime.drawables().get(1).unwrap();
+        assert_eq!(drawable.blend_mode(), 1);
+        let quad = drawable
+            .particle_mesh()
+            .unwrap()
+            .projected_quad(0, &view)
+            .unwrap();
+        assert_eq!(quad[0].color >> 24, 0);
+        assert_ne!(quad[0].color & 0xffffff, 0xffffff);
+        assert_eq!(quad[3].color, 0xffffff);
+        for now in start..start + 3 {
+            runtime.update(now, 1)?;
+        }
+        assert_random(&mut runtime, &expected);
+        assert_eq!(runtime.dispatch_command(2, command(324))?, 1);
+        runtime.dispatch_command(2, command(322))?;
+        runtime.update(start + 3, 1)?;
+        assert_random(&mut runtime, &expected);
+        assert_eq!(runtime.drawables().get(1).unwrap().display(), 0);
+        parameters[52..56].fill(0);
     }
     runtime.dispatch_command(2, command(323))?;
     assert!(

@@ -7,12 +7,13 @@ use super::{
     particle_down::Down, particle_energy::Energy, particle_exclamation::Exclamation,
     particle_explosion::Explosion, particle_film_noise::FilmNoise,
     particle_flower_burst::FlowerBurst, particle_glint::Glint, particle_hadou::Hadou,
-    particle_ice::Ice, particle_note::Note, particle_notice::Notice, particle_paper::Paper,
-    particle_plugin, particle_protect::Protect, particle_question::Question, particle_rain::Rain,
-    particle_rising::Rising, particle_sakura::Sakura, particle_scene_sparkle::SceneSparkle,
-    particle_shy::Shy, particle_sigh::Sigh, particle_silent::Silent, particle_spark::Spark,
-    particle_sparkle::Sparkle, particle_steam::Steam, particle_surprise::Surprise,
-    particle_sweat::Sweat, particle_thunder::Thunder, particle_warukira::Warukira,
+    particle_ice::Ice, particle_mirror::Mirror, particle_note::Note, particle_notice::Notice,
+    particle_paper::Paper, particle_plugin, particle_protect::Protect, particle_question::Question,
+    particle_rain::Rain, particle_rising::Rising, particle_sakura::Sakura,
+    particle_scene_sparkle::SceneSparkle, particle_shy::Shy, particle_sigh::Sigh,
+    particle_silent::Silent, particle_spark::Spark, particle_sparkle::Sparkle,
+    particle_steam::Steam, particle_surprise::Surprise, particle_sweat::Sweat,
+    particle_thunder::Thunder, particle_warukira::Warukira,
 };
 use crate::kcs::{
     Host, Interpreter, ParticleHost, ParticleSource, ParticleTask, Program, ScriptRandom,
@@ -69,6 +70,7 @@ enum Effect {
     Explosion(Explosion),
     Round(Round),
     Steam(Box<Steam>),
+    Mirror(Mirror),
 }
 
 impl Effect {
@@ -133,6 +135,7 @@ impl Effect {
             particle_plugin::Kind::Roundy => Self::Round(Round::new(host, random, RoundVariant::Y)),
             particle_plugin::Kind::Roundz => Self::Round(Round::new(host, random, RoundVariant::Z)),
             particle_plugin::Kind::Steam => Self::Steam(Box::new(Steam::new(host, image, random))),
+            particle_plugin::Kind::Mirror => Self::Mirror(Mirror::new(host, image, random)),
             particle_plugin::Kind::SceneSparkle => {
                 Self::SceneSparkle(SceneSparkle::new(host, image, random))
             }
@@ -232,6 +235,7 @@ impl ParticleRunner {
                     Some(Effect::Explosion(effect)) => effect.write_mesh(host),
                     Some(Effect::Round(effect)) => effect.write_mesh(host),
                     Some(Effect::Steam(effect)) => effect.write_mesh(host),
+                    Some(Effect::Mirror(effect)) => effect.write_mesh(host),
                     _ => {}
                 }
             }
@@ -275,6 +279,14 @@ impl ParticleRunner {
                 if let Some(effect) = effect {
                     let delta = host.elapsed.wrapping_sub(host.previous_elapsed);
                     match effect {
+                        Effect::Mirror(effect) => {
+                            effect.update(
+                                delta,
+                                host.source.unwrap_or_default().position_2d,
+                                services.random().unwrap_or(&mut host.random),
+                            );
+                            effect.write_mesh(host);
+                        }
                         Effect::Steam(effect) => {
                             effect.update(delta, services.random().unwrap_or(&mut host.random));
                             effect.write_mesh(host);
