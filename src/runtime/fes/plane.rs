@@ -124,6 +124,9 @@ impl<F: ObjectFactory> Store<'_, F> {
         if matches!(object.state, ObjectState::Sound(_)) {
             return self.update_fes_sound(owner, objects, handle);
         }
+        if matches!(object.state, ObjectState::Particle(_)) {
+            return self.update_fes_particle(owner, objects, handle);
+        }
         let object = objects.get(handle).unwrap();
         if object.state.plane().is_none() {
             return match object.state {
@@ -218,6 +221,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                 ObjectState::Viewport(state) => state.dirty,
                 ObjectState::Base | ObjectState::Draw(_) => target_object.base_dirty,
                 ObjectState::Sound(state) => state.is_dirty(),
+                ObjectState::Particle(state) => state.is_dirty(),
                 _ => {
                     target.plane().is_some_and(|state| state.dirty)
                         || target.image().is_some_and(|state| state.updates.is_dirty())
@@ -342,6 +346,8 @@ impl<F: ObjectFactory> Store<'_, F> {
                 self.check_fes_draw_binding(owner, object.task_id)?;
             } else if matches!(object.state, ObjectState::Button(_)) {
                 self.check_fes_button_binding(owner, object.task_id)?;
+            } else if matches!(object.state, ObjectState::Particle(_)) {
+                self.check_fes_particle_binding(owner, object.task_id)?;
             } else if let Some(protocol) = super::slider::ControlKind::of(&object.state) {
                 self.check_fes_control_binding(owner, object.task_id, protocol)?;
             } else if let ObjectState::String(state) = &object.state {

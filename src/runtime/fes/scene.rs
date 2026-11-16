@@ -1233,6 +1233,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                         super::ObjectState::Base
                         | super::ObjectState::Viewport(_)
                         | super::ObjectState::Draw(_)
+                        | super::ObjectState::Particle(_)
                         | super::ObjectState::Slider(_)
                         | super::ObjectState::Scroll2(_) => fes::SubcommandContext::default(),
                         super::ObjectState::String(text) => {
@@ -1365,6 +1366,11 @@ impl<F: ObjectFactory> Store<'_, F> {
             {
                 if !self.advance_fes_motions(&mut scene.objects, 0, Some(handle))? {
                     return Ok(Some(false));
+                }
+                if let ObjectState::Particle(particle) =
+                    &mut scene.objects.get_mut(handle).unwrap().state
+                {
+                    particle.stop = true;
                 }
             }
             scene.motion_stop.as_mut().unwrap().bank += 1;

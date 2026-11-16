@@ -61,6 +61,9 @@ impl Objects {
                 | b"stype"
                 | b"refcap"
                 | b"filter"
+                | b"init"
+                | b"param"
+                | b"start"
         ) {
             return Ok(false);
         }
@@ -76,6 +79,9 @@ impl Objects {
         }
         if self.count(&target.name) == 1 {
             target.bank = 0;
+        }
+        if matches!(name, b"init" | b"param" | b"start") {
+            return self.dispatch_particle_command(interpreter, line.offset, &args, &target, state);
         }
         if name == b"getsize" {
             return self.dispatch_size_query(interpreter, line.offset, &args, &target, state);
@@ -195,6 +201,21 @@ impl Objects {
                 }
                 break;
             };
+            let source = match &command {
+                Command::Attach(Some(reference)) => self
+                    .lookup(&reference.name, reference.bank)
+                    .and_then(|source| self.get(source))
+                    .filter(|object| match &object.state {
+                        ObjectState::CPlane(_) | ObjectState::Plane(_) => true,
+                        ObjectState::String(state) => {
+                            state.layout.encoding() == crate::message::TextEncoding::Cp932
+                        }
+                        _ => false,
+                    })
+                    .map(|object| object.task_id.unwrap_or(0)),
+                Command::Attach(None) => Some(0),
+                _ => None,
+            };
             let object = self.get_mut(handle).unwrap();
             let mut dirty = false;
             match &command {
@@ -287,6 +308,10 @@ impl Objects {
                 Command::Attach(control) => {
                     if let ObjectState::Button(button) = &mut object.state {
                         button.set_control(control.as_ref())?;
+                    } else if let ObjectState::Particle(particle) = &mut object.state {
+                        if let Some(source) = source {
+                            particle.attach(source);
+                        }
                     }
                 }
                 Command::Plane(reference) => {
@@ -469,7 +494,10 @@ impl Objects {
             if delay {
                 self.get_mut(handle).unwrap().motion_delay = value as u32;
             } else {
-                active |= self.motion_active(handle)?;
+                active |= match &self.get(handle).unwrap().state {
+                    ObjectState::Particle(particle) => particle.playing(),
+                    _ => self.motion_active(handle)?,
+                };
             }
         }
         if !delay {

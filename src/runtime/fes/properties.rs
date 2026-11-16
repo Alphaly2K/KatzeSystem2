@@ -122,6 +122,10 @@ impl Objects {
                     sound.volume = value;
                     changed
                 }
+                ObjectState::Particle(particle) => {
+                    particle.opacity = value;
+                    true
+                }
                 ObjectState::Base | ObjectState::Draw(_) | ObjectState::Viewport(_) => {
                     return Ok(false);
                 }

@@ -171,7 +171,11 @@ impl Scene {
                     };
                     for bank in banks {
                         if let Some(handle) = self.objects.lookup(&target.name, bank as i32) {
-                            if self.objects.motion_active(handle)? {
+                            let active = match &self.objects.get(handle).unwrap().state {
+                                ObjectState::Particle(particle) => particle.playing(),
+                                _ => self.objects.motion_active(handle)?,
+                            };
+                            if active {
                                 return Ok(true);
                             }
                         }

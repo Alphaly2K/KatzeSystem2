@@ -72,7 +72,10 @@ impl Objects {
                 ObjectState::Draw(_) | ObjectState::Viewport(_)
             )
             && object.state.control().is_none()
-            && !matches!(object.state, ObjectState::Sound(_))
+            && !matches!(
+                object.state,
+                ObjectState::Sound(_) | ObjectState::Particle(_)
+            )
             && object.state.plane().is_none()
         {
             return Err(Error::new(0, "FES 此对象类型的运动属性尚未接入"));

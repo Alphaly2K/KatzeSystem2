@@ -35,6 +35,7 @@ impl<F: ObjectFactory> Store<'_, F> {
         }
         let object = objects.get(handle).unwrap();
         let button = matches!(object.state, ObjectState::Button(_));
+        let particle = matches!(object.state, ObjectState::Particle(_));
         let control = ControlKind::of(&object.state);
         let string = match &object.state {
             ObjectState::String(state) => Some(state.task_kind()),
@@ -54,11 +55,13 @@ impl<F: ObjectFactory> Store<'_, F> {
             object.images.push(wrapper);
             objects.update_order[index].image = Some(wrapper);
         }
-        if (button || control.is_some() || string.is_some())
+        if (button || particle || control.is_some() || string.is_some())
             && objects.update_order[index].task_id.is_none()
         {
             let (kind, name) = if button {
                 (kind::BUTTON, b"FE Button".as_slice())
+            } else if particle {
+                (kind::PARTICLE_3D, b"FE Particle".as_slice())
             } else if let Some(kind) = string {
                 (
                     kind,

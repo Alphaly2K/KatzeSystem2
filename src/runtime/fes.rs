@@ -22,6 +22,7 @@ mod motion;
 mod natives;
 mod navigation;
 mod panel;
+mod particle;
 mod plane;
 mod preload;
 mod properties;
@@ -38,6 +39,7 @@ pub use difimage::DifImageState;
 pub use draw::DrawState;
 pub use logstring::LogStringState;
 pub use navigation::NavigationOutcome;
+pub use particle::ParticleState;
 pub use scene::Scene;
 pub use string::StringState;
 pub(super) use task::dispatch_borrowed_control_event;
@@ -88,6 +90,7 @@ pub enum ObjectState {
     Slider(Box<SliderState>),
     Scroll2(Box<Scroll2State>),
     Sound(Box<SoundState>),
+    Particle(Box<ParticleState>),
     Draw(Box<DrawState>),
     String(Box<StringState>),
     LogString(Box<LogStringState>),
@@ -109,6 +112,7 @@ impl ObjectState {
             Self::Slider(_) => "SLIDER",
             Self::Scroll2(_) => "SCROLL2",
             Self::Sound(_) => "SOUND",
+            Self::Particle(_) => "PARTICLE",
             Self::Draw(_) => "DRAW",
             Self::String(state) => state.kind(),
             Self::LogString(state) => state.kind(),
@@ -130,6 +134,7 @@ impl ObjectState {
             "SLIDER" => Self::Slider(Box::default()),
             "SCROLL2" => Self::Scroll2(Box::default()),
             "SOUND" => Self::Sound(Box::default()),
+            "PARTICLE" => Self::Particle(Box::default()),
             "DRAW" => Self::Draw(Box::default()),
             "STRING" | "STRING8" => Self::String(Box::new(StringState::new(kind, text)?)),
             "LOGSTRING" | "LOGSTRING8" => {
@@ -615,7 +620,7 @@ impl Objects {
                 self.set_parent(handle, self.lookup(&parent.name, parent.bank))?;
             }
             let dirty = match &mut self.objects.get_mut(&handle).unwrap().state {
-                ObjectState::Base | ObjectState::Draw(_) => false,
+                ObjectState::Base | ObjectState::Draw(_) | ObjectState::Particle(_) => false,
                 ObjectState::Viewport(state) => state.apply(&initialization.attributes),
                 ObjectState::CImage(state) => state.apply(&initialization.attributes, bank as u32),
                 ObjectState::Image(state) | ObjectState::ImageWindow(state) => {
@@ -689,6 +694,9 @@ impl Objects {
                 state.dirty = true;
             }
             if let ObjectState::Sound(state) = &mut object.state {
+                state.dirty = true;
+            }
+            if let ObjectState::Particle(state) = &mut object.state {
                 state.dirty = true;
             }
             pending.extend(object.children.iter().copied());
