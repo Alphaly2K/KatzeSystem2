@@ -66,6 +66,7 @@ pub(super) enum Kind {
     Rising3,
     Protect,
     Dark,
+    DarkTriangle,
     Sakura,
     Ice,
     SceneSparkle,
@@ -182,6 +183,8 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
         Kind::Rising3
     } else if name.eq_ignore_ascii_case(b"dark.ppi") {
         Kind::Dark
+    } else if name.eq_ignore_ascii_case(b"dark_tri.ppi") {
+        Kind::DarkTriangle
     } else if name.eq_ignore_ascii_case(b"o_150102.ppi") {
         Kind::Ice
     } else if name.eq_ignore_ascii_case(b"s_040101.ppi") {
@@ -260,6 +263,7 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
         | Kind::Mirror
         | Kind::Ring
         | Kind::Radiate
+        | Kind::DarkTriangle
         | Kind::Thunder
         | Kind::Protect => 0x0002_0002,
         _ => 0x0002_0001,

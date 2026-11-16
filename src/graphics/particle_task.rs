@@ -145,6 +145,9 @@ impl Effect {
             }
             particle_plugin::Kind::Sakura => Self::Sakura(Sakura::new(host, image, random)),
             particle_plugin::Kind::Dark => Self::Dark(Dark::new(host, image, random)),
+            particle_plugin::Kind::DarkTriangle => {
+                Self::Dark(Dark::new_triangle(host, image, random))
+            }
             particle_plugin::Kind::Protect => Self::Protect(Box::new(Protect::new(host))),
         })
     }
@@ -434,6 +437,7 @@ impl ParticleRunner {
                             effect.write_mesh(host);
                         }
                         Effect::Dark(effect) => {
+                            effect.refresh_parameters(&host.parameters);
                             effect.update(
                                 delta,
                                 host.source.unwrap_or_default().position_2d,

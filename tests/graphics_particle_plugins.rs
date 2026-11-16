@@ -50,6 +50,7 @@ fn plugin(name: &[u8]) -> Vec<u8> {
             | b"mirror.ppi"
             | b"aoi.ppi"
             | b"radiate.ppi"
+            | b"dark_tri.ppi"
     ) {
         bytes[361] = 2;
     }
@@ -1293,6 +1294,16 @@ fn scatter_effects_use_shared_randomness_and_preserve_task_lifecycle() -> Result
         (
             b"dark.ppi".as_slice(),
             [570f32, 220., 20., 40., 50., 0.].as_slice(),
+            8,
+            72,
+            [[0., 0.], [0.5, 0.5]],
+            0,
+            0,
+            0,
+        ),
+        (
+            b"dark_tri.ppi".as_slice(),
+            [640f32, 250., 496., 530., 784., 530., 20., 40., 80., 0.].as_slice(),
             8,
             72,
             [[0., 0.], [0.5, 0.5]],

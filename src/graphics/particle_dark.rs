@@ -30,6 +30,7 @@ struct Particle {
     spin: f32,
     position: [f32; 3],
     scale: f32,
+    base_scale: f32,
     angle: f32,
     alpha: u32,
     region: u32,
@@ -72,6 +73,7 @@ impl Particle {
             spin,
             position: [0.; 3],
             scale,
+            base_scale: 0.,
             angle,
             alpha: 0,
             region,
@@ -90,11 +92,44 @@ pub(super) struct Dark {
     updates: i32,
     mode: u32,
     particles: Vec<Particle>,
+    triangle: Option<Triangle>,
+}
+
+struct Triangle {
+    anchors: [[f32; 3]; 3],
+    scale_input: f32,
 }
 
 impl Dark {
     pub(super) fn new(host: &ParticleHost, image: [f32; 2], random: &mut ScriptRandom) -> Self {
-        let p = host.parameters.map(f32::from_bits);
+        Self::with_parameters(host, image, random, host.parameters)
+    }
+
+    pub(super) fn new_triangle(
+        host: &ParticleHost,
+        image: [f32; 2],
+        random: &mut ScriptRandom,
+    ) -> Self {
+        let p = host.parameters;
+        let mut parameters = p;
+        parameters[..6].copy_from_slice(&[p[0], p[1], p[6], p[7], p[8], p[9]]);
+        let mut effect = Self::with_parameters(host, image, random, parameters);
+        effect.triangle = Some(Triangle {
+            anchors: std::array::from_fn(|i| {
+                [f32::from_bits(p[i * 2]), f32::from_bits(p[i * 2 + 1]), 0.]
+            }),
+            scale_input: f32::from_bits(p[8]),
+        });
+        effect
+    }
+
+    fn with_parameters(
+        host: &ParticleHost,
+        image: [f32; 2],
+        random: &mut ScriptRandom,
+        parameters: [u32; 32],
+    ) -> Self {
+        let p = parameters.map(f32::from_bits);
         let scale = p[4] / 100.;
         Self {
             anchor: [p[0], p[1], 0.],
@@ -109,6 +144,25 @@ impl Dark {
             particles: (0..host.quads.len())
                 .map(|_| Particle::spawn(scale, random))
                 .collect(),
+            triangle: None,
+        }
+    }
+
+    pub(super) fn refresh_parameters(&mut self, parameters: &[u32; 32]) {
+        if let Some(triangle) = &mut self.triangle {
+            let scale = f32::from_bits(parameters[8]);
+            // 三个锚点只在缩放参数改变时一起重读。
+            if triangle.scale_input != scale {
+                triangle.scale_input = scale;
+                self.scale = scale / 100.;
+                triangle.anchors = std::array::from_fn(|i| {
+                    [
+                        f32::from_bits(parameters[i * 2]),
+                        f32::from_bits(parameters[i * 2 + 1]),
+                        0.,
+                    ]
+                });
+            }
         }
     }
 
@@ -122,16 +176,33 @@ impl Dark {
         }
         let offset: [f32; 2] = std::array::from_fn(|i| source[i] - self.center[i]);
         let step = integer(delta as f32);
-        for p in self.particles.iter_mut().take(self.visible.max(0) as usize) {
+        for (index, p) in self
+            .particles
+            .iter_mut()
+            .take(self.visible.max(0) as usize)
+            .enumerate()
+        {
+            let anchor = self
+                .triangle
+                .as_ref()
+                .map_or(self.anchor, |triangle| triangle.anchors[index % 3]);
             let time = p.age.wrapping_sub(p.phase_time);
             if p.phase <= 2 {
                 p.velocity[1] += self.acceleration;
-                for i in 0..2 {
+                for (i, &anchor) in anchor.iter().enumerate().take(2) {
                     p.relative[i] += p.velocity[i];
-                    p.position[i] = self.anchor[i] + p.relative[i];
+                    p.position[i] = anchor + p.relative[i];
                 }
-                p.position[2] = self.anchor[2];
-                p.scale = fade(self.scale, self.scale * 2., p.total as f32, p.age as f32);
+                p.position[2] = anchor[2];
+                if p.phase == 0 {
+                    p.base_scale = self.scale;
+                }
+                p.scale = fade(
+                    p.base_scale,
+                    p.base_scale * 2.,
+                    p.total as f32,
+                    p.age as f32,
+                );
                 p.angle += p.spin;
                 match p.phase {
                     0 => {
@@ -168,8 +239,10 @@ impl Dark {
                     }
                 }
             } else {
-                *p = Particle::spawn(self.scale, random);
-                p.position = self.anchor;
+                let mut next = Particle::spawn(self.scale, random);
+                next.base_scale = p.base_scale;
+                *p = next;
+                p.position = anchor;
             }
             for (position, delta) in p.position.iter_mut().zip(offset) {
                 *position += delta;
@@ -284,6 +357,49 @@ mod tests {
             [[0., 0.], [0.5, 0.5]]
         );
         assert!(host.quads[0].iter().all(|v| v.color == 0x28ff_ffff));
+    }
+
+    #[test]
+    fn triangle_refreshes_anchors_with_scale_and_retains_each_particles_phase_scale() {
+        let mut host = host(1);
+        for (i, n) in [640f32, 250., 496., 530., 784., 530., 20., 40., 80., 0.]
+            .into_iter()
+            .enumerate()
+        {
+            host.parameters[i] = n.to_bits();
+        }
+        let mut random = ScriptRandom::seeded(17);
+        let mut effect = Dark::new_triangle(&host, [64., 128.], &mut random);
+        host.parameters[0] = 700f32.to_bits();
+        effect.refresh_parameters(&host.parameters);
+        assert_eq!(
+            effect.triangle.as_ref().unwrap().anchors[0],
+            [640., 250., 0.]
+        );
+        effect.update(150, [640., 360.], &mut random);
+        effect.update(0, [640., 360.], &mut random);
+        assert_eq!(effect.particles[0].phase, 1);
+        assert_eq!(effect.particles[0].scale, 1.6);
+        host.parameters[8] = 90f32.to_bits();
+        effect.refresh_parameters(&host.parameters);
+        assert_eq!(
+            effect.triangle.as_ref().unwrap().anchors[0],
+            [700., 250., 0.]
+        );
+        effect.update(0, [640., 360.], &mut random);
+        assert_eq!(effect.particles[0].scale, 1.6);
+        effect.update(31, [640., 360.], &mut random);
+        effect.update(0, [640., 360.], &mut random);
+        assert_eq!(effect.particles[0].phase, 2);
+        effect.update(57, [640., 360.], &mut random);
+        effect.update(0, [640., 360.], &mut random);
+        assert_eq!(effect.particles[0].phase, 3);
+        effect.update(0, [640., 360.], &mut random);
+        assert_eq!(effect.particles[0].position, [700., 250., 0.]);
+        assert_eq!(effect.particles[0].scale, 0.9);
+        assert_eq!(effect.particles[0].base_scale, 0.8);
+        effect.update(0, [640., 360.], &mut random);
+        assert_eq!(effect.particles[0].base_scale, 0.9);
     }
 
     #[test]
