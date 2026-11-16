@@ -164,7 +164,9 @@ fn creation_registers_minimum_id_and_inherits_raw_context() {
     let mut parent_data = data();
     parent_data[100..106].copy_from_slice(b"child\0");
     let mut asm = Asm::default();
-    asm.ins(0x25, &[kind::ORDINARY])
+    asm.ins(0x25, &[160])
+        .ins(0x2b, &[454, 4])
+        .ins(0x25, &[kind::ORDINARY])
         .ins(0x2b, &[68, 0])
         .ins(0x25, &[100])
         .ins(0x2b, &[66, 12])
@@ -196,6 +198,7 @@ fn creation_registers_minimum_id_and_inherits_raw_context() {
     assert_eq!(node.parent, Some(parent));
     assert_eq!(node.kind, kind::ORDINARY);
     let parent_vm = runtime.object(parent).unwrap().interpreter().unwrap();
+    assert_eq!(parent_vm.read_string(160).unwrap(), b"pctx");
     assert_eq!(words(parent_vm, 0, 1), [2], "命令 66 返回新编号");
     // 子任务尚未等待消息，同步分派返回零。
     assert_eq!(words(parent_vm, 16, 1), [0]);

@@ -418,6 +418,8 @@ fn creation_formats_names_and_passes_raw_context_before_requesting_deletion() {
 #[test]
 fn task_switching_replaces_creation_context_on_a_shared_host() {
     let mut code = Vec::new();
+    ins(&mut code, 0x25, &[48]);
+    ins(&mut code, 0x2b, &[454, 4]);
     for arg in [12, 42, 32] {
         ins(&mut code, 0x25, &[arg]);
     }
@@ -433,6 +435,10 @@ fn task_switching_replaces_creation_context_on_a_shared_host() {
         task.task_id = id;
         task.set_creation_context(Some(context)).unwrap();
         assert!(task.update(100, 1, &mut host, 100).unwrap());
+        assert_eq!(
+            task.interpreter.read_string(48).unwrap(),
+            context.split(|&byte| byte == 0).next().unwrap()
+        );
     }
     assert_eq!(services.created[0].sender, 7);
     assert_eq!(services.created[0].context, b"raw%d[G0]");

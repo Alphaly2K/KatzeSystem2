@@ -1079,6 +1079,8 @@ fn resource_controls_preserve_alpha_cache_geometry_pixel_origin_and_return_stack
             call(&mut code, 733, &[width, 2]);
             ins(&mut code, 0x26, &[0]);
             ins(&mut code, 0x25, &[0xdead_beef]);
+            handle_call(&mut code, 877, &[]);
+            ins(&mut code, 0x26, &[84]);
             for (operations, at) in [
                 (vec![], 64),
                 (vec![(736, vec![0, 0, width, 2, 0xff12_3456])], 68),
@@ -1093,6 +1095,10 @@ fn resource_controls_preserve_alpha_cache_geometry_pixel_origin_and_return_stack
                 ins(&mut code, 0x26, &[at]);
             }
             handle_call(&mut code, 728, &[0xfedc_ba98]);
+            handle_call(&mut code, 877, &[]);
+            ins(&mut code, 0x26, &[88]);
+            call(&mut code, 877, &[0]);
+            ins(&mut code, 0x26, &[92]);
             for (native, args) in [
                 (718, vec![0, 19]),
                 (719, vec![(-5i32) as u32, 6]),
@@ -1132,6 +1138,9 @@ fn resource_controls_preserve_alpha_cache_geometry_pixel_origin_and_return_stack
             let task = runtime.create(0, kind::ORDINARY, b"controls", b"").unwrap();
             runtime.update(0, 1).unwrap();
             let vm = vm(&runtime, task);
+            assert_eq!(word(vm, 84), 0);
+            assert_eq!(word(vm, 88), 0xfedc_ba98);
+            assert_eq!(word(vm, 92), 0);
             assert_eq!(
                 vm.read(64, 20).unwrap(),
                 [u32::from(width != 0), u32::from(width != 0), 0, 0, 1]

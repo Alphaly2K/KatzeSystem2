@@ -282,7 +282,7 @@ impl<H: Host, S: TaskServices> Host for TaskHost<'_, H, S> {
         }
         let count = match index {
             66 => 3,
-            67 | 109 => 1,
+            67 | 109 | 454 => 1,
             108 | 110 => 2,
             69 | 70 | 72 | 73 => 4,
             _ => return self.inner.call(index, arguments, vm),
@@ -293,6 +293,10 @@ impl<H: Host, S: TaskServices> Host for TaskHost<'_, H, S> {
         let mut args = [0; 4];
         for (arg, bytes) in args.iter_mut().zip(arguments.chunks_exact(4)) {
             *arg = u32::from_le_bytes(bytes.try_into().unwrap());
+        }
+        if index == 454 {
+            write_task_context(vm, args[0], &self.creation_context)?;
+            return Ok(NativeReturn::Continue);
         }
         if index == 66 {
             let name = strings::format(vm, args[2], 0)?;
@@ -384,4 +388,11 @@ impl<H: Host, S: TaskServices> Host for TaskHost<'_, H, S> {
             _ => unreachable!(),
         }
     }
+}
+
+pub(crate) fn write_task_context(vm: &mut Interpreter, address: u32, context: &[u8]) -> Result<()> {
+    let context = context.split(|&byte| byte == 0).next().unwrap_or_default();
+    let mut bytes = context.to_vec();
+    bytes.push(0);
+    vm.write(address, &bytes)
 }

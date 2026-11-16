@@ -61,6 +61,7 @@ pub use resource_host::{ResourceHost, ResourceServices};
 pub use sequences::SequenceData;
 pub(crate) use strings::format as format_string;
 pub use system_host::{SystemHost, SystemServices};
+pub(crate) use task_host::write_task_context;
 pub use task_host::{TaskHost, TaskServices};
 
 #[derive(Clone, Copy, Debug)]

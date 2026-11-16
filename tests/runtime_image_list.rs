@@ -906,12 +906,41 @@ fn pixel_lookup_uses_signed_keys_and_preserves_missing_output_and_buffer_tails()
 }
 
 #[test]
-fn ordinary_source_query_uses_sender_keys_and_returns_current_pixels() -> Result<()> {
+fn ordinary_list_registration_and_source_query_share_pixels_after_source_release() -> Result<()> {
     struct Queries;
     impl ProgramLoader for Queries {
         fn load(&mut self, _: &[u8]) -> Result<Option<Program>> {
             let mut code = Vec::new();
             push(&mut code, 0xdead_beef);
+            for empty in [false, true] {
+                for value in [1, 7] {
+                    push(&mut code, value);
+                }
+                if empty {
+                    push(&mut code, 0);
+                } else {
+                    code.extend([0x25, 0x13]);
+                    code.extend(32u32.to_le_bytes());
+                }
+                for value in [
+                    0,
+                    0,
+                    0,
+                    0,
+                    1f32.to_bits(),
+                    1f32.to_bits(),
+                    0,
+                    u32::MAX,
+                    1,
+                    0,
+                ] {
+                    push(&mut code, value);
+                }
+                call(&mut code, 257, 52);
+            }
+            code.extend([0x25, 0x13]);
+            code.extend(32u32.to_le_bytes());
+            call(&mut code, 114, 4);
             for (index, values) in [[1, 7], [1, 99], [0, 7]].into_iter().enumerate() {
                 for value in values {
                     push(&mut code, value);
@@ -920,8 +949,8 @@ fn ordinary_source_query_uses_sender_keys_and_returns_current_pixels() -> Result
                 code.extend([0x26, 3]);
                 code.extend((index as u32 * 4).to_le_bytes());
             }
-            code.push(0x3b);
-            Ok(Some(Program::from_code(&code, vec![0; 12], 64)?))
+            call(&mut code, 65, 0);
+            Ok(Some(Program::from_code(&code, vec![0; 36], 128)?))
         }
     }
     for budget in [1, 4096] {
@@ -942,20 +971,18 @@ fn ordinary_source_query_uses_sender_keys_and_returns_current_pixels() -> Result
         send(&mut runtime, list, 285, 2, 2);
         let script = runtime.create(0, kind::ORDINARY, b"queries", b"")?;
         let image = runtime.images_mut().create(99, [1, 1])?;
+        runtime
+            .images_mut()
+            .get_mut(image)?
+            .pixels_mut()
+            .copy_from_slice(&0xff12_3456u32.to_le_bytes());
         let pixels = runtime.images().pixel_handle(image)?;
-        let mut record = [0; 60];
-        record[..4].copy_from_slice(&pixels.to_le_bytes());
-        let mut register = command(list, 286, 7, 0);
-        register.sender = script;
-        runtime.dispatch_command_with_buffers(
-            0,
-            register,
-            &mut CommandBuffers {
-                data1: Some(&mut record),
-                ..Default::default()
-            },
-        )?;
-        runtime.images_mut().release(image)?;
+        runtime
+            .object_mut(script)
+            .unwrap()
+            .interpreter_mut()
+            .unwrap()
+            .write(32, &image.to_le_bytes())?;
         runtime.update(1, 1)?;
         let vm = runtime.object(script).unwrap().interpreter().unwrap();
         assert_eq!(
@@ -963,6 +990,13 @@ fn ordinary_source_query_uses_sender_keys_and_returns_current_pixels() -> Result
             [pixels, 0, 0].map(u32::to_le_bytes).concat()
         );
         assert_eq!(vm.stack_bytes(), 0xdead_beefu32.to_le_bytes());
+        assert!(runtime.images().get(image).is_err());
+        send(&mut runtime, list, 296, 0, 0);
+        let output = output_image(&mut runtime, list);
+        assert_eq!(
+            runtime.images().get(output)?.surface().pixel(0, 1),
+            Some(0xff12_3456)
+        );
     }
     Ok(())
 }

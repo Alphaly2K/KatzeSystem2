@@ -176,6 +176,16 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             return Ok(NativeReturn::Value(handle));
         }
         let handle = read::u32_at(arguments, 0)?;
+        if index == 877 {
+            if arguments.len() != 4 {
+                return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+            }
+            return Ok(NativeReturn::Value(if handle == 0 {
+                0
+            } else {
+                self.resources.images.resource(handle)?.alpha_mask()
+            }));
+        }
         if index == 735 {
             let source = if handle == 0 {
                 None

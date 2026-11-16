@@ -1574,7 +1574,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
     ) -> Result<NativeReturn> {
         let count = match index {
             66 => 12,
-            67 | 75 | 109 | 272..=274 | 452 => 4,
+            67 | 75 | 109 | 272..=274 | 452 | 454 => 4,
             108 | 110 | 275 | 426 | 427 | 694 => 8,
             69 | 70 | 72 | 73 => 16,
             76 => 0,
@@ -1588,6 +1588,10 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             *arg = u32::from_le_bytes(bytes.try_into().unwrap());
         }
         match index {
+            454 => {
+                crate::kcs::write_task_context(vm, args[0], &self.context)?;
+                Ok(NativeReturn::Continue)
+            }
             272 | 273 => {
                 self.command_target(args[0], index + 49, [0; 3])?;
                 Ok(NativeReturn::Continue)
