@@ -25,6 +25,7 @@ pub struct PlaneObject {
     parent_offset: Option<[f32; 3]>,
     shape_kind: u32,
     geometry_name: Vec<u8>,
+    pattern: Option<[u32; 10]>,
     movie: bool,
     echo: Option<super::echo::Echo>,
     echo_paused: bool,
@@ -52,6 +53,7 @@ impl PlaneObject {
             parent_offset: None,
             shape_kind: 0,
             geometry_name: Vec::new(),
+            pattern: None,
             movie: false,
             echo: None,
             echo_paused: false,
@@ -149,6 +151,11 @@ impl PlaneObject {
     /// 上次成功装载的 KX2 名称；清除图元或装载失败不改写此值。
     pub fn geometry_name(&self) -> &[u8] {
         &self.geometry_name
+    }
+
+    /// 上次成功生成的网格记录；空行列同样保留，替换其他图元不清除记录。
+    pub fn pattern(&self) -> Option<&[u32; 10]> {
+        self.pattern.as_ref()
     }
 
     fn input_task(&self, host: &mut dyn Host) -> Result<u32> {
@@ -672,6 +679,74 @@ impl TaskObject for PlaneObject {
                         _ => 5,
                     };
                     drawings(host)?.insert(id, drawable)?;
+                }
+            }
+            46 => {
+                self.release_movie(host)?;
+                drawings(host)?.remove(id);
+                if self.creation_flags == 1 {
+                    drawings(host)?.insert(id, Drawable::default())?;
+                    self.offset = [0.; 2];
+                    self.size = [0.; 2];
+                    let record = words::<10>(buffers.data1.as_deref())?;
+                    let columns = (record[8] as i32).max(0) as usize;
+                    let rows = (record[9] as i32).max(0) as usize;
+                    if columns
+                        .checked_mul(rows)
+                        .is_none_or(|n| n > crate::read::MAX_ITEMS)
+                    {
+                        return Err(Error::new(0, "平面网格子任务数量超过上限"));
+                    }
+                    let rows = if columns == 0 { 0 } else { rows };
+                    let mut rectangle = [0; 32];
+                    for (word, bytes) in
+                        record[3..8].iter().zip(rectangle[12..].chunks_exact_mut(4))
+                    {
+                        bytes.copy_from_slice(&word.to_le_bytes());
+                    }
+                    let origin = [record[0], record[1], record[2]].map(f32::from_bits);
+                    let step = [record[3], record[4]].map(f32::from_bits);
+                    let mut ignored = 0;
+                    for row in 0..rows {
+                        for column in 0..columns {
+                            let child = host.create_task_child(kind::PLANE, b"ptn plane", b"")?;
+                            self.send_command(
+                                child,
+                                41,
+                                [0; 3],
+                                &mut CommandBuffers {
+                                    data1: Some(&mut rectangle),
+                                    ..CommandBuffers::default()
+                                },
+                                &mut ignored,
+                                host,
+                            )?;
+                            let position = [
+                                arithmetic(1, arithmetic(3, column as f32, step[0]), origin[0]),
+                                arithmetic(1, arithmetic(3, row as f32, step[1]), origin[1]),
+                                origin[2],
+                            ];
+                            let mut position_bytes = [0; 12];
+                            for (value, bytes) in
+                                position.iter().zip(position_bytes.chunks_exact_mut(4))
+                            {
+                                bytes.copy_from_slice(&value.to_le_bytes());
+                            }
+                            self.send_command(
+                                child,
+                                53,
+                                [0; 3],
+                                &mut CommandBuffers {
+                                    data1: Some(&mut position_bytes),
+                                    ..CommandBuffers::default()
+                                },
+                                &mut ignored,
+                                host,
+                            )?;
+                        }
+                    }
+                    self.pattern = Some(record);
+                    self.shape_kind = 9;
                 }
             }
             43 | 44 => {

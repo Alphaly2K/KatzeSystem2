@@ -173,7 +173,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             | 462 | 464 | 466 | 534 | 653 | 655 | 657 | 701 | 848 | 849 | 988 | 1066 | 1068 => 8,
             880 => 16,
             339 => 24,
-            84 | 87 | 93 | 101 | 345 | 862 => 20,
+            84 | 87 | 93 | 101 | 345 | 433 | 862 => 20,
             85 | 86 => 16,
             96 | 100 | 256 | 260 | 263 | 343 | 344 | 346 | 463 | 625 | 654 | 663 | 879 | 881 => 12,
             104 => 28,
@@ -204,6 +204,20 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         }
         let word = |i: usize| u32::from_le_bytes(arguments[i * 4..i * 4 + 4].try_into().unwrap());
         match index {
+            433 => {
+                let mut record = [0; 40];
+                record[12..20].copy_from_slice(&arguments[4..12]);
+                record[32..40].copy_from_slice(&arguments[12..20]);
+                self.command_target_with_buffers(
+                    target,
+                    46,
+                    [0; 3],
+                    &mut CommandBuffers {
+                        data1: Some(&mut record),
+                        ..CommandBuffers::default()
+                    },
+                )?;
+            }
             346 | 655 => {
                 let formatted = format_string(vm, word(1), 0)?;
                 let end = formatted
