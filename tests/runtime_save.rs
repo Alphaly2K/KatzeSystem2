@@ -291,7 +291,7 @@ fn data_natives_preserve_null_paths_and_validate_vm_spans_handles_and_services()
             vm,
         )
     }
-    for index in [244, 245, 248, 254, 389] {
+    for index in [244, 245, 248, 254, 389, 1031] {
         assert_eq!(
             call(&mut host, &mut vm, index, &[0]).unwrap(),
             NativeReturn::Value(0)
@@ -354,26 +354,43 @@ fn data_natives_preserve_null_paths_and_validate_vm_spans_handles_and_services()
 }
 
 #[test]
-fn container_writes_report_failure_then_reload_the_saved_records_without_consuming_the_source() {
+fn container_file_operations_preserve_write_modes_records_and_void_delete_results() {
     #[derive(Default)]
     struct Files {
         writes: Vec<(u32, Vec<u8>, Vec<u8>)>,
+        preserving_time: Vec<bool>,
+        removals: Vec<(u32, Vec<u8>, bool)>,
         saved: Option<Vec<u8>>,
     }
     struct MemoryFiles(Rc<RefCell<Files>>);
+    impl MemoryFiles {
+        fn save(&mut self, task: u32, name: &[u8], bytes: &[u8], preserve: bool) -> Result<bool> {
+            let mut files = self.0.borrow_mut();
+            files.writes.push((task, name.to_vec(), bytes.to_vec()));
+            files.preserving_time.push(preserve);
+            if files.writes.len() % 2 == 1 {
+                return Ok(false);
+            }
+            files.saved = Some(bytes.to_vec());
+            Ok(true)
+        }
+    }
     impl SaveServices for MemoryFiles {
         fn read(&mut self, _: u32, name: &[u8]) -> Result<Option<Vec<u8>>> {
             assert_eq!(name, b"slot-7.css");
             Ok(self.0.borrow().saved.clone())
         }
         fn write(&mut self, task: u32, name: &[u8], bytes: &[u8]) -> Result<bool> {
+            self.save(task, name, bytes, false)
+        }
+        fn write_preserving_time(&mut self, task: u32, name: &[u8], bytes: &[u8]) -> Result<bool> {
+            self.save(task, name, bytes, true)
+        }
+        fn remove(&mut self, task: u32, name: &[u8]) -> Result<bool> {
             let mut files = self.0.borrow_mut();
-            files.writes.push((task, name.to_vec(), bytes.to_vec()));
-            if files.writes.len() == 1 {
-                return Ok(false);
-            }
-            files.saved = Some(bytes.to_vec());
-            Ok(true)
+            let removed = files.saved.take().is_some();
+            files.removals.push((task, name.to_vec(), removed));
+            Ok(removed)
         }
     }
     struct WritePrograms;
@@ -390,15 +407,19 @@ fn container_writes_report_failure_then_reload_the_saved_records_without_consumi
             }
             native(&mut code, 244, 4);
             store(&mut code, 4);
-            for output in [8, 12] {
+            for (index, output) in [(245, 8), (245, 12), (1031, 20), (1031, 24)] {
                 load(&mut code, 0);
                 push(&mut code, 64);
-                native(&mut code, 245, 2);
+                native(&mut code, index, 2);
                 store(&mut code, output);
             }
             push(&mut code, 64);
             native(&mut code, 247, 1);
             store(&mut code, 16);
+            for _ in 0..2 {
+                push(&mut code, 64);
+                native(&mut code, 990, 1);
+            }
             ins(&mut code, 0x3b, &[]);
             let mut data = vec![0; 128];
             data[48..52].copy_from_slice(&7u32.to_le_bytes());
@@ -422,12 +443,13 @@ fn container_writes_report_failure_then_reload_the_saved_records_without_consumi
         runtime.update(0, 1).unwrap();
         let vm = runtime.object(task).unwrap().interpreter().unwrap();
         let values: Vec<_> = vm
-            .read(0, 20)
+            .read(0, 28)
             .unwrap()
             .chunks_exact(4)
             .map(|bytes| u32::from_le_bytes(bytes.try_into().unwrap()))
             .collect();
         assert_eq!(&values[1..4], &[1, 0, 1]);
+        assert_eq!(&values[5..], &[0, 1]);
         assert_ne!(values[0], values[4]);
         for handle in [values[0], values[4]] {
             let data = runtime.host().data_container(handle).unwrap();
@@ -436,10 +458,18 @@ fn container_writes_report_failure_then_reload_the_saved_records_without_consumi
         }
         assert_eq!(vm.stack_bytes(), 0xdead_beefu32.to_le_bytes());
         let files = files.borrow();
-        assert_eq!(files.writes.len(), 2);
-        assert_eq!(files.writes[0], files.writes[1]);
+        assert_eq!(files.writes.len(), 4);
+        assert!(files.writes.iter().all(|write| *write == files.writes[0]));
+        assert_eq!(files.preserving_time, [false, false, true, true]);
         assert_eq!(files.writes[0].0, task);
         assert_eq!(files.writes[0].1, b"slot-7.css");
+        assert_eq!(
+            files.removals,
+            [
+                (task, b"slot-7.css".to_vec(), true),
+                (task, b"slot-7.css".to_vec(), false)
+            ]
+        );
     }
 }
 

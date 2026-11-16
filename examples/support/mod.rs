@@ -427,6 +427,43 @@ pub struct Saves {
     pub root: String,
 }
 
+impl Saves {
+    fn path(&self, name: &[u8]) -> Result<std::path::PathBuf> {
+        let name = encoding_rs::SHIFT_JIS
+            .decode_without_bom_handling_and_without_replacement(name)
+            .ok_or_else(|| Error::new(0, "存档名称包含无效 CP932"))?
+            .replace('\\', "/");
+        Ok(std::path::Path::new(&self.root).join(name))
+    }
+
+    fn write_file(&self, name: &[u8], bytes: &[u8], preserve_time: bool) -> Result<bool> {
+        use std::io::Write;
+
+        let path = self.path(name)?;
+        let modified = if preserve_time {
+            std::fs::File::open(&path)
+                .ok()
+                .and_then(|file| file.metadata().ok()?.modified().ok())
+        } else {
+            None
+        };
+        let _ = std::fs::create_dir_all(&self.root);
+        let Ok(mut file) = std::fs::File::create(&path) else {
+            return Ok(false);
+        };
+        if file.write_all(bytes).is_err() {
+            drop(file);
+            let _ = std::fs::remove_file(path);
+            return Ok(false);
+        }
+        if let Some(modified) = modified {
+            // 原写入器忽略恢复时间的失败，返回值仍取决于完整写入。
+            let _ = file.set_times(std::fs::FileTimes::new().set_modified(modified));
+        }
+        Ok(true)
+    }
+}
+
 pub struct Files {
     pub root: String,
 }
@@ -468,28 +505,23 @@ impl katze_system2::io::FileServices for Files {
 
 impl SaveServices for Saves {
     fn read(&mut self, _: u32, name: &[u8]) -> Result<Option<Vec<u8>>> {
-        let name = encoding_rs::SHIFT_JIS
-            .decode_without_bom_handling_and_without_replacement(name)
-            .ok_or_else(|| Error::new(0, "存档名称包含无效 CP932"))?
-            .replace('\\', "/");
-        Ok(std::fs::read(std::path::Path::new(&self.root).join(name)).ok())
+        Ok(std::fs::read(self.path(name)?).ok())
     }
 
     fn write(&mut self, _: u32, name: &[u8], bytes: &[u8]) -> Result<bool> {
-        let name = encoding_rs::SHIFT_JIS
-            .decode_without_bom_handling_and_without_replacement(name)
-            .ok_or_else(|| Error::new(0, "存档名称包含无效 CP932"))?
-            .replace('\\', "/");
-        let _ = std::fs::create_dir_all(&self.root);
-        Ok(std::fs::write(std::path::Path::new(&self.root).join(name), bytes).is_ok())
+        self.write_file(name, bytes, false)
+    }
+
+    fn write_preserving_time(&mut self, _: u32, name: &[u8], bytes: &[u8]) -> Result<bool> {
+        self.write_file(name, bytes, true)
+    }
+
+    fn remove(&mut self, _: u32, name: &[u8]) -> Result<bool> {
+        Ok(std::fs::remove_file(self.path(name)?).is_ok())
     }
 
     fn modified_time(&mut self, _: u32, name: &[u8]) -> Result<Option<u64>> {
-        let name = encoding_rs::SHIFT_JIS
-            .decode_without_bom_handling_and_without_replacement(name)
-            .ok_or_else(|| Error::new(0, "存档名称包含无效 CP932"))?
-            .replace('\\', "/");
-        let Ok(metadata) = std::fs::metadata(std::path::Path::new(&self.root).join(name)) else {
+        let Ok(metadata) = std::fs::metadata(self.path(name)?) else {
             return Ok(None);
         };
         let Ok(modified) = metadata.modified() else {
