@@ -3,6 +3,7 @@ use crate::{Error, Result, Step, read};
 use std::collections::BTreeMap;
 
 mod calendar;
+mod clipboard;
 mod configuration;
 mod data;
 mod database;
@@ -35,6 +36,7 @@ mod triples;
 mod utf8;
 mod vectors;
 pub use crate::task::TaskClock;
+pub use clipboard::{ClipboardRequest, ClipboardText};
 pub(crate) use configuration::save_configuration;
 pub(crate) use database::load as load_database;
 pub use database::{Database, DatabaseRecord};

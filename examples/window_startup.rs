@@ -6,6 +6,8 @@
 
 #[path = "support/audio_output.rs"]
 mod audio_output;
+#[path = "support/clipboard_output.rs"]
+mod clipboard_output;
 mod support;
 
 use katze_system2::{
@@ -321,6 +323,8 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .nth(1)
         .ok_or("用法：window_startup <游戏目录>")?;
     let mut game = load_game(&root)?;
+    let clipboard_encoding = game.router.script_encoding;
+    let mut clipboard = clipboard_output::Output::default();
     let startup = game.startup.clone();
     let programs = std::mem::take(&mut game.programs);
     let mut runtime = build_runtime(
@@ -476,6 +480,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         if !runtime.host_mut().window_close_requests.is_empty() {
             break;
         }
+        clipboard.pump(runtime.host_mut(), clipboard_encoding);
         audio.pump()?;
         if refresh_title {
             let next =

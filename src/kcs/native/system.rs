@@ -86,7 +86,7 @@ pub(super) fn call(
     }
     let count = match index {
         11 => 7,
-        1 | 6 | 9 | 71 | 75 | 209 | 210 | 212 | 213 | 393 | 1040 => 1,
+        1 | 6 | 9 | 10 | 71 | 75 | 209 | 210 | 212 | 213 | 393 | 1039 | 1040 => 1,
         8 | 149 | 211 | 392 | 1049 => 2,
         35 | 36 => 3,
         787 => 4,
@@ -132,6 +132,7 @@ pub(super) fn call(
         392 | 1049 => return crate::kcs::message_text::call(index, &args, vm),
 
         1 | 1040 => return crate::kcs::debug::call(host, index, args[0], vm),
+        10 | 1039 => return crate::kcs::clipboard::call(host, index, args[0], vm),
         6 => NativeReturn::Value(args[0]),
         9 => {
             if host.window_close_requests.len() >= read::MAX_ITEMS {

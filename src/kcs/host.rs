@@ -53,6 +53,8 @@ pub struct HostState {
     pub unicode_debug_messages: Vec<Vec<u16>>,
     pub menu_item_requests: Vec<MenuItemRequest>,
     pub window_close_requests: Vec<WindowCloseRequest>,
+    /// 按调用顺序提交的文字复制请求，由外层宿主消费。
+    pub clipboard_requests: Vec<super::ClipboardRequest>,
     pub task_time: u32,
     pub task_origin: u32,
     pub task_id: u32,

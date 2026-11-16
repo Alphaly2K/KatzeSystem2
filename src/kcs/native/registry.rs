@@ -85,6 +85,7 @@ pub(super) fn core(index: u32) -> CoreHandler {
         | 6
         | 8
         | 9
+        | 10
         | 11
         | 35
         | 36
@@ -103,6 +104,7 @@ pub(super) fn core(index: u32) -> CoreHandler {
         | 609
         | 610
         | 629
+        | 1039
         | 1040
         | 1049 => CoreHandler::System,
         0
