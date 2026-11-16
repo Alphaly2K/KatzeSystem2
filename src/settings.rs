@@ -154,6 +154,9 @@ impl SystemSettings {
         if let Some(name) = &self.font_names[0] {
             defaults.font_name.clone_from(name);
         }
+        if let Some(name) = &self.font_names[1] {
+            defaults.ruby_font_name.clone_from(name);
+        }
         defaults.outline = self.font_controls[0];
         defaults.shadow = self.font_controls[1];
         defaults.bold = self.font_controls[2] != 0;

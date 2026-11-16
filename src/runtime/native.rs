@@ -142,6 +142,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             RuntimeHandler::SoundLoad => self.load_sound_native(index, arguments, vm),
             RuntimeHandler::Input => self.input_native(index, arguments, vm),
             RuntimeHandler::Message => self.message_native(index, arguments, vm),
+            RuntimeHandler::TextWindow => self.text_window_native(index, arguments, vm),
             RuntimeHandler::Fes => self.fes_native(index, arguments, vm),
             RuntimeHandler::PointerPosition => {
                 if arguments.len() != 8 {

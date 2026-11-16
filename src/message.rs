@@ -16,6 +16,7 @@ mod reveal;
 mod task;
 mod timing;
 mod userfont;
+pub(crate) mod window;
 
 pub use defaults::MessageDefaults;
 pub use display::{Display, DisplayProgress, DisplaySettings};
@@ -30,6 +31,7 @@ pub use playback::{DisplayUpdate, GlyphState};
 pub use reveal::{Reveal, RevealGlyph};
 pub use task::{FontRequest, FontServices, MessageFactory, MessageObject};
 pub use timing::{Schedule, TimingSettings};
+pub use window::TextWindowObject;
 
 /// 已解码文字仍保留原文字对象路径，供布局及消息更新使用。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

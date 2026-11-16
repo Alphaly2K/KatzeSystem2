@@ -22,6 +22,7 @@ fn construction_keeps_fes_colors_and_raw_font_parameters_separate_from_message_d
             outline: 8,
             glyph_parameter: Some(17),
             reveal: true,
+            ..Default::default()
         };
         let state = StringState::new(encoding, &defaults, 7).unwrap();
         let extra = usize::from(encoding == TextEncoding::Unicode) * 0x40;

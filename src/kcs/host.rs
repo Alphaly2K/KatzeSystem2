@@ -282,6 +282,13 @@ impl Host for CoreHost<'_> {
             .ok_or_else(|| Error::new(0, "宿主未配置消息默认设置"))
     }
 
+    fn frame_rate(&self) -> u32 {
+        self.host
+            .platform_settings
+            .as_ref()
+            .map_or(60, |s| s.window_fps)
+    }
+
     fn message_time_scale(&self) -> Option<u32> {
         self.host.message_time_scale
     }

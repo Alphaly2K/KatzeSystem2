@@ -144,6 +144,10 @@ impl<H: Host, S: SystemServices> Host for SystemHost<'_, H, S> {
         self.inner.message_defaults()
     }
 
+    fn frame_rate(&self) -> u32 {
+        self.inner.frame_rate()
+    }
+
     fn message_time_scale(&self) -> Option<u32> {
         self.inner.message_time_scale()
     }

@@ -338,6 +338,11 @@ pub trait Host {
         None
     }
 
+    /// 逻辑更新频率；旧文本窗口据此换算逐字间隔，默认每秒六十次。
+    fn frame_rate(&self) -> u32 {
+        60
+    }
+
     fn message_time_scale(&self) -> Option<u32> {
         None
     }
@@ -676,6 +681,10 @@ impl<T: Host + ?Sized> Host for &mut T {
 
     fn message_defaults(&self) -> Result<&crate::message::MessageDefaults> {
         (**self).message_defaults()
+    }
+
+    fn frame_rate(&self) -> u32 {
+        (**self).frame_rate()
     }
 
     fn message_time_scale(&self) -> Option<u32> {

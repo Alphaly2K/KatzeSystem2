@@ -134,6 +134,7 @@ fn defaults_write_only_tagged_configuration_and_require_explicit_global_settings
             shadow: u32::MAX,
             outline: 0x12345678,
             glyph_parameter: Some(0),
+            ..Default::default()
         });
         assert!(query(&mut rt, &mut config[..4]).is_err());
         assert_eq!(config, tagged);
@@ -1119,5 +1120,142 @@ fn user_glyph_commands_retain_sources_across_clear_and_rebuild_mappings_on_confi
         assert_eq!(draw(&mut object, &mut host), first);
         send(&mut object, &mut host, 457 + shift, 0, Some(&mut config));
         assert!(draw(&mut object, &mut host).iter().all(|&b| b == 0));
+    }
+}
+
+#[test]
+fn text_window_natives_render_independent_colors_and_resume_timed_pages() {
+    struct WindowPrograms;
+    impl ProgramLoader for WindowPrograms {
+        fn load(&mut self, name: &[u8]) -> Result<Option<Program>> {
+            let mut code = Vec::new();
+            let mut call = |index: u32, args: &[u32]| {
+                for &value in args {
+                    code.extend([0x25, 3]);
+                    code.extend(value.to_le_bytes());
+                }
+                code.extend([0x2b, 3]);
+                code.extend(index.to_le_bytes());
+                code.push(3);
+                code.extend((args.len() as u32 * 4).to_le_bytes());
+            };
+            call(123u32, &[1, 64, 160]);
+            call(557, &[1, 0xff00_0000]);
+            call(124, &[1, 224]);
+            call(65, &[]);
+            call(125, &[1]);
+            call(418, &[1, 64, 160, 192]);
+            call(124, &[1, 240]);
+            call(65, &[]);
+            let mut data = vec![0; 512];
+            for (i, value) in [
+                2u32,
+                3,
+                24,
+                16,
+                4,
+                1,
+                6,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                16,
+                0xff33_2211,
+                u32::from(name == b"timed"),
+                3,
+                0,
+                1,
+                0,
+                0,
+                0,
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                set(&mut data, 64 + i * 4, value);
+            }
+            data[224..226].copy_from_slice(b"AB");
+            data[240..242].copy_from_slice(b"CD");
+            Ok(Some(Program::from_code(&code, data, 128)?))
+        }
+    }
+    for budget in [1, 4096] {
+        for timed in [false, true] {
+            let mut rt = Runtime::new(
+                0,
+                kind::ROOT,
+                Box::new(BaseObject::new()),
+                State::new(0),
+                MessageFactory {
+                    fallback: KcsFactory::new(WindowPrograms),
+                },
+            );
+            rt.set_budget(budget, 1 << 20);
+            rt.set_fonts(Fonts);
+            rt.host_mut().message_defaults = Some(MessageDefaults {
+                font_name: vec![84],
+                glyph_parameter: Some(0),
+                ..Default::default()
+            });
+            rt.drawing_mut().enabled = true;
+            rt.drawing_mut().active = true;
+            rt.drawing_mut().target = Some(RenderTarget::new([32, 24]).unwrap());
+            let window = rt.create(0, kind::TEXT_WINDOW, b"text", b"").unwrap();
+            assert_eq!(window, 1);
+            let caller = rt
+                .create(
+                    0,
+                    kind::ORDINARY,
+                    if timed { b"timed" } else { b"instant" },
+                    b"",
+                )
+                .unwrap();
+            rt.update(100, 1).unwrap();
+            rt.dispatch_command(0, command(caller, 163, 0)).unwrap();
+            let pixel =
+                |rt: &Runtime<_>, x, y| rt.drawing().target.as_ref().unwrap().pixel(x, y).unwrap();
+            assert_eq!(pixel(&rt, 3, 4), if timed { 0 } else { 0xff11_2233 });
+            let mut marker = Surface::new([1, 1]).unwrap();
+            marker.clear(0xffab_cdef);
+            rt.drawing_mut()
+                .copy_surface(&marker, marker.bounds(), [25, 18]);
+            rt.dispatch_command(0, command(window, 47, 1)).unwrap();
+            if timed {
+                assert_eq!(rt.dispatch_command(0, command(window, 109, 0)).unwrap(), 0);
+                rt.update(101, 1).unwrap();
+                assert_eq!(pixel(&rt, 3, 4), 0xff11_2233);
+                assert_eq!(pixel(&rt, 8, 4), 0);
+                rt.update(103, 1).unwrap();
+                assert_eq!(pixel(&rt, 25, 18), 0xffab_cdef);
+            } else {
+                assert_eq!(pixel(&rt, 25, 18), 0);
+            }
+            assert_eq!(pixel(&rt, 8, 4), 0xff11_2233);
+            assert_eq!(rt.dispatch_command(0, command(window, 109, 0)).unwrap(), 1);
+            rt.dispatch_command(0, command(caller, 162, 1)).unwrap();
+            rt.update(105, 1).unwrap();
+            rt.dispatch_command(0, command(caller, 163, 0)).unwrap();
+            assert_eq!(pixel(&rt, 3, 4), if timed { 0 } else { 0xff11_2233 });
+            rt.dispatch_command(0, command(window, 47, 1)).unwrap();
+            rt.update(109, 1).unwrap();
+            assert_eq!(pixel(&rt, 3, 4), 0xff11_2233);
+            assert_eq!(pixel(&rt, 8, 4), 0xff11_2233);
+            assert_eq!(rt.dispatch_command(0, command(window, 109, 0)).unwrap(), 1);
+            assert!(
+                rt.object(caller)
+                    .unwrap()
+                    .interpreter()
+                    .unwrap()
+                    .stack_bytes()
+                    .is_empty()
+            );
+            rt.destroy(window).unwrap();
+            assert!(rt.drawables().get(window).is_none());
+        }
     }
 }

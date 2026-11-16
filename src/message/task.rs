@@ -772,6 +772,7 @@ impl<F: ObjectFactory> ObjectFactory for MessageFactory<F> {
 
     fn create(&mut self, id: u32, object_kind: u32, name: &[u8]) -> Result<Box<dyn TaskObject>> {
         match object_kind {
+            kind::TEXT_WINDOW => Ok(Box::new(super::TextWindowObject::new(id))),
             kind::STRING_PLANE => Ok(Box::new(MessageObject::new(id, TextEncoding::Cp932))),
             kind::STRING_PLANE_UTF8 => Ok(Box::new(MessageObject::new(id, TextEncoding::Unicode))),
             _ => self.fallback.create(id, object_kind, name),

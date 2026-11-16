@@ -26,6 +26,7 @@ mod motion;
 mod movie;
 mod native;
 mod particle;
+mod text_window;
 pub use motion::MotionSnapshot;
 mod image_data;
 mod image_resources;
@@ -48,6 +49,7 @@ pub mod kind {
     pub const ROOT: u32 = 1;
     pub const PLANE: u32 = 2;
     pub const BUTTON: u32 = 6;
+    pub const TEXT_WINDOW: u32 = 8;
     pub const INPUT: u32 = 11;
     pub const ORDINARY: u32 = 12;
     pub const SOUND: u32 = 13;
@@ -1919,6 +1921,13 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
             .fonts
             .as_mut()
             .map(|fonts| fonts.as_mut() as _)
+    }
+
+    fn frame_rate(&self) -> u32 {
+        self.host
+            .platform_settings
+            .as_ref()
+            .map_or(60, |s| s.window_fps)
     }
 
     fn message_time_scale(&self) -> Option<u32> {

@@ -5,6 +5,8 @@ use crate::{Error, Result};
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct MessageDefaults {
     pub font_name: Vec<u16>,
+    /// 类型 8 的注音字体；空名称沿用普通字体。
+    pub ruby_font_name: Vec<u16>,
     pub bold: bool,
     pub shadow: u32,
     pub outline: u32,

@@ -193,6 +193,7 @@ pub(crate) enum RuntimeHandler {
     SoundLoad,
     Input,
     Message,
+    TextWindow,
     Fes,
     PointerPosition,
     Graphics,
@@ -205,6 +206,7 @@ pub(crate) enum RuntimeHandler {
 
 pub(crate) fn runtime(index: u32) -> RuntimeHandler {
     match index {
+        123..=125 | 418 | 557 => RuntimeHandler::TextWindow,
         29 => RuntimeHandler::FileOpen,
         453 => RuntimeHandler::Property,
         361 => RuntimeHandler::Configuration,
