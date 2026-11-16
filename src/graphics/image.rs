@@ -7,11 +7,13 @@ use std::collections::BTreeMap;
 
 mod blur;
 mod cache;
+mod export;
 mod layers;
 mod resize;
 mod resource;
 mod transform;
 mod window;
+pub(crate) use export::ExportFormat;
 pub(crate) use resource::{ImageResource, ResourceGeometry};
 
 /// 普通 111 的单个图像名称；帧号位于冒号后，扩展名按原名称重新拼接。
@@ -61,6 +63,7 @@ pub struct Image {
     id: u32,
     info: StandardInfo,
     surface: Surface,
+    channels_swapped: bool,
     attributes: BTreeMap<u16, [u32; 5]>,
     pub(crate) alpha_mask: u32,
     pub(super) filter_revision: u64,
@@ -80,20 +83,28 @@ impl Image {
                 base: [0; 2],
             },
             surface: Surface::new(size)?,
+            channels_swapped: false,
             attributes: BTreeMap::new(),
             alpha_mask: 0,
             filter_revision: 0,
         })
     }
 
-    pub fn from_frame(frame: DecodedFrame) -> Result<Self> {
-        if frame.info.bit_depth as i16 != 32 {
-            return Err(Error::new(0, "图像对象需要 32 位像素"));
+    /// 输入像素为 BGRA8；24 位图像的视图 Alpha 固定为 255。
+    pub fn from_frame(mut frame: DecodedFrame) -> Result<Self> {
+        if !matches!(frame.info.bit_depth as i16, 24 | 32) {
+            return Err(Error::new(0, "图像对象需要 24 或 32 位像素"));
+        }
+        if frame.info.bit_depth as i16 == 24 {
+            for pixel in frame.pixels.chunks_exact_mut(4) {
+                pixel[3] = 255;
+            }
         }
         Ok(Self {
             id: frame.id,
             info: frame.info,
             surface: Surface::from_bgra(frame.info.size, frame.pixels)?,
+            channels_swapped: false,
             attributes: frame.attributes,
             alpha_mask: 0,
             filter_revision: 0,
@@ -140,12 +151,75 @@ impl Image {
         &self.surface
     }
 
+    /// 返回 BGRA8 视图；24 位图像的 Alpha 槽须保持 255。
     pub fn pixels_mut(&mut self) -> &mut [u8] {
         self.surface.pixels_mut()
     }
 
     pub fn fill_rect_from_bottom(&mut self, rect: Rect, argb: u32) -> bool {
+        if self.is_rgb() {
+            return self.fill_rgb_rect(rect, argb);
+        }
         self.surface.fill_rect_from_bottom(rect, argb)
+    }
+
+    pub(crate) fn is_rgb(&self) -> bool {
+        self.info.bit_depth as i16 == 24
+    }
+
+    fn restore_rgb_alpha(&mut self) {
+        if self.is_rgb() {
+            for pixel in self.surface.pixels_mut().chunks_exact_mut(4) {
+                pixel[3] = 255;
+            }
+        }
+    }
+
+    pub(crate) fn pixel_from_bottom(&self, x: u32, y: u32) -> u32 {
+        let x = x.wrapping_sub(self.info.offset[0] as u32);
+        let y = y.wrapping_sub(self.info.offset[1] as u32);
+        if x >= self.info.size[0] || y >= self.info.size[1] {
+            return 0;
+        }
+        let pixel = self
+            .surface
+            .pixel(x, self.info.size[1] - 1 - y)
+            .unwrap_or(0);
+        if self.is_rgb() {
+            pixel & 0x00ff_ffff
+        } else {
+            pixel
+        }
+    }
+
+    fn fill_rgb_rect(&mut self, rect: Rect, argb: u32) -> bool {
+        let Some(rect) = rect.intersect(self.surface.bounds()) else {
+            return false;
+        };
+        let alpha = argb >> 24;
+        if alpha == 0 {
+            return true;
+        }
+        let colors = argb.to_le_bytes();
+        for y in rect.top..rect.bottom {
+            for x in rect.left..rect.right {
+                let at = (self.info.size[1] as usize - 1 - y as usize) * self.surface.stride()
+                    + x as usize * 4;
+                let pixel = &mut self.surface.pixels_mut()[at..at + 4];
+                if alpha == 255 {
+                    pixel[..3].copy_from_slice(&[colors[2], colors[1], colors[0]]);
+                } else {
+                    // 三通道分支以颜色字节自身作权重，Alpha 只选择分支。
+                    for (value, color) in pixel[..3].iter_mut().zip(colors) {
+                        *value = (i32::from(*value)
+                            + (((i32::from(color) - i32::from(*value)) * i32::from(color)) >> 8))
+                            as u8;
+                    }
+                }
+                pixel[3] = 255;
+            }
+        }
+        true
     }
 
     /// 普通 115 的图像目标分支：目标位置叠加源偏移，两端矩形独立裁剪，不缩放。
@@ -153,7 +227,11 @@ impl Image {
         let Some(region) = self.blend_region(source, source_rect, at) else {
             return false;
         };
-        self.surface.blend_region(&source.surface, region, 255);
+        if self.is_rgb() {
+            self.blend_rgb_region(Some(source), region);
+        } else {
+            self.surface.blend_region(&source.surface, region, 255);
+        }
         true
     }
 
@@ -162,8 +240,47 @@ impl Image {
         let Some(region) = self.blend_region(self, source_rect, at) else {
             return false;
         };
-        self.surface.blend_region_within(region, 255);
+        if self.is_rgb() {
+            self.blend_rgb_region(None, region);
+        } else {
+            self.surface.blend_region_within(region, 255);
+        }
         true
+    }
+
+    fn blend_rgb_region(&mut self, source: Option<&Self>, region: ImageRegion) {
+        let source_is_rgb = source.is_none_or(Self::is_rgb);
+        for row in (0..region.height).rev() {
+            if source_is_rgb {
+                let source_stride = source.unwrap_or(self).surface.stride();
+                let from = (region.source_y + row) * source_stride + region.source_x * 4;
+                let at = (region.y + row) * self.surface.stride() + region.x * 4;
+                let length = region.width * 4;
+                if let Some(source) = source {
+                    self.surface.pixels_mut()[at..at + length]
+                        .copy_from_slice(&source.surface.pixels()[from..from + length]);
+                } else {
+                    self.surface
+                        .pixels_mut()
+                        .copy_within(from..from + length, at);
+                }
+                continue;
+            }
+            for column in 0..region.width {
+                let source = source.unwrap_or(self);
+                let from = (region.source_y + row) * source.surface.stride()
+                    + (region.source_x + column) * 4;
+                let pixel: [u8; 4] = source.surface.pixels()[from..from + 4].try_into().unwrap();
+                let at = (region.y + row) * self.surface.stride() + (region.x + column) * 4;
+                let target = &mut self.surface.pixels_mut()[at..at + 4];
+                for (value, color) in target[..3].iter_mut().zip(pixel) {
+                    *value = (i32::from(*value)
+                        + (((i32::from(color) - i32::from(*value)) * i32::from(pixel[3])) >> 8))
+                        as u8;
+                }
+                target[3] = 255;
+            }
+        }
     }
 
     fn blend_region(&self, source: &Self, source_rect: Rect, at: [i32; 2]) -> Option<ImageRegion> {
@@ -227,6 +344,9 @@ impl Image {
             return Ok(());
         };
         if source.alpha_mask != 0 {
+            if source.is_rgb() {
+                return Err(Error::new(0, "24 位图像的列表通道掩码尚未接入"));
+            }
             let channel = source.alpha_mask as usize - 1;
             if channel >= 4 {
                 return Err(Error::new(0, "图像 Alpha 掩码通道须为零至四"));
@@ -246,13 +366,14 @@ impl Image {
             }
             return Ok(());
         }
-        let has_alpha = *has_alpha.get_or_insert_with(|| {
-            source
-                .surface
-                .pixels()
-                .chunks_exact(4)
-                .any(|pixel| pixel[3] != 255)
-        });
+        let has_alpha = !source.is_rgb()
+            && *has_alpha.get_or_insert_with(|| {
+                source
+                    .surface
+                    .pixels()
+                    .chunks_exact(4)
+                    .any(|pixel| pixel[3] != 255)
+            });
         if opacity == 255 && !has_alpha {
             self.surface.copy_from(
                 &source.surface,
@@ -374,6 +495,7 @@ impl Images {
             return self.insert(owner, Image::new(data.image.info.size)?, None);
         }
         let mut image = data.image.clone();
+        image.channels_swapped = false;
         for axis in 0..2 {
             if image.info.canvas_size[axis] == 0 {
                 image.info.canvas_size[axis] = image.info.size[axis];
@@ -578,6 +700,9 @@ impl Images {
             .data
             .get_mut(&pixels)
             .ok_or_else(|| Error::new(0, "图像对象尚未绑定像素"))?;
+        if data.image.is_rgb() {
+            return Ok(false);
+        }
         Ok(*data.has_alpha.get_or_insert_with(|| {
             data.image
                 .surface()

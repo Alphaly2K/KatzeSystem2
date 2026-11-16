@@ -23,7 +23,7 @@ fn thumbnail_encoding_crops_transparency_and_preserves_top_down_pixels() {
         (4, 11u32),
         (8, 0x20),
         (12, u32::MAX),
-        (20, 24),
+        (20, 16),
         (32, u32::MAX),
         (36, u32::MAX),
         (44, 0),
@@ -34,6 +34,27 @@ fn thumbnail_encoding_crops_transparency_and_preserves_top_down_pixels() {
         malformed.copy_from_slice(&bytes);
     }
     assert!(hg2::decode_frame(&bytes[..bytes.len() - 1]).is_err());
+}
+
+#[test]
+fn rgb_frames_keep_all_pixels_and_the_final_partial_plane_group() {
+    for size in [[1, 1], [3, 2], [7, 49], [17, 21]] {
+        let pixels: Vec<_> = (0..size[0] * size[1])
+            .flat_map(|i| [(i * 17) as u8, (i * 37) as u8, (i * 53) as u8, 0])
+            .collect();
+        let frame =
+            hg2::decode_frame(&hg2::encode_frame_with_depth(size, &pixels, 24).unwrap()).unwrap();
+        assert_eq!(frame.info.bit_depth, 24);
+        assert_eq!(frame.info.size, size);
+        assert_eq!(frame.info.canvas_size, size);
+        assert_eq!(frame.info.offset, [0; 2]);
+        assert_eq!(frame.info.reserved, 0);
+        for (actual, expected) in frame.pixels.chunks_exact(4).zip(pixels.chunks_exact(4)) {
+            assert_eq!(&actual[..3], &expected[..3]);
+            assert_eq!(actual[3], 255);
+        }
+    }
+    assert!(hg2::encode_frame_with_depth([1, 1], &[0; 4], 16).is_err());
 }
 
 #[test]

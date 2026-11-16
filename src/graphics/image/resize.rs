@@ -41,6 +41,7 @@ impl Image {
         }
         self.info.size = size;
         self.surface = surface;
+        self.restore_rgb_alpha();
         self.filter_revision = self.filter_revision.wrapping_add(1);
         Ok(true)
     }
@@ -50,7 +51,9 @@ impl Image {
         let Some((from, to)) = self.scaled_regions(source, from, to) else {
             return Ok(false);
         };
-        resample::copy_scaled(&mut self.surface, Some(&source.surface), from, to)
+        let copied = resample::copy_scaled(&mut self.surface, Some(&source.surface), from, to)?;
+        self.restore_rgb_alpha();
+        Ok(copied)
     }
 
     /// 对自身执行同一拷贝；等尺寸按行移动，缩放时即时读取此前写入的像素。
@@ -58,14 +61,20 @@ impl Image {
         let Some((from, to)) = self.scaled_regions(self, from, to) else {
             return Ok(false);
         };
-        resample::copy_scaled(&mut self.surface, None, from, to)
+        let copied = resample::copy_scaled(&mut self.surface, None, from, to)?;
+        self.restore_rgb_alpha();
+        Ok(copied)
     }
 
     pub(crate) fn blend_clipped_from(&mut self, source: &Self, from: Rect, to: Rect) -> bool {
         let Some(region) = self.clipped_blend_region(source, from, to) else {
             return false;
         };
-        self.surface.blend_region(&source.surface, region, 255);
+        if self.is_rgb() {
+            self.blend_rgb_region(Some(source), region);
+        } else {
+            self.surface.blend_region(&source.surface, region, 255);
+        }
         true
     }
 
@@ -73,7 +82,11 @@ impl Image {
         let Some(region) = self.clipped_blend_region(self, from, to) else {
             return false;
         };
-        self.surface.blend_region_within(region, 255);
+        if self.is_rgb() {
+            self.blend_rgb_region(None, region);
+        } else {
+            self.surface.blend_region_within(region, 255);
+        }
         true
     }
 

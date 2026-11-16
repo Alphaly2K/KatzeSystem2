@@ -87,3 +87,42 @@ fn file_source_reads_concurrently_without_sharing_reader_positions() {
         }
     });
 }
+
+#[test]
+fn wide_file_creation_bridges_cp932_and_stops_at_the_first_zero() {
+    use katze_system2::io::FileServices;
+    #[derive(Default)]
+    struct Files(Vec<(u32, Vec<u8>)>);
+    impl FileServices for Files {
+        fn create(&mut self, task: u32, name: &[u8]) -> Result<Option<Box<dyn Write>>> {
+            self.0.push((task, name.to_vec()));
+            Ok(Some(Box::new(Vec::<u8>::new())))
+        }
+        fn append_line(&mut self, _: u32, _: &[u8], _: &[u8]) -> Result<()> {
+            unreachable!()
+        }
+    }
+    let mut files = Files::default();
+    let name: Vec<_> = "あ\u{80}\u{f8f0}\u{f8f1}\u{f8f2}\u{f8f3}\0🌟"
+        .encode_utf16()
+        .collect();
+    assert!(files.create_utf16(7, &name).unwrap().is_some());
+    assert_eq!(
+        files.0,
+        [(7, vec![0x82, 0xa0, 0x80, 0xa0, 0xfd, 0xfe, 0xff])]
+    );
+    assert!(
+        files
+            .create_utf16(7, &[0xd800])
+            .err()
+            .unwrap()
+            .message
+            .contains("UTF-16")
+    );
+    let error = match files.create_utf16(7, &"🌟".encode_utf16().collect::<Vec<_>>()) {
+        Err(error) => error,
+        Ok(_) => panic!("unrepresentable names require a wide file service"),
+    };
+    assert!(error.message.contains("宽字符"));
+    assert_eq!(files.0.len(), 1);
+}

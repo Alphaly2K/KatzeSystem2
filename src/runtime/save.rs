@@ -37,7 +37,11 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         }
         if index == 241 {
             let image = self.resources.images.get(source)?;
-            let bytes = crate::hg2::encode_frame(image.info().size, image.surface().pixels())?;
+            let bytes = crate::hg2::encode_frame_with_depth(
+                image.info().size,
+                image.surface().pixels(),
+                image.info().bit_depth & 0xffff,
+            )?;
             self.host
                 .data_container_mut(container)?
                 .append(record, &bytes)?;

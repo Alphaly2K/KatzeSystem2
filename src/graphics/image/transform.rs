@@ -4,6 +4,9 @@ use crate::graphics::Surface;
 
 impl Image {
     pub(crate) fn multiply_color(&mut self, argb: u32) {
+        if self.is_rgb() {
+            return;
+        }
         self.filter_revision = self.filter_revision.wrapping_add(1);
         let factors = argb.to_le_bytes();
         for pixel in self.pixels_mut().chunks_exact_mut(4) {

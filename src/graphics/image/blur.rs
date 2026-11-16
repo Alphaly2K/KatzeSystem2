@@ -3,8 +3,11 @@ use crate::graphics::Surface;
 use crate::{Error, Result};
 
 impl Image {
-    /// 扩边后依次作水平、垂直三角滤波；半径按有符号值钳制到 0～255。
+    /// 扩边后依次作水平、垂直三角滤波；24 位水平分支的未初始化结果返回诊断。
     pub fn blur(&mut self, radius: [i32; 2]) -> Result<bool> {
+        if self.is_rgb() {
+            return self.blur_rgb(radius);
+        }
         let radius = radius.map(|value| value.clamp(0, 255));
         let offset = self.info.offset;
         if !self.expand_for_blur(radius)? {
@@ -36,13 +39,32 @@ impl Image {
                 .checked_sub(offset)
                 .and_then(|value| value.checked_sub(size[axis]))
                 .ok_or_else(|| Error::new(0, "图像扩边的像素范围位于画布之外"))?;
-            before[axis] = (radius[axis] as u32).min(offset);
-            size[axis] += before[axis] + (radius[axis] as u32).min(remaining);
+            let (before_radius, after_radius) = if self.is_rgb() {
+                // 三通道入口依次传入左、右、下、上，两个半径交错用于扩边。
+                (radius[0], radius[1])
+            } else {
+                (radius[axis], radius[axis])
+            };
+            before[axis] = (before_radius as u32).min(offset);
+            size[axis] += before[axis] + (after_radius as u32).min(remaining);
         }
         if size == self.info.size {
             return Ok(true);
         }
+        if self.is_rgb() {
+            let old_stride = (self.info.size[0] as usize * 3 + 3) & !3;
+            let stride = (size[0] as usize * 3 + 3) & !3;
+            let after = size[0] - self.info.size[0] - before[0];
+            if old_stride != self.info.size[0] as usize * 3
+                && (after != 0 || before[0] as usize * 3 + old_stride > stride)
+            {
+                return Err(Error::new(0, "24 位扩边会将未初始化的行填充复制到可见像素"));
+            }
+        }
         let mut surface = Surface::new(size)?;
+        if self.is_rgb() {
+            surface.clear(0xff00_0000);
+        }
         let top = size[1] - self.info.size[1] - before[1];
         for y in 0..self.info.size[1] as usize {
             let from = y * self.surface.stride();
@@ -56,6 +78,53 @@ impl Image {
         for (axis, amount) in before.into_iter().enumerate() {
             self.info.offset[axis] -= amount as i32;
         }
+        Ok(true)
+    }
+
+    fn blur_rgb(&mut self, radius: [i32; 2]) -> Result<bool> {
+        if radius.iter().any(|&value| value < 0) || self.surface.pixels().is_empty() {
+            return Ok(false);
+        }
+        if radius[0] != 0 {
+            return Err(Error::new(0, "24 位水平模糊会留下未初始化的可见像素"));
+        }
+        let offset = self.info.offset;
+        if !self.expand_for_blur(radius)? {
+            return Ok(false);
+        }
+        let radius = radius[1].min(255) as usize;
+        if radius != 0 {
+            let source = self.surface.clone();
+            let [width, height] = source.size().map(|value| value as usize);
+            let factor = 256 / (radius + 1) as u32;
+            let weights: Vec<_> = (0..=radius * 2)
+                .map(|index| {
+                    ((radius + 1 - index.abs_diff(radius)) * 256 + radius / 2) as u32
+                        / (radius + 1) as u32
+                })
+                .collect();
+            for y in 0..height {
+                for x in 0..width {
+                    let mut sums = [0u32; 3];
+                    for (index, &weight) in weights.iter().enumerate() {
+                        let row = (y + index).saturating_sub(radius).min(height - 1);
+                        let at = row * source.stride() + x * 4;
+                        for (sum, &color) in sums.iter_mut().zip(&source.pixels()[at..at + 3]) {
+                            *sum += u32::from(color) * weight;
+                        }
+                    }
+                    let at = y * self.surface.stride() + x * 4;
+                    for (value, sum) in self.surface.pixels_mut()[at..at + 3].iter_mut().zip(sums) {
+                        *value = (sum.wrapping_mul(factor) >> 16) as u8;
+                    }
+                }
+            }
+        }
+        for (axis, old) in offset.into_iter().enumerate() {
+            self.info.base[axis] =
+                self.info.base[axis].wrapping_add(old.wrapping_sub(self.info.offset[axis]));
+        }
+        self.filter_revision = self.filter_revision.wrapping_add(1);
         Ok(true)
     }
 }

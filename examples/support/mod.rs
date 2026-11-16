@@ -469,6 +469,17 @@ pub struct Files {
 }
 
 impl katze_system2::io::FileServices for Files {
+    fn create_utf16(&mut self, _: u32, name: &[u16]) -> Result<Option<Box<dyn std::io::Write>>> {
+        let Ok(name) = String::from_utf16(name) else {
+            return Ok(None);
+        };
+        Ok(
+            std::fs::File::create(std::path::Path::new(&self.root).join(name.replace('\\', "/")))
+                .ok()
+                .map(|file| Box::new(file) as Box<dyn std::io::Write>),
+        )
+    }
+
     fn create(&mut self, _: u32, name: &[u8]) -> Result<Option<Box<dyn std::io::Write>>> {
         let Some(name) =
             encoding_rs::SHIFT_JIS.decode_without_bom_handling_and_without_replacement(name)

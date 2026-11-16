@@ -12,6 +12,23 @@ pub type SharedSource = Arc<dyn ReadSource>;
 
 /// 脚本文件写入；名称为 CP932 字节，目录策略独立于资源与存档路由。
 pub trait FileServices {
+    /// 创建或截断宽字符名称指向的文件；默认桥接 CP932 创建服务。
+    fn create_utf16(
+        &mut self,
+        task_id: u32,
+        name: &[u16],
+    ) -> Result<Option<Box<dyn std::io::Write>>> {
+        let name = &name[..name
+            .iter()
+            .position(|&unit| unit == 0)
+            .unwrap_or(name.len())];
+        let name =
+            String::from_utf16(name).map_err(|_| Error::new(0, "文件名称包含无效 UTF-16"))?;
+        let name = crate::text::cp932_encoded(&name)
+            .map_err(|_| Error::new(0, "文件输出服务需要宽字符名称支持"))?;
+        self.create(task_id, &name)
+    }
+
     /// 创建或截断文件并打开顺序写入端；普通打开失败返回 None。
     fn create(&mut self, _task_id: u32, _name: &[u8]) -> Result<Option<Box<dyn std::io::Write>>> {
         Err(Error::new(0, "宿主未提供文件创建服务"))

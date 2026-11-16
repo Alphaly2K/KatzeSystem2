@@ -96,15 +96,9 @@ impl Resources {
         }
         if index == 1026 {
             let image = self.images.get(args[0])?;
-            let info = image.info();
-            let x = args[1].wrapping_sub(info.offset[0] as u32);
-            let y = args[2].wrapping_sub(info.offset[1] as u32);
-            let pixel = if x < info.size[0] && y < info.size[1] {
-                image.surface().pixel(x, info.size[1] - 1 - y).unwrap_or(0)
-            } else {
-                0
-            };
-            return Ok(NativeReturn::Value(pixel));
+            return Ok(NativeReturn::Value(
+                image.pixel_from_bottom(args[1], args[2]),
+            ));
         }
         let info = self.images.get_mut(args[0])?.info_mut();
         match index {

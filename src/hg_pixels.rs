@@ -1,12 +1,21 @@
 use crate::{Error, Result, read};
 
 pub(crate) fn decode(literals: &[u8], commands: &[u8], dimensions: [u32; 2]) -> Result<Vec<u8>> {
-    let size = byte_size(dimensions)?;
+    decode_channels(literals, commands, dimensions, 4)
+}
+
+pub(crate) fn decode_channels(
+    literals: &[u8],
+    commands: &[u8],
+    dimensions: [u32; 2],
+    channels: usize,
+) -> Result<Vec<u8>> {
+    let size = channel_byte_size(dimensions, channels)?;
     let planes = expand_runs(literals, commands, size)?;
     let mut pixels = vec![0; size];
     // 位平面按完整游程缓冲分组；小图允许在可见像素之后保留填充。
     let plane_size = planes.len() / 4;
-    for (index, pixel) in pixels.chunks_exact_mut(4).enumerate() {
+    for (index, pixel) in pixels.chunks_mut(4).enumerate() {
         for (channel, value) in pixel.iter_mut().enumerate() {
             let mut packed = 0;
             for plane in 0..4 {
@@ -16,9 +25,9 @@ pub(crate) fn decode(literals: &[u8], commands: &[u8], dimensions: [u32; 2]) -> 
             *value = (packed >> 1) ^ 0u8.wrapping_sub(packed & 1);
         }
     }
-    let stride = dimensions[0] as usize * 4;
-    for index in 4..stride {
-        pixels[index] = pixels[index].wrapping_add(pixels[index - 4]);
+    let stride = dimensions[0] as usize * channels;
+    for index in channels..stride {
+        pixels[index] = pixels[index].wrapping_add(pixels[index - channels]);
     }
     for index in stride..size {
         pixels[index] = pixels[index].wrapping_add(pixels[index - stride]);
@@ -27,12 +36,16 @@ pub(crate) fn decode(literals: &[u8], commands: &[u8], dimensions: [u32; 2]) -> 
 }
 
 pub(crate) fn byte_size(dimensions: [u32; 2]) -> Result<usize> {
+    channel_byte_size(dimensions, 4)
+}
+
+fn channel_byte_size(dimensions: [u32; 2], channels: usize) -> Result<usize> {
     if dimensions.contains(&0) {
         return Err(Error::new(0, "HG 像素尺寸为零"));
     }
     let size = dimensions[0]
         .checked_mul(dimensions[1])
-        .and_then(|n| n.checked_mul(4))
+        .and_then(|n| n.checked_mul(channels as u32))
         .ok_or_else(|| Error::new(0, "HG 像素尺寸溢出"))?;
     read::sized(size, 0)
 }
@@ -121,22 +134,30 @@ fn expand_runs(literals: &[u8], commands: &[u8], minimum_size: usize) -> Result<
 }
 
 pub(crate) fn encode(pixels: &[u8], dimensions: [u32; 2]) -> Result<(Vec<u8>, Vec<u8>)> {
-    let size = byte_size(dimensions)?;
+    encode_channels(pixels, dimensions, 4)
+}
+
+pub(crate) fn encode_channels(
+    pixels: &[u8],
+    dimensions: [u32; 2],
+    channels: usize,
+) -> Result<(Vec<u8>, Vec<u8>)> {
+    let size = channel_byte_size(dimensions, channels)?;
     if pixels.len() != size {
         return Err(Error::new(0, "HG 像素长度与尺寸不符"));
     }
     let mut deltas = pixels.to_vec();
-    let stride = dimensions[0] as usize * 4;
+    let stride = dimensions[0] as usize * channels;
     for i in (stride..size).rev() {
         deltas[i] = deltas[i].wrapping_sub(deltas[i - stride]);
     }
-    for i in (4..stride).rev() {
-        deltas[i] = deltas[i].wrapping_sub(deltas[i - 4]);
+    for i in (channels..stride).rev() {
+        deltas[i] = deltas[i].wrapping_sub(deltas[i - channels]);
     }
-    let padded = size.max(1024);
+    let padded = (size.max(1024) + 3) & !3;
     let quarter = padded / 4;
     let mut planes = vec![0; padded];
-    for (i, pixel) in deltas.chunks_exact(4).enumerate() {
+    for (i, pixel) in deltas.chunks(4).enumerate() {
         for (channel, &delta) in pixel.iter().enumerate() {
             let packed = if delta < 128 {
                 delta << 1

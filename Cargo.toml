@@ -15,6 +15,8 @@ fontdue = { version = "=0.9.3", default-features = false, features = ["std"] }
 fontdb = { version = "=0.23.0", default-features = false, features = ["fs", "fontconfig"] }
 ttf-parser = { version = "=0.25.1", default-features = false, features = ["std"] }
 lewton = { version = "=0.10.2", default-features = false, features = ["ogg"] }
+jpeg-encoder = "=0.6.1"
+png = "=0.17.16"
 roxmltree = "0.20.0"
 
 [build-dependencies]
