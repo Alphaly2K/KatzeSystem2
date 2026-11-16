@@ -35,6 +35,12 @@ impl SystemSettings {
             .or_else(|| self.voice_prefix_index(name)))
     }
 
+    pub(crate) fn voice_file_archive(&self, name: &[u8]) -> Result<Option<&[u8]>> {
+        Ok(self
+            .voice_file_index(name)?
+            .map(|index| terminated(&self.sound[20 + index * 116 + 84..20 + (index + 1) * 116])))
+    }
+
     fn voice_directory_index(&self, name: &[u8]) -> Option<usize> {
         let mut position = 0;
         let mut separator = 0;

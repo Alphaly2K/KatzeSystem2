@@ -59,6 +59,7 @@ pub(super) fn core(index: u32) -> CoreHandler {
         | 605
         | 606
         | 607
+        | 674
         | 741
         | 789
         | 790

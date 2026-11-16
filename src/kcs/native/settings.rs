@@ -8,6 +8,39 @@ pub(super) fn call(
     arguments: &[u8],
     vm: &mut Interpreter,
 ) -> Result<NativeReturn> {
+    if index == 674 {
+        let args = words(arguments, 2, vm.pc)?;
+        let file = strings::format(vm, args[0], 0)?;
+        let category = strings::format(vm, args[1], 0)?;
+        if file.len() >= 260 || category.len() >= 260 {
+            return Err(Error::new(vm.pc, "归档槽号查询名称超过基线缓冲区范围"));
+        }
+        let archives = host
+            .archive_config
+            .as_ref()
+            .ok_or_else(|| Error::new(vm.pc, "宿主未提供归档类别配置"))?;
+        let category = if category.eq_ignore_ascii_case(b"sound") {
+            if host.sound_config_enabled != 0 {
+                host.sound_config
+                    .as_ref()
+                    .ok_or_else(|| Error::new(vm.pc, "宿主未提供新声音分类配置"))?
+                    .file_part(&file)?
+                    .map(|part| part.archive.as_slice())
+            } else {
+                host.system_settings
+                    .as_ref()
+                    .ok_or_else(|| Error::new(vm.pc, "宿主未配置全局设置"))?
+                    .voice_file_archive(&file)?
+            }
+        } else {
+            Some(category.as_slice())
+        };
+        return Ok(NativeReturn::Value(
+            category
+                .and_then(|name| archives.find(name))
+                .map_or(u32::MAX, |slot| slot as u32),
+        ));
+    }
     if matches!(index, 605..=607 | 844) {
         let name = strings::format(vm, read::u32_at(arguments, 0)?, 0)?;
         let settings = host

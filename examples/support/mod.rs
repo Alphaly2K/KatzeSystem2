@@ -712,6 +712,7 @@ pub fn build_runtime(
         },
     );
     let startup_xml = katze_system2::resource::XmlDocument::parse(startup.as_bytes())?;
+    runtime.host_mut().archive_config = Some(router.config.clone());
     runtime.host_mut().sound_groups = Some(katze_system2::audio::SoundGroups::from_startup_xml(
         startup.as_bytes(),
     )?);
