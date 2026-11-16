@@ -4,7 +4,7 @@ use katze_system2::{
     io::FileServices,
     kcs::{
         CoreHost, Host, Interpreter, NativeReturn, OrdinaryTask, Program, ResourceHost,
-        ResourceServices,
+        ResourceServices, SystemHost, SystemServices, TaskHost, TaskServices,
     },
     resource::ResourceMode,
     runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, kind},
@@ -129,6 +129,24 @@ impl ResourceServices for TransferFiles {
 }
 
 struct Output(Rc<RefCell<Transfers>>);
+
+struct OtherServices;
+impl SystemServices for OtherServices {
+    fn open(&mut self, _: u32, _: &[u8], _: &[u8], _: &[u8]) -> Result<()> {
+        unreachable!()
+    }
+}
+impl TaskServices for OtherServices {
+    fn dispatch_message(&mut self, _: u32, _: &mut [u32; 4]) -> Result<u32> {
+        unreachable!()
+    }
+    fn enqueue_message(&mut self, _: u32, _: [u32; 4]) -> Result<u32> {
+        unreachable!()
+    }
+    fn interpreter(&mut self, _: u32) -> Result<&mut Interpreter> {
+        unreachable!()
+    }
+}
 impl std::io::Write for Output {
     fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
         let mut state = self.0.borrow_mut();
@@ -209,7 +227,12 @@ fn file_handles_keep_independent_cursors_byte_counts_partial_writes_and_close_st
         vec![0xcc; 384],
     )
     .unwrap();
-    let mut host = ResourceHost::new(&mut core, &mut files);
+    let mut platform_services = OtherServices;
+    let mut task_services = OtherServices;
+    let mut platform = SystemHost::new(&mut core, &mut platform_services);
+    let mut tasks = TaskHost::new(&mut platform, &mut task_services);
+    let mut host = ResourceHost::new(&mut tasks, &mut files);
+    host.set_task_id(42);
     let first = result(native(&mut host, &mut vm, 29, &[64, 128]));
     let second = result(native(&mut host, &mut vm, 29, &[64, 224]));
     assert_ne!(first, second);

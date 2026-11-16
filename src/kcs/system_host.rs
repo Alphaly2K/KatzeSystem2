@@ -32,6 +32,10 @@ impl<'a, H: Host, S: SystemServices> SystemHost<'a, H, S> {
 }
 
 impl<H: Host, S: SystemServices> Host for SystemHost<'_, H, S> {
+    fn register_file_source(&mut self, source: crate::io::SharedSource) -> Result<u32> {
+        self.inner.register_file_source(source)
+    }
+
     fn language_selection(&self) -> [u32; 3] {
         self.inner.language_selection()
     }
