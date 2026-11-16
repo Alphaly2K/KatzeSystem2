@@ -90,6 +90,7 @@ mod particle_sigh;
 mod particle_silent;
 mod particle_spark;
 mod particle_sparkle;
+mod particle_steam;
 mod particle_surprise;
 mod particle_sweat;
 mod particle_thunder;

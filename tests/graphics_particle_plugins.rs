@@ -2008,6 +2008,65 @@ fn dash_keeps_module_activation_across_restarts_and_preserves_task_controls() ->
 }
 
 #[test]
+fn steam_prefills_alpha_and_preserves_task_controls_and_shared_randomness() -> Result<()> {
+    let mut runtime = runtime_with_count(plugin(b"steam.ppi"), 3)?;
+    runtime.update(1, 1)?;
+    let mut parameters = [0; 128];
+    for (i, value) in [
+        120f32, 80., 80., 90., 100., 70., 60., 50., 40., 10., 60., 0., 720., 1250., 720., 55., 1.,
+        1.,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        parameters[i * 4..i * 4 + 4].copy_from_slice(&value.to_le_bytes());
+    }
+    runtime.dispatch_command_with_buffers(
+        2,
+        command(325),
+        &mut CommandBuffers {
+            data1: Some(&mut parameters),
+            ..Default::default()
+        },
+    )?;
+    let view = Projection::default();
+    for start in [2, 30] {
+        let before = runtime.host_mut().random.clone();
+        runtime.dispatch_command(2, command(321))?;
+        let mut after = runtime.host_mut().random.clone();
+        let mut before = before;
+        assert_ne!(after.next_integer(), before.next_integer());
+        assert_ne!(after.next_float(), before.next_float());
+        let drawable = runtime.drawables().get(1).unwrap();
+        assert_eq!(drawable.blend_mode(), 0);
+        let mesh = drawable.particle_mesh().unwrap();
+        assert_eq!(mesh.projected_quad(0, &view).unwrap()[0].color >> 24, 128);
+        assert_eq!(mesh.projected_quad(1, &view).unwrap()[0].color >> 24, 0);
+        for now in start..start + 3 {
+            runtime.update(now, 1)?;
+        }
+        assert_eq!(runtime.dispatch_command(2, command(324))?, 1);
+        let stopped = runtime.host_mut().random.clone();
+        runtime.dispatch_command(2, command(322))?;
+        runtime.update(start + 3, 1)?;
+        assert_random(&mut runtime, &stopped);
+        assert_eq!(runtime.drawables().get(1).unwrap().display(), 0);
+    }
+    runtime.dispatch_command(2, command(323))?;
+    assert!(
+        runtime
+            .drawables()
+            .get(1)
+            .unwrap()
+            .particle_mesh()
+            .is_none()
+    );
+    runtime.destroy(1)?;
+    assert!(runtime.drawables().get(1).is_none());
+    Ok(())
+}
+
+#[test]
 fn round_variants_register_grouped_faces_and_preserve_randomness_restart_and_release() -> Result<()>
 {
     for (name, count, uv_first, uv_last) in [
