@@ -112,6 +112,7 @@ impl Drawables {
         self.order();
         let mut touched = false;
         for id in &self.order {
+            let wave = self.vertex_waves.get(id).map(|(_, wave)| *wave);
             let drawable = self.entries.get_mut(id).unwrap();
             if let Some([lower, upper]) = range {
                 let depth = drawable.transform().base_point()[2];
@@ -165,7 +166,9 @@ impl Drawables {
             };
             for index in 0..count {
                 let (vertices, texture) = if drawable.canvas_triangles().is_some() {
-                    let triangle = drawable.transformed_canvas_triangle(index, parent).unwrap();
+                    let triangle = drawable
+                        .transformed_canvas_triangle_with_wave(index, parent, wave)
+                        .unwrap();
                     (
                         selected.project_triangle(
                             triangle.vertices,
@@ -181,9 +184,14 @@ impl Drawables {
                     )
                 } else {
                     (
-                        drawable
-                            .projected_triangle(index, parent, &selected, origin, true)
-                            .unwrap(),
+                        selected.project_triangle(
+                            drawable
+                                .transformed_triangle_with_wave(index, parent, wave)
+                                .unwrap(),
+                            drawable.transform().base_point()[2],
+                            origin,
+                            true,
+                        ),
                         drawable.image_texture.as_ref().map(|texture| FrameTexture {
                             address: Default::default(),
                             source: TextureSource::Image(texture.surface.as_ref().unwrap().clone()),

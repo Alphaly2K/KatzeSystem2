@@ -211,10 +211,19 @@ impl Drawable {
 
     /// 取一个三角形并应用对象及父级矩阵；颜色覆盖在变换路径上生效。
     pub fn transformed_triangle(&self, index: usize, parent: [f32; 16]) -> Option<[Vertex; 3]> {
+        self.transformed_triangle_with_wave(index, parent, None)
+    }
+
+    pub(super) fn transformed_triangle_with_wave(
+        &self,
+        index: usize,
+        parent: [f32; 16],
+        wave: Option<super::vertex_wave::VertexWave>,
+    ) -> Option<[Vertex; 3]> {
         Some(self.triangles.get(index)?.map(|vertex| {
             let point = self
                 .transform
-                .transform_point_with_parent(vertex.position, parent);
+                .transform_point_with_wave(vertex.position, parent, wave);
             Vertex {
                 position: [point[0], point[1], point[2]],
                 color: if self.color_enabled != 0 {
@@ -255,6 +264,7 @@ pub struct Drawables {
     pub(super) order: Vec<u32>,
     order_dirty: bool,
     pub(super) cameras: BTreeMap<u32, super::Camera2D>,
+    pub(super) vertex_waves: BTreeMap<u32, (u32, super::vertex_wave::VertexWave)>,
     pub(super) next_camera: u32,
     pub(super) particle_module_states: super::particle_plugin::ModuleStates,
 }
@@ -292,6 +302,7 @@ impl Drawables {
             return false;
         }
         self.order.retain(|&item| item != id);
+        self.vertex_waves.remove(&id);
         true
     }
 

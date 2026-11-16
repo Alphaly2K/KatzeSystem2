@@ -144,16 +144,29 @@ impl Drawable {
         index: usize,
         parent: [f32; 16],
     ) -> Option<CanvasTriangle> {
+        self.transformed_canvas_triangle_with_wave(index, parent, None)
+    }
+
+    pub(super) fn transformed_canvas_triangle_with_wave(
+        &self,
+        index: usize,
+        parent: [f32; 16],
+        wave: Option<super::vertex_wave::VertexWave>,
+    ) -> Option<CanvasTriangle> {
         let mut triangle = *self.canvas_triangles.as_ref()?.get(index)?;
         let base = self.transform.base_point();
         let position = self.transform.position();
         triangle.vertices = triangle.vertices.map(|vertex| {
-            let point = [
+            let mut point = [
                 f(2, vertex.position[0], base[0]),
                 f(2, vertex.position[1], base[1]),
                 f(1, vertex.position[2], position[2]),
                 1.,
             ];
+            if let Some(wave) = wave {
+                let position = wave.apply([point[0], point[1], point[2]]);
+                point[..3].copy_from_slice(&position);
+            }
             let mut point = transform_vector(point, *self.transform.matrix());
             for axis in 0..2 {
                 point[axis] = f(2, f(1, position[axis], point[axis]), 0.5);

@@ -196,7 +196,11 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             }
             return Ok(NativeReturn::Continue);
         }
-        let count = if matches!(index, 196 | 199) { 8 } else { 4 };
+        let count = match index {
+            196 | 199 => 8,
+            201 => 12,
+            _ => 4,
+        };
         if arguments.len() != count {
             return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
         }
@@ -208,6 +212,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     return Ok(NativeReturn::Continue);
                 }
                 let (code, length) = match object_kind {
+                    kind::WAVE => (269, 20),
                     kind::WIPE => (280, 56),
                     kind::FADE => (281, 44),
                     kind::WIPE_ALPHA => (280, 48),
@@ -227,6 +232,25 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             }
             197 | 198 | 203 => {
                 self.command_target(target, if index == 203 { 267 } else { index + 66 }, [0; 3])?;
+            }
+            201 => {
+                let object_kind = self.command_target(target, 13, [0; 3])?;
+                if read::u32_at(arguments, 4)? == 0 && matches!(object_kind, 18 | 25) {
+                    if object_kind != kind::WAVE {
+                        return Err(Error::new(vm.pc, "尚未接入该类型的效果更新参数"));
+                    }
+                    let address = read::u32_at(arguments, 8)?;
+                    let mut record = vm.read(address, 20)?.to_vec();
+                    self.command_target_with_buffers(
+                        target,
+                        270,
+                        [0, address, 0],
+                        &mut CommandBuffers {
+                            data1: Some(&mut record),
+                            ..Default::default()
+                        },
+                    )?;
+                }
             }
             199 => {
                 let address = read::u32_at(arguments, 4)?;

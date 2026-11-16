@@ -53,6 +53,7 @@ pub mod kind {
     pub const SOUND: u32 = 13;
     pub const IMAGE_LIST: u32 = 15;
     pub const PARTICLE_3D: u32 = 16;
+    pub const WAVE: u32 = 18;
     pub const WIPE: u32 = 26;
     pub const FADE: u32 = 27;
     pub const WIPE_ALPHA: u32 = 28;

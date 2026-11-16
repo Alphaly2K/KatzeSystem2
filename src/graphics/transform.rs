@@ -119,12 +119,23 @@ impl Transform {
 
     /// 基点只减 X／Y，变换后加四维平移，W 也加一；不作 W 除法。
     pub fn transform_point(&self, point: [f32; 3]) -> [f32; 4] {
-        let point = [
+        self.transform_point_inner(point, None)
+    }
+
+    fn transform_point_inner(
+        &self,
+        point: [f32; 3],
+        wave: Option<super::vertex_wave::VertexWave>,
+    ) -> [f32; 4] {
+        let mut position = [
             arithmetic(2, point[0], self.base[0]),
             arithmetic(2, point[1], self.base[1]),
             point[2],
-            1.0,
         ];
+        if let Some(wave) = wave {
+            position = wave.apply(position);
+        }
+        let point = [position[0], position[1], position[2], 1.];
         let point = transform_vector(point, self.matrix);
         [
             arithmetic(1, point[0], self.position[0]),
@@ -137,6 +148,15 @@ impl Transform {
     /// 在本对象变换之后应用父级／绘图上下文矩阵，保留前一步产生的 W。
     pub fn transform_point_with_parent(&self, point: [f32; 3], parent: [f32; 16]) -> [f32; 4] {
         transform_vector(self.transform_point(point), parent)
+    }
+
+    pub(super) fn transform_point_with_wave(
+        &self,
+        point: [f32; 3],
+        parent: [f32; 16],
+        wave: Option<super::vertex_wave::VertexWave>,
+    ) -> [f32; 4] {
+        transform_vector(self.transform_point_inner(point, wave), parent)
     }
 
     fn rebuild_matrix(&mut self) {

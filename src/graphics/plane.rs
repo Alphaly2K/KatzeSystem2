@@ -1139,6 +1139,7 @@ impl<F: ObjectFactory> ObjectFactory for GraphicsFactory<F> {
     fn create(&mut self, id: u32, object_kind: u32, name: &[u8]) -> Result<Box<dyn TaskObject>> {
         match object_kind {
             kind::PLANE => Ok(Box::new(PlaneObject::new(id))),
+            kind::WAVE => Ok(Box::new(super::WaveObject::new(id))),
             kind::IMAGE_LIST => Ok(Box::new(super::ImageListObject::new(id))),
             kind::FADE => Ok(Box::new(super::FadeObject::new())),
             kind::WIPE => Ok(Box::new(super::WipeObject::new())),
