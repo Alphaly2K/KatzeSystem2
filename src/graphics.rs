@@ -84,6 +84,7 @@ mod particle_paper;
 mod particle_plugin;
 mod particle_protect;
 mod particle_question;
+mod particle_radiate;
 mod particle_rain;
 mod particle_ring;
 mod particle_rising;

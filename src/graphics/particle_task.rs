@@ -9,9 +9,9 @@ use super::{
     particle_flower_burst::FlowerBurst, particle_glint::Glint, particle_hadou::Hadou,
     particle_ice::Ice, particle_mirror::Mirror, particle_note::Note, particle_notice::Notice,
     particle_paper::Paper, particle_plugin, particle_protect::Protect, particle_question::Question,
-    particle_rain::Rain, particle_ring::Ring, particle_rising::Rising, particle_sakura::Sakura,
-    particle_scene_sparkle::SceneSparkle, particle_shy::Shy, particle_sigh::Sigh,
-    particle_silent::Silent, particle_spark::Spark, particle_sparkle::Sparkle,
+    particle_radiate::Radiate, particle_rain::Rain, particle_ring::Ring, particle_rising::Rising,
+    particle_sakura::Sakura, particle_scene_sparkle::SceneSparkle, particle_shy::Shy,
+    particle_sigh::Sigh, particle_silent::Silent, particle_spark::Spark, particle_sparkle::Sparkle,
     particle_steam::Steam, particle_surprise::Surprise, particle_sweat::Sweat,
     particle_thunder::Thunder, particle_warukira::Warukira,
 };
@@ -72,6 +72,7 @@ enum Effect {
     Steam(Box<Steam>),
     Mirror(Mirror),
     Ring(Ring),
+    Radiate(Radiate),
 }
 
 impl Effect {
@@ -138,6 +139,7 @@ impl Effect {
             particle_plugin::Kind::Steam => Self::Steam(Box::new(Steam::new(host, image, random))),
             particle_plugin::Kind::Mirror => Self::Mirror(Mirror::new(host, image, random)),
             particle_plugin::Kind::Ring => Self::Ring(Ring::new(host, image)?),
+            particle_plugin::Kind::Radiate => Self::Radiate(Radiate::new(host, image, random)),
             particle_plugin::Kind::SceneSparkle => {
                 Self::SceneSparkle(SceneSparkle::new(host, image, random))
             }
@@ -239,6 +241,7 @@ impl ParticleRunner {
                     Some(Effect::Steam(effect)) => effect.write_mesh(host),
                     Some(Effect::Mirror(effect)) => effect.write_mesh(host),
                     Some(Effect::Ring(effect)) => effect.write_mesh(host),
+                    Some(Effect::Radiate(effect)) => effect.write_mesh(host),
                     _ => {}
                 }
             }
@@ -282,6 +285,10 @@ impl ParticleRunner {
                 if let Some(effect) = effect {
                     let delta = host.elapsed.wrapping_sub(host.previous_elapsed);
                     match effect {
+                        Effect::Radiate(effect) => {
+                            effect.update(delta, services.random().unwrap_or(&mut host.random));
+                            effect.write_mesh(host);
+                        }
                         Effect::Ring(effect) => {
                             effect.update(delta, host.source.unwrap_or_default().position_2d);
                             effect.write_mesh(host);

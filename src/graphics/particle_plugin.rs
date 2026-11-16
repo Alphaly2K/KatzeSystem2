@@ -80,6 +80,7 @@ pub(super) enum Kind {
     Steam,
     Mirror,
     Ring,
+    Radiate,
 }
 
 fn u16_at(bytes: &[u8], at: usize) -> Option<u16> {
@@ -207,6 +208,8 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
         Kind::Mirror
     } else if name.eq_ignore_ascii_case(b"aoi.ppi") {
         Kind::Ring
+    } else if name.eq_ignore_ascii_case(b"radiate.ppi") {
+        Kind::Radiate
     } else if name.eq_ignore_ascii_case(b"sakura.ppi") {
         Kind::Sakura
     } else if name.eq_ignore_ascii_case(b"protect.ppi") {
@@ -256,6 +259,7 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
         | Kind::Shy
         | Kind::Mirror
         | Kind::Ring
+        | Kind::Radiate
         | Kind::Thunder
         | Kind::Protect => 0x0002_0002,
         _ => 0x0002_0001,
