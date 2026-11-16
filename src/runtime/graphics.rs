@@ -152,12 +152,12 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             | 1067
             | 1069 => 4,
             82 | 88 | 92 | 94 | 95 | 97 | 102 | 103 | 105 | 106 | 258 | 262 | 402 | 455 | 462
-            | 464 | 466 | 534 | 653 | 657 | 701 | 848 | 849 | 988 | 1066 | 1068 => 8,
+            | 464 | 466 | 534 | 653 | 655 | 657 | 701 | 848 | 849 | 988 | 1066 | 1068 => 8,
             880 => 16,
             339 => 24,
             84 | 87 | 93 | 101 | 345 | 862 => 20,
             85 | 86 => 16,
-            96 | 100 | 256 | 260 | 263 | 343 | 344 | 463 | 625 | 654 | 663 | 879 | 881 => 12,
+            96 | 100 | 256 | 260 | 263 | 343 | 344 | 346 | 463 | 625 | 654 | 663 | 879 | 881 => 12,
             104 => 28,
             257 | 732 => 52,
             _ => unreachable!(),
@@ -168,7 +168,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         let route_zero = matches!(
             index,
             104 | 105 | 106 | 107 | 256 | 257 | 258 | 260 | 261 | 262 | 263 | 339..=342 | 402 | 455 | 732 | 462
-                ..=464 | 534 | 570 | 572 | 625 | 653 | 654 | 657 | 663 | 702 | 989 | 848 | 849 | 862 | 879..=881 | 1065..=1069
+                ..=464 | 534 | 570 | 572 | 625 | 653 | 654 | 655 | 657 | 663 | 702 | 989 | 848 | 849 | 862 | 879..=881 | 1065..=1069
         );
         if route_zero && arguments.len() != count {
             return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
@@ -186,6 +186,43 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         }
         let word = |i: usize| u32::from_le_bytes(arguments[i * 4..i * 4 + 4].try_into().unwrap());
         match index {
+            346 | 655 => {
+                let formatted = format_string(vm, word(1), 0)?;
+                let end = formatted
+                    .iter()
+                    .position(|&byte| byte == 0)
+                    .unwrap_or(formatted.len());
+                if end >= 260 {
+                    return Err(Error::new(vm.pc, "平面字符串超过基线缓冲区范围"));
+                }
+                let mut text = if index == 346 {
+                    self.resources
+                        .services
+                        .as_mut()
+                        .ok_or_else(|| Error::new(vm.pc, "运行时未配置资源服务"))?
+                        .resolve(b"kx3", &formatted[..end])?
+                } else {
+                    formatted[..end].to_vec()
+                };
+                text.truncate(
+                    text.iter()
+                        .position(|&byte| byte == 0)
+                        .unwrap_or(text.len()),
+                );
+                if text.len() >= 260 {
+                    return Err(Error::new(vm.pc, "平面资源名超过基线缓冲区范围"));
+                }
+                text.push(0);
+                self.command_target_with_buffers(
+                    target,
+                    if index == 346 { 71 } else { 86 },
+                    [if index == 346 { word(2) } else { 0 }, 0, 0],
+                    &mut CommandBuffers {
+                        data1: Some(&mut text),
+                        ..Default::default()
+                    },
+                )?;
+            }
             702 | 989 => {
                 let mut handle = [0; 4];
                 self.command_target_with_buffers(

@@ -524,6 +524,24 @@ impl TaskObject for Recorder {
         host: &mut dyn Host,
         _: usize,
     ) -> Result<CommandOutcome> {
+        if matches!(c.code, 71 | 86) {
+            assert_eq!(c.data, [if c.code == 71 { 0x8000_0001 } else { 0 }, 0, 0]);
+            assert!(buffers.data0.is_none());
+            let text = buffers.data1.as_deref().unwrap();
+            if c.code == 71 {
+                assert_eq!(text, b"kx3/mesh\0");
+            } else {
+                assert!(matches!(text, b"mesh\0" | b"\0"));
+            }
+            let mut first = [0; 4];
+            let count = text.len().min(4);
+            first[..count].copy_from_slice(&text[..count]);
+            self.records
+                .borrow_mut()
+                .push([self.id, c.sender, c.code, u32::from_le_bytes(first)]);
+            *output = 0x1234;
+            return Ok(CommandOutcome::finished(false));
+        }
         if matches!(c.code, 448 | 450 | 451) {
             assert_eq!(c.data[0], 0);
             assert_eq!(c.data[2], 0);
@@ -729,6 +747,94 @@ fn image_commands_route_zero_targets_and_unwrap_pixels_without_consuming_return_
                     assert!(vm.stack_bytes().is_empty());
                 }
             }
+        }
+    }
+}
+
+#[test]
+fn named_plane_commands_expand_external_text_route_zero_selectively_and_preserve_the_stack() {
+    struct Loader(Program);
+    impl ProgramLoader for Loader {
+        fn load(&mut self, _: &[u8]) -> Result<Option<Program>> {
+            Ok(Some(self.0.clone()))
+        }
+    }
+    struct Resources(Records);
+    impl katze_system2::kcs::ResourceServices for Resources {
+        fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+            assert_eq!(category, b"kx3");
+            assert_eq!(name, b"mesh");
+            self.0.borrow_mut().push([1, 0, 0, 0]);
+            Ok(b"kx3/mesh\0ignored".to_vec())
+        }
+        fn read(
+            &mut self,
+            _: &[u8],
+            _: katze_system2::resource::ResourceMode,
+        ) -> Result<Option<Vec<u8>>> {
+            panic!("named commands only resolve resources")
+        }
+    }
+    fn ins(code: &mut Vec<u8>, opcode: u8, args: &[u32]) {
+        code.push(opcode);
+        for value in args {
+            code.push(3);
+            code.extend(value.to_le_bytes());
+        }
+    }
+    fn call(code: &mut Vec<u8>, native: u32, args: &[u32]) {
+        for &value in args {
+            ins(code, 0x25, &[value]);
+        }
+        ins(code, 0x2b, &[native, args.len() as u32 * 4]);
+    }
+    for root in [0, 77] {
+        for budget in [1, 4096] {
+            let mut code = Vec::new();
+            ins(&mut code, 0x25, &[0xdead_beef]);
+            call(&mut code, 346, &[0, u32::MAX, u32::MAX]);
+            call(&mut code, 346, &[root, 0x8000_0020, 0x8000_0001]);
+            call(&mut code, 655, &[root, 0x8000_0020]);
+            call(&mut code, 655, &[root, 0]);
+            ins(&mut code, 0x26, &[0]);
+            code.push(0x3b);
+            let mut memory = vec![0; 64];
+            memory[32..37].copy_from_slice(b"mesh\0");
+            let mut external = vec![0; 64];
+            external[32..41].copy_from_slice(b"%s[G32]\0\0");
+            let mut factory =
+                KcsFactory::new(Loader(Program::from_code(&code, memory, 128).unwrap()));
+            factory.external = katze_system2::memory::SharedMemory::new(external).unwrap();
+            let records = Records::default();
+            let resolves = Records::default();
+            let mut runtime = Runtime::new(
+                root,
+                kind::ROOT,
+                Box::new(Recorder {
+                    id: root,
+                    base: BaseObject::new(),
+                    records: records.clone(),
+                }),
+                State::new(0),
+                factory,
+            );
+            runtime.set_resources(Resources(resolves.clone()));
+            runtime.set_budget(budget, 1 << 20);
+            let task = runtime.create(root, kind::ORDINARY, b"named", b"").unwrap();
+            runtime.update(1, 1).unwrap();
+            let mut expected = Vec::new();
+            if root != 0 {
+                expected.push([root, task, 71, u32::from_le_bytes(*b"kx3/")]);
+            }
+            expected.extend([
+                [root, task, 86, u32::from_le_bytes(*b"mesh")],
+                [root, task, 86, 0],
+            ]);
+            assert_eq!(*records.borrow(), expected);
+            assert_eq!(resolves.borrow().len(), usize::from(root != 0));
+            let vm = runtime.object(task).unwrap().interpreter().unwrap();
+            assert_eq!(vm.read(0, 4).unwrap(), 0xdead_beefu32.to_le_bytes());
+            assert!(vm.stack_bytes().is_empty());
         }
     }
 }
