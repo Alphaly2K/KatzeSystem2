@@ -512,26 +512,18 @@ impl SaveServices for Saves {
 
 fn local_save_date(file_time: u64) -> Result<[u32; 6]> {
     let seconds = (i128::from(file_time) - 116_444_736_000_000_000i128) / 10_000_000;
-    let seconds =
-        libc::time_t::try_from(seconds).map_err(|_| Error::new(0, "存档修改时间超过平台范围"))?;
-    let mut date = std::mem::MaybeUninit::<libc::tm>::uninit();
-    #[cfg(unix)]
-    let valid = unsafe { !libc::localtime_r(&seconds, date.as_mut_ptr()).is_null() };
-    #[cfg(windows)]
-    let valid = unsafe { libc::localtime_s(date.as_mut_ptr(), &seconds) == 0 };
-    #[cfg(not(any(unix, windows)))]
-    let valid = false;
-    if !valid {
-        return Err(Error::new(0, "存档本地日期转换失败"));
-    }
-    let date = unsafe { date.assume_init() };
+    use chrono::{Datelike, Timelike};
+    let seconds = i64::try_from(seconds).map_err(|_| Error::new(0, "存档修改时间超过日期范围"))?;
+    let date = chrono::DateTime::from_timestamp(seconds, 0)
+        .ok_or_else(|| Error::new(0, "存档本地日期转换失败"))?
+        .with_timezone(&chrono::Local);
     let values = [
-        date.tm_year + 1900,
-        date.tm_mon + 1,
-        date.tm_mday,
-        date.tm_hour,
-        date.tm_min,
-        date.tm_sec,
+        date.year(),
+        date.month() as i32,
+        date.day() as i32,
+        date.hour() as i32,
+        date.minute() as i32,
+        date.second() as i32,
     ];
     let mut result = [0; 6];
     for (target, value) in result.iter_mut().zip(values) {

@@ -85,6 +85,7 @@ pub(super) fn call(
         return Ok(NativeReturn::YieldVoid);
     }
     let count = match index {
+        11 => 7,
         1 | 6 | 9 | 71 | 75 | 209 | 210 | 212 | 213 | 393 | 1040 => 1,
         8 | 149 | 211 | 392 | 1049 => 2,
         35 | 36 => 3,
@@ -94,6 +95,18 @@ pub(super) fn call(
     };
     let args = super::words(arguments, count, vm.pc)?;
     Ok(match index {
+        11 => {
+            for &address in &args {
+                vm.read(address, 4)?;
+            }
+            let time = host
+                .local_time
+                .unwrap_or_else(super::super::calendar::local_time);
+            for (&address, value) in args.iter().zip(time) {
+                vm.write(address, &u32::from(value).to_le_bytes())?;
+            }
+            NativeReturn::Continue
+        }
         787 => {
             for address in &args {
                 vm.read(*address, 4)?;

@@ -16,7 +16,7 @@ pub(super) fn call(
     }
     let count = match index {
         59 | 61 | 320 | 397 | 874 => 2,
-        875 => 3,
+        875 | 786 => 3,
         218 | 318 => 5,
         _ => 1,
     };
@@ -25,6 +25,11 @@ pub(super) fn call(
         return super::spline::prepare(&args, vm);
     }
     Ok(match index {
+        786 => NativeReturn::Value(super::super::calendar::day_of_week(
+            args[0] as i32,
+            args[1] as i32,
+            args[2] as i32,
+        ) as u32),
         874 => NativeReturn::Value((args[0] & 0xffff) | (args[1] << 16)),
         875 => {
             vm.write(args[1], &(args[0] as i16 as i32).to_le_bytes())?;

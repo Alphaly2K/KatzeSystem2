@@ -51,7 +51,7 @@ pub(super) fn core(index: u32) -> CoreHandler {
         | 1051
         | 1063 => CoreHandler::Text,
         904 => CoreHandler::Text,
-        33 | 34 | 50..=64 | 218 | 318..=320 | 397 | 461 | 874 | 875 => CoreHandler::Scalar,
+        33 | 34 | 50..=64 | 218 | 318..=320 | 397 | 461 | 786 | 874 | 875 => CoreHandler::Scalar,
         359..=361
         | 533
         | 565
@@ -85,6 +85,7 @@ pub(super) fn core(index: u32) -> CoreHandler {
         | 6
         | 8
         | 9
+        | 11
         | 35
         | 36
         | 65

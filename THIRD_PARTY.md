@@ -31,10 +31,22 @@
 |generic-array|0.14.7|MIT|[许可](licenses/generic-array-0.14.7/LICENSE)|
 |typenum|1.20.1|MIT|[许可](licenses/typenum-1.20.1/LICENSE-MIT)|
 |version_check|0.9.5|MIT|[许可](licenses/version_check-0.9.5/LICENSE-MIT)|
+|android_system_properties|0.1.6|MIT|[许可](licenses/android_system_properties-0.1.6/LICENSE-MIT)|
+|autocfg|1.5.1|MIT|[许可](licenses/autocfg-1.5.1/LICENSE-MIT)|
+|chrono|0.4.42|MIT|[许可](licenses/chrono-0.4.42/LICENSE.txt)|
+|iana-time-zone|0.1.65|MIT|[许可](licenses/iana-time-zone-0.1.65/LICENSE-MIT)|
+|iana-time-zone-haiku|0.1.2|MIT|[许可](licenses/iana-time-zone-haiku-0.1.2/LICENSE-MIT)|
+|num-traits|0.2.19|MIT|[许可](licenses/num-traits-0.2.19/LICENSE-MIT)|
+|syn|2.0.119|MIT|[许可](licenses/syn-2.0.119/LICENSE-MIT)|
+|windows-core|0.62.2|MIT|[许可](licenses/windows-core-0.62.2/license-mit)|
+|windows-implement|0.60.2|MIT|[许可](licenses/windows-implement-0.60.2/license-mit)|
+|windows-interface|0.59.3|MIT|[许可](licenses/windows-interface-0.59.3/license-mit)|
+|windows-result|0.4.1|MIT|[许可](licenses/windows-result-0.4.1/license-mit)|
+|windows-strings|0.5.1|MIT|[许可](licenses/windows-strings-0.5.1/license-mit)|
 
-依赖版本与校验值由 `Cargo.lock` 固定。Zlib 解压使用 zlib-rs 纯 Rust 后端，不要求系统 Zlib。flate2 在 WebAssembly 目标仍声明 miniz_oxide 依赖，相关许可继续保留。zlib-rs 最低 Rust 版本为 1.75，兼容项目的 Rust 1.87，分发时保留版权与 Zlib 声明，修改上游源码时明确标记。字体服务使用 fontdb 统一发现、fontdue 栅格化和 ttf-parser 元数据解析；fontdb 启用 fs／fontconfig，fontconfig-parser 使用纯 Rust 解析配置，关闭 memmap。新增依赖采用上表的 MIT 或 Zlib 许可，分发时保留许可及版权声明；slotmap 的来源与修改标记义务按其 Zlib 许可执行。未引入先行实现的源码或资源。
+依赖版本与校验值由 `Cargo.lock` 固定。Zlib 解压使用 zlib-rs 纯 Rust 后端，不要求系统 Zlib。flate2 在 WebAssembly 目标仍声明 miniz_oxide 依赖，相关许可继续保留。zlib-rs 最低 Rust 版本为 1.75，兼容项目的 Rust 1.87，分发时保留版权与 Zlib 声明，修改上游源码时明确标记。字体服务使用 fontdb 统一发现、fontdue 栅格化和 ttf-parser 元数据解析；fontdb 启用 fs／fontconfig，fontconfig-parser 使用纯 Rust 解析配置，关闭 memmap。新增依赖采用上表的 MIT 或 Zlib 许可，分发时保留许可及版权声明；slotmap 的来源与修改标记义务按其 Zlib 许可执行。本地时间由 chrono 和时区发现依赖提供，最低 Rust 版本不超过 1.87；关闭 chrono 默认特性，仅启用 clock。其余目标平台的传递依赖一并登记并保留 MIT 声明。未引入先行实现的源码或资源。
 
-启动示例使用开发依赖 `libc` 0.2.191 调用平台本地日期转换，选择 MIT 许可，兼容项目 LGPL-2.1；分发示例时保留其[版权及许可声明](licenses/libc-0.2.191/LICENSE-MIT)。
+启动示例使用开发依赖 `libc` 0.2.191 访问系统接口，选择 MIT 许可，兼容项目 LGPL-2.1；分发示例时保留其[版权及许可声明](licenses/libc-0.2.191/LICENSE-MIT)。
 
 macOS 图形后端使用 Metal 的 Rust 绑定。以下依赖选择 MIT 分支；`unicode-ident` 另保留 Unicode-3.0 声明，分发时随附全部版权和许可文字。`block`、`malloc_buf` 的发布包通过包元数据声明 MIT，本项目同时保留声明的作者及 MIT 正文。
 

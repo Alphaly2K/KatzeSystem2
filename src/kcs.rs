@@ -2,6 +2,7 @@ pub use crate::memory::{MemoryRead, SharedMemory};
 use crate::{Error, Result, Step, read};
 use std::collections::BTreeMap;
 
+mod calendar;
 mod configuration;
 mod data;
 mod database;
