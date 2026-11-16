@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 pub struct ConfigurationFiles {
     pub directory: PathBuf,
     pub sound_name: Vec<u16>,
+    pub folders: FolderPaths,
 }
 
 impl ConfigurationFiles {
@@ -32,10 +33,12 @@ impl ConfigurationFiles {
             Some(path) => PathBuf::from(path),
             None => Path::new(root).join(native_path(&folders.save)?),
         };
+        folders.save = path_units(&directory);
         let sound_name = startup.wide_text(b"SOUNDCONFIG")?.unwrap_or_default();
         Ok(Self {
             directory,
             sound_name,
+            folders,
         })
     }
 

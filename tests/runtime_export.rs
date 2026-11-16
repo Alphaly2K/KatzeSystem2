@@ -83,11 +83,11 @@ impl TaskObject for Receiver {
         host: &mut dyn Host,
         budget: usize,
     ) -> Result<CommandOutcome> {
-        if matches!(command.code, 453 | 454 | 516 | 517 | 585 | 587 | 588) {
+        if matches!(command.code, 453 | 454 | 516 | 517 | 583 | 585 | 587 | 588) {
             let name = |bytes: &[u8]| bytes[..bytes.iter().position(|&b| b == 0).unwrap()].to_vec();
             self.events.borrow_mut().push(Event {
                 command: *command,
-                first: if command.code == 453 {
+                first: if matches!(command.code, 453 | 583) {
                     buffers.data1.as_deref().unwrap().to_vec()
                 } else if matches!(command.code, 516 | 585 | 588) {
                     name(buffers.data1.as_deref().unwrap())
@@ -198,6 +198,14 @@ fn run(
     );
     runtime.set_budget(budget, 1 << 20);
     runtime.set_resources(Resources(resolutions.clone()));
+    runtime.host_mut().folder_paths = Some(katze_system2::resource::FolderPaths {
+        user_data: "USER%title%".encode_utf16().collect(),
+        common_data: "COMMON".encode_utf16().collect(),
+        brand: "BRAND%title%".encode_utf16().collect(),
+        title: "TITLE".encode_utf16().collect(),
+        save: "SAVE/資料/🌟".encode_utf16().collect(),
+        imglib: "IMAGES".encode_utf16().collect(),
+    });
     for _ in 0..7 {
         runtime.create(0, kind::BASE, b"receiver", b"")?;
     }
@@ -388,6 +396,106 @@ fn system_task_natives_route_wide_records_text_and_full_query_results() -> Resul
                 .unwrap_err()
                 .to_string()
                 .contains(expected)
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn network_configuration_routes_two_byte_fields_and_a_byte_expanded_folder() -> Result<()> {
+    for (path, wide) in [
+        (Vec::new(), Vec::new()),
+        (vec![0x82, 0xa0], vec![0xff82, 0xffa0]),
+        (
+            b"%title%\x82\xa0".to_vec(),
+            [
+                "TITLE".encode_utf16().collect::<Vec<_>>(),
+                vec![0xff82, 0xffa0],
+            ]
+            .concat(),
+        ),
+        (
+            b"%save%/%USERPROFILE%/%brand%/%imglib%".to_vec(),
+            "SAVE/資料/🌟/USER%title%/BRAND%title%/IMAGES"
+                .encode_utf16()
+                .collect(),
+        ),
+        (b"%\x82\xa0%".to_vec(), "%あ%".encode_utf16().collect()),
+        (vec![b'x'; 511], vec![u16::from(b'x'); 511]),
+    ] {
+        let mut data = vec![0; 4096];
+        data[16..20].copy_from_slice(&7u32.to_le_bytes());
+        let first = b"user%u[G16]";
+        data[64..64 + first.len()].copy_from_slice(first);
+        let second = b"key%c[G24]ignored";
+        data[600..600 + second.len()].copy_from_slice(second);
+        data[1200..1200 + path.len()].copy_from_slice(&path);
+        let mut record = vec![0; 2048];
+        record[..5].copy_from_slice(b"user7");
+        record[512..515].copy_from_slice(b"key");
+        for (bytes, unit) in record[1024..].chunks_exact_mut(2).zip(wide) {
+            bytes.copy_from_slice(&unit.to_le_bytes());
+        }
+        for external in [0, 0x8000_0000] {
+            let mut code = Vec::new();
+            instruction(&mut code, 0x25, &[0x1357_9bdf]);
+            for target in [7, u32::MAX, 0] {
+                for value in [target, external | 64, external | 600, external | 1200] {
+                    instruction(&mut code, 0x25, &[value]);
+                }
+                instruction(&mut code, 0x2b, &[1018, 16]);
+                instruction(&mut code, 0x25, &[target]);
+                instruction(&mut code, 0x2b, &[601, 4]);
+                instruction(&mut code, 0x26, &[if target == u32::MAX { 4 } else { 0 }]);
+                instruction(&mut code, 0x25, &[target]);
+                instruction(&mut code, 0x2b, &[1022, 4]);
+                instruction(&mut code, 0x26, &[if target == u32::MAX { 4 } else { 8 }]);
+            }
+            code.push(0x3b);
+            for budget in [1, 4096] {
+                let (events, resolutions) = run(&code, &data, budget, 0xabcdef01)?;
+                assert!(resolutions.is_empty());
+                let expected: Vec<_> = [7, 0]
+                    .into_iter()
+                    .flat_map(|target| {
+                        [583, 454, 587]
+                            .into_iter()
+                            .map(|code| Event {
+                                command: Command {
+                                    sender: 8,
+                                    target,
+                                    code,
+                                    data: [0; 3],
+                                },
+                                first: if code == 583 {
+                                    record.clone()
+                                } else {
+                                    Vec::new()
+                                },
+                                second: None,
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .collect();
+                assert_eq!(events, expected);
+            }
+        }
+    }
+    for field in 0..3 {
+        let mut data = vec![0; 4096];
+        let start = [64, 600, 1200][field];
+        data[start..start + 512].fill(b'x');
+        let mut code = Vec::new();
+        for value in [7, 64, 600, 1200] {
+            instruction(&mut code, 0x25, &[value]);
+        }
+        instruction(&mut code, 0x2b, &[1018, 16]);
+        code.push(0x3b);
+        assert!(
+            run(&code, &data, 4096, 0)
+                .unwrap_err()
+                .to_string()
+                .contains("字段容量")
         );
     }
     Ok(())

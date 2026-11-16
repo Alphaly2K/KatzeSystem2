@@ -414,4 +414,18 @@ fn folder_expansion_preserves_case_literal_tokens_and_single_pass_replacements()
             .expand(&wide(&format!("%{}", "x".repeat(259))))
             .is_err()
     );
+    assert_eq!(
+        paths
+            .expand_bytes(b"\x82\xa0%\x82\xa0%/%brand%/%title%\0ignored", 511)
+            .unwrap(),
+        [
+            vec![0xff82, 0xffa0],
+            wide("%あ%/Brand%title%/"),
+            vec![0x03a9, 0xd800]
+        ]
+        .concat()
+    );
+    assert_eq!(paths.expand_bytes(&[65; 511], 511).unwrap().len(), 511);
+    assert!(paths.expand_bytes(&[65; 512], 511).is_err());
+    assert!(paths.expand_bytes(&[b'%'; 260], 259).is_err());
 }
