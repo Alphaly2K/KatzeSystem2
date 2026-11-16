@@ -238,6 +238,7 @@ pub(crate) fn screen_commands(image: Arc<Surface>, opacity: u8) -> [DrawCommand;
     [[0, 1, 2], [2, 1, 3]].map(|indices| DrawCommand {
         vertices: indices.map(|i| vertices[i]),
         texture: Some(FrameTexture {
+            filter: None,
             address: Default::default(),
             source: TextureSource::Image(image.clone()),
             uv: indices.map(|i| uv[i]),

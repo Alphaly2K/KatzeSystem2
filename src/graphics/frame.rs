@@ -31,6 +31,8 @@ pub struct FrameTexture {
     pub source: TextureSource,
     pub uv: [[f32; 2]; 3],
     pub address: [TextureAddress; 2],
+    /// None 沿用绘制列表的取样方式。
+    pub filter: Option<TextureFilter>,
 }
 
 /// 已按图元顺序、相机和投影准备的设备输入。
@@ -177,6 +179,7 @@ impl Drawables {
                             true,
                         ),
                         Some(FrameTexture {
+                            filter: None,
                             address: Default::default(),
                             source: TextureSource::Canvas(triangle.tile),
                             uv: triangle.uv,
@@ -193,6 +196,7 @@ impl Drawables {
                             true,
                         ),
                         drawable.image_texture.as_ref().map(|texture| FrameTexture {
+                            filter: None,
                             address: Default::default(),
                             source: TextureSource::Image(texture.surface.as_ref().unwrap().clone()),
                             uv: texture.uv[index],

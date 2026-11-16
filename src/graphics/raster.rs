@@ -425,6 +425,7 @@ pub(super) fn draw_command(
         return Ok(false);
     }
     if let Some(source) = &command.texture {
+        let filter = source.filter.unwrap_or(filter);
         let state = RasterState {
             address: source.address,
             ..state

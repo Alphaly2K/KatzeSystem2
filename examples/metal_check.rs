@@ -61,6 +61,7 @@ fn check() -> Result<(), Box<dyn std::error::Error>> {
             [[-4., -4.], [40., -4.], [-4., 40.]],
             [0x8080c040; 3],
             Some(FrameTexture {
+                filter: None,
                 address: Default::default(),
                 source: TextureSource::Canvas(0),
                 uv: [uv; 3],
@@ -81,6 +82,7 @@ fn check() -> Result<(), Box<dyn std::error::Error>> {
     triangles.push(gradient);
     cases.push(triangles.clone());
     triangles.last_mut().unwrap().texture = Some(FrameTexture {
+        filter: None,
         address: Default::default(),
         source: TextureSource::Canvas(0),
         uv: [[0.17, 0.19], [1.13, 0.87], [-0.21, 1.31]],
@@ -90,6 +92,7 @@ fn check() -> Result<(), Box<dyn std::error::Error>> {
         [[0., 0.], [32., 0.], [0., 24.]],
         [0xff123456; 3],
         Some(FrameTexture {
+            filter: None,
             address: Default::default(),
             source: TextureSource::Canvas(1),
             uv: [[0.; 2]; 3],
@@ -122,9 +125,11 @@ fn check() -> Result<(), Box<dyn std::error::Error>> {
                     [0x408020ff, 0xc020ff40, 0xffef8040]
                 },
                 (mode == 2).then(|| FrameTexture {
+                    filter: None,
                     address: Default::default(),
                     source: TextureSource::Image(image.clone()),
-                    uv: [[0.17, 0.19], [1.13, 0.87], [-0.21, 1.31]],
+                    // 避开裁剪插值后恰落 texel 边界的点取样，隔离设备插值精度差异。
+                    uv: [[0.173, 0.193], [1.137, 0.877], [-0.217, 1.317]],
                 }),
             );
             for (index, vertex) in clipped.vertices.iter_mut().enumerate() {
@@ -147,6 +152,7 @@ fn check() -> Result<(), Box<dyn std::error::Error>> {
                 [0x408020ff, 0xc020ff40, 0xffef8040]
             },
             (mode == 2).then(|| FrameTexture {
+                filter: None,
                 address: Default::default(),
                 source: TextureSource::Image(image.clone()),
                 uv: [[0.5; 2]; 3],
@@ -165,6 +171,7 @@ fn check() -> Result<(), Box<dyn std::error::Error>> {
                     [[2., 2.], [28., 2.], [2., 22.]],
                     [(alpha << 24) | 0x90a0b0; 3],
                     textured.then(|| FrameTexture {
+                        filter: None,
                         address: Default::default(),
                         source: TextureSource::Image(image.clone()),
                         uv: [[0.5; 2]; 3],
@@ -176,6 +183,17 @@ fn check() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
+    let mut mixed = background.to_vec();
+    for filter in [
+        TextureFilter::Point,
+        TextureFilter::Linear,
+        TextureFilter::Point,
+    ] {
+        let mut command = cases[11].last().unwrap().clone();
+        command.texture.as_mut().unwrap().filter = Some(filter);
+        mixed.push(command);
+    }
+    cases.push(mixed);
     let mut comparisons = 0;
     let mut largest_error = 0;
     for filter in [TextureFilter::Point, TextureFilter::Linear] {

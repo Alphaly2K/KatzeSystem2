@@ -218,6 +218,7 @@ impl CellFlip {
                     commands.push(DrawCommand {
                         vertices: indices.map(|i| cell.current[face][i]),
                         texture: Some(FrameTexture {
+                            filter: None,
                             address: Default::default(),
                             source: TextureSource::Image(self.source[face].clone()),
                             uv: indices.map(|i| cell.uv[i]),

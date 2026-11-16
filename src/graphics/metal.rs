@@ -438,7 +438,12 @@ impl Renderer {
                 .as_ref()
                 .map(|t| t.address)
                 .unwrap_or_default();
-            let sampler = usize::from(filter == TextureFilter::Linear)
+            let selected_filter = triangle
+                .texture
+                .as_ref()
+                .and_then(|t| t.filter)
+                .unwrap_or(filter);
+            let sampler = usize::from(selected_filter == TextureFilter::Linear)
                 | (usize::from(address[0] == super::TextureAddress::Wrap) << 1)
                 | (usize::from(address[1] == super::TextureAddress::Wrap) << 2);
             if sampler != sampler_index {

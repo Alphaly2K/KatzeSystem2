@@ -155,6 +155,7 @@ impl ParticleMesh {
                 touched |= draw(DrawCommand {
                     vertices,
                     texture: self.texture.as_ref().map(|image| FrameTexture {
+                        filter: None,
                         address: self.address,
                         source: TextureSource::Image(image.clone()),
                         uv: indices.map(|i| quad[i].uv),

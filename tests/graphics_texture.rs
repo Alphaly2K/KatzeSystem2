@@ -6,6 +6,55 @@ use katze_system2::graphics::{
 use std::sync::Arc;
 
 #[test]
+fn texture_filter_overrides_mix_point_and_linear_sampling_in_one_frame() {
+    let image = Arc::new(
+        Surface::from_bgra(
+            [2, 1],
+            [0xffff0000u32, 0xff0000ff]
+                .into_iter()
+                .flat_map(u32::to_le_bytes)
+                .collect(),
+        )
+        .unwrap(),
+    );
+    for filter in [TextureFilter::Point, TextureFilter::Linear] {
+        let commands = [
+            TextureFilter::Point,
+            TextureFilter::Linear,
+            TextureFilter::Point,
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, selected)| {
+            let x = index as f32 * 4.;
+            DrawCommand {
+                vertices: [[x, 0.], [x + 4., 0.], [x, 4.]].map(|p| ProjectedVertex {
+                    position: [p[0], p[1], 0.5],
+                    rhw: 1.,
+                    color: u32::MAX,
+                }),
+                texture: Some(FrameTexture {
+                    source: TextureSource::Image(image.clone()),
+                    uv: [[0.5; 2]; 3],
+                    address: Default::default(),
+                    filter: Some(selected),
+                }),
+                clip: None,
+                blend_mode: 0,
+            }
+        })
+        .collect();
+        let mut target = RenderTarget::new([12, 4]).unwrap();
+        DrawList { commands, filter }
+            .render_into(&mut target, None)
+            .unwrap();
+        assert_eq!(target.pixel(1, 1), Some(0xff0000ff));
+        assert_eq!(target.pixel(5, 1), Some(0xff800080));
+        assert_eq!(target.pixel(9, 1), Some(0xff0000ff));
+    }
+}
+
+#[test]
 fn draw_commands_apply_all_blend_factors_after_texture_modulation() {
     let expected = [
         [0xbf788898, 0xcf636368],
@@ -36,6 +85,7 @@ fn draw_commands_apply_all_blend_factors_after_texture_modulation() {
                     ..v
                 }),
                 texture: textured.then(|| FrameTexture {
+                    filter: None,
                     address: Default::default(),
                     source: TextureSource::Image(texture.clone()),
                     uv: [[0.5; 2]; 3],
@@ -75,6 +125,7 @@ fn image_commands_hold_their_pixels_and_mix_with_canvas_textures() {
             DrawCommand {
                 vertices: vertices(),
                 texture: Some(FrameTexture {
+                    filter: None,
                     address: Default::default(),
                     source: TextureSource::Image(image.clone()),
                     uv: [[0.5; 2]; 3],
@@ -85,6 +136,7 @@ fn image_commands_hold_their_pixels_and_mix_with_canvas_textures() {
             DrawCommand {
                 vertices: vertices(),
                 texture: Some(FrameTexture {
+                    filter: None,
                     address: Default::default(),
                     source: TextureSource::Canvas(0),
                     uv: [[0.5; 2]; 3],
@@ -132,6 +184,7 @@ fn depth_clipping_keeps_visible_color_and_texture_interpolation() {
                 commands: vec![DrawCommand {
                     vertices: triangle,
                     texture: (mode == 2).then(|| FrameTexture {
+                        filter: None,
                         address: Default::default(),
                         source: TextureSource::Image(image.clone()),
                         uv: [[0.17, 0.19], [1.13, 0.87], [-0.21, 1.31]],
@@ -273,6 +326,7 @@ fn command_addressing_wraps_each_axis_and_filters_across_texture_seams() {
                 commands: vec![DrawCommand {
                     vertices: vertices(),
                     texture: Some(FrameTexture {
+                        filter: None,
                         source: TextureSource::Image(image.clone()),
                         address,
                         uv: [uv; 3],
@@ -296,6 +350,7 @@ fn command_addressing_wraps_each_axis_and_filters_across_texture_seams() {
             commands: vec![DrawCommand {
                 vertices: vertices(),
                 texture: Some(FrameTexture {
+                    filter: None,
                     source: TextureSource::Image(image.clone()),
                     address,
                     uv: [uv; 3],
@@ -313,6 +368,7 @@ fn command_addressing_wraps_each_axis_and_filters_across_texture_seams() {
         commands: vec![DrawCommand {
             vertices: vertices(),
             texture: Some(FrameTexture {
+                filter: None,
                 source: TextureSource::Image(image),
                 address: [Wrap, Mirror],
                 uv: [[-0.25, 0.25], [2.75, 0.25], [-0.25, 0.25]],
@@ -499,6 +555,7 @@ fn camera_crossing_triangles_keep_the_visible_exterior_and_zero_rhw_fallback() {
                 commands: vec![DrawCommand {
                     vertices,
                     texture: (mode == 2).then(|| FrameTexture {
+                        filter: None,
                         address: Default::default(),
                         source: TextureSource::Image(texture.clone()),
                         uv,

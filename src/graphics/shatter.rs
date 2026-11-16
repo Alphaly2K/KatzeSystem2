@@ -219,6 +219,7 @@ impl Shatter {
                     .current
                     .map(|point| project(point, mesh.size, fragment.color)),
                 texture: Some(FrameTexture {
+                    filter: None,
                     address: Default::default(),
                     source: TextureSource::Image(source.clone()),
                     uv: fragment.uv,
