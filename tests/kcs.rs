@@ -380,6 +380,9 @@ fn numeric_parameters_parse_raw_quoted_bytes_and_abort_invalid_tokens_before_wri
                 (b"missing 7%", 7),
                 (b"~1+2", -4),
                 (b"NAME[2]+7", 18),
+                (b"@[#3+=1]", 5),
+                (b"@[-1][#3=0]", 5),
+                (b"(@)[1/0]+#3", 22),
             ] {
                 let mut code = Vec::new();
                 ins(
@@ -402,6 +405,7 @@ fn numeric_parameters_parse_raw_quoted_bytes_and_abort_invalid_tokens_before_wri
                 .unwrap();
                 let mut state = katze_system2::expression::State::new(4);
                 state.shared[3] = 17;
+                state.current = 5;
                 state.named.insert("NAME".into(), [(2, 11)].into());
                 let mut host = kcs::CoreHost::new(&mut state);
                 loop {

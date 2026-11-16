@@ -128,7 +128,7 @@ pub(super) fn parse(bytes: &[u8]) -> Result<Node> {
                 let bank = pop(&mut values, at)?;
                 match values.last_mut() {
                     Some(Node::Named(_, target)) => *target = Some(Box::new(bank)),
-                    Some(Node::Number(_)) => (),
+                    Some(Node::Number(_) | Node::Current) => (),
                     _ => return Err(Error::new(at, "此表达式索引目标尚未接入")),
                 }
             }
