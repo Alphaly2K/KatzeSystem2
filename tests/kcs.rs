@@ -383,6 +383,14 @@ fn numeric_parameters_parse_raw_quoted_bytes_and_abort_invalid_tokens_before_wri
                 (b"@[#3+=1]", 5),
                 (b"@[-1][#3=0]", 5),
                 (b"(@)[1/0]+#3", 22),
+                (b"[0,1]", 0),
+                (b"[(#3+=1)]", 0),
+                (b"([#3+=1]) 9", 9),
+                (b"[0,1][#3=0]", 0),
+                (b"9 [0,1]", 0),
+                (b"#3=1,2", 0),
+                (b"(#3=1)+(2,3)", 0),
+                (b"\"1,2\"+7", 7),
             ] {
                 let mut code = Vec::new();
                 ins(

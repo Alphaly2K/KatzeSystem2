@@ -59,6 +59,10 @@ pub(super) fn parse(bytes: &[u8]) -> Result<Node> {
             cursor += 1;
             continue;
         }
+        // 原构树器拒绝引号外的逗号，整条表达式归零且不执行已解析子树。
+        if byte == b',' {
+            return Ok(Node::Number(0));
+        }
         tokens += 1;
         if tokens > 512 {
             return Err(Error::new(cursor, "表达式节点过多"));
@@ -129,6 +133,7 @@ pub(super) fn parse(bytes: &[u8]) -> Result<Node> {
                 match values.last_mut() {
                     Some(Node::Named(_, target)) => *target = Some(Box::new(bank)),
                     Some(Node::Number(_) | Node::Current) => (),
+                    None => (),
                     _ => return Err(Error::new(at, "此表达式索引目标尚未接入")),
                 }
             }
@@ -149,7 +154,7 @@ pub(super) fn parse(bytes: &[u8]) -> Result<Node> {
                 let text = [
                     "<<=", ">>=", "++", "--", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "==",
                     "!=", "<=", ">=", "&&", "||", "<<", ">>", "=", "+", "-", "*", "/", "%", "&",
-                    "|", "^", "<", ">", "!", "~", ",", ".", "?", ":",
+                    "|", "^", "<", ">", "!", "~", ".", "?", ":",
                 ]
                 .into_iter()
                 .find(|text| bytes[cursor..].starts_with(text.as_bytes()))
@@ -210,7 +215,7 @@ fn reduce(operator: Operator, at: usize, values: &mut Vec<Node>) -> Result<()> {
         }
         Operator::Binary(op) => {
             let left = pop(values, at)?;
-            if matches!(op, "," | "." | "?" | ":") {
+            if matches!(op, "." | "?" | ":") {
                 Node::Number(0)
             } else if assignment(op) && !matches!(left, Node::Variable(..)) {
                 Node::NoWrite(Box::new(left), Some(Box::new(right)))
