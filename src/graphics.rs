@@ -82,6 +82,7 @@ mod particle_plugin;
 mod particle_protect;
 mod particle_question;
 mod particle_rain;
+mod particle_ring;
 mod particle_rising;
 mod particle_round;
 mod particle_sakura;

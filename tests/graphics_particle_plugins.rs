@@ -48,6 +48,7 @@ fn plugin(name: &[u8]) -> Vec<u8> {
             | b"thunder.ppi"
             | b"protect.ppi"
             | b"mirror.ppi"
+            | b"aoi.ppi"
     ) {
         bytes[361] = 2;
     }
@@ -57,6 +58,11 @@ fn plugin(name: &[u8]) -> Vec<u8> {
         bytes[400..403].copy_from_slice(&[0x55, 0x8b, 0xec]);
         bytes[435] = 0x68;
         bytes[436..440].copy_from_slice(&0x324u32.to_le_bytes());
+    }
+    if name == b"aoi.ppi" {
+        bytes[340..344].copy_from_slice(&0x1090u32.to_le_bytes());
+        bytes[400..404].copy_from_slice(&[0x55, 0x8b, 0xec, 0x68]);
+        bytes[404..408].copy_from_slice(&0xacu32.to_le_bytes());
     }
     bytes
 }
@@ -277,6 +283,9 @@ fn invalid_plugin_metadata_and_layout_are_rejected_before_start() -> Result<()> 
         bytes[361] = version;
         assert!(runtime(bytes)?.update(1, 1).is_err());
     }
+    let mut bytes = plugin(b"aoi.ppi");
+    bytes[404..408].copy_from_slice(&0xbcu32.to_le_bytes());
+    assert!(runtime(bytes)?.update(1, 1).is_err());
     for count in [0, 5] {
         let mut runtime = runtime_with_count(plugin(b"em_silent.ppi"), count)?;
         assert!(runtime.update(1, 1).is_err());
@@ -2061,6 +2070,66 @@ fn mirror_initializes_colored_vertices_and_preserves_randomness_blending_and_tas
         assert_random(&mut runtime, &expected);
         assert_eq!(runtime.drawables().get(1).unwrap().display(), 0);
         parameters[52..56].fill(0);
+    }
+    runtime.dispatch_command(2, command(323))?;
+    assert!(
+        runtime
+            .drawables()
+            .get(1)
+            .unwrap()
+            .particle_mesh()
+            .is_none()
+    );
+    runtime.destroy(1)?;
+    assert!(runtime.drawables().get(1).is_none());
+    Ok(())
+}
+
+#[test]
+fn ring_registers_grouped_trails_preserves_unused_quads_and_restarts_without_random_draws()
+-> Result<()> {
+    let mut runtime = runtime_with_count(plugin(b"aoi.ppi"), 7)?;
+    runtime.update(1, 1)?;
+    let expected = runtime.host_mut().random.clone();
+    let mut parameters = [0; 128];
+    for (i, n) in [3f32, 420., 420., 1., 500., 5., 1., 25.]
+        .into_iter()
+        .enumerate()
+    {
+        parameters[i * 4..i * 4 + 4].copy_from_slice(&n.to_le_bytes());
+    }
+    let view = Projection::default();
+    for start in [2, 100] {
+        runtime.dispatch_command_with_buffers(
+            2,
+            command(325),
+            &mut CommandBuffers {
+                data1: Some(&mut parameters),
+                ..Default::default()
+            },
+        )?;
+        runtime.dispatch_command(2, command(321))?;
+        let drawable = runtime.drawables().get(1).unwrap();
+        assert_eq!(drawable.blend_mode(), 1);
+        let mesh = drawable.particle_mesh().unwrap();
+        for i in 0..6 {
+            assert_eq!(mesh.projected_quad(i, &view).unwrap()[0].color >> 24, 0);
+        }
+        assert_eq!(mesh.projected_quad(6, &view).unwrap()[0].color, 0xffffffff);
+        for now in start..start + 80 {
+            runtime.update(now, 1)?;
+        }
+        assert_random(&mut runtime, &expected);
+        let drawable = runtime.drawables().get(1).unwrap();
+        let mesh = drawable.particle_mesh().unwrap();
+        for i in 0..6 {
+            assert_eq!(mesh.projected_quad(i, &view).unwrap()[0].color >> 24, 0);
+        }
+        assert_eq!(runtime.dispatch_command(2, command(324))?, 1);
+        runtime.dispatch_command(2, command(322))?;
+        runtime.update(start + 80, 1)?;
+        assert_eq!(runtime.drawables().get(1).unwrap().display(), 0);
+        assert_random(&mut runtime, &expected);
     }
     runtime.dispatch_command(2, command(323))?;
     assert!(

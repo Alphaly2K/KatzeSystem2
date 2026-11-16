@@ -79,6 +79,7 @@ pub(super) enum Kind {
     Roundz,
     Steam,
     Mirror,
+    Ring,
 }
 
 fn u16_at(bytes: &[u8], at: usize) -> Option<u16> {
@@ -204,6 +205,8 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
         Kind::Steam
     } else if name.eq_ignore_ascii_case(b"mirror.ppi") {
         Kind::Mirror
+    } else if name.eq_ignore_ascii_case(b"aoi.ppi") {
+        Kind::Ring
     } else if name.eq_ignore_ascii_case(b"sakura.ppi") {
         Kind::Sakura
     } else if name.eq_ignore_ascii_case(b"protect.ppi") {
@@ -214,15 +217,20 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
     let base = read::u32_at(exports, 16).ok()?;
     let count = read::u32_at(exports, 20).ok()?;
     let functions_at = offset(read::u32_at(exports, 28).ok()?)?;
-    if matches!(kind, Kind::Spark) {
+    if matches!(kind, Kind::Spark | Kind::Ring) {
         let index = 1u32.checked_sub(base).filter(|&i| i < count)? as usize;
         let at = functions_at.checked_add(index.checked_mul(4)?)?;
         let code_at = offset(read::u32_at(bytes, at).ok()?)?;
-        let code = bytes.get(code_at..code_at.checked_add(40)?)?;
-        // 相同标识及版本存在两种布局，仅接入已核实的路径粒子变体。
+        let (at, size) = if matches!(kind, Kind::Ring) {
+            (3, 0xacu32)
+        } else {
+            (35, 0x324)
+        };
+        let code = bytes.get(code_at..code_at.checked_add(at + 5)?)?;
+        // 内部标识不足以区分布局，另核对构造入口的分配尺寸。
         if code[..3] != [0x55, 0x8b, 0xec]
-            || code[35] != 0x68
-            || read::u32_at(code, 36).ok()? != 0x324
+            || code[at] != 0x68
+            || read::u32_at(code, at + 1).ok()? != size
         {
             return None;
         }
@@ -247,6 +255,7 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
         | Kind::DigiRing
         | Kind::Shy
         | Kind::Mirror
+        | Kind::Ring
         | Kind::Thunder
         | Kind::Protect => 0x0002_0002,
         _ => 0x0002_0001,
