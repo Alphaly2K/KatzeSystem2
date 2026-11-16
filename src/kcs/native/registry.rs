@@ -4,6 +4,7 @@ pub(super) enum CoreHandler {
     Scalar,
     Settings,
     Storage,
+    Database,
     System,
     Matrix,
     Data,
@@ -68,17 +69,8 @@ pub(super) fn core(index: u32) -> CoreHandler {
         | 1050
         | 1053
         | 1062 => CoreHandler::Settings,
-        243
-        | 253
-        | 419..=423
-        | 459
-        | 515..=518
-        | 869
-        | 870
-        | 872..=873
-        | 896..=899
-        | 902
-        | 1052 => CoreHandler::Storage,
+        243 | 253 | 419..=423 | 459 | 515..=518 | 896..=899 | 902 | 1052 => CoreHandler::Storage,
+        869..=873 | 878 => CoreHandler::Database,
         238 | 242 | 244..=248 | 252 | 254 | 290 | 389 | 390 | 469 | 833..=836 => CoreHandler::Data,
         900 | 901 => CoreHandler::MapData,
         424 | 425 => CoreHandler::Sequence,
@@ -190,6 +182,7 @@ pub(crate) enum RuntimeHandler {
     Cst,
     Motion,
     SequenceFile,
+    DatabaseLoad,
     SharedRecord,
     FlagBackup,
     SoundLoop,
@@ -238,6 +231,7 @@ pub(crate) fn runtime(index: u32) -> RuntimeHandler {
         | 1064 => RuntimeHandler::Cst,
         294..=317 | 388 | 440 | 514 | 535 | 586 => RuntimeHandler::Motion,
         458 => RuntimeHandler::SequenceFile,
+        869 => RuntimeHandler::DatabaseLoad,
         240 | 250 => RuntimeHandler::SharedRecord,
         609 | 610 => RuntimeHandler::FlagBackup,
         400 => RuntimeHandler::SoundLoop,

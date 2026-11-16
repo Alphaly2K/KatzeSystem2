@@ -95,6 +95,17 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                 }
                 Ok(NativeReturn::Continue)
             }
+            RuntimeHandler::DatabaseLoad => {
+                let database = crate::kcs::load_database(
+                    arguments,
+                    vm,
+                    self.resources
+                        .services
+                        .as_mut()
+                        .map(|services| services.as_mut() as _),
+                )?;
+                Ok(NativeReturn::Value(self.host.create_database(database)?))
+            }
             RuntimeHandler::SharedRecord => self.shared_record(index, arguments, vm),
             RuntimeHandler::FlagBackup => {
                 if !arguments.is_empty() {

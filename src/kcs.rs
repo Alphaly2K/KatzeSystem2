@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 
 mod configuration;
 mod data;
+mod database;
 mod debug;
 mod host;
 mod map_data;
@@ -33,6 +34,8 @@ mod utf8;
 mod vectors;
 pub use crate::task::TaskClock;
 pub(crate) use configuration::save_configuration;
+pub(crate) use database::load as load_database;
+pub use database::{Database, DatabaseRecord};
 pub(crate) use host::hierarchy_query;
 pub use host::{CoreHost, HostState, MenuItemRequest, WindowCloseRequest};
 pub(crate) use matrix::{
@@ -271,6 +274,10 @@ pub trait Host {
     /// 将已经读取的文件绑定到存活的序列集合，保留已有名称树。
     fn load_sequence_data(&mut self, _handle: u32, _bytes: Vec<u8>) -> Result<()> {
         Err(Error::new(0, "宿主未提供序列文件存储"))
+    }
+    /// 登记已经完成资源读取的词条数据库，返回独立句柄。
+    fn create_database(&mut self, _database: Database) -> Result<u32> {
+        Err(Error::new(0, "宿主未提供数据库存储"))
     }
     fn load_kcs_program(&mut self, _name: &[u8]) -> Result<Option<Program>> {
         Err(Error::new(0, "宿主未提供 KCS 程序装载"))
@@ -549,6 +556,9 @@ impl<T: Host + ?Sized> Host for &mut T {
 
     fn load_sequence_data(&mut self, handle: u32, bytes: Vec<u8>) -> Result<()> {
         (**self).load_sequence_data(handle, bytes)
+    }
+    fn create_database(&mut self, database: Database) -> Result<u32> {
+        (**self).create_database(database)
     }
     fn set_task_shared_numbers(&mut self, available: bool) {
         (**self).set_task_shared_numbers(available);

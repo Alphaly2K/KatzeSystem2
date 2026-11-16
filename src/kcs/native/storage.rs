@@ -1,5 +1,4 @@
 use super::{words, write_string};
-use crate::kcs::host::TextRecord;
 use crate::kcs::{HostState, Interpreter, NativeReturn, strings};
 use crate::{Error, Result, expression, read};
 use std::collections::BTreeMap;
@@ -79,43 +78,6 @@ pub(super) fn call(
         host.data_container_mut(handle)?
             .append(read::u32_at(arguments, 4)?, &bytes)?;
         return Ok(NativeReturn::Value(1));
-    }
-    if index == 869 {
-        if arguments.len() != 16 {
-            return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
-        }
-        let mut record = TextRecord::default();
-        for (position, bytes) in arguments.chunks_exact(4).enumerate() {
-            record.strings[position] =
-                strings::format(vm, u32::from_le_bytes(bytes.try_into().unwrap()), 0)?;
-        }
-        let handle = host.handle_allocator().allocate()?;
-        host.text_records.insert(handle, record);
-        return Ok(NativeReturn::Value(handle));
-    }
-    if index == 873 {
-        if arguments.len() != 8 {
-            return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
-        }
-        let handle = read::u32_at(arguments, 0)?;
-        let address = read::u32_at(arguments, 4)?;
-        let data = host.raw_buffer_rest(address)?.to_vec();
-        host.text_records
-            .get_mut(&handle)
-            .ok_or_else(|| Error::new(vm.pc, "KCS 文本记录句柄无效"))?
-            .payload = data;
-        return Ok(NativeReturn::Continue);
-    }
-    if matches!(index, 870 | 872) {
-        let count = if index == 870 { 1 } else { 2 };
-        if arguments.len() != count * 4 {
-            return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
-        }
-        let handle = read::u32_at(arguments, 0)?;
-        if let Some(record) = host.text_records.get_mut(&handle) {
-            record.calls.push((index, arguments.to_vec()));
-        }
-        return Ok(NativeReturn::Continue);
     }
     if matches!(index, 419 | 515) {
         if host.integer_maps.len() + host.sequence_maps.len() >= read::MAX_ITEMS {

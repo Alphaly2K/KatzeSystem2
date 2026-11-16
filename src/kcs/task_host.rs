@@ -67,6 +67,9 @@ impl<H: Host, S: TaskServices> Host for TaskHost<'_, H, S> {
     fn load_sequence_data(&mut self, handle: u32, bytes: Vec<u8>) -> Result<()> {
         self.inner.load_sequence_data(handle, bytes)
     }
+    fn create_database(&mut self, database: crate::kcs::Database) -> Result<u32> {
+        self.inner.create_database(database)
+    }
 
     fn set_task_shared_numbers(&mut self, available: bool) {
         self.inner.set_task_shared_numbers(available);

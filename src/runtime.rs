@@ -1828,6 +1828,9 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
     fn load_sequence_data(&mut self, handle: u32, bytes: Vec<u8>) -> Result<()> {
         self.host.load_sequence_data(handle, bytes)
     }
+    fn create_database(&mut self, database: crate::kcs::Database) -> Result<u32> {
+        self.host.create_database(database)
+    }
     fn set_task_shared_numbers(&mut self, available: bool) {
         if let Some(task) = self.running.get_mut(&self.host.task_id) {
             task.shared_numbers = Some(available);

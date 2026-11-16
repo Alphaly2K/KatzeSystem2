@@ -42,17 +42,6 @@ pub struct WindowCloseRequest {
     pub notify: bool,
 }
 
-/// 普通 869～873 的文本记录对象；后续命令语义待原入口核实。
-#[derive(Default)]
-pub(super) struct TextRecord {
-    /// 869 装入的四个格式展开字符串。
-    pub strings: [Vec<u8>; 4],
-    /// 873 装入的原始记录数据。
-    pub payload: Vec<u8>,
-    /// 870／872 每次调用的编号及原始参数字节。
-    pub calls: Vec<(u32, Vec<u8>)>,
-}
-
 /// 普通任务表的持久宿主状态；数值区由 `CoreHost::state` 单独提供，
 /// 以便同一份状态在多次 native 调用之间保留集合句柄、随机序列和请求队列。
 #[derive(Default)]
@@ -119,14 +108,28 @@ pub struct HostState {
     pub(super) sequence_maps: BTreeMap<u32, super::sequences::SequenceMap>,
     pub(super) record_stacks: BTreeMap<u32, super::record_stack::RecordStack>,
     pub(super) containers: BTreeMap<u32, crate::save::DataContainer>,
-    /// 普通 869 创建的四字符串记录。
-    /// 873 装入原始数据，870／872 的调用仅记录参数，副作用待原入口核实。
-    pub(super) text_records: BTreeMap<u32, TextRecord>,
+    pub(super) databases: BTreeMap<u32, super::Database>,
     pub(super) raw_buffers: BTreeMap<u32, Vec<u8>>,
     handles: HandleAllocator,
 }
 
 impl HostState {
+    /// 借用存活数据库的词条和标记；870 释放后句柄失效。
+    pub fn database(&self, handle: u32) -> Result<&super::Database> {
+        self.databases
+            .get(&handle)
+            .ok_or_else(|| Error::new(0, "数据库句柄无效"))
+    }
+
+    pub(crate) fn create_database(&mut self, database: super::Database) -> Result<u32> {
+        if self.databases.len() >= crate::read::MAX_ITEMS {
+            return Err(Error::new(0, "数据库数量超过上限"));
+        }
+        let handle = self.handle_allocator().allocate()?;
+        self.databases.insert(handle, database);
+        Ok(handle)
+    }
+
     pub(crate) fn sound_stereo_value(&self) -> u32 {
         self.sound_stereo.unwrap_or_else(|| {
             self.platform_settings
@@ -258,6 +261,9 @@ impl Host for CoreHost<'_> {
     }
     fn load_sequence_data(&mut self, handle: u32, bytes: Vec<u8>) -> Result<()> {
         self.host.load_sequence_data(handle, bytes)
+    }
+    fn create_database(&mut self, database: super::Database) -> Result<u32> {
+        self.host.create_database(database)
     }
     fn message_defaults(&self) -> Result<&crate::message::MessageDefaults> {
         self.host

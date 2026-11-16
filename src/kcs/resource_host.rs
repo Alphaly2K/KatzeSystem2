@@ -237,6 +237,9 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
     fn load_sequence_data(&mut self, handle: u32, bytes: Vec<u8>) -> Result<()> {
         self.inner.load_sequence_data(handle, bytes)
     }
+    fn create_database(&mut self, database: crate::kcs::Database) -> Result<u32> {
+        self.inner.create_database(database)
+    }
     fn set_task_shared_numbers(&mut self, available: bool) {
         self.inner.set_task_shared_numbers(available);
     }
@@ -441,6 +444,10 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
                 Some(&mut self.services),
                 self.inner.unicode_text(),
             );
+        }
+        if index == 869 {
+            let database = super::load_database(arguments, vm, Some(&mut self.services))?;
+            return Ok(NativeReturn::Value(self.inner.create_database(database)?));
         }
         if index == 458 {
             if let Some((handle, bytes)) =
