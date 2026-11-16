@@ -2,6 +2,7 @@ pub use crate::memory::{MemoryRead, SharedMemory};
 use crate::{Error, Result, Step, read};
 use std::collections::BTreeMap;
 
+mod achievements;
 mod calendar;
 mod clipboard;
 mod configuration;
@@ -36,6 +37,7 @@ mod triples;
 mod utf8;
 mod vectors;
 pub use crate::task::TaskClock;
+pub use achievements::AchievementServices;
 pub use clipboard::{ClipboardRequest, ClipboardText};
 pub(crate) use configuration::save_configuration;
 pub(crate) use database::load as load_database;

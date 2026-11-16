@@ -338,6 +338,13 @@ impl<F: ObjectFactory> Runtime<F> {
         self.host.system_services = Some(Box::new(services));
     }
 
+    pub fn set_achievement_services(
+        &mut self,
+        services: impl crate::kcs::AchievementServices + 'static,
+    ) {
+        self.host.achievement_services = Some(Box::new(services));
+    }
+
     pub fn set_file_services(&mut self, services: impl crate::io::FileServices + 'static) {
         self.host.file_services = Some(Box::new(services));
     }

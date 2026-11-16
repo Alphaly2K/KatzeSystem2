@@ -31,6 +31,9 @@ pub(crate) fn call_native(
         registry::CoreHandler::File => super::files::call(host, index, arguments, vm),
         registry::CoreHandler::Database => database::call(host, index, arguments, vm),
         registry::CoreHandler::System => system::call(state, host, task_tree, index, arguments, vm),
+        registry::CoreHandler::Achievements => {
+            super::achievements::call(host, index, arguments, vm)
+        }
         registry::CoreHandler::Matrix => matrix::call(host, index, arguments, vm),
         registry::CoreHandler::Data => super::data::call(host, index, arguments, vm),
         registry::CoreHandler::MapData => super::map_data::call(host, index, arguments, vm),

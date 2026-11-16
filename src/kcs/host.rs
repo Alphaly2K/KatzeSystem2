@@ -104,6 +104,8 @@ pub struct HostState {
     pub save_services: Option<Box<dyn crate::save::SaveServices>>,
     /// 普通 629 使用的同步平台打开服务；未配置时该入口返回诊断。
     pub system_services: Option<Box<dyn super::SystemServices>>,
+    /// None 对应未建立成就管理器；命名和解锁状态由服务维护。
+    pub achievement_services: Option<Box<dyn super::AchievementServices>>,
     pub file_services: Option<Box<dyn crate::io::FileServices>>,
     pub(super) files: BTreeMap<u32, super::files::OpenedFile>,
     /// 外层输入宿主提供的当前逻辑画布坐标；保留画布外的值。
