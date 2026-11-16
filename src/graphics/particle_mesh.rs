@@ -1,7 +1,6 @@
 use super::{DrawCommand, FrameTexture, ProjectedVertex, Projection, Surface, TextureSource};
 use crate::kcs::{ParticleHost, ParticleVertex, transform_vector};
 use crate::{Error, Result, read};
-use std::cmp::Ordering;
 use std::sync::Arc;
 
 /// 旧式粒子绘制快照；解释器更新与设备提交分别持有自己的网格。
@@ -58,16 +57,8 @@ impl ParticleMesh {
         self.viewport = particles.surface_size;
         self.order.clear();
         self.order.extend(0..count);
-        self.order.sort_by(|&left, &right| {
-            let depth = |i: usize| self.quads[i][0].position[2] + self.offsets[i][2];
-            let delta = depth(left) - depth(right);
-            if delta < 0. {
-                Ordering::Less
-            } else if delta > 0. {
-                Ordering::Greater
-            } else {
-                Ordering::Equal
-            }
+        sort_depth(&mut self.order, &|i| {
+            self.quads[i][0].position[2] + self.offsets[i][2]
         });
         Ok(())
     }
@@ -166,5 +157,71 @@ impl ParticleMesh {
             }
         }
         Ok(touched)
+    }
+}
+
+fn sort_depth(mut order: &mut [usize], depth: &impl Fn(usize) -> f32) {
+    while order.len() > 1 {
+        // 原排序将中点移到分区末位；相等和 NaN 均不进入左分区。
+        // 该比较不满足 Rust 标准排序要求的全序，必须保留原分区过程。
+        let middle = (order.len() - 1) / 2;
+        let pivot = order[middle];
+        let pivot_depth = depth(pivot);
+        order[middle] = order[0];
+        let mut boundary = 0;
+        for index in 1..order.len() {
+            if depth(order[index]) - pivot_depth < 0. {
+                boundary += 1;
+                order.swap(boundary, index);
+            }
+        }
+        order[0] = order[boundary];
+        order[boundary] = pivot;
+        let (left, right) = order.split_at_mut(boundary);
+        let right = &mut right[1..];
+        // 两分区互不影响，先递归较短者以限制栈深度。
+        if left.len() < right.len() {
+            sort_depth(left, depth);
+            order = right;
+        } else {
+            sort_depth(right, depth);
+            order = left;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn depth_sort_preserves_equal_and_unordered_partition_order() -> Result<()> {
+        for (depths, expected) in [
+            (vec![0.; 4], vec![1, 2, 0, 3]),
+            (vec![2., -1., 1., 0., 2.], vec![1, 3, 2, 0, 4]),
+            (
+                vec![
+                    f32::NAN,
+                    2.,
+                    -1.,
+                    -f32::NAN,
+                    1.,
+                    f32::INFINITY,
+                    f32::NEG_INFINITY,
+                ],
+                vec![3, 0, 6, 2, 4, 1, 5],
+            ),
+        ] {
+            let mut host = ParticleHost::default();
+            host.reset_quads(depths.len(), [16.; 2])?;
+            for (quad, depth) in host.quads.iter_mut().zip(depths) {
+                quad[0].position[2] = depth;
+            }
+            let mut mesh = ParticleMesh::new(&host, None, 59000.)?;
+            assert_eq!(mesh.order, expected);
+            mesh.update(&host)?;
+            assert_eq!(mesh.order, expected);
+        }
+        Ok(())
     }
 }
