@@ -12,6 +12,8 @@ struct Vertex {
     color: [f32; 4],
     uv: [f32; 2],
     padding: [f32; 2],
+    uv_plane: [f32; 4],
+    uv_gradient: [f32; 4],
 }
 
 struct Tile {
@@ -165,7 +167,7 @@ impl Renderer {
         let Some(drawable) = self.layer.next_drawable().map(ToOwned::to_owned) else {
             return Ok(false);
         };
-        self.prepare(triangles, canvas, size)?;
+        self.prepare(triangles, canvas, size, filter)?;
         let command = self.queue.new_command_buffer();
         self.encode(command, drawable.texture(), triangles, canvas, filter);
         command.present_drawable(&drawable);
@@ -184,7 +186,7 @@ impl Renderer {
     ) -> Result<Surface> {
         validate_size(size)?;
         let mut surface = Surface::new(size)?;
-        self.prepare(triangles, canvas, size)?;
+        self.prepare(triangles, canvas, size, filter)?;
         let target = texture(&self.device, size, MTLTextureUsage::RenderTarget);
         let command = self.queue.new_command_buffer();
         self.encode(command, &target, triangles, canvas, filter);
@@ -210,6 +212,7 @@ impl Renderer {
         triangles: &[FrameTriangle],
         canvas: &mut RenderTarget,
         size: [u32; 2],
+        filter: TextureFilter,
     ) -> Result<()> {
         self.wait()?;
         self.vertices.clear();
@@ -227,6 +230,11 @@ impl Renderer {
             if interpolate && triangle.vertices.iter().any(|v| !v.rhw.is_finite()) {
                 return Err(Error::new(0, "设备插值需要有限的 RHW"));
             }
+            let [uv_plane, uv_gradient] = if textured {
+                affine_point_uv(triangle, filter)
+            } else {
+                [[0.; 4]; 2]
+            };
             for (index, vertex) in triangle.vertices.iter().enumerate() {
                 let w = if interpolate && vertex.rhw != 0. {
                     1. / vertex.rhw
@@ -260,6 +268,8 @@ impl Renderer {
                         .filter(|_| textured)
                         .map_or([0.; 2], |t| t.uv[index]),
                     padding: [0.; 2],
+                    uv_plane,
+                    uv_gradient,
                 });
             }
         }
@@ -486,6 +496,49 @@ impl Drop for Renderer {
     fn drop(&mut self) {
         let _ = self.wait();
     }
+}
+
+fn affine_point_uv(triangle: &FrameTriangle, filter: TextureFilter) -> [[f32; 4]; 2] {
+    let Some(texture) = &triangle.texture else {
+        return [[0.; 4]; 2];
+    };
+    let rhw = triangle
+        .vertices
+        .map(|v| if v.rhw == 0. { 1. } else { v.rhw });
+    if texture.filter.unwrap_or(filter) != TextureFilter::Point
+        || rhw[0] <= 0.
+        || rhw.iter().any(|&v| v != rhw[0])
+    {
+        return [[0.; 4]; 2];
+    }
+    // 直接按像素中心求仿射 UV，避免设备重心插值把精确 texel 边界推向相邻像素。
+    let p = triangle.vertices.map(|v| {
+        [v.position[0], v.position[1]].map(|v| (f64::from(v) * 256. + 0.5).floor() / 256.)
+    });
+    let dx = [p[1][0] - p[0][0], p[2][0] - p[0][0]];
+    let dy = [p[1][1] - p[0][1], p[2][1] - p[0][1]];
+    let determinant = dx[0] * dy[1] - dx[1] * dy[0];
+    if determinant == 0. || !determinant.is_finite() {
+        return [[0.; 4]; 2];
+    }
+    let mut origin = [0., 0., 1., 0.];
+    let mut gradient = [0.; 4];
+    for axis in 0..2 {
+        let base = f64::from(texture.uv[0][axis]);
+        let delta = [
+            f64::from(texture.uv[1][axis]) - base,
+            f64::from(texture.uv[2][axis]) - base,
+        ];
+        let x = (delta[0] * dy[1] - delta[1] * dy[0]) / determinant;
+        let y = (dx[0] * delta[1] - dx[1] * delta[0]) / determinant;
+        origin[axis] = (base - x * p[0][0] - y * p[0][1]) as f32;
+        gradient[axis] = x as f32;
+        gradient[axis + 2] = y as f32;
+    }
+    if origin.iter().chain(&gradient).any(|v| !v.is_finite()) {
+        return [[0.; 4]; 2];
+    }
+    [origin, gradient]
 }
 
 fn validate_size(size: [u32; 2]) -> Result<()> {

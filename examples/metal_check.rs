@@ -218,6 +218,47 @@ fn check() -> Result<(), Box<dyn std::error::Error>> {
             comparisons += 1;
         }
     }
+    let cells = std::sync::Arc::new(Surface::from_bgra(
+        [8, 8],
+        (0..64u32)
+            .flat_map(|i| (0xff000000 | ((i % 8) * 31) | (((i / 8) * 31) << 8)).to_le_bytes())
+            .collect(),
+    )?);
+    let positions = [[-0.5, -0.5], [7.5, -0.5], [-0.5, 5.5], [7.5, 5.5]];
+    let uv = [
+        [-0.03125, -0.03125],
+        [0.46875, -0.03125],
+        [-0.03125, 0.34375],
+        [0.46875, 0.34375],
+    ];
+    for filter in [TextureFilter::Point, TextureFilter::Linear] {
+        let commands = [[0, 1, 2], [2, 1, 3]].map(|indices| {
+            triangle(
+                indices.map(|i| positions[i]),
+                [u32::MAX; 3],
+                Some(FrameTexture {
+                    source: TextureSource::Image(cells.clone()),
+                    uv: indices.map(|i| uv[i]),
+                    filter: Some(TextureFilter::Point),
+                    address: Default::default(),
+                }),
+            )
+        });
+        let frame = DrawList {
+            commands: commands.to_vec(),
+            filter,
+        };
+        let reference = SoftwareBackend.render(&frame, &mut canvas, [8, 6])?;
+        let output = renderer.render(&frame, &mut canvas, [8, 6])?;
+        let expected = reference.tiles()[0].as_ref().unwrap();
+        let actual = output.tiles()[0].as_ref().unwrap();
+        assert_eq!(
+            actual.pixels(),
+            expected.pixels(),
+            "affine point sampling, {filter:?}"
+        );
+        comparisons += 1;
+    }
     let triangles = &cases[6];
     let before =
         renderer.render_offscreen(triangles, &mut canvas, [32, 24], TextureFilter::Point)?;
