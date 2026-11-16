@@ -95,22 +95,28 @@ impl TaskObject for Receiver {
         host: &mut dyn Host,
         budget: usize,
     ) -> Result<CommandOutcome> {
-        if command.code == 800 {
+        if matches!(command.code, 800 | 801) {
             let mut vm = Interpreter::new(Program::from_code(&[], vec![], 16)?, vec![])?;
-            let NativeReturn::Value(handle) = host.call(112, &bytes(&[3, 2]), &mut vm)? else {
-                unreachable!();
+            let handle = if command.code == 801 {
+                host.images_mut().unwrap().create_empty(command.target)?
+            } else {
+                let NativeReturn::Value(handle) = host.call(112, &bytes(&[3, 2]), &mut vm)? else {
+                    unreachable!();
+                };
+                handle
             };
-            for (x, y, color) in [(0, 1, 0x010000ff), (2, 0, 0x8000ff00)] {
-                assert_eq!(
-                    host.call(117, &bytes(&[handle, x, y, 1, 1, color]), &mut vm)?,
-                    NativeReturn::Continue
-                );
+            if command.code == 800 {
+                for (x, y, color) in [(0, 1, 0x010000ff), (2, 0, 0x8000ff00)] {
+                    assert_eq!(
+                        host.call(117, &bytes(&[handle, x, y, 1, 1, color]), &mut vm)?,
+                        NativeReturn::Continue
+                    );
+                }
             }
-            host.dispatch_task_command(
-                packet(3, command.target, 98, [0, handle, 1]),
-                &mut CommandBuffers::default(),
-                &mut 0,
-            )?;
+            assert_eq!(
+                host.call(394, &bytes(&[3, handle]), &mut vm)?,
+                NativeReturn::Continue
+            );
             assert_eq!(
                 host.call(114, &bytes(&[handle]), &mut vm)?,
                 NativeReturn::Continue
@@ -906,6 +912,18 @@ fn allocated_image_masks_survive_release_and_gate_plane_selection_and_capture() 
         .unwrap();
     assert_eq!(mask.size(), [3, 2]);
     assert_eq!(mask.bytes(), [1, 4]);
+    assert_ne!(send(&mut runtime, 2, 801, 0), 0);
+    assert!(
+        runtime
+            .input_state(1)
+            .unwrap()
+            .regions()
+            .get(3)
+            .unwrap()
+            .hit_mask()
+            .is_none()
+    );
+    send(&mut runtime, 2, 800, 0);
     runtime.update_input_selection(1, Some([20, 30])).unwrap();
     assert_eq!(send(&mut runtime, 3, 74, 0), 1);
     let pressed = KeyEvent {

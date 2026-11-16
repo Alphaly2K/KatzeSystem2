@@ -684,7 +684,7 @@ Scene 消费 `noact`／`lockactive` 并按主体时点处理通知。`preferred_
 
 `Runtime::input_state(id)`／`input_state_mut(id)` 查询输入状态。普通 145～148、154、285／286、401、403／404 经根对象查询输入任务，接通区域属性、即时键掩码、选择清理、光标和键开关；285 压入查询值，其余保持 native 返回槽。145 删除调用任务自身区域，147 的零地址清空矩形。参数见[普通输入入口](input.md#普通脚本入口)。`dispatch_input_key`、`scan_input_keys`、`update_input_selection`、`dispatch_input_motion` 将逻辑坐标和设备查询连接到真实任务命令路由。接收者回调可以修改正在执行的输入任务的区域、键开关、指针及基类状态，后续遍历立即生效，错误返回也保留已发生的修改。完整协议见[输入对象](input.md#输入对象与运行时)。
 
-`input::HitMask::from_image(&image)` 按画布尺寸、裁剪偏移及非零 Alpha 生成区域持有的独立位图。输入命令 147 与平面命令 98 通过 `Host::image(handle)` 使用普通 111／112 的解码图像；位图在图像释放后继续有效。独立宿主提供解码图像借用，TaskHost／ResourceHost／SystemHost 向内层委托该查询。边界、替换失败和空句柄规则见[位掩码](input.md#位掩码)。
+`input::HitMask::from_image(&image)` 按画布尺寸、裁剪偏移及非零 Alpha 生成区域持有的独立位图。输入命令 147 与平面命令 98 通过 `Host::pixel_image(pixels)` 使用图像包装绑定的解码像素；位图在图像释放后继续有效。普通 394 及 FES 按钮先取得包装的像素句柄，空包装清除掩码。单一图像命名空间的独立宿主默认沿用 `image` 查询；TaskHost／ResourceHost／SystemHost 向内层委托像素查询。边界、替换失败和空句柄规则见[位掩码](input.md#位掩码)。
 
 `Host::parent_task_id()` 返回当前对象的直接父级编号，默认返回诊断。Runtime 从任务树查询；CoreHost 使用其 task_tree，TaskHost 优先使用 TaskServices 的树，ResourceHost／SystemHost／`&mut H` 继续向内层委托。平面 53／54 开启／解除相对父级坐标绑定，具体规则见[图形接口](graphics.md)。父级传播期间的 61／62 可查询正在执行的平面，保持删除门控、几何源选择及输出缓冲区契约；完整平面重入仍未开放。
 

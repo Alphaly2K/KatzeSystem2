@@ -15,6 +15,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             146 => (129, 8),
             147 => (130, 8),
             148 => (132, 8),
+            150 => (138, 12),
             154 => (143, 8),
             285 => (145, 4),
             286 => (146, 0),
@@ -41,6 +42,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             145 => [0, self.host.task_id, 0],
             401 => [0, a, 0],
             147 => [a, u32::from(b != 0), 0],
+            150 => [read::u32_at(arguments, 8)?, (a & 0xffff) | (b << 16), 0],
             _ => [a, b, 0],
         };
         let target = self.command_target(0, 34, [0; 3])?;

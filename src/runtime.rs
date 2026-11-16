@@ -1873,6 +1873,10 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         self.resources.images.get(handle)
     }
 
+    fn pixel_image(&self, pixels: u32) -> Result<&crate::graphics::Image> {
+        self.resources.images.pixel_image(pixels)
+    }
+
     fn image_data(&self, handle: u32) -> Result<&[u8]> {
         self.resources.raw.image_data(handle)
     }

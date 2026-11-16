@@ -14,6 +14,20 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         if matches!(index, 398 | 399) {
             return self.echo_native(index, arguments, vm);
         }
+        if index == 394 {
+            if arguments.len() != 8 {
+                return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+            }
+            let target = read::u32_at(arguments, 0)?;
+            let image = read::u32_at(arguments, 4)?;
+            let pixels = if image == 0 {
+                0
+            } else {
+                self.resources.images.pixel_handle(image)?
+            };
+            self.command_target(target, 98, [0, pixels, 0])?;
+            return Ok(NativeReturn::Continue);
+        }
         if matches!(index, 858 | 859) {
             let count = if index == 858 { 4 } else { 12 };
             if arguments.len() != count {

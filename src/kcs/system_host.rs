@@ -96,6 +96,10 @@ impl<H: Host, S: SystemServices> Host for SystemHost<'_, H, S> {
         self.inner.image(handle)
     }
 
+    fn pixel_image(&self, pixels: u32) -> Result<&crate::graphics::Image> {
+        self.inner.pixel_image(pixels)
+    }
+
     fn image_data(&self, handle: u32) -> Result<&[u8]> {
         self.inner.image_data(handle)
     }

@@ -367,6 +367,11 @@ pub trait Host {
         Err(Error::new(0, "宿主未提供解码图像查询"))
     }
 
+    /// 借用像素句柄的解码图像；单一图像命名空间的宿主可沿用 image 查询。
+    fn pixel_image(&self, pixels: u32) -> Result<&crate::graphics::Image> {
+        self.image(pixels)
+    }
+
     /// 原始图像数据的同步借用；来源使用者自行持有解码后的帧。
     fn image_data(&self, _handle: u32) -> Result<&[u8]> {
         Err(Error::new(0, "宿主未提供原始图像数据查询"))
@@ -623,6 +628,10 @@ impl<T: Host + ?Sized> Host for &mut T {
 
     fn image(&self, handle: u32) -> Result<&crate::graphics::Image> {
         (**self).image(handle)
+    }
+
+    fn pixel_image(&self, pixels: u32) -> Result<&crate::graphics::Image> {
+        (**self).pixel_image(pixels)
     }
 
     fn image_data(&self, handle: u32) -> Result<&[u8]> {

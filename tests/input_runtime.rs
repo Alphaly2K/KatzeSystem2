@@ -71,6 +71,7 @@ fn ordinary_input_wrappers_query_devices_and_update_regions_and_key_switches() -
         call(&mut code, native, &args);
     }
     call(&mut code, 401, &[0]);
+    call(&mut code, 150, &[0x1000a, 0x20014, 7]);
     wait(&mut code);
     call(&mut code, 285, &[0]);
     emit(&mut code, 0x26, &[4]);
@@ -95,6 +96,7 @@ fn ordinary_input_wrappers_query_devices_and_update_regions_and_key_switches() -
             },
         );
         rt.set_budget(budget, 1 << 20);
+        rt.set_input_pointer_control(true);
         let input = rt.create(0, kind::INPUT, b"input", b"")?;
         rt.input_state_mut(input).unwrap().set_update_rate(120);
         let caller = rt.create(0, kind::ORDINARY, b"caller", b"")?;
@@ -140,6 +142,8 @@ fn ordinary_input_wrappers_query_devices_and_update_regions_and_key_switches() -
         assert_eq!(current.keys().enabled()[0], 0);
         assert_eq!(current.pointer().idle_limit, 360);
         assert_eq!(current.pointer().cursor_requested, 0);
+        assert_eq!(current.pointer().move_target, [10, 20]);
+        assert_eq!(current.pointer().move_remaining, 7);
         assert_eq!(
             rt.object(caller)
                 .unwrap()

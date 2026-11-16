@@ -175,8 +175,11 @@ impl<F: ObjectFactory> Store<'_, F> {
                 self.button_command(owner, task, 101, [0; 3], Some(&mut bytes))?;
             }
             self.button_command(owner, task, 93, [0, enabled, 0], None)?;
-            if flags.needs_rebuild() && mask && self.resources.images.pixel_handle(wrapper)? != 0 {
-                self.button_command(owner, task, 98, [0, wrapper, 0], None)?;
+            if flags.needs_rebuild() && mask {
+                let pixels = self.resources.images.pixel_handle(wrapper)?;
+                if pixels != 0 {
+                    self.button_command(owner, task, 98, [0, pixels, 0], None)?;
+                }
             }
             let updates = &mut objects
                 .get_mut(handle)

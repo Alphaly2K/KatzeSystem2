@@ -142,7 +142,7 @@ impl Regions {
         } else {
             region.mask = None;
             region.words[11] = 0;
-            let image = host.image(handle)?;
+            let image = host.pixel_image(handle)?;
             region.words[12..14].copy_from_slice(&HitMask::image_size(image));
             region.mask = Some(HitMask::from_image(image)?);
             region.words[11] = 1;

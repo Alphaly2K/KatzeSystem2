@@ -241,7 +241,7 @@ pub(crate) fn runtime(index: u32) -> RuntimeHandler {
         400 => RuntimeHandler::SoundLoop,
         156..=168 | 347..=349 | 903 => RuntimeHandler::SoundControl,
         604 | 935 | 936 => RuntimeHandler::SoundLoad,
-        145..=148 | 154 | 285 | 286 | 401 | 403 | 404 | 937 => RuntimeHandler::Input,
+        145..=148 | 150 | 154 | 285 | 286 | 401 | 403 | 404 | 937 => RuntimeHandler::Input,
         611..=621 | 695 | 884 => RuntimeHandler::Message,
         447..=449 | 451 | 630 | 645..=647 | 649 | 650 | 882 | 883 => RuntimeHandler::Fes,
         149 => RuntimeHandler::PointerPosition,
@@ -262,6 +262,7 @@ pub(crate) fn runtime(index: u32) -> RuntimeHandler {
         | 263
         | 339..=342
         | 343..=345
+        | 394
         | 398
         | 399
         | 402
