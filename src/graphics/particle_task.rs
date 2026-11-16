@@ -8,10 +8,11 @@ use super::{
     particle_flower_burst::FlowerBurst, particle_glint::Glint, particle_hadou::Hadou,
     particle_ice::Ice, particle_note::Note, particle_notice::Notice, particle_paper::Paper,
     particle_plugin, particle_protect::Protect, particle_question::Question, particle_rain::Rain,
-    particle_rising::Rising, particle_sakura::Sakura, particle_scene_sparkle::SceneSparkle,
-    particle_shy::Shy, particle_sigh::Sigh, particle_silent::Silent, particle_spark::Spark,
-    particle_sparkle::Sparkle, particle_surprise::Surprise, particle_sweat::Sweat,
-    particle_thunder::Thunder, particle_warukira::Warukira,
+    particle_rising::Rising, particle_roundy::Roundy, particle_sakura::Sakura,
+    particle_scene_sparkle::SceneSparkle, particle_shy::Shy, particle_sigh::Sigh,
+    particle_silent::Silent, particle_spark::Spark, particle_sparkle::Sparkle,
+    particle_surprise::Surprise, particle_sweat::Sweat, particle_thunder::Thunder,
+    particle_warukira::Warukira,
 };
 use crate::kcs::{
     Host, Interpreter, ParticleHost, ParticleSource, ParticleTask, Program, ScriptRandom,
@@ -66,6 +67,7 @@ enum Effect {
     Paper(Paper),
     Dash(Dash),
     Explosion(Explosion),
+    Roundy(Roundy),
 }
 
 impl Effect {
@@ -127,6 +129,7 @@ impl Effect {
             particle_plugin::Kind::Explosion => {
                 Self::Explosion(Explosion::new(host, image, random, module_state))
             }
+            particle_plugin::Kind::Roundy => Self::Roundy(Roundy::new(host, random)),
             particle_plugin::Kind::SceneSparkle => {
                 Self::SceneSparkle(SceneSparkle::new(host, image, random))
             }
@@ -224,6 +227,7 @@ impl ParticleRunner {
                     Some(Effect::Paper(effect)) => effect.write_mesh(host),
                     Some(Effect::Dash(effect)) => effect.write_mesh(host),
                     Some(Effect::Explosion(effect)) => effect.write_mesh(host),
+                    Some(Effect::Roundy(effect)) => effect.write_mesh(host),
                     _ => {}
                 }
             }
@@ -267,6 +271,10 @@ impl ParticleRunner {
                 if let Some(effect) = effect {
                     let delta = host.elapsed.wrapping_sub(host.previous_elapsed);
                     match effect {
+                        Effect::Roundy(effect) => {
+                            effect.update(delta, services.random().unwrap_or(&mut host.random));
+                            effect.write_mesh(host);
+                        }
                         Effect::Explosion(effect) => {
                             effect.update(delta, services.random().unwrap_or(&mut host.random));
                             effect.write_mesh(host);

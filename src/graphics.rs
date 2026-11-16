@@ -82,6 +82,7 @@ mod particle_protect;
 mod particle_question;
 mod particle_rain;
 mod particle_rising;
+mod particle_roundy;
 mod particle_sakura;
 mod particle_scene_sparkle;
 mod particle_shy;
