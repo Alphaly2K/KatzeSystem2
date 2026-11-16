@@ -60,6 +60,8 @@ pub mod kind {
     pub const FADE: u32 = 27;
     pub const WIPE_ALPHA: u32 = 28;
     pub const FES: u32 = 34;
+    pub const RENDER_BLUR: u32 = 35;
+    pub const RENDER_MOSAIC: u32 = 36;
     pub const RWIPE: u32 = 39;
     pub const SCROLL2: u32 = 41;
     pub const SLIDER: u32 = 42;

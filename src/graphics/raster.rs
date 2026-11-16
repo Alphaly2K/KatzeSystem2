@@ -91,7 +91,10 @@ impl Surface {
                     if uv.iter().all(|p| p[axis] == uv[0][axis]) {
                         f64::from(uv[0][axis])
                     } else {
-                        (0..3).map(|i| f64::from(uv[i][axis]) * weights[i]).sum()
+                        // 基点加差值保留精确 texel 边界，避免常量项随权重求和发生偏移。
+                        let base = f64::from(uv[0][axis]);
+                        base + (f64::from(uv[1][axis]) - base) * weights[1]
+                            + (f64::from(uv[2][axis]) - base) * weights[2]
                     }
                 });
                 if coordinates.iter().any(|n: &f64| !n.is_finite()) {

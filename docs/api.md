@@ -546,6 +546,8 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 
 `Drawables::compose(projection, parent, filter, range)` 生成设备无关的 `DrawList`，包含按显示、排序、相机、裁剪及投影准备的 `DrawCommand`。`range=None` 合成全帧，指定区间时按图元基点 Z 选择 `[lower, upper)`，非正上界返回空列表。`FrameTexture` 的 `source` 选择 `TextureSource::Canvas(tile)` 或 `TextureSource::Image(Arc<Surface>)`，`uv` 保存三个顶点的纹理坐标，`address` 按 U、V 分别选择 `TextureAddress::Mirror`（默认）或 `Wrap`，循环寻址的双线性过滤跨纹理边缘取样。`filter=None` 沿用 `DrawList::filter`，`Some(TextureFilter)` 为该纹理选择独立过滤方式，同一列表可混合点取样和双线性过滤。`DrawCommand::blend_mode` 保存 0～5 的混合编号，软件与 Metal 后端均在调制之后混合，其他编号回退到零；逐通道规则见[图形接口](graphics.md)。`TextureSource::surface(canvas)` 借用实际像素，缺失面块返回 None；图像来源独立于画布。绘制命令及列表可克隆，共享图像保持像素寿命，修改来源时可使用 `Arc::make_mut` 保留已经生成的帧。`FrameTriangle` 保留为 `DrawCommand` 的兼容别名；既有 `frame_triangles` 返回同类命令。`Runtime::compose_frame()` 使用 `set_frame_view` 配置的视图合成全帧。
 
+`GraphicsFactory` 的类型 35／36 提供实时残影和马赛克，普通 521～524 配置及启停。完整帧合成会推进捕获与反馈；指定深度区间的合成直接选择图元。任务创建、首次矩形保持及重启规则见[实时滤镜](graphics.md#实时残影与马赛克)。
+
 `GraphicsBackend::render` 接收绘制列表、画布和输出尺寸，返回从透明背景开始绘制的独立完整目标。`present` 提交至宿主已附着的窗口，暂时无法呈现时返回 false，未提供窗口能力时返回诊断。`SoftwareBackend` 提供无设备的离屏实现。`Runtime::set_graphics_backend` 连接后端，`present_frame(size)` 合成并呈现；脚本画面捕获使用同一后端，捕获失败保留前次完整目标。未连接后端时，既有软件捕获和显式 `render_frame` 接口继续可用。
 
 macOS 的 `graphics::metal::Renderer` 实现该后端接口，`layer()` 交由宿主附着到原生视图。直接调用 `present` 清空并呈现最终帧，`render_offscreen` 同步读回 BGRA。每个实例绑定一份画布并消费其 dirty 标记，更换画布须先调用 `invalidate_canvas`；后端接口管理调用所需的 Objective-C autorelease pool，直接调用底层方法时由宿主提供。无设备、着色器失败及执行错误均返回诊断。

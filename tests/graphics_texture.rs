@@ -6,6 +6,57 @@ use katze_system2::graphics::{
 use std::sync::Arc;
 
 #[test]
+fn affine_uvs_keep_exact_texel_boundaries_across_both_halves_of_a_quad() {
+    let image = Arc::new(
+        Surface::from_bgra(
+            [8, 8],
+            (0..64u32)
+                .flat_map(|i| (0xff000000 | ((i % 8) * 31) | (((i / 8) * 31) << 8)).to_le_bytes())
+                .collect(),
+        )
+        .unwrap(),
+    );
+    let vertices = [[-0.5, -0.5], [7.5, -0.5], [-0.5, 5.5], [7.5, 5.5]].map(|p| ProjectedVertex {
+        position: [p[0], p[1], 0.5],
+        rhw: 1.,
+        color: u32::MAX,
+    });
+    let uv = [
+        [-0.03125, -0.03125],
+        [0.46875, -0.03125],
+        [-0.03125, 0.34375],
+        [0.46875, 0.34375],
+    ];
+    let commands = [[0, 1, 2], [2, 1, 3]].map(|indices| DrawCommand {
+        vertices: indices.map(|i| vertices[i]),
+        texture: Some(FrameTexture {
+            source: TextureSource::Image(image.clone()),
+            uv: indices.map(|i| uv[i]),
+            address: Default::default(),
+            filter: Some(TextureFilter::Point),
+        }),
+        clip: None,
+        blend_mode: 0,
+    });
+    let mut target = RenderTarget::new([8, 6]).unwrap();
+    DrawList {
+        commands: commands.to_vec(),
+        filter: TextureFilter::Linear,
+    }
+    .render_into(&mut target, None)
+    .unwrap();
+    for y in 0..6 {
+        for x in 0..8 {
+            assert_eq!(
+                target.pixel(x, y),
+                image.pixel(x / 2, y / 2),
+                "pixel ({x}, {y})"
+            );
+        }
+    }
+}
+
+#[test]
 fn texture_filter_overrides_mix_point_and_linear_sampling_in_one_frame() {
     let image = Arc::new(
         Surface::from_bgra(

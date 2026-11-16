@@ -2,6 +2,7 @@ use super::{ObjectFactory, ObjectHost, kind};
 use crate::kcs::{Interpreter, NativeReturn};
 use crate::task::CommandBuffers;
 use crate::{Error, Result, read};
+mod screen_filter;
 
 impl<F: ObjectFactory> ObjectHost<'_, F> {
     pub(super) fn transition_native(
@@ -10,6 +11,9 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         arguments: &[u8],
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
+        if matches!(index, 521..=524) {
+            return self.screen_filter_native(index, arguments, vm);
+        }
         if matches!(index, 967..=973) {
             let target = read::u32_at(arguments, 0)?;
             let length = match index {

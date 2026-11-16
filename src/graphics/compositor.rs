@@ -8,6 +8,7 @@ pub(super) enum ScreenEffect {
     PageFlip(u32),
     CellFlip(u32),
     RWipe(u32),
+    Filter(u32),
 }
 
 /// 持有画布、绘图登记和帧视图，生成设备无关的绘制列表。
@@ -22,6 +23,7 @@ pub struct Compositor {
     pub(crate) page_flips: std::collections::BTreeMap<u32, super::page_flip::PageFlip>,
     pub(crate) cell_flips: std::collections::BTreeMap<u32, super::cell_flip::CellFlip>,
     pub(crate) rwipes: std::collections::BTreeMap<u32, super::rwipe::RWipe>,
+    pub(super) screen_filters: std::collections::BTreeMap<u32, super::screen_filter::ScreenFilter>,
     pub(crate) drawing_rect: Option<super::Rect>,
     pub(super) screen_effect: Option<ScreenEffect>,
 }
@@ -100,6 +102,33 @@ impl Compositor {
     ) -> Result<DrawList> {
         if range.is_some() {
             return self.drawables.compose(&projection, parent, filter, range);
+        }
+        if let Some(ScreenEffect::Filter(id)) = self.screen_effect {
+            let effect = self.screen_filters.get_mut(&id).unwrap();
+            if !effect.enabled() {
+                return self.drawables.compose(&projection, parent, filter, None);
+            }
+            if self.auxiliary_targets.len() < 2 {
+                return Err(Error::new(0, "实时滤镜需要两个辅助渲染目标"));
+            }
+            let [near, far] = effect.range;
+            let mut frame =
+                self.drawables
+                    .compose(&projection, parent, filter, Some([0., near]))?;
+            let middle = self
+                .drawables
+                .compose(&projection, parent, filter, Some([near, far]))?;
+            frame.commands.extend(effect.frame(
+                &middle,
+                self.drawing.target.as_ref(),
+                &mut self.auxiliary_targets,
+            )?);
+            frame.commands.extend(
+                self.drawables
+                    .compose(&projection, parent, filter, Some([far, 1_000_000.]))?
+                    .commands,
+            );
+            return Ok(frame);
         }
         if let Some(ScreenEffect::RWipe(id)) = self.screen_effect {
             let effect = self.rwipes.get_mut(&id).unwrap();

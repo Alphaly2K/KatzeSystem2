@@ -1228,6 +1228,8 @@ impl<F: ObjectFactory> ObjectFactory for GraphicsFactory<F> {
             kind::WIPE => Ok(Box::new(super::WipeObject::new())),
             kind::WIPE_ALPHA => Ok(Box::new(super::WipeAlphaObject::new())),
             kind::RWIPE => Ok(Box::new(super::RWipeObject::new(id))),
+            kind::RENDER_BLUR => Ok(Box::new(super::ScreenFilterObject::blur(id))),
+            kind::RENDER_MOSAIC => Ok(Box::new(super::ScreenFilterObject::mosaic(id))),
             kind::RENDER_WMOSAIC => Ok(Box::new(super::MosaicObject::new(id))),
             kind::RENDER_FMOSAIC => Ok(Box::new(super::MosaicObject::fading(id))),
             kind::RENDER_WBREAK => Ok(Box::new(super::ShatterObject::new(id))),
