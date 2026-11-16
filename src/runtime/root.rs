@@ -8,6 +8,7 @@ pub struct RootObject {
     base: BaseObject,
     input_task: u32,
     sound_task: u32,
+    command_40: u32,
 }
 
 impl RootObject {
@@ -16,6 +17,7 @@ impl RootObject {
             base: BaseObject::new(),
             input_task,
             sound_task,
+            command_40: 0,
         }
     }
 }
@@ -60,7 +62,8 @@ impl TaskObject for RootObject {
                     1..=3 => return Ok(true),
                     34 => *output = self.input_task,
                     35 => *output = self.sound_task,
-                    32 | 33 | 37..=40 => {
+                    40 => self.command_40 = command.data[1],
+                    32 | 33 | 37..=39 => {
                         return Err(Error::new(0, "根对象专属命令尚未接入"));
                     }
                     _ => {}

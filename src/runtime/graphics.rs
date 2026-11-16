@@ -102,6 +102,24 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             }
             return Ok(NativeReturn::Continue);
         }
+        if index == 541 {
+            let drawing = self.resources.compositor.drawing_mut();
+            if drawing.mode == 0 && drawing.enabled {
+                if let Some(target) = drawing.target.as_mut() {
+                    if arguments.len() != 16 {
+                        return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+                    }
+                    let mut values = [0; 4];
+                    for (value, bytes) in values.iter_mut().zip(arguments.chunks_exact(4)) {
+                        *value = i32::from_le_bytes(bytes.try_into().unwrap());
+                    }
+                    target.release_tiles(crate::graphics::Rect::from_xywh(
+                        values[0], values[1], values[2], values[3],
+                    ));
+                }
+            }
+            return Ok(NativeReturn::Continue);
+        }
         if index == 739 {
             if arguments.len() != 8 {
                 return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));

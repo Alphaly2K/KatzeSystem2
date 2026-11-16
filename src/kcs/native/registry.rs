@@ -273,6 +273,7 @@ pub(crate) fn runtime(index: u32) -> RuntimeHandler {
         | 462..=464
         | 466
         | 534
+        | 541
         | 542
         | 568
         | 570
@@ -312,6 +313,7 @@ pub(crate) fn runtime(index: u32) -> RuntimeHandler {
         | 427
         | 452
         | 454
+        | 577
         | 651
         | 694 => RuntimeHandler::Task,
         241 | 251 | 387 => RuntimeHandler::MediaRecord,

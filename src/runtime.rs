@@ -1587,7 +1587,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
     ) -> Result<NativeReturn> {
         let count = match index {
             66 => 12,
-            67 | 75 | 109 | 272..=274 | 452 | 454 | 651 => 4,
+            67 | 75 | 109 | 272..=274 | 452 | 454 | 577 | 651 => 4,
             108 | 110 | 275 | 426 | 427 | 694 => 8,
             69 | 70 | 72 | 73 => 16,
             76 => 0,
@@ -1601,6 +1601,10 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             *arg = u32::from_le_bytes(bytes.try_into().unwrap());
         }
         match index {
+            577 => {
+                self.command_target(0, 40, [0, args[0], 0])?;
+                Ok(NativeReturn::Continue)
+            }
             651 => {
                 self.command_target(args[0], 24, [0, u32::MAX, 0])?;
                 Ok(NativeReturn::Continue)

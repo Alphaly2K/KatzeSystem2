@@ -528,7 +528,7 @@ IMAGE 通过 `base.updates.needs_rebuild()` 保存来源装载请求。FILE 的�
 
 普通 739 接受两个 VM 输出地址，由 Runtime 使用共享 `input_coordinates()` 和当前 drawing 的 mode／enabled 查询设备偏移经过截断、回绕加倍及逻辑转换的结果。active 与目标存在性不参与该查询；地址零有效，同址或部分重叠保持逐次读写的顺序，返回状态二且不压值。换算及异常浮点规则见[输入坐标](input.md#坐标转换)。
 
-`SystemSettings::apply_startup_xml` 另读取纹理尺寸、虚拟网格、八组区域和两处分界行，字段见[全局设置](settings.md)。`RenderTarget::from_tiles` 可建立全空的稀疏网格，`prepare_tiles(areas, split_row)` 补建缺失面块，`tile_bit_depth(index)` 查询 16／32 位格式。普通 542 按共享设置执行同一准备，忽略参数及 active，只受模式、enabled 和目标存在性门控，以状态二保留返回槽；已有像素和标记不变。容量、区域及位深转换见[当前绘图目标](graphics.md#当前绘图目标)。
+`SystemSettings::apply_startup_xml` 另读取纹理尺寸、虚拟网格、八组区域和两处分界行，字段见[全局设置](settings.md)。`RenderTarget::from_tiles` 可建立全空的稀疏网格，`prepare_tiles(areas, split_row)` 补建缺失面块，`tile_bit_depth(index)` 查询 16／32 位格式。`release_tiles(rect)` 释放与像素矩形相交的完整面块，保留布局及更新标记；普通 541 连接这一操作。普通 542 按共享设置执行同一准备，忽略参数及 active，只受模式、enabled 和目标存在性门控，以状态二保留返回槽；已有像素和标记不变。容量、区域及位深转换见[当前绘图目标](graphics.md#当前绘图目标)。
 
 `graphics::Transform` 提供基点、平移、缩放、弧度旋转及显式矩阵的查询／设置和 dirty 消费。`transform_point` 返回本对象变换后的四维顶点，`transform_point_with_parent` 再应用父级矩阵；两者保留原 W，不执行 W 除法。默认基点为 `[0, 0, 5000]`，基点 Z 不参与该顶点变换。比较规则与矩阵组合契约见[绘图变换](graphics.md#绘图变换)。
 
@@ -580,7 +580,7 @@ FES 的 `prepare_release` 在子任务释放后，先向非零的共享列表发
 
 Scene 已处理 `execfes`、`endfes` 及 `endkcs` 的结束时序。`execfes` 使用同一资源服务补全名称，继承创建上下文和共享列表，传递最多十六个数值参数，立即启动直属子任务后在同一时刻继续父脚本；预算和资源错误续跑保留创建进度及参数。`endfes` 在正常主体中请求子任务删除，普通主体等到下一时刻再继续；事件处理器中的结束或创建请求留待正常主体消费。`Scene::child_fes()` 查询保存的子任务编号，退出码不会自动回收子任务，后续状态通过 `_EXITCODE_` 提供；完整协议见[图形文档](graphics.md#fes-任务对象)。`execkcs` 构造普通子任务后补全 KCS 名称，依序执行 161 的装载及初始化、172 的 FES 构造时外部区绑定，再保存编号并继续父脚本。`Scene::child_kcs()` 查询保存编号，额外词项不求值。
 
-`RootObject::new(input_task, sound_task)` 保存输入与声音任务编号，命令 34／35 原样返回相应值；任务删除后不会自动选择替代编号。该对象作为 Runtime 的显式根参数使用，子任务由调用者创建，自动启动链仍待接入。根对象遵循专属命令消费规则，其余未实现的专属入口返回诊断。
+`RootObject::new(input_task, sound_task)` 保存输入与声音任务编号，命令 34／35 原样返回相应值；任务删除后不会自动选择替代编号。该对象作为 Runtime 的显式根参数使用，子任务由调用者创建，自动启动链仍待接入。普通 577 向原始目标零发送命令 40，以第二数据项保存一个 DWORD，不改变查询编号或命令输出；调用保留返回槽。根对象遵循专属命令消费规则，其余未实现的专属入口返回诊断。
 
 `runtime::fes::Scene::new(program, handles)` 组合预先装载的 FES 解释器和对象存储；与 Runtime 共用 `runtime.host().handle_allocator()`。调用前通过 `objects_mut()?.set_image_list(list, clip)` 绑定共享列表；`Runtime::update_fes_scene(owner, &mut scene, now)` 消费已支持的脚本事件并按声明顺序更新对象，返回 false 时继续调用以完成预算续跑，期间保留原时刻和游标。true 表示本轮完成，`exit_code()` 在本轮最终对象更新完成后返回最近已处理的退出通知值，不表示脚本停止。`deadline()` 查询原始等待期限，包含根运动 `0xffffffff`、绝对帧 `0xfffffffe`、对象 `0xfffffffc`、文字 `0xfffffffa` 和局部标志 `0xfffffff9`；完成恢复时点见[完成等待](graphics.md#fes-运动与帧完成等待)。`raw_input()` 查询控制器保存的原始输入掩码，`is_pending()` 查询续跑状态，`objects()`／`interpreter()` 提供只读查询；推进未完成时 `objects_mut()` 返回诊断。首次推进绑定 owner，后续不能更换。调用方在所属任务主体时点推进，保证该任务时钟已经更新；下层动画命令继续使用任务自身时钟。支持范围和未接入服务见[场景推进](graphics.md#fes-场景推进)。
 

@@ -151,6 +151,26 @@ impl RenderTarget {
         self.dirty.fill(false);
     }
 
+    /// 释放与像素矩形相交的完整面块，保留布局及更新标记，返回释放数量。
+    pub fn release_tiles(&mut self, rect: Rect) -> usize {
+        let mut released = 0;
+        for row in 0..self.grid[1] {
+            for column in 0..self.grid[0] {
+                let tile_rect = Rect::from_xywh(
+                    (column * self.tile_size[0]) as i32,
+                    (row * self.tile_size[1]) as i32,
+                    self.tile_size[0] as i32,
+                    self.tile_size[1] as i32,
+                );
+                if tile_rect.intersect(rect).is_some() {
+                    let index = row as usize * self.grid[0] as usize + column as usize;
+                    released += usize::from(self.tiles[index].take().is_some());
+                }
+            }
+        }
+        released
+    }
+
     /// 以全局整数像素中心绘制纯色三角形，跨面块保留相同的亚像素边界。
     pub fn blend_triangle(&mut self, points: [[f32; 2]; 3], argb: u32) -> bool {
         self.blend_triangle_clipped(points, argb, super::raster::RasterState::default())
