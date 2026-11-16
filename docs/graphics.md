@@ -1329,7 +1329,7 @@ FES 任务销毁时也恢复共享列表提交，独立于 DRAW 的正常完成�
 
 普通 272／273 分别发送命令 321／322，普通 274 查询命令 324（未到达接收者时返回零）；普通 275 将第二参数指向的 128 字节交给命令 325。普通 426／427 分别转发命令 326／327。所有发送者均为调用任务，零目标仍路由；274 以状态一返回查询值，其余以状态二保留返回槽。类型 38 的粒子装载、播放和绘制尚未接入，相应命令 320～323、591／592 返回明确诊断。
 
-`graphics::Particle3DObject` 是独立的类型 16 对象，支持普通 271 装载旧式及 2.0 KCS、693 装载已识别的雨、提示、怒气、叹气、低落、汗滴及 `em_dis`／`em_common`／`em_note`／`em_angry`／`ohanaburst`／`em_exclamation`／`filmnoise`／`asease`／`em_suprise`／`em_silent`／`em_question`／`kirakira`／`concent`／`em_kyupin`／`energy`／`digi`／`digiring`／`rising3`／`rising4`／`em_double`／`em_shy`／`warukira`／`hadou`／`protect`／`dark`／`dark_tri`／`sakura`／`o_150102`／`s_040101`／`spark` 路径变体及 `thunder`／`paper`／`dash`／`star`／`exprode`／`roundy`／`roundz`／`steam`／`mirror`／`ring`／`radiate`／`swordspark`／`cmnptcl` 效果。这些效果使用跨平台内置实现，共用参数、启停、状态查询、不透明度、坐标组和释放命令，以及统一的网格与绘图后端。资源缺失会清理旧效果，未知插件类型或版本返回诊断。
+`graphics::Particle3DObject` 是独立的类型 16 对象，支持普通 271 装载旧式及 2.0 KCS、693 装载已识别的雨、提示、怒气、叹气、低落、汗滴及 `em_dis`／`em_common`／`em_note`／`em_angry`／`ohanaburst`／`em_exclamation`／`filmnoise`／`asease`／`em_suprise`／`em_silent`／`em_question`／`kirakira`／`concent`／`em_kyupin`／`energy`／`digi`／`digiring`／`rising3`／`rising4`／`em_double`／`em_shy`／`warukira`／`hadou`／`protect`／`dark`／`dark_tri`／`sakura`／`o_150102`／`s_040101`／`spark` 路径变体及 `thunder`／`paper`／`dash`／`star`／`exprode`／`roundy`／`roundz`／`steam`／`mirror`／`ring`／`radiate`／`swordspark`／`cmnptcl`／`rubble` 效果。这些效果使用跨平台内置实现，共用参数、启停、状态查询、不透明度、坐标组和释放命令，以及统一的网格与绘图后端。资源缺失会清理旧效果，未知插件类型或版本返回诊断。
 
 HG-3 解码返回顶端起始像素，粒子装载将其转换为原位图的底端起始行序，以匹配脚本 UV。
 
@@ -1461,3 +1461,6 @@ HG-3 解码返回顶端起始像素，粒子装载将其转换为原位图的底
 `cmnptcl` 使用版本 `0x00020002`。前三项 float 参数选择配置组、组内编号和集中发射标记；每次播放均先按 `ptcldat` 资源类别解析 `ptcl{组}{编号:03}.plist`，再读取配置。配置采用 UTF-8 plist 字典，支持重力及径向两种发射模式；重复字段使用后值，未知字段忽略。重新播放时省略的字段保留原配置；缺失或空文件清空粒子内部状态并保持配置及发射器状态，首次缺失不显示粒子。停止标记在同一已装载效果的重新播放中保留，重新装载创建新的发射器。
 
 平均寿命决定发射间隔，累计时间严格超过间隔才激活粒子；非零集中标记一次激活全组。每次出生消费十九个共享浮点随机数。寿命归零后，运行中的发射器先重生当前槽，再用末尾活跃粒子填入该槽并重生末尾，保留原入口的随机消费顺序。发射结束后逐个隐藏到期粒子；内部结束不修改任务的播放状态。颜色及颜色增量按无符号字节存储和回绕，位置、缩放、旋转及来源相对画布中心的偏移复用统一网格后端。配置指定目标混合因子一时启用加算模式。
+
+
+`rubble` 使用版本 `0x00020001`。前九项 float 参数为公共曲线起终点的 XYZ、缩放百分比、寿命及每次更新增加的可见粒子数。各粒子沿公共曲线按编号分布，随机选择四分区图集、缩放、旋转方向和飞出终点，再沿独立曲线运动。出生消费三个共享整数和六个共享浮点随机数；更新不消费随机数。Alpha 在前十分之一寿命内显现，严格超过随机寿命后保留终点、旋转及 Alpha，年龄继续累计；不自动重生，混合模式保持。

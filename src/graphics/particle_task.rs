@@ -10,7 +10,7 @@ use super::{
     particle_hadou::Hadou, particle_ice::Ice, particle_mirror::Mirror, particle_note::Note,
     particle_notice::Notice, particle_paper::Paper, particle_plugin, particle_protect::Protect,
     particle_question::Question, particle_radiate::Radiate, particle_rain::Rain,
-    particle_ring::Ring, particle_rising::Rising, particle_sakura::Sakura,
+    particle_ring::Ring, particle_rising::Rising, particle_rubble::Rubble, particle_sakura::Sakura,
     particle_scene_sparkle::SceneSparkle, particle_shy::Shy, particle_sigh::Sigh,
     particle_silent::Silent, particle_spark::Spark, particle_sparkle::Sparkle,
     particle_steam::Steam, particle_surprise::Surprise, particle_sweat::Sweat,
@@ -76,6 +76,7 @@ enum Effect {
     Radiate(Radiate),
     SwordSpark(SwordSpark),
     Emitter(Box<Emitter>),
+    Rubble(Rubble),
 }
 
 impl Effect {
@@ -149,6 +150,7 @@ impl Effect {
             particle_plugin::Kind::Mirror => Self::Mirror(Mirror::new(host, image, random)),
             particle_plugin::Kind::Ring => Self::Ring(Ring::new(host, image)?),
             particle_plugin::Kind::Radiate => Self::Radiate(Radiate::new(host, image, random)),
+            particle_plugin::Kind::Rubble => Self::Rubble(Rubble::new(host, image, random)),
             particle_plugin::Kind::SceneSparkle => {
                 Self::SceneSparkle(SceneSparkle::new(host, image, random))
             }
@@ -280,6 +282,7 @@ impl ParticleRunner {
                     Some(Effect::Mirror(effect)) => effect.write_mesh(host),
                     Some(Effect::Ring(effect)) => effect.write_mesh(host),
                     Some(Effect::Radiate(effect)) => effect.write_mesh(host),
+                    Some(Effect::Rubble(effect)) => effect.write_mesh(host),
                     _ => {}
                 }
             }
@@ -333,6 +336,10 @@ impl ParticleRunner {
                         }
                         Effect::Radiate(effect) => {
                             effect.update(delta, services.random().unwrap_or(&mut host.random));
+                            effect.write_mesh(host);
+                        }
+                        Effect::Rubble(effect) => {
+                            effect.update(delta);
                             effect.write_mesh(host);
                         }
                         Effect::Ring(effect) => {

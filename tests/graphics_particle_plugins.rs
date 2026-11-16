@@ -394,6 +394,7 @@ fn invalid_plugin_metadata_and_layout_are_rejected_before_start() -> Result<()> 
         (b"em_silent.ppi", 1),
         (b"swordspark.ppi", 2),
         (b"cmnptcl.ppi", 1),
+        (b"rubble.ppi", 2),
     ] {
         let mut bytes = plugin(name);
         bytes[361] = version;
@@ -2602,6 +2603,70 @@ fn paper_shares_randomness_keeps_finite_particles_loaded_and_supports_task_contr
         assert_eq!(runtime.drawables().get(1).unwrap().display(), 0);
     }
     assert_ne!(starts[0], starts[1]);
+    runtime.dispatch_command(2, command(323))?;
+    assert!(
+        runtime
+            .drawables()
+            .get(1)
+            .unwrap()
+            .particle_mesh()
+            .is_none()
+    );
+    runtime.destroy(1)?;
+    assert!(runtime.drawables().get(1).is_none());
+    Ok(())
+}
+
+#[test]
+fn rubble_registers_atlas_quads_retains_random_state_during_motion_and_restarts_cleanly()
+-> Result<()> {
+    let mut runtime = runtime_with_count(plugin(b"rubble.ppi"), 3)?;
+    runtime.update(1, 1)?;
+    let mut parameters = [0; 128];
+    for (i, value) in [10f32, 20., 0., 100., 60., 20., 100., 8., 2.]
+        .into_iter()
+        .enumerate()
+    {
+        parameters[i * 4..i * 4 + 4].copy_from_slice(&value.to_le_bytes());
+    }
+    let view = Projection::default();
+    for start in [2, 30] {
+        runtime.dispatch_command_with_buffers(
+            2,
+            command(325),
+            &mut CommandBuffers {
+                data1: Some(&mut parameters),
+                ..Default::default()
+            },
+        )?;
+        let mut expected = runtime.host_mut().random.clone();
+        for _ in 0..9 {
+            expected.next_integer();
+        }
+        for _ in 0..18 {
+            expected.next_float();
+        }
+        runtime.dispatch_command(2, command(321))?;
+        assert_random(&mut runtime, &expected);
+        let mesh = runtime.drawables().get(1).unwrap().particle_mesh().unwrap();
+        for i in 0..3 {
+            let quad = mesh.projected_quad(i, &view).unwrap();
+            assert!(quad.iter().all(|v| v.color == 0x00ff_ffff));
+            assert_eq!(quad[1].uv[0] - quad[0].uv[0], 0.5);
+            assert_eq!(quad[2].uv[1] - quad[0].uv[1], 0.5);
+        }
+        for now in start..start + 10 {
+            runtime.update(now, 1)?;
+        }
+        assert_random(&mut runtime, &expected);
+        let mesh = runtime.drawables().get(1).unwrap().particle_mesh().unwrap();
+        assert!((0..3).all(|i| mesh.projected_quad(i, &view).unwrap()[0].color == 0xffff_ffff));
+        assert_eq!(runtime.dispatch_command(2, command(324))?, 1);
+        runtime.dispatch_command(2, command(322))?;
+        runtime.update(start + 10, 1)?;
+        assert_eq!(runtime.drawables().get(1).unwrap().display(), 0);
+        assert_random(&mut runtime, &expected);
+    }
     runtime.dispatch_command(2, command(323))?;
     assert!(
         runtime

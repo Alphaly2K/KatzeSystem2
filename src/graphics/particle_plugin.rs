@@ -84,6 +84,7 @@ pub(super) enum Kind {
     Radiate,
     SwordSpark,
     Emitter,
+    Rubble,
 }
 
 fn u16_at(bytes: &[u8], at: usize) -> Option<u16> {
@@ -219,6 +220,8 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
         Kind::SwordSpark
     } else if name.eq_ignore_ascii_case(b"cmnptcl.ppi") {
         Kind::Emitter
+    } else if name.eq_ignore_ascii_case(b"rubble.ppi") {
+        Kind::Rubble
     } else if name.eq_ignore_ascii_case(b"sakura.ppi") {
         Kind::Sakura
     } else if name.eq_ignore_ascii_case(b"protect.ppi") {
