@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, BTreeSet};
 mod audio;
 mod backlog;
 mod cst;
+mod debug_window;
 mod emocon;
 pub mod fes;
 pub use cst::CstContext;

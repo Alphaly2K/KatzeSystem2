@@ -72,6 +72,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                 crate::kcs::save_configuration(self.host, keys, vm.pc)?;
                 Ok(NativeReturn::Continue)
             }
+            RuntimeHandler::DebugWindow => self.debug_window_native(index, arguments, vm),
             RuntimeHandler::Emocon => self.emocon_native(index, arguments, vm),
             RuntimeHandler::Backlog => self.backlog_native(index, arguments, vm),
             RuntimeHandler::LoadProgram => self.ordinary_load_native(arguments, vm),

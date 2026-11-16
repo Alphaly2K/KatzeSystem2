@@ -71,6 +71,7 @@ pub(crate) use strings::format as format_string;
 pub use system_host::{SystemHost, SystemServices};
 pub(crate) use task_host::write_task_context;
 pub use task_host::{TaskHost, TaskServices};
+pub(crate) use utf8::decode_units as decode_utf8_units;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Operand {

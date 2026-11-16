@@ -2,7 +2,7 @@ use super::{Interpreter, NativeReturn};
 use crate::{Error, Result, read};
 use std::collections::BTreeMap;
 
-pub(super) fn decode_units(source: &[u8], terminal_sentinel: bool) -> Result<Vec<u16>> {
+pub(crate) fn decode_units(source: &[u8], terminal_sentinel: bool) -> Result<Vec<u16>> {
     let mut units = Vec::new();
     let mut position = 0;
     while let Some(&byte) = source.get(position) {
