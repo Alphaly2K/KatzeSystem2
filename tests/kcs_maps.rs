@@ -84,6 +84,7 @@ fn null_integer_map_operations_skip_key_address_resolution() {
     assert_eq!(call(&mut host, &mut vm, 516, &[0]), NativeReturn::Continue);
     for (index, args, expected) in [
         (896, vec![0, u32::MAX, 7], NativeReturn::Continue),
+        (887, vec![0, u32::MAX, 7], NativeReturn::Continue),
         (897, vec![0, u32::MAX], NativeReturn::Value(0)),
         (1052, vec![0, u32::MAX], NativeReturn::Value(0)),
         (898, vec![0], NativeReturn::Continue),
@@ -92,6 +93,10 @@ fn null_integer_map_operations_skip_key_address_resolution() {
         (900, vec![u32::MAX, 0], NativeReturn::Continue),
         (901, vec![0, u32::MAX], NativeReturn::Continue),
         (901, vec![u32::MAX, 0], NativeReturn::Continue),
+        (891, vec![0, u32::MAX], NativeReturn::Continue),
+        (891, vec![u32::MAX, 0], NativeReturn::Continue),
+        (892, vec![0, u32::MAX], NativeReturn::Continue),
+        (892, vec![u32::MAX, 0], NativeReturn::Continue),
         (902, vec![u32::MAX, 0, u32::MAX], NativeReturn::Value(0)),
         (895, vec![0], NativeReturn::Continue),
         (676, vec![0], NativeReturn::Continue),
@@ -106,11 +111,11 @@ fn null_integer_map_operations_skip_key_address_resolution() {
 
 #[test]
 fn named_values_share_dictionary_handles_and_keep_formatted_updates_and_sorted_keys() {
-    for (new, release, query, clear, size, key) in [
-        (894, 886, 897, 898, 899, 902),
-        (675, 676, 888, 889, 890, 893),
-        (885, 895, 897, 889, 899, 893),
-        (515, 516, 888, 898, 890, 902),
+    for (new, release, set, query, clear, size, key, export, import) in [
+        (894, 886, 887, 897, 898, 899, 902, 891, 892),
+        (675, 676, 896, 888, 889, 890, 893, 900, 901),
+        (885, 895, 887, 897, 889, 899, 893, 900, 892),
+        (515, 516, 896, 888, 898, 890, 902, 891, 901),
     ] {
         let mut state = State::new(0);
         let mut host = CoreHost::new(&mut state);
@@ -132,8 +137,9 @@ fn named_values_share_dictionary_handles_and_keep_formatted_updates_and_sorted_k
         let NativeReturn::Value(handle) = call(&mut host, &mut vm, new, &[u32::MAX]) else {
             panic!("dictionary handle expected")
         };
-        call(&mut host, &mut vm, 896, &[handle, 16, 1]);
-        call(&mut host, &mut vm, 896, &[handle, 48, 0x80000001]);
+        let value = if set == 887 { 0x7fc01234 } else { 0x80000001 };
+        call(&mut host, &mut vm, set, &[handle, 16, 1]);
+        call(&mut host, &mut vm, set, &[handle, 48, value]);
         for (address, value) in [(16, 7), (64, 9), (80, 11)] {
             call(&mut host, &mut vm, 517, &[handle, address, value]);
         }
@@ -143,7 +149,7 @@ fn named_values_share_dictionary_handles_and_keep_formatted_updates_and_sorted_k
         );
         assert_eq!(
             call(&mut host, &mut vm, query, &[handle, 16]),
-            NativeReturn::Value(0x80000001)
+            NativeReturn::Value(value)
         );
         assert_eq!(
             call(&mut host, &mut vm, query, &[handle, 96]),
@@ -160,7 +166,7 @@ fn named_values_share_dictionary_handles_and_keep_formatted_updates_and_sorted_k
         );
         assert_eq!(
             call(&mut host, &mut vm, 1052, &[handle, 16]),
-            NativeReturn::Value(0x80000001)
+            NativeReturn::Value(value)
         );
         for (index, expected_key) in [b"%d[G0]".as_slice(), b"17", b"ABC", b"abc"]
             .into_iter()
@@ -182,13 +188,13 @@ fn named_values_share_dictionary_handles_and_keep_formatted_updates_and_sorted_k
             panic!()
         };
         host.raw_buffer_mut(raw, 64).unwrap().fill(0xcc);
-        call(&mut host, &mut vm, 900, &[handle, raw + 1]);
+        call(&mut host, &mut vm, export, &[handle, raw + 1]);
         let mut expected = vec![0xcc; 40];
         expected[..4].copy_from_slice(&4u32.to_le_bytes());
         expected[4..11].copy_from_slice(b"%d[G0]\0");
         expected[12..16].copy_from_slice(&7u32.to_le_bytes());
         expected[16..19].copy_from_slice(b"17\0");
-        expected[20..24].copy_from_slice(&0x80000001u32.to_le_bytes());
+        expected[20..24].copy_from_slice(&value.to_le_bytes());
         expected[24..28].copy_from_slice(b"ABC\0");
         expected[28..32].copy_from_slice(&9u32.to_le_bytes());
         expected[32..36].copy_from_slice(b"abc\0");
@@ -204,7 +210,7 @@ fn named_values_share_dictionary_handles_and_keep_formatted_updates_and_sorted_k
         let target = create(&mut host, &mut vm);
         call(&mut host, &mut vm, 517, &[target, 48, 55]);
         call(&mut host, &mut vm, 517, &[target, 96, 33]);
-        call(&mut host, &mut vm, 901, &[target, raw + 1]);
+        call(&mut host, &mut vm, import, &[target, raw + 1]);
         for (key, value) in [(48, 55), (96, 33), (80, 11)] {
             assert_eq!(
                 call(&mut host, &mut vm, 518, &[target, key]),
@@ -215,12 +221,12 @@ fn named_values_share_dictionary_handles_and_keep_formatted_updates_and_sorted_k
             .into_iter()
             .flat_map(u32::to_le_bytes)
             .collect();
-        assert!(host.call(901, &bad, &mut vm).is_err());
+        assert!(host.call(import, &bad, &mut vm).is_err());
         let short: Vec<_> = [handle, raw + 63]
             .into_iter()
             .flat_map(u32::to_le_bytes)
             .collect();
-        assert!(host.call(900, &short, &mut vm).is_err());
+        assert!(host.call(export, &short, &mut vm).is_err());
         call(&mut host, &mut vm, 834, &[raw]);
         assert_eq!(
             call(&mut host, &mut vm, 518, &[target, 80]),
