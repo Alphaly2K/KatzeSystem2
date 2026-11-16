@@ -280,6 +280,7 @@ fn invalid_plugin_metadata_and_layout_are_rejected_before_start() -> Result<()> 
         (b"rain.ppi".as_slice(), 2),
         (b"em_down.ppi", 1),
         (b"em_silent.ppi", 1),
+        (b"swordspark.ppi", 2),
     ] {
         let mut bytes = plugin(name);
         bytes[361] = version;
@@ -1312,6 +1313,16 @@ fn scatter_effects_use_shared_randomness_and_preserve_task_lifecycle() -> Result
             0,
         ),
         (
+            b"swordspark.ppi".as_slice(),
+            [590f32, 347., 25., 13., 1., 1., 5., 30., 60.].as_slice(),
+            32,
+            64,
+            [[0., 0.], [0.5, 0.5]],
+            0,
+            0,
+            0,
+        ),
+        (
             b"sakura.ppi".as_slice(),
             [8f32, 20., 120., 500., 0.].as_slice(),
             14,
@@ -1528,7 +1539,12 @@ fn scatter_effects_use_shared_randomness_and_preserve_task_lifecycle() -> Result
             .unwrap();
         if matches!(
             name,
-            b"digi.ppi" | b"digiring.ppi" | b"rising4.ppi" | b"rising3.ppi" | b"sakura.ppi"
+            b"digi.ppi"
+                | b"digiring.ppi"
+                | b"rising4.ppi"
+                | b"rising3.ppi"
+                | b"sakura.ppi"
+                | b"swordspark.ppi"
         ) {
             assert!(restarted[0].color >> 24 > 0);
         } else {

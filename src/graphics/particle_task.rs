@@ -13,7 +13,7 @@ use super::{
     particle_sakura::Sakura, particle_scene_sparkle::SceneSparkle, particle_shy::Shy,
     particle_sigh::Sigh, particle_silent::Silent, particle_spark::Spark, particle_sparkle::Sparkle,
     particle_steam::Steam, particle_surprise::Surprise, particle_sweat::Sweat,
-    particle_thunder::Thunder, particle_warukira::Warukira,
+    particle_sword_spark::SwordSpark, particle_thunder::Thunder, particle_warukira::Warukira,
 };
 use crate::kcs::{
     Host, Interpreter, ParticleHost, ParticleSource, ParticleTask, Program, ScriptRandom,
@@ -73,6 +73,7 @@ enum Effect {
     Mirror(Mirror),
     Ring(Ring),
     Radiate(Radiate),
+    SwordSpark(SwordSpark),
 }
 
 impl Effect {
@@ -84,6 +85,9 @@ impl Effect {
         module_state: Arc<AtomicU32>,
     ) -> Result<Self> {
         Ok(match kind {
+            particle_plugin::Kind::SwordSpark => {
+                Self::SwordSpark(SwordSpark::new(host, image, random)?)
+            }
             particle_plugin::Kind::Rain => Self::Rain(Rain::new(host, image, random)),
             particle_plugin::Kind::Notice => Self::Notice(Notice::new(host, image)),
             particle_plugin::Kind::Anger => Self::Anger(Anger::new(host, image, random)),
@@ -230,6 +234,7 @@ impl ParticleRunner {
                 };
                 *effect = Some(next?);
                 match effect {
+                    Some(Effect::SwordSpark(effect)) => effect.write_mesh(host),
                     Some(Effect::Protect(effect)) => effect.write_mesh(host),
                     Some(Effect::Dark(effect)) => effect.write_mesh(host),
                     Some(Effect::Sakura(effect)) => effect.write_mesh(host),
@@ -447,6 +452,10 @@ impl ParticleRunner {
                         }
                         Effect::Spark(effect) => {
                             effect.update(delta, services.random().unwrap_or(&mut host.random));
+                            effect.write_mesh(host);
+                        }
+                        Effect::SwordSpark(effect) => {
+                            effect.update(delta, &host.parameters);
                             effect.write_mesh(host);
                         }
                         Effect::SceneSparkle(effect) => {

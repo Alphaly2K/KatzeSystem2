@@ -99,6 +99,7 @@ mod particle_sparkle;
 mod particle_steam;
 mod particle_surprise;
 mod particle_sweat;
+mod particle_sword_spark;
 mod particle_thunder;
 mod particle_warukira;
 pub(crate) use particle_task::refresh_particle_source;
