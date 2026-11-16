@@ -1,15 +1,17 @@
 use super::Resources;
+use crate::graphics::Image;
 use crate::kcs::{Interpreter, NativeReturn};
 use crate::{Error, Result};
 
 impl Resources {
     pub(super) fn image_data_native(
         &mut self,
+        owner: u32,
         index: u32,
         arguments: &[u8],
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
-        let count = if index == 369 { 2 } else { 3 };
+        let count = if matches!(index, 364 | 369) { 2 } else { 3 };
         if arguments.len() != count * 4 {
             return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
         }
@@ -17,6 +19,30 @@ impl Resources {
             .chunks_exact(4)
             .map(|bytes| u32::from_le_bytes(bytes.try_into().unwrap()))
             .collect();
+        if index == 364 {
+            if args[0] == 0 {
+                return Ok(NativeReturn::Value(0));
+            }
+            let bytes = self.raw.image_data(args[0])?;
+            let frame = if bytes.starts_with(b"HG-3") {
+                crate::hg3::decode_frame(bytes, args[1] as i32)?
+            } else if bytes.starts_with(b"HG-2") {
+                Some(crate::hg2::decode_frame(bytes)?).filter(|frame| frame.id == args[1])
+            } else if bytes.starts_with(&[0xff, 0xd8]) {
+                return Err(Error::new(vm.pc, "未支持的 JPEG 图像解码"));
+            } else {
+                None
+            };
+            let Some(frame) = frame else {
+                return Ok(NativeReturn::Value(0));
+            };
+            let has_alpha = Some(frame.info.reserved != 0);
+            return Ok(NativeReturn::Value(self.images.insert(
+                owner,
+                Image::from_frame(frame)?,
+                has_alpha,
+            )?));
+        }
         if matches!(index, 362 | 363) {
             for address in &args[1..] {
                 vm.read(*address, 4)?;

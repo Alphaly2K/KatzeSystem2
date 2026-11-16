@@ -222,8 +222,8 @@ impl Resources {
         arguments: &[u8],
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
-        if matches!(index, 362 | 363 | 369 | 372 | 373 | 1026) {
-            return self.image_data_native(index, arguments, vm);
+        if matches!(index, 362..=364 | 369 | 372 | 373 | 1026) {
+            return self.image_data_native(owner, index, arguments, vm);
         }
         if matches!(index, 434..=438) {
             return crate::kcs::prefetch_call(
