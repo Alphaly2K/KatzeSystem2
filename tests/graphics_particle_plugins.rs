@@ -51,6 +51,7 @@ fn plugin(name: &[u8]) -> Vec<u8> {
             | b"aoi.ppi"
             | b"radiate.ppi"
             | b"dark_tri.ppi"
+            | b"cmnptcl.ppi"
     ) {
         bytes[361] = 2;
     }
@@ -151,6 +152,117 @@ fn assert_random(
     let mut expected = expected.clone();
     assert_eq!(actual.next_integer(), expected.next_integer());
     assert_eq!(actual.next_float(), expected.next_float());
+}
+
+#[test]
+fn emitter_reads_current_config_on_each_start_and_uses_shared_random_and_mesh() -> Result<()> {
+    use std::{cell::RefCell, rc::Rc};
+
+    struct ConfigFiles {
+        bytes: Rc<RefCell<Vec<u8>>>,
+        reads: Rc<RefCell<Vec<Vec<u8>>>>,
+    }
+    impl ResourceServices for ConfigFiles {
+        fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+            if category == b"image" {
+                assert!(name.is_empty());
+                return Ok(Vec::new());
+            }
+            assert_eq!(category, b"ptcldat");
+            Ok([b"custom-data/".as_slice(), name].concat())
+        }
+        fn resolve_file(&mut self, _: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+            Ok(name.to_vec())
+        }
+        fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
+            if mode == ResourceMode::File {
+                return Ok(Some(plugin(b"cmnptcl.ppi")));
+            }
+            assert_eq!(mode, ResourceMode::LooseFirst);
+            self.reads.borrow_mut().push(name.to_vec());
+            Ok(Some(self.bytes.borrow().clone()))
+        }
+    }
+    let bytes = Rc::new(RefCell::new(
+        b"<plist><dict>\
+        <key>duration</key><real>-1</real>\
+        <key>particleLifespan</key><real>0.1</real>\
+        <key>startParticleSize</key><real>30</real>\
+        <key>finishParticleSize</key><real>30</real>\
+        <key>startColorAlpha</key><real>1</real>\
+        <key>finishColorAlpha</key><real>1</real>\
+        </dict></plist>"
+            .to_vec(),
+    ));
+    let reads = Rc::new(RefCell::new(Vec::new()));
+    let mut runtime = runtime_with_count(plugin(b"cmnptcl.ppi"), 2)?;
+    runtime.set_resources(ConfigFiles {
+        bytes: bytes.clone(),
+        reads: reads.clone(),
+    });
+    runtime.update(1, 1)?;
+    assert!(reads.borrow().is_empty());
+    runtime.dispatch_command(2, command(321))?;
+    assert_eq!(&*reads.borrow(), &[b"custom-data/ptcl20000.plist".to_vec()]);
+    let mut expected = ScriptRandom::seeded(17);
+    for _ in 0..38 {
+        expected.next_float();
+    }
+    runtime.update(2, 1)?;
+    runtime.update(6, 1)?;
+    assert_random(&mut runtime, &expected);
+    let quad = runtime
+        .drawables()
+        .get(1)
+        .unwrap()
+        .particle_mesh()
+        .unwrap()
+        .projected_quad(0, &Projection::default())
+        .unwrap();
+    assert_eq!(quad[0].color >> 24, 255);
+    assert!(quad[1].position[0] > quad[0].position[0]);
+    runtime.dispatch_command(2, command(322))?;
+    *bytes.borrow_mut() = b"<plist><dict><key>speed</key><real>120</real></dict></plist>".to_vec();
+    let mut parameters = [0u8; 128];
+    for (i, v) in [3f32, 9., 1.].into_iter().enumerate() {
+        parameters[i * 4..i * 4 + 4].copy_from_slice(&v.to_le_bytes());
+    }
+    runtime.dispatch_command_with_buffers(
+        2,
+        command(325),
+        &mut CommandBuffers {
+            data1: Some(&mut parameters),
+            ..Default::default()
+        },
+    )?;
+    runtime.dispatch_command(2, command(321))?;
+    assert_eq!(reads.borrow()[1], b"custom-data/ptcl3009.plist");
+    for _ in 0..38 {
+        expected.next_float();
+    }
+    runtime.update(7, 1)?;
+    runtime.update(11, 1)?;
+    assert_random(&mut runtime, &expected);
+    let moved = runtime
+        .drawables()
+        .get(1)
+        .unwrap()
+        .particle_mesh()
+        .unwrap()
+        .projected_quad(0, &Projection::default())
+        .unwrap();
+    assert!(moved[0].position[0] > quad[0].position[0]);
+    assert_eq!(moved[0].color >> 24, 255);
+    runtime.dispatch_command(2, command(323))?;
+    assert!(
+        runtime
+            .drawables()
+            .get(1)
+            .unwrap()
+            .particle_mesh()
+            .is_none()
+    );
+    Ok(())
 }
 
 #[test]
@@ -281,6 +393,7 @@ fn invalid_plugin_metadata_and_layout_are_rejected_before_start() -> Result<()> 
         (b"em_down.ppi", 1),
         (b"em_silent.ppi", 1),
         (b"swordspark.ppi", 2),
+        (b"cmnptcl.ppi", 1),
     ] {
         let mut bytes = plugin(name);
         bytes[361] = version;

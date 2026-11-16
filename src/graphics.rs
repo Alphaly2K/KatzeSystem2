@@ -69,6 +69,7 @@ mod particle_digi_ring;
 mod particle_dis;
 mod particle_double;
 mod particle_down;
+mod particle_emitter;
 mod particle_energy;
 mod particle_exclamation;
 mod particle_explosion;

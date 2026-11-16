@@ -4,14 +4,15 @@ use super::{
     particle_anger::Anger, particle_angry::Angry, particle_asease::Asease, particle_common::Common,
     particle_concentration::Concentration, particle_dark::Dark, particle_dash::Dash,
     particle_digi::Digi, particle_digi_ring::DigiRing, particle_dis::Dis, particle_double::Double,
-    particle_down::Down, particle_energy::Energy, particle_exclamation::Exclamation,
-    particle_explosion::Explosion, particle_film_noise::FilmNoise,
-    particle_flower_burst::FlowerBurst, particle_glint::Glint, particle_hadou::Hadou,
-    particle_ice::Ice, particle_mirror::Mirror, particle_note::Note, particle_notice::Notice,
-    particle_paper::Paper, particle_plugin, particle_protect::Protect, particle_question::Question,
-    particle_radiate::Radiate, particle_rain::Rain, particle_ring::Ring, particle_rising::Rising,
-    particle_sakura::Sakura, particle_scene_sparkle::SceneSparkle, particle_shy::Shy,
-    particle_sigh::Sigh, particle_silent::Silent, particle_spark::Spark, particle_sparkle::Sparkle,
+    particle_down::Down, particle_emitter::Emitter, particle_energy::Energy,
+    particle_exclamation::Exclamation, particle_explosion::Explosion,
+    particle_film_noise::FilmNoise, particle_flower_burst::FlowerBurst, particle_glint::Glint,
+    particle_hadou::Hadou, particle_ice::Ice, particle_mirror::Mirror, particle_note::Note,
+    particle_notice::Notice, particle_paper::Paper, particle_plugin, particle_protect::Protect,
+    particle_question::Question, particle_radiate::Radiate, particle_rain::Rain,
+    particle_ring::Ring, particle_rising::Rising, particle_sakura::Sakura,
+    particle_scene_sparkle::SceneSparkle, particle_shy::Shy, particle_sigh::Sigh,
+    particle_silent::Silent, particle_spark::Spark, particle_sparkle::Sparkle,
     particle_steam::Steam, particle_surprise::Surprise, particle_sweat::Sweat,
     particle_sword_spark::SwordSpark, particle_thunder::Thunder, particle_warukira::Warukira,
 };
@@ -74,6 +75,7 @@ enum Effect {
     Ring(Ring),
     Radiate(Radiate),
     SwordSpark(SwordSpark),
+    Emitter(Box<Emitter>),
 }
 
 impl Effect {
@@ -85,6 +87,9 @@ impl Effect {
         module_state: Arc<AtomicU32>,
     ) -> Result<Self> {
         Ok(match kind {
+            particle_plugin::Kind::Emitter => {
+                return Err(Error::new(0, "通用粒子需要配置资源初始化"));
+            }
             particle_plugin::Kind::SwordSpark => {
                 Self::SwordSpark(SwordSpark::new(host, image, random)?)
             }
@@ -223,6 +228,31 @@ impl ParticleRunner {
                 ..
             } => {
                 *origin = 0;
+                if matches!(kind, particle_plugin::Kind::Emitter) {
+                    let name = Emitter::filename(&host.parameters);
+                    let resources = services
+                        .resource_services()
+                        .ok_or_else(|| Error::new(0, "宿主未提供粒子配置读取服务"))?;
+                    let name = resources.resolve(b"ptcldat", &name)?;
+                    let bytes = resources.read(&name, ResourceMode::LooseFirst)?;
+                    let mut emitter = match effect.take() {
+                        Some(Effect::Emitter(emitter)) => emitter,
+                        _ => Box::default(),
+                    };
+                    let mut random = std::mem::take(&mut host.random);
+                    let result = emitter.restart(
+                        host,
+                        image,
+                        bytes.as_deref(),
+                        services.random().unwrap_or(&mut random),
+                    );
+                    host.random = random;
+                    result?;
+                    emitter.write_mesh(host);
+                    *effect = Some(Effect::Emitter(emitter));
+                    host.active = true;
+                    return Ok(());
+                }
                 *effect = None;
                 let next = if let Some(random) = services.random() {
                     Effect::new(*kind, host, image, random, module_state.clone())
@@ -293,6 +323,14 @@ impl ParticleRunner {
                 if let Some(effect) = effect {
                     let delta = host.elapsed.wrapping_sub(host.previous_elapsed);
                     match effect {
+                        Effect::Emitter(effect) => {
+                            effect.update(
+                                delta,
+                                host.source.unwrap_or_default().position_2d,
+                                services.random().unwrap_or(&mut host.random),
+                            );
+                            effect.write_mesh(host);
+                        }
                         Effect::Radiate(effect) => {
                             effect.update(delta, services.random().unwrap_or(&mut host.random));
                             effect.write_mesh(host);
