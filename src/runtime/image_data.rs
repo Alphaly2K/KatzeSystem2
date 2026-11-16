@@ -11,7 +11,11 @@ impl Resources {
         arguments: &[u8],
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
-        let count = if matches!(index, 364 | 369) { 2 } else { 3 };
+        let count = match index {
+            118 => 1,
+            364 | 369 => 2,
+            _ => 3,
+        };
         if arguments.len() != count * 4 {
             return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
         }
@@ -19,6 +23,9 @@ impl Resources {
             .chunks_exact(4)
             .map(|bytes| u32::from_le_bytes(bytes.try_into().unwrap()))
             .collect();
+        if index == 118 {
+            return Ok(NativeReturn::Value(self.images.duplicate(owner, args[0])?));
+        }
         if index == 364 {
             if args[0] == 0 {
                 return Ok(NativeReturn::Value(0));
@@ -43,7 +50,7 @@ impl Resources {
                 has_alpha,
             )?));
         }
-        if matches!(index, 362 | 363) {
+        if matches!(index, 119 | 362 | 363) {
             for address in &args[1..] {
                 vm.read(*address, 4)?;
             }
@@ -51,9 +58,14 @@ impl Resources {
                 vm.write(*address, &[0; 4])?;
             }
             if args[0] != 0 {
+                if index == 119 && self.images.pixel_handle(args[0])? == 0 {
+                    return Ok(NativeReturn::Continue);
+                }
                 let info = self.images.get(args[0])?.info();
                 for (axis, address) in args[1..].iter().enumerate() {
-                    let value = if index == 363 {
+                    let value = if index == 119 {
+                        info.size[axis]
+                    } else if index == 363 {
                         info.offset[axis] as u32
                     } else if info.canvas_size[axis] == 0 {
                         info.size[axis]
@@ -66,7 +78,7 @@ impl Resources {
             return Ok(NativeReturn::Continue);
         }
         if args[0] == 0 {
-            return Ok(if index == 369 {
+            return Ok(if matches!(index, 369 | 538) {
                 NativeReturn::Continue
             } else {
                 NativeReturn::Value(0)
@@ -74,6 +86,12 @@ impl Resources {
         }
         if index == 369 {
             self.images.get_mut(args[0])?.multiply_color(args[1]);
+            return Ok(NativeReturn::Continue);
+        }
+        if index == 538 {
+            self.images
+                .get_mut(args[0])?
+                .blur([args[1] as i32, args[2] as i32])?;
             return Ok(NativeReturn::Continue);
         }
         if index == 1026 {

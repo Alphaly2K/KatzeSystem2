@@ -358,6 +358,27 @@ impl Images {
         self.empty_wrapper(Some(owner))
     }
 
+    pub(crate) fn duplicate(&mut self, owner: u32, source: u32) -> Result<u32> {
+        if source == 0 {
+            return Ok(0);
+        }
+        let pixels = self.pixel_handle(source)?;
+        if pixels == 0 {
+            return Err(Error::new(0, "未绑定像素图像的复制读取未初始化尺寸"));
+        }
+        let data = self.data.get(&pixels).unwrap();
+        if data.image.info.size.contains(&0) {
+            return self.insert(owner, Image::new(data.image.info.size)?, None);
+        }
+        let mut image = data.image.clone();
+        for axis in 0..2 {
+            if image.info.canvas_size[axis] == 0 {
+                image.info.canvas_size[axis] = image.info.size[axis];
+            }
+        }
+        self.insert(owner, image, data.has_alpha)
+    }
+
     fn empty_wrapper(&mut self, owner: Option<u32>) -> Result<u32> {
         if self.entries.len() == read::MAX_ITEMS {
             return Err(Error::new(0, "图像对象数量超过上限"));

@@ -395,3 +395,115 @@ fn clipped_blending_uses_source_extent_and_keeps_feedback_for_shared_pixels() {
         }
     }
 }
+
+#[test]
+fn copied_images_keep_independent_pixels_and_blur_shared_wrappers_until_release() {
+    let pixels: Vec<_> = (0..6)
+        .flat_map(|i| {
+            [
+                (i * 17 + 19) as u8,
+                (i * 37 + 19) as u8,
+                (i * 53 + 19) as u8,
+                [0, 1, 127, 128, 254, 255][i as usize],
+            ]
+        })
+        .collect();
+    let mut code = Vec::new();
+    call(&mut code, 118, &[1], Some(0));
+    call(&mut code, 118, &[0], Some(4));
+    call(&mut code, 119, &[1, 16, 17], None);
+    stored_call(&mut code, 119, 0, &[24, 28], None);
+    stored_call(&mut code, 362, 0, &[32, 36], None);
+    call(&mut code, 65, &[], None);
+    stored_call(&mut code, 372, 0, &[9, 8], Some(48));
+    stored_call(&mut code, 373, 0, &[2, 3], Some(52));
+    code.extend([0x25, 3]);
+    code.extend(0xabcd_ef01u32.to_le_bytes());
+    stored_call(&mut code, 538, 0, &[1, 2], Some(56));
+    stored_call(&mut code, 119, 0, &[24, 28], None);
+    stored_call(&mut code, 363, 0, &[40, 44], None);
+    call(&mut code, 65, &[], None);
+    stored_call(&mut code, 114, 0, &[], None);
+    call(&mut code, 65, &[], None);
+    code.push(0x3b);
+    let program = Program::from_code(&code, vec![0xa5; 128], 128).unwrap();
+    for budget in [1, 4096] {
+        for explicit in [false, true] {
+            let mut rt = Runtime::new(
+                0,
+                kind::ROOT,
+                Box::new(BaseObject::new()),
+                State::new(0),
+                KcsFactory::new(Loader(program.clone())),
+            );
+            rt.set_budget(budget, 1 << 20);
+            assert_eq!(rt.images_mut().create(0, [3, 2]).unwrap(), 1);
+            let mut image = Image::from_frame(DecodedFrame {
+                id: 7,
+                info: StandardInfo {
+                    size: [3, 2],
+                    bit_depth: 32,
+                    offset: [0; 2],
+                    canvas_size: [0; 2],
+                    reserved: 1,
+                    base: [-3, 9],
+                },
+                pixels: pixels.clone(),
+                attributes: [(1, [9, 8, 7, 6, 5])].into(),
+            })
+            .unwrap();
+            image.set_alpha_mask(4).unwrap();
+            *rt.images_mut().get_mut(1).unwrap() = image;
+            let task = rt.create(0, kind::ORDINARY, b"copy", b"").unwrap();
+            rt.update(0, 0).unwrap();
+            let vm = rt.object(task).unwrap().interpreter().unwrap();
+            let copied = u32::from_le_bytes(vm.read(0, 4).unwrap().as_ref().try_into().unwrap());
+            assert_eq!(vm.read(4, 4).unwrap(), [0; 4]);
+            assert_eq!(vm.read(16, 5).unwrap(), [3, 2, 0, 0, 0]);
+            assert_eq!(
+                vm.read(24, 16).unwrap(),
+                [3u32, 2, 3, 2]
+                    .into_iter()
+                    .flat_map(u32::to_le_bytes)
+                    .collect::<Vec<_>>()
+            );
+            assert_eq!(rt.images().get(copied).unwrap().alpha_mask(), 4);
+            let shared = rt.images_mut().share(copied).unwrap();
+            rt.images_mut().get_mut(1).unwrap().pixels_mut().fill(0);
+            assert_eq!(rt.images().get(copied).unwrap().surface().pixels(), pixels);
+            rt.update(1, 0).unwrap();
+            let vm = rt.object(task).unwrap().interpreter().unwrap();
+            assert_eq!(vm.read(56, 4).unwrap(), 0xabcd_ef01u32.to_le_bytes());
+            assert!(vm.stack_bytes().is_empty());
+            let image = rt.images().get(shared).unwrap();
+            assert_eq!(image.info().size, [5, 6]);
+            assert_eq!(image.info().canvas_size, [9, 8]);
+            assert_eq!(image.info().offset, [1, 1]);
+            assert_eq!(image.info().base, [-2, 11]);
+            assert_eq!(image.attribute(1), Some([9, 8, 7, 6, 5]));
+            let expected = [
+                0u32, 0, 0x04654c2d, 0x07684e2e, 0x047d5d35, 0x04b28246, 0x0ecb944e, 0x20857e44,
+                0x23688748, 0x0e4c944e, 0x07b28246, 0x1ccb944e, 0x3c878246, 0x40678a49, 0x194b944e,
+                0x0bb28246, 0x2bcb944e, 0x518b8748, 0x4e67904c, 0x1c49974f, 0x07b28246, 0x1ccb944e,
+                0x35888347, 0x32688d4a, 0x124a964f, 0x04b28246, 0x0ecb944e, 0x19a2ab59, 0x1568be61,
+                0x071ccc68,
+            ]
+            .into_iter()
+            .flat_map(u32::to_le_bytes)
+            .collect::<Vec<_>>();
+            assert_eq!(image.surface().pixels(), expected);
+            if explicit {
+                rt.update(2, 0).unwrap();
+                assert!(rt.images().get(copied).is_err());
+            }
+            rt.destroy(task).unwrap();
+            assert!(rt.images().get(copied).is_err());
+            assert_eq!(
+                rt.images().get(shared).unwrap().surface().pixels(),
+                expected
+            );
+            rt.images_mut().release_reference(shared).unwrap();
+            assert!(rt.images().get(shared).is_err());
+        }
+    }
+}
