@@ -149,6 +149,32 @@ fn ordinary_alpha_blending_preserves_integer_rounding_and_transparent_colors() {
 }
 
 #[test]
+fn full_opacity_blend_preserves_hidden_colors_and_extends_row_edges() {
+    let mut source = Surface::new([52, 1]).unwrap();
+    source.fill_rect(Rect::from_xywh(0, 0, 16, 1), 0x0011_2233);
+    source.fill_rect(Rect::from_xywh(32, 0, 16, 1), 0x8044_5566);
+    source.fill_rect(Rect::from_xywh(48, 0, 4, 1), 0x0011_1122);
+    let mut target = Surface::new([54, 3]).unwrap();
+    target.fill_rect(Rect::from_xywh(17, 1, 16, 1), 0x0011_2299);
+    target.fill_rect(Rect::from_xywh(33, 1, 16, 1), 0xff22_3344);
+    target.fill_rect(Rect::from_xywh(49, 1, 4, 1), 0x0044_3344);
+
+    assert!(target.blend_from(&source, source.bounds(), [1, 1], 255));
+    let expected = [0x0011_2233u32; 17]
+        .into_iter()
+        .chain([0x0011_2299; 16])
+        .chain([0xff33_4455; 16])
+        .chain([0x0044_3344; 4])
+        .chain([0x0011_1122])
+        .flat_map(u32::to_le_bytes)
+        .collect::<Vec<_>>();
+    let mut rows = target.pixels().chunks_exact(target.stride());
+    assert_eq!(rows.next().unwrap(), [0; 54 * 4]);
+    assert_eq!(rows.next().unwrap(), expected);
+    assert_eq!(rows.next().unwrap(), [0; 54 * 4]);
+}
+
+#[test]
 fn ordinary_blending_clips_independently_and_extends_only_into_zero_neighbors() {
     let source = Surface::from_bgra(
         [3, 2],

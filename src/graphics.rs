@@ -310,11 +310,11 @@ impl Surface {
             if region.x > 0 {
                 extend_color(&mut self.pixels[start - 4..start], &input[..4]);
             }
-            for (target, pixel) in self.pixels[start..start + count]
-                .chunks_exact_mut(4)
-                .zip(input.chunks_exact(4))
-            {
-                blend_pixel(target, pixel, opacity);
+            let target = &mut self.pixels[start..start + count];
+            if opacity & 0xffff == 255 && count >= 64 {
+                blend_full_opacity_row(target, input);
+            } else {
+                blend_pixels(target, input, opacity);
             }
             if region.x + region.width < self.size[0] as usize {
                 extend_color(
@@ -409,6 +409,29 @@ fn extend_color(target: &mut [u8], source: &[u8]) {
     if target == [0; 4] {
         target[..3].copy_from_slice(&source[..3]);
     }
+}
+
+fn blend_pixels(target: &mut [u8], source: &[u8], opacity: u32) {
+    for (target, source) in target.chunks_exact_mut(4).zip(source.chunks_exact(4)) {
+        blend_pixel(target, source, opacity);
+    }
+}
+
+fn blend_full_opacity_row(target: &mut [u8], source: &[u8]) {
+    let mut target = target.chunks_exact_mut(64);
+    let mut source = source.chunks_exact(64);
+    for (target, source) in target.by_ref().zip(source.by_ref()) {
+        // 零像素块包含颜色和 Alpha；带隐藏颜色的透明像素仍参与普通混合。
+        if source == [0; 64] {
+            continue;
+        }
+        if target == [0; 64] {
+            target.copy_from_slice(source);
+        } else {
+            blend_pixels(target, source, 255);
+        }
+    }
+    blend_pixels(target.into_remainder(), source.remainder(), 255);
 }
 
 fn blend_pixel(target: &mut [u8], source: &[u8], opacity: u32) {
