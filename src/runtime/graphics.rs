@@ -209,6 +209,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             | 99
             | 107
             | 261
+            | 264
             | 340..=342
             | 570
             | 572
@@ -233,7 +234,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         }
         let route_zero = matches!(
             index,
-            104 | 105 | 106 | 107 | 256 | 257 | 258 | 260 | 261 | 262 | 263 | 339..=342 | 402 | 455 | 731..=732 | 462
+            104 | 105 | 106 | 107 | 256 | 257 | 258 | 260..=264 | 339..=342 | 402 | 455 | 731..=732 | 462
                 ..=464 | 534 | 570 | 572 | 625 | 653 | 654 | 655 | 657 | 663 | 702 | 989 | 848 | 849 | 862 | 879..=881 | 1065..=1069
         );
         if route_zero && arguments.len() != count {
@@ -698,6 +699,9 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     },
                 )?;
                 return Ok(NativeReturn::Value(u32::from_le_bytes(image)));
+            }
+            264 => {
+                self.command_target(target, 294, [0; 3])?;
             }
             657 => {
                 let mut pixels = [0; 4];
