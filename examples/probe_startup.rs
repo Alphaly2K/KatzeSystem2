@@ -6,23 +6,102 @@ mod support;
 
 use katze_system2::{
     Result,
-    input::{ButtonSource, DeviceKeys, InputDevice, KeySample, PointerSample},
+    graphics::Rect,
+    input::{ButtonSource, DeviceKeys, InputDevice, KeySample, PointerSample, Region},
     kcs::ResourceServices,
     resource::ResourceMode,
     runtime::kind,
 };
-use std::collections::BTreeMap;
+use std::{cell::Cell, collections::BTreeMap, rc::Rc};
 use support::{Game, advance_frame, build_runtime, load_game};
+
+struct StoryReplay {
+    automatic_from: u32,
+    advance_key_from: Option<u32>,
+    pointer: Rc<Cell<[i32; 2]>>,
+    plan: Vec<usize>,
+    previous: Vec<(u32, Rect)>,
+    option: usize,
+    step: usize,
+}
+
+impl StoryReplay {
+    fn from_env() -> Option<Self> {
+        let automatic_from = std::env::var("KATZE_PROBE_AUTO_FROM").ok()?.parse().ok()?;
+        Some(Self {
+            automatic_from,
+            advance_key_from: std::env::var("KATZE_PROBE_CTRL_FROM")
+                .ok()
+                .and_then(|round| round.parse().ok()),
+            pointer: Rc::new(Cell::new([900, 400])),
+            plan: std::env::var("KATZE_PROBE_CHOICE_PLAN")
+                .unwrap_or_default()
+                .split(',')
+                .filter_map(|item| item.trim().parse().ok())
+                .collect(),
+            previous: Vec::new(),
+            option: 0,
+            step: 0,
+        })
+    }
+
+    fn update(&mut self, frame: u32, regions: &[Region]) {
+        if frame < self.automatic_from || !frame.is_multiple_of(4) {
+            return;
+        }
+        let mut choices: Vec<_> = regions
+            .iter()
+            .filter(|r| r.enabled() != 0 && r.selection_enabled() != 0)
+            .map(|r| (r.id(), r.bounds()))
+            .filter(|(_, r)| {
+                r.left >= 0
+                    && r.right <= 1280
+                    && r.top >= 60
+                    && r.bottom < 600
+                    && r.right >= r.left.saturating_add(120)
+                    && r.bottom - r.top >= 15
+            })
+            .collect();
+        choices.sort_by_key(|(_, r)| (r.top, r.left));
+        let story_choice = |r: Rect| r.right - r.left > 900;
+        if choices.len() > 1 && choices != self.previous {
+            self.option = 0;
+            if choices.iter().all(|(_, r)| story_choice(*r)) {
+                self.option = self.plan.get(self.step).copied().unwrap_or(0);
+                self.step += 1;
+            }
+            println!(
+                "CHOICE_SELECTION frame={frame} option={} step={} count={} regions={choices:?}",
+                self.option,
+                self.step,
+                choices.len()
+            );
+            self.previous.clone_from(&choices);
+        } else if choices.is_empty() {
+            self.previous.clear();
+        }
+        // 单独的消息窗工具按钮不代表剧情选择。
+        let target = choices
+            .get(self.option.min(choices.len().saturating_sub(1)))
+            .filter(|(_, r)| choices.len() > 1 || story_choice(*r));
+        self.pointer.set(target.map_or([900, 400], |(_, r)| {
+            [(r.left + r.right) / 2, (r.top + r.bottom) / 2]
+        }));
+    }
+}
 
 /// 按轮次产生点击的设备；`KATZE_PROBE_CLICKS` 为逗号分隔的 `轮次@x:y` 项。
 struct ScriptedDevice {
     polls: u32,
     clicks: Vec<(u32, [i32; 2])>,
     keys: DeviceKeys,
+    automatic_from: Option<u32>,
+    advance_key_from: Option<u32>,
+    replay_pointer: Option<Rc<Cell<[i32; 2]>>>,
 }
 
 impl ScriptedDevice {
-    fn new(keys: DeviceKeys) -> Self {
+    fn new(keys: DeviceKeys, replay: Option<&StoryReplay>) -> Self {
         let mut clicks: Vec<(u32, [i32; 2])> = std::env::var("KATZE_PROBE_CLICKS").map_or_else(
             |_| Vec::new(),
             |value| {
@@ -46,6 +125,9 @@ impl ScriptedDevice {
             polls: 0,
             clicks,
             keys,
+            automatic_from: replay.map(|replay| replay.automatic_from),
+            advance_key_from: replay.and_then(|replay| replay.advance_key_from),
+            replay_pointer: replay.map(|replay| replay.pointer.clone()),
         }
     }
 }
@@ -59,8 +141,15 @@ impl InputDevice for ScriptedDevice {
         let pressed = self
             .clicks
             .iter()
-            .any(|(round, _)| self.polls >= *round && self.polls < round + 2);
+            .any(|&(round, _)| self.polls.wrapping_sub(round) < 2)
+            || self
+                .automatic_from
+                .is_some_and(|round| self.polls >= round && self.polls.is_multiple_of(4));
         self.keys.button(ButtonSource::Mouse, 1, u32::from(pressed));
+        if let Some(round) = self.advance_key_from {
+            self.keys
+                .button(ButtonSource::Keyboard, 0x11, u32::from(self.polls >= round));
+        }
         if std::env::var_os("KATZE_TRACE_INPUT").is_some() && self.polls < 320 {
             eprintln!("[input-poll] polls={}", self.polls);
         }
@@ -68,12 +157,19 @@ impl InputDevice for ScriptedDevice {
     }
     fn pointer(&mut self) -> Result<PointerSample> {
         // 按下持续两轮，位置再保持两轮，使释放入轮也落在同一区域内。
-        let click = self
-            .clicks
-            .iter()
-            .find(|(round, _)| self.polls >= *round && self.polls < round + 4);
+        let lookahead = if self.replay_pointer.is_some() { 8 } else { 0 };
+        let click = self.clicks.iter().find(|&&(round, _)| {
+            self.polls.saturating_add(lookahead) >= round && self.polls < round.saturating_add(4)
+        });
         Ok(PointerSample {
-            position: click.map_or([640, 360], |(_, position)| *position),
+            position: click.map_or_else(
+                || {
+                    self.replay_pointer
+                        .as_ref()
+                        .map_or([640, 360], |pointer| pointer.get())
+                },
+                |(_, position)| *position,
+            ),
             active: 1,
         })
     }
@@ -369,7 +465,8 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .configuration_keys
         .take()
         .ok_or("缺少启动按键配置")?;
-    runtime.set_input_device(ScriptedDevice::new(keys))?;
+    let mut replay = StoryReplay::from_env();
+    runtime.set_input_device(ScriptedDevice::new(keys, replay.as_ref()))?;
     let input = runtime.create(0, kind::INPUT, b"input", b"")?;
     let sound = runtime.create(0, kind::SOUND, b"sound", b"")?;
     println!("输入 {input} 声音 {sound}");
@@ -418,9 +515,11 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         }
     };
     let mut now = 0;
+    let timing = std::env::var_os("KATZE_TRACE_TIMING").is_some();
     for frame in 0..frames {
-        now += 1;
+        now += if replay.is_some() { 3 } else { 1 };
         let system_time_ms = (u64::from(now) * 1000 / 60) as u32;
+        let started = timing.then(std::time::Instant::now);
         if let Err(error) = advance_frame(&mut runtime, now, system_time_ms) {
             println!("第 {frame} 帧 pc {}：{}", error.offset, error.message);
             for id in task_ids(&runtime) {
@@ -454,7 +553,30 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             }
+            if replay.is_some() {
+                return Err(error.into());
+            }
             break;
+        }
+        if let Some(started) = started {
+            let elapsed = started.elapsed();
+            if elapsed.as_millis() >= 20 {
+                eprintln!(
+                    "[slow-update] frame={frame} ms={:.2}",
+                    elapsed.as_secs_f64() * 1000.
+                );
+            }
+        }
+        if let Some(replay) = &mut replay {
+            if let Some(state) = runtime
+                .object_mut(sound)
+                .and_then(|object| object.audio_state_mut())
+            {
+                state.mix_stereo(48_000, &mut [0.; 4800])?;
+            }
+            if let Some(state) = runtime.input_state(input) {
+                replay.update(frame, state.regions().records());
+            }
         }
         let dump_frame = std::env::var("KATZE_PROBE_DUMP").ok().is_some_and(|value| {
             let frames: Vec<u32> = value
