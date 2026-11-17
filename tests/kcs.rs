@@ -1655,6 +1655,84 @@ fn parenthesized_words_keep_groups_and_observe_overlapping_writes() {
 }
 
 #[test]
+fn prefix_copies_distinguish_formatting_tab_escapes_and_live_overlap() {
+    use kcs::{Host, NativeReturn};
+    let mut state = katze_system2::expression::State::new(0);
+    let mut host = kcs::CoreHost::new(&mut state);
+    let mut vm = kcs::Interpreter::new(
+        kcs::Program::from_code(&[], vec![0xa5; 256], 0).unwrap(),
+        vec![0x5a; 256],
+    )
+    .unwrap();
+    let args = |target: u32, source: u32, limit: u32| {
+        [target, source, 128, limit]
+            .into_iter()
+            .flat_map(u32::to_le_bytes)
+            .collect::<Vec<_>>()
+    };
+    vm.write(0, &42u32.to_le_bytes()).unwrap();
+    for (index, source, separators, expected) in [
+        (
+            38,
+            b"%d[G0],tail".as_slice(),
+            b",".as_slice(),
+            b"%d[G0]".as_slice(),
+        ),
+        (39, b"%d[G0],tail", b",", b"42"),
+        (38, b"ab\tcd", b"\\t", b"ab"),
+        (39, b"ab\tcd", b"\\t", b"ab\tcd"),
+        (38, b"ab\\cd", b"\\t", b"ab\\cd"),
+        (39, b"ab\\cd", b"\\t", b"ab"),
+        (38, b"ab\tcd", b"\\\t", b"ab"),
+        (39, b"ab\tcd", b"\\\t", b"ab"),
+    ] {
+        vm.write(64, &[source, b"\0"].concat()).unwrap();
+        vm.write(128, &[separators, b"\0"].concat()).unwrap();
+        vm.write(192, &[0xa5; 32]).unwrap();
+        assert_eq!(
+            host.call(index, &args(192, 64, 32), &mut vm).unwrap(),
+            NativeReturn::Value(expected.len() as u32)
+        );
+        assert_eq!(
+            vm.read(192, expected.len() + 3).unwrap(),
+            [expected, &[0, 0, 0xa5]].concat()
+        );
+    }
+    vm.write(128, &[0]).unwrap();
+    for (index, expected) in [(38, b"AAAAAA".as_slice()), (39, b"ABCDEF".as_slice())] {
+        vm.write(64, b"ABCDEF\0").unwrap();
+        assert_eq!(
+            host.call(index, &args(65, 64, 8), &mut vm).unwrap(),
+            NativeReturn::Value(6)
+        );
+        assert_eq!(vm.read(65, 8).unwrap(), [expected, &[0, 0]].concat());
+        for (limit, length) in [(0, 3), (1, 3), (2, 0), (3, 1), (4, 2)] {
+            vm.write(64, b"abc\0").unwrap();
+            assert_eq!(
+                host.call(index, &args(192, 64, limit), &mut vm).unwrap(),
+                NativeReturn::Value(length)
+            );
+        }
+    }
+    vm.write(0x8000_00ff, b"Q").unwrap();
+    vm.write(192, &[0xa5; 8]).unwrap();
+    assert!(host.call(38, &args(192, 0x8000_00ff, 8), &mut vm).is_err());
+    assert_eq!(vm.read(192, 2).unwrap(), [b'Q', 0xa5]);
+    vm.write(128, &[&[b'x'; 65][..], &[0]].concat()).unwrap();
+    vm.write(224, &[0xa5; 8]).unwrap();
+    for index in [38, 39] {
+        assert!(
+            host.call(index, &args(224, 64, 8), &mut vm)
+                .unwrap_err()
+                .message
+                .contains("分隔字节")
+        );
+        assert!(host.call(index, &[0; 12], &mut vm).is_err());
+        assert_eq!(vm.read(224, 8).unwrap(), [0xa5; 8]);
+    }
+}
+
+#[test]
 fn byte_truncation_and_zero_separated_word_helpers_keep_boundaries() {
     use kcs::Host;
     let mut vm = kcs::Interpreter::new(

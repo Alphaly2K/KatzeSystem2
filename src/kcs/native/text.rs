@@ -26,7 +26,7 @@ pub(super) fn call(
         | 1051
         | 1063 => 2,
         37 | 41..=43 | 519 | 539 => 3,
-        38 | 44 | 45 => 4,
+        38 | 39 | 44 | 45 => 4,
         _ => unreachable!(),
     };
     let args = words(arguments, count, vm.pc)?;
@@ -200,30 +200,44 @@ pub(super) fn call(
             }
             NativeReturn::Value(count)
         }
-        38 => {
+        38 | 39 => {
+            let source = if index == 39 {
+                Some(strings::format(vm, args[1], 0)?)
+            } else {
+                None
+            };
             let separators = vm.read_string(args[2])?;
             let mut decoded = Vec::new();
             let mut p = 0;
             while p < separators.len() {
-                if separators[p..].starts_with(b"\\t") {
+                let tab = if index == 38 { b't' } else { b'\t' };
+                if separators[p] == b'\\' && separators.get(p + 1) == Some(&tab) {
                     decoded.push(b'\t');
                     p += 2;
                 } else {
                     decoded.push(separators[p]);
                     p += 1;
                 }
+                if decoded.len() > 64 {
+                    return Err(Error::new(vm.pc, "KCS 分隔字节集合超过缓冲区上限"));
+                }
             }
-            let source = vm.read_string(args[1])?;
-            let length = source
-                .iter()
-                .position(|b| decoded.contains(b))
-                .unwrap_or(source.len())
-                .min(args[3].wrapping_sub(2) as usize);
-            let value = source[..length].to_vec();
-            drop(source);
             drop(separators);
-            write_string(vm, args[0], &value, 2)?;
-            NativeReturn::Value(length as u32)
+            let mut length = 0;
+            loop {
+                let byte = if let Some(source) = &source {
+                    source.get(length as usize).copied().unwrap_or(0)
+                } else {
+                    vm.read(args[1].wrapping_add(length), 1)?[0]
+                };
+                if byte == 0 || length >= args[3].wrapping_sub(2) || decoded.contains(&byte) {
+                    break;
+                }
+                vm.write(args[0].wrapping_add(length), &[byte])?;
+                length += 1;
+            }
+            vm.write(args[0].wrapping_add(length), &[0; 2])?;
+            NativeReturn::Value(length)
         }
         41 => {
             let value = strings::split(&vm.read_string(args[1])?, &vm.read_string(args[2])?);

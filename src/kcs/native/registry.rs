@@ -45,9 +45,7 @@ pub(super) fn core(index: u32) -> CoreHandler {
         27 | 28 | 35 | 36 => CoreHandler::Memory,
         214 | 215 | 217 | 218 => CoreHandler::Rectangle,
         13..=26
-        | 37
-        | 38
-        | 40..=49
+        | 37..=49
         | 276..=278
         | 519
         | 539
