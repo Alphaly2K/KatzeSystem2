@@ -898,13 +898,14 @@ fn resource_transforms_keep_return_stack_and_shared_update_flag() {
             (713, vec![50, 100, 200]),
             (723, vec![90]),
             (727, vec![1]),
+            (716, vec![0x80ff_8040]),
         ] {
             handle_call(&mut code, native, &args);
             call(&mut code, 65, &[]);
         }
         call(&mut code, 713, &[u32::MAX, 100, 100, 100]);
         call(&mut code, 737, &[u32::MAX, 0]);
-        for native in [713, 723, 727, 729, 737] {
+        for native in [713, 716, 723, 727, 729, 737] {
             call(&mut code, native, &[0]);
         }
         call(&mut code, 65, &[]);
@@ -924,7 +925,7 @@ fn resource_transforms_keep_return_stack_and_shared_update_flag() {
         let handle = word(vm(&runtime, task), 0);
         assert!(!runtime.image_resource_updated(handle, true).unwrap());
         runtime.retain_image_resource(handle).unwrap();
-        for frame in 1..=4 {
+        for frame in 1..=5 {
             runtime.update(frame, 1).unwrap();
             assert!(runtime.image_resource_updated(handle, false).unwrap());
             assert!(runtime.image_resource_updated(handle, true).unwrap());
@@ -935,11 +936,11 @@ fn resource_transforms_keep_return_stack_and_shared_update_flag() {
             );
         }
         let image = runtime.image_resource(handle).unwrap();
-        assert_eq!(image.surface().pixels(), [255, 255, 127, 0]);
+        assert_eq!(image.surface().pixels(), [64, 128, 127, 0]);
         assert_eq!(image.info().offset, [5, -2]);
         assert_eq!(image.info().base, [4, 3]);
         assert_eq!(image.attribute(1), Some([8, 9, 7, 6, 5]));
-        runtime.update(5, 1).unwrap();
+        runtime.update(6, 1).unwrap();
         assert!(!runtime.image_resource_updated(handle, true).unwrap());
         runtime.destroy(task).unwrap();
         assert!(runtime.image_resource(handle).is_ok());
@@ -948,6 +949,7 @@ fn resource_transforms_keep_return_stack_and_shared_update_flag() {
     }
     for (native, args) in [
         (713, vec![50, 50, 50]),
+        (716, vec![u32::MAX]),
         (723, vec![0]),
         (726, vec![1, 1]),
         (727, vec![0]),

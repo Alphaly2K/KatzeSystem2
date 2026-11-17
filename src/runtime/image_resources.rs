@@ -286,7 +286,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         }
         let count = match index {
             711 | 721 => 1,
-            722 | 723 | 727..=729 | 737 => 2,
+            716 | 722 | 723 | 727..=729 | 737 => 2,
             713 => 4,
             712 | 714 | 715 | 717..=720 | 726 | 730 => 3,
             724 => 7,
@@ -325,9 +325,10 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         } else {
             [100; 3]
         };
-        if matches!(index, 713 | 723 | 726 | 727 | 729 | 730 | 737) {
+        if matches!(index, 713 | 716 | 723 | 726 | 727 | 729 | 730 | 737) {
             let transform = match index {
                 713 => ResourceTransform::Rgb(rgb),
+                716 => ResourceTransform::Color(read::u32_at(arguments, 4)?),
                 723 => ResourceTransform::Rotate(read::u32_at(arguments, 4)? as i32),
                 726 => ResourceTransform::Blur([
                     read::u32_at(arguments, 4)? as i32,

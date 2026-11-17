@@ -91,6 +91,7 @@ impl ResourceGeometry {
 }
 
 pub(crate) enum ResourceTransform {
+    Color(u32),
     Rgb([u32; 3]),
     Alpha(u32),
     Filter(ImageFilter),
@@ -285,6 +286,7 @@ impl Images {
                 }
                 let image = images.get_mut(source)?;
                 match transform {
+                    ResourceTransform::Color(argb) => image.multiply_color(argb),
                     ResourceTransform::Rgb(rgb) => image.adjust_rgb_percent(rgb),
                     ResourceTransform::Alpha(percent) => image.adjust_alpha_percent(percent),
                     ResourceTransform::Filter(filter) => filter.apply(image),
@@ -440,6 +442,28 @@ mod tests {
         let mut expected = 0xff12_3456u32.to_le_bytes().repeat(5);
         expected[..4].copy_from_slice(&[20, 40, 60, 32]);
         expected[16..].copy_from_slice(&[200, 180, 160, 64]);
+        assert_eq!(
+            images.resource(handle).unwrap().surface().pixels(),
+            expected
+        );
+        images
+            .transform_resource(handle, ResourceTransform::Color(0x80ff_8040), None)
+            .unwrap();
+        assert_eq!(
+            images.get(sources[0]).unwrap().surface().pixels(),
+            [5, 20, 60, 16]
+        );
+        assert_eq!(
+            images.get(sources[1]).unwrap().surface().pixels(),
+            [50, 90, 160, 32]
+        );
+        assert_eq!(
+            images.resource(handle).unwrap().surface().pixels(),
+            expected
+        );
+        images.refresh_resource(handle).unwrap();
+        expected[..4].copy_from_slice(&[5, 20, 60, 16]);
+        expected[16..].copy_from_slice(&[50, 90, 160, 32]);
         assert_eq!(
             images.resource(handle).unwrap().surface().pixels(),
             expected
