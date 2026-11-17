@@ -201,7 +201,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             return Ok(NativeReturn::Continue);
         }
         let count = match index {
-            196 | 199 => 8,
+            196 | 199 | 202 => 8,
             201 => 12,
             _ => 4,
         };
@@ -248,6 +248,24 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     self.command_target_with_buffers(
                         target,
                         270,
+                        [0, address, 0],
+                        &mut CommandBuffers {
+                            data1: Some(&mut record),
+                            ..Default::default()
+                        },
+                    )?;
+                }
+            }
+            202 => {
+                if matches!(
+                    self.command_target(target, 13, [0; 3])?,
+                    kind::WIPE | kind::FADE
+                ) {
+                    let address = read::u32_at(arguments, 4)?;
+                    let mut record = vm.read(address, 20)?.to_vec();
+                    self.command_target_with_buffers(
+                        target,
+                        266,
                         [0, address, 0],
                         &mut CommandBuffers {
                             data1: Some(&mut record),

@@ -228,6 +228,14 @@ fn object_commands_preserve_packets_and_distinguish_missing_routes_from_outputs(
     let mut host = TaskHost::new(&mut core, &mut services);
     host.set_task_id(7);
     assert_eq!(
+        host.call(74, &42u32.to_le_bytes(), &mut vm).unwrap(),
+        NativeReturn::Value(0x8000_0001)
+    );
+    assert_eq!(
+        host.call(74, &999u32.to_le_bytes(), &mut vm).unwrap(),
+        NativeReturn::Value(u32::MAX)
+    );
+    assert_eq!(
         host.call(77, &0x8000_0000u32.to_le_bytes(), &mut vm)
             .unwrap(),
         NativeReturn::Value(0x8000_0001)
@@ -279,6 +287,12 @@ fn object_commands_preserve_packets_and_distinguish_missing_routes_from_outputs(
     assert_eq!(
         host.services.commands,
         [
+            Command {
+                target: 42,
+                sender: 7,
+                code: 13,
+                data: [0; 3]
+            },
             Command {
                 target: 0,
                 sender: 7,

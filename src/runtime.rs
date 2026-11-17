@@ -1753,7 +1753,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
     ) -> Result<NativeReturn> {
         let count = match index {
             66 => 12,
-            67 | 75 | 77 | 109 | 272..=274 | 452 | 454 | 577 | 651 => 4,
+            67 | 74 | 75 | 77 | 109 | 272..=274 | 452 | 454 | 577 | 651 => 4,
             108 | 110 | 275 | 426 | 427 | 694 => 8,
             69 | 70 | 72 | 73 => 16,
             76 => 0,
@@ -1767,6 +1767,23 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             *arg = u32::from_le_bytes(bytes.try_into().unwrap());
         }
         match index {
+            74 => {
+                let sender = self.host.task_id;
+                let mut output = 0;
+                let found = route_command(
+                    self.store(),
+                    sender,
+                    Command {
+                        target: args[0],
+                        sender,
+                        code: 13,
+                        data: [0; 3],
+                    },
+                    &mut CommandBuffers::default(),
+                    &mut output,
+                )?;
+                Ok(NativeReturn::Value(if found { output } else { u32::MAX }))
+            }
             77 => Ok(NativeReturn::Value(self.command_target(
                 0,
                 33,

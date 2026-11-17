@@ -234,6 +234,10 @@ fn ordinary_transition_calls_prepare_play_query_and_finish_image_effects() {
         for effect in [kind::WIPE, kind::FADE, kind::WIPE_ALPHA] {
             let mut code = Vec::new();
             instruction(&mut code, 0x25, &[0xdeadbeef]);
+            call(&mut code, 74, &[1]);
+            instruction(&mut code, 0x26, &[20]);
+            call(&mut code, 74, &[999]);
+            instruction(&mut code, 0x26, &[24]);
             call(&mut code, 196, &[0, u32::MAX]);
             call(&mut code, 196, &[1, 64]);
             call(&mut code, 197, &[1]);
@@ -243,6 +247,13 @@ fn ordinary_transition_calls_prepare_play_query_and_finish_image_effects() {
             call(&mut code, 200, &[1]);
             instruction(&mut code, 0x26, &[4]);
             call(&mut code, 199, &[1, 128]);
+            let replaces_images = matches!(effect, kind::WIPE | kind::FADE);
+            call(&mut code, 202, &[999, u32::MAX]);
+            call(
+                &mut code,
+                202,
+                &[1, if replaces_images { 192 } else { u32::MAX }],
+            );
             call(&mut code, 203, &[1]);
             call(&mut code, 200, &[1]);
             instruction(&mut code, 0x26, &[16]);
@@ -271,7 +282,7 @@ fn ordinary_transition_calls_prepare_play_query_and_finish_image_effects() {
             rt.drawing_mut().active = true;
             rt.drawing_mut().target = Some(RenderTarget::new([3, 3]).unwrap());
             let mut handles = Vec::new();
-            for color in [0xff000000u32, 0xff806040, 0xff000080] {
+            for color in [0xff000000u32, 0xff806040, 0xff000080, 0xff21cc54] {
                 let handle = rt.images_mut().create(0, [1, 1]).unwrap();
                 handles.push(handle);
                 rt.images_mut()
@@ -292,16 +303,25 @@ fn ordinary_transition_calls_prepare_play_query_and_finish_image_effects() {
             .into_iter()
             .flat_map(u32::to_le_bytes)
             .collect();
-            rt.object_mut(2)
-                .unwrap()
-                .interpreter_mut()
-                .unwrap()
-                .write(64, &parameters)
-                .unwrap();
+            let vm = rt.object_mut(2).unwrap().interpreter_mut().unwrap();
+            vm.write(64, &parameters).unwrap();
+            let replacement: Vec<_> = [0, handles[0], 0, 0, handles[3]]
+                .into_iter()
+                .flat_map(u32::to_le_bytes)
+                .collect();
+            vm.write(192, &replacement).unwrap();
             assert!(rt.update(10, 1).unwrap());
             assert!(rt.update(11, 1).unwrap());
             let vm = rt.object(2).unwrap().interpreter().unwrap();
-            for (address, expected) in [(0, 1u32), (4, 1), (8, 0), (12, 0xdeadbeef), (16, 0)] {
+            for (address, expected) in [
+                (0, 1u32),
+                (4, 1),
+                (8, 0),
+                (12, 0xdeadbeef),
+                (16, 0),
+                (20, effect),
+                (24, u32::MAX),
+            ] {
                 assert_eq!(
                     vm.read(address, 4).unwrap().as_ref(),
                     &expected.to_le_bytes()
@@ -311,7 +331,11 @@ fn ordinary_transition_calls_prepare_play_query_and_finish_image_effects() {
             assert_eq!(vm.read(128, 64).unwrap().as_ref(), &[0x75; 64]);
             assert_eq!(
                 rt.drawing().target.as_ref().unwrap().pixel(1, 1),
-                Some(0xff806040)
+                Some(if replaces_images {
+                    0xff21cc54
+                } else {
+                    0xff806040
+                })
             );
         }
     }
