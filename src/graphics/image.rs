@@ -508,6 +508,16 @@ impl Images {
         self.insert(owner, image, data.has_alpha)
     }
 
+    pub(crate) fn copy_attributes(&mut self, target: u32, source: u32) -> Result<()> {
+        let source_pixels = self.pixel_handle(source)?;
+        let attributes = self.pixel_image(source_pixels)?.attributes.clone();
+        if self.pixel_handle(target)? == source_pixels && !attributes.is_empty() {
+            return Err(Error::new(0, "同一像素的属性复制会读取原入口已释放的记录"));
+        }
+        self.get_mut(target)?.attributes.extend(attributes);
+        Ok(())
+    }
+
     fn empty_wrapper(&mut self, owner: Option<u32>) -> Result<u32> {
         if self.entries.len() == read::MAX_ITEMS {
             return Err(Error::new(0, "图像对象数量超过上限"));

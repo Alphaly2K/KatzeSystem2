@@ -200,6 +200,19 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             return Ok(NativeReturn::Value(handle));
         }
         let handle = read::u32_at(arguments, 0)?;
+        if index == 725 {
+            if arguments.len() != 8 {
+                return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+            }
+            let source = read::u32_at(arguments, 4)?;
+            if handle == 0 || source == 0 {
+                return Ok(NativeReturn::Value(1));
+            }
+            let target = self.resources.images.resource_entry(handle)?.image;
+            let source = self.resources.images.resource_entry(source)?.image;
+            self.resources.images.copy_attributes(target, source)?;
+            return Ok(NativeReturn::Value(1));
+        }
         if index == 877 {
             if arguments.len() != 4 {
                 return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));

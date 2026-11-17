@@ -362,14 +362,13 @@ pub(crate) fn runtime(index: u32) -> RuntimeHandler {
         | 376..=378
         | 434..=438
         | 468
-        | 536
-        | 538
+        | 536..=538
         | 558
         | 564
         | 590..=597
         | 641
         | 1026 => RuntimeHandler::Resource,
-        681 | 682 | 710..=715 | 717..=724 | 726..=728 | 730 | 733 | 735..=737 | 877 => {
+        681 | 682 | 710..=715 | 717..=728 | 730 | 733 | 735..=737 | 877 => {
             RuntimeHandler::ImageResource
         }
         _ => RuntimeHandler::Core,

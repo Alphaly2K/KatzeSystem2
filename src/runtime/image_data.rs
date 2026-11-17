@@ -13,7 +13,7 @@ impl Resources {
     ) -> Result<NativeReturn> {
         let count = match index {
             118 | 377 => 1,
-            364 | 369 | 376 | 378 | 468 | 558 | 564 | 641 => 2,
+            364 | 369 | 376 | 378 | 468 | 537 | 558 | 564 | 641 => 2,
             120 | 121 => 4,
             _ => 3,
         };
@@ -32,6 +32,13 @@ impl Resources {
             .collect();
         if index == 118 {
             return Ok(NativeReturn::Value(self.images.duplicate(owner, args[0])?));
+        }
+        if index == 537 {
+            if args[0] == 0 || args[1] == 0 {
+                return Ok(NativeReturn::Value(0));
+            }
+            self.images.copy_attributes(args[0], args[1])?;
+            return Ok(NativeReturn::Value(1));
         }
         if index == 364 {
             if args[0] == 0 {

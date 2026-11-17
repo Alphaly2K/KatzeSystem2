@@ -311,6 +311,148 @@ fn loaded_resources_resolve_before_frame_selection_and_preserve_geometry_and_att
 }
 
 #[test]
+fn attribute_copies_merge_records_keep_shared_images_and_diagnose_freed_source_aliases() {
+    struct AttributeFiles;
+    impl ResourceServices for AttributeFiles {
+        fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+            assert_eq!(category, b"image");
+            Ok(name.to_vec())
+        }
+
+        fn read(&mut self, name: &[u8], _: ResourceMode) -> Result<Option<Vec<u8>>> {
+            let attributes = match name {
+                b"target.hg3" => [(1, [99; 5]), (3, [11, 12, 13, 14, 15])],
+                b"source.hg3" => [(1, [1, 2, 3, 4, 5]), (2, [6, 7, 8, 9, 10])],
+                _ => return Ok(None),
+            };
+            let mut bytes = blob();
+            bytes.truncate(bytes.len() - 36);
+            if name == b"target.hg3" {
+                bytes[48..52].copy_from_slice(&10u32.to_le_bytes());
+            }
+            for (index, (key, values)) in attributes.into_iter().enumerate() {
+                bytes.extend(format!("ats{key:04}\0").bytes());
+                bytes.extend(
+                    [if index == 0 { 36 } else { 0 }, 20]
+                        .into_iter()
+                        .chain(values)
+                        .flat_map(u32::to_le_bytes),
+                );
+            }
+            Ok(Some(bytes))
+        }
+    }
+
+    fn image(
+        runtime: &Runtime<KcsFactory<Loader>>,
+        handle: u32,
+        resource: bool,
+    ) -> &katze_system2::graphics::Image {
+        if resource {
+            runtime.image_resource(handle).unwrap()
+        } else {
+            runtime.images().get(handle).unwrap()
+        }
+    }
+
+    for budget in [1, 4096] {
+        for resource in [false, true] {
+            let native = if resource { 725 } else { 537 };
+            let load = if resource { 710 } else { 111 };
+            let mut code = Vec::new();
+            for (name, output) in [(64, 0), (80, 4)] {
+                call(&mut code, load, &[name]);
+                ins(&mut code, 0x26, &[output]);
+            }
+            call(&mut code, 65, &[]);
+            ins(&mut code, 0x25, &[0xdead_beef]);
+            for (args, output) in [([0, u32::MAX], 8), ([u32::MAX, 0], 12)] {
+                call(&mut code, native, &args);
+                ins(&mut code, 0x26, &[output]);
+            }
+            for address in [0u32, 4] {
+                code.extend([0x25, 0x13]);
+                code.extend(address.to_le_bytes());
+            }
+            ins(&mut code, 0x2b, &[native, 8]);
+            ins(&mut code, 0x26, &[16]);
+            handle_call(
+                &mut code,
+                if resource { 724 } else { 536 },
+                &[1, 20, 24, 28, 32, 36],
+            );
+            ins(&mut code, 0x26, &[40]);
+            ins(&mut code, 0x26, &[44]);
+            call(&mut code, 65, &[]);
+            ins(&mut code, 0x25, &[0xabcdef01]);
+            for _ in 0..2 {
+                code.extend([0x25, 0x13]);
+                code.extend(0u32.to_le_bytes());
+            }
+            ins(&mut code, 0x2b, &[native, 8]);
+            let mut runtime = runtime(&code, budget);
+            runtime.set_resources(AttributeFiles);
+            let task = runtime
+                .create(0, kind::ORDINARY, b"attributes", b"")
+                .unwrap();
+            let interpreter = runtime.object_mut(task).unwrap().interpreter_mut().unwrap();
+            interpreter.write(64, b"target:7.hg3\0").unwrap();
+            interpreter.write(80, b"source:7.hg3\0").unwrap();
+            runtime.update(0, 1).unwrap();
+            let target = word(vm(&runtime, task), 0);
+            let source = word(vm(&runtime, task), 4);
+            let before = image(&runtime, target, resource).clone();
+            let source_before = image(&runtime, source, resource).clone();
+            if resource {
+                runtime.image_resource_updated(target, true).unwrap();
+            } else {
+                let shared = runtime.images_mut().share(target).unwrap();
+                runtime
+                    .object_mut(task)
+                    .unwrap()
+                    .interpreter_mut()
+                    .unwrap()
+                    .write(0, &shared.to_le_bytes())
+                    .unwrap();
+            }
+            runtime.update(1, 1).unwrap();
+            let interpreter = vm(&runtime, task);
+            assert_eq!(
+                [word(interpreter, 8), word(interpreter, 12)],
+                [u32::from(resource); 2]
+            );
+            assert_eq!([word(interpreter, 16), word(interpreter, 40)], [1; 2]);
+            assert_eq!(word(interpreter, 44), 0xdead_beef);
+            assert!(interpreter.stack_bytes().is_empty());
+            assert_eq!(
+                interpreter.read(20, 20).unwrap(),
+                [1u32, 2, 3, 4, 5]
+                    .into_iter()
+                    .flat_map(u32::to_le_bytes)
+                    .collect::<Vec<_>>()
+            );
+            let output = image(&runtime, target, resource);
+            assert_eq!(output.info(), before.info());
+            assert_eq!(output.surface(), before.surface());
+            assert_eq!(output.attribute(1), Some([1, 2, 3, 4, 5]));
+            assert_eq!(output.attribute(2), Some([6, 7, 8, 9, 10]));
+            assert_eq!(output.attribute(3), Some([11, 12, 13, 14, 15]));
+            assert_eq!(image(&runtime, source, resource), &source_before);
+            let copied = output.clone();
+            if resource {
+                assert!(!runtime.image_resource_updated(target, false).unwrap());
+            }
+            assert!(runtime.update(2, 1).unwrap_err().message.contains("已释放"));
+            assert_eq!(image(&runtime, target, resource), &copied);
+            assert_eq!(
+                vm(&runtime, task).stack_bytes(),
+                0xabcdef01u32.to_le_bytes()
+            );
+        }
+    }
+}
+
+#[test]
 fn failed_loads_skip_allocation_and_validate_name_sources() {
     let mut code = Vec::new();
     call(&mut code, 710, &[u32::MAX]);
