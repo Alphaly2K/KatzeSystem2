@@ -73,9 +73,20 @@ fn channel_byte_size(dimensions: [u32; 2], channels: usize) -> Result<usize> {
 struct Bits<'a> {
     bytes: &'a [u8],
     position: usize,
+    word: u64,
+    available: u32,
 }
 
-impl Bits<'_> {
+impl<'a> Bits<'a> {
+    fn new(bytes: &'a [u8]) -> Self {
+        Self {
+            bytes,
+            position: 0,
+            word: 0,
+            available: 0,
+        }
+    }
+
     fn bit(&mut self) -> Result<bool> {
         let byte = self
             .bytes
@@ -87,22 +98,37 @@ impl Bits<'_> {
     }
 
     fn gamma(&mut self) -> Result<usize> {
+        if let Some(value) = self.buffered_gamma() {
+            return Ok(value);
+        }
         let byte = self.position / 8;
         let shift = self.position % 8;
-        // 完整码字一次取位；跨字边界及短尾沿用逐位路径的截断诊断。
         if let Some(bytes) = self.bytes.get(byte..byte + 8) {
-            let word = u64::from_le_bytes(bytes.try_into().unwrap()) >> shift;
-            if word & 1 != 0 {
-                self.position += 1;
-                return Ok(1);
-            }
-            let zeros = word.trailing_zeros() as usize;
-            if zeros < 32 && zeros * 2 < 64 - shift {
-                self.position += zeros * 2 + 1;
-                let tail = ((word >> (zeros + 1)) as u32).reverse_bits() >> (32 - zeros);
-                return Ok((1usize << zeros) | tail as usize);
+            // 命令按低位开始，翻转后可从最高位连续取出完整码字。
+            self.word = u64::from_le_bytes(bytes.try_into().unwrap()).reverse_bits() << shift;
+            self.available = 64 - shift as u32;
+            if let Some(value) = self.buffered_gamma() {
+                return Ok(value);
             }
         }
+        self.available = 0;
+        self.gamma_tail()
+    }
+
+    fn buffered_gamma(&mut self) -> Option<usize> {
+        let length = self.word.leading_zeros() * 2 + 1;
+        if length > self.available {
+            return None;
+        }
+        let value = self.word >> (64 - length);
+        self.word <<= length;
+        self.available -= length;
+        self.position += length as usize;
+        Some(value as usize)
+    }
+
+    #[cold]
+    fn gamma_tail(&mut self) -> Result<usize> {
         let mut zeros = 0;
         while !self.bit()? {
             zeros += 1;
@@ -119,10 +145,7 @@ impl Bits<'_> {
 }
 
 fn expand_runs(literals: &[u8], commands: &[u8], minimum_size: usize) -> Result<Vec<u8>> {
-    let mut bits = Bits {
-        bytes: commands,
-        position: 0,
-    };
+    let mut bits = Bits::new(commands);
     let mut copy = bits.bit()?;
     let size = bits.gamma()?;
     if size < minimum_size {
@@ -250,8 +273,8 @@ mod tests {
             255, 255, 15, 0, 0, 0, 0, 0, 0, 0, 0,
         ];
         let mut bits = Bits {
-            bytes: &bytes,
             position: 3,
+            ..Bits::new(&bytes)
         };
         for (value, position) in [
             (1, 4),
@@ -271,10 +294,7 @@ mod tests {
             ([0, 0, 0, 128, 0, 0, 0, 0], 0x8000_0000),
             ([0, 0, 0, 128, 255, 255, 255, 127], 0xffff_ffff),
         ] {
-            let mut bits = Bits {
-                bytes: &bytes,
-                position: 0,
-            };
+            let mut bits = Bits::new(&bytes);
             assert_eq!(bits.gamma().unwrap(), value);
             assert_eq!(bits.position, 63);
         }
@@ -283,9 +303,36 @@ mod tests {
             ([0u8; 2].as_slice(), 16, 2),
             ([128u8].as_slice(), 8, 1),
         ] {
-            let mut bits = Bits { bytes, position: 0 };
+            let mut bits = Bits::new(bytes);
             assert_eq!(bits.gamma().unwrap_err().offset, offset);
             assert_eq!(bits.position, position);
+        }
+    }
+
+    #[test]
+    fn gamma_refills_unaligned_windows_without_consuming_padding() {
+        let runs = [1, 3, 4, 7, 63, 8, 1, 257, 65537, 1, 4, 2, 13, 1];
+        for alignment in 0..8 {
+            let mut writer = BitWriter::default();
+            for _ in 0..alignment {
+                writer.bit(false);
+            }
+            for _ in 0..4 {
+                for run in runs {
+                    writer.gamma(run);
+                }
+            }
+            let mut bits = Bits {
+                position: alignment,
+                ..Bits::new(&writer.bytes)
+            };
+            for _ in 0..4 {
+                for run in runs {
+                    assert_eq!(bits.gamma().unwrap(), run);
+                }
+            }
+            assert_eq!(bits.position, writer.position);
+            assert_eq!(bits.gamma().unwrap_err().offset, writer.bytes.len());
         }
     }
 }
