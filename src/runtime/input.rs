@@ -10,6 +10,9 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         arguments: &[u8],
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
+        if (151..=153).contains(&index) {
+            return self.input_text_native(index, arguments, vm);
+        }
         let (code, length) = match index {
             144 => (127, 16),
             145 => (128, 0),
@@ -99,6 +102,67 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             396 if found => NativeReturn::Value(u32::from_le_bytes(cursor)),
             396 => return Err(Error::new(vm.pc, "KCS 光标状态查询缺少输入任务")),
             _ => NativeReturn::Continue,
+        })
+    }
+
+    fn input_text_native(
+        &mut self,
+        index: u32,
+        arguments: &[u8],
+        vm: &mut Interpreter,
+    ) -> Result<NativeReturn> {
+        let address = if index == 152 {
+            0
+        } else {
+            if arguments.len() != 4 {
+                return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+            }
+            read::u32_at(arguments, 0)?
+        };
+        let target = self.command_target(0, 34, [0; 3])?;
+        if !self
+            .tree
+            .node(target)
+            .is_some_and(|node| node.kind == super::kind::INPUT)
+        {
+            return Err(Error::new(vm.pc, "KCS 文字输入缺少输入任务"));
+        }
+        let mut text = [0; crate::input::TEXT_ENTRY_CAPACITY];
+        if index == 151 {
+            let initial = vm.read_string(address)?;
+            if initial.len() >= text.len() {
+                return Err(Error::new(vm.pc, "输入对话框初始文字超出缓冲区"));
+            }
+            text[..initial.len()].copy_from_slice(&initial);
+        }
+        let mut status = 0;
+        let sender = self.host.task_id;
+        let found = route_command(
+            self.store(),
+            sender,
+            Command {
+                target,
+                sender,
+                code: index - 11,
+                data: [0; 3],
+            },
+            &mut CommandBuffers {
+                data1: (index != 152).then_some(&mut text),
+                ..Default::default()
+            },
+            &mut status,
+        )?;
+        if !found {
+            return Err(Error::new(vm.pc, "KCS 文字输入缺少输入任务"));
+        }
+        if index == 153 {
+            let end = read::zstr(&text, 0)?.len();
+            vm.write(address, &text[..=end])?;
+        }
+        Ok(if index == 152 {
+            NativeReturn::Value(status)
+        } else {
+            NativeReturn::Continue
         })
     }
 }

@@ -196,6 +196,110 @@ struct Factory {
     records: Records,
 }
 
+#[test]
+fn ordinary_text_entry_tracks_pending_accepted_and_cancelled_requests() -> Result<()> {
+    use katze_system2::runtime::{KcsFactory, ProgramLoader, RootObject};
+
+    struct Source(Vec<u8>);
+    impl ProgramLoader for Source {
+        fn load(&mut self, _: &[u8]) -> Result<Option<Program>> {
+            let mut data = vec![0x5a; 192];
+            data[0..5].copy_from_slice(b"seed\0");
+            data[8..10].copy_from_slice(b"B\0");
+            Ok(Some(Program::from_code(&self.0, data, 128)?))
+        }
+    }
+
+    let mut code = Vec::new();
+    let emit = |code: &mut Vec<u8>, opcode, words: &[u32]| {
+        code.push(opcode);
+        for word in words {
+            code.push(3);
+            code.extend(word.to_le_bytes());
+        }
+    };
+    let call = |code: &mut Vec<u8>, native, words: &[u32]| {
+        for word in words {
+            emit(code, 0x25, &[*word]);
+        }
+        emit(code, 0x2b, &[native, words.len() as u32 * 4]);
+    };
+    let query = |code: &mut Vec<u8>, status_at, text_at| {
+        call(code, 152, &[u32::MAX]);
+        emit(code, 0x26, &[status_at]);
+        call(code, 153, &[text_at]);
+    };
+    let wait = |code: &mut Vec<u8>| {
+        call(code, 71, &[96]);
+        emit(code, 0x26, &[124]);
+    };
+    emit(&mut code, 0x25, &[0xcafe_babe]);
+    query(&mut code, 24, 40);
+    call(&mut code, 151, &[0]);
+    query(&mut code, 28, 48);
+    wait(&mut code);
+    call(&mut code, 151, &[8]);
+    wait(&mut code);
+    query(&mut code, 32, 56);
+    call(&mut code, 151, &[8]);
+    wait(&mut code);
+    query(&mut code, 36, 64);
+    emit(&mut code, 0x26, &[72]);
+    emit(&mut code, 0x3b, &[]);
+
+    for budget in [1, 4096] {
+        let mut rt = Runtime::new(
+            0,
+            kind::ROOT,
+            Box::new(RootObject::new(1, 0)),
+            expression::State::new(0),
+            InputFactory {
+                fallback: KcsFactory::new(Source(code.clone())),
+            },
+        );
+        rt.set_budget(budget, 1 << 20);
+        let input = rt.create(0, kind::INPUT, b"input", b"")?;
+        let caller = rt.create(0, kind::ORDINARY, b"caller", b"")?;
+        rt.set_input_device(Device(Rc::new(RefCell::new(DeviceState::new([0, 0])))))?;
+        rt.update(0, 0)?;
+        let first = rt.input_state(input).unwrap().text_entry_request().unwrap();
+        assert_eq!(&*first, "seed");
+
+        rt.send_message(0, caller, [0; 4])?;
+        let state = rt.input_state_mut(input).unwrap();
+        let second = state.text_entry_request().unwrap();
+        assert_eq!(&*second, "B");
+        assert!(!state.complete_text_entry(&first, Some("late"))?);
+        assert!(state.complete_text_entry(&second, Some("あ"))?);
+        assert!(!state.complete_text_entry(&second, None)?);
+
+        rt.send_message(0, caller, [0; 4])?;
+        let state = rt.input_state_mut(input).unwrap();
+        let third = state.text_entry_request().unwrap();
+        assert_eq!(&*third, "B");
+        assert!(!state.complete_text_entry(&second, Some("late"))?);
+        assert!(state.complete_text_entry(&third, None)?);
+        assert!(state.text_entry_request().is_none());
+
+        rt.send_message(0, caller, [0; 4])?;
+        let vm = rt.object(caller).unwrap().interpreter().unwrap();
+        for (at, status) in [(24, 2u32), (28, 0), (32, 1), (36, 2)] {
+            assert_eq!(vm.read(at, 4)?, status.to_le_bytes());
+        }
+        for (at, text) in [
+            (40, b"\0Z".as_slice()),
+            (48, b"seed\0Z"),
+            (56, b"\x82\xa0\0Z"),
+            (64, b"B\0Z"),
+        ] {
+            assert_eq!(vm.read(at, text.len())?, text);
+        }
+        assert_eq!(vm.read(72, 4)?, 0xcafe_babeu32.to_le_bytes());
+        assert!(vm.stack_bytes().is_empty());
+    }
+    Ok(())
+}
+
 struct Receiver {
     base: BaseObject,
     id: u32,
@@ -361,7 +465,7 @@ impl TaskObject for Receiver {
                 *output = 1;
                 if self.mode.get() == 3 {
                     send(host, self.id, 24, 0, 0x87654321)?;
-                    send(host, self.id, 140, 0, 0)?;
+                    send(host, self.id, 155, 0, 0)?;
                 }
             }
             (4, 4, _) => {
@@ -394,7 +498,7 @@ impl TaskObject for Receiver {
                 send(host, self.id, 159, 0, 0)?;
             }
             (11, 22, 2) => {
-                send(host, self.id, 140, 0, 0)?;
+                send(host, self.id, 155, 0, 0)?;
             }
             (12, 6, 2) => {
                 send(host, self.id, 139, 5, 50 | 60 << 16)?;
@@ -545,7 +649,7 @@ fn scanning_callbacks_modify_later_keys_and_restore_all_state_on_errors() -> Res
             })
         })
         .unwrap_err();
-    assert!(error.message.contains("140"));
+    assert!(error.message.contains("155"));
     assert_eq!(
         runtime.input_state(1).unwrap().keys().records()[0][0].mask,
         3
@@ -1081,7 +1185,7 @@ fn cursor_commands_keep_nested_changes_and_restore_state_after_callback_errors()
         input_command(&mut runtime, 143, [7, 1, 0])
             .unwrap_err()
             .message
-            .contains("140")
+            .contains("155")
     );
     let input = runtime.input_state(1).unwrap();
     assert_eq!(input.pointer().auto_hide, 7);

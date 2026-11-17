@@ -1,3 +1,4 @@
+use super::text_entry::TextEntry;
 use super::{
     Events, InputDevice, KeyEvent, KeyEventKind, KeySample, KeyServices, KeyTransition, Keys,
     PointerMotion, PointerState, Regions,
@@ -5,6 +6,7 @@ use super::{
 use crate::kcs::Host;
 use crate::task::{Command, CommandBuffers, Control, TaskClock};
 use crate::{Error, Result};
+use std::sync::Arc;
 
 /// 同步回调期间由宿主持有的输入命令状态；同一份状态在嵌套命令间保持修改。
 #[derive(Default)]
@@ -14,6 +16,7 @@ pub struct CommandState {
     pub regions: Regions,
     pub keys: Keys,
     pub pointer: PointerState,
+    text_entry: TextEntry,
     pub update_rate: u32,
     raw_state: u32,
     pub(super) suppressed: u32,
@@ -82,6 +85,14 @@ impl CommandState {
                     self.pointer.move_started = self.clock.elapsed();
                 }
             }
+            140 => self.text_entry.begin(
+                buffers
+                    .data1
+                    .as_deref()
+                    .ok_or_else(|| Error::new(0, "输入对话框缺少初始文字缓冲区"))?,
+            )?,
+            141 => *output = self.text_entry.status,
+            142 => write(buffers.data1.as_deref_mut(), self.text_entry.bytes())?,
             143 => {
                 self.pointer.auto_hide = command.data[0];
                 self.pointer.idle_limit = self.update_rate.wrapping_mul(command.data[1]) / 60;
@@ -175,6 +186,7 @@ impl CommandState {
             regions,
             keys,
             pointer,
+            text_entry,
             update_rate,
             raw_state,
             suppressed,
@@ -186,6 +198,7 @@ impl CommandState {
                 clock,
                 keys,
                 pointer,
+                text_entry,
                 update_rate,
                 raw_state,
                 suppressed,
@@ -222,6 +235,20 @@ impl InputState {
     }
     pub fn pointer_mut(&mut self) -> &mut PointerState {
         &mut self.commands.pointer
+    }
+
+    /// 当前文字输入请求及其初始文字。宿主以 `Arc::ptr_eq` 判定是否为同一个请求。
+    /// 用户编辑时，原输入框限制为十六个 UTF-16 单元。
+    pub fn text_entry_request(&self) -> Option<Arc<str>> {
+        self.commands.text_entry.request()
+    }
+
+    /// 确认文字或以 `None` 取消。过期或已完成的请求返回 `false`，不修改状态。
+    pub fn complete_text_entry(&mut self, request: &Arc<str>, text: Option<&str>) -> Result<bool> {
+        if self.commands.control.deletion_requested != 0 {
+            return Ok(false);
+        }
+        self.commands.text_entry.complete(request, text)
     }
     pub fn update_rate(&self) -> u32 {
         self.commands.update_rate
@@ -332,6 +359,7 @@ pub(super) struct Callback<'a> {
     clock: &'a mut TaskClock,
     keys: &'a mut Keys,
     pointer: &'a mut PointerState,
+    text_entry: &'a mut TextEntry,
     update_rate: &'a mut u32,
     raw_state: &'a mut u32,
     suppressed: &'a mut u32,
@@ -352,6 +380,7 @@ impl Callback<'_> {
             regions: std::mem::take(regions),
             keys: std::mem::take(self.keys),
             pointer: std::mem::take(self.pointer),
+            text_entry: std::mem::take(self.text_entry),
             update_rate: *self.update_rate,
             raw_state: *self.raw_state,
             suppressed: events.suppressed(),
@@ -369,6 +398,7 @@ impl Callback<'_> {
         *regions = state.regions;
         *self.keys = state.keys;
         *self.pointer = state.pointer;
+        *self.text_entry = state.text_entry;
         *self.update_rate = state.update_rate;
         *self.raw_state = state.raw_state;
         *self.suppressed = state.suppressed;

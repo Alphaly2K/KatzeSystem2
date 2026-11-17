@@ -11,6 +11,8 @@ mod keys;
 pub use keys::{KeySample, KeyServices, KeyState, KeyTransition, Keys};
 mod state;
 pub use state::{CommandState, InputDelivery, InputState};
+mod text_entry;
+pub(crate) use text_entry::CAPACITY as TEXT_ENTRY_CAPACITY;
 mod object;
 pub use object::{InputFactory, InputObject};
 mod button;
