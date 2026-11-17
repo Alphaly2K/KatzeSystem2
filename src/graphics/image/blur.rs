@@ -142,11 +142,57 @@ fn rounded(sum: u32, factor: u32) -> u8 {
 }
 
 fn blur_axis(source: &Surface, axis: usize, radius: usize) -> Result<Surface> {
-    let size = source.size().map(|value| value as usize);
+    let jobs = (source.pixels().len() / (4 * 256 * 1024)).clamp(1, 4);
+    let workers = if jobs > 1 {
+        std::thread::available_parallelism().map_or(1, |count| jobs.min(count.get()))
+    } else {
+        1
+    };
+    blur_axis_with_workers(source, axis, radius, workers)
+}
+
+fn blur_axis_with_workers(
+    source: &Surface,
+    axis: usize,
+    radius: usize,
+    workers: usize,
+) -> Result<Surface> {
+    let height = source.size()[1] as usize;
     let mut output = if axis == 0 {
         Surface::new(source.size())?
     } else {
         source.clone()
+    };
+    if output.pixels().is_empty() {
+        return Ok(output);
+    }
+    if workers > 1 && height > 1 {
+        let rows_per_job = height.div_ceil(workers);
+        let bytes_per_job = rows_per_job * output.stride();
+        std::thread::scope(|scope| {
+            let mut chunks = output.pixels_mut().chunks_mut(bytes_per_job);
+            let first = chunks.next().unwrap();
+            for (index, chunk) in chunks.enumerate() {
+                scope.spawn(move || {
+                    blur_rows(source, axis, radius, (index + 1) * rows_per_job, chunk);
+                });
+            }
+            blur_rows(source, axis, radius, 0, first);
+        });
+    } else {
+        blur_rows(source, axis, radius, 0, output.pixels_mut());
+    }
+    Ok(output)
+}
+
+fn blur_rows(source: &Surface, axis: usize, radius: usize, first_row: usize, output: &mut [u8]) {
+    let [w, h] = source.size().map(|value| value as usize);
+    let stride = source.stride();
+    let rows = first_row..first_row + output.len() / stride;
+    let (lines, span, length, line_stride, pixel_stride) = if axis == 0 {
+        (rows, 0..w, w, stride, 4)
+    } else {
+        (0..w, rows, h, 4, stride)
     };
     let weights: Vec<_> = (0..=radius * 2)
         .map(|index| {
@@ -170,20 +216,16 @@ fn blur_axis(source: &Surface, axis: usize, radius: usize) -> Result<Surface> {
         })
         .collect();
     let opaque_alpha = weights.iter().sum::<u32>() * 255;
-    let (lines, length, line_stride, pixel_stride) = if axis == 0 {
-        (size[1], size[0], source.stride(), 4)
-    } else {
-        (size[0], size[1], 4, source.stride())
-    };
-    // 分块限制细长图像的临时行缓存，边缘仍从完整来源钳制取样。
-    let capacity = length.min(1024) + radius * 2;
+    // 并行分块只限制输出行；取样始终以完整来源图像钳制坐标。
+    let capacity = span.len().min(1024) + radius * 2;
     let mut pixels = vec![[0u8; 4]; capacity];
     let mut prefix = vec![LineSum::default(); capacity + 1];
     let width = radius + 1;
-    for line in 0..lines {
+    for line in lines.clone() {
         let base = line * line_stride;
-        for start in (0..length).step_by(1024) {
-            let count = (length - start).min(1024);
+        let target_base = (line - lines.start) * line_stride;
+        for start in span.clone().step_by(1024) {
+            let count = (span.end - start).min(1024);
             let padded = count + radius * 2;
             prefix[0] = LineSum::default();
             for i in 0..padded {
@@ -228,9 +270,9 @@ fn blur_axis(source: &Surface, axis: usize, radius: usize) -> Result<Surface> {
                             std::array::from_fn(|i| (right.colors[i] - left.colors[i]) / visible);
                         mixed_sum(&pixels[x..x + weights.len()], &weights, mean)
                     };
-                    let at = base + (start + x) * pixel_stride;
+                    let at = target_base + (start - span.start + x) * pixel_stride;
                     for (channel, sum) in sums.into_iter().enumerate() {
-                        output.pixels_mut()[at + channel] = rounded(sum, factor);
+                        output[at + channel] = rounded(sum, factor);
                     }
                 }
                 if x + 1 < count {
@@ -244,7 +286,6 @@ fn blur_axis(source: &Surface, axis: usize, radius: usize) -> Result<Surface> {
             }
         }
     }
-    Ok(output)
 }
 
 // 单独编译混合窗口的归约，保持不透明窗口快速路径的性能。
@@ -263,4 +304,31 @@ fn mixed_sum(pixels: &[[u8; 4]], weights: &[u32], mean: [u32; 3]) -> [u32; 4] {
         sums[3] += alpha * weight;
     }
     sums
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn blur_workers_sample_across_output_stripes() {
+        for (size, radius) in [([1031, 17], 7), ([19, 1033], 16), ([23, 9], 255)] {
+            let mut source = Surface::new(size).unwrap();
+            for (index, pixel) in source.pixels_mut().chunks_exact_mut(4).enumerate() {
+                let x = index as u32 % size[0];
+                let y = index as u32 / size[0];
+                let alpha = match (x / 5 + y / 13) % 5 {
+                    0 | 1 => 0,
+                    2 => 127,
+                    _ => 255,
+                };
+                pixel.copy_from_slice(&[(3 * x + y) as u8, (index % 239) as u8, y as u8, alpha]);
+            }
+            for axis in 0..2 {
+                let single = blur_axis_with_workers(&source, axis, radius, 1).unwrap();
+                let split = blur_axis_with_workers(&source, axis, radius, 4).unwrap();
+                assert_eq!(single.pixels(), split.pixels(), "{size:?}, axis {axis}");
+            }
+        }
+    }
 }
