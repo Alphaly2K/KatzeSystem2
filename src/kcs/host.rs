@@ -94,10 +94,13 @@ pub struct HostState {
     pub surface_size: [u32; 2],
     /// 窗口客户区内的绘图矩形；未配置时使用从零开始的 surface_size。
     pub window_content_rect: Option<crate::graphics::Rect>,
-    /// 外层图形宿主维护的连续截图开关，保留原始 DWORD。
+    /// 连续截图模式，保留原始 DWORD；零停止输出。
     pub frame_capture_enabled: u32,
-    /// 下一次连续截图使用的序号；由外层捕获流程同步。
+    /// 下一次连续截图使用的序号，按 DWORD 回绕。
     pub frame_capture_index: u32,
+    /// 连续截图名称使用的 UTF-16 前缀，不包含末尾零。
+    pub frame_capture_folder: Vec<u16>,
+    pub(crate) frame_capture_task_id: u32,
     /// 消息记录生成显示时间时使用的全局比例；None 表示尚无时间上下文。
     pub message_time_scale: Option<u32>,
     pub message_defaults: Option<crate::message::MessageDefaults>,

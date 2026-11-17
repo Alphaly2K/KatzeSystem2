@@ -519,6 +519,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             window.update();
         } else {
             window.update_with_buffer(&buffer, 1280, 720)?;
+            runtime.capture_sequence_frame(output.as_ref().unwrap())?;
         }
         if now.is_multiple_of(120) {
             println!(

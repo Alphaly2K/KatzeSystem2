@@ -30,6 +30,7 @@ mod native;
 mod particle;
 mod text_window;
 pub use motion::MotionSnapshot;
+mod frame_capture;
 mod image_data;
 mod image_export;
 mod image_resources;
@@ -259,7 +260,13 @@ impl<F: ObjectFactory> Runtime<F> {
 
     /// 通过已连接的图形后端呈现完整帧；暂时无法呈现时返回 false。
     pub fn present_frame(&mut self, size: [u32; 2]) -> Result<bool> {
-        self.resources.present_frame(size)
+        let (presented, snapshot) = self
+            .resources
+            .present_frame(size, self.host.frame_capture_enabled != 0)?;
+        if let Some(snapshot) = snapshot {
+            self.capture_sequence_frame(&snapshot)?;
+        }
+        Ok(presented)
     }
 
     /// 设置内部捕获所读取的画面区域；None 使用 surface_size 定义的整幅画面。

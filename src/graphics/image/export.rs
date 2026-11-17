@@ -39,6 +39,55 @@ impl ExportFormat {
 }
 
 impl Image {
+    pub(crate) fn encode_frame_bmp(
+        frame: &crate::graphics::RenderTarget,
+        rectangle: Option<crate::graphics::Rect>,
+    ) -> Result<Option<Vec<u8>>> {
+        if frame.size().contains(&0) {
+            return Ok(None);
+        }
+        let rectangle = rectangle.unwrap_or_else(|| {
+            crate::graphics::Rect::from_xywh(0, 0, frame.size()[0] as i32, frame.size()[1] as i32)
+        });
+        let extent = [
+            rectangle.right.wrapping_sub(rectangle.left),
+            rectangle.bottom.wrapping_sub(rectangle.top),
+        ];
+        if extent.iter().any(|&value| value < 0) {
+            return Err(Error::new(0, "画面捕获区域尺寸不能为负数"));
+        }
+        let [width, height] = extent.map(|value| value as u32);
+        if width == 0 || height == 0 {
+            return Ok(None);
+        }
+        let mut image = Self::new([width, height])?;
+        for y in 0..height {
+            for x in 0..width {
+                let source = [
+                    rectangle.left.wrapping_add(x as i32),
+                    rectangle.top.wrapping_add(y as i32),
+                ];
+                let in_bounds = (0..frame.size()[0] as i32).contains(&source[0])
+                    && (0..frame.size()[1] as i32).contains(&source[1]);
+                let color = if in_bounds {
+                    frame
+                        .pixel(source[0] as u32, source[1] as u32)
+                        .ok_or_else(|| Error::new(0, "连续截图读取缺失的渲染面块"))?
+                } else {
+                    0
+                }
+                .to_le_bytes();
+                let at = y as usize * image.surface.stride() + x as usize * 4;
+                let pixel = &mut image.surface.pixels_mut()[at..at + 4];
+                pixel.copy_from_slice(&color);
+                // 原捕获先将 Alpha 设为 255，随后的白色背景转换保持 RGB。
+                pixel[3] = 255;
+            }
+        }
+        image.info.bit_depth = 24;
+        image.encode_bmp().map(Some)
+    }
+
     pub(crate) fn encode_export(&mut self, format: ExportFormat) -> Result<Option<Vec<u8>>> {
         let changed = (format == ExportFormat::Jpeg && !self.channels_swapped)
             || (format != ExportFormat::Png && !self.is_rgb());
