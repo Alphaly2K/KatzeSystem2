@@ -1230,6 +1230,7 @@ impl<F: ObjectFactory> ObjectFactory for GraphicsFactory<F> {
             kind::RWIPE => Ok(Box::new(super::RWipeObject::new(id))),
             kind::RENDER_BLUR => Ok(Box::new(super::ScreenFilterObject::blur(id))),
             kind::RENDER_MOSAIC => Ok(Box::new(super::ScreenFilterObject::mosaic(id))),
+            kind::RENDER_SHADE => Ok(Box::new(super::ScreenFilterObject::shade(id))),
             kind::RENDER_DRAW => Ok(Box::new(super::render_draw::RenderDrawObject::new(id))),
             kind::RENDER_WMOSAIC => Ok(Box::new(super::MosaicObject::new(id))),
             kind::RENDER_FMOSAIC => Ok(Box::new(super::MosaicObject::fading(id))),

@@ -241,7 +241,7 @@ pub(crate) fn runtime(index: u32) -> RuntimeHandler {
         143 => RuntimeHandler::LoadProgram,
         271 | 693 => RuntimeHandler::LoadParticle,
         265..=270 | 417 | 788 | 997 | 998 => RuntimeHandler::Movie,
-        196..=203 | 520..=524 | 527..=532 | 853..=857 | 860 | 861 | 905 | 967..=973 => {
+        196..=203 | 520..=532 | 853..=857 | 860 | 861 | 905 | 967..=973 => {
             RuntimeHandler::Transition
         }
         633..=640 => RuntimeHandler::NameTable,

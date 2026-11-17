@@ -11,7 +11,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         arguments: &[u8],
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
-        if matches!(index, 521..=524) {
+        if matches!(index, 521..=526) {
             return self.screen_filter_native(index, arguments, vm);
         }
         if matches!(index, 967..=973) {

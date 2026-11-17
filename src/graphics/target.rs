@@ -275,6 +275,10 @@ impl RenderTarget {
 
     /// 按顶端起始坐标清零相交的像素和 Alpha；即使原像素为零也标记该块。
     pub fn clear_rect(&mut self, rect: Rect) -> bool {
+        self.fill_rect(rect, 0)
+    }
+
+    pub(super) fn fill_rect(&mut self, rect: Rect, argb: u32) -> bool {
         let Some(rect) = rect.intersect(Rect::from_xywh(
             0,
             0,
@@ -308,7 +312,7 @@ impl RenderTarget {
                         right: clipped.right - x,
                         bottom: clipped.bottom - y,
                     },
-                    0,
+                    argb,
                 );
                 touched = true;
             }

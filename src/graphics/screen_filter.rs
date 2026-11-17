@@ -4,7 +4,31 @@ use super::{
     DrawCommand, DrawList, FrameTexture, ProjectedVertex, Rect, RenderTarget, Surface,
     TextureFilter, TextureSource,
 };
-use crate::{Result, read};
+use crate::{Error, Result, read};
+
+#[derive(Clone, Copy)]
+pub(super) enum FilterKind {
+    Blur,
+    Mosaic,
+    Shade,
+}
+
+impl FilterKind {
+    pub fn accepts(self, command: u32) -> bool {
+        match self {
+            Self::Blur => matches!(command, 384 | 385),
+            Self::Mosaic => matches!(command, 386 | 387),
+            Self::Shade => matches!(command, 388 | 389),
+        }
+    }
+
+    pub fn target_count(self) -> usize {
+        match self {
+            Self::Shade => 1,
+            _ => 2,
+        }
+    }
+}
 
 #[derive(Clone, Copy)]
 struct Quad {
@@ -72,9 +96,25 @@ struct Mosaic {
     quad: Option<Quad>,
 }
 
+struct Shade {
+    quad: Quad,
+    radius: Option<i32>,
+}
+
 enum Filter {
     Blur(Blur),
     Mosaic(Mosaic),
+    Shade(Shade),
+}
+
+impl Filter {
+    fn kind(&self) -> FilterKind {
+        match self {
+            Self::Blur(_) => FilterKind::Blur,
+            Self::Mosaic(_) => FilterKind::Mosaic,
+            Self::Shade(_) => FilterKind::Shade,
+        }
+    }
 }
 
 pub(super) struct ScreenFilter {
@@ -86,28 +126,34 @@ pub(super) struct ScreenFilter {
 }
 
 impl ScreenFilter {
-    pub fn new(size: [u32; 2], scale: [f32; 2], mosaic: bool) -> Self {
+    pub fn new(size: [u32; 2], scale: [f32; 2], kind: FilterKind) -> Self {
         // 固定采用原设备的二次幂纹理分支，使后端能力不改变取样几何。
         let texture_size = size.map(u32::next_power_of_two);
-        let effect = if mosaic {
-            Filter::Mosaic(Mosaic {
+        let full_quad = || {
+            Quad::rectangle(
+                [0., 0., size[0] as f32, size[1] as f32],
+                texture_size.map(|v| v as f32),
+            )
+        };
+        let effect = match kind {
+            FilterKind::Mosaic => Filter::Mosaic(Mosaic {
                 scale,
                 divisors: [1.; 2],
                 color: 0,
                 quad: None,
-            })
-        } else {
-            Filter::Blur(Blur {
+            }),
+            FilterKind::Blur => Filter::Blur(Blur {
                 matrix: *super::Transform::default().matrix(),
                 offset: [0.; 3],
                 color: 0,
-                quad: Quad::rectangle(
-                    [0., 0., size[0] as f32, size[1] as f32],
-                    texture_size.map(|v| v as f32),
-                ),
+                quad: full_quad(),
                 first_frame: true,
                 index: 0,
-            })
+            }),
+            FilterKind::Shade => Filter::Shade(Shade {
+                quad: full_quad(),
+                radius: None,
+            }),
         };
         Self {
             active: 0,
@@ -119,10 +165,10 @@ impl ScreenFilter {
     }
 
     pub fn configure(&mut self, bytes: &[u8]) -> Result<()> {
-        let count = if matches!(self.effect, Filter::Mosaic(_)) {
-            36
-        } else {
-            88
+        let count = match self.effect {
+            Filter::Blur(_) => 88,
+            Filter::Mosaic(_) => 36,
+            Filter::Shade(_) => 12,
         };
         let bytes = read::range(bytes, 0, count)?;
         let word = |i| u32::from_le_bytes(bytes[i * 4..i * 4 + 4].try_into().unwrap());
@@ -142,6 +188,10 @@ impl ScreenFilter {
                     let rect = std::array::from_fn(|i| float(i) * mosaic.scale[i % 2]);
                     mosaic.quad = Some(Quad::rectangle(rect, self.texture_size.map(|v| v as f32)));
                 }
+            }
+            Filter::Shade(shade) => {
+                shade.radius = Some((word(0) as i32).min(4));
+                self.range = [float(1), float(2)];
             }
         }
         Ok(())
@@ -163,16 +213,25 @@ impl ScreenFilter {
         middle: &DrawList,
         canvas: Option<&RenderTarget>,
         targets: &mut [RenderTarget],
-    ) -> Result<[DrawCommand; 2]> {
+        output: &mut Vec<DrawCommand>,
+    ) -> Result<()> {
+        if targets.len() < self.effect.kind().target_count() {
+            return Err(Error::new(0, "实时滤镜的辅助渲染目标不足"));
+        }
         let index = match &mut self.effect {
             Filter::Blur(blur) => {
                 blur.index = 1 - blur.index;
                 blur.index
             }
-            Filter::Mosaic(_) => 0,
+            Filter::Mosaic(_) | Filter::Shade(_) => 0,
         };
         let bounds = Rect::from_xywh(0, 0, self.size[0] as i32, self.size[1] as i32);
-        targets[index].clear_rect(bounds);
+        let background = if matches!(self.effect, Filter::Shade(_)) {
+            0xff00_0000
+        } else {
+            0
+        };
+        targets[index].fill_rect(bounds, background);
         middle.render_into(&mut targets[index], canvas)?;
         match &mut self.effect {
             Filter::Blur(blur) => {
@@ -187,7 +246,7 @@ impl ScreenFilter {
                 }
                 blur.first_frame = false;
                 let image = padded_image(&targets[index], self.texture_size)?;
-                Ok(blur.quad.commands(image, self.size, None))
+                output.extend(blur.quad.commands(image, self.size, None));
             }
             Filter::Mosaic(mosaic) => {
                 let (small, expanded) = mosaic.quads(self.texture_size);
@@ -201,10 +260,83 @@ impl ScreenFilter {
                 }
                 .render_into(&mut targets[1], None)?;
                 let image = padded_image(&targets[1], self.texture_size)?;
-                Ok(expanded.commands(image, self.size, Some(TextureFilter::Point)))
+                output.extend(expanded.commands(image, self.size, Some(TextureFilter::Point)));
+            }
+            Filter::Shade(shade) => {
+                let image = padded_image(&targets[0], self.texture_size)?;
+                for quad in shade.quads() {
+                    output.extend(quad.commands(image.clone(), self.size, None));
+                }
             }
         }
+        Ok(())
     }
+}
+
+impl Shade {
+    fn quads(&self) -> impl Iterator<Item = Quad> + '_ {
+        const OFFSETS: [Option<[i32; 2]>; 48] = shade_offsets();
+        OFFSETS.into_iter().map(|offset| {
+            let mut quad = self.quad;
+            if let Some([x, y]) = offset {
+                for vertex in &mut quad.vertices {
+                    vertex.position[0] += x as f32;
+                    vertex.position[1] += y as f32;
+                }
+                if let Some(radius) = self.radius {
+                    let [x, y, _] = quad.vertices[0].position;
+                    let distance = (x * x + y * y).sqrt();
+                    let opacity = if radius > 0 {
+                        let radius = radius as f32;
+                        ((radius - distance.min(radius)) * 255. / radius) as u32
+                    } else {
+                        0
+                    };
+                    for vertex in &mut quad.vertices {
+                        vertex.color = (opacity << 24) | 0x00ff_ffff;
+                    }
+                }
+            }
+            quad
+        })
+    }
+}
+
+const fn shade_offsets() -> [Option<[i32; 2]>; 48] {
+    let mut offsets: [Option<[i32; 2]>; 48] = [None; 48];
+    let mut y: i32 = -3;
+    while y <= 3 {
+        let mut x: i32 = -3;
+        while x <= 3 {
+            let ax = x.abs();
+            let ay = y.abs();
+            let ring = if ax > ay { ax } else { ay };
+            // 原环索引有重叠，命中同一项时依次累加偏移。
+            let index = if ring == 0 {
+                0
+            } else {
+                let side = if ay == ring {
+                    if x > 0 { 5 * ring - x } else { ring + x }
+                } else if y > 0 {
+                    3 * ring + y
+                } else {
+                    7 * ring - y
+                };
+                (1 + 4 * ring * (ring - 1) + side) as usize
+            };
+            // 最后一组没有初始化顶点。
+            if index < offsets.len() {
+                let [u, v] = match offsets[index] {
+                    Some(offset) => offset,
+                    None => [0, 0],
+                };
+                offsets[index] = Some([u + x, v + y]);
+            }
+            x += 1;
+        }
+        y += 1;
+    }
+    offsets
 }
 
 impl Blur {

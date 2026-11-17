@@ -110,9 +110,6 @@ impl Compositor {
             if !effect.enabled() {
                 return self.drawables.compose(&projection, parent, filter, None);
             }
-            if self.auxiliary_targets.len() < 2 {
-                return Err(Error::new(0, "实时滤镜需要两个辅助渲染目标"));
-            }
             let [near, far] = effect.range;
             let mut frame =
                 self.drawables
@@ -120,11 +117,12 @@ impl Compositor {
             let middle = self
                 .drawables
                 .compose(&projection, parent, filter, Some([near, far]))?;
-            frame.commands.extend(effect.frame(
+            effect.frame(
                 &middle,
                 self.drawing.target.as_ref(),
                 &mut self.auxiliary_targets,
-            )?);
+                &mut frame.commands,
+            )?;
             frame.commands.extend(
                 self.drawables
                     .compose(&projection, parent, filter, Some([far, 1_000_000.]))?

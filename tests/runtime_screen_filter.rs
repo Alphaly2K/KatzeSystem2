@@ -315,32 +315,61 @@ fn render_draw_fades_the_auxiliary_capture_below_the_upper_band() {
 }
 
 #[test]
+fn shade_natives_render_the_middle_band_with_ordered_shifted_samples() {
+    for budget in [1, 4096] {
+        let mut runtime = engine(budget);
+        rectangle(&mut runtime, 102, [2., 2.], [2., 2.], 15., 0xff00ff00);
+        let effect = runtime
+            .create(0, kind::RENDER_SHADE, b"shade", b"")
+            .unwrap();
+        assert_eq!(runtime.compositor().auxiliary_targets().len(), 1);
+        execute(
+            &mut runtime,
+            &[
+                (525, &[0]),
+                (526, &[0]),
+                (525, &[effect, 5, 10f32.to_bits(), 20f32.to_bits()]),
+                (526, &[effect, 0x80000001]),
+            ],
+            vec![],
+            false,
+        );
+        assert_eq!(state(&mut runtime, effect), 0x80000001);
+        let scene = runtime.compose_frame().unwrap();
+        assert_eq!(scene.commands.len(), 100);
+        let shade = &scene.commands[2..98];
+        assert_eq!(shade[0].vertices[0].color, 0xd1ffffff);
+        assert_eq!(shade[2].vertices[0].position, [-2.5, -0.5, 0.5]);
+        assert_eq!(shade[2].vertices[0].color, 0x5cffffff);
+        assert_eq!(shade[6].vertices[0].color, 0xffffffff);
+
+        let image = pixels(&mut runtime);
+        assert_eq!(image.pixel(0, 0), Some(0xffffff00));
+        assert_eq!(image.pixel(3, 3), Some(0xac00a300));
+        assert_eq!(image.pixel(7, 5).map(|argb| argb & 0x00ffffff), Some(0));
+        execute(&mut runtime, &[(526, &[effect, 0])], vec![], false);
+        assert_eq!(state(&mut runtime, effect), 0);
+        assert_eq!(pixels(&mut runtime).pixel(3, 3), Some(0xff00ff00));
+        runtime.destroy(effect).unwrap();
+        assert!(runtime.compositor().auxiliary_targets().is_empty());
+    }
+}
+
+#[test]
 fn unavailable_filter_targets_ignore_configuration_and_remain_inactive() {
-    for object_kind in [kind::RENDER_BLUR, kind::RENDER_MOSAIC, kind::RENDER_DRAW] {
+    for (object_kind, config) in [
+        (kind::RENDER_BLUR, 384),
+        (kind::RENDER_MOSAIC, 386),
+        (kind::RENDER_SHADE, 388),
+        (kind::RENDER_DRAW, 390),
+    ] {
         let mut runtime = engine(1);
         runtime.host_mut().platform_settings = Some(katze_system2::settings::PlatformSettings {
             d3d_backbuffer: 0,
             ..Default::default()
         });
         let effect = runtime.create(0, object_kind, b"unavailable", b"").unwrap();
-        for (code, data) in [
-            (
-                match object_kind {
-                    kind::RENDER_BLUR => 384,
-                    kind::RENDER_MOSAIC => 386,
-                    _ => 390,
-                },
-                [0; 3],
-            ),
-            (
-                match object_kind {
-                    kind::RENDER_BLUR => 385,
-                    kind::RENDER_MOSAIC => 387,
-                    _ => 391,
-                },
-                [0, u32::MAX, 0],
-            ),
-        ] {
+        for (code, data) in [(config, [0; 3]), (config + 1, [0, u32::MAX, 0])] {
             runtime
                 .dispatch_command(
                     0,

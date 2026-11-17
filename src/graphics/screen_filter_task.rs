@@ -1,14 +1,18 @@
-use super::{Compositor, compositor::ScreenEffect, screen_filter::ScreenFilter};
+use super::{
+    Compositor,
+    compositor::ScreenEffect,
+    screen_filter::{FilterKind, ScreenFilter},
+};
 use crate::kcs::{Host, Interpreter};
 use crate::runtime::{BaseObject, TaskObject};
 use crate::task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock};
 use crate::{Error, Result};
 
-/// 类型 35 的实时残影与类型 36 的实时马赛克。
+/// 类型 35～37 的实时残影、马赛克与阴影。
 pub struct ScreenFilterObject {
     base: BaseObject,
     id: u32,
-    mosaic: bool,
+    filter: FilterKind,
     ready: bool,
 }
 
@@ -17,14 +21,21 @@ impl ScreenFilterObject {
         Self {
             base: BaseObject::new(),
             id,
-            mosaic: false,
+            filter: FilterKind::Blur,
             ready: false,
         }
     }
 
     pub fn mosaic(id: u32) -> Self {
         Self {
-            mosaic: true,
+            filter: FilterKind::Mosaic,
+            ..Self::blur(id)
+        }
+    }
+
+    pub fn shade(id: u32) -> Self {
+        Self {
+            filter: FilterKind::Shade,
             ..Self::blur(id)
         }
     }
@@ -62,7 +73,7 @@ impl TaskObject for ScreenFilterObject {
     }
 
     fn initialize_resources(&mut self, host: &mut dyn Host) -> Result<()> {
-        self.ready = host.reserve_auxiliary_targets(2)?;
+        self.ready = host.reserve_auxiliary_targets(self.filter.target_count() as u32)?;
         if self.ready {
             let size = host.surface_size();
             let logical = host.input_coordinates().logical_size;
@@ -76,7 +87,7 @@ impl TaskObject for ScreenFilterObject {
             let compositor = compositor(host)?;
             compositor
                 .screen_filters
-                .insert(self.id, ScreenFilter::new(size, scale, self.mosaic));
+                .insert(self.id, ScreenFilter::new(size, scale, self.filter));
             compositor.screen_effect = Some(ScreenEffect::Filter(self.id));
         }
         Ok(())
@@ -123,10 +134,10 @@ impl TaskObject for ScreenFilterObject {
                     .get(&self.id)
                     .map_or(0, |effect| effect.active);
             }
-            384..=387 if (command.code >= 386) == self.mosaic => {
+            code if self.filter.accepts(code) => {
                 if self.ready {
                     let effect = compositor(host)?.screen_filters.get_mut(&self.id).unwrap();
-                    if matches!(command.code, 384 | 386) {
+                    if code % 2 == 0 {
                         effect.configure(buffers.data1.as_deref().unwrap_or_default())?;
                     } else {
                         effect.set_active(command.data[1]);
