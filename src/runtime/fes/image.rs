@@ -45,15 +45,7 @@ impl<F: ObjectFactory> Store<'_, F> {
             let raw = if name.is_empty() {
                 0
             } else {
-                let services = self
-                    .resources
-                    .services
-                    .as_deref_mut()
-                    .ok_or_else(|| Error::new(0, "运行时未配置 FES 图像资源服务"))?;
-                let mut services = super::preload::ImageServices::new(&cache, services);
-                self.resources
-                    .raw
-                    .load_fes_image(name, &mut services, owner, 0)?
+                self.load_fes_image(&cache, name, owner)?
             };
             objects
                 .get_mut(handle)
@@ -101,7 +93,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                     }
                     Ok(())
                 })();
-                self.resources.raw.release_image(raw)?;
+                self.resources.raw.release_owned_image(owner, raw)?;
                 result?;
                 prepared = true;
             }
@@ -183,20 +175,14 @@ impl<F: ObjectFactory> Store<'_, F> {
                 let raw = if name.is_empty() {
                     0
                 } else {
-                    let services = self
-                        .resources
-                        .services
-                        .as_deref_mut()
-                        .ok_or_else(|| Error::new(0, "运行时未配置 FES 图像资源服务"))?;
-                    let mut services = super::preload::ImageServices::new(&cache, services);
-                    self.resources
-                        .raw
-                        .load_fes_image(name, &mut services, owner, 0)?
+                    self.load_fes_image(&cache, name, owner)?
                 };
                 let loaded_name = String::from_utf8_lossy(name).into_owned();
                 let object_name = objects.get(handle).unwrap().name.clone();
                 let object = objects.get_mut(handle).unwrap();
-                self.resources.raw.release_image(object.raw_image)?;
+                self.resources
+                    .raw
+                    .release_owned_image(owner, object.raw_image)?;
                 object.raw_image = raw;
                 if std::env::var_os("KATZE_TRACE_NATIVE").is_some() {
                     eprintln!(

@@ -144,6 +144,7 @@ pub struct ResourceHost<'a, H, S> {
 pub(crate) struct ResourceState {
     xml: BTreeMap<u32, XmlDocument>,
     images: BTreeMap<u32, ImageData>,
+    owned_images: BTreeMap<u32, BTreeMap<u32, u32>>,
     triples: BTreeMap<u32, super::triples::TripleTable>,
     pub(super) name_tables: BTreeMap<u32, super::name_table::NameTable>,
     pub(super) section_tables: BTreeMap<u32, super::section_table::SectionTable>,
@@ -151,8 +152,8 @@ pub(crate) struct ResourceState {
 }
 
 struct ImageData {
-    bytes: Vec<u8>,
-    owner: Option<u32>,
+    bytes: std::rc::Rc<Vec<u8>>,
+    references: u32,
 }
 
 impl<'a, H: Host, S: ResourceServices> ResourceHost<'a, H, S> {
@@ -165,7 +166,7 @@ impl<'a, H: Host, S: ResourceServices> ResourceHost<'a, H, S> {
         }
     }
 
-    /// 借用成功装载的图像资源原始字节，存活至 366 释放或宿主销毁。
+    /// 借用成功装载的图像资源原始字节，存活至最后一份引用释放。
     pub fn image_data(&self, handle: u32) -> Result<&[u8]> {
         self.state.image_data(handle)
     }
@@ -186,6 +187,24 @@ impl ResourceState {
             .ok_or_else(|| Error::new(0, "KCS 图像数据句柄无效"))
     }
 
+    pub(crate) fn retain_image(&mut self, owner: u32, handle: u32) -> Result<std::rc::Rc<Vec<u8>>> {
+        let image = self
+            .images
+            .get_mut(&handle)
+            .ok_or_else(|| Error::new(0, "KCS 图像数据句柄无效"))?;
+        image.references = image
+            .references
+            .checked_add(1)
+            .ok_or_else(|| Error::new(0, "KCS 图像数据引用超过上限"))?;
+        *self
+            .owned_images
+            .entry(owner)
+            .or_default()
+            .entry(handle)
+            .or_default() += 1;
+        Ok(image.bytes.clone())
+    }
+
     pub fn load_image(
         &mut self,
         name: &[u8],
@@ -203,18 +222,27 @@ impl ResourceState {
         self.insert_image(bytes, owner, offset)
     }
 
-    pub(crate) fn load_fes_image(
+    pub(crate) fn load_resolved_fes_image(
         &mut self,
         name: &[u8],
         services: &mut dyn ResourceServices,
         owner: u32,
         offset: usize,
     ) -> Result<u32> {
-        let name = services.resolve(b"image", name)?;
-        let Some(bytes) = services.read(&name, ResourceMode::LooseFirst)? else {
+        let Some(bytes) = services.read(name, ResourceMode::LooseFirst)? else {
             return Ok(0);
         };
         self.insert_image(bytes, Some(owner), offset)
+    }
+
+    pub(crate) fn cache_image(
+        &mut self,
+        owner: u32,
+        bytes: Vec<u8>,
+        offset: usize,
+    ) -> Result<(u32, std::rc::Rc<Vec<u8>>)> {
+        let handle = self.insert_image(bytes, Some(owner), offset)?;
+        Ok((handle, self.images[&handle].bytes.clone()))
     }
 
     fn insert_image(&mut self, bytes: Vec<u8>, owner: Option<u32>, offset: usize) -> Result<u32> {
@@ -222,19 +250,68 @@ impl ResourceState {
             return Err(Error::new(offset, "KCS 图像资源超过读取上限"));
         }
         let handle = self.allocate_handle(offset)?;
-        self.images.insert(handle, ImageData { bytes, owner });
+        self.images.insert(
+            handle,
+            ImageData {
+                bytes: std::rc::Rc::new(bytes),
+                references: 1,
+            },
+        );
+        if let Some(owner) = owner {
+            self.owned_images
+                .entry(owner)
+                .or_default()
+                .insert(handle, 1);
+        }
         Ok(handle)
     }
 
+    pub(crate) fn release_owned_image(&mut self, owner: u32, handle: u32) -> Result<()> {
+        if handle == 0 {
+            return Ok(());
+        }
+        let handles = self
+            .owned_images
+            .get_mut(&owner)
+            .ok_or_else(|| Error::new(0, "KCS 图像数据所属任务无效"))?;
+        let count = handles
+            .get_mut(&handle)
+            .ok_or_else(|| Error::new(0, "KCS 图像数据所属任务无效"))?;
+        *count -= 1;
+        if *count == 0 {
+            handles.remove(&handle);
+        }
+        if handles.is_empty() {
+            self.owned_images.remove(&owner);
+        }
+        self.release_image(handle)
+    }
+
     pub fn release_image(&mut self, handle: u32) -> Result<()> {
-        if handle != 0 && self.images.remove(&handle).is_none() {
-            return Err(Error::new(0, "KCS 图像数据句柄无效"));
+        if handle != 0 {
+            let image = self
+                .images
+                .get_mut(&handle)
+                .ok_or_else(|| Error::new(0, "KCS 图像数据句柄无效"))?;
+            image.references -= 1;
+            if image.references == 0 {
+                self.images.remove(&handle);
+            }
         }
         Ok(())
     }
 
     pub fn release_owner(&mut self, owner: u32) {
-        self.images.retain(|_, image| image.owner != Some(owner));
+        if let Some(handles) = self.owned_images.remove(&owner) {
+            for (handle, count) in handles {
+                if let Some(image) = self.images.get_mut(&handle) {
+                    image.references = image.references.saturating_sub(count);
+                    if image.references == 0 {
+                        self.images.remove(&handle);
+                    }
+                }
+            }
+        }
     }
 
     pub(super) fn allocate_handle(&mut self, offset: usize) -> Result<u32> {

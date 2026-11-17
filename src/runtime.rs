@@ -403,7 +403,7 @@ impl<F: ObjectFactory> Runtime<F> {
         self.resources.update_image_list(list, true, false, None)
     }
 
-    /// 365 装载的原始图像字节，存活至 366 显式释放或运行时销毁。
+    /// 365 装载或 FES 保留的原始图像字节，存活至最后一份引用释放。
     pub fn image_data(&self, handle: u32) -> Result<&[u8]> {
         self.resources.raw.image_data(handle)
     }
@@ -1043,6 +1043,32 @@ fn run_nested<F: ObjectFactory>(
                         name,
                         crate::read::u32_at(bytes, 32)?,
                         numbers,
+                    )?;
+                }
+                return Ok(());
+            }
+            if command.code == 356 {
+                **propagate = false;
+                if !running.get(&target).is_some_and(|task| task.deleted) {
+                    let scene = &mut fes_scene.as_mut().unwrap().scene;
+                    let mut nested = ObjectHost {
+                        numbers,
+                        host,
+                        resources,
+                        tree,
+                        objects,
+                        running,
+                        factory,
+                        fes_scene: None,
+                        context: Vec::new(),
+                        budget,
+                        limit,
+                    };
+                    scene.bind_image_resource(
+                        target,
+                        command.data[1],
+                        buffers.data0.as_deref(),
+                        &mut nested,
                     )?;
                 }
                 return Ok(());

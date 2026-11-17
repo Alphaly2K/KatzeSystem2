@@ -8,7 +8,54 @@ use std::{
     rc::Rc,
 };
 
-pub(super) type Cache = Rc<BTreeMap<Vec<u8>, Vec<u8>>>;
+#[derive(Clone)]
+pub(super) struct CachedImage {
+    pub handle: u32,
+    pub bytes: Rc<Vec<u8>>,
+}
+
+pub(super) type Cache = Rc<BTreeMap<Vec<u8>, CachedImage>>;
+
+pub(super) fn bind_image_resource(
+    cache: &mut Cache,
+    owner: u32,
+    source: u32,
+    input: Option<&[u8]>,
+    host: &mut dyn crate::kcs::Host,
+) -> Result<()> {
+    if source == 0 {
+        return Ok(());
+    }
+    let name = crate::read::zstr(
+        input.ok_or_else(|| Error::new(0, "FES 图像绑定名称缓冲区缺失"))?,
+        0,
+    )?;
+    let name = host
+        .resource_services()
+        .ok_or_else(|| Error::new(0, "运行时未配置 FES 图像资源服务"))?
+        .resolve(b"image", name)?;
+    let name = terminated(&name);
+    if name.len() >= 260 {
+        return Err(Error::new(0, "FES 图像绑定完整名称超过容量"));
+    }
+    if !cache.contains_key(name) {
+        if cache.len() >= read::MAX_ITEMS {
+            return Err(Error::new(0, "FES 预加载资源数量超过上限"));
+        }
+        let bytes = host
+            .fes_services()
+            .ok_or_else(|| Error::new(0, "宿主未提供 FES 资源绑定服务"))?
+            .retain_image_data(owner, source)?;
+        Rc::make_mut(cache).insert(
+            name.to_vec(),
+            CachedImage {
+                handle: source,
+                bytes,
+            },
+        );
+    }
+    Ok(())
+}
 
 pub(super) struct Preload {
     lines: VecDeque<fes::Line>,
@@ -42,12 +89,12 @@ impl Objects {
     pub fn preloaded_image(&self, name: &[u8]) -> Option<&[u8]> {
         self.preloaded_images
             .get(terminated(name))
-            .map(Vec::as_slice)
+            .map(|image| image.bytes.as_slice())
     }
 }
 
 impl<F: ObjectFactory> Store<'_, F> {
-    pub(super) fn preload_fes_images(&mut self, scene: &mut Scene) -> Result<bool> {
+    pub(super) fn preload_fes_images(&mut self, owner: u32, scene: &mut Scene) -> Result<bool> {
         for _ in 0..self.budget.max(1) {
             let Some(line) = scene.preload.lines.front() else {
                 return Ok(true);
@@ -79,7 +126,13 @@ impl<F: ObjectFactory> Store<'_, F> {
                     if !cache.contains_key(name) && cache.len() >= read::MAX_ITEMS {
                         return Err(Error::new(0, "FES 预加载资源数量超过上限"));
                     }
-                    cache.entry(name.to_vec()).or_insert(bytes);
+                    if let std::collections::btree_map::Entry::Vacant(entry) =
+                        cache.entry(name.to_vec())
+                    {
+                        let (handle, bytes) =
+                            self.resources.raw.cache_image(owner, bytes, offset)?;
+                        entry.insert(CachedImage { handle, bytes });
+                    }
                 }
                 Ok(())
             })();
@@ -112,9 +165,27 @@ impl ResourceServices for ImageServices<'_> {
 
     fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
         match self.cache.get(terminated(name)) {
-            Some(bytes) => Ok(Some(bytes.clone())),
+            Some(image) => Ok(Some(image.bytes.as_ref().clone())),
             None => self.inner.read(name, mode),
         }
+    }
+}
+
+impl<F: ObjectFactory> Store<'_, F> {
+    pub(super) fn load_fes_image(&mut self, cache: &Cache, name: &[u8], owner: u32) -> Result<u32> {
+        let services = self
+            .resources
+            .services
+            .as_deref_mut()
+            .ok_or_else(|| Error::new(0, "运行时未配置 FES 图像资源服务"))?;
+        let name = services.resolve(b"image", name)?;
+        if let Some(image) = cache.get(terminated(&name)) {
+            self.resources.raw.retain_image(owner, image.handle)?;
+            return Ok(image.handle);
+        }
+        self.resources
+            .raw
+            .load_resolved_fes_image(&name, services, owner, 0)
     }
 }
 

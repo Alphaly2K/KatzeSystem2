@@ -16,7 +16,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         let length = match index {
             448 | 665..=668 => 4,
             630 | 631 => 16,
-            645 | 664 | 882 => 12,
+            645 | 664 | 738 | 882 => 12,
             _ => 8,
         };
         if arguments.len() != length {
@@ -24,12 +24,12 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         }
         let target = read::u32_at(arguments, 0)?;
         match index {
-            664 => {
+            664 | 738 => {
                 let mut name = format_string(vm, read::u32_at(arguments, 4)?, 0)?;
                 name.push(0);
                 self.command_target_with_buffers(
                     target,
-                    351,
+                    if index == 664 { 351 } else { 356 },
                     [0, read::u32_at(arguments, 8)?, 0],
                     &mut CommandBuffers {
                         data0: Some(&mut name),

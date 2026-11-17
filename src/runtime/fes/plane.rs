@@ -393,6 +393,14 @@ impl<F: ObjectFactory> Store<'_, F> {
         for id in objects.objects.keys().copied().collect::<Vec<_>>() {
             self.release_fes_object_images(owner, objects, id, list)?;
         }
+        let cache = std::rc::Rc::make_mut(&mut objects.preloaded_images);
+        while let Some((name, image)) = cache.first_key_value() {
+            self.resources
+                .raw
+                .release_owned_image(owner, image.handle)?;
+            let name = name.clone();
+            cache.remove(&name);
+        }
         Ok(())
     }
 
@@ -486,7 +494,7 @@ impl<F: ObjectFactory> Store<'_, F> {
             object.image = None;
         }
         let raw = objects.get(id).unwrap().raw_image;
-        self.resources.raw.release_image(raw)?;
+        self.resources.raw.release_owned_image(owner, raw)?;
         objects.get_mut(id).unwrap().raw_image = 0;
         Ok(())
     }

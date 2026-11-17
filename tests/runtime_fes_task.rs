@@ -55,6 +55,55 @@ struct Factory {
 }
 impl ObjectFactory for Factory {
     fn create(&mut self, id: u32, kind: u32, name: &[u8]) -> Result<Box<dyn TaskObject>> {
+        if kind == kind::ORDINARY && name == b"resource binding driver" {
+            fn ins(code: &mut Vec<u8>, op: u8, values: &[u32]) {
+                code.push(op);
+                for value in values {
+                    code.push(3);
+                    code.extend(value.to_le_bytes());
+                }
+            }
+            fn call(code: &mut Vec<u8>, native: u32, args: &[u32], output: Option<u32>) {
+                for value in args {
+                    ins(code, 0x25, &[*value]);
+                }
+                ins(code, 0x2b, &[native, args.len() as u32 * 4]);
+                if let Some(at) = output {
+                    ins(code, 0x26, &[at]);
+                }
+            }
+            let mut code = Vec::new();
+            ins(&mut code, 0x25, &[0xdead_beef]);
+            call(&mut code, 365, &[128], Some(4));
+            call(&mut code, 365, &[160], Some(8));
+            call(&mut code, 738, &[3, 192, 0], None);
+            for (target, address) in [(0, 4), (u32::MAX, 4), (3, 4), (3, 8), (4, 4)] {
+                ins(&mut code, 0x25, &[target]);
+                ins(&mut code, 0x25, &[192]);
+                ins(&mut code, 0x2f, &[address]);
+                ins(&mut code, 0x2b, &[738, 12]);
+            }
+            for address in [4, 8] {
+                ins(&mut code, 0x2f, &[address]);
+                ins(&mut code, 0x2b, &[366, 4]);
+            }
+            call(&mut code, 65, &[], None);
+            let mut data = vec![0; 256];
+            data[..4].copy_from_slice(&7u32.to_le_bytes());
+            for (at, name) in [
+                (128, b"one\0".as_slice()),
+                (160, b"two\0"),
+                (192, b"bound_%d[G0]\0"),
+            ] {
+                data[at..at + name.len()].copy_from_slice(name);
+            }
+            let mut task = katze_system2::kcs::OrdinaryTask::new(
+                Program::from_code(&code, data, 256)?,
+                Vec::new(),
+            )?;
+            task.task_id = id;
+            return Ok(Box::new(OrdinaryObject::new(task)));
+        }
         if kind == kind::ORDINARY && name == b"named context driver" {
             fn call(code: &mut Vec<u8>, native: u32, args: &[u32], output: Option<u32>) {
                 let mut ins = |op: u8, values: &[u32]| {
@@ -350,12 +399,22 @@ impl ObjectFactory for Factory {
             ins(0x25, 3, &[128]);
             ins(0x2b, 3, &[883, 8]);
             ins(0x26, 3, &[28]);
+            ins(0x25, 3, &[144]);
+            ins(0x2b, 3, &[365, 4]);
+            ins(0x26, 3, &[56]);
+            ins(0x2f, 3, &[32]);
+            ins(0x25, 3, &[144]);
+            ins(0x2f, 3, &[56]);
+            ins(0x2b, 3, &[738, 12]);
+            ins(0x2f, 3, &[56]);
+            ins(0x2b, 3, &[366, 4]);
             ins(0x29, 3, &[0]);
             let mut data = vec![0; 160];
             data[64..70].copy_from_slice(b"REPLY\0");
             data[96..107].copy_from_slice(b"item COLOR\0");
             data[112..121].copy_from_slice(b"callback\0");
             data[128..137].copy_from_slice(b"response\0");
+            data[144..152].copy_from_slice(b"binding\0");
             let mut task = katze_system2::kcs::OrdinaryTask::new(
                 Program::from_code(&code, data, 160)?,
                 Vec::new(),
@@ -503,6 +562,10 @@ impl ResourceServices for Files {
         if category == b"mot" {
             assert_eq!(name, b"dummy");
             return Ok(b"draw.kcs".to_vec());
+        }
+        if category == b"image" {
+            assert_eq!(name, b"binding");
+            return Ok(name.to_vec());
         }
         assert_eq!(category, b"fes");
         if name == b"child" {
@@ -1336,6 +1399,156 @@ fn fes_release_removes_only_its_entries_from_an_ancestor_image_list() {
             runtime.drawing().target.as_ref().unwrap().pixel(1, 1),
             Some(0)
         );
+    }
+}
+
+#[test]
+fn raw_image_bindings_precede_initialization_keep_first_sources_and_release_shared_references() {
+    fn image_bytes(color: u32) -> Vec<u8> {
+        let raw = katze_system2::hg2::encode_frame([1, 1], &color.to_le_bytes()).unwrap();
+        let field = |at| u32::from_le_bytes(raw[at..at + 4].try_into().unwrap());
+        let mut bytes = b"HG-3".to_vec();
+        for value in [12u32, 0x300, 0, 0] {
+            bytes.extend(value.to_le_bytes());
+        }
+        bytes.extend(b"stdinfo\0");
+        for value in [56u32, 40, 1, 1, 32, 0, 0, 1, 1, 0, 0, 0] {
+            bytes.extend(value.to_le_bytes());
+        }
+        bytes.extend(b"img0000\0");
+        for value in [
+            0,
+            24 + field(32) + field(40),
+            0,
+            1,
+            field(32),
+            field(36),
+            field(40),
+            field(44),
+        ] {
+            bytes.extend(value.to_le_bytes());
+        }
+        bytes.extend(&raw[88..]);
+        bytes
+    }
+    struct BindingFiles {
+        files: BTreeMap<Vec<u8>, Vec<u8>>,
+        reads: Rc<RefCell<Vec<Vec<u8>>>>,
+    }
+    impl ResourceServices for BindingFiles {
+        fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+            assert_eq!(category, b"image");
+            Ok([b"image/".as_slice(), name].concat())
+        }
+        fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
+            assert_eq!(mode, ResourceMode::LooseFirst);
+            self.reads.borrow_mut().push(name.to_vec());
+            Ok(self.files.get(name).cloned())
+        }
+    }
+    for (budget, initialize_second) in [(1, false), (1, true), (4096, false), (4096, true)] {
+        let mut setup = setup(budget, b"");
+        let original = image_bytes(0xff123456);
+        let alternate = image_bytes(0xffabcdef);
+        let script = b"#PRELOAD\nbound_7\n#DEFINE\nIMAGE raw\nIMAGE decoded\n#OBJECT FILE IDN DISP\nraw bound_7 -1 0\ndecoded bound_7 0 0\n#START\nwait 1000\n";
+        setup.runtime.set_resources(BindingFiles {
+            files: BTreeMap::from([
+                (b"image/one".to_vec(), original.clone()),
+                (b"image/two".to_vec(), alternate.clone()),
+                (b"image/bound_7".to_vec(), alternate),
+                (b"complete.fes".to_vec(), packed(script)),
+            ]),
+            reads: setup.reads.clone(),
+        });
+        let rt = &mut setup.runtime;
+        let first = rt.create(0, kind::FES, b"first", b"").unwrap();
+        let second = rt.create(0, kind::FES, b"second", b"").unwrap();
+        assert_eq!((first, second), (3, 4));
+        assert_eq!(send(rt, first, 356, 0, 0), 0);
+        let caller = rt
+            .create(0, kind::ORDINARY, b"resource binding driver", b"")
+            .unwrap();
+        rt.update(0, 1).unwrap();
+        let vm = rt.object(caller).unwrap().interpreter().unwrap();
+        let source = u32::from_le_bytes(vm.read(4, 4).unwrap().try_into().unwrap());
+        let ignored = u32::from_le_bytes(vm.read(8, 4).unwrap().try_into().unwrap());
+        assert_eq!(vm.stack_bytes(), 0xdead_beefu32.to_le_bytes());
+        assert_eq!(rt.image_data(source).unwrap(), original);
+        assert!(rt.image_data(ignored).is_err());
+        rt.destroy(caller).unwrap();
+        send(rt, first, 337, 0, 0);
+        if initialize_second {
+            send(rt, second, 337, 0, 0);
+        }
+        let list = rt.create(first, kind::IMAGE_LIST, b"list", b"").unwrap();
+        send(rt, list, 285, 8, 6);
+        send(rt, first, 340, 0, list);
+        file(rt, first, b"complete.fes").unwrap();
+        let raw = rt
+            .object(first)
+            .unwrap()
+            .fes_scene()
+            .unwrap()
+            .objects()
+            .lookup("raw", 0)
+            .unwrap();
+        send(rt, first, 339, 0, 0);
+        let scene = rt.object(first).unwrap().fes_scene().unwrap();
+        assert_eq!(scene.objects().get(raw).unwrap().raw_image_handle(), source);
+        assert_eq!(
+            scene
+                .objects()
+                .preloaded_image(b"image/bound_7")
+                .unwrap()
+                .as_ptr(),
+            rt.image_data(source).unwrap().as_ptr()
+        );
+        let decoded = scene.objects().lookup("decoded", 0).unwrap();
+        let wrapper = scene
+            .objects()
+            .get(decoded)
+            .unwrap()
+            .image_handle()
+            .unwrap();
+        assert_eq!(
+            rt.images().get(wrapper).unwrap().surface().pixel(0, 0),
+            Some(0xff123456)
+        );
+        assert_eq!(
+            *setup.reads.borrow(),
+            [
+                b"image/one".to_vec(),
+                b"image/two".to_vec(),
+                b"complete.fes".to_vec(),
+                b"image/bound_7".to_vec()
+            ]
+        );
+        let mut name = b"bound_7\0".to_vec();
+        rt.dispatch_command_with_buffers(
+            0,
+            command(first, 356, 0, u32::MAX),
+            &mut CommandBuffers {
+                data0: Some(&mut name),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let mut name = b"unbound\0".to_vec();
+        assert!(
+            rt.dispatch_command_with_buffers(
+                0,
+                command(first, 356, 0, u32::MAX),
+                &mut CommandBuffers {
+                    data0: Some(&mut name),
+                    ..Default::default()
+                }
+            )
+            .is_err()
+        );
+        rt.destroy(first).unwrap();
+        assert_eq!(rt.image_data(source).unwrap(), original);
+        rt.destroy(second).unwrap();
+        assert!(rt.image_data(source).is_err());
     }
 }
 
@@ -3182,11 +3395,17 @@ fn focus_notifications_wait_for_the_body_and_lock_commands_end_local_handlers() 
 #[test]
 fn fes_send_allows_synchronous_parameter_access_and_a_block_callback() {
     for budget in [1, 4096] {
-        let mut runtime = setup(
-            budget,
-            b"#DEFINE\nCIMAGE item\n#OBJECT SIZE COLOR\nitem 1,1 0xff112233\n#START\nsend 7 8 9\n$0=$0+1\nexit 37\nwait 1000\n#REPLY\n$1=\\7\n",
-        )
-        .runtime;
+        let source = b"#DEFINE\nCIMAGE item\n#OBJECT SIZE COLOR\nitem 1,1 0xff112233\n#START\nsend 7 8 9\n$0=$0+1\nexit 37\nwait 1000\n#REPLY\n$1=\\7\n";
+        let mut setup = setup(budget, source);
+        setup.runtime.set_resources(Files {
+            files: BTreeMap::from([
+                (b"complete.fes".to_vec(), packed(source)),
+                (b"binding".to_vec(), vec![1, 2, 3]),
+            ]),
+            reads: setup.reads.clone(),
+            fail_media: setup.fail_media.clone(),
+        });
+        let mut runtime = setup.runtime;
         let parent = runtime
             .create(0, kind::ORDINARY, b"send receiver", b"")
             .unwrap();
@@ -3198,6 +3417,17 @@ fn fes_send_allows_synchronous_parameter_access_and_a_block_callback() {
         send(&mut runtime, list, 285, 8, 6);
         send(&mut runtime, fes, 340, 0, list);
         send(&mut runtime, fes, 339, 0, 0);
+        let raw = u32::from_le_bytes(
+            runtime
+                .object(parent)
+                .unwrap()
+                .interpreter()
+                .unwrap()
+                .read(56, 4)
+                .unwrap()
+                .try_into()
+                .unwrap(),
+        );
         runtime.update(101, 1).unwrap();
         assert_eq!(&runtime.numbers().shared[..2], &[1, 91]);
         let vm = runtime.object(parent).unwrap().interpreter().unwrap();
@@ -3225,6 +3455,13 @@ fn fes_send_allows_synchronous_parameter_access_and_a_block_callback() {
         assert_eq!(image.color, 0);
         let callback = scene.objects().lookup("callback", 0).unwrap();
         assert_eq!(scene.objects().get(callback).unwrap().parent(), None);
+        assert_eq!(
+            scene.objects().preloaded_image(b"binding"),
+            Some([1, 2, 3].as_slice())
+        );
+        assert_eq!(runtime.image_data(raw).unwrap(), [1, 2, 3]);
+        runtime.destroy(fes).unwrap();
+        assert!(runtime.image_data(raw).is_err());
     }
 }
 

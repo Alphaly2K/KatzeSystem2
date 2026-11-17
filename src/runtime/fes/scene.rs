@@ -199,6 +199,22 @@ impl Scene {
         self.interpreter.local_values()
     }
 
+    pub(in crate::runtime) fn bind_image_resource(
+        &mut self,
+        owner: u32,
+        source: u32,
+        input: Option<&[u8]>,
+        host: &mut dyn crate::kcs::Host,
+    ) -> Result<()> {
+        super::preload::bind_image_resource(
+            &mut self.objects.preloaded_images,
+            owner,
+            source,
+            input,
+            host,
+        )
+    }
+
     pub(in crate::runtime) fn register_named_value(
         &mut self,
         name: &[u8],
@@ -778,7 +794,7 @@ impl<F: ObjectFactory> Store<'_, F> {
         {
             return Ok(false);
         }
-        if !self.preload_fes_images(scene)? {
+        if !self.preload_fes_images(owner, scene)? {
             return Ok(false);
         }
         self.prepare_fes_media(owner, scene)
@@ -1597,7 +1613,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                 scene.invocation.as_mut().unwrap().flush_scripts = false;
             }
             if !scene.interpreter.initialization_pending()
-                && (!self.preload_fes_images(scene)?
+                && (!self.preload_fes_images(owner, scene)?
                     || (scene.media_prepared != scene.objects.update_order.len()
                         && !self.prepare_fes_media(owner, scene)?))
             {

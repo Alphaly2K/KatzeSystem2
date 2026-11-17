@@ -6,6 +6,10 @@ use crate::{Error, Result, fes};
 
 /// FES 任务所需的共享表达式状态、媒体更新及启动时的子树调度。
 pub trait Services {
+    /// 为指定任务持有一份原始图像数据引用；释放任务时回收。
+    fn retain_image_data(&mut self, _owner: u32, _handle: u32) -> Result<std::rc::Rc<Vec<u8>>> {
+        Err(Error::new(0, "FES 图像数据引用服务尚未提供"))
+    }
     /// 写入 FES 表达式命名值，并选择其完整求值上下文。
     fn register_named_value(
         &mut self,
@@ -119,6 +123,9 @@ pub trait Services {
 }
 
 impl<F: ObjectFactory> Services for ObjectHost<'_, F> {
+    fn retain_image_data(&mut self, owner: u32, handle: u32) -> Result<std::rc::Rc<Vec<u8>>> {
+        self.resources.raw.retain_image(owner, handle)
+    }
     fn register_named_value(&mut self, scene: &mut Scene, name: &[u8], value: u32) -> Result<()> {
         scene.register_named_value(name, value, self.numbers)
     }
@@ -357,7 +364,7 @@ pub struct FesObject {
     loaded: bool,
     started: bool,
     scene: Option<Scene>,
-    // 脚本标识符使用 ASCII，宿主命令还接受任意原始字节键。
+    preloaded_images: super::preload::Cache,
     external: crate::memory::SharedMemory,
     pending: Option<Command>,
     name: Vec<u8>,
@@ -426,6 +433,7 @@ impl FesObject {
             loaded: false,
             started: false,
             scene: None,
+            preloaded_images: Default::default(),
             external,
             pending: None,
             name: Vec::new(),
@@ -1181,6 +1189,7 @@ impl TaskObject for FesObject {
                     .handle_allocator()
                     .ok_or_else(|| Error::new(0, "宿主未提供 FES 共享编号源"))?;
                 let mut scene = Scene::new(fes::Program::from_text(b"")?, handles)?;
+                scene.objects.preloaded_images = std::mem::take(&mut self.preloaded_images);
                 scene.set_system_value("_EXITCODE_", -1);
                 scene.set_system_value("_SAVEOBJ_", 0);
                 scene.set_system_value("_FRAME_", 0);
@@ -1471,7 +1480,20 @@ impl TaskObject for FesObject {
                 let name = crate::read::zstr(&bytes[..32], 0)?;
                 services(host)?.define_object(scene, b, name, crate::read::u32_at(bytes, 32)?)?;
             }
-            178 | 356 => {
+            356 => {
+                let cache = match &mut self.scene {
+                    Some(scene) => &mut scene.objects.preloaded_images,
+                    None => &mut self.preloaded_images,
+                };
+                super::preload::bind_image_resource(
+                    cache,
+                    self.id,
+                    b,
+                    buffers.data0.as_deref(),
+                    host,
+                )?;
+            }
+            178 => {
                 return Err(Error::new(0, "FES 专属命令尚未接入"));
             }
             _ => {
@@ -1527,7 +1549,7 @@ impl TaskObject for FesObject {
             }
         }
         if let Some(scene) = &mut self.scene {
-            if scene
+            if !scene.objects.preloaded_images.is_empty() || scene
                 .objects
                 .objects
                 .values()
