@@ -15,24 +15,44 @@ pub(crate) fn decode_channels(
     let mut pixels = vec![0; size];
     // 位平面按完整游程缓冲分组；小图允许在可见像素之后保留填充。
     let plane_size = planes.len() / 4;
-    for (index, pixel) in pixels.chunks_mut(4).enumerate() {
-        for (channel, value) in pixel.iter_mut().enumerate() {
-            let mut packed = 0;
-            for plane in 0..4 {
-                let pair = (planes[plane * plane_size + index] >> (channel * 2)) & 3;
-                packed |= pair << (6 - plane * 2);
-            }
-            *value = (packed >> 1) ^ 0u8.wrapping_sub(packed & 1);
-        }
+    let (a, rest) = planes.split_at(plane_size);
+    let (b, rest) = rest.split_at(plane_size);
+    let (c, d) = rest.split_at(plane_size);
+    let mut words = pixels.chunks_exact_mut(4);
+    for (pixel, ((&a, &b), (&c, &d))) in words.by_ref().zip(a.iter().zip(b).zip(c.iter().zip(d))) {
+        pixel.copy_from_slice(&unpack_planes(a, b, c, d));
+    }
+    let tail = words.into_remainder();
+    if !tail.is_empty() {
+        let index = size / 4;
+        tail.copy_from_slice(&unpack_planes(a[index], b[index], c[index], d[index])[..tail.len()]);
     }
     let stride = dimensions[0] as usize * channels;
+    let mut rows = pixels.chunks_exact_mut(stride);
+    let mut previous = rows.next().unwrap();
     for index in channels..stride {
-        pixels[index] = pixels[index].wrapping_add(pixels[index - channels]);
+        previous[index] = previous[index].wrapping_add(previous[index - channels]);
     }
-    for index in stride..size {
-        pixels[index] = pixels[index].wrapping_add(pixels[index - stride]);
+    for row in rows {
+        for (pixel, &above) in row.iter_mut().zip(previous.iter()) {
+            *pixel = pixel.wrapping_add(above);
+        }
+        previous = row;
     }
     Ok(pixels)
+}
+
+fn unpack_planes(a: u8, b: u8, c: u8, d: u8) -> [u8; 4] {
+    fn spread(byte: u8) -> u32 {
+        let byte = u32::from(byte);
+        // 将一个位平面的四对位各放入一个独立字节。
+        let nibbles = (byte | (byte << 12)) & 0x000f_000f;
+        (nibbles | (nibbles << 6)) & 0x0303_0303
+    }
+
+    let packed = (spread(a) << 6) | (spread(b) << 4) | (spread(c) << 2) | spread(d);
+    let sign = (packed & 0x0101_0101) * 255;
+    (((packed & 0xfefe_fefe) >> 1) ^ sign).to_le_bytes()
 }
 
 pub(crate) fn byte_size(dimensions: [u32; 2]) -> Result<usize> {
