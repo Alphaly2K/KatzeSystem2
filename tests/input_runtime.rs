@@ -37,6 +37,9 @@ fn ordinary_input_wrappers_query_devices_and_update_regions_and_key_switches() -
             for (i, value) in [1i32, 2, 5, 6].into_iter().enumerate() {
                 data[65 + i * 4..69 + i * 4].copy_from_slice(&value.to_le_bytes());
             }
+            for (i, value) in [0i32, 0, 1, 1].into_iter().enumerate() {
+                data[85 + i * 4..89 + i * 4].copy_from_slice(&value.to_le_bytes());
+            }
             Ok(Some(Program::from_code(&self.0, data, 128)?))
         }
     }
@@ -59,6 +62,7 @@ fn ordinary_input_wrappers_query_devices_and_update_regions_and_key_switches() -
         emit(code, 0x26, &[124]);
     };
     emit(&mut code, 0x25, &[0xdead_beef]);
+    call(&mut code, 144, &[0x8765_4321, u32::MAX, 85, 2]);
     call(&mut code, 285, &[0]);
     emit(&mut code, 0x26, &[0]);
     for (native, args) in [
@@ -119,26 +123,18 @@ fn ordinary_input_wrappers_query_devices_and_update_regions_and_key_switches() -
                 ..Default::default()
             },
         )?;
-        let mut bytes = region(caller, [0, 0, 1, 1]);
-        rt.dispatch_command_with_buffers(
-            0,
-            Command {
-                sender: 0,
-                target: input,
-                code: 127,
-                data: [0; 3],
-            },
-            &mut CommandBuffers {
-                data1: Some(&mut bytes),
-                ..Default::default()
-            },
-        )?;
         rt.update(0, 0)?;
         let current = rt.input_state(input).unwrap();
         let entry = current.regions().get(9).unwrap();
         assert_eq!(entry.priority(), 77);
         assert_eq!(entry.event_mask(), 0x1234_5678);
         assert_eq!(entry.bounds(), Rect::from_xywh(1, 2, 4, 4));
+        let own = current.regions().get(caller).unwrap();
+        assert_eq!(own.priority(), -1);
+        assert_eq!(own.event_mask(), 2);
+        assert_eq!(own.bounds(), Rect::from_xywh(0, 0, 1, 1));
+        assert_eq!(own.enabled(), 1);
+        assert_eq!(own.selection_enabled(), 1);
         assert_eq!(current.keys().enabled()[0], 0);
         assert_eq!(current.pointer().idle_limit, 360);
         assert_eq!(current.pointer().cursor_requested, 0);

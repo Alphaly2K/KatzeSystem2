@@ -11,6 +11,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
         let (code, length) = match index {
+            144 => (127, 16),
             145 => (128, 0),
             146 => (129, 8),
             147 => (130, 8),
@@ -39,31 +40,42 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             0
         };
         let data = match index {
+            144 => [b, 0, 0],
             145 => [0, self.host.task_id, 0],
             401 => [0, a, 0],
             147 => [a, u32::from(b != 0), 0],
             150 => [read::u32_at(arguments, 8)?, (a & 0xffff) | (b << 16), 0],
             _ => [a, b, 0],
         };
-        let target = self.command_target(0, 34, [0; 3])?;
         let sender = self.host.task_id;
-        let mut rectangle = if index == 147 && b != 0 {
-            Some(vm.read(b, 16)?.to_vec())
+        let mut buffer = if index == 144 {
+            let mut record = vec![0; 60];
+            record[..4].copy_from_slice(&sender.to_le_bytes());
+            record[8..12].copy_from_slice(&arguments[12..16]);
+            let address = read::u32_at(arguments, 8)?;
+            if address != 0 {
+                record[12..28].copy_from_slice(&vm.read(address, 16)?);
+            }
+            Some(record)
         } else {
             None
         };
+        let target = self.command_target(0, 34, [0; 3])?;
+        if index == 147 && b != 0 {
+            buffer = Some(vm.read(b, 16)?.to_vec());
+        }
         let mut output = 0;
         route_command(
             self.store(),
             sender,
             Command {
                 target,
-                sender,
+                sender: if index == 144 { a } else { sender },
                 code,
                 data,
             },
             &mut CommandBuffers {
-                data1: rectangle.as_deref_mut(),
+                data1: buffer.as_deref_mut(),
                 ..CommandBuffers::default()
             },
             &mut output,
