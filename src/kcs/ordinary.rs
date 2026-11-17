@@ -14,6 +14,17 @@ enum CommandPhase {
     Notification(Command, [u32; 4], usize),
 }
 
+fn with_increment<T>(
+    vm: &mut Interpreter,
+    increment: &mut u32,
+    execute: impl FnOnce(&mut Interpreter) -> Result<T>,
+) -> Result<T> {
+    vm.ordinary_increment = Some(*increment);
+    let result = execute(vm);
+    *increment = vm.ordinary_increment.take().unwrap();
+    result
+}
+
 /// 已装载的普通 KCS 任务；子任务树与对象命令由外层宿主管理。
 pub struct OrdinaryTask {
     pub interpreter: Interpreter,
@@ -80,7 +91,11 @@ impl OrdinaryTask {
         };
         self.synchronize(host, select_numbers);
         self.apply_effects(host)?;
-        let step = self.interpreter.resume(host, budget)?;
+        let step = with_increment(
+            &mut self.interpreter,
+            &mut self.accumulated_increment,
+            |vm| vm.resume(host, budget),
+        )?;
         self.apply_effects(host)?;
         if matches!(step, Step::Yield) {
             return Ok(false);
@@ -364,9 +379,11 @@ impl OrdinaryTask {
         self.command_phase = Some(CommandPhase::Notification(*command, message, entry_pc));
         self.synchronize(host, select_numbers);
         self.apply_effects(host)?;
-        let result = self
-            .interpreter
-            .dispatch_message(&mut message, host, budget);
+        let result = with_increment(
+            &mut self.interpreter,
+            &mut self.accumulated_increment,
+            |vm| vm.dispatch_message(&mut message, host, budget),
+        );
         self.command_phase = Some(CommandPhase::Notification(*command, message, entry_pc));
         let step = result?;
         self.apply_effects(host)?;
@@ -407,7 +424,11 @@ impl OrdinaryTask {
         };
         self.synchronize(host, select_numbers);
         self.apply_effects(host)?;
-        let step = self.interpreter.dispatch_message(message, host, budget)?;
+        let step = with_increment(
+            &mut self.interpreter,
+            &mut self.accumulated_increment,
+            |vm| vm.dispatch_message(message, host, budget),
+        )?;
         self.apply_effects(host)?;
         if matches!(step, Some(Step::Yield)) {
             return Ok(false);
@@ -435,9 +456,11 @@ impl OrdinaryTask {
         self.synchronize(host, select_numbers);
         self.apply_effects(host)?;
         self.command_phase = Some(CommandPhase::Delete(message));
-        let step = self
-            .interpreter
-            .dispatch_message(&mut message, host, budget)?;
+        let step = with_increment(
+            &mut self.interpreter,
+            &mut self.accumulated_increment,
+            |vm| vm.dispatch_message(&mut message, host, budget),
+        )?;
         self.apply_effects(host)?;
         if matches!(step, Some(Step::Yield)) {
             self.command_phase = Some(CommandPhase::Delete(message));
@@ -491,10 +514,10 @@ impl OrdinaryTask {
                 self.phase = Some(UpdatePhase::Resume(self.interpreter.pc));
                 break;
             }
-            let step = self.interpreter.dispatch_message(
-                &mut self.messages[index],
-                host,
-                budget_per_call,
+            let step = with_increment(
+                &mut self.interpreter,
+                &mut self.accumulated_increment,
+                |vm| vm.dispatch_message(&mut self.messages[index], host, budget_per_call),
             )?;
             self.apply_effects(host)?;
             if matches!(step, Some(Step::Yield)) {
@@ -503,7 +526,11 @@ impl OrdinaryTask {
             self.phase = Some(UpdatePhase::Messages(index + 1));
         }
         self.apply_effects(host)?;
-        let step = self.interpreter.resume(host, budget_per_call)?;
+        let step = with_increment(
+            &mut self.interpreter,
+            &mut self.accumulated_increment,
+            |vm| vm.resume(host, budget_per_call),
+        )?;
         self.apply_effects(host)?;
         if matches!(step, Step::Yield) {
             return Ok(false);

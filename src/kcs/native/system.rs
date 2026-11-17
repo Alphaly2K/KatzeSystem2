@@ -13,6 +13,18 @@ pub(super) fn call(
     arguments: &[u8],
     vm: &mut Interpreter,
 ) -> Result<NativeReturn> {
+    if matches!(index, 442 | 443) {
+        let increment = vm
+            .ordinary_increment
+            .as_mut()
+            .ok_or_else(|| Error::new(vm.pc, "KCS 当前没有普通任务增量计数"))?;
+        return Ok(if index == 442 {
+            *increment = 0;
+            NativeReturn::Continue
+        } else {
+            NativeReturn::Value(increment.wrapping_add(*increment >> 2))
+        });
+    }
     if index == 445 {
         return super::super::system_host::message_box(
             host.system_services

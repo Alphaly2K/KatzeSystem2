@@ -95,6 +95,64 @@ fn budget_resumption_keeps_the_update_time_and_current_message() {
 }
 
 #[test]
+fn increment_natives_keep_reset_visible_across_message_resumption() {
+    let mut code = Vec::new();
+    let query = |code: &mut Vec<u8>, address| {
+        ins(code, 0x2b, &[(3, 443), (3, 0)]);
+        ins(code, 0x26, &[(3, address)]);
+    };
+    ins(&mut code, 0x25, &[(3, 0x1357_9bdf)]);
+    query(&mut code, 0);
+    ins(&mut code, 0x25, &[(3, 32)]);
+    ins(&mut code, 0x2b, &[(3, 71), (3, 4)]);
+    ins(&mut code, 0x2d, &[]);
+    query(&mut code, 4);
+    ins(&mut code, 0x25, &[(3, u32::MAX)]);
+    ins(&mut code, 0x2b, &[(3, 442), (3, 4)]);
+    query(&mut code, 8);
+    code.push(0x3b);
+    let program = Program::from_code(&code, vec![0; 48], 64).unwrap();
+    let mut numbers = State::new(0);
+    let mut host = CoreHost::new(&mut numbers);
+    for budget in [1, 4096] {
+        for queued in [false, true] {
+            let mut task = OrdinaryTask::new(program.clone(), vec![]).unwrap();
+            task.accumulated_increment = u32::MAX;
+            for _ in 0..20 {
+                if task.initialize(&mut host, budget).unwrap() {
+                    break;
+                }
+            }
+            assert!(!task.is_pending());
+            assert_eq!(task.accumulated_increment, u32::MAX);
+            assert!(task.interpreter.is_waiting_for_message());
+            let mut message = [1, 0, 0, 0];
+            let mut output = 0;
+            if queued {
+                task.enqueue_message(message).unwrap();
+            }
+            for round in 0..20 {
+                let done = if queued {
+                    task.update(20, if round == 0 { 9 } else { 99 }, &mut host, budget)
+                } else {
+                    task.dispatch_message(&mut message, &mut output, &mut host, budget)
+                };
+                if done.unwrap() {
+                    break;
+                }
+            }
+            assert!(!task.is_pending());
+            assert_eq!(task.accumulated_increment, 0);
+            assert_eq!(
+                values(&task),
+                [0x3fff_fffe, if queued { 10 } else { 0x3fff_fffe }, 0, 0]
+            );
+            assert_eq!(task.interpreter.stack_bytes(), 0x1357_9bdfu32.to_le_bytes());
+        }
+    }
+}
+
+#[test]
 fn stopped_task_keeps_updating_its_clock_and_retains_queued_messages() {
     let mut code = Vec::new();
     ins(&mut code, 0x2b, &[(3, 65), (3, 0)]);

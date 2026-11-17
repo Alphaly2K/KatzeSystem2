@@ -921,6 +921,7 @@ pub struct Interpreter {
     messages: messages::MessageState,
     execution_mode: u32,
     native_arguments: Option<usize>,
+    ordinary_increment: Option<u32>,
 }
 
 impl Interpreter {
@@ -955,6 +956,7 @@ impl Interpreter {
             messages: messages::MessageState::default(),
             execution_mode: 1,
             native_arguments: None,
+            ordinary_increment: None,
         })
     }
     /// 当前解释器执行的程序。
