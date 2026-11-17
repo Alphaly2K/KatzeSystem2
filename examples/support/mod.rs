@@ -59,34 +59,24 @@ fn decode_byte(byte: u8, position: usize) -> u8 {
     alphabet_index(byte).map_or(byte, |index| ALPHABET[51 - (index + position) % 52])
 }
 
-fn encrypted_name_matches(raw: &[u8], name: &str) -> bool {
-    if !name.is_ascii() {
-        return (0..52)
-            .any(|shift| String::from_utf8_lossy(&decode(raw, shift)).eq_ignore_ascii_case(name));
-    }
-    if raw.len() != name.len() {
-        return false;
-    }
-    let Some((position, index)) = raw
-        .iter()
+fn fallback_name_key(name: &[u8], encoded: bool) -> Vec<u8> {
+    let mut anchor = None;
+    name.iter()
+        .copied()
         .enumerate()
-        .find_map(|(position, &byte)| alphabet_index(byte).map(|index| (position, index)))
-    else {
-        return raw.eq_ignore_ascii_case(name.as_bytes());
-    };
-    let Some(expected) = alphabet_index(name.as_bytes()[position]) else {
-        return false;
-    };
-    // 忽略大小写时首个字母只对应两种位移；其余字节验证完整名称。
-    let shift = (155 - expected - index - position % 52) % 52;
-    [shift, (shift + 26) % 52].into_iter().any(|shift| {
-        raw.iter()
-            .zip(name.bytes())
-            .enumerate()
-            .all(|(i, (&byte, expected))| {
-                decode_byte(byte, shift + i).eq_ignore_ascii_case(&expected)
-            })
-    })
+        .map(|(position, byte)| {
+            let Some(index) = alphabet_index(byte) else {
+                return byte;
+            };
+            let index = if encoded {
+                51 - (index + position) % 52
+            } else {
+                index
+            } % 26;
+            // 相对首字母的位移同时消去未知密钥位移和大小写差异。
+            b'A' + ((26 + index - *anchor.get_or_insert(index)) % 26) as u8
+        })
+        .collect()
 }
 
 fn name_score(name: &[u8]) -> i32 {
@@ -137,16 +127,26 @@ struct Entry {
     length: u32,
 }
 
+impl Entry {
+    fn name_bytes(&self) -> &[u8] {
+        self.raw.split(|&byte| byte == 0).next().unwrap()
+    }
+}
+
 pub struct Archive {
     file: SharedSource,
     key: Option<u32>,
     entries: Vec<Entry>,
     index: BTreeMap<String, usize>,
+    fallback_index: BTreeMap<Vec<u8>, usize>,
 }
 
 impl Archive {
     pub fn open(path: &str) -> std::result::Result<Self, Box<dyn std::error::Error>> {
-        let file = Arc::new(FileSource::open(path)?) as SharedSource;
+        Self::from_source(Arc::new(FileSource::open(path)?))
+    }
+
+    fn from_source(file: SharedSource) -> std::result::Result<Self, Box<dyn std::error::Error>> {
         let mut head = vec![0; 8];
         file.read_exact_at(0, &mut head)?;
         if &head[..4] != b"KIF\0" {
@@ -203,15 +203,27 @@ impl Archive {
             .enumerate()
             .map(|(i, entry)| (entry.name.to_ascii_uppercase(), i))
             .collect();
+        let mut fallback_index = BTreeMap::new();
+        if encrypted {
+            for (position, entry) in entries.iter().enumerate() {
+                let raw = entry.name_bytes();
+                if raw.is_ascii() {
+                    fallback_index
+                        .entry(fallback_name_key(raw, true))
+                        .or_insert(position);
+                }
+            }
+        }
         Ok(Self {
             file,
             key: archive_key,
             entries,
             index,
+            fallback_index,
         })
     }
 
-    /// 精确名称优先；未命中时逐条目按请求名称反查。
+    /// 精确名称优先；未命中时按请求名称反查。
     ///
     /// 样本的校验码不可得，条目名称的位移只能猜测；反查只服务本机探针。
     fn locate(&self, name: &str) -> Option<usize> {
@@ -219,17 +231,18 @@ impl Archive {
             return Some(position);
         }
         self.key?;
-        for (position, entry) in self.entries.iter().enumerate() {
-            let end = entry
-                .raw
-                .iter()
-                .position(|&byte| byte == 0)
-                .unwrap_or(entry.raw.len());
-            if encrypted_name_matches(&entry.raw[..end], name) {
-                return Some(position);
-            }
+        if name.is_ascii() {
+            return self
+                .fallback_index
+                .get(&fallback_name_key(name.as_bytes(), false))
+                .copied();
         }
-        None
+        self.entries.iter().position(|entry| {
+            (0..52).any(|shift| {
+                String::from_utf8_lossy(&decode(entry.name_bytes(), shift))
+                    .eq_ignore_ascii_case(name)
+            })
+        })
     }
 
     pub fn open_source(&self, name: &str) -> Result<Option<SharedSource>> {
@@ -248,18 +261,66 @@ impl Archive {
     /// 枚举已还原的条目名及原始名称字节；仅服务诊断输出。
     pub fn entries(&self) -> impl Iterator<Item = (&str, &[u8], u32, u32)> {
         self.entries.iter().map(|entry| {
-            let end = entry
-                .raw
-                .iter()
-                .position(|&b| b == 0)
-                .unwrap_or(entry.raw.len());
             (
                 entry.name.as_str(),
-                &entry.raw[..end],
+                entry.name_bytes(),
                 entry.offset,
                 entry.length,
             )
         })
+    }
+}
+
+#[cfg(test)]
+mod archive_tests {
+    use super::*;
+    use blowfish::cipher::BlockEncrypt;
+
+    #[test]
+    fn indexed_archive_lookup_matches_exhaustive_decode_and_preserves_priority() {
+        let raw = [
+            decode(b"A_07/bCd.Hg3", 14),
+            decode(b"a_07/BcD.hg3", 5),
+            decode(b"A_08/bCd.Hg3", 14),
+            b"314.159".to_vec(),
+            decode(b"\xc3\xa9.XyZ", 3),
+        ];
+        let mut data = vec![0; 8 + (raw.len() + 1) * 72];
+        let seed = 23u32;
+        data[..4].copy_from_slice(b"KIF\0");
+        data[4..8].copy_from_slice(&((raw.len() + 1) as u32).to_le_bytes());
+        data[8..19].copy_from_slice(b"__key__.dat");
+        data[76..80].copy_from_slice(&seed.to_le_bytes());
+        let key = katze_system2::kcs::ScriptRandom::seeded(seed).next_integer();
+        let cipher = BlowfishLE::new_from_slice(&key.to_le_bytes()).unwrap();
+        for (entry, encrypted_name) in data[80..].chunks_exact_mut(72).zip(&raw) {
+            entry[..encrypted_name.len()].copy_from_slice(encrypted_name);
+            let block: &mut [u8; 8] = (&mut entry[64..72]).try_into().unwrap();
+            cipher.encrypt_block(block.into());
+        }
+        let archive = Archive::from_source(Arc::new(data)).unwrap();
+        let mut requests = vec!["missing.hg3".to_string(), "314.159".to_string()];
+        for encrypted_name in &raw {
+            for shift in 0..52 {
+                let name = String::from_utf8(decode(encrypted_name, shift)).unwrap();
+                requests.extend([name.to_ascii_uppercase(), name.to_ascii_lowercase()]);
+            }
+        }
+        for name in requests {
+            let expected = archive
+                .entries
+                .iter()
+                .rposition(|entry| entry.name.eq_ignore_ascii_case(&name))
+                .or_else(|| {
+                    raw.iter().position(|entry| {
+                        (0..52).any(|shift| {
+                            String::from_utf8_lossy(&decode(entry, shift))
+                                .eq_ignore_ascii_case(&name)
+                        })
+                    })
+                });
+            assert_eq!(archive.locate(&name), expected, "{name}");
+        }
     }
 }
 
