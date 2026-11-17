@@ -100,6 +100,9 @@ impl<F: ObjectFactory> Store<'_, F> {
         if matches!(object.state, ObjectState::Draw(_)) {
             return self.update_fes_draw(owner, objects, handle);
         }
+        if matches!(object.state, ObjectState::ScreenTransition(_)) {
+            return self.update_fes_screen_transition(owner, objects, handle);
+        }
         if matches!(object.state, ObjectState::CImage(_)) {
             return self.update_fes_cimage(owner, objects, handle, image);
         }
@@ -344,6 +347,8 @@ impl<F: ObjectFactory> Store<'_, F> {
             pending.extend(object.children());
             if matches!(object.state, ObjectState::Draw(_)) {
                 self.check_fes_draw_binding(owner, object.task_id)?;
+            } else if let ObjectState::ScreenTransition(state) = &object.state {
+                self.check_fes_screen_transition_binding(owner, object.task_id, state)?;
             } else if matches!(object.state, ObjectState::Button(_)) {
                 self.check_fes_button_binding(owner, object.task_id)?;
             } else if matches!(object.state, ObjectState::Particle(_)) {

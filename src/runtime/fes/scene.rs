@@ -1216,6 +1216,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                         || self.fes_debug_command(scene, &args)?
                         || self.fes_font_command(scene, &args, &line)?
                         || self.fes_sound_command(scene, &args, line.offset)?
+                        || self.run_fes_screen_transition(scene, &args)?
                     {
                         scene.interpreter.resume();
                     } else if let Some(complete) =
@@ -1371,6 +1372,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                         super::ObjectState::Base
                         | super::ObjectState::Viewport(_)
                         | super::ObjectState::Draw(_)
+                        | super::ObjectState::ScreenTransition(_)
                         | super::ObjectState::Particle(_)
                         | super::ObjectState::Slider(_)
                         | super::ObjectState::Scroll2(_) => fes::SubcommandContext::default(),
@@ -1574,7 +1576,7 @@ impl<F: ObjectFactory> Store<'_, F> {
             scene
                 .objects
                 .update_order
-                .retain(|record| record.kind != "DRAW" || objects.contains_key(&record.object));
+                .retain(|record| !record.expires() || objects.contains_key(&record.object));
             scene.media_prepared = scene
                 .media_prepared
                 .saturating_sub(old_count - scene.objects.update_order.len());
@@ -1715,6 +1717,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                                 || self.fes_debug_command(scene, &args)?
                                 || self.fes_font_command(scene, &args, &line)?
                                 || self.fes_sound_command(scene, &args, line.offset)?
+                                || self.run_fes_screen_transition(scene, &args)?
                             {
                                 scene.interpreter.resume();
                                 continue;

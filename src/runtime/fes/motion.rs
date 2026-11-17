@@ -69,7 +69,7 @@ impl Objects {
             && !matches!(object.state, ObjectState::Base)
             && !matches!(
                 object.state,
-                ObjectState::Draw(_) | ObjectState::Viewport(_)
+                ObjectState::Draw(_) | ObjectState::ScreenTransition(_) | ObjectState::Viewport(_)
             )
             && object.state.control().is_none()
             && !matches!(

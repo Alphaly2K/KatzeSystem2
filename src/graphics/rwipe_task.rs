@@ -23,7 +23,8 @@ impl RWipeObject {
     fn release(&mut self, host: &mut dyn Host) -> Result<()> {
         let compositor = compositor(host)?;
         compositor.rwipes.remove(&self.id);
-        if self.ready {
+        if matches!(compositor.screen_effect, Some(super::compositor::ScreenEffect::RWipe(id)) if id == self.id)
+        {
             compositor.screen_effect = None;
             compositor.auxiliary_targets.clear();
         }

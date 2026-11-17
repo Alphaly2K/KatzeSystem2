@@ -33,6 +33,15 @@ impl<F: ObjectFactory> Store<'_, F> {
             objects.update_order[index].prepared = true;
             return Ok(());
         }
+        if matches!(
+            objects.get(handle).unwrap().state,
+            ObjectState::ScreenTransition(_)
+        ) {
+            self.prepare_fes_screen_transition(owner, objects, handle)?;
+            objects.update_order[index].task_id = objects.get(handle).unwrap().task_id;
+            objects.update_order[index].prepared = true;
+            return Ok(());
+        }
         let object = objects.get(handle).unwrap();
         let button = matches!(object.state, ObjectState::Button(_));
         let particle = matches!(object.state, ObjectState::Particle(_));

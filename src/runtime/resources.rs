@@ -129,7 +129,7 @@ impl Resources {
         Ok(true)
     }
 
-    fn render_depth_frame(
+    pub(super) fn render_depth_frame(
         &mut self,
         size: [u32; 2],
         range: [f32; 2],

@@ -96,9 +96,9 @@ impl<F: ObjectFactory> Store<'_, F> {
         }
         self.prepare_fes_object(owner, &mut scene.objects, index)?;
         let record = &scene.objects.update_order[index];
-        let draw = record.kind == "DRAW";
+        let expires = record.expires();
         let Some(handle) = scene.objects.media_handle(record) else {
-            if draw {
+            if expires {
                 scene.objects.publish_bindings(&mut scene.interpreter);
             }
             return Ok(());
@@ -112,7 +112,7 @@ impl<F: ObjectFactory> Store<'_, F> {
         }
         if scene.objects.get(handle).unwrap().state.control().is_none() {
             self.update_fes_object_image(owner, &mut scene.objects, handle, image)?;
-            if draw {
+            if expires {
                 scene.objects.publish_bindings(&mut scene.interpreter);
             }
             return Ok(());

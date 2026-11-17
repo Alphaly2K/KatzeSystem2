@@ -29,6 +29,7 @@ mod properties;
 mod queries;
 mod reference;
 mod scene;
+mod screen_transition;
 mod slider;
 mod sound;
 mod string;
@@ -41,6 +42,7 @@ pub use logstring::LogStringState;
 pub use navigation::NavigationOutcome;
 pub use particle::ParticleState;
 pub use scene::Scene;
+pub use screen_transition::ScreenTransition;
 pub use string::StringState;
 pub(super) use task::dispatch_borrowed_control_event;
 pub use task::{FesFactory, FesObject, Services};
@@ -59,6 +61,10 @@ pub struct MediaRecord {
 }
 
 impl MediaRecord {
+    fn expires(&self) -> bool {
+        matches!(self.kind, "DRAW" | "RDRAW" | "RWIPE")
+    }
+
     pub fn kind(&self) -> &'static str {
         self.kind
     }
@@ -92,6 +98,7 @@ pub enum ObjectState {
     Sound(Box<SoundState>),
     Particle(Box<ParticleState>),
     Draw(Box<DrawState>),
+    ScreenTransition(Box<ScreenTransition>),
     String(Box<StringState>),
     LogString(Box<LogStringState>),
     SavePanel(Box<crate::fes::SavePanelState>),
@@ -114,6 +121,7 @@ impl ObjectState {
             Self::Sound(_) => "SOUND",
             Self::Particle(_) => "PARTICLE",
             Self::Draw(_) => "DRAW",
+            Self::ScreenTransition(state) => state.kind(),
             Self::String(state) => state.kind(),
             Self::LogString(state) => state.kind(),
             Self::SavePanel(_) => "SAVEPANEL",
@@ -136,6 +144,7 @@ impl ObjectState {
             "SOUND" => Self::Sound(Box::default()),
             "PARTICLE" => Self::Particle(Box::default()),
             "DRAW" => Self::Draw(Box::default()),
+            "RDRAW" | "RWIPE" => Self::ScreenTransition(Box::new(ScreenTransition::new(kind))),
             "STRING" | "STRING8" => Self::String(Box::new(StringState::new(kind, text)?)),
             "LOGSTRING" | "LOGSTRING8" => {
                 Self::LogString(Box::new(LogStringState::new(kind, text)?))
@@ -471,7 +480,7 @@ impl Objects {
 
     fn media_handle(&self, record: &MediaRecord) -> Option<u32> {
         let handle = self.lookup(&record.target.name, record.target.bank)?;
-        (record.kind != "DRAW" || handle == record.object).then_some(handle)
+        (!record.expires() || handle == record.object).then_some(handle)
     }
 
     pub fn media_records(&self) -> &[MediaRecord] {
@@ -643,7 +652,10 @@ impl Objects {
                 self.set_parent(handle, self.lookup(&parent.name, parent.bank))?;
             }
             let dirty = match &mut self.objects.get_mut(&handle).unwrap().state {
-                ObjectState::Base | ObjectState::Draw(_) | ObjectState::Particle(_) => false,
+                ObjectState::Base
+                | ObjectState::Draw(_)
+                | ObjectState::ScreenTransition(_)
+                | ObjectState::Particle(_) => false,
                 ObjectState::Viewport(state) => state.apply(&initialization.attributes),
                 ObjectState::CImage(state) => state.apply(&initialization.attributes, bank as u32),
                 ObjectState::Image(state) | ObjectState::ImageWindow(state) => {

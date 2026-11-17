@@ -521,3 +521,158 @@ fn render_wipe_uses_image_wrappers_and_keeps_foreground_and_stopped_pixels() {
         assert_eq!(render(&mut rt).pixel(0, 0), Some(0xffab_cdef));
     }
 }
+
+struct TransitionFiles;
+
+impl katze_system2::kcs::ResourceServices for TransitionFiles {
+    fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+        assert!(category == b"image" || (category == b"mot" && name == b"d"));
+        Ok(name.to_vec())
+    }
+
+    fn read(
+        &mut self,
+        name: &[u8],
+        _: katze_system2::resource::ResourceMode,
+    ) -> Result<Option<Vec<u8>>> {
+        use std::io::Write;
+        let compress = |bytes: &[u8]| {
+            let mut output = flate2::write::ZlibEncoder::new(Vec::new(), Default::default());
+            output.write_all(bytes).unwrap();
+            output.finish().unwrap()
+        };
+        fn words(bytes: &mut Vec<u8>, values: &[u32]) {
+            bytes.extend(values.iter().flat_map(|value| value.to_le_bytes()));
+        }
+        let data = match name {
+            b"d" => {
+                let mut bytes = b"KCS\0".to_vec();
+                words(&mut bytes, &[2, 0, 52, 1, 53, 0, 0, 0, 64, 53, 0, 1]);
+                bytes.extend(compress(&[0x3b]));
+                bytes
+            }
+            b"rule" => {
+                let pixels = compress(&[6, 42, 27, 64]);
+                let control = compress(&[9, 1]);
+                let mut bytes = b"HG-3".to_vec();
+                words(&mut bytes, &[12, 0x300, 0, 0]);
+                bytes.extend(b"stdinfo\0");
+                words(&mut bytes, &[56, 40, 1, 1, 32, 0, 0, 1, 1, 0, 0, 0]);
+                bytes.extend(b"img0000\0");
+                words(
+                    &mut bytes,
+                    &[
+                        0,
+                        (24 + pixels.len() + control.len()) as u32,
+                        0,
+                        1,
+                        pixels.len() as u32,
+                        4,
+                        control.len() as u32,
+                        2,
+                    ],
+                );
+                bytes.extend(pixels);
+                bytes.extend(control);
+                bytes
+            }
+            b"absent" => return Ok(None),
+            _ => panic!("unexpected transition resource: {name:?}"),
+        };
+        Ok(Some(data))
+    }
+}
+
+#[test]
+fn fes_screen_transitions_hold_old_pixels_and_release_the_all_objects_wait() {
+    for (command, first, second, name, kind, available) in [
+        (
+            "rdraw",
+            "4 0 10",
+            "($0+=1)",
+            "__rdrawobj__",
+            kind::RENDER_DRAW,
+            true,
+        ),
+        (
+            "rwipe",
+            "4 rule 0 10",
+            "($0+=1) absent",
+            "__rwipeobj__",
+            kind::RWIPE,
+            true,
+        ),
+        (
+            "rwipe",
+            "4 absent 0 10",
+            "($0+=1) rule",
+            "__rwipeobj__",
+            kind::RWIPE,
+            false,
+        ),
+    ] {
+        let mut rt = engine();
+        rt.numbers_mut().shared.push(0);
+        rt.set_budget(2, 10_000);
+        rt.set_resources(TransitionFiles);
+        rt.drawables_mut()
+            .insert(
+                101,
+                Drawable::rectangle([2., 2., 0.], [2., 2.], 0xff55_7733),
+            )
+            .unwrap();
+        rt.drawables_mut().set_display(101, 1);
+        rt.drawables_mut().set_base_point(101, [0., 0., 20.]);
+        let text =
+            format!("#START\n{command} {first}\n{command} {second}\nwait\nexit 7\nwait 100\n");
+        let mut scene = katze_system2::runtime::fes::Scene::new(
+            katze_system2::fes::Program::from_text(text.as_bytes()).unwrap(),
+            rt.host().handle_allocator(),
+        )
+        .unwrap();
+        let advance = |rt: &mut Engine, scene: &mut katze_system2::runtime::fes::Scene, now| {
+            assert!(rt.update(now, 1).unwrap());
+            assert!((0..100).any(|_| rt.update_fes_scene(0, scene, now).unwrap()));
+        };
+        let render = |rt: &mut Engine| {
+            let mut output = RenderTarget::new([8, 6]).unwrap();
+            rt.compose_frame()
+                .unwrap()
+                .render_into(&mut output, rt.drawing().target.as_ref())
+                .unwrap();
+            output
+        };
+        advance(&mut rt, &mut scene, 1);
+        assert_eq!(rt.numbers().shared[0], 0);
+        let task = scene
+            .objects()
+            .lookup(name, 0)
+            .and_then(|handle| scene.objects().get(handle).unwrap().task_id());
+        assert_eq!(task.is_some(), available);
+        rt.drawables_mut().set_color(100, 0xffab_cdef, u32::MAX);
+        rt.drawables_mut().set_color(101, 0xff77_3355, u32::MAX);
+        if let Some(task) = task {
+            assert_eq!(rt.tree().node(task).unwrap().kind, kind);
+            let frame = render(&mut rt);
+            assert_eq!(frame.pixel(0, 0), Some(0xff11_2233));
+            assert_eq!(frame.pixel(2, 2), Some(0xff77_3355));
+        }
+        for now in 2..=16 {
+            advance(&mut rt, &mut scene, now);
+            render(&mut rt);
+            if now == 4 && available {
+                assert_ne!(state(&mut rt, task.unwrap()), 0);
+                assert_eq!(scene.exit_code(), None);
+            }
+        }
+        assert_eq!(render(&mut rt).pixel(0, 0), Some(0xffab_cdef));
+        assert!(
+            scene.objects().lookup(name, 0).is_none(),
+            "{command} {first}"
+        );
+        if let Some(task) = task {
+            assert!(rt.tree().node(task).is_none());
+        }
+        assert_eq!(scene.exit_code(), Some(7));
+    }
+}
