@@ -175,9 +175,7 @@ impl Scene {
         }
         let preload = super::preload::Preload::new(&program);
         let mut interpreter = fes::Interpreter::new(program)?;
-        interpreter
-            .local_values_mut()
-            .copy_from_slice(self.interpreter.local_values());
+        interpreter.bind_local_numbers(self.interpreter.local_numbers());
         interpreter.named = std::mem::take(&mut self.interpreter.named);
         self.objects.publish_bindings(&mut interpreter);
         self.interpreter = interpreter;
@@ -185,11 +183,11 @@ impl Scene {
         Ok(())
     }
 
-    pub(in crate::runtime) fn parameter_values(&self) -> &[i32] {
+    pub(in crate::runtime) fn parameter_values(&self) -> std::cell::Ref<'_, Vec<i32>> {
         self.interpreter.local_values()
     }
 
-    pub(in crate::runtime) fn parameter_values_mut(&mut self) -> &mut [i32] {
+    pub(in crate::runtime) fn parameter_values_mut(&mut self) -> std::cell::RefMut<'_, Vec<i32>> {
         self.interpreter.local_values_mut()
     }
 
@@ -198,10 +196,17 @@ impl Scene {
         code: u32,
         length: u32,
         bytes: Option<&mut [u8]>,
+        values: Option<crate::expression::LocalNumbers>,
         output: &mut u32,
     ) -> Result<()> {
+        let Some(values) = values else {
+            if code == 349 {
+                *output = 0;
+            }
+            return Ok(());
+        };
         if code == 349 {
-            let values = self.parameter_values();
+            let values = values.borrow();
             let size = values.len() * 4;
             *output = size as u32;
             if let Some(target) = bytes {
@@ -211,7 +216,7 @@ impl Scene {
                     let target = target
                         .get_mut(..size)
                         .ok_or_else(|| Error::new(0, "FES 参数记录输出缓冲区不足"))?;
-                    for (target, value) in target.chunks_exact_mut(4).zip(values) {
+                    for (target, value) in target.chunks_exact_mut(4).zip(values.iter()) {
                         target.copy_from_slice(&value.to_le_bytes());
                     }
                 }
@@ -225,18 +230,23 @@ impl Scene {
                     .and_then(|bytes| bytes.get(..size))
                     .ok_or_else(|| Error::new(0, "FES 参数记录输入缓冲区不足"))?
             };
-            self.restore_parameter_bytes(bytes)?;
+            self.restore_parameter_bytes(values, bytes)?;
         }
         Ok(())
     }
 
-    pub(super) fn restore_parameter_bytes(&mut self, bytes: &[u8]) -> Result<()> {
-        let values = self.interpreter.local_values_mut();
+    fn restore_parameter_bytes(
+        &mut self,
+        values: crate::expression::LocalNumbers,
+        bytes: &[u8],
+    ) -> Result<()> {
+        let mut values = values.borrow_mut();
         for (value, input) in values.iter_mut().zip(bytes.chunks(4)) {
             let mut word = value.to_le_bytes();
             word[..input.len()].copy_from_slice(input);
             *value = i32::from_le_bytes(word);
         }
+        drop(values);
         if !bytes.is_empty() {
             self.interpreter.restart_block("_LOAD_")?;
         }

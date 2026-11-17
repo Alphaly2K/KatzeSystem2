@@ -324,6 +324,9 @@ pub trait Host {
 
     fn set_task_shared_numbers(&mut self, _available: bool) {}
 
+    /// 选择当前任务独立的局部数值区；同编号再次绑定保留原区。
+    fn set_task_local_numbers(&mut self, _values: crate::expression::LocalNumbers) {}
+
     /// FES 任务使用同一运行时的共享状态、对象更新和立即启动服务。
     fn fes_services(&mut self) -> Option<&mut dyn crate::runtime::fes::Services> {
         None
@@ -596,6 +599,9 @@ impl<T: Host + ?Sized> Host for &mut T {
     }
     fn set_task_shared_numbers(&mut self, available: bool) {
         (**self).set_task_shared_numbers(available);
+    }
+    fn set_task_local_numbers(&mut self, values: crate::expression::LocalNumbers) {
+        (**self).set_task_local_numbers(values);
     }
     fn load_kcs_program(&mut self, name: &[u8]) -> Result<Option<Program>> {
         (**self).load_kcs_program(name)

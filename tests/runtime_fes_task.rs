@@ -55,6 +55,80 @@ struct Factory {
 }
 impl ObjectFactory for Factory {
     fn create(&mut self, id: u32, kind: u32, name: &[u8]) -> Result<Box<dyn TaskObject>> {
+        if kind == kind::ORDINARY && matches!(name, b"local copy driver" | b"other local driver") {
+            fn call(code: &mut Vec<u8>, native: u32, args: &[u32], output: Option<u32>) {
+                let mut ins = |op: u8, args: &[u32]| {
+                    code.push(op);
+                    for value in args {
+                        code.push(3);
+                        code.extend(value.to_le_bytes());
+                    }
+                };
+                for value in args {
+                    ins(0x25, &[*value]);
+                }
+                ins(0x2b, &[native, args.len() as u32 * 4]);
+                if let Some(at) = output {
+                    ins(0x26, &[at]);
+                }
+            }
+            let copying = name == b"local copy driver";
+            let mut code = vec![0x25, 3];
+            code.extend(0xdead_beefu32.to_le_bytes());
+            call(&mut code, 213, &[64], Some(0));
+            call(&mut code, 213, &[96], Some(0));
+            call(&mut code, 65, &[], None);
+            if copying {
+                call(&mut code, 665, &[3], None);
+                call(&mut code, 646, &[3, 0], Some(4));
+                call(&mut code, 646, &[3, 511], Some(8));
+                call(&mut code, 645, &[3, 0, 27], None);
+            } else {
+                call(&mut code, 213, &[128], Some(4));
+                call(&mut code, 213, &[160], Some(8));
+            }
+            call(&mut code, 213, &[128], Some(12));
+            if copying {
+                call(&mut code, 666, &[3], None);
+            }
+            call(&mut code, 65, &[], None);
+            call(&mut code, 213, &[128], Some(16));
+            if copying {
+                for target in [0, u32::MAX, 6] {
+                    call(&mut code, 665, &[target], None);
+                }
+            }
+            call(&mut code, 65, &[], None);
+            let mut data = vec![0; 256];
+            for (at, text) in [
+                (
+                    64,
+                    if copying {
+                        b"\\0=11\0".as_slice()
+                    } else {
+                        b"\\0=99\0"
+                    },
+                ),
+                (
+                    96,
+                    if copying {
+                        b"\\511=0x80000001\0".as_slice()
+                    } else {
+                        b"\\511=99\0"
+                    },
+                ),
+                (128, b"\\0\0"),
+                (160, b"\\511\0"),
+            ] {
+                data[at..at + text.len()].copy_from_slice(text);
+            }
+            let mut task = katze_system2::kcs::OrdinaryTask::new(
+                Program::from_code(&code, data, 256)?,
+                Vec::new(),
+            )?;
+            task.task_id = id;
+            return Ok(Box::new(OrdinaryObject::new(task)));
+        }
         if kind == kind::ORDINARY && name == b"send receiver" {
             let mut code = Vec::new();
             let mut ins = |opcode: u8, flags: u8, values: &[u32]| {
@@ -1079,6 +1153,113 @@ fn fes_release_removes_only_its_entries_from_an_ancestor_image_list() {
         assert_eq!(
             runtime.drawing().target.as_ref().unwrap().pixel(1, 1),
             Some(0)
+        );
+    }
+}
+
+#[test]
+fn local_context_copies_keep_task_isolation_selection_stack_and_lifetimes() {
+    for budget in [1, 4096] {
+        let mut runtime = setup(budget, b"").runtime;
+        let fes = runtime.create(0, kind::FES, b"copy target", b"").unwrap();
+        send(&mut runtime, fes, 337, 0, 0);
+        let first = runtime
+            .create(0, kind::ORDINARY, b"local copy driver", b"")
+            .unwrap();
+        let second = runtime
+            .create(0, kind::ORDINARY, b"other local driver", b"")
+            .unwrap();
+        let uninitialized = runtime.create(0, kind::FES, b"uninitialized", b"").unwrap();
+        assert_eq!((fes, first, second, uninitialized), (3, 4, 5, 6));
+        runtime.update(0, 1).unwrap();
+        let mut snapshot = runtime.numbers().clone();
+        assert_eq!(
+            katze_system2::expression::eval("\\0=123", &mut snapshot).unwrap(),
+            123
+        );
+        assert_eq!(
+            runtime
+                .object(second)
+                .unwrap()
+                .local_numbers()
+                .unwrap()
+                .borrow()[0],
+            99
+        );
+        for frame in [1, 2] {
+            runtime.update(frame, 1).unwrap();
+        }
+        for (task, values) in [
+            (first, [11u32, 0x8000_0001, 27, 27]),
+            (second, [99, 99, 99, 99]),
+        ] {
+            let vm = runtime.object(task).unwrap().interpreter().unwrap();
+            for (at, value) in [4, 8, 12, 16].into_iter().zip(values) {
+                assert_eq!(vm.read(at, 4).unwrap(), value.to_le_bytes());
+            }
+            assert_eq!(vm.stack_bytes(), 0xdead_beefu32.to_le_bytes());
+        }
+        let mut record = vec![0; 2048];
+        assert_eq!(
+            runtime
+                .dispatch_command_with_buffers(
+                    0,
+                    command(fes, 349, 2048, 0),
+                    &mut CommandBuffers {
+                        data1: Some(&mut record),
+                        ..Default::default()
+                    },
+                )
+                .unwrap(),
+            2048
+        );
+        assert_eq!(&record[..4], &99u32.to_le_bytes());
+        record[..4].copy_from_slice(&123u32.to_le_bytes());
+        runtime
+            .dispatch_command_with_buffers(
+                0,
+                command(fes, 350, 4, 0),
+                &mut CommandBuffers {
+                    data1: Some(&mut record),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            runtime
+                .object(second)
+                .unwrap()
+                .local_numbers()
+                .unwrap()
+                .borrow()[0],
+            123
+        );
+        assert_eq!(send(&mut runtime, fes, 347, 0, 0), 27);
+        assert_eq!(send(&mut runtime, fes, 347, 511, 0), 0x8000_0001);
+        let released = Rc::downgrade(&runtime.object(first).unwrap().local_numbers().unwrap());
+        runtime.destroy(first).unwrap();
+        assert!(released.upgrade().is_none());
+        let replacement = runtime
+            .create(0, kind::ORDINARY, b"other local driver", b"")
+            .unwrap();
+        assert_eq!(
+            runtime
+                .object(replacement)
+                .unwrap()
+                .local_numbers()
+                .unwrap()
+                .borrow()[0],
+            0
+        );
+        runtime.update(3, 1).unwrap();
+        assert_eq!(
+            runtime
+                .object(replacement)
+                .unwrap()
+                .local_numbers()
+                .unwrap()
+                .borrow()[0],
+            99
         );
     }
 }

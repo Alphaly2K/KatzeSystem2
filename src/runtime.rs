@@ -180,13 +180,18 @@ impl<F: ObjectFactory> Runtime<F> {
         root_id: u32,
         root_kind: u32,
         mut root: Box<dyn TaskObject>,
-        numbers: expression::State,
+        mut numbers: expression::State,
         factory: F,
     ) -> Self {
         let mut host = HostState::default();
         host.configured_shared_slots = numbers.shared.len() as u32;
         let resources = Resources::with_handles(host.handle_allocator());
         root.initialize_language(host.languages.selection());
+        if root.shared_numbers_available() == Some(true) {
+            if let Some(values) = root.local_numbers() {
+                numbers.register_local(root_id, values);
+            }
+        }
         Self {
             tree: TaskTree::new(root_id, root_kind),
             objects: BTreeMap::from([(root_id, root)]),
@@ -805,6 +810,11 @@ fn create_object_impl<F: ObjectFactory>(
     })?;
     object.register_graphics(&mut resources.compositor.drawables)?;
     tree.insert(parent, id, kind)?;
+    if object.shared_numbers_available() == Some(true) {
+        if let Some(values) = object.local_numbers() {
+            numbers.register_local(id, values);
+        }
+    }
     objects.insert(id, object);
     Ok(id)
 }
@@ -845,6 +855,7 @@ struct RunningTask {
     paused_changed: Option<i32>,
     context: Option<Vec<u8>>,
     shared_numbers: Option<bool>,
+    local_numbers: Option<crate::expression::LocalNumbers>,
     external: Option<crate::memory::SharedMemory>,
     remaining_messages: Option<usize>,
     memory: Option<crate::kcs::MemoryLoan>,
@@ -1080,8 +1091,22 @@ fn run_nested<F: ObjectFactory>(
                         command.code,
                         command.data[0],
                         buffers.data1.as_deref_mut(),
+                        numbers.active_local(),
                         output,
                     )?;
+                }
+                return Ok(());
+            }
+            if matches!(command.code, 352 | 353) {
+                **propagate = false;
+                if !running.get(&target).is_some_and(|task| task.deleted) {
+                    let caller = command.data[1];
+                    let (from, to) = if command.code == 352 {
+                        (caller, target)
+                    } else {
+                        (target, caller)
+                    };
+                    numbers.copy_local(from, to)?;
                 }
                 return Ok(());
             }
@@ -1089,6 +1114,9 @@ fn run_nested<F: ObjectFactory>(
                 **propagate = false;
                 if !running.get(&target).is_some_and(|task| task.deleted) {
                     let scene = &mut fes_scene.as_mut().unwrap().scene;
+                    if matches!(command.code, 346 | 347) {
+                        numbers.select_local(scene.interpreter().local_numbers());
+                    }
                     let index = command.data[0] as usize;
                     if command.code == 342 {
                         scene.set_system_value("_SAVEOBJ_", command.data[1] as i32);
@@ -1318,6 +1346,7 @@ fn run_nested<F: ObjectFactory>(
             paused_changed: None,
             context: object.creation_context().map(<[u8]>::to_vec),
             shared_numbers: object.shared_numbers_available(),
+            local_numbers: object.local_numbers(),
             external: object.external_storage(),
             remaining_messages: object
                 .queued_messages()
@@ -1894,7 +1923,22 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
     fn set_task_shared_numbers(&mut self, available: bool) {
         if let Some(task) = self.running.get_mut(&self.host.task_id) {
             task.shared_numbers = Some(available);
+            if available {
+                if let Some(values) = &task.local_numbers {
+                    self.numbers
+                        .register_local(self.host.task_id, values.clone());
+                }
+            }
         }
+    }
+    fn set_task_local_numbers(&mut self, values: crate::expression::LocalNumbers) {
+        if let Some(task) = self.running.get_mut(&self.host.task_id) {
+            if task.shared_numbers != Some(true) {
+                return;
+            }
+            task.local_numbers = Some(values.clone());
+        }
+        self.numbers.bind_local(self.host.task_id, values);
     }
     fn load_kcs_program(&mut self, name: &[u8]) -> Result<Option<Program>> {
         self.resources.images.release_resources(self.host.task_id)?;
@@ -2360,6 +2404,7 @@ impl<F: ObjectFactory> Lifecycle for TaskLifecycle<'_, F> {
         self.resources.raw.release_owner(id);
         self.resources.compositor.drawables.remove(id);
         self.resources.emocon.remove(&id);
+        self.numbers.release_local(id);
         self.objects.remove(&id);
         Ok(())
     }

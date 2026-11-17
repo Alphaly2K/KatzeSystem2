@@ -1,9 +1,12 @@
 use crate::{Error, Result};
-use std::collections::BTreeMap;
+use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
 
 mod fallback;
 
-#[derive(Clone, Debug)]
+/// 一份任务局部数值区；绑定后的长度须保持为 512 个 DWORD 槽。
+pub type LocalNumbers = Rc<RefCell<Vec<i32>>>;
+
+#[derive(Debug)]
 pub struct State {
     pub shared: Vec<i32>,
     pub local: Vec<i32>,
@@ -11,6 +14,34 @@ pub struct State {
     /// 宿主提供的只读命名值，按名称和银行号索引。
     pub named: BTreeMap<String, BTreeMap<i32, i32>>,
     pub current: i32,
+    local_contexts: BTreeMap<u32, LocalNumbers>,
+    active_local: Option<LocalNumbers>,
+}
+
+impl Clone for State {
+    fn clone(&self) -> Self {
+        let local_contexts: BTreeMap<_, _> = self
+            .local_contexts
+            .iter()
+            .map(|(&id, values)| (id, Rc::new(RefCell::new(values.borrow().clone()))))
+            .collect();
+        let active_local = self.active_local.as_ref().map(|active| {
+            self.local_contexts
+                .iter()
+                .find(|(_, values)| Rc::ptr_eq(values, active))
+                .map(|(id, _)| local_contexts[id].clone())
+                .unwrap_or_else(|| Rc::new(RefCell::new(active.borrow().clone())))
+        });
+        Self {
+            shared: self.shared.clone(),
+            local: self.local.clone(),
+            strings: self.strings.clone(),
+            named: self.named.clone(),
+            current: self.current,
+            local_contexts,
+            active_local,
+        }
+    }
 }
 
 impl State {
@@ -21,7 +52,54 @@ impl State {
             strings: BTreeMap::new(),
             named: BTreeMap::new(),
             current: 0,
+            local_contexts: BTreeMap::new(),
+            active_local: None,
         }
+    }
+
+    pub(crate) fn bind_local(&mut self, id: u32, values: LocalNumbers) {
+        self.active_local = Some(self.local_contexts.entry(id).or_insert(values).clone());
+    }
+
+    pub(crate) fn register_local(&mut self, id: u32, values: LocalNumbers) {
+        if let std::collections::btree_map::Entry::Vacant(entry) = self.local_contexts.entry(id) {
+            entry.insert(values.clone());
+            self.active_local = Some(values);
+        }
+    }
+
+    pub(crate) fn select_local(&mut self, values: LocalNumbers) {
+        self.active_local = Some(values);
+    }
+
+    pub(crate) fn active_local(&self) -> Option<LocalNumbers> {
+        self.active_local.clone()
+    }
+
+    pub(crate) fn release_local(&mut self, id: u32) {
+        if let Some(values) = self.local_contexts.remove(&id) {
+            if self
+                .active_local
+                .as_ref()
+                .is_some_and(|active| Rc::ptr_eq(active, &values))
+            {
+                self.active_local = None;
+            }
+        }
+    }
+
+    pub(crate) fn copy_local(&mut self, from: u32, to: u32) -> Result<()> {
+        if let (Some(source), Some(target)) =
+            (self.local_contexts.get(&from), self.local_contexts.get(&to))
+        {
+            if source.borrow().len() != 512 || target.borrow().len() != 512 {
+                return Err(Error::new(0, "局部数值区须包含 512 个槽"));
+            }
+            if !Rc::ptr_eq(source, target) {
+                target.borrow_mut().copy_from_slice(&source.borrow());
+            }
+        }
+        Ok(())
     }
 }
 
@@ -127,7 +205,16 @@ pub(crate) fn eval_parameter_bytes(source: &[u8], state: &mut State) -> Result<i
 }
 
 fn evaluate_root(node: &Node, state: &mut State) -> Result<i32> {
-    let value = evaluate(node, state)?.load(state);
+    let local = state.active_local.clone();
+    let mut local = local.as_ref().map(|values| values.borrow_mut());
+    if let Some(values) = &mut local {
+        std::mem::swap(&mut state.local, values);
+    }
+    let result = evaluate(node, state).map(|value| value.load(state));
+    if let Some(values) = &mut local {
+        std::mem::swap(&mut state.local, values);
+    }
+    let value = result?;
     // 正号写出供父节点读取的数值，但原求值器不更新本次调用的直接返回槽。
     Ok(if matches!(node, Node::Unary(op, ..) if op == "+") {
         0

@@ -222,7 +222,7 @@ pub struct Interpreter {
     block: usize,
     pc: usize,
     calls: Vec<(usize, usize)>,
-    local: Vec<i32>,
+    local: crate::expression::LocalNumbers,
     pending: Option<Event>,
     pub return_value: i32,
     /// 当前 FES 的宿主命名值；对象句柄与系统值均由宿主更新。
@@ -323,7 +323,7 @@ impl Interpreter {
             block,
             pc: 0,
             calls: Vec::new(),
-            local: vec![0; 512],
+            local: std::rc::Rc::new(std::cell::RefCell::new(vec![0; 512])),
             pending: None,
             return_value: 0,
             named: BTreeMap::new(),
@@ -353,11 +353,17 @@ impl Interpreter {
     pub fn resume(&mut self) {
         self.pending = None;
     }
-    pub(crate) fn local_values(&self) -> &[i32] {
-        &self.local
+    pub(crate) fn local_values(&self) -> std::cell::Ref<'_, Vec<i32>> {
+        self.local.borrow()
     }
-    pub(crate) fn local_values_mut(&mut self) -> &mut [i32] {
-        &mut self.local
+    pub(crate) fn local_values_mut(&mut self) -> std::cell::RefMut<'_, Vec<i32>> {
+        self.local.borrow_mut()
+    }
+    pub(crate) fn local_numbers(&self) -> crate::expression::LocalNumbers {
+        self.local.clone()
+    }
+    pub(crate) fn bind_local_numbers(&mut self, values: crate::expression::LocalNumbers) {
+        self.local = values;
     }
     pub(crate) fn initialization_pending(&self) -> bool {
         self.pre_declarations.is_some()
@@ -424,11 +430,10 @@ impl Interpreter {
     ) -> Result<i32> {
         let current = state.current;
         state.current = value;
-        std::mem::swap(&mut self.local, &mut state.local);
+        state.select_local(self.local.clone());
         std::mem::swap(&mut self.named, &mut state.named);
         let result = text::ascii(bytes).and_then(|s| evaluate(s, state));
         std::mem::swap(&mut self.named, &mut state.named);
-        std::mem::swap(&mut self.local, &mut state.local);
         state.current = current;
         result
     }

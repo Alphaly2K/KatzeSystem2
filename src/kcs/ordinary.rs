@@ -25,6 +25,7 @@ pub struct OrdinaryTask {
     pub accumulated_increment: u32,
     /// 构造时的语言选择，随后由命令 19 更新。
     pub language_selection: [u32; 3],
+    pub(crate) local_numbers: crate::expression::LocalNumbers,
     messages: Vec<[u32; 4]>,
     phase: Option<UpdatePhase>,
     command_phase: Option<CommandPhase>,
@@ -41,6 +42,7 @@ impl OrdinaryTask {
             task_id: 0,
             accumulated_increment: 0,
             language_selection: [0, 0, u32::MAX],
+            local_numbers: std::rc::Rc::new(std::cell::RefCell::new(vec![0; 512])),
             messages: Vec::new(),
             phase: None,
             command_phase: None,
@@ -66,6 +68,7 @@ impl OrdinaryTask {
 
     /// 装载后立即推进一次 VM；不更新时间、不消费排队消息，也不累计 increment。
     pub fn initialize(&mut self, host: &mut impl Host, budget: usize) -> Result<bool> {
+        let select_numbers = self.command_phase.is_none();
         let entry_pc = match self.command_phase {
             Some(CommandPhase::Initialize(pc)) => pc,
             _ => {
@@ -75,7 +78,7 @@ impl OrdinaryTask {
                 pc
             }
         };
-        self.synchronize(host);
+        self.synchronize(host, select_numbers);
         self.apply_effects(host)?;
         let step = self.interpreter.resume(host, budget)?;
         self.apply_effects(host)?;
@@ -94,9 +97,12 @@ impl OrdinaryTask {
         Ok(())
     }
 
-    fn synchronize(&self, host: &mut impl Host) {
+    fn synchronize(&self, host: &mut impl Host, select_numbers: bool) {
         host.set_task_clock(&self.clock);
         host.set_task_id(self.task_id);
+        if select_numbers {
+            host.set_task_local_numbers(self.local_numbers.clone());
+        }
         host.set_task_context(&self.creation_context);
     }
 
@@ -302,6 +308,7 @@ impl OrdinaryTask {
         host: &mut impl Host,
         budget: usize,
     ) -> Result<CommandOutcome> {
+        let select_numbers = self.command_phase.is_none();
         let (mut message, entry_pc) = match self.command_phase {
             Some(CommandPhase::Notification(saved, message, pc)) if saved == *command => {
                 (message, pc)
@@ -355,7 +362,7 @@ impl OrdinaryTask {
             }
         };
         self.command_phase = Some(CommandPhase::Notification(*command, message, entry_pc));
-        self.synchronize(host);
+        self.synchronize(host, select_numbers);
         self.apply_effects(host)?;
         let result = self
             .interpreter
@@ -385,6 +392,7 @@ impl OrdinaryTask {
         host: &mut impl Host,
         budget: usize,
     ) -> Result<bool> {
+        let select_numbers = self.command_phase.is_none();
         let entry_pc = match self.command_phase {
             Some(CommandPhase::Message(pc)) => pc,
             _ => {
@@ -397,7 +405,7 @@ impl OrdinaryTask {
                 pc
             }
         };
-        self.synchronize(host);
+        self.synchronize(host, select_numbers);
         self.apply_effects(host)?;
         let step = self.interpreter.dispatch_message(message, host, budget)?;
         self.apply_effects(host)?;
@@ -413,6 +421,7 @@ impl OrdinaryTask {
 
     /// 先尝试同步删除通知，再标记删除；false 表示通知仍需预算续跑。
     pub fn request_delete(&mut self, host: &mut impl Host, budget: usize) -> Result<bool> {
+        let select_numbers = self.command_phase.is_none();
         let mut message = match self.command_phase {
             Some(CommandPhase::Delete(message)) => message,
             _ => {
@@ -423,7 +432,7 @@ impl OrdinaryTask {
                 [u32::MAX, 0xffff_0006, 0, 0]
             }
         };
-        self.synchronize(host);
+        self.synchronize(host, select_numbers);
         self.apply_effects(host)?;
         self.command_phase = Some(CommandPhase::Delete(message));
         let step = self
@@ -463,6 +472,7 @@ impl OrdinaryTask {
         host: &mut impl Host,
         budget_per_call: usize,
     ) -> Result<bool> {
+        let select_numbers = self.phase.is_none();
         if self.command_phase.is_some() {
             return Err(Error::new(self.interpreter.pc, "普通任务命令尚未完成"));
         }
@@ -473,7 +483,7 @@ impl OrdinaryTask {
             self.accumulated_increment = self.accumulated_increment.wrapping_add(increment);
             self.phase = Some(UpdatePhase::Messages(0));
         }
-        self.synchronize(host);
+        self.synchronize(host, select_numbers);
         self.apply_effects(host)?;
         while let Some(UpdatePhase::Messages(index)) = self.phase {
             if index == self.messages.len() {

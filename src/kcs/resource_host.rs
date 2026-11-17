@@ -456,6 +456,10 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
         self.inner.set_task_id(id);
     }
 
+    fn set_task_local_numbers(&mut self, values: crate::expression::LocalNumbers) {
+        self.inner.set_task_local_numbers(values);
+    }
+
     fn set_task_context(&mut self, context: &[u8]) {
         self.inner.set_task_context(context);
     }

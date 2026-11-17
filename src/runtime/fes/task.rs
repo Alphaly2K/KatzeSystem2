@@ -6,6 +6,14 @@ use crate::{Error, Result, fes};
 
 /// FES 任务所需的共享表达式状态、媒体更新及启动时的子树调度。
 pub trait Services {
+    /// 当前选中的局部数值区，供参数记录入口使用。
+    fn active_local_numbers(&self) -> Option<crate::expression::LocalNumbers> {
+        None
+    }
+    /// 在已登记的两个任务之间复制局部数值，保持当前表达式上下文。
+    fn copy_local_numbers(&mut self, _from: u32, _to: u32) -> Result<()> {
+        Err(Error::new(0, "FES 局部数值复制服务尚未提供"))
+    }
     /// 只推进装载期事件；false 表示保留游标等待续跑。
     fn prepare(&mut self, scene: &mut Scene, budget: usize) -> Result<bool>;
     /// 推进当前任务的场景；false 后沿用同一时刻继续本轮。
@@ -83,7 +91,14 @@ pub trait Services {
 }
 
 impl<F: ObjectFactory> Services for ObjectHost<'_, F> {
+    fn active_local_numbers(&self) -> Option<crate::expression::LocalNumbers> {
+        self.numbers.active_local()
+    }
+    fn copy_local_numbers(&mut self, from: u32, to: u32) -> Result<()> {
+        self.numbers.copy_local(from, to)
+    }
     fn prepare(&mut self, scene: &mut Scene, budget: usize) -> Result<bool> {
+        self.numbers.select_local(scene.interpreter.local_numbers());
         let owner = self.host.task_id;
         let mut store = self.store();
         store.budget = budget.max(1);
@@ -91,6 +106,7 @@ impl<F: ObjectFactory> Services for ObjectHost<'_, F> {
     }
 
     fn update(&mut self, scene: &mut Scene, now: u32, budget: usize) -> Result<bool> {
+        self.numbers.select_local(scene.interpreter.local_numbers());
         let owner = self.host.task_id;
         let mut store = self.store();
         store.budget = budget.max(1);
@@ -103,6 +119,7 @@ impl<F: ObjectFactory> Services for ObjectHost<'_, F> {
         name: &str,
         budget: usize,
     ) -> Result<bool> {
+        self.numbers.select_local(scene.interpreter.local_numbers());
         let owner = self.host.task_id;
         let mut store = self.store();
         store.budget = budget.max(1);
@@ -140,6 +157,7 @@ impl<F: ObjectFactory> Services for ObjectHost<'_, F> {
         refresh: bool,
         budget: usize,
     ) -> Result<bool> {
+        self.numbers.select_local(scene.interpreter.local_numbers());
         let owner = self.host.task_id;
         let mut store = self.store();
         store.budget = budget.max(1);
@@ -153,6 +171,7 @@ impl<F: ObjectFactory> Services for ObjectHost<'_, F> {
         event: u32,
         budget: usize,
     ) -> Result<Option<bool>> {
+        self.numbers.select_local(scene.interpreter.local_numbers());
         let owner = self.host.task_id;
         let mut store = self.store();
         store.budget = budget.max(1);
@@ -166,6 +185,7 @@ impl<F: ObjectFactory> Services for ObjectHost<'_, F> {
         event: u32,
         budget: usize,
     ) -> Result<Option<bool>> {
+        self.numbers.select_local(scene.interpreter.local_numbers());
         let owner = self.host.task_id;
         let mut store = self.store();
         store.budget = budget.max(1);
@@ -941,6 +961,11 @@ impl TaskObject for FesObject {
     fn shared_numbers_available(&self) -> Option<bool> {
         Some(self.initialized)
     }
+    fn local_numbers(&self) -> Option<crate::expression::LocalNumbers> {
+        self.scene
+            .as_ref()
+            .map(|scene| scene.interpreter.local_numbers())
+    }
     fn accepts_deferred_delete(&self) -> bool {
         true
     }
@@ -1088,8 +1113,11 @@ impl TaskObject for FesObject {
                 scene.set_system_value("_EXITCODE_", -1);
                 scene.set_system_value("_SAVEOBJ_", 0);
                 scene.set_system_value("_FRAME_", 0);
+                let values = scene.interpreter.local_numbers();
                 self.scene = Some(scene);
                 self.initialized = true;
+                host.set_task_shared_numbers(true);
+                host.set_task_local_numbers(values);
                 self.bind()?;
             }
             338 => {
@@ -1277,9 +1305,12 @@ impl TaskObject for FesObject {
                 if !self.initialized {
                     return Err(Error::new(0, "FES 参数访问需要已初始化对象"));
                 }
+                host.set_task_local_numbers(
+                    self.scene.as_ref().unwrap().interpreter.local_numbers(),
+                );
                 let index = command.data[0] as usize;
                 if command.code == 346 {
-                    let values = self.scene.as_mut().unwrap().parameter_values_mut();
+                    let mut values = self.scene.as_mut().unwrap().parameter_values_mut();
                     if let Some(value) = values.get_mut(index) {
                         *value = b as i32;
                     }
@@ -1339,18 +1370,30 @@ impl TaskObject for FesObject {
                 buffers,
             )?,
             349 | 350 => {
+                let values = services(host)?.active_local_numbers();
                 if let Some(scene) = &mut self.scene {
                     scene.parameter_record_command(
                         command.code,
                         command.data[0],
                         buffers.data1.as_deref_mut(),
+                        values,
                         output,
                     )?;
                 } else {
                     *output = 0;
                 }
             }
-            178 | 344 | 345 | 351..=356 => {
+            352 | 353 => {
+                if self.initialized {
+                    let (from, to) = if command.code == 352 {
+                        (b, self.id)
+                    } else {
+                        (self.id, b)
+                    };
+                    services(host)?.copy_local_numbers(from, to)?;
+                }
+            }
+            178 | 344 | 345 | 351 | 354..=356 => {
                 return Err(Error::new(0, "FES 专属命令尚未接入"));
             }
             _ => {

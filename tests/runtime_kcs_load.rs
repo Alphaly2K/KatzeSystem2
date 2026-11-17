@@ -124,6 +124,8 @@ fn load_initialization_preserves_task_state_and_missing_program_removes_the_vm()
             .unwrap();
 
         load(&mut runtime, id, 0, b"child.kcs").unwrap();
+        let local = runtime.object(id).unwrap().local_numbers().unwrap();
+        local.borrow_mut()[511] = 0x1234_5678;
         assert_eq!(counter(&runtime, id), 0);
         assert_eq!(
             runtime.object(id).unwrap().creation_context(),
@@ -175,6 +177,11 @@ fn load_initialization_preserves_task_state_and_missing_program_removes_the_vm()
         runtime.update(60, 3).unwrap();
         assert_eq!(runtime.object(id).unwrap().clock().time, 19);
         load(&mut runtime, id, u32::MAX, b"child.kcs").unwrap();
+        assert!(Rc::ptr_eq(
+            &local,
+            &runtime.object(id).unwrap().local_numbers().unwrap()
+        ));
+        assert_eq!(local.borrow()[511], 0x1234_5678);
         assert_eq!(counter(&runtime, id), 1);
         runtime.dispatch_command(0, command(id, 3, [0; 3])).unwrap();
         load(&mut runtime, id, 1, b"ignored.kcs").unwrap();

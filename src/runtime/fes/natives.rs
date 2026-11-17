@@ -14,7 +14,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             return self.fes_local_record_native(index, arguments, vm);
         }
         let length = match index {
-            448 => 4,
+            448 | 665 | 666 => 4,
             630 => 16,
             645 | 882 => 12,
             _ => 8,
@@ -24,6 +24,13 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         }
         let target = read::u32_at(arguments, 0)?;
         match index {
+            665 | 666 => {
+                self.command_target(
+                    target,
+                    if index == 665 { 352 } else { 353 },
+                    [0, self.host.task_id, 0],
+                )?;
+            }
             447 => {
                 let formatted = format_string(vm, read::u32_at(arguments, 4)?, 0)?;
                 let mut name = self

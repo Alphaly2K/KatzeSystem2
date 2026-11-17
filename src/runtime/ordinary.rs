@@ -82,11 +82,13 @@ pub struct OrdinaryObject {
     shared_numbers: bool,
     loading: Option<Loading>,
     external: SharedMemory,
+    local_numbers: crate::expression::LocalNumbers,
 }
 
 impl OrdinaryObject {
     pub fn new(task: OrdinaryTask) -> Self {
         let external = task.interpreter.external_storage();
+        let local_numbers = task.local_numbers.clone();
         Self {
             id: task.task_id,
             task: Some(task),
@@ -94,6 +96,7 @@ impl OrdinaryObject {
             shared_numbers: true,
             loading: None,
             external,
+            local_numbers,
         }
     }
 
@@ -112,6 +115,7 @@ impl OrdinaryObject {
             shared_numbers: false,
             loading: None,
             external,
+            local_numbers: std::rc::Rc::new(std::cell::RefCell::new(vec![0; 512])),
         }
     }
 
@@ -207,6 +211,7 @@ impl OrdinaryObject {
                         let mut task = OrdinaryTask::new(program, Vec::new())?;
                         task.interpreter.bind_external(self.external.clone());
                         task.task_id = self.id;
+                        task.local_numbers = self.local_numbers.clone();
                         task.control = self.unloaded.base.control.clone();
                         task.clock = self.unloaded.base.clock.clone();
                         task.creation_context = self.unloaded.context.clone();
@@ -287,6 +292,9 @@ impl TaskObject for OrdinaryObject {
 
     fn shared_numbers_available(&self) -> Option<bool> {
         Some(self.shared_numbers)
+    }
+    fn local_numbers(&self) -> Option<crate::expression::LocalNumbers> {
+        Some(self.local_numbers.clone())
     }
     fn control(&self) -> &Control {
         self.task

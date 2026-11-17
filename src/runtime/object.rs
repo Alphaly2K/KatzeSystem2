@@ -41,6 +41,11 @@ pub trait TaskObject {
         None
     }
 
+    /// 对象独立的 512 槽局部数值区；共享数值绑定完成后登记。
+    fn local_numbers(&self) -> Option<crate::expression::LocalNumbers> {
+        None
+    }
+
     /// 显式输入入口使用的状态；其他对象返回 None。
     fn input_state(&self) -> Option<&crate::input::InputState> {
         None
