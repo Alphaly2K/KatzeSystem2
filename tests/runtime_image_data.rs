@@ -218,6 +218,89 @@ fn call(code: &mut Vec<u8>, native: u32, args: &[u32], output: Option<u32>) {
 }
 
 #[test]
+fn rectangle_image_union_uses_pixel_handles_physical_size_and_wrapping_endpoints() {
+    for budget in [1, 4096] {
+        for base in [0, 0x8000_0000u32] {
+            let mut rt = Runtime::new(
+                0,
+                kind::ROOT,
+                Box::new(BaseObject::new()),
+                State::new(0),
+                KcsFactory::new(Loader(Program::from_code(&[], vec![], 0).unwrap())),
+            );
+            rt.set_budget(budget, 1 << 20);
+            let wrapper = rt.images_mut().create(0, [3, 2]).unwrap();
+            let pixels = rt.images().pixel_handle(wrapper).unwrap();
+            *rt.images_mut().get_mut(wrapper).unwrap() = Image::from_frame(DecodedFrame {
+                id: 7,
+                info: StandardInfo {
+                    size: [3, 2],
+                    bit_depth: 32,
+                    offset: [-20, 30],
+                    canvas_size: [40, 50],
+                    reserved: 0,
+                    base: [60, 70],
+                },
+                pixels: vec![0; 24],
+                attributes: Default::default(),
+            })
+            .unwrap();
+            let zero = rt.images_mut().create(0, [0, 4]).unwrap();
+            let zero_pixels = rt.images().pixel_handle(zero).unwrap();
+            let cases = [
+                ([0i32; 4], pixels, [-2, -3], [-2i32, -3, 1, -1]),
+                ([-4, -4, 10, 10], pixels, [-2, -3], [-4, -4, 10, 10]),
+                ([7, 8, 1, 2], pixels, [0, 0], [0, 0, 3, 2]),
+                ([1, 2, 3, 4], pixels, [i32::MAX, 0], [1, 2, 3, 4]),
+                ([8, 7, 2, 1], 0, [10, 20], [0; 4]),
+                ([1, 2, 3, 4], zero_pixels, [10, 20], [1, 2, 3, 4]),
+            ];
+            let mut memory = vec![0xa5; 128];
+            let mut code = Vec::new();
+            for (i, (source, image, offset, _)) in cases.iter().enumerate() {
+                let at = i * 16;
+                let bytes: Vec<_> = source.iter().flat_map(|n| n.to_le_bytes()).collect();
+                memory[at..at + 16].copy_from_slice(&bytes);
+                call(
+                    &mut code,
+                    216,
+                    &[base + at as u32, *image, offset[0] as u32, offset[1] as u32],
+                    None,
+                );
+            }
+            code.push(0x3b);
+            rt.factory_mut().programs.0 = Program::from_code(&code, memory.clone(), 128).unwrap();
+            let id = rt.create(0, kind::ORDINARY, b"union", b"").unwrap();
+            if base != 0 {
+                rt.object_mut(id)
+                    .unwrap()
+                    .interpreter_mut()
+                    .unwrap()
+                    .replace_external(memory)
+                    .unwrap();
+            }
+            rt.update(10, 1).unwrap();
+            let vm = rt.object(id).unwrap().interpreter().unwrap();
+            for (i, (_, _, _, expected)) in cases.iter().enumerate() {
+                let bytes: Vec<_> = expected.iter().flat_map(|n| n.to_le_bytes()).collect();
+                assert_eq!(vm.read(base + i as u32 * 16, 16).unwrap(), bytes);
+            }
+            assert_eq!(vm.read(base + 96, 32).unwrap(), [0xa5; 32]);
+            assert!(vm.stack_bytes().is_empty());
+
+            let mut code = Vec::new();
+            call(&mut code, 216, &[0, wrapper, 0, 0], None);
+            code.push(0x3b);
+            rt.factory_mut().programs.0 = Program::from_code(&code, vec![0xa5; 16], 64).unwrap();
+            let id = rt.create(0, kind::ORDINARY, b"invalid", b"").unwrap();
+            assert!(rt.update(20, 1).unwrap_err().message.contains("像素句柄"));
+            let vm = rt.object(id).unwrap().interpreter().unwrap();
+            assert_eq!(vm.read(0, 16).unwrap(), [0xa5; 16]);
+        }
+    }
+}
+
+#[test]
 fn raw_image_geometry_and_pixels_keep_bottom_coordinates_overlap_and_shared_storage() {
     let mut code = Vec::new();
     call(&mut code, 363, &[1, 80, 84], None);

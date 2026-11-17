@@ -262,6 +262,7 @@ impl Resources {
         let valid = match index {
             111 | 114 => length == 4,
             112 => length == 8,
+            216 => length == 16,
             116 => length == 40,
             115 | 367 => {
                 length == 40
@@ -279,6 +280,25 @@ impl Resources {
         let mut args = [0; 10];
         for (arg, bytes) in args.iter_mut().zip(arguments.chunks_exact(4)) {
             *arg = u32::from_le_bytes(bytes.try_into().unwrap());
+        }
+        if index == 216 {
+            vm.read(args[0], 16)?;
+            let size = if args[1] == 0 {
+                [0; 2]
+            } else {
+                self.images.pixel_image(args[1])?.info().size
+            };
+            crate::kcs::unite_rectangle(
+                vm,
+                args[0],
+                [
+                    args[2] as i32,
+                    args[3] as i32,
+                    args[2].wrapping_add(size[0]) as i32,
+                    args[3].wrapping_add(size[1]) as i32,
+                ],
+            )?;
+            return Ok(NativeReturn::Continue);
         }
         if index == 536 {
             if args[0] == 0 {

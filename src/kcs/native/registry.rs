@@ -2,6 +2,7 @@
 pub(super) enum CoreHandler {
     Text,
     Memory,
+    Rectangle,
     Scalar,
     Settings,
     Storage,
@@ -42,6 +43,7 @@ pub(super) fn core(index: u32) -> CoreHandler {
         1042 | 1043 => CoreHandler::Achievements,
         29..=32 => CoreHandler::File,
         27 | 28 | 35 | 36 => CoreHandler::Memory,
+        214 | 215 | 217 | 218 => CoreHandler::Rectangle,
         13..=26
         | 37
         | 38
@@ -57,7 +59,7 @@ pub(super) fn core(index: u32) -> CoreHandler {
         | 1051
         | 1063 => CoreHandler::Text,
         904 => CoreHandler::Text,
-        33 | 34 | 50..=64 | 218 | 318..=320 | 397 | 461 | 786 | 874 | 875 => CoreHandler::Scalar,
+        33 | 34 | 50..=64 | 318..=320 | 397 | 461 | 786 | 874 | 875 => CoreHandler::Scalar,
         359..=361
         | 533
         | 565
@@ -353,6 +355,7 @@ pub(crate) fn runtime(index: u32) -> RuntimeHandler {
         576 | 688 | 689 => RuntimeHandler::StateRecord,
         111
         | 112
+        | 216
         | 114..=119
         | 284
         | 362..=369

@@ -17,7 +17,7 @@ pub(super) fn call(
     let count = match index {
         59 | 61 | 320 | 397 | 874 => 2,
         875 | 786 => 3,
-        218 | 318 => 5,
+        318 => 5,
         _ => 1,
     };
     let args = words(arguments, count, vm.pc)?;
@@ -35,26 +35,6 @@ pub(super) fn call(
             vm.write(args[1], &(args[0] as i16 as i32).to_le_bytes())?;
             let high = (args[0] >> 16) as i16;
             vm.write(args[2], &(high as i32).to_le_bytes())?;
-            NativeReturn::Continue
-        }
-        218 => {
-            let source: [i32; 4] = {
-                let bytes = vm.read(args[0], 16)?;
-                std::array::from_fn(|i| {
-                    i32::from_le_bytes(bytes[i * 4..i * 4 + 4].try_into().unwrap())
-                })
-            };
-            let mut rectangle = [
-                source[0].max(args[1] as i32),
-                source[1].max(args[2] as i32),
-                source[2].min(args[3] as i32),
-                source[3].min(args[4] as i32),
-            ];
-            if rectangle[0] >= rectangle[2] || rectangle[1] >= rectangle[3] {
-                rectangle = [0; 4];
-            }
-            let bytes: Vec<_> = rectangle.into_iter().flat_map(i32::to_le_bytes).collect();
-            vm.write(args[0], &bytes)?;
             NativeReturn::Continue
         }
         318 => {

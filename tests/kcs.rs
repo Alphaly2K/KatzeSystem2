@@ -82,6 +82,80 @@ fn rectangle_intersection_uses_signed_endpoints_and_clears_empty_results() -> Re
 }
 
 #[test]
+fn rectangle_union_ignores_empty_inputs_and_reads_aliases_before_writing() -> Result<()> {
+    use kcs::{Host, NativeReturn};
+    let mut numbers = katze_system2::expression::State::new(0);
+    let mut host = kcs::CoreHost::new(&mut numbers);
+    let mut vm = kcs::Interpreter::new(
+        kcs::Program::from_code(&[], vec![0xa5; 64], 0)?,
+        vec![0xa5; 64],
+    )?;
+    let args = |values: &[u32]| {
+        values
+            .iter()
+            .flat_map(|value| value.to_le_bytes())
+            .collect::<Vec<_>>()
+    };
+    let bytes = |rect: [i32; 4]| {
+        rect.into_iter()
+            .flat_map(i32::to_le_bytes)
+            .collect::<Vec<_>>()
+    };
+    for (target, other) in [(4, 36), (0x8000_0004, 36), (4, 0x8000_0024)] {
+        for (left, right, expected) in [
+            ([0; 4], [-5, -2, 10, 20], [-5, -2, 10, 20]),
+            ([8, 3, 2, 10], [-5, -2, 10, 20], [-5, -2, 10, 20]),
+            ([1, 2, 3, 4], [8, 3, 2, 10], [1, 2, 3, 4]),
+            ([8, 3, 2, 10], [1, 2, 3, 2], [0; 4]),
+            ([1, 2, 3, 4], [3, -2, 8, 5], [1, -2, 8, 5]),
+            (
+                [1, 2, 3, 4],
+                [i32::MIN, i32::MIN, i32::MAX, i32::MAX],
+                [i32::MIN, i32::MIN, i32::MAX, i32::MAX],
+            ),
+        ] {
+            vm.write(target, &bytes(left))?;
+            vm.write(other, &bytes(right))?;
+            assert_eq!(
+                host.call(215, &args(&[target, other]), &mut vm)?,
+                NativeReturn::Continue
+            );
+            assert_eq!(vm.read(target, 16)?, bytes(expected));
+            assert_eq!(vm.read(other, 16)?, bytes(right));
+            assert_eq!(
+                host.call(217, &args(&[target]), &mut vm)?,
+                NativeReturn::Value(u32::from(expected == [0; 4]))
+            );
+        }
+        assert_eq!(
+            host.call(214, &args(&[target]), &mut vm)?,
+            NativeReturn::Continue
+        );
+        assert_eq!(
+            vm.read(target - 1, 18)?,
+            [vec![0xa5], vec![0; 16], vec![0xa5]].concat()
+        );
+    }
+    vm.write(0, &bytes([1, 2, 3, 4]))?;
+    vm.write(16, &5i32.to_le_bytes())?;
+    host.call(215, &args(&[0, 4]), &mut vm)?;
+    assert_eq!(vm.read(0, 16)?, bytes([1, 2, 4, 5]));
+    host.call(215, &args(&[0, 0]), &mut vm)?;
+    assert_eq!(vm.read(0, 16)?, bytes([1, 2, 4, 5]));
+    let before = vm.read(0, 64)?.to_vec();
+    for (index, arguments) in [
+        (214, vec![]),
+        (215, args(&[0])),
+        (217, vec![]),
+        (215, args(&[0, 63])),
+    ] {
+        assert!(host.call(index, &arguments, &mut vm).is_err());
+        assert_eq!(vm.read(0, 64)?, before);
+    }
+    Ok(())
+}
+
+#[test]
 fn spline_preparation_keeps_control_points_boundary_coefficients_and_guard_bytes() -> Result<()> {
     use kcs::Host;
     let mut vm = kcs::Interpreter::new(kcs::Program::from_code(&[], vec![0xa5; 88], 64)?, vec![])?;

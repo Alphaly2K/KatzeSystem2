@@ -56,7 +56,7 @@ pub(crate) use memory::copy as copy_memory;
 pub(crate) use memory::copy_between as copy_memory_between;
 pub(crate) use memory::{MemoryLoan, copy_loan};
 pub use motion::{MotionHost, MotionState, MotionTask};
-pub(crate) use native::{RuntimeHandler, call_native, runtime_native_handler};
+pub(crate) use native::{RuntimeHandler, call_native, runtime_native_handler, unite_rectangle};
 pub(crate) use numeric::float as float_operation;
 pub(crate) use numeric::float_ieee as ieee_float_operation;
 pub(crate) use numeric::native_math as native_float_math;

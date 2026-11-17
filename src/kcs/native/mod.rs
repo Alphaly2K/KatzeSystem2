@@ -5,6 +5,8 @@ use crate::{Error, Result, expression};
 mod database;
 mod matrix;
 mod memory;
+mod rectangle;
+pub(crate) use rectangle::unite_at as unite_rectangle;
 mod registry;
 pub(crate) use registry::{RuntimeHandler, runtime as runtime_native_handler};
 mod scalar;
@@ -28,6 +30,7 @@ pub(crate) fn call_native(
     match registry::core(index) {
         registry::CoreHandler::Text => text::call(state, host, index, arguments, vm),
         registry::CoreHandler::Memory => memory::call(host, index, arguments, vm),
+        registry::CoreHandler::Rectangle => rectangle::call(index, arguments, vm),
         registry::CoreHandler::Scalar => scalar::call(host, index, arguments, vm),
         registry::CoreHandler::Settings => settings::call(host, index, arguments, vm),
         registry::CoreHandler::Storage => storage::call(state, host, index, arguments, vm),
