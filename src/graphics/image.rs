@@ -73,11 +73,18 @@ pub struct Image {
 impl Image {
     /// 创建普通 112 使用的零初始化图像，画布、偏移、基点及帧 ID 均为零。
     pub fn new(size: [u32; 2]) -> Result<Self> {
-        Ok(Self {
+        Self::new_with_depth(size, 32)
+    }
+
+    pub(crate) fn new_with_depth(size: [u32; 2], bit_depth: u32) -> Result<Self> {
+        if !matches!(bit_depth, 24 | 32) {
+            return Err(Error::new(0, "图像对象需要 24 或 32 位像素"));
+        }
+        let mut image = Self {
             id: 0,
             info: StandardInfo {
                 size,
-                bit_depth: 32,
+                bit_depth,
                 offset: [0; 2],
                 canvas_size: [0; 2],
                 reserved: 0,
@@ -88,7 +95,9 @@ impl Image {
             attributes: BTreeMap::new(),
             alpha_mask: 0,
             filter_revision: 0,
-        })
+        };
+        image.restore_rgb_alpha();
+        Ok(image)
     }
 
     /// 输入像素为 BGRA8；24 位图像的视图 Alpha 固定为 255。
@@ -151,6 +160,22 @@ impl Image {
 
     pub fn surface(&self) -> &Surface {
         &self.surface
+    }
+
+    pub(crate) fn blend_surface_from_top(&mut self, source: &Surface, at: [i32; 2]) {
+        let Some(region) = self.surface.clip_blend(source, source.bounds(), at) else {
+            return;
+        };
+        if self.is_rgb() {
+            self.blend_rgb_surface_region(source, region);
+        } else {
+            self.surface.blend_region(source, region, 255);
+        }
+    }
+
+    pub(crate) fn clear_pixels(&mut self) {
+        self.surface.clear(0);
+        self.restore_rgb_alpha();
     }
 
     /// 返回 BGRA8 视图；24 位图像的 Alpha 槽须保持 255。
@@ -252,27 +277,32 @@ impl Image {
 
     fn blend_rgb_region(&mut self, source: Option<&Self>, region: ImageRegion) {
         let source_is_rgb = source.is_none_or(Self::is_rgb);
+        if !source_is_rgb {
+            self.blend_rgb_surface_region(&source.unwrap().surface, region);
+            return;
+        }
         for row in (0..region.height).rev() {
-            if source_is_rgb {
-                let source_stride = source.unwrap_or(self).surface.stride();
-                let from = (region.source_y + row) * source_stride + region.source_x * 4;
-                let at = (region.y + row) * self.surface.stride() + region.x * 4;
-                let length = region.width * 4;
-                if let Some(source) = source {
-                    self.surface.pixels_mut()[at..at + length]
-                        .copy_from_slice(&source.surface.pixels()[from..from + length]);
-                } else {
-                    self.surface
-                        .pixels_mut()
-                        .copy_within(from..from + length, at);
-                }
-                continue;
+            let source_stride = source.unwrap_or(self).surface.stride();
+            let from = (region.source_y + row) * source_stride + region.source_x * 4;
+            let at = (region.y + row) * self.surface.stride() + region.x * 4;
+            let length = region.width * 4;
+            if let Some(source) = source {
+                self.surface.pixels_mut()[at..at + length]
+                    .copy_from_slice(&source.surface.pixels()[from..from + length]);
+            } else {
+                self.surface
+                    .pixels_mut()
+                    .copy_within(from..from + length, at);
             }
+        }
+    }
+
+    fn blend_rgb_surface_region(&mut self, source: &Surface, region: ImageRegion) {
+        for row in (0..region.height).rev() {
             for column in 0..region.width {
-                let source = source.unwrap_or(self);
-                let from = (region.source_y + row) * source.surface.stride()
-                    + (region.source_x + column) * 4;
-                let pixel: [u8; 4] = source.surface.pixels()[from..from + 4].try_into().unwrap();
+                let from =
+                    (region.source_y + row) * source.stride() + (region.source_x + column) * 4;
+                let pixel: [u8; 4] = source.pixels()[from..from + 4].try_into().unwrap();
                 let at = (region.y + row) * self.surface.stride() + (region.x + column) * 4;
                 let target = &mut self.surface.pixels_mut()[at..at + 4];
                 for (value, color) in target[..3].iter_mut().zip(pixel) {
@@ -796,6 +826,13 @@ impl Images {
         self.data
             .get(&pixels)
             .map(|data| &data.image)
+            .ok_or_else(|| Error::new(0, "图像像素句柄无效"))
+    }
+
+    pub(crate) fn pixel_image_mut(&mut self, pixels: u32) -> Result<&mut Image> {
+        self.data
+            .get_mut(&pixels)
+            .map(|data| &mut data.image)
             .ok_or_else(|| Error::new(0, "图像像素句柄无效"))
     }
 

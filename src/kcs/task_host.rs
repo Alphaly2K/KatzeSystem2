@@ -206,6 +206,15 @@ impl<H: Host, S: TaskServices> Host for TaskHost<'_, H, S> {
         self.inner.submit_message(surface, rectangle, at)
     }
 
+    fn submit_message_pixels(
+        &mut self,
+        pixels: u32,
+        rectangle: crate::graphics::Rect,
+        at: [i32; 2],
+    ) -> Result<bool> {
+        self.inner.submit_message_pixels(pixels, rectangle, at)
+    }
+
     fn update_image_list(
         &mut self,
         list: &mut crate::graphics::ImageList,

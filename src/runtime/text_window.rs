@@ -15,7 +15,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             137 | 599 => 6,
             418 => 4,
             124 | 127 | 128 | 131 | 133 | 135 | 136 | 139 | 456 | 557 | 585 => 2,
-            125 | 129 | 130 | 132 => 1,
+            125 | 129 | 130 | 132 | 391 => 1,
             _ => unreachable!(),
         };
         if arguments.len() != count * 4 {
@@ -168,6 +168,19 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     119,
                     [read::u32_at(arguments, 4)?, read::u32_at(arguments, 8)?, 0],
                 )?;
+            }
+            391 => {
+                let mut bytes = [0; 4];
+                self.command_target_with_buffers(
+                    target,
+                    120,
+                    [0; 3],
+                    &mut CommandBuffers {
+                        data1: Some(&mut bytes),
+                        ..Default::default()
+                    },
+                )?;
+                return Ok(NativeReturn::Value(u32::from_le_bytes(bytes)));
             }
             599 => {
                 let mut bytes = arguments[4..24].to_vec();

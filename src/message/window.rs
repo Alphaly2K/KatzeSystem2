@@ -1,5 +1,5 @@
 use super::{FontRequest, GlyphEffects, GlyphPaint, TextEncoding};
-use crate::graphics::{PlaneObject, Rect, Surface};
+use crate::graphics::{Image, PlaneObject, Rect, Surface};
 use crate::kcs::{Host, Interpreter};
 use crate::runtime::{TaskObject, kind};
 use crate::task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock};
@@ -14,7 +14,9 @@ pub(crate) use layout::codes as character_set;
 pub struct TextWindowObject {
     plane: PlaneObject,
     layout: Layout,
-    surface: Option<Surface>,
+    image: u32,
+    // 像素借用不随包装的后续重绑而改变。
+    pixels: u32,
     fonts: Option<[FontRequest; 2]>,
     edge: u32,
     next: usize,
@@ -28,7 +30,8 @@ impl TextWindowObject {
         Self {
             plane: PlaneObject::new(id),
             layout: Layout::default(),
-            surface: None,
+            image: 0,
+            pixels: 0,
             fonts: None,
             edge: 0xff00_0000,
             next: 0,
@@ -38,8 +41,16 @@ impl TextWindowObject {
         }
     }
 
-    pub fn surface(&self) -> Option<&Surface> {
-        self.surface.as_ref()
+    /// 窗口持有的普通图像句柄；配置前为零，查询不增加引用。
+    pub fn image(&self) -> u32 {
+        self.image
+    }
+    pub fn surface<'a>(&self, host: &'a dyn Host) -> Result<Option<&'a Surface>> {
+        if self.image == 0 {
+            Ok(None)
+        } else {
+            Ok(Some(host.pixel_image(self.pixels)?.surface()))
+        }
     }
     pub fn glyph_count(&self) -> usize {
         self.layout.glyphs.len()
@@ -84,7 +95,20 @@ impl TextWindowObject {
         }
         let c = &self.layout.config;
         let size = [c[2] as u32, c[3] as u32];
-        self.surface = Some(Surface::new(size)?);
+        let bit_depth = match c[4] {
+            3 => 24,
+            4 => 32,
+            _ => return Err(Error::new(0, "文本窗口仅支持三或四通道图像")),
+        };
+        let image = Image::new_with_depth(size, bit_depth)?;
+        let images = host
+            .images_mut()
+            .ok_or_else(|| Error::new(0, "宿主未提供文本窗口图像存储"))?;
+        images.release_for(self.plane.id(), self.image)?;
+        self.image = 0;
+        self.pixels = 0;
+        self.image = images.insert(self.plane.id(), image, None)?;
+        self.pixels = images.pixel_handle(self.image)?;
         if self.fonts.is_none() {
             let defaults = host.message_defaults()?;
             let face = FontRequest {
@@ -129,12 +153,12 @@ impl TextWindowObject {
     }
 
     fn paint(&mut self, end: usize, host: &mut dyn Host) -> Result<()> {
-        let (Some(surface), Some(requests)) = (&mut self.surface, &self.fonts) else {
+        let Some(requests) = &self.fonts else {
             return Ok(());
         };
-        let fonts = host
-            .fonts()
-            .ok_or_else(|| Error::new(0, "宿主未提供文本窗口字体服务"))?;
+        if self.image == 0 {
+            return Ok(());
+        }
         for glyph in self.layout.glyphs.iter_mut().take(end) {
             if glyph.drawn || matches!(glyph.code, 0 | 0xffff) {
                 continue;
@@ -164,8 +188,10 @@ impl TextWindowObject {
                 } else {
                     crate::text::cp932(bytes)?.chars().next().unwrap()
                 };
-                let mask =
-                    fonts.rasterize(&requests[usize::from(glyph.ruby)], character, size as u32)?;
+                let mask = host
+                    .fonts()
+                    .ok_or_else(|| Error::new(0, "宿主未提供文本窗口字体服务"))?
+                    .rasterize(&requests[usize::from(glyph.ruby)], character, size as u32)?;
                 let extent = (size as u32)
                     .max(mask.size()[0])
                     .max(mask.size()[1])
@@ -175,21 +201,23 @@ impl TextWindowObject {
                 mask.paint(&mut image, &paint)?;
                 image
             };
-            surface.blend_from(&image, image.bounds(), glyph.position, 255);
+            host.images_mut()
+                .ok_or_else(|| Error::new(0, "宿主未提供文本窗口图像存储"))?
+                .pixel_image_mut(self.pixels)?
+                .blend_surface_from_top(&image, glyph.position);
             glyph.drawn = true;
         }
         Ok(())
     }
 
     fn publish_whole(&self, host: &mut dyn Host) -> Result<()> {
-        if self.layout.config[5] != 0 {
-            if let Some(surface) = &self.surface {
-                host.submit_message(
-                    surface,
-                    surface.bounds(),
-                    [self.layout.config[0], self.layout.config[1]],
-                )?;
-            }
+        if self.layout.config[5] != 0 && self.image != 0 {
+            let bounds = host.pixel_image(self.pixels)?.surface().bounds();
+            host.submit_message_pixels(
+                self.pixels,
+                bounds,
+                [self.layout.config[0], self.layout.config[1]],
+            )?;
         }
         Ok(())
     }
@@ -201,9 +229,10 @@ impl TextWindowObject {
         if self.layout.config[5] == 0 {
             return Ok(());
         }
-        let Some(surface) = &self.surface else {
+        if self.image == 0 {
             return Ok(());
-        };
+        }
+        let surface_bounds = host.pixel_image(self.pixels)?.surface().bounds();
         let mut bounds: Option<Rect> = None;
         for glyph in self
             .layout
@@ -241,9 +270,9 @@ impl TextWindowObject {
                     width.wrapping_add(i32::from(width < self.layout.config[2].wrapping_sub(1))),
                     height.wrapping_add(i32::from(height < self.layout.config[3].wrapping_sub(1))),
                 );
-                if let Some(rectangle) = rectangle.intersect(surface.bounds()) {
-                    host.submit_message(
-                        surface,
+                if let Some(rectangle) = rectangle.intersect(surface_bounds) {
+                    host.submit_message_pixels(
+                        self.pixels,
                         rectangle,
                         [
                             self.layout.config[0].wrapping_add(rectangle.left),
@@ -392,8 +421,12 @@ impl TaskObject for TextWindowObject {
             }
             105 => {
                 self.layout.clear();
-                if let Some(surface) = &mut self.surface {
-                    surface.clear(0);
+                if self.image != 0 {
+                    let image = host
+                        .images_mut()
+                        .ok_or_else(|| Error::new(0, "宿主未提供文本窗口图像存储"))?
+                        .pixel_image_mut(self.pixels)?;
+                    image.clear_pixels();
                 }
                 self.next = 0;
                 self.breaks = 0;
@@ -453,6 +486,14 @@ impl TaskObject for TextWindowObject {
                 );
             }
             119 => self.layout.cursor = [command.data[0] as i32, command.data[1] as i32],
+            120 => {
+                if let Some(bytes) = buffers.data1.as_deref_mut() {
+                    crate::read::range(bytes, 0, 4)?;
+                    bytes[..4].copy_from_slice(&self.image.to_le_bytes());
+                } else if command.data[1] != 0 {
+                    return Err(Error::new(0, "文本窗口图像查询需要输出缓冲区"));
+                }
+            }
             121 => self.layout.hanging_enabled = command.data[1] != 0,
             122 => self.edge = command.data[1],
             123 => {
@@ -516,5 +557,16 @@ impl TaskObject for TextWindowObject {
     }
     fn request_delete(&mut self, host: &mut dyn Host, budget: usize) -> Result<bool> {
         self.plane.request_delete(host, budget)
+    }
+
+    fn prepare_release(&mut self, host: &mut dyn Host, _: usize) -> Result<bool> {
+        if self.image != 0 {
+            host.images_mut()
+                .ok_or_else(|| Error::new(0, "宿主未提供文本窗口图像存储"))?
+                .release_for(self.plane.id(), self.image)?;
+            self.image = 0;
+            self.pixels = 0;
+        }
+        Ok(true)
     }
 }

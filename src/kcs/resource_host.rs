@@ -464,6 +464,15 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
         self.inner.submit_message(surface, rectangle, at)
     }
 
+    fn submit_message_pixels(
+        &mut self,
+        pixels: u32,
+        rectangle: crate::graphics::Rect,
+        at: [i32; 2],
+    ) -> Result<bool> {
+        self.inner.submit_message_pixels(pixels, rectangle, at)
+    }
+
     fn update_image_list(
         &mut self,
         list: &mut crate::graphics::ImageList,

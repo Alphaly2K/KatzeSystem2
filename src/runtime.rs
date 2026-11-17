@@ -975,6 +975,10 @@ fn run_nested<F: ObjectFactory>(
             **propagate = false;
             return Ok(());
         }
+        if *kind == kind::ORDINARY && command.code == 120 {
+            **propagate = !task.deleted;
+            return Ok(());
+        }
     }
     if let Some(task) = running.get_mut(&target) {
         if let Execution::Command {
@@ -2184,6 +2188,20 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
             .compositor
             .drawing
             .copy_surface(surface, rectangle, at))
+    }
+
+    fn submit_message_pixels(
+        &mut self,
+        pixels: u32,
+        rectangle: crate::graphics::Rect,
+        at: [i32; 2],
+    ) -> Result<bool> {
+        let image = self.resources.images.pixel_image(pixels)?;
+        Ok(self
+            .resources
+            .compositor
+            .drawing
+            .copy_surface(image.surface(), rectangle, at))
     }
 
     fn update_image_list(

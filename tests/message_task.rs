@@ -1348,6 +1348,7 @@ fn text_window_controls_reveal_segments_and_preserve_literal_mode() {
     for (slot, value) in [
         (2, 64),
         (3, 32),
+        (4, 4),
         (5, 1),
         (6, 10),
         (7, 4),
@@ -1516,6 +1517,7 @@ fn text_window_atlas_snapshots_survive_source_release_and_reconfiguration() {
     for (slot, value) in [
         (2, 64),
         (3, 32),
+        (4, 4),
         (5, 1),
         (6, 6),
         (7, 4),
@@ -1589,5 +1591,222 @@ fn text_window_atlas_snapshots_survive_source_release_and_reconfiguration() {
         );
         rt.destroy(window).unwrap();
         assert!(rt.drawables().get(window).is_none());
+    }
+}
+
+#[test]
+fn text_window_image_queries_share_live_pixels_and_release_replaced_wrappers() {
+    struct QueryProgram(Program);
+    impl ProgramLoader for QueryProgram {
+        fn load(&mut self, _: &[u8]) -> Result<Option<Program>> {
+            Ok(Some(self.0.clone()))
+        }
+    }
+    fn instruction(code: &mut Vec<u8>, opcode: u8, values: &[u32]) {
+        code.push(opcode);
+        for value in values {
+            code.push(3);
+            code.extend(value.to_le_bytes());
+        }
+    }
+    fn call(code: &mut Vec<u8>, native: u32, args: &[u32]) {
+        for &arg in args {
+            instruction(code, 0x25, &[arg]);
+        }
+        instruction(code, 0x2b, &[native, args.len() as u32 * 4]);
+    }
+    fn query(code: &mut Vec<u8>, target: u32, destination: u32) {
+        call(code, 391, &[target]);
+        instruction(code, 0x26, &[destination]);
+    }
+    let mut code = Vec::new();
+    instruction(&mut code, 0x25, &[0xdeadbeef]);
+    for (target, destination) in [(1, 0), (0, 16), (u32::MAX, 20), (2, 24)] {
+        query(&mut code, target, destination);
+    }
+    call(&mut code, 123, &[1, 64, 160]);
+    query(&mut code, 1, 4);
+    query(&mut code, 1, 8);
+    call(&mut code, 124, &[1, 224]);
+    call(&mut code, 65, &[]);
+    query(&mut code, 1, 12);
+    call(&mut code, 124, &[1, 240]);
+    call(&mut code, 65, &[]);
+    call(&mut code, 125, &[1]);
+    query(&mut code, 1, 28);
+    call(&mut code, 65, &[]);
+    call(&mut code, 124, &[1, 240]);
+    query(&mut code, 1, 40);
+    call(&mut code, 65, &[]);
+    call(&mut code, 123, &[1, 64, 160]);
+    query(&mut code, 1, 32);
+    call(&mut code, 65, &[]);
+    call(&mut code, 67, &[1]);
+    query(&mut code, 1, 36);
+    call(&mut code, 65, &[]);
+    for budget in [1, 4096] {
+        for channels in [3, 4] {
+            let text_color = if channels == 3 {
+                0xff102132
+            } else {
+                0xff112233
+            };
+            let marker = if channels == 3 {
+                0xffefcdab
+            } else {
+                0xffabcdef
+            };
+            let retained_marker = if channels == 3 {
+                0xff91bacc
+            } else {
+                0xffccba91
+            };
+            let mut data = vec![0; 256];
+            for (slot, value) in [
+                (2, 40),
+                (3, 24),
+                (4, channels),
+                (5, 1),
+                (6, 6),
+                (15, 16),
+                (16, 0xff332211),
+            ] {
+                set(&mut data, 64 + slot * 4, value);
+            }
+            data[224] = b'A';
+            data[240] = b'B';
+            let mut rt = Runtime::new(
+                0,
+                kind::ROOT,
+                Box::new(BaseObject::new()),
+                State::new(0),
+                MessageFactory {
+                    fallback: KcsFactory::new(QueryProgram(
+                        Program::from_code(&code, data, 128).unwrap(),
+                    )),
+                },
+            );
+            rt.set_budget(budget, 1 << 20);
+            rt.set_fonts(Fonts);
+            rt.host_mut().message_defaults = Some(MessageDefaults {
+                font_name: vec![84],
+                glyph_parameter: Some(0),
+                ..Default::default()
+            });
+            rt.drawing_mut().enabled = true;
+            rt.drawing_mut().active = true;
+            rt.drawing_mut().target = Some(RenderTarget::new([40, 24]).unwrap());
+            let window = rt.create(0, kind::TEXT_WINDOW, b"text", b"").unwrap();
+            let caller = rt.create(0, kind::ORDINARY, b"query", b"").unwrap();
+            let values = |rt: &Runtime<_>| {
+                rt.object(caller)
+                    .unwrap()
+                    .interpreter()
+                    .unwrap()
+                    .read(0, 44)
+                    .unwrap()
+                    .chunks_exact(4)
+                    .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
+                    .collect::<Vec<_>>()
+            };
+            let advance = |rt: &mut Runtime<_>, now| {
+                rt.dispatch_command(0, command(caller, 162, 1)).unwrap();
+                rt.update(now, 1).unwrap();
+                rt.dispatch_command(0, command(caller, 163, 0)).unwrap();
+            };
+            rt.update(100, 1).unwrap();
+            rt.dispatch_command(0, command(caller, 163, 0)).unwrap();
+            let handle = values(&rt)[1];
+            assert_ne!(handle, 0);
+            assert_eq!(values(&rt)[2], handle);
+            for index in [0, 4, 5, 6] {
+                assert_eq!(values(&rt)[index], 0);
+            }
+            assert_eq!(
+                rt.images().get(handle).unwrap().info().bit_depth,
+                channels * 8
+            );
+            assert_eq!(
+                rt.images().get(handle).unwrap().surface().pixel(1, 1),
+                Some(text_color)
+            );
+            rt.images_mut()
+                .get_mut(handle)
+                .unwrap()
+                .fill_rect_from_bottom(Rect::from_xywh(30, 5, 1, 1), 0xffabcdef);
+            advance(&mut rt, 101);
+            assert_eq!(values(&rt)[3], handle);
+            assert_eq!(
+                rt.images().get(handle).unwrap().surface().pixel(6, 1),
+                Some(text_color)
+            );
+            assert_eq!(
+                rt.drawing().target.as_ref().unwrap().pixel(30, 18),
+                Some(marker)
+            );
+            let alias = rt.images_mut().share(handle).unwrap();
+            advance(&mut rt, 102);
+            assert_eq!(values(&rt)[7], handle);
+            let empty = if channels == 3 { 0xff000000 } else { 0 };
+            assert_eq!(
+                rt.images().get(alias).unwrap().surface().pixel(1, 1),
+                Some(empty)
+            );
+            assert_eq!(
+                rt.images().get(alias).unwrap().surface().pixel(30, 18),
+                Some(empty)
+            );
+            rt.images_mut()
+                .get_mut(alias)
+                .unwrap()
+                .fill_rect_from_bottom(Rect::from_xywh(20, 15, 1, 1), 0xffccba91);
+            rt.images_mut().recreate(handle, [41, 25]).unwrap();
+            advance(&mut rt, 103);
+            assert_eq!(values(&rt)[10], handle);
+            assert_eq!(rt.images().get(handle).unwrap().info().size, [41, 25]);
+            assert_eq!(
+                rt.images().get(handle).unwrap().surface().pixel(1, 1),
+                Some(0)
+            );
+            assert_eq!(
+                rt.images().get(alias).unwrap().surface().pixel(1, 1),
+                Some(text_color)
+            );
+            assert_eq!(
+                rt.drawing().target.as_ref().unwrap().pixel(20, 8),
+                Some(retained_marker)
+            );
+            advance(&mut rt, 104);
+            let replacement = values(&rt)[8];
+            assert_ne!(replacement, handle);
+            assert!(rt.images().get(handle).is_err());
+            assert_eq!(
+                rt.images().get(alias).unwrap().surface().pixel(20, 8),
+                Some(retained_marker)
+            );
+            assert_eq!(
+                rt.images().get(replacement).unwrap().surface().pixel(20, 8),
+                Some(empty)
+            );
+            advance(&mut rt, 105);
+            assert_eq!(values(&rt)[9], 0);
+            assert!(rt.images().get(replacement).is_ok());
+            assert_eq!(
+                rt.object(caller)
+                    .unwrap()
+                    .interpreter()
+                    .unwrap()
+                    .stack_bytes(),
+                0xdeadbeefu32.to_le_bytes()
+            );
+            rt.update(106, 1).unwrap();
+            assert!(rt.object(window).is_none());
+            assert!(rt.images().get(replacement).is_err());
+            assert_eq!(
+                rt.images().get(alias).unwrap().surface().pixel(20, 8),
+                Some(retained_marker)
+            );
+            rt.images_mut().release(alias).unwrap();
+        }
     }
 }

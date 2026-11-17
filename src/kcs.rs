@@ -383,6 +383,17 @@ pub trait Host {
         Err(Error::new(0, "宿主未提供消息画布提交服务"))
     }
 
+    /// 将像素句柄的顶端起始区域复制到消息画布，保留像素身份。
+    fn submit_message_pixels(
+        &mut self,
+        pixels: u32,
+        rectangle: crate::graphics::Rect,
+        at: [i32; 2],
+    ) -> Result<bool> {
+        let surface = self.pixel_image(pixels)?.surface().clone();
+        self.submit_message(&surface, rectangle, at)
+    }
+
     /// 已解码图像的借用；调用方在同步命令结束前完成像素读取。
     fn image(&self, _handle: u32) -> Result<&crate::graphics::Image> {
         Err(Error::new(0, "宿主未提供解码图像查询"))
@@ -730,6 +741,15 @@ impl<T: Host + ?Sized> Host for &mut T {
         at: [i32; 2],
     ) -> Result<bool> {
         (**self).submit_message(surface, rectangle, at)
+    }
+
+    fn submit_message_pixels(
+        &mut self,
+        pixels: u32,
+        rectangle: crate::graphics::Rect,
+        at: [i32; 2],
+    ) -> Result<bool> {
+        (**self).submit_message_pixels(pixels, rectangle, at)
     }
 
     fn update_image_list(
