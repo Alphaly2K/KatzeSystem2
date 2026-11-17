@@ -375,20 +375,21 @@ impl ImageList {
     }
 
     pub(crate) fn decode_hg3(data: &[u8]) -> Result<BTreeMap<u32, Image>> {
-        let metadata = crate::hg3::Metadata::parse(data)?;
+        let directory = crate::hg3::FrameDirectory::parse(data)?;
         let mut frames = BTreeMap::new();
         let mut length = 0usize;
-        for frame in metadata.frames {
-            if frames.contains_key(&frame.id) {
+        for frame in directory.frames {
+            if frames.contains_key(&frame.metadata.id) {
                 continue;
             }
-            let image = crate::hg3::decode_frame(data, frame.id as i32)?
-                .ok_or_else(|| Error::new(frame.offset, "HG-3 帧目录与解码结果不匹配"))?;
+            let image = frame.decode(data)?;
             length = length
                 .checked_add(image.pixels.len())
                 .filter(|&length| length <= read::MAX_BYTES)
-                .ok_or_else(|| Error::new(frame.offset, "图像列表帧集合超过像素存储上限"))?;
-            frames.insert(frame.id, Image::from_frame(image)?);
+                .ok_or_else(|| {
+                    Error::new(frame.metadata.offset, "图像列表帧集合超过像素存储上限")
+                })?;
+            frames.insert(frame.metadata.id, Image::from_frame(image)?);
         }
         Ok(frames)
     }

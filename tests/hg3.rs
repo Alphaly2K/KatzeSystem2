@@ -325,6 +325,10 @@ fn selective_reads_skip_unselected_pixels_and_keep_unsigned_and_duplicate_select
         padding.push(start + image_end + 4..start + frame.len() - 12);
         bytes.extend(&frame[12..]);
     }
+    let mut metadata_source = ShortSource::new(&bytes);
+    metadata_source.forbidden = padding.iter().chain(&payloads).cloned().collect();
+    let metadata = hg3::Metadata::read(&metadata_source).unwrap();
+    let directory_bytes = metadata_source.read.load(Ordering::Relaxed);
     for (id, selected) in [
         (None, Some(1)),
         (Some(2), Some(1)),
@@ -347,9 +351,21 @@ fn selective_reads_skip_unselected_pixels_and_keep_unsigned_and_duplicate_select
         if let Some(selected) = selected {
             assert_eq!(actual.unwrap().info.offset[0], selected as i32 * 10);
         }
-        assert!(source.read.load(Ordering::Relaxed) < bytes.len() / 10);
+        assert_eq!(
+            source.read.load(Ordering::Relaxed),
+            directory_bytes + selected.map_or(0, |i| payloads[i].len())
+        );
     }
-    let last = hg3::Metadata::parse(&bytes).unwrap().frames[3].offset;
+    let last = metadata.frames[3].offset;
+    let tag = payloads[3].start - 16;
+    let mut unsupported = bytes.clone();
+    unsupported[tag..tag + 8].copy_from_slice(b"img_jpg\0");
+    assert_eq!(hg3::Metadata::parse(&unsupported).unwrap(), metadata);
+    assert_eq!(
+        hg3::decode_frame(&unsupported, 2),
+        hg3::decode_frame(&bytes, 2)
+    );
+    assert_eq!(hg3::decode_frame(&unsupported, -1).unwrap_err().offset, tag);
     for (at, value, offset) in [
         (last, 7u32, last),
         (last + 20, 39, 0),

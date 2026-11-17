@@ -3,7 +3,7 @@ use crate::{
     Error, Result,
     fes::PanelContent,
     graphics::{Image, Rect, Surface},
-    hg3::Metadata,
+    hg3::FrameDirectory,
     kcs::ResourceServices,
     message::{FontRequest, GlyphEffects, GlyphPaint, TextEncoding},
     resource::ResourceMode,
@@ -13,15 +13,17 @@ use std::collections::BTreeMap;
 
 struct PanelFile {
     bytes: Vec<u8>,
-    metadata: Metadata,
+    directory: FrameDirectory,
     frames: BTreeMap<i32, Option<Image>>,
 }
 
 impl PanelFile {
     fn frame(&mut self, id: i32) -> Result<Option<&Image>> {
         if !self.frames.contains_key(&id) {
-            let image = crate::hg3::decode_frame(&self.bytes, id)?
-                .map(Image::from_frame)
+            let image = self
+                .directory
+                .frame(id)
+                .map(|frame| Image::from_frame(frame.decode(&self.bytes)?))
                 .transpose()?;
             self.frames.insert(id, image);
         }
@@ -53,10 +55,10 @@ impl<F: ObjectFactory> Store<'_, F> {
                 .read(&resolved, ResourceMode::LooseFirst)?
                 .filter(|bytes| !bytes.is_empty())
                 .map(|bytes| {
-                    let metadata = Metadata::parse(&bytes)?;
+                    let directory = FrameDirectory::parse(&bytes)?;
                     Ok(PanelFile {
                         bytes,
-                        metadata,
+                        directory,
                         frames: BTreeMap::new(),
                     })
                 })
@@ -87,8 +89,8 @@ impl<F: ObjectFactory> Store<'_, F> {
             let mut files = BTreeMap::new();
             let geometry = self
                 .panel_file(objects, &mut files, &name)?
-                .and_then(|file| file.metadata.frames.first())
-                .and_then(|frame| frame.info)
+                .and_then(|file| file.directory.frames.first())
+                .and_then(|frame| frame.metadata.info)
                 .map(|info| info.canvas_size);
             if let Some(size) = geometry {
                 objects
@@ -114,8 +116,8 @@ impl<F: ObjectFactory> Store<'_, F> {
                     };
                     let position = self
                         .panel_file(objects, &mut files, &name)?
-                        .and_then(|file| file.metadata.frame(*id))
-                        .and_then(|frame| frame.info)
+                        .and_then(|file| file.directory.frame(*id))
+                        .and_then(|frame| frame.metadata.info)
                         .map_or([0; 2], |info| info.offset);
                     match content.kind() {
                         0 => {

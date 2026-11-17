@@ -5,12 +5,12 @@ impl Image {
     /// 将 HG-3 的 0～8 帧拼接为指定尺寸的窗口图像，缺失帧跳过。
     pub fn from_window(bytes: &[u8], size: [u32; 2]) -> Result<Self> {
         let mut image = Self::new(size)?;
-        hg3::Metadata::parse(bytes)?;
+        let directory = hg3::FrameDirectory::parse(bytes)?;
         for id in 0..9 {
-            let Some(frame) = hg3::decode_frame(bytes, id)? else {
+            let Some(frame) = directory.frame(id) else {
                 continue;
             };
-            let mut part = Self::from_frame(frame)?;
+            let mut part = Self::from_frame(frame.decode(bytes)?)?;
             part.use_pixel_canvas();
             let [width, height] = part.info().size;
             let [w, h] = size;
