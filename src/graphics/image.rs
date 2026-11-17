@@ -652,13 +652,13 @@ impl Images {
                 services.resolve(b"image", token)?
             };
             let next = if direct {
-                let Some(bytes) = services.read(&name, ResourceMode::LooseFirst)? else {
+                let Some(source) = services.open(&name, ResourceMode::LooseFirst)? else {
                     continue;
                 };
-                if bytes.is_empty() {
+                if source.is_empty()? {
                     continue;
                 }
-                hg3::decode_frame(&bytes, frame)?
+                hg3::decode_frame_from(source.as_ref(), Some(frame))?
                     .map(Image::from_frame)
                     .transpose()?
             } else {

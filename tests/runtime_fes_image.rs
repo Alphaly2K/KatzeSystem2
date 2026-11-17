@@ -1644,15 +1644,48 @@ fn image_files_share_the_mapped_frame_and_keep_the_first_successful_geometry() {
     assert_eq!(runtime.images().pixel_handle(wrapper).unwrap(), 0);
 }
 
-struct DirectFiles(PixelFiles);
+struct DirectFiles {
+    files: PixelFiles,
+    skipped: std::ops::Range<u64>,
+}
+
+struct DirectSource {
+    bytes: Vec<u8>,
+    skipped: std::ops::Range<u64>,
+}
+
+impl katze_system2::io::ReadSource for DirectSource {
+    fn len(&self) -> Result<u64> {
+        Ok(self.bytes.len() as u64)
+    }
+
+    fn read_at(&self, offset: u64, output: &mut [u8]) -> Result<usize> {
+        let end = offset + output.len() as u64;
+        assert!(end <= self.skipped.start || offset >= self.skipped.end);
+        katze_system2::io::ReadSource::read_at(&self.bytes, offset, output)
+    }
+}
 
 impl ResourceServices for DirectFiles {
     fn resolve(&mut self, _: &[u8], _: &[u8]) -> Result<Vec<u8>> {
         panic!("直接路径不经过类别名称补全")
     }
 
-    fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
-        self.0.read(name, mode)
+    fn read(&mut self, _: &[u8], _: ResourceMode) -> Result<Option<Vec<u8>>> {
+        panic!("直接路径应使用随机读取源")
+    }
+
+    fn open(
+        &mut self,
+        name: &[u8],
+        mode: ResourceMode,
+    ) -> Result<Option<katze_system2::io::SharedSource>> {
+        Ok(self.files.read(name, mode)?.map(|bytes| {
+            std::sync::Arc::new(DirectSource {
+                bytes,
+                skipped: self.skipped.clone(),
+            }) as katze_system2::io::SharedSource
+        }))
     }
 }
 
@@ -1660,10 +1693,19 @@ impl ResourceServices for DirectFiles {
 fn image_direct_paths_keep_spaces_bypass_categories_and_replace_requested_dimensions() {
     let (mut runtime, mut objects, _) = setup();
     let reads = Rc::new(RefCell::new(Vec::new()));
-    runtime.set_resources(DirectFiles(PixelFiles {
-        files: BTreeMap::from([(b"raw sprite.hg3".to_vec(), pixel_file(0xff12_3456))]),
-        reads: reads.clone(),
-    }));
+    let mut bytes = pixel_file(0xffab_cdef);
+    let skipped = 92..bytes.len() as u64;
+    let next = bytes.len() as u32 - 12;
+    bytes[12..16].copy_from_slice(&next.to_le_bytes());
+    bytes[16..20].copy_from_slice(&6u32.to_le_bytes());
+    bytes.extend_from_slice(&pixel_file(0xff12_3456)[12..]);
+    runtime.set_resources(DirectFiles {
+        files: PixelFiles {
+            files: BTreeMap::from([(b"raw sprite.hg3".to_vec(), bytes)]),
+            reads: reads.clone(),
+        },
+        skipped,
+    });
     let sprite = define(&mut objects, "IMAGE", "sprite");
     let ObjectState::Image(state) = &mut objects.get_mut(sprite).unwrap().state else {
         panic!()
@@ -1684,6 +1726,10 @@ fn image_direct_paths_keep_spaces_bypass_categories_and_replace_requested_dimens
     let wrapper = objects.get(sprite).unwrap().image_handle().unwrap();
     let pixels = runtime.images().pixel_handle(wrapper).unwrap();
     assert_ne!(pixels, 0);
+    assert_eq!(
+        runtime.images().get(wrapper).unwrap().surface().pixel(0, 0),
+        Some(0xff12_3456)
+    );
     assert_eq!(image(&objects, sprite).size, [1, 1]);
     assert_eq!(image(&objects, sprite).base_point, [3., 4.]);
     let info = runtime.images().get(wrapper).unwrap().info();
