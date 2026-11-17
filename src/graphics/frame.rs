@@ -55,6 +55,42 @@ pub struct DrawList {
 }
 
 impl DrawList {
+    pub(crate) fn push_screen_quad(
+        &mut self,
+        rect: Rect,
+        image: Option<&Arc<Surface>>,
+        color: u32,
+        filter: Option<TextureFilter>,
+    ) {
+        if rect.right <= rect.left || rect.bottom <= rect.top {
+            return;
+        }
+        let positions = [
+            [rect.left as f32, rect.top as f32, 0.],
+            [rect.right as f32, rect.top as f32, 0.],
+            [rect.left as f32, rect.bottom as f32, 0.],
+            [rect.right as f32, rect.bottom as f32, 0.],
+        ];
+        let uv = [[0., 0.], [1., 0.], [0., 1.], [1., 1.]];
+        for indices in [[0, 1, 2], [2, 1, 3]] {
+            self.commands.push(DrawCommand {
+                vertices: indices.map(|i| ProjectedVertex {
+                    position: positions[i],
+                    rhw: 1.,
+                    color,
+                }),
+                texture: image.map(|image| FrameTexture {
+                    filter,
+                    address: Default::default(),
+                    source: TextureSource::Image(image.clone()),
+                    uv: indices.map(|i| uv[i]),
+                }),
+                clip: None,
+                blend_mode: 0,
+            });
+        }
+    }
+
     /// 向已有目标混合软件帧；画布仅在命令使用其面块时需要，不清空目标。
     pub fn render_into(
         &self,

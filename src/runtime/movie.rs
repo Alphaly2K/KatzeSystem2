@@ -1,8 +1,5 @@
 use super::{ObjectFactory, ObjectHost, Resources, TaskObject};
-use crate::graphics::{
-    DrawCommand, DrawList, FrameTexture, ProjectedVertex, Rect, Surface, TextureFilter,
-    TextureSource,
-};
+use crate::graphics::{DrawList, Rect, Surface, TextureFilter};
 use crate::kcs::{Interpreter, NativeReturn, format_string};
 use crate::movie::Player;
 use crate::{Error, Result, read};
@@ -40,10 +37,9 @@ impl Movie {
             commands: Vec::new(),
             filter,
         };
-        quad(&mut output, bounds, None, 0xff00_0000);
+        output.push_screen_quad(bounds, None, 0xff00_0000, None);
         if let Some(frame) = &self.frame {
-            quad(
-                &mut output,
+            output.push_screen_quad(
                 self.rectangle.unwrap_or_else(|| {
                     Rect::from_xywh(
                         0,
@@ -52,41 +48,12 @@ impl Movie {
                         self.surface_size[1] as i32,
                     )
                 }),
-                Some(frame.clone()),
+                Some(frame),
                 u32::MAX,
+                None,
             );
         }
         Ok(Some(output))
-    }
-}
-
-fn quad(output: &mut DrawList, rectangle: Rect, image: Option<Arc<Surface>>, color: u32) {
-    if rectangle.right <= rectangle.left || rectangle.bottom <= rectangle.top {
-        return;
-    }
-    let positions = [
-        [rectangle.left as f32, rectangle.top as f32, 0.],
-        [rectangle.right as f32, rectangle.top as f32, 0.],
-        [rectangle.left as f32, rectangle.bottom as f32, 0.],
-        [rectangle.right as f32, rectangle.bottom as f32, 0.],
-    ];
-    let uv = [[0., 0.], [1., 0.], [0., 1.], [1., 1.]];
-    for indices in [[0, 1, 2], [2, 1, 3]] {
-        output.commands.push(DrawCommand {
-            vertices: indices.map(|i| ProjectedVertex {
-                position: positions[i],
-                rhw: 1.,
-                color,
-            }),
-            texture: image.as_ref().map(|image| FrameTexture {
-                filter: None,
-                address: Default::default(),
-                source: TextureSource::Image(image.clone()),
-                uv: indices.map(|i| uv[i]),
-            }),
-            clip: None,
-            blend_mode: 0,
-        });
     }
 }
 

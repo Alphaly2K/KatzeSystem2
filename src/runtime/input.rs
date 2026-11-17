@@ -13,6 +13,28 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         if (151..=153).contains(&index) {
             return self.input_text_native(index, arguments, vm);
         }
+        if index == 395 {
+            if arguments.len() != 12 {
+                return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+            }
+            let address = read::u32_at(arguments, 0)?;
+            vm.read(address, 1)?;
+            let packed =
+                (read::u32_at(arguments, 4)? & 0xffff) | (read::u32_at(arguments, 8)? << 16);
+            let target = self.command_target(0, 34, [0; 3])?;
+            let mut name = vm.read_string(address)?.to_vec();
+            name.push(0);
+            self.command_target_with_buffers(
+                target,
+                148,
+                [address, packed, 0],
+                &mut CommandBuffers {
+                    data0: Some(&mut name),
+                    ..Default::default()
+                },
+            )?;
+            return Ok(NativeReturn::Continue);
+        }
         let (code, length) = match index {
             144 => (127, 16),
             145 => (128, 0),

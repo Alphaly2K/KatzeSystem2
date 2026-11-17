@@ -18,6 +18,7 @@ pub(super) struct Resources {
     pub input_device: Option<Box<dyn crate::input::InputDevice>>,
     pub input_coordinates: crate::input::CoordinateMap,
     pub input_pointer_control: bool,
+    pub image_cursor: Option<super::image_cursor::ImageCursor>,
     pub motion_host: crate::kcs::MotionHost,
     pub motion_controllers: std::collections::BTreeMap<u32, crate::kcs::MotionQueue>,
     pub motion_snapshots: std::collections::BTreeMap<u32, super::MotionSnapshot>,
@@ -52,8 +53,12 @@ impl Resources {
         &mut self,
         size: [u32; 2],
         capture: bool,
+        with_cursor: bool,
     ) -> Result<(bool, Option<RenderTarget>)> {
-        let frame = self.compose_frame(None)?;
+        let mut frame = self.compose_frame(None)?;
+        if with_cursor {
+            self.append_image_cursor(&mut frame)?;
+        }
         let capture =
             capture && self.compositor.drawing.mode == 0 && self.compositor.drawing.enabled;
         let canvas = self

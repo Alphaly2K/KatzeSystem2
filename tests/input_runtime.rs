@@ -24,6 +24,116 @@ struct Record {
 type Records = Rc<RefCell<Vec<Record>>>;
 
 #[test]
+fn ordinary_image_cursor_tracks_hotspot_visibility_and_replacement() -> Result<()> {
+    use katze_system2::{
+        graphics::{Projection, RenderTarget, TextureFilter, Transform},
+        kcs::ResourceServices,
+        resource::ResourceMode,
+        runtime::{KcsFactory, ProgramLoader, RootObject},
+    };
+
+    struct Source(Vec<u8>);
+    impl ProgramLoader for Source {
+        fn load(&mut self, _: &[u8]) -> Result<Option<Program>> {
+            let mut data = vec![0; 128];
+            data[0..12].copy_from_slice(b"image/c.hg2\0");
+            data[16..32].copy_from_slice(b"image/absent.hg2");
+            Ok(Some(Program::from_code(&self.0, data, 96)?))
+        }
+    }
+
+    struct Files(Vec<u8>);
+    impl ResourceServices for Files {
+        fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
+            assert_eq!(mode, ResourceMode::LooseFirst);
+            match name {
+                b"image/c.hg2" => Ok(Some(self.0.clone())),
+                b"image/absent.hg2" => Ok(None),
+                _ => panic!("unexpected cursor lookup {name:?}"),
+            }
+        }
+    }
+
+    let mut code = vec![];
+    for (op, values) in [
+        (0x25, &[0xcafe_babe][..]),
+        (0x25, &[0]),
+        (0x25, &[0x8100_0001]),
+        (0x25, &[0x7200_0002]),
+        (0x2b, &[395, 12]),
+        (0x25, &[80]),
+        (0x2b, &[71, 4]),
+        (0x26, &[104]),
+        (0x25, &[16]),
+        (0x25, &[0]),
+        (0x25, &[0]),
+        (0x2b, &[395, 12]),
+        (0x26, &[104]),
+        (0x3b, &[]),
+    ] {
+        code.push(op);
+        for value in values.iter().copied() {
+            code.push(3);
+            code.extend(u32::to_le_bytes(value));
+        }
+    }
+
+    let mut rt = Runtime::new(
+        0,
+        kind::ROOT,
+        Box::new(RootObject::new(1, 0)),
+        expression::State::new(0),
+        InputFactory {
+            fallback: KcsFactory::new(Source(code)),
+        },
+    );
+    let projection = Projection::default();
+    let transform = *Transform::default().matrix();
+    rt.set_frame_view(projection.clone(), transform, TextureFilter::Linear);
+    let drawing = rt.compositor_mut().drawing_mut();
+    drawing.enabled = true;
+    drawing.target = Some(RenderTarget::new([16, 12])?);
+    let mut pixels = [0; 16];
+    pixels[..4].copy_from_slice(&[0, 0, 255, 255]);
+    rt.set_resources(Files(katze_system2::hg2::encode_frame([2, 2], &pixels)?));
+    let device = Rc::new(RefCell::new(DeviceState::new([5, 6])));
+    rt.set_input_device(Device(device.clone()))?;
+    rt.input_coordinates_mut().logical_size = [16, 12];
+    rt.create(0, kind::INPUT, b"input", b"")?;
+    let caller = rt.create(0, kind::ORDINARY, b"caller", b"")?;
+    rt.update(0, 0)?;
+
+    assert!(rt.uses_image_cursor());
+    let mut output = RenderTarget::new([16, 12])?;
+    assert!(rt.render_frame(&mut output, &projection, transform, TextureFilter::Linear)?);
+    assert_eq!(output.pixel(4, 4), Some(0xffff_0000));
+    assert_eq!(output.pixel(5, 4), Some(0));
+    assert_eq!(output.pixel(5, 6), Some(0));
+    let mut composed = RenderTarget::new([16, 12])?;
+    assert!(rt.compose_frame()?.render_into(&mut composed, None)?);
+    assert_eq!(output, composed);
+
+    device.borrow_mut().cursor = 0;
+    assert!(rt.compose_frame()?.commands.is_empty());
+    device.borrow_mut().cursor = 1;
+    device.borrow_mut().sample.active = 0;
+    assert!(rt.compose_frame()?.commands.is_empty());
+    device.borrow_mut().sample.active = 1;
+    device.borrow_mut().sample.position = [16, 6];
+    assert!(rt.compose_frame()?.commands.is_empty());
+    device.borrow_mut().sample.position = [5, 6];
+    assert!(!rt.compose_frame()?.commands.is_empty());
+
+    rt.send_message(0, caller, [0; 4])?;
+    assert!(!rt.uses_image_cursor());
+    assert!(rt.compose_frame()?.commands.is_empty());
+    let vm = rt.object(caller).unwrap().interpreter().unwrap();
+    assert_eq!(vm.read(104, 4)?, 0xcafe_babeu32.to_le_bytes());
+    assert!(vm.stack_bytes().is_empty());
+    Ok(())
+}
+
+#[test]
 fn ordinary_input_wrappers_query_devices_and_update_regions_and_key_switches() -> Result<()> {
     use katze_system2::{
         graphics::Rect,

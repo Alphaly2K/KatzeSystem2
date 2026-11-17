@@ -524,6 +524,11 @@ pub trait Host {
         false
     }
 
+    /// Replace the image used by the game cursor. The name is a resource path in CP932.
+    fn set_image_cursor(&mut self, _name: &[u8], _hotspot: [u16; 2]) -> Result<()> {
+        Err(Error::new(0, "宿主未提供光标图像服务"))
+    }
+
     /// 普通 8 使用的渲染上下文尺寸，独立于输入坐标映射与当前绘图目标。
     fn surface_size(&self) -> [u32; 2] {
         [0; 2]
@@ -822,6 +827,10 @@ impl<T: Host + ?Sized> Host for &mut T {
     }
     fn input_pointer_control(&self) -> bool {
         (**self).input_pointer_control()
+    }
+
+    fn set_image_cursor(&mut self, name: &[u8], hotspot: [u16; 2]) -> Result<()> {
+        (**self).set_image_cursor(name, hotspot)
     }
 
     fn random(&mut self) -> Option<&mut ScriptRandom> {

@@ -436,7 +436,7 @@ impl Shared {
     fn update_active(&mut self) {
         self.active = u32::from(self.foreground && self.mouse_focus && self.pointer_inside);
     }
-    pub fn cursor(&self) -> bool {
-        self.cursor != 0
+    pub fn cursor(&self, game_cursor: bool) -> bool {
+        self.cursor != 0 && !(game_cursor && self.active != 0)
     }
 }

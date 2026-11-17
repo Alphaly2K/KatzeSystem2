@@ -126,6 +126,15 @@ impl CommandState {
             147 => self
                 .regions
                 .set_image_mask(command.data[0], command.data[1], host)?,
+            148 => {
+                let bytes = buffers
+                    .data0
+                    .as_deref()
+                    .ok_or_else(|| Error::new(0, "光标图像命令缺少资源名缓冲区"))?;
+                let name = crate::read::zstr(bytes, 0)?;
+                let point = command.data[1];
+                host.set_image_cursor(name, [point as u16, (point >> 16) as u16])?;
+            }
             149 => write(
                 buffers.data1.as_deref_mut(),
                 &self.pointer.cursor_shown.to_le_bytes(),

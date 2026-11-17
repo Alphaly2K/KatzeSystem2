@@ -22,6 +22,7 @@ mod export;
 pub mod fes;
 pub use cst::CstContext;
 mod graphics;
+mod image_cursor;
 mod input;
 mod message;
 mod motion;
@@ -233,12 +234,22 @@ impl<F: ObjectFactory> Runtime<F> {
         parent: [f32; 16],
         filter: crate::graphics::TextureFilter,
     ) -> Result<bool> {
-        if let Some(frame) = self.resources.movie_frame(output.size(), filter)? {
-            return frame.render_into(output, self.resources.compositor.drawing.target.as_ref());
+        let touched = if let Some(frame) = self.resources.movie_frame(output.size(), filter)? {
+            frame.render_into(output, self.resources.compositor.drawing.target.as_ref())?
+        } else {
+            self.resources
+                .compositor
+                .render_frame(output, projection, parent, filter)?
+        };
+        if !self.uses_image_cursor() {
+            return Ok(touched);
         }
-        self.resources
-            .compositor
-            .render_frame(output, projection, parent, filter)
+        let mut overlay = crate::graphics::DrawList {
+            commands: Vec::new(),
+            filter,
+        };
+        self.resources.append_image_cursor(&mut overlay)?;
+        Ok(overlay.render_into(output, None)? || touched)
     }
 
     /// 配置脚本内部画面捕获使用的投影、父变换和纹理取样。
@@ -265,14 +276,21 @@ impl<F: ObjectFactory> Runtime<F> {
 
     /// 以已配置的帧视图和当前画布合成绘制列表。
     pub fn compose_frame(&mut self) -> Result<crate::graphics::DrawList> {
-        self.resources.compose_frame(None)
+        let mut frame = self.resources.compose_frame(None)?;
+        if self.uses_image_cursor() {
+            self.resources.append_image_cursor(&mut frame)?;
+        }
+        Ok(frame)
     }
 
     /// 通过已连接的图形后端呈现完整帧；暂时无法呈现时返回 false。
     pub fn present_frame(&mut self, size: [u32; 2]) -> Result<bool> {
-        let (presented, snapshot) = self
-            .resources
-            .present_frame(size, self.host.frame_capture_enabled != 0)?;
+        let with_cursor = self.uses_image_cursor();
+        let (presented, snapshot) = self.resources.present_frame(
+            size,
+            self.host.frame_capture_enabled != 0,
+            with_cursor,
+        )?;
         if let Some(snapshot) = snapshot {
             self.capture_sequence_frame(&snapshot)?;
         }
@@ -2271,6 +2289,9 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
     }
     fn input_pointer_control(&self) -> bool {
         self.resources.input_pointer_control
+    }
+    fn set_image_cursor(&mut self, name: &[u8], hotspot: [u16; 2]) -> Result<()> {
+        self.resources.load_image_cursor(name, hotspot)
     }
     fn canvas_layout(&self) -> Result<Option<crate::graphics::CanvasLayout>> {
         self.resources

@@ -134,7 +134,6 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             let mouse = window.events.mouse_state();
             shared.sample_pointer([mouse.x(), mouse.y()], [size.0, size.1], [1280, 720]);
             shared.set_mouse_focus(window.window.has_mouse_focus());
-            window.context.mouse().show_cursor(shared.cursor());
         }
         now = now.wrapping_add(1);
         let refresh_title = runtime
@@ -172,6 +171,10 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         if window_actions::pump(&mut runtime, input, &mut window)? {
             break;
         }
+        window
+            .context
+            .mouse()
+            .show_cursor(shared.borrow().cursor(runtime.uses_image_cursor()));
         if !runtime.host().window_requests.is_empty() && !menu_pending_noted {
             eprintln!("窗口菜单重建尚待接入");
             menu_pending_noted = true;
