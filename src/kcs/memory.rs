@@ -8,6 +8,22 @@ pub(crate) struct MemoryLoan {
 }
 
 impl Interpreter {
+    pub(crate) fn release_bytes(&mut self, address: u32) -> bool {
+        if address & 0x8000_0000 != 0 {
+            return false;
+        }
+        let base = address as usize;
+        let Some(bytes) = self.allocations.remove(&base) else {
+            return false;
+        };
+        let length = bytes.len();
+        let later = self.allocations.split_off(&base);
+        for (base, bytes) in later {
+            self.allocations.insert(base - length, bytes);
+        }
+        true
+    }
+
     pub(crate) fn lend_memory(&mut self) -> MemoryLoan {
         MemoryLoan {
             memory: std::mem::take(&mut self.memory),

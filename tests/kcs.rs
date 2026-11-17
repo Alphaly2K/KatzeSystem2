@@ -1765,6 +1765,64 @@ fn grouped_integer_format_keeps_sign_rules_minimum_integer_and_double_zero() {
 }
 
 #[test]
+fn dynamic_memory_natives_zero_blocks_rebase_addresses_and_keep_stack_bounds() -> Result<()> {
+    use kcs::{Host, NativeReturn};
+
+    let mut code = Vec::new();
+    let call = |code: &mut Vec<u8>, index, args: &[(u8, u32)], output| {
+        for &arg in args {
+            ins(code, 0x25, &[arg]);
+        }
+        ins(code, 0x2b, &[(3, index), (3, args.len() as u32 * 4)]);
+        if let Some(address) = output {
+            ins(code, 0x26, &[(3, address)]);
+        }
+    };
+    call(&mut code, 27, &[(3, 0)], Some(0));
+    call(&mut code, 27, &[(3, 4)], Some(4));
+    call(&mut code, 27, &[(3, 5)], Some(8));
+    call(&mut code, 36, &[(0x13, 8), (3, 0x1ff), (3, 5)], None);
+    call(&mut code, 28, &[(3, 129)], Some(12));
+    call(&mut code, 28, &[(3, 0x8000_0000)], Some(16));
+    call(&mut code, 28, &[(0x13, 4)], Some(20));
+    call(&mut code, 28, &[(0x13, 8)], Some(24));
+    call(&mut code, 35, &[(3, 0x8000_0000), (3, 128), (3, 5)], None);
+    call(&mut code, 28, &[(3, 128)], Some(28));
+    call(&mut code, 28, &[(3, 128)], Some(32));
+    call(&mut code, 27, &[(3, 3)], Some(36));
+    code.push(0x3b);
+
+    for budget in [1, 4096] {
+        let mut vm =
+            kcs::Interpreter::new(kcs::Program::from_code(&code, vec![0; 64], 64)?, vec![0; 8])?;
+        let mut numbers = katze_system2::expression::State::new(0);
+        let mut host = kcs::CoreHost::new(&mut numbers);
+        while vm.run(&mut host, budget)? != Step::Halted {}
+        assert!(vm.stack_bytes().is_empty());
+        let expected: Vec<_> = [u32::MAX, 128, 132, 0, 0, 1, 0, 1, 0, 128]
+            .into_iter()
+            .flat_map(u32::to_le_bytes)
+            .collect();
+        assert_eq!(vm.read(0, expected.len())?, expected);
+        assert_eq!(vm.read(0x8000_0000, 5)?, [255; 5]);
+        assert_eq!(vm.read(128, 3)?, [0; 3]);
+        assert!(vm.read(127, 2).is_err());
+        assert!(vm.read(131, 1).is_err());
+        assert!(vm.write(130, &[1, 2]).is_err());
+        assert!(host.call(27, &[0; 8], &mut vm).is_err());
+        assert!(host.call(28, &[], &mut vm).is_err());
+        assert!(host.call(27, &u32::MAX.to_le_bytes(), &mut vm).is_err());
+        assert_eq!(vm.read(128, 3)?, [0; 3]);
+        assert_eq!(
+            host.call(28, &128u32.to_le_bytes(), &mut vm)?,
+            NativeReturn::Value(1)
+        );
+        assert!(vm.read(128, 1).is_err());
+    }
+    Ok(())
+}
+
+#[test]
 fn memory_copy_keeps_forward_cpu_blocks_and_crt_overlap_results() {
     use kcs::{Host, MemoryCopyMode};
     let mut state = katze_system2::expression::State::new(8);

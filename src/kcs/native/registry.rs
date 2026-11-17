@@ -1,6 +1,7 @@
 #[derive(Clone, Copy)]
 pub(super) enum CoreHandler {
     Text,
+    Memory,
     Scalar,
     Settings,
     Storage,
@@ -40,6 +41,7 @@ pub(super) fn core(index: u32) -> CoreHandler {
         441 | 628 | 845..=847 => CoreHandler::Window,
         1042 | 1043 => CoreHandler::Achievements,
         29..=32 => CoreHandler::File,
+        27 | 28 | 35 | 36 => CoreHandler::Memory,
         13..=26
         | 37
         | 38
@@ -94,8 +96,6 @@ pub(super) fn core(index: u32) -> CoreHandler {
         | 9
         | 10
         | 11
-        | 35
-        | 36
         | 65
         | 68
         | 71

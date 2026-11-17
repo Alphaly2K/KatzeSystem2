@@ -1,6 +1,6 @@
 use crate::kcs::{
     HostState, Interpreter, MenuItemRequest, NativeReturn, WindowCloseRequest, hierarchy_query,
-    memory, strings,
+    strings,
 };
 use crate::task::TaskTree;
 use crate::{Error, Result, expression, read};
@@ -98,7 +98,6 @@ pub(super) fn call(
         11 => 7,
         1 | 6 | 9 | 10 | 71 | 75 | 209 | 210 | 212 | 213 | 393 | 1039 | 1040 => 1,
         8 | 149 | 211 | 392 | 1049 => 2,
-        35 | 36 => 3,
         787 => 4,
         5 | 76 => 0,
         _ => unreachable!(),
@@ -190,22 +189,6 @@ pub(super) fn call(
                 args.first().copied().unwrap_or(0),
                 vm.pc,
             )?
-        }
-        35 => {
-            memory::copy(
-                vm,
-                args[0],
-                args[1],
-                read::sized(args[2], vm.pc)?,
-                host.memory_copy_mode,
-            )?;
-            NativeReturn::Continue
-        }
-        36 => {
-            let count = read::sized(args[2], vm.pc)?;
-            vm.read(args[0], count)?;
-            vm.write(args[0], &vec![args[1] as u8; count])?;
-            NativeReturn::Continue
         }
         209 => NativeReturn::Continue,
         210 => NativeReturn::Value(state.shared.get(args[0] as usize).copied().unwrap_or(0) as u32),
