@@ -201,7 +201,7 @@ impl Interpreter {
         } else {
             -1
         };
-        if bank == -1 && self.object_banks.get(&name).copied().unwrap_or(0) <= 1 {
+        if bank == -1 && self.object_banks.get(&name).copied().unwrap_or(0) as i32 <= 1 {
             bank = 0;
         }
         Ok(ObjectReference { name, bank })

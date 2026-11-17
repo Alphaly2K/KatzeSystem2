@@ -15,7 +15,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         }
         let length = match index {
             448 | 665..=668 => 4,
-            630 => 16,
+            630 | 631 => 16,
             645 | 882 => 12,
             _ => 8,
         };
@@ -24,6 +24,24 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         }
         let target = read::u32_at(arguments, 0)?;
         match index {
+            631 => {
+                let name = format_string(vm, read::u32_at(arguments, 8)?, 0)?;
+                if name.len() >= 32 {
+                    return Err(Error::new(vm.pc, "FES 动态创建名称超过容量"));
+                }
+                let mut context = [0; 36];
+                context[..name.len()].copy_from_slice(&name);
+                context[32..].copy_from_slice(&read::u32_at(arguments, 12)?.to_le_bytes());
+                self.command_target_with_buffers(
+                    target,
+                    344,
+                    [0, read::u32_at(arguments, 4)?, 0],
+                    &mut CommandBuffers {
+                        data0: Some(&mut context),
+                        ..Default::default()
+                    },
+                )?;
+            }
             632 => {
                 let address = read::u32_at(arguments, 4)?;
                 let mut header = format_string(vm, address, 0)?;

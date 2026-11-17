@@ -14,6 +14,16 @@ pub trait Services {
     fn copy_local_numbers(&mut self, _from: u32, _to: u32) -> Result<()> {
         Err(Error::new(0, "FES 局部数值复制服务尚未提供"))
     }
+    /// 动态登记对象及其银行，媒体在正常更新时准备。
+    fn define_object(
+        &mut self,
+        _scene: &mut Scene,
+        _kind: u32,
+        _name: &[u8],
+        _banks: u32,
+    ) -> Result<()> {
+        Err(Error::new(0, "FES 动态对象创建服务尚未提供"))
+    }
     /// 按 OBJECT 列头及数据行初始化现有对象，不刷新下层媒体。
     fn initialize_object_line(
         &mut self,
@@ -105,6 +115,15 @@ impl<F: ObjectFactory> Services for ObjectHost<'_, F> {
     }
     fn copy_local_numbers(&mut self, from: u32, to: u32) -> Result<()> {
         self.numbers.copy_local(from, to)
+    }
+    fn define_object(
+        &mut self,
+        scene: &mut Scene,
+        kind: u32,
+        name: &[u8],
+        banks: u32,
+    ) -> Result<()> {
+        scene.define_object(kind, name, banks, self.numbers)
     }
     fn initialize_object_line(
         &mut self,
@@ -1432,7 +1451,20 @@ impl TaskObject for FesObject {
                 )?;
                 services(host)?.initialize_object_line(scene, header, buffers.data1.as_deref())?;
             }
-            178 | 344 | 351 | 356 => {
+            344 => {
+                let scene = self
+                    .scene
+                    .as_mut()
+                    .ok_or_else(|| Error::new(0, "FES 动态创建需要已初始化对象"))?;
+                let bytes = buffers
+                    .data0
+                    .as_deref()
+                    .filter(|bytes| bytes.len() >= 36)
+                    .ok_or_else(|| Error::new(0, "FES 动态创建名称及数量缓冲区不足"))?;
+                let name = crate::read::zstr(&bytes[..32], 0)?;
+                services(host)?.define_object(scene, b, name, crate::read::u32_at(bytes, 32)?)?;
+            }
+            178 | 351 | 356 => {
                 return Err(Error::new(0, "FES 专属命令尚未接入"));
             }
             _ => {

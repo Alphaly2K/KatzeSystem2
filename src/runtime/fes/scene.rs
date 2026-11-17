@@ -197,6 +197,29 @@ impl Scene {
         self.interpreter.local_values()
     }
 
+    pub(in crate::runtime) fn define_object(
+        &mut self,
+        kind: u32,
+        name: &[u8],
+        banks: u32,
+        numbers: &mut crate::expression::State,
+    ) -> Result<()> {
+        numbers.select_local(self.interpreter.local_numbers());
+        let definition = fes::ObjectDefinition::from_type_index(kind, name, banks)?;
+        self.objects.define_dynamic(&definition)?;
+        self.interpreter
+            .set_object_bank_count(&definition.name, self.objects.count(&definition.name));
+        for bank in 0..(banks as i32).max(0) {
+            let handle = self.objects.lookup(&definition.name, bank).unwrap_or(0);
+            self.interpreter
+                .named
+                .entry(definition.name.clone())
+                .or_default()
+                .insert(bank, handle as i32);
+        }
+        Ok(())
+    }
+
     pub(in crate::runtime) fn initialize_object_line(
         &mut self,
         header: &[u8],
@@ -1242,7 +1265,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                     scene.motion_names.insert(call.binding.name.clone(), name);
                 }
                 let (bank, end) = if call.target.bank == -1 {
-                    (0, i64::from(scene.objects.count(&call.target.name)))
+                    (0, i64::from(scene.objects.count(&call.target.name) as i32))
                 } else {
                     (i64::from(call.target.bank), i64::from(call.target.bank) + 1)
                 };
@@ -1385,7 +1408,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                 return Ok(Some(true));
             }
             let (bank, end) = if target.bank == -1 {
-                (0, i64::from(scene.objects.count(&target.name)))
+                (0, i64::from(scene.objects.count(&target.name) as i32))
             } else {
                 (i64::from(target.bank), i64::from(target.bank) + 1)
             };

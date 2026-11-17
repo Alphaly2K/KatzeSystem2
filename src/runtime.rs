@@ -1023,6 +1023,24 @@ fn run_nested<F: ObjectFactory>(
             ..
         } = &mut execution
         {
+            if command.code == 344 {
+                **propagate = false;
+                if !running.get(&target).is_some_and(|task| task.deleted) {
+                    let bytes = buffers
+                        .data0
+                        .as_deref()
+                        .filter(|bytes| bytes.len() >= 36)
+                        .ok_or_else(|| Error::new(0, "FES 动态创建名称及数量缓冲区不足"))?;
+                    let name = crate::read::zstr(&bytes[..32], 0)?;
+                    fes_scene.as_mut().unwrap().scene.define_object(
+                        command.data[1],
+                        name,
+                        crate::read::u32_at(bytes, 32)?,
+                        numbers,
+                    )?;
+                }
+                return Ok(());
+            }
             if command.code == 345 {
                 **propagate = false;
                 if !running.get(&target).is_some_and(|task| task.deleted) {

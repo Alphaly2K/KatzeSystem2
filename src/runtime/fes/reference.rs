@@ -68,7 +68,7 @@ impl<F: ObjectFactory> Store<'_, F> {
             args.get(2)
                 .map_or(Ok(0), |value| interpreter.eval(value, self.numbers))? as u32;
         let banks = if target.bank == -1 {
-            0..i64::from(objects.count(&target.name))
+            0..i64::from(objects.count(&target.name) as i32)
         } else {
             i64::from(target.bank)..i64::from(target.bank) + 1
         };

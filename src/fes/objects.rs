@@ -52,6 +52,23 @@ pub struct ObjectDefinition {
     pub banks: u32,
 }
 
+impl ObjectDefinition {
+    pub(crate) fn from_type_index(index: u32, name: &[u8], banks: u32) -> Result<Self> {
+        let kind = KINDS
+            .get(index as usize)
+            .copied()
+            .ok_or_else(|| Error::new(0, "FES 对象类型编号越界"))?;
+        if name.len() > 31 || name.contains(&0) {
+            return Err(Error::new(0, "FES 对象名称超过 31 字节或包含零字节"));
+        }
+        Ok(Self {
+            kind,
+            name: text::cp932(name)?,
+            banks,
+        })
+    }
+}
+
 impl Interpreter {
     pub(super) fn define_object(&mut self, line: &Line, state: &mut State) -> Result<Event> {
         let expanded = text::expand(&line.bytes, &state.strings)?;

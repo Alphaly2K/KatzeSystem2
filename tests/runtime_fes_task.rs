@@ -55,6 +55,60 @@ struct Factory {
 }
 impl ObjectFactory for Factory {
     fn create(&mut self, id: u32, kind: u32, name: &[u8]) -> Result<Box<dyn TaskObject>> {
+        if kind == kind::ORDINARY && name == b"dynamic creation driver" {
+            let mut code = vec![0x25, 3];
+            code.extend(0xdead_beefu32.to_le_bytes());
+            let mut ins = |op: u8, values: &[u32]| {
+                code.push(op);
+                for value in values {
+                    code.push(3);
+                    code.extend(value.to_le_bytes());
+                }
+            };
+            for (target, kind, name, count) in [
+                (0, 0, 64, 1),
+                (u32::MAX, 0, 64, 1),
+                (3, 1, 64, 2),
+                (3, 0, 64, 3),
+                (3, 6, 96, 1),
+                (3, 0, 112, 0),
+                (3, 5, 128, 1),
+                (3, 1, 144, u32::MAX),
+                (3, 1, 144, 2),
+                (3, 0, 160, 1),
+            ] {
+                for value in [target, kind, name, count] {
+                    ins(0x25, &[value]);
+                }
+                ins(0x2b, &[631, 16]);
+            }
+            ins(0x25, &[3]);
+            ins(0x25, &[64]);
+            ins(0x2b, &[883, 8]);
+            ins(0x26, &[4]);
+            ins(0x25, &[176]);
+            ins(0x2b, &[213, 4]);
+            ins(0x26, &[8]);
+            ins(0x2b, &[65, 0]);
+            let mut data = vec![0; 256];
+            data[..4].copy_from_slice(&7u32.to_le_bytes());
+            for (at, text) in [
+                (64, b"created_%d[G0]\0".as_slice()),
+                (96, b"button\0"),
+                (128, b"view\0"),
+                (144, b"negative\0"),
+                (160, b"\x82\xa0\0"),
+                (176, b"\\0\0"),
+            ] {
+                data[at..at + text.len()].copy_from_slice(text);
+            }
+            let mut task = katze_system2::kcs::OrdinaryTask::new(
+                Program::from_code(&code, data, 256)?,
+                Vec::new(),
+            )?;
+            task.task_id = id;
+            return Ok(Box::new(OrdinaryObject::new(task)));
+        }
         if kind == kind::ORDINARY && name == b"dynamic initialization driver" {
             let mut code = vec![0x25, 3];
             code.extend(0xdead_beefu32.to_le_bytes());
@@ -211,10 +265,16 @@ impl ObjectFactory for Factory {
             ins(0x2f, 3, &[32]);
             ins(0x25, 3, &[96]);
             ins(0x2b, 3, &[632, 8]);
+            ins(0x2f, 3, &[32]);
+            ins(0x25, 3, &[0]);
+            ins(0x25, 3, &[112]);
+            ins(0x25, 3, &[1]);
+            ins(0x2b, 3, &[631, 16]);
             ins(0x29, 3, &[0]);
             let mut data = vec![0; 128];
             data[64..70].copy_from_slice(b"REPLY\0");
             data[96..107].copy_from_slice(b"item COLOR\0");
+            data[112..121].copy_from_slice(b"callback\0");
             let mut task = katze_system2::kcs::OrdinaryTask::new(
                 Program::from_code(&code, data, 128)?,
                 Vec::new(),
@@ -1320,6 +1380,141 @@ fn local_context_copies_keep_task_isolation_selection_stack_and_lifetimes() {
                 .unwrap()
                 .borrow()[0],
             99
+        );
+    }
+}
+
+#[test]
+fn dynamic_creation_preserves_bindings_orphans_raw_counts_and_media_lifetimes() {
+    for budget in [1, 4096] {
+        let mut runtime = setup(budget, b"#START\nwait 1000\n").runtime;
+        let fes = runtime.create(0, kind::FES, b"scene", b"").unwrap();
+        assert!(
+            runtime
+                .dispatch_command(0, command(fes, 344, 0, 0))
+                .unwrap_err()
+                .message
+                .contains("初始化")
+        );
+        let list = runtime.create(fes, kind::IMAGE_LIST, b"list", b"").unwrap();
+        send(&mut runtime, list, 285, 8, 6);
+        send(&mut runtime, fes, 337, 0, 0);
+        send(&mut runtime, fes, 340, 0, list);
+        file(&mut runtime, fes, b"complete.fes").unwrap();
+        send(&mut runtime, fes, 346, 0, 77);
+        send(&mut runtime, fes, 339, 0, 0);
+        let deadline = runtime.object(fes).unwrap().fes_scene().unwrap().deadline();
+        let caller = runtime
+            .create(0, kind::ORDINARY, b"dynamic creation driver", b"")
+            .unwrap();
+        runtime.update(1, 1).unwrap();
+        let scene = runtime.object(fes).unwrap().fes_scene().unwrap();
+        let objects = scene.objects();
+        assert_eq!(objects.len(), 11);
+        assert_eq!(objects.media_records().len(), 10);
+        assert_eq!(objects.get(objects.top()).unwrap().children().count(), 0);
+        assert_eq!(objects.count("created_7"), 2);
+        assert_eq!(objects.count("negative"), u32::MAX);
+        assert_eq!(objects.count(""), 0);
+        assert!(objects.lookup("negative", 1).is_some());
+        assert!(objects.lookup("あ", 0).is_some());
+        assert_eq!(
+            objects
+                .get(objects.lookup("view", 0).unwrap())
+                .unwrap()
+                .state
+                .kind(),
+            "BASE"
+        );
+        for (name, bank) in [
+            ("created_7", 0),
+            ("created_7", 1),
+            ("created_7", 2),
+            ("button", 0),
+        ] {
+            let object = objects.get(objects.lookup(name, bank).unwrap()).unwrap();
+            assert_eq!(object.parent(), None);
+            assert_eq!(object.task_id(), None);
+            assert_eq!(object.image_handle(), None);
+        }
+        let first = objects.lookup("created_7", 0).unwrap();
+        assert_eq!(scene.interpreter().named["created_7"][&0] as u32, first);
+        let vm = runtime.object(caller).unwrap().interpreter().unwrap();
+        assert_eq!(vm.stack_bytes(), 0xdead_beefu32.to_le_bytes());
+        assert_eq!(vm.read(4, 4).unwrap(), first.to_le_bytes());
+        assert_eq!(vm.read(8, 4).unwrap(), 77u32.to_le_bytes());
+        assert_eq!(scene.deadline(), deadline);
+        for row in [
+            b"created_7 2,2 0xff112233 10 1".as_slice(),
+            b"button 2,2 0xffabcdef 5 1",
+            b"negative 2,2 0xff123456 13 1",
+        ] {
+            let mut header = b"OBJECT SIZE COLOR PRI DISP\0".to_vec();
+            let mut row = [row, &[0]].concat();
+            runtime
+                .dispatch_command_with_buffers(
+                    0,
+                    command(fes, 345, 0, 0),
+                    &mut CommandBuffers {
+                        data0: Some(&mut header),
+                        data1: Some(&mut row),
+                        external: None,
+                    },
+                )
+                .unwrap();
+        }
+        runtime.update(2, 1).unwrap();
+        let scene = runtime.object(fes).unwrap().fes_scene().unwrap();
+        let objects = scene.objects();
+        for bank in 0..2 {
+            let handle = objects.lookup("negative", bank).unwrap();
+            let katze_system2::runtime::fes::ObjectState::CImage(image) =
+                &objects.get(handle).unwrap().state
+            else {
+                unreachable!()
+            };
+            assert_eq!(image.size, if bank == 0 { [2, 2] } else { [-1, -1] });
+        }
+        let button = objects
+            .get(objects.lookup("button", 0).unwrap())
+            .unwrap()
+            .task_id()
+            .unwrap();
+        assert!(
+            runtime
+                .input_state(1)
+                .unwrap()
+                .regions()
+                .get(button)
+                .is_some()
+        );
+        let wrappers: Vec<_> = objects
+            .media_records()
+            .iter()
+            .filter_map(|record| record.image_handle())
+            .collect();
+        assert_eq!(wrappers.len(), 7);
+        for (index, wrapper) in wrappers.iter().enumerate() {
+            let pixels = runtime.images().pixel_handle(*wrapper).unwrap();
+            assert_eq!(pixels != 0, matches!(index, 0 | 1 | 5));
+            if pixels != 0 {
+                assert_eq!(runtime.images().get(*wrapper).unwrap().info().size, [2, 2]);
+            }
+        }
+        runtime.destroy(fes).unwrap();
+        assert!(runtime.object(button).is_none());
+        assert!(
+            runtime
+                .input_state(1)
+                .unwrap()
+                .regions()
+                .get(button)
+                .is_none()
+        );
+        assert!(
+            wrappers
+                .into_iter()
+                .all(|wrapper| runtime.images().pixel_handle(wrapper).is_err())
         );
     }
 }
@@ -2848,6 +3043,8 @@ fn fes_send_allows_synchronous_parameter_access_and_a_block_callback() {
             unreachable!()
         };
         assert_eq!(image.color, 0);
+        let callback = scene.objects().lookup("callback", 0).unwrap();
+        assert_eq!(scene.objects().get(callback).unwrap().parent(), None);
     }
 }
 

@@ -122,7 +122,7 @@ impl ObjectState {
 
     fn new(kind: &str, text: &string::Context) -> Result<Self> {
         Ok(match kind {
-            "BASE" => Self::Base,
+            "BASE" | "VIEW" => Self::Base,
             "VIEWPORT" => Self::Viewport(Box::default()),
             "CIMAGE" => Self::CImage(Box::default()),
             "IMAGE" => Self::Image(Box::default()),
@@ -488,12 +488,33 @@ impl Objects {
         {
             return Err(Error::new(0, "FES 对象名称需要 1～31 个非零 ASCII 字节"));
         }
-        let count = definition.banks as usize;
-        if count == 0
-            || count > read::MAX_ITEMS - self.objects.len()
+        if definition.banks == 0 || definition.banks as usize > read::MAX_ITEMS {
+            return Err(Error::new(0, "FES 对象数量超出上限"));
+        }
+        self.define_with_parent(definition, Some(self.top))
+    }
+
+    pub(super) fn define_dynamic(&mut self, definition: &ObjectDefinition) -> Result<Vec<u32>> {
+        self.require_motion_idle()?;
+        self.define_with_parent(definition, None)
+    }
+
+    fn define_with_parent(
+        &mut self,
+        definition: &ObjectDefinition,
+        parent: Option<u32>,
+    ) -> Result<Vec<u32>> {
+        let count = (definition.banks as i32).max(0) as usize;
+        if count > read::MAX_ITEMS - self.objects.len()
             || count > read::MAX_ITEMS - self.update_order.len()
         {
             return Err(Error::new(0, "FES 对象数量超出上限"));
+        }
+        if count == 0 {
+            self.counts
+                .entry(definition.name.clone())
+                .or_insert(definition.banks);
+            return Ok(Vec::new());
         }
         let initial = ObjectState::new(definition.kind, &self.text)?;
         let handles: Vec<_> = (0..count)
@@ -507,7 +528,7 @@ impl Objects {
                     handle,
                     name: definition.name.clone(),
                     bank: bank as u32,
-                    parent: Some(self.top),
+                    parent,
                     children: BTreeSet::new(),
                     task_id: None,
                     image: None,
@@ -526,11 +547,13 @@ impl Objects {
             );
             bindings.entry(bank as i32).or_insert(handle);
         }
-        self.objects
-            .get_mut(&self.top)
-            .unwrap()
-            .children
-            .extend(handles.iter().copied());
+        if let Some(parent) = parent {
+            self.objects
+                .get_mut(&parent)
+                .unwrap()
+                .children
+                .extend(handles.iter().copied());
+        }
         self.counts
             .entry(definition.name.clone())
             .or_insert(definition.banks);
@@ -607,7 +630,7 @@ impl Objects {
         self.require_motion_idle()?;
         let ObjectReference { name, bank } = &initialization.target;
         let banks = if *bank == -1 {
-            0..i64::from(self.count(name))
+            0..i64::from(self.count(name) as i32)
         } else {
             i64::from(*bank)..i64::from(*bank) + 1
         };

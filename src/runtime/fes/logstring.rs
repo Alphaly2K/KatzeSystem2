@@ -252,7 +252,7 @@ impl<F: ObjectFactory> Store<'_, F> {
             })?);
         }
         let banks = if target.bank == -1 {
-            0..i64::from(scene.objects.count(&target.name))
+            0..i64::from(scene.objects.count(&target.name) as i32)
         } else {
             i64::from(target.bank)..i64::from(target.bank) + 1
         };

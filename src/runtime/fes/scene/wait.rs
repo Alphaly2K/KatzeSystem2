@@ -126,7 +126,7 @@ impl Scene {
                     && (!self.input.mode || self.input.ctrl || self.input.cancel_enabled);
                 if let Some(target) = &self.wait_target {
                     let banks = if target.bank == -1 {
-                        0..i64::from(self.objects.count(&target.name))
+                        0..i64::from(self.objects.count(&target.name) as i32)
                     } else {
                         i64::from(target.bank)..i64::from(target.bank) + 1
                     };
@@ -165,7 +165,7 @@ impl Scene {
                 }
                 if let Some(target) = &self.wait_target {
                     let banks = if target.bank == -1 {
-                        0..i64::from(self.objects.count(&target.name))
+                        0..i64::from(self.objects.count(&target.name) as i32)
                     } else {
                         i64::from(target.bank)..i64::from(target.bank) + 1
                     };

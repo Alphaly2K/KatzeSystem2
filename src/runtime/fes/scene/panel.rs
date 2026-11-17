@@ -37,7 +37,7 @@ impl<F: ObjectFactory> Store<'_, F> {
             return Ok(());
         };
         let banks = if target.bank == -1 {
-            0..i64::from(scene.objects.count(&target.name))
+            0..i64::from(scene.objects.count(&target.name) as i32)
         } else {
             i64::from(target.bank)..i64::from(target.bank) + 1
         };
@@ -152,7 +152,7 @@ impl<F: ObjectFactory> Store<'_, F> {
         offset: usize,
     ) -> Result<()> {
         let banks = if target.bank == -1 {
-            0..i64::from(scene.objects.count(&target.name))
+            0..i64::from(scene.objects.count(&target.name) as i32)
         } else {
             i64::from(target.bank)..i64::from(target.bank) + 1
         };
@@ -227,7 +227,7 @@ impl<F: ObjectFactory> Store<'_, F> {
             None => true,
         };
         let banks = if target.bank == -1 {
-            0..i64::from(scene.objects.count(&target.name))
+            0..i64::from(scene.objects.count(&target.name) as i32)
         } else {
             i64::from(target.bank)..i64::from(target.bank) + 1
         };
