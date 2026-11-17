@@ -1,7 +1,7 @@
 use crate::{Error, Result};
 
 mod image;
-pub(crate) use image::ExportFormat;
+pub(crate) use image::{ExportFormat, ResourceTransform};
 pub use image::{Image, ImageReference, Images};
 mod image_filter;
 pub use image_filter::ImageFilter;

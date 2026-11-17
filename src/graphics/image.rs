@@ -15,7 +15,7 @@ mod resource;
 mod transform;
 mod window;
 pub(crate) use export::ExportFormat;
-pub(crate) use resource::{ImageResource, ResourceGeometry};
+pub(crate) use resource::{ImageResource, ResourceGeometry, ResourceTransform};
 
 /// 普通 111 的单个图像名称；帧号位于冒号后，扩展名按原名称重新拼接。
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1012,6 +1012,14 @@ impl Images {
         if source_data == target_data {
             return Err(Error::new(0, "图像列表自有图像不能同时用作绘制来源"));
         }
+        let clip = if let Some(geometry) = source.1 {
+            let Some(clip) = clip.intersect(geometry.bounds(position, base)) else {
+                return Ok(());
+            };
+            clip
+        } else {
+            clip
+        };
         let mut source_image = self.data.remove(&source_data).unwrap();
         let original_info = source_image.image.info;
         if let Some(geometry) = source.1 {

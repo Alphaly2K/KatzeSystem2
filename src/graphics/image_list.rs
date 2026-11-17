@@ -93,7 +93,7 @@ struct Block {
 /// 持有自有图像及独立来源包装的无变换图像列表。
 /// 所有包装登记到 owner；调用方应在该任务释放前使用或显式释放本列表。
 pub struct ImageList {
-    owner: u32,
+    owner: Option<u32>,
     image: u32,
     entries: BTreeMap<u32, Entry>,
     blocks: Vec<Block>,
@@ -114,6 +114,15 @@ impl ImageList {
         tile_size: [u32; 2],
         images: &mut Images,
     ) -> Result<Self> {
+        Self::new_tiled_for(Some(owner), size, tile_size, images)
+    }
+
+    pub(crate) fn new_tiled_for(
+        owner: Option<u32>,
+        size: [u32; 2],
+        tile_size: [u32; 2],
+        images: &mut Images,
+    ) -> Result<Self> {
         if tile_size.contains(&0) {
             return Err(Error::new(0, "图像列表面块步长不能为零"));
         }
@@ -122,7 +131,10 @@ impl ImageList {
         if count > read::MAX_ITEMS as u64 {
             return Err(Error::new(0, "图像列表面块数量超过上限"));
         }
-        let image = images.create(owner, size)?;
+        let image = match owner {
+            Some(owner) => images.create(owner, size)?,
+            None => images.insert_unowned(Image::new(size)?, None)?,
+        };
         let blocks = (0..count as u32)
             .map(|index| {
                 let x = (index % grid[0]) * tile_size[0];
@@ -183,7 +195,7 @@ impl ImageList {
         images: &mut Images,
     ) -> Result<()> {
         self.check_animation_pass()?;
-        let replacement = Self::new_tiled(self.owner, size, tile_size, images)?;
+        let replacement = Self::new_tiled_for(self.owner, size, tile_size, images)?;
         images.release(self.image)?;
         self.image = replacement.image;
         self.blocks = replacement.blocks;
@@ -200,6 +212,24 @@ impl ImageList {
         images: &mut Images,
     ) -> Result<()> {
         self.set_pixels(key, images.pixel_handle(source)?, properties, images)
+    }
+
+    pub(crate) fn set_layer(
+        &mut self,
+        key: u32,
+        source: u32,
+        properties: ImageListProperties,
+        images: &mut Images,
+    ) -> Result<()> {
+        // 来源节点保留登记时的几何，像素扩边后仍按原范围生成脏区。
+        let geometry = ResourceGeometry::from_image(images.get(source)?);
+        self.set_pixels_inner(
+            key,
+            images.pixel_handle(source)?,
+            properties,
+            Some(geometry),
+            images,
+        )
     }
 
     /// 登记独立捕获图像；后续原地过滤使引用此像素的条目自动重绘。
@@ -247,6 +277,7 @@ impl ImageList {
         let Some(resource) = entry.resource else {
             return Ok(());
         };
+        images.refresh_resource(resource)?;
         if !images.resource_updated(resource, true)? {
             return Ok(());
         }
@@ -293,7 +324,7 @@ impl ImageList {
             images.bind_pixels(image, pixels)?;
             image
         } else {
-            images.share_pixels_for(Some(self.owner), pixels)?
+            images.share_pixels_for(self.owner, pixels)?
         };
         let (frames, animation) = self
             .entries
@@ -377,7 +408,11 @@ impl ImageList {
         let mut frames = BTreeMap::new();
         for (id, image) in decoded {
             let alpha = Some(image.info().reserved != 0);
-            match images.insert(self.owner, image, alpha) {
+            let inserted = match self.owner {
+                Some(owner) => images.insert(owner, image, alpha),
+                None => images.insert_unowned(image, alpha),
+            };
+            match inserted {
                 Ok(image) => {
                     frames.insert(id, image);
                 }
@@ -643,6 +678,20 @@ impl ImageList {
         for block in &mut self.blocks {
             block.dirty = Some(block.bounds);
         }
+    }
+
+    pub(crate) fn invalidate_source(&mut self, key: u32, images: &Images) -> Result<()> {
+        let entry = self.entries.get_mut(&key).unwrap();
+        if entry.visible() {
+            entry.history = accumulate(
+                entry.history,
+                entry.bounds(images, entry.properties.base_point)?,
+                entry.clip,
+            );
+            let history = entry.history;
+            self.mark(history);
+        }
+        Ok(())
     }
 
     fn mark(&mut self, rect: Option<Rect>) {

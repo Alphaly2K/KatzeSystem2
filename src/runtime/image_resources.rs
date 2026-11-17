@@ -1,8 +1,10 @@
 use super::{ObjectFactory, ObjectHost, Resources, Runtime};
-use crate::graphics::{Image, ImageFilter, ImageReference, Rect};
+use crate::graphics::{Image, ImageFilter, ImageReference, Rect, ResourceTransform};
 use crate::kcs::{Interpreter, NativeReturn, format_string};
 use crate::resource::ResourceMode;
 use crate::{Error, Result, read};
+
+type ImageLayers = Vec<(Image, Option<bool>)>;
 
 impl<F: ObjectFactory> Runtime<F> {
     /// 借用独立图像资源当前的解码图像；句柄属于普通 710／733 资源表。
@@ -27,11 +29,7 @@ impl<F: ObjectFactory> Runtime<F> {
 }
 
 impl Resources {
-    fn load_image_resource(
-        &mut self,
-        name: &[u8],
-        preload: bool,
-    ) -> Result<Option<(Image, Option<bool>)>> {
+    fn load_image_resource(&mut self, name: &[u8], preload: bool) -> Result<Option<ImageLayers>> {
         if name.len() >= 260 {
             return Err(Error::new(0, "图像资源名超过基线缓冲区范围"));
         }
@@ -85,10 +83,11 @@ impl Resources {
                     self.images
                         .decode(&layer, (!animated).then_some(0), preload, services)?
                 {
-                    layers.push(image);
+                    let alpha = Some(image.info().reserved != 0);
+                    layers.push((image, alpha));
                 }
             }
-            return Ok(Image::from_layers(&layers)?.map(|image| (image, None)));
+            return Ok((!layers.is_empty()).then_some(layers));
         }
         let animation_name = [&name[..end], b".anm"].concat();
         let animated = !preload
@@ -111,7 +110,7 @@ impl Resources {
         )?;
         Ok(image.map(|image| {
             let has_alpha = image.info().reserved != 0;
-            (image, Some(has_alpha))
+            vec![(image, Some(has_alpha))]
         }))
     }
 }
@@ -151,12 +150,16 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             if arguments.len() != if index == 710 { 4 } else { 8 } {
                 return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
             }
-            let (image, has_alpha) = if index == 733 {
-                (
+            if index == 733 {
+                let handle = self.resources.images.insert_resource(
+                    Some(self.host.task_id),
                     Image::new([read::u32_at(arguments, 0)?, read::u32_at(arguments, 4)?])?,
+                    false,
                     None,
-                )
-            } else {
+                )?;
+                return Ok(NativeReturn::Value(handle));
+            }
+            let layers = {
                 let address = read::u32_at(arguments, 0)?;
                 if vm.read(address, 1).is_err() {
                     return Ok(NativeReturn::Value(0));
@@ -191,11 +194,17 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                 };
                 image
             };
-            let handle = self.resources.images.insert_resource(
+            let tiles = self
+                .resources
+                .compositor
+                .drawing
+                .target
+                .as_ref()
+                .map(|target| target.tile_size());
+            let handle = self.resources.images.insert_layered_resource(
                 Some(self.host.task_id),
-                image,
-                index == 710,
-                has_alpha,
+                layers,
+                tiles,
             )?;
             return Ok(NativeReturn::Value(handle));
         }
@@ -277,7 +286,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         }
         let count = match index {
             711 | 721 => 1,
-            722 | 723 | 727 | 728 | 737 => 2,
+            722 | 723 | 727..=729 | 737 => 2,
             713 => 4,
             712 | 714 | 715 | 717..=720 | 726 | 730 => 3,
             724 => 7,
@@ -316,69 +325,36 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         } else {
             [100; 3]
         };
-        let resource = self.resources.images.resource_entry(handle)?;
-        let image_handle = resource.image;
-        let has_source_layer = resource.has_source_layer;
-        if index == 730 {
-            if !has_source_layer {
-                return Err(Error::new(
-                    vm.pc,
-                    "该图像资源操作需要来源图层，空白资源的原入口会访问空容器",
-                ));
-            }
+        if matches!(index, 713 | 723 | 726 | 727 | 729 | 730 | 737) {
+            let transform = match index {
+                713 => ResourceTransform::Rgb(rgb),
+                723 => ResourceTransform::Rotate(read::u32_at(arguments, 4)? as i32),
+                726 => ResourceTransform::Blur([
+                    read::u32_at(arguments, 4)? as i32,
+                    read::u32_at(arguments, 8)? as i32,
+                ]),
+                727 => ResourceTransform::Flip(read::u32_at(arguments, 4)? != 0),
+                729 => ResourceTransform::Alpha(read::u32_at(arguments, 4)?),
+                730 => ResourceTransform::Resize([
+                    read::u32_at(arguments, 4)?,
+                    read::u32_at(arguments, 8)?,
+                ]),
+                737 => ResourceTransform::Filter(filter),
+                _ => unreachable!(),
+            };
+            let tiles = self
+                .resources
+                .compositor
+                .drawing
+                .target
+                .as_ref()
+                .map(|target| target.tile_size());
             self.resources
                 .images
-                .get_mut(image_handle)?
-                .resize_canvas([read::u32_at(arguments, 4)?, read::u32_at(arguments, 8)?])?;
-            self.resources.images.rebuild_resource_geometry(handle)?;
-            self.resources.images.resource_entry_mut(handle)?.updated = true;
+                .transform_resource(handle, transform, tiles)?;
             return Ok(NativeReturn::Continue);
         }
-        if index == 726 {
-            if !has_source_layer {
-                return Err(Error::new(
-                    vm.pc,
-                    "该图像资源操作需要来源图层，空白资源的原入口会访问空容器",
-                ));
-            }
-            let radius = [
-                read::u32_at(arguments, 4)? as i32,
-                read::u32_at(arguments, 8)? as i32,
-            ];
-            let image = self.resources.images.get_mut(image_handle)?;
-            image.expand_for_blur(radius)?;
-            let size = image.info().size;
-            let offset = image.info().offset;
-            image.blur(radius)?;
-            let geometry = &mut self.resources.images.resource_entry_mut(handle)?.geometry;
-            geometry.size = size;
-            geometry.offset = offset;
-            self.resources.images.resource_entry_mut(handle)?.updated = true;
-            return Ok(NativeReturn::Continue);
-        }
-        if matches!(index, 713 | 723 | 727 | 737) {
-            if index != 737 && !has_source_layer {
-                return Err(Error::new(
-                    vm.pc,
-                    "该图像资源操作需要来源图层，空白资源的原入口会访问空容器",
-                ));
-            }
-            let image = self.resources.images.get_mut(image_handle)?;
-            match index {
-                713 => image.adjust_rgb_percent(rgb),
-                723 => {
-                    image.rotate_right_angle(read::u32_at(arguments, 4)? as i32)?;
-                }
-                727 => image.flip(read::u32_at(arguments, 4)? != 0),
-                737 => filter.apply(image),
-                _ => unreachable!(),
-            }
-            if matches!(index, 723 | 727) {
-                self.resources.images.rebuild_resource_geometry(handle)?;
-            }
-            self.resources.images.resource_entry_mut(handle)?.updated = true;
-            return Ok(NativeReturn::Continue);
-        }
+        let image_handle = self.resources.images.resource_entry(handle)?.image;
         if index == 721 {
             return Ok(NativeReturn::Value(u32::from(
                 self.resources.images.uses_alpha(image_handle)?,

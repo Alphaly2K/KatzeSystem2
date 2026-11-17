@@ -22,7 +22,7 @@ fn layer(size: [u32; 2], offset: [i32; 2], base: [i32; 2], pixels: Vec<u8>) -> I
 }
 
 #[test]
-fn layered_images_union_bounds_align_bases_and_merge_attributes() {
+fn layered_images_keep_offsets_and_first_base_and_merge_attributes() {
     let first = layer([2, 1], [-1, 2], [3, 4], [10, 20, 30, 255].repeat(2));
     let mut second = layer(
         [1, 2],
@@ -52,7 +52,8 @@ fn layered_images_union_bounds_align_bases_and_merge_attributes() {
     assert_eq!(
         image.surface().pixels(),
         [
-            10, 20, 30, 255, 40, 50, 60, 255, 10, 20, 30, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            10, 20, 30, 255, 10, 20, 30, 255, 80, 90, 100, 128, 0, 0, 0, 0, 40, 50, 60, 0, 40, 50,
+            60, 255,
         ]
     );
     assert_eq!(layers[0].surface().pixels(), [10, 20, 30, 255].repeat(2));

@@ -181,12 +181,22 @@ fn resources_release_owner_registration_and_keep_independent_references() {
 }
 
 fn blob() -> Vec<u8> {
+    pixel_blob([0; 4])
+}
+
+fn pixel_blob(color: [u8; 4]) -> Vec<u8> {
     let compress = |bytes: &[u8]| {
         let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), Default::default());
         encoder.write_all(bytes).unwrap();
         encoder.finish().unwrap()
     };
-    let data = compress(&[0; 4]);
+    let delta = color.map(|value| (value << 1) ^ (0u8.wrapping_sub(value >> 7)));
+    let planes = [6, 4, 2, 0].map(|shift| {
+        delta.iter().enumerate().fold(0, |value, (i, byte)| {
+            value | (((byte >> shift) & 3) << (i * 2))
+        })
+    });
+    let data = compress(&planes);
     let control = compress(&[9, 1]);
     let mut bytes = b"HG-3".to_vec();
     bytes.extend([12u32, 0x300, 0, 7].into_iter().flat_map(u32::to_le_bytes));
@@ -716,6 +726,166 @@ fn layered_resource_names_expand_each_component_and_scan_composite_alpha() {
 }
 
 #[test]
+fn layered_resource_changes_wait_for_drawing_and_rebuild_from_retained_sources() {
+    use katze_system2::graphics::{ImageList, ImageListProperties};
+
+    struct Layers;
+    impl ResourceServices for Layers {
+        fn resolve(&mut self, _: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+            Ok(name.to_vec())
+        }
+
+        fn read(&mut self, name: &[u8], _: ResourceMode) -> Result<Option<Vec<u8>>> {
+            let color = match name {
+                b"layers.hg3" | b"layers_1.hg3" => [20, 40, 60, 64],
+                b"layers_02.hg3" => [200, 180, 160, 128],
+                _ => return Ok(None),
+            };
+            let mut bytes = pixel_blob(color);
+            if name != b"layers.hg3" {
+                bytes[16..20].copy_from_slice(&0u32.to_le_bytes());
+            }
+            for (at, value) in [(48, 0u32), (52, 0), (56, 11), (60, 13)] {
+                bytes[at..at + 4].copy_from_slice(&value.to_le_bytes());
+            }
+            Ok(Some(bytes))
+        }
+    }
+
+    for budget in [1, 4096] {
+        for combined in [false, true] {
+            let mut code = Vec::new();
+            call(&mut code, 710, &[64]);
+            ins(&mut code, 0x26, &[0]);
+            ins(&mut code, 0x25, &[0xdead_beef]);
+            call(&mut code, 65, &[]);
+            handle_call(&mut code, 729, &[50]);
+            call(&mut code, 65, &[]);
+            handle_call(&mut code, 736, &[0, 0, 1, 1, 0xff12_3456]);
+            handle_call(&mut code, 729, &[100]);
+            call(&mut code, 65, &[]);
+            handle_call(&mut code, 737, &[3]);
+            call(&mut code, 65, &[]);
+            for (native, values) in [(718, [17, 19]), (719, [2, 3]), (720, [4, 5])] {
+                handle_call(&mut code, native, &values);
+                ins(&mut code, 0x2d, &[]);
+            }
+            handle_call(&mut code, 728, &[2]);
+            handle_call(&mut code, 723, &[0]);
+            call(&mut code, 65, &[]);
+            let mut runtime = runtime(&code, budget);
+            runtime.set_resources(Layers);
+            let task = runtime.create(0, kind::ORDINARY, b"layers", b"").unwrap();
+            runtime
+                .object_mut(task)
+                .unwrap()
+                .interpreter_mut()
+                .unwrap()
+                .write(
+                    64,
+                    if combined {
+                        b"layers,1,2.hg3\0"
+                    } else {
+                        b"layers:7.hg3\0"
+                    },
+                )
+                .unwrap();
+            runtime.update(0, 1).unwrap();
+            let handle = word(vm(&runtime, task), 0);
+            let mut list = ImageList::new(999, [1, 1], runtime.images_mut()).unwrap();
+            list.set_resource(
+                0,
+                handle,
+                ImageListProperties::default(),
+                runtime.images_mut(),
+            )
+            .unwrap();
+            let initial = if combined {
+                [162, 151, 139, 161]
+            } else {
+                [20, 40, 60, 64]
+            };
+            assert_eq!(
+                runtime.image_resource(handle).unwrap().surface().pixels(),
+                initial
+            );
+            for (frame, before, after) in [
+                (
+                    1,
+                    if combined { initial } else { [20, 40, 60, 32] },
+                    if combined {
+                        [149, 140, 131, 89]
+                    } else {
+                        [20, 40, 60, 32]
+                    },
+                ),
+                (
+                    2,
+                    [86, 52, 18, 255],
+                    if combined {
+                        [149, 140, 131, 89]
+                    } else {
+                        [86, 52, 18, 255]
+                    },
+                ),
+                (
+                    3,
+                    if combined {
+                        [149, 140, 131, 89]
+                    } else {
+                        [169, 203, 237, 255]
+                    },
+                    if combined {
+                        [102, 111, 120, 89]
+                    } else {
+                        [169, 203, 237, 255]
+                    },
+                ),
+            ] {
+                runtime.update(frame, 1).unwrap();
+                assert!(runtime.image_resource_updated(handle, true).unwrap());
+                assert_eq!(
+                    runtime.image_resource(handle).unwrap().surface().pixels(),
+                    before
+                );
+                assert!(
+                    list.update_animations(frame, budget, runtime.images_mut())
+                        .unwrap()
+                );
+                list.update(runtime.images_mut()).unwrap();
+                assert_eq!(
+                    runtime.image_resource(handle).unwrap().surface().pixels(),
+                    after
+                );
+                assert!(!runtime.image_resource_updated(handle, false).unwrap());
+                assert_eq!(
+                    vm(&runtime, task).stack_bytes(),
+                    0xdead_beefu32.to_le_bytes()
+                );
+            }
+            runtime.update(4, 1).unwrap();
+            let image = runtime.image_resource(handle).unwrap();
+            assert_eq!(
+                image.info().canvas_size,
+                if combined { [11, 13] } else { [17, 19] }
+            );
+            assert_eq!(image.info().offset, if combined { [0; 2] } else { [2, 3] });
+            assert_eq!(image.info().base, if combined { [3, 4] } else { [4, 5] });
+            assert_eq!(image.alpha_mask(), if combined { 0 } else { 2 });
+            runtime.destroy(task).unwrap();
+            assert!(
+                list.update_animations(5, budget, runtime.images_mut())
+                    .unwrap()
+            );
+            list.update(runtime.images_mut()).unwrap();
+            assert!(runtime.image_resource(handle).is_ok());
+            list.release(runtime.images_mut()).unwrap();
+            assert!(runtime.image_resource(handle).is_err());
+        }
+    }
+}
+
+#[test]
 fn resource_transforms_keep_return_stack_and_shared_update_flag() {
     for budget in [1, 4096] {
         let mut code = Vec::new();
@@ -734,7 +904,7 @@ fn resource_transforms_keep_return_stack_and_shared_update_flag() {
         }
         call(&mut code, 713, &[u32::MAX, 100, 100, 100]);
         call(&mut code, 737, &[u32::MAX, 0]);
-        for native in [713, 723, 727, 737] {
+        for native in [713, 723, 727, 729, 737] {
             call(&mut code, native, &[0]);
         }
         call(&mut code, 65, &[]);
@@ -781,6 +951,7 @@ fn resource_transforms_keep_return_stack_and_shared_update_flag() {
         (723, vec![0]),
         (726, vec![1, 1]),
         (727, vec![0]),
+        (729, vec![100]),
         (730, vec![1, 1]),
     ] {
         let mut code = Vec::new();
