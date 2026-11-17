@@ -906,11 +906,24 @@ fn pixel_lookup_uses_signed_keys_and_preserves_missing_output_and_buffer_tails()
 }
 
 #[test]
-fn ordinary_list_registration_and_source_query_share_pixels_after_source_release() -> Result<()> {
-    struct Queries;
+fn ordinary_and_resource_registration_keep_pixels_after_source_and_owner_release() -> Result<()> {
+    struct Queries(bool);
     impl ProgramLoader for Queries {
         fn load(&mut self, _: &[u8]) -> Result<Option<Program>> {
             let mut code = Vec::new();
+            if self.0 {
+                push(&mut code, 1);
+                push(&mut code, 1);
+                call(&mut code, 733, 8);
+                code.extend([0x26, 3]);
+                code.extend(32u32.to_le_bytes());
+                code.extend([0x25, 0x13]);
+                code.extend(32u32.to_le_bytes());
+                for value in [0, 0, 1, 1, 0xff12_3456] {
+                    push(&mut code, value);
+                }
+                call(&mut code, 736, 24);
+            }
             push(&mut code, 0xdead_beef);
             for empty in [false, true] {
                 for value in [1, 7] {
@@ -936,11 +949,11 @@ fn ordinary_list_registration_and_source_query_share_pixels_after_source_release
                 ] {
                     push(&mut code, value);
                 }
-                call(&mut code, 257, 52);
+                call(&mut code, if self.0 { 731 } else { 257 }, 52);
             }
             code.extend([0x25, 0x13]);
             code.extend(32u32.to_le_bytes());
-            call(&mut code, 114, 4);
+            call(&mut code, if self.0 { 711 } else { 114 }, 4);
             for (index, values) in [[1, 7], [1, 99], [0, 7]].into_iter().enumerate() {
                 for value in values {
                     push(&mut code, value);
@@ -954,49 +967,72 @@ fn ordinary_list_registration_and_source_query_share_pixels_after_source_release
         }
     }
     for budget in [1, 4096] {
-        let mut runtime = Runtime::new(
-            0,
-            kind::ROOT,
-            Box::new(BaseObject::new()),
-            State::new(0),
-            GraphicsFactory {
-                fallback: KcsFactory::new(Queries),
-            },
-        );
-        runtime.set_budget(budget, 10000);
-        runtime.host_mut().surface_size = [2, 2];
-        runtime.drawing_mut().target = Some(RenderTarget::new([2, 2])?);
-        let list = runtime.create(0, kind::IMAGE_LIST, b"list", b"")?;
-        assert_eq!(list, 1);
-        send(&mut runtime, list, 285, 2, 2);
-        let script = runtime.create(0, kind::ORDINARY, b"queries", b"")?;
-        let image = runtime.images_mut().create(99, [1, 1])?;
-        runtime
-            .images_mut()
-            .get_mut(image)?
-            .pixels_mut()
-            .copy_from_slice(&0xff12_3456u32.to_le_bytes());
-        let pixels = runtime.images().pixel_handle(image)?;
-        runtime
-            .object_mut(script)
-            .unwrap()
-            .interpreter_mut()
-            .unwrap()
-            .write(32, &image.to_le_bytes())?;
-        runtime.update(1, 1)?;
-        let vm = runtime.object(script).unwrap().interpreter().unwrap();
-        assert_eq!(
-            vm.read(0, 12)?,
-            [pixels, 0, 0].map(u32::to_le_bytes).concat()
-        );
-        assert_eq!(vm.stack_bytes(), 0xdead_beefu32.to_le_bytes());
-        assert!(runtime.images().get(image).is_err());
-        send(&mut runtime, list, 296, 0, 0);
-        let output = output_image(&mut runtime, list);
-        assert_eq!(
-            runtime.images().get(output)?.surface().pixel(0, 1),
-            Some(0xff12_3456)
-        );
+        for resource in [false, true] {
+            let mut runtime = Runtime::new(
+                0,
+                kind::ROOT,
+                Box::new(BaseObject::new()),
+                State::new(0),
+                GraphicsFactory {
+                    fallback: KcsFactory::new(Queries(resource)),
+                },
+            );
+            runtime.set_budget(budget, 10000);
+            runtime.host_mut().surface_size = [2, 2];
+            runtime.drawing_mut().target = Some(RenderTarget::new([2, 2])?);
+            let list = runtime.create(0, kind::IMAGE_LIST, b"list", b"")?;
+            assert_eq!(list, 1);
+            send(&mut runtime, list, 285, 2, 2);
+            let script = runtime.create(0, kind::ORDINARY, b"queries", b"")?;
+            let pixels = if resource {
+                None
+            } else {
+                let image = runtime.images_mut().create(99, [1, 1])?;
+                runtime
+                    .images_mut()
+                    .get_mut(image)?
+                    .pixels_mut()
+                    .copy_from_slice(&0xff12_3456u32.to_le_bytes());
+                let pixels = runtime.images().pixel_handle(image)?;
+                runtime
+                    .object_mut(script)
+                    .unwrap()
+                    .interpreter_mut()
+                    .unwrap()
+                    .write(32, &image.to_le_bytes())?;
+                Some(pixels)
+            };
+            runtime.update(1, 1)?;
+            let vm = runtime.object(script).unwrap().interpreter().unwrap();
+            let source = u32::from_le_bytes(vm.read(32, 4)?.as_ref().try_into().unwrap());
+            let result = u32::from_le_bytes(vm.read(0, 4)?.as_ref().try_into().unwrap());
+            assert_ne!(result, 0);
+            if let Some(pixels) = pixels {
+                assert_eq!(result, pixels);
+                assert!(runtime.images().get(source).is_err());
+            } else {
+                assert_eq!(
+                    runtime.image_resource(source)?.surface().pixels(),
+                    0xff12_3456u32.to_le_bytes()
+                );
+            }
+            assert_eq!(vm.read(4, 8)?, [0; 8]);
+            assert_eq!(vm.stack_bytes(), 0xdead_beefu32.to_le_bytes());
+            runtime.destroy(script)?;
+            send(&mut runtime, list, 296, 0, 0);
+            let output = output_image(&mut runtime, list);
+            assert_eq!(
+                runtime.images().get(output)?.surface().pixel(0, 1),
+                Some(0xff12_3456)
+            );
+            if resource {
+                assert!(runtime.image_resource(source).is_ok());
+            }
+            runtime.destroy(list)?;
+            if resource {
+                assert!(runtime.image_resource(source).is_err());
+            }
+        }
     }
     Ok(())
 }
