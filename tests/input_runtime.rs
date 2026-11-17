@@ -75,6 +75,8 @@ fn ordinary_input_wrappers_query_devices_and_update_regions_and_key_switches() -
         call(&mut code, native, &args);
     }
     call(&mut code, 401, &[0]);
+    call(&mut code, 396, &[u32::MAX]);
+    emit(&mut code, 0x26, &[16]);
     call(&mut code, 150, &[0x1000a, 0x20014, 7]);
     wait(&mut code);
     call(&mut code, 285, &[0]);
@@ -103,6 +105,10 @@ fn ordinary_input_wrappers_query_devices_and_update_regions_and_key_switches() -
         rt.set_input_pointer_control(true);
         let input = rt.create(0, kind::INPUT, b"input", b"")?;
         rt.input_state_mut(input).unwrap().set_update_rate(120);
+        rt.input_state_mut(input)
+            .unwrap()
+            .pointer_mut()
+            .cursor_shown = 0x8000_0001;
         let caller = rt.create(0, kind::ORDINARY, b"caller", b"")?;
         let device = Rc::new(RefCell::new(DeviceState::new([20, 30])));
         device.borrow_mut().key_mask = 2;
@@ -171,6 +177,7 @@ fn ordinary_input_wrappers_query_devices_and_update_regions_and_key_switches() -
         let vm = rt.object(caller).unwrap().interpreter().unwrap();
         assert_eq!(vm.read(8, 4)?, 0u32.to_le_bytes());
         assert_eq!(vm.read(12, 4)?, 0xdead_beefu32.to_le_bytes());
+        assert_eq!(vm.read(16, 4)?, 0x8000_0001u32.to_le_bytes());
         assert!(vm.stack_bytes().is_empty());
         let queries = &device.borrow().queries;
         assert!(queries.windows(4).any(|q| q

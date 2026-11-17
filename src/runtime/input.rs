@@ -20,6 +20,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             154 => (143, 8),
             285 => (145, 4),
             286 => (146, 0),
+            396 => (149, 0),
             401 => (150, 4),
             403 => (151, 8),
             404 => (152, 0),
@@ -64,8 +65,17 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         if index == 147 && b != 0 {
             buffer = Some(vm.read(b, 16)?.to_vec());
         }
+        let mut cursor = [0; 4];
+        if index == 396
+            && !self
+                .tree
+                .node(target)
+                .is_some_and(|node| node.kind == crate::runtime::kind::INPUT)
+        {
+            return Err(Error::new(vm.pc, "KCS 光标状态查询缺少输入任务"));
+        }
         let mut output = 0;
-        route_command(
+        let found = route_command(
             self.store(),
             sender,
             Command {
@@ -75,15 +85,20 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                 data,
             },
             &mut CommandBuffers {
-                data1: buffer.as_deref_mut(),
+                data1: if index == 396 {
+                    Some(&mut cursor)
+                } else {
+                    buffer.as_deref_mut()
+                },
                 ..CommandBuffers::default()
             },
             &mut output,
         )?;
-        Ok(if index == 285 {
-            NativeReturn::Value(output)
-        } else {
-            NativeReturn::Continue
+        Ok(match index {
+            285 => NativeReturn::Value(output),
+            396 if found => NativeReturn::Value(u32::from_le_bytes(cursor)),
+            396 => return Err(Error::new(vm.pc, "KCS 光标状态查询缺少输入任务")),
+            _ => NativeReturn::Continue,
         })
     }
 }

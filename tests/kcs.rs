@@ -2059,3 +2059,20 @@ fn coordinate_queries_preserve_raw_values_and_write_in_argument_order() {
         );
     }
 }
+#[test]
+fn known_native_slots_keep_initialized_and_undefined_results_distinct() -> Result<()> {
+    use kcs::Host;
+    let mut vm = kcs::Interpreter::new(kcs::Program::from_code(&[], vec![], 64)?, vec![])?;
+    let mut numbers = katze_system2::expression::State::new(0);
+    let mut host = kcs::CoreHost::new(&mut numbers);
+    assert_eq!(host.call(1024, &[], &mut vm)?, kcs::NativeReturn::Value(1));
+    for index in [140, 142, 549] {
+        let error = host.call(index, &[], &mut vm).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains(&format!("{index} 的原入口未初始化返回值"))
+        );
+    }
+    Ok(())
+}

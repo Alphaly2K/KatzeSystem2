@@ -103,6 +103,9 @@ pub(super) fn call(
     if index == 465 {
         return Ok(NativeReturn::Value(host.debug_mode));
     }
+    if index == 1024 {
+        return Ok(NativeReturn::Value(1));
+    }
     if index == 65 {
         return Ok(NativeReturn::YieldVoid);
     }

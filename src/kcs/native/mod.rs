@@ -52,6 +52,10 @@ pub(crate) fn call_native(
         registry::CoreHandler::Vector => super::vectors::call(index, arguments, vm),
         registry::CoreHandler::Continue => Ok(NativeReturn::Continue),
         registry::CoreHandler::Zero => Ok(NativeReturn::Value(0)),
+        registry::CoreHandler::UninitializedResult => Err(Error::new(
+            vm.pc,
+            format!("KCS native {index} 的原入口未初始化返回值"),
+        )),
         registry::CoreHandler::Unknown => {
             Err(Error::new(vm.pc, format!("未支持的 KCS native {index}")))
         }

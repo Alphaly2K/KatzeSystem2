@@ -20,6 +20,7 @@ pub(super) enum CoreHandler {
     Vector,
     Continue,
     Zero,
+    UninitializedResult,
     Unknown,
 }
 
@@ -118,6 +119,7 @@ pub(super) fn core(index: u32) -> CoreHandler {
         | 609
         | 610
         | 629
+        | 1024
         | 1039
         | 1040
         | 1049 => CoreHandler::System,
@@ -182,6 +184,7 @@ pub(super) fn core(index: u32) -> CoreHandler {
         | 909
         | 925
         | 1027..=1030 => CoreHandler::Zero,
+        140 | 142 | 549 => CoreHandler::UninitializedResult,
         _ => CoreHandler::Unknown,
     }
 }
@@ -269,7 +272,7 @@ pub(crate) fn runtime(index: u32) -> RuntimeHandler {
         400 => RuntimeHandler::SoundLoop,
         156..=168 | 347..=349 | 569 | 587 | 602 | 603 | 903 => RuntimeHandler::SoundControl,
         604 | 935 | 936 => RuntimeHandler::SoundLoad,
-        144..=148 | 150 | 154 | 285 | 286 | 401 | 403 | 404 | 937 => RuntimeHandler::Input,
+        144..=148 | 150 | 154 | 285 | 286 | 396 | 401 | 403 | 404 | 937 => RuntimeHandler::Input,
         611..=621 | 695 | 884 => RuntimeHandler::Message,
         447..=451 | 630..=632 | 645..=647 | 649 | 650 | 664..=668 | 738 | 882 | 883 => {
             RuntimeHandler::Fes
