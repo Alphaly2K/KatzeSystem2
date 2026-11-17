@@ -235,7 +235,10 @@ impl Resources {
         arguments: &[u8],
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
-        if matches!(index, 118 | 119 | 362..=364 | 369 | 372 | 373 | 538 | 1026) {
+        if matches!(
+            index,
+            118 | 119 | 121 | 122 | 362..=364 | 369 | 372 | 373 | 538 | 1026
+        ) {
             return self.image_data_native(owner, index, arguments, vm);
         }
         if matches!(index, 434..=438) {

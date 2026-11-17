@@ -304,6 +304,77 @@ fn rectangle_image_union_uses_wrappers_physical_size_and_wrapping_endpoints() {
 }
 
 #[test]
+fn image_adjustment_natives_keep_shared_storage_alpha_and_null_gates() {
+    for budget in [1, 4096] {
+        for bit_depth in [24, 32] {
+            let mut rt = Runtime::new(
+                0,
+                kind::ROOT,
+                Box::new(BaseObject::new()),
+                State::new(0),
+                KcsFactory::new(Loader(Program::from_code(&[], vec![], 0).unwrap())),
+            );
+            rt.set_budget(budget, 1 << 20);
+            let handle = rt.images_mut().create(0, [2, 1]).unwrap();
+            *rt.images_mut().get_mut(handle).unwrap() = Image::from_frame(DecodedFrame {
+                id: 7,
+                info: StandardInfo {
+                    size: [2, 1],
+                    bit_depth,
+                    offset: [0; 2],
+                    canvas_size: [2, 1],
+                    reserved: 1,
+                    base: [1, -1],
+                },
+                pixels: vec![50, 100, 200, 64, 2, 3, 4, 127],
+                attributes: [(1, [3, 4, 5, 6, 9])].into(),
+            })
+            .unwrap();
+            let shared = rt.images_mut().share(handle).unwrap();
+            let empty = rt.images_mut().create_empty(0).unwrap();
+            let mut code = Vec::new();
+            call(&mut code, 121, &[0, 1, 2, 3], None);
+            call(&mut code, 122, &[0, u32::MAX, u32::MAX], None);
+            call(&mut code, 121, &[u32::MAX, 100, 100, 100], None);
+            call(&mut code, 121, &[empty, 100, 100, 100], None);
+            call(&mut code, 121, &[handle, 50, 125, 200], None);
+            call(&mut code, 65, &[], None);
+            call(&mut code, 122, &[shared, 4, 1], None);
+            code.push(0x3b);
+            rt.factory_mut().programs.0 = Program::from_code(&code, vec![], 128).unwrap();
+            let id = rt.create(0, kind::ORDINARY, b"adjust", b"").unwrap();
+            rt.update(10, 1).unwrap();
+            let image = rt.images().get(shared).unwrap();
+            let colors = if bit_depth == 24 {
+                [50, 100, 200, 255, 2, 3, 4, 255]
+            } else {
+                [100, 125, 100, 64, 4, 3, 2, 127]
+            };
+            assert_eq!(image.surface().pixels(), colors);
+            rt.update(20, 1).unwrap();
+            let image = rt.images().get(handle).unwrap();
+            assert_eq!(image, rt.images().get(shared).unwrap());
+            assert_eq!(image.info().size, [4, 1]);
+            assert_eq!(image.info().canvas_size, [4, 1]);
+            assert_eq!(image.info().base, [2, 0]);
+            assert_eq!(image.info().reserved, 1);
+            assert_eq!(image.id(), 7);
+            assert_eq!(image.attribute(1), Some([6, 4, 10, 6, 9]));
+            assert_eq!(&image.surface().pixels()[..4], &colors[..4]);
+            assert_eq!(&image.surface().pixels()[12..], &colors[4..]);
+            assert!(
+                rt.object(id)
+                    .unwrap()
+                    .interpreter()
+                    .unwrap()
+                    .stack_bytes()
+                    .is_empty()
+            );
+        }
+    }
+}
+
+#[test]
 fn raw_image_geometry_and_pixels_keep_bottom_coordinates_overlap_and_shared_storage() {
     let mut code = Vec::new();
     call(&mut code, 363, &[1, 80, 84], None);

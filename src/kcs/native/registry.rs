@@ -357,6 +357,8 @@ pub(crate) fn runtime(index: u32) -> RuntimeHandler {
         | 112
         | 216
         | 114..=119
+        | 121
+        | 122
         | 284
         | 362..=369
         | 372

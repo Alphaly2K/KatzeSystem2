@@ -14,6 +14,7 @@ impl Resources {
         let count = match index {
             118 => 1,
             364 | 369 => 2,
+            121 => 4,
             _ => 3,
         };
         if arguments.len() != count * 4 {
@@ -78,11 +79,27 @@ impl Resources {
             return Ok(NativeReturn::Continue);
         }
         if args[0] == 0 {
-            return Ok(if matches!(index, 369 | 538) {
+            return Ok(if matches!(index, 121 | 122 | 369 | 538) {
                 NativeReturn::Continue
             } else {
                 NativeReturn::Value(0)
             });
+        }
+        if index == 121 {
+            let rgb = [args[1], args[2], args[3]];
+            if rgb != [100; 3] {
+                let image = self.images.get_mut(args[0])?;
+                if !image.is_rgb() {
+                    image.adjust_rgb_percent(rgb);
+                }
+            }
+            return Ok(NativeReturn::Continue);
+        }
+        if index == 122 {
+            self.images
+                .get_mut(args[0])?
+                .resize_canvas([args[1], args[2]])?;
+            return Ok(NativeReturn::Continue);
         }
         if index == 369 {
             self.images.get_mut(args[0])?.multiply_color(args[1]);
