@@ -280,6 +280,9 @@ impl<H: Host, S: TaskServices> Host for TaskHost<'_, H, S> {
     fn set_task_local_numbers(&mut self, values: crate::expression::LocalNumbers) {
         self.inner.set_task_local_numbers(values);
     }
+    fn set_task_named_values(&mut self, values: crate::expression::NamedValues) {
+        self.inner.set_task_named_values(values);
+    }
 
     fn set_task_context(&mut self, context: &[u8]) {
         self.creation_context.clear();

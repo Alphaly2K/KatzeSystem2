@@ -576,7 +576,7 @@ impl Objects {
     pub fn publish_bindings(&self, interpreter: &mut crate::fes::Interpreter) {
         for (name, &count) in &self.counts {
             interpreter.set_object_bank_count(name, count);
-            interpreter.named.insert(
+            interpreter.named_values_mut().insert(
                 name.clone(),
                 self.bindings
                     .get(name)

@@ -210,3 +210,5 @@ CrySirror 自有代码采用 MPL-2.0，归档及 HG-3 所在的 `crysirror-forma
 - [版本差异](https://github.com/trigger-segfault/TriggersTools.CatSystem2/wiki/Engine-Versions)、[UTF-8 移植案例](https://github.com/trigger-segfault/TriggersTools.CatSystem2/wiki/Case-3:-Grisaia-no-Kajitsu-UTF8-transplant)
 
 FES 参数记录存在上下文差异：公开实现按目标播放器选择数值银行；2.6.1.90 的 349／350 直接使用当前选中局部区，346／347 才选择目标 FES。正式实现另接入 665～668 的双向局部复制和原始控制状态查询／清零；后者使用独立控制字，保持与任务退出属性分别存储。
+
+664／351 已核实为表达式命名区登记：选中目标 FES 后写入银行零，并保持选择供后续普通求值使用；882／883 则读写独立的原始名称表，不选择上下文。正式实现将命名区与局部数值一同管理，避免把原始名称写入对象或系统绑定。

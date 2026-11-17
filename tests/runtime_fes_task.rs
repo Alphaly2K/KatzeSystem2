@@ -55,6 +55,71 @@ struct Factory {
 }
 impl ObjectFactory for Factory {
     fn create(&mut self, id: u32, kind: u32, name: &[u8]) -> Result<Box<dyn TaskObject>> {
+        if kind == kind::ORDINARY && name == b"named context driver" {
+            fn call(code: &mut Vec<u8>, native: u32, args: &[u32], output: Option<u32>) {
+                let mut ins = |op: u8, values: &[u32]| {
+                    code.push(op);
+                    for value in values {
+                        code.push(3);
+                        code.extend(value.to_le_bytes());
+                    }
+                };
+                for value in args {
+                    ins(0x25, &[*value]);
+                }
+                ins(0x2b, &[native, args.len() as u32 * 4]);
+                if let Some(at) = output {
+                    ins(0x26, &[at]);
+                }
+            }
+            let mut code = vec![0x25, 3];
+            code.extend(0xdead_beefu32.to_le_bytes());
+            call(&mut code, 213, &[160], Some(4));
+            call(&mut code, 664, &[3, 128, 17], None);
+            call(&mut code, 213, &[160], Some(8));
+            call(&mut code, 213, &[192], Some(12));
+            call(&mut code, 882, &[3, 128, 99], None);
+            call(&mut code, 883, &[3, 128], Some(16));
+            call(&mut code, 213, &[160], Some(20));
+            call(&mut code, 664, &[4, 128, 22], None);
+            call(&mut code, 213, &[160], Some(24));
+            call(&mut code, 645, &[3, u32::MAX, 0], None);
+            call(&mut code, 213, &[160], Some(28));
+            call(&mut code, 664, &[3, 208, 73], None);
+            call(&mut code, 882, &[3, 208, 88], None);
+            call(&mut code, 213, &[208], Some(32));
+            call(&mut code, 664, &[3, 224, 44], None);
+            call(&mut code, 213, &[224], Some(36));
+            call(&mut code, 213, &[240], Some(40));
+            call(&mut code, 664, &[3, 256, 0x8000_0001], None);
+            call(&mut code, 664, &[3, 272, 55], None);
+            call(&mut code, 65, &[], None);
+            call(&mut code, 213, &[160], Some(44));
+            call(&mut code, 213, &[192], Some(48));
+            call(&mut code, 646, &[3, 0], Some(56));
+            call(&mut code, 213, &[160], Some(52));
+            call(&mut code, 65, &[], None);
+            let mut data = vec![0; 320];
+            data[..4].copy_from_slice(&7u32.to_le_bytes());
+            for (at, text) in [
+                (128, b"item_%d[G0]\0".as_slice()),
+                (160, b"item_7\0"),
+                (192, b"\\0\0"),
+                (208, b"_CLICK_L_\0"),
+                (224, b"item\0"),
+                (240, b"item[1]\0"),
+                (256, b"\x82\xa0\0"),
+                (272, b"\0"),
+            ] {
+                data[at..at + text.len()].copy_from_slice(text);
+            }
+            let mut task = katze_system2::kcs::OrdinaryTask::new(
+                Program::from_code(&code, data, 320)?,
+                Vec::new(),
+            )?;
+            task.task_id = id;
+            return Ok(Box::new(OrdinaryObject::new(task)));
+        }
         if kind == kind::ORDINARY && name == b"dynamic creation driver" {
             let mut code = vec![0x25, 3];
             code.extend(0xdead_beefu32.to_le_bytes());
@@ -270,13 +335,29 @@ impl ObjectFactory for Factory {
             ins(0x25, 3, &[112]);
             ins(0x25, 3, &[1]);
             ins(0x2b, 3, &[631, 16]);
+            ins(0x2f, 3, &[32]);
+            ins(0x25, 3, &[128]);
+            ins(0x25, 3, &[45]);
+            ins(0x2b, 3, &[664, 12]);
+            ins(0x25, 3, &[128]);
+            ins(0x2b, 3, &[213, 4]);
+            ins(0x26, 3, &[24]);
+            ins(0x2f, 3, &[32]);
+            ins(0x25, 3, &[128]);
+            ins(0x25, 3, &[99]);
+            ins(0x2b, 3, &[882, 12]);
+            ins(0x2f, 3, &[32]);
+            ins(0x25, 3, &[128]);
+            ins(0x2b, 3, &[883, 8]);
+            ins(0x26, 3, &[28]);
             ins(0x29, 3, &[0]);
-            let mut data = vec![0; 128];
+            let mut data = vec![0; 160];
             data[64..70].copy_from_slice(b"REPLY\0");
             data[96..107].copy_from_slice(b"item COLOR\0");
             data[112..121].copy_from_slice(b"callback\0");
+            data[128..137].copy_from_slice(b"response\0");
             let mut task = katze_system2::kcs::OrdinaryTask::new(
-                Program::from_code(&code, data, 128)?,
+                Program::from_code(&code, data, 160)?,
                 Vec::new(),
             )?;
             task.task_id = id;
@@ -1259,6 +1340,102 @@ fn fes_release_removes_only_its_entries_from_an_ancestor_image_list() {
 }
 
 #[test]
+fn named_contexts_persist_between_natives_and_keep_raw_tables_and_tasks_independent() {
+    use katze_system2::expression::eval;
+    fn register(runtime: &mut TestRuntime, target: u32, name: &[u8], value: u32) {
+        let mut name = [name, &[0]].concat();
+        runtime
+            .dispatch_command_with_buffers(
+                0,
+                command(target, 351, 0, value),
+                &mut CommandBuffers {
+                    data0: Some(&mut name),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+    }
+    for budget in [1, 4096] {
+        let mut runtime = setup(budget, b"#DEFINE\nBASE item[2]\n#START\nwait 1000\n").runtime;
+        let first = runtime.create(0, kind::FES, b"first", b"").unwrap();
+        let second = runtime.create(0, kind::FES, b"second", b"").unwrap();
+        assert_eq!((first, second), (3, 4));
+        // The uninitialized handler ignores even absent name buffers.
+        assert_eq!(send(&mut runtime, first, 351, 0, 77), 0);
+        send(&mut runtime, first, 337, 0, 0);
+        send(&mut runtime, second, 337, 0, 0);
+        register(&mut runtime, first, b"seed", 123);
+        file(&mut runtime, first, b"complete.fes").unwrap();
+        assert_eq!(eval("seed", runtime.numbers_mut()).unwrap(), 123);
+        send(&mut runtime, first, 346, 0, 77);
+        runtime
+            .numbers_mut()
+            .named
+            .insert("item_7".into(), BTreeMap::from([(0, 999)]));
+        let caller = runtime
+            .create(0, kind::ORDINARY, b"named context driver", b"")
+            .unwrap();
+        runtime.update(0, 1).unwrap();
+        let scene = runtime.object(first).unwrap().fes_scene().unwrap();
+        let bank_one = scene.objects().lookup("item", 1).unwrap();
+        assert_eq!(scene.interpreter().named_values()["item"][&0], 44);
+        assert_eq!(
+            scene.interpreter().named_values()["item"][&1] as u32,
+            bank_one
+        );
+        assert_eq!(
+            scene.interpreter().named_values()["あ"][&0] as u32,
+            0x8000_0001
+        );
+        assert_eq!(scene.interpreter().named_values()[""][&0], 55);
+        let vm = runtime.object(caller).unwrap().interpreter().unwrap();
+        for (at, value) in [
+            (4, 0),
+            (8, 17),
+            (12, 77),
+            (16, 99),
+            (20, 17),
+            (24, 22),
+            (28, 17),
+            (32, 73),
+            (36, 44),
+            (40, bank_one),
+        ] {
+            assert_eq!(
+                vm.read(at, 4).unwrap(),
+                value.to_le_bytes(),
+                "offset {at}, budget {budget}"
+            );
+        }
+        assert_eq!(vm.stack_bytes(), 0xdead_beefu32.to_le_bytes());
+        let mut snapshot = runtime.numbers().clone();
+        register(&mut runtime, first, b"item_7", 18);
+        assert_eq!(eval("item_7", &mut snapshot).unwrap(), 17);
+        assert_eq!(eval("item_7", runtime.numbers_mut()).unwrap(), 18);
+        runtime.update(1, 1).unwrap();
+        let vm = runtime.object(caller).unwrap().interpreter().unwrap();
+        for (at, value) in [(44, 0u32), (48, 0), (52, 18)] {
+            assert_eq!(vm.read(at, 4).unwrap(), value.to_le_bytes());
+        }
+        assert_eq!(vm.stack_bytes(), 0xdead_beefu32.to_le_bytes());
+        assert_eq!(
+            runtime
+                .object(second)
+                .unwrap()
+                .fes_scene()
+                .unwrap()
+                .interpreter()
+                .named_values()["item_7"][&0],
+            22
+        );
+        let released = Rc::downgrade(&runtime.object(first).unwrap().named_values().unwrap());
+        runtime.destroy(first).unwrap();
+        assert!(released.upgrade().is_none());
+        assert_eq!(eval("item_7", runtime.numbers_mut()).unwrap(), 999);
+    }
+}
+
+#[test]
 fn local_context_copies_keep_task_isolation_selection_stack_and_lifetimes() {
     for budget in [1, 4096] {
         let mut runtime = setup(budget, b"").runtime;
@@ -1438,10 +1615,13 @@ fn dynamic_creation_preserves_bindings_orphans_raw_counts_and_media_lifetimes() 
             assert_eq!(object.image_handle(), None);
         }
         let first = objects.lookup("created_7", 0).unwrap();
-        assert_eq!(scene.interpreter().named["created_7"][&0] as u32, first);
+        assert_eq!(
+            scene.interpreter().named_values()["created_7"][&0] as u32,
+            first
+        );
         let vm = runtime.object(caller).unwrap().interpreter().unwrap();
         assert_eq!(vm.stack_bytes(), 0xdead_beefu32.to_le_bytes());
-        assert_eq!(vm.read(4, 4).unwrap(), first.to_le_bytes());
+        assert_eq!(vm.read(4, 4).unwrap(), 0u32.to_le_bytes());
         assert_eq!(vm.read(8, 4).unwrap(), 77u32.to_le_bytes());
         assert_eq!(scene.deadline(), deadline);
         for row in [
@@ -1657,7 +1837,7 @@ fn ordinary_natives_bind_load_and_start_fes_with_shared_values_and_pixels() {
                     .fes_scene()
                     .unwrap()
                     .interpreter()
-                    .named["_SAVEOBJ_"][&0],
+                    .named_values()["_SAVEOBJ_"][&0],
                 0x8000_0001u32 as i32
             );
             assert_eq!(
@@ -3021,7 +3201,7 @@ fn fes_send_allows_synchronous_parameter_access_and_a_block_callback() {
         runtime.update(101, 1).unwrap();
         assert_eq!(&runtime.numbers().shared[..2], &[1, 91]);
         let vm = runtime.object(parent).unwrap().interpreter().unwrap();
-        for (address, value) in [(4, 91u32), (12, 1), (16, 1), (20, 0)] {
+        for (address, value) in [(4, 91u32), (12, 1), (16, 1), (20, 0), (24, 45), (28, 99)] {
             assert_eq!(&*vm.read(address, 4).unwrap(), &value.to_le_bytes());
         }
         let container = u32::from_le_bytes(vm.read(8, 4).unwrap().try_into().unwrap());

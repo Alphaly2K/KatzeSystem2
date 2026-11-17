@@ -716,7 +716,7 @@ fn interpreter_events_initialize_actual_bank_types_and_publish_object_identities
         let mut interpreter =
             fes::Interpreter::new(fes::Program::from_text(source).unwrap()).unwrap();
         interpreter
-            .named
+            .named_values_mut()
             .insert("_FRAME_".into(), BTreeMap::from([(0, 9)]));
         let mut numbers = State::new(8);
         let mut objects = Objects::new(HandleAllocator::default()).unwrap();
@@ -783,7 +783,7 @@ fn interpreter_events_initialize_actual_bank_types_and_publish_object_identities
         assert_eq!(state.base.color, -1);
         assert_eq!(state.base.priority, 31);
         assert_eq!(numbers.shared[0], handle as i32);
-        assert_eq!(interpreter.named["_FRAME_"][&0], 9);
+        assert_eq!(interpreter.named_values()["_FRAME_"][&0], 9);
     }
 }
 
@@ -904,7 +904,7 @@ fn reparenting_and_removal_keep_bank_holes_and_failed_initialization_changes() {
         fes::Interpreter::new(fes::Program::from_text(b"#START\nexit 0\n").unwrap()).unwrap();
     objects.publish_bindings(&mut interpreter);
     assert_eq!(
-        interpreter.named["item"],
+        interpreter.named_values()["item"],
         BTreeMap::from([(0, new[0] as i32), (1, new[1] as i32)])
     );
     assert_eq!(

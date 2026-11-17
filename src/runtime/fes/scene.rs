@@ -19,6 +19,7 @@ use scripts::{ChildScripts, ScriptDisposition, ScriptRequest};
 /// 一份预先装载的 FES 执行状态；调用方绑定共享列表并在所属任务的主体时点推进。
 pub struct Scene {
     pub(super) interpreter: fes::Interpreter,
+    raw_named_values: BTreeMap<Vec<u8>, u32>,
     pub(super) objects: Objects,
     pub(super) font_names: Option<Vec<Vec<u16>>>,
     owner: Option<u32>,
@@ -117,13 +118,14 @@ impl Scene {
             "_PUSH_LEFT_",
         ] {
             interpreter
-                .named
+                .named_values_mut()
                 .entry(name.to_owned())
                 .or_default()
                 .insert(0, 0);
         }
         Ok(Self {
             interpreter,
+            raw_named_values: BTreeMap::new(),
             objects,
             font_names: None,
             owner: None,
@@ -186,7 +188,7 @@ impl Scene {
         let preload = super::preload::Preload::new(&program);
         let mut interpreter = fes::Interpreter::new(program)?;
         interpreter.bind_local_numbers(self.interpreter.local_numbers());
-        interpreter.named = std::mem::take(&mut self.interpreter.named);
+        interpreter.bind_named_context(self.interpreter.named_context());
         self.objects.publish_bindings(&mut interpreter);
         self.interpreter = interpreter;
         self.preload = preload;
@@ -197,6 +199,60 @@ impl Scene {
         self.interpreter.local_values()
     }
 
+    pub(in crate::runtime) fn register_named_value(
+        &mut self,
+        name: &[u8],
+        value: u32,
+        numbers: &mut crate::expression::State,
+    ) -> Result<()> {
+        numbers.select_context(
+            self.interpreter.local_numbers(),
+            self.interpreter.named_context(),
+        );
+        if name.len() >= 32 {
+            return Err(Error::new(0, "FES 表达式名称超过容量"));
+        }
+        self.interpreter
+            .named_values_mut()
+            .entry(crate::text::cp932(name)?)
+            .or_default()
+            .insert(0, value as i32);
+        Ok(())
+    }
+
+    pub(in crate::runtime) fn raw_name_command(
+        &mut self,
+        code: u32,
+        value: u32,
+        buffers: &mut crate::task::CommandBuffers<'_>,
+    ) -> Result<()> {
+        let key = crate::read::zstr(
+            buffers
+                .data0
+                .as_deref()
+                .ok_or_else(|| Error::new(0, "FES 名称输入缓冲区缺失"))?,
+            0,
+        )?;
+        if code == 358 {
+            self.raw_named_values.insert(key.to_vec(), value);
+        } else {
+            let target = buffers
+                .data1
+                .as_deref_mut()
+                .filter(|bytes| bytes.len() >= 4)
+                .ok_or_else(|| Error::new(0, "FES 名称查询输出缓冲区不足"))?;
+            target[..4].copy_from_slice(
+                &self
+                    .raw_named_values
+                    .get(key)
+                    .copied()
+                    .unwrap_or(0)
+                    .to_le_bytes(),
+            );
+        }
+        Ok(())
+    }
+
     pub(in crate::runtime) fn define_object(
         &mut self,
         kind: u32,
@@ -204,7 +260,10 @@ impl Scene {
         banks: u32,
         numbers: &mut crate::expression::State,
     ) -> Result<()> {
-        numbers.select_local(self.interpreter.local_numbers());
+        numbers.select_context(
+            self.interpreter.local_numbers(),
+            self.interpreter.named_context(),
+        );
         let definition = fes::ObjectDefinition::from_type_index(kind, name, banks)?;
         self.objects.define_dynamic(&definition)?;
         self.interpreter
@@ -212,7 +271,7 @@ impl Scene {
         for bank in 0..(banks as i32).max(0) {
             let handle = self.objects.lookup(&definition.name, bank).unwrap_or(0);
             self.interpreter
-                .named
+                .named_values_mut()
                 .entry(definition.name.clone())
                 .or_default()
                 .insert(bank, handle as i32);
@@ -227,7 +286,10 @@ impl Scene {
         numbers: &mut crate::expression::State,
         transform_name: impl FnMut(&[u8]) -> Result<Vec<u8>>,
     ) -> Result<()> {
-        numbers.select_local(self.interpreter.local_numbers());
+        numbers.select_context(
+            self.interpreter.local_numbers(),
+            self.interpreter.named_context(),
+        );
         if let Some(initialization) = self
             .interpreter
             .initialize_object_line(header, row, numbers)?
@@ -495,7 +557,7 @@ impl Scene {
 
     pub(in crate::runtime) fn set_system_value(&mut self, name: &str, value: i32) {
         self.interpreter
-            .named
+            .named_values_mut()
             .entry(name.to_owned())
             .or_default()
             .insert(0, value);
@@ -1505,7 +1567,7 @@ impl<F: ObjectFactory> Store<'_, F> {
             }
             scene
                 .interpreter
-                .named
+                .named_values_mut()
                 .entry("_FRAME_".to_owned())
                 .or_default()
                 .insert(0, now.wrapping_sub(scene.frame_origin) as i32);
@@ -1874,9 +1936,9 @@ mod tests {
                     }
                 }
                 assert!(complete);
-                assert_eq!(scene.interpreter().named["_CLICK_L_"][&0], 0);
-                assert_eq!(scene.interpreter().named["_RELEASE_UP_"][&0], -1);
-                assert_eq!(scene.interpreter().named["_TOUCH_"][&0], -1);
+                assert_eq!(scene.interpreter().named_values()["_CLICK_L_"][&0], 0);
+                assert_eq!(scene.interpreter().named_values()["_RELEASE_UP_"][&0], -1);
+                assert_eq!(scene.interpreter().named_values()["_TOUCH_"][&0], -1);
                 assert_eq!(scene.raw_input(), 16);
                 assert_eq!(scene.exit_code(), Some(5));
             }

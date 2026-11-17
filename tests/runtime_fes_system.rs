@@ -178,12 +178,12 @@ fn object_events_preserve_waits_queue_exits_and_transfer_only_the_main_cursor() 
             assert_eq!(scene.deadline(), if transferred { None } else { Some(177) });
             assert_eq!(scene.exit_code(), None);
             assert_eq!(
-                scene.interpreter().named["_CLICK_L_"][&0],
+                scene.interpreter().named_values()["_CLICK_L_"][&0],
                 scene.objects().lookup("button", 0).unwrap() as i32
             );
             update(&mut runtime, &mut scene, 101);
             assert_eq!(scene.exit_code(), exit);
-            assert_eq!(scene.interpreter().named["_CLICK_L_"][&0], 0);
+            assert_eq!(scene.interpreter().named_values()["_CLICK_L_"][&0], 0);
             assert_eq!(runtime.numbers().shared[7], if transferred { 0 } else { 1 });
         }
     }
@@ -260,7 +260,7 @@ fn system_input_values_keep_object_identity_without_event_handlers() {
                 .unwrap(),
             Some(false)
         );
-        assert_eq!(scene.interpreter().named[name][&0], expected);
+        assert_eq!(scene.interpreter().named_values()[name][&0], expected);
     }
 }
 
@@ -284,7 +284,7 @@ fn system_blocks_preserve_the_main_wait_and_stop_at_local_wait_or_break() {
             assert_eq!(runtime.numbers().shared[1], expected);
             assert_eq!(scene.interpreter().return_value, result);
             assert_eq!(scene.deadline(), Some(177));
-            assert_eq!(scene.interpreter().named["_FRAME_"][&0], 1);
+            assert_eq!(scene.interpreter().named_values()["_FRAME_"][&0], 1);
             assert!(!scene.is_pending());
             assert!(scene.objects_mut().is_ok());
             system(&mut runtime, &mut scene, "_FES_WAKE_");

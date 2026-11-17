@@ -263,7 +263,7 @@ fn draw_preserves_snapshot_stages_zero_clock_and_restores_submission_after_both_
                 h.round(now);
             }
             assert!(h.scene.objects().lookup("__drawobj__", 0).is_none());
-            assert!(h.scene.interpreter().named["__drawobj__"].is_empty());
+            assert!(h.scene.interpreter().named_values()["__drawobj__"].is_empty());
             assert!(h.runtime.images().get(snapshot).is_err());
             assert!(h.runtime.tree().node(task).is_none());
             assert_eq!(h.canvas(2, 3), 0xff8899aa);

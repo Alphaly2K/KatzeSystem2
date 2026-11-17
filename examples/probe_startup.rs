@@ -503,8 +503,8 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                             scene.objects().canvas_offset()
                         );
                         if let Some(fes_names) = std::env::var_os("KATZE_PROBE_FESNAMED") {
-                            let names = &scene.interpreter().named;
-                            for (name, slots) in names {
+                            let names = scene.interpreter().named_values();
+                            for (name, slots) in names.iter() {
                                 let name = std::str::from_utf8(name.as_bytes()).unwrap_or("");
                                 if fes_names.to_string_lossy().split(',').any(|f| name == f) {
                                     println!("    FES {id} 命名 {name} = {slots:?}");

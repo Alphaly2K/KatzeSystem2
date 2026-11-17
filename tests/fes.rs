@@ -564,7 +564,10 @@ fn named_bindings_are_scoped_to_the_fes_and_reach_initializers_and_conditions() 
         ("value", 1, 42),
         ("_FRAME_", 0, 5),
     ] {
-        vm.named.entry(name.into()).or_default().insert(bank, value);
+        vm.named_values_mut()
+            .entry(name.into())
+            .or_default()
+            .insert(bank, value);
     }
     let mut state = State::new(8);
     state.named.entry("_X_".into()).or_default().insert(0, 999);
@@ -572,7 +575,10 @@ fn named_bindings_are_scoped_to_the_fes_and_reach_initializers_and_conditions() 
         panic!("expected object creation");
     };
     assert_eq!(definition.banks, 2);
-    vm.named.entry("sprite".into()).or_default().insert(1, 77);
+    vm.named_values_mut()
+        .entry("sprite".into())
+        .or_default()
+        .insert(1, 77);
     vm.resume();
     let Step::Event(fes::Event::InitializeObject(initialization)) = vm.run(&mut state, 20).unwrap()
     else {
@@ -589,7 +595,7 @@ fn named_bindings_are_scoped_to_the_fes_and_reach_initializers_and_conditions() 
     );
     assert_eq!(state.named["_X_"][&0], 999);
     assert!(!state.named.contains_key("sprite"));
-    assert_eq!(vm.named["sprite"][&1], 77);
+    assert_eq!(vm.named_values()["sprite"][&1], 77);
 }
 
 #[test]
@@ -1086,7 +1092,10 @@ fn subcommand_current_overrides_event_bank_and_restores_state_after_errors() {
         Step::Event(fes::Event::Wait(0))
     ));
     assert!(vm.dispatch_event("button", 3, "PUSH_L", None).unwrap());
-    vm.named.entry("value".into()).or_default().insert(0, 19);
+    vm.named_values_mut()
+        .entry("value".into())
+        .or_default()
+        .insert(0, 19);
     state.named.entry("value".into()).or_default().insert(0, 90);
     let binding = fes::Subcommand {
         mode: fes::SubcommandMode::Oneshot,
@@ -1113,7 +1122,7 @@ fn subcommand_current_overrides_event_bank_and_restores_state_after_errors() {
     );
     assert_eq!(state.current, 77);
     assert_eq!(state.named["value"][&0], 90);
-    assert_eq!(vm.named["value"][&0], 19);
+    assert_eq!(vm.named_values()["value"][&0], 19);
     assert_eq!(vm.event_context().unwrap().bank, 3);
 }
 

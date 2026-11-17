@@ -6,6 +6,15 @@ use crate::{Error, Result, fes};
 
 /// FES 任务所需的共享表达式状态、媒体更新及启动时的子树调度。
 pub trait Services {
+    /// 写入 FES 表达式命名值，并选择其完整求值上下文。
+    fn register_named_value(
+        &mut self,
+        _scene: &mut Scene,
+        _name: &[u8],
+        _value: u32,
+    ) -> Result<()> {
+        Err(Error::new(0, "FES 表达式名称登记服务尚未提供"))
+    }
     /// 当前选中的局部数值区，供参数记录入口使用。
     fn active_local_numbers(&self) -> Option<crate::expression::LocalNumbers> {
         None
@@ -110,6 +119,9 @@ pub trait Services {
 }
 
 impl<F: ObjectFactory> Services for ObjectHost<'_, F> {
+    fn register_named_value(&mut self, scene: &mut Scene, name: &[u8], value: u32) -> Result<()> {
+        scene.register_named_value(name, value, self.numbers)
+    }
     fn active_local_numbers(&self) -> Option<crate::expression::LocalNumbers> {
         self.numbers.active_local()
     }
@@ -136,7 +148,10 @@ impl<F: ObjectFactory> Services for ObjectHost<'_, F> {
         })
     }
     fn prepare(&mut self, scene: &mut Scene, budget: usize) -> Result<bool> {
-        self.numbers.select_local(scene.interpreter.local_numbers());
+        self.numbers.select_context(
+            scene.interpreter.local_numbers(),
+            scene.interpreter.named_context(),
+        );
         let owner = self.host.task_id;
         let mut store = self.store();
         store.budget = budget.max(1);
@@ -144,7 +159,10 @@ impl<F: ObjectFactory> Services for ObjectHost<'_, F> {
     }
 
     fn update(&mut self, scene: &mut Scene, now: u32, budget: usize) -> Result<bool> {
-        self.numbers.select_local(scene.interpreter.local_numbers());
+        self.numbers.select_context(
+            scene.interpreter.local_numbers(),
+            scene.interpreter.named_context(),
+        );
         let owner = self.host.task_id;
         let mut store = self.store();
         store.budget = budget.max(1);
@@ -157,7 +175,10 @@ impl<F: ObjectFactory> Services for ObjectHost<'_, F> {
         name: &str,
         budget: usize,
     ) -> Result<bool> {
-        self.numbers.select_local(scene.interpreter.local_numbers());
+        self.numbers.select_context(
+            scene.interpreter.local_numbers(),
+            scene.interpreter.named_context(),
+        );
         let owner = self.host.task_id;
         let mut store = self.store();
         store.budget = budget.max(1);
@@ -195,7 +216,10 @@ impl<F: ObjectFactory> Services for ObjectHost<'_, F> {
         refresh: bool,
         budget: usize,
     ) -> Result<bool> {
-        self.numbers.select_local(scene.interpreter.local_numbers());
+        self.numbers.select_context(
+            scene.interpreter.local_numbers(),
+            scene.interpreter.named_context(),
+        );
         let owner = self.host.task_id;
         let mut store = self.store();
         store.budget = budget.max(1);
@@ -209,7 +233,10 @@ impl<F: ObjectFactory> Services for ObjectHost<'_, F> {
         event: u32,
         budget: usize,
     ) -> Result<Option<bool>> {
-        self.numbers.select_local(scene.interpreter.local_numbers());
+        self.numbers.select_context(
+            scene.interpreter.local_numbers(),
+            scene.interpreter.named_context(),
+        );
         let owner = self.host.task_id;
         let mut store = self.store();
         store.budget = budget.max(1);
@@ -223,7 +250,10 @@ impl<F: ObjectFactory> Services for ObjectHost<'_, F> {
         event: u32,
         budget: usize,
     ) -> Result<Option<bool>> {
-        self.numbers.select_local(scene.interpreter.local_numbers());
+        self.numbers.select_context(
+            scene.interpreter.local_numbers(),
+            scene.interpreter.named_context(),
+        );
         let owner = self.host.task_id;
         let mut store = self.store();
         store.budget = budget.max(1);
@@ -328,7 +358,6 @@ pub struct FesObject {
     started: bool,
     scene: Option<Scene>,
     // 脚本标识符使用 ASCII，宿主命令还接受任意原始字节键。
-    raw_named_values: std::collections::BTreeMap<Vec<u8>, u32>,
     external: crate::memory::SharedMemory,
     pending: Option<Command>,
     name: Vec<u8>,
@@ -397,7 +426,6 @@ impl FesObject {
             loaded: false,
             started: false,
             scene: None,
-            raw_named_values: std::collections::BTreeMap::new(),
             external,
             pending: None,
             name: Vec::new(),
@@ -1004,6 +1032,11 @@ impl TaskObject for FesObject {
             .as_ref()
             .map(|scene| scene.interpreter.local_numbers())
     }
+    fn named_values(&self) -> Option<crate::expression::NamedValues> {
+        self.scene
+            .as_ref()
+            .map(|scene| scene.interpreter.named_context())
+    }
     fn accepts_deferred_delete(&self) -> bool {
         true
     }
@@ -1152,10 +1185,12 @@ impl TaskObject for FesObject {
                 scene.set_system_value("_SAVEOBJ_", 0);
                 scene.set_system_value("_FRAME_", 0);
                 let values = scene.interpreter.local_numbers();
+                let names = scene.interpreter.named_context();
                 self.scene = Some(scene);
                 self.initialized = true;
                 host.set_task_shared_numbers(true);
                 host.set_task_local_numbers(values);
+                host.set_task_named_values(names);
                 self.bind()?;
             }
             338 => {
@@ -1357,49 +1392,21 @@ impl TaskObject for FesObject {
                     *output = values.get(index).copied().unwrap_or(0) as u32;
                 }
             }
-            357 | 358 => {
-                if self.initialized {
-                    let key = name(
+            351 => {
+                if let Some(scene) = &mut self.scene {
+                    let name = crate::read::zstr(
                         buffers
                             .data0
                             .as_deref()
-                            .ok_or_else(|| Error::new(0, "FES 名称输入缓冲区缺失"))?,
-                        usize::MAX,
+                            .ok_or_else(|| Error::new(0, "FES 表达式名称缓冲区缺失"))?,
+                        0,
                     )?;
-                    let scene = self
-                        .scene
-                        .as_mut()
-                        .ok_or_else(|| Error::new(0, "FES 名称访问需要已装载脚本"))?;
-                    if command.code == 358 {
-                        if key.is_ascii() {
-                            scene
-                                .interpreter
-                                .named
-                                .entry(crate::text::ascii(key)?.to_owned())
-                                .or_default()
-                                .insert(0, b as i32);
-                        } else {
-                            self.raw_named_values.insert(key.to_vec(), b);
-                        }
-                    } else {
-                        let target = buffers
-                            .data1
-                            .as_deref_mut()
-                            .filter(|bytes| bytes.len() >= 4)
-                            .ok_or_else(|| Error::new(0, "FES 名称查询输出缓冲区不足"))?;
-                        let value = if key.is_ascii() {
-                            scene
-                                .interpreter
-                                .named
-                                .get(crate::text::ascii(key)?)
-                                .and_then(|banks| banks.get(&0))
-                                .copied()
-                                .unwrap_or(0) as u32
-                        } else {
-                            self.raw_named_values.get(key).copied().unwrap_or(0)
-                        };
-                        target[..4].copy_from_slice(&value.to_le_bytes());
-                    }
+                    services(host)?.register_named_value(scene, name, b)?;
+                }
+            }
+            357 | 358 => {
+                if let Some(scene) = &mut self.scene {
+                    scene.raw_name_command(command.code, b, buffers)?;
                 }
             }
             177 => super::super::save::query_shared_numbers_available(
@@ -1464,7 +1471,7 @@ impl TaskObject for FesObject {
                 let name = crate::read::zstr(&bytes[..32], 0)?;
                 services(host)?.define_object(scene, b, name, crate::read::u32_at(bytes, 32)?)?;
             }
-            178 | 351 | 356 => {
+            178 | 356 => {
                 return Err(Error::new(0, "FES 专属命令尚未接入"));
             }
             _ => {
@@ -1822,7 +1829,7 @@ mod tests {
     }
 
     #[test]
-    fn named_values_are_written_to_the_scene_interpreter() {
+    fn raw_names_do_not_overwrite_expression_names() {
         use crate::task::CommandBuffers;
 
         let mut task = FesObject::new(3);
@@ -1858,9 +1865,13 @@ mod tests {
             .unwrap(),
             CommandOutcome::finished(false)
         );
-        assert_eq!(
-            task.scene().unwrap().interpreter().named["STILL_READ"][&0],
-            1
+        assert!(
+            !task
+                .scene()
+                .unwrap()
+                .interpreter()
+                .named_values()
+                .contains_key("STILL_READ")
         );
         assert_eq!(
             task.dispatch_command_with_buffers(
@@ -1920,8 +1931,8 @@ mod tests {
             assert_eq!(task.last_input(), if code == 9 { 0x80000002 } else { 0 });
             let scene = task.scene().unwrap();
             assert_eq!(scene.raw_input(), 0x80000002);
-            assert_eq!(scene.interpreter().named["_CLICK_L_"][&0], 73);
-            assert!(!scene.interpreter().named.contains_key("_MOUSE_X_"));
+            assert_eq!(scene.interpreter().named_values()["_CLICK_L_"][&0], 73);
+            assert!(!scene.interpreter().named_values().contains_key("_MOUSE_X_"));
         }
         assert_eq!(
             host.0,

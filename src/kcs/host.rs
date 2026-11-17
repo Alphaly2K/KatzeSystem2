@@ -385,6 +385,9 @@ impl Host for CoreHost<'_> {
     fn set_task_local_numbers(&mut self, values: crate::expression::LocalNumbers) {
         self.state.bind_local(self.host.task_id, values);
     }
+    fn set_task_named_values(&mut self, values: crate::expression::NamedValues) {
+        self.state.bind_named(self.host.task_id, values);
+    }
 
     fn set_task_clock(&mut self, clock: &TaskClock) {
         CoreHost::set_task_clock(self, clock);

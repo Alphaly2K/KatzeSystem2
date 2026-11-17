@@ -16,7 +16,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         let length = match index {
             448 | 665..=668 => 4,
             630 | 631 => 16,
-            645 | 882 => 12,
+            645 | 664 | 882 => 12,
             _ => 8,
         };
         if arguments.len() != length {
@@ -24,6 +24,19 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         }
         let target = read::u32_at(arguments, 0)?;
         match index {
+            664 => {
+                let mut name = format_string(vm, read::u32_at(arguments, 4)?, 0)?;
+                name.push(0);
+                self.command_target_with_buffers(
+                    target,
+                    351,
+                    [0, read::u32_at(arguments, 8)?, 0],
+                    &mut CommandBuffers {
+                        data0: Some(&mut name),
+                        ..Default::default()
+                    },
+                )?;
+            }
             631 => {
                 let name = format_string(vm, read::u32_at(arguments, 8)?, 0)?;
                 if name.len() >= 32 {
@@ -213,7 +226,10 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     let active = self.objects.get(&target).is_some_and(|object| {
                         object.control().deletion_requested == 0
                             && object.shared_numbers_available() == Some(true)
-                    });
+                    }) || self
+                        .running
+                        .get(&target)
+                        .is_some_and(|task| !task.deleted && task.shared_numbers == Some(true));
                     if !supported || !active {
                         return Err(Error::new(vm.pc, "FES 名称查询需要可达且已初始化的目标"));
                     }

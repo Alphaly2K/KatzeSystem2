@@ -191,6 +191,9 @@ impl<F: ObjectFactory> Runtime<F> {
             if let Some(values) = root.local_numbers() {
                 numbers.register_local(root_id, values);
             }
+            if let Some(values) = root.named_values() {
+                numbers.bind_named(root_id, values);
+            }
         }
         Self {
             tree: TaskTree::new(root_id, root_kind),
@@ -814,6 +817,9 @@ fn create_object_impl<F: ObjectFactory>(
         if let Some(values) = object.local_numbers() {
             numbers.register_local(id, values);
         }
+        if let Some(values) = object.named_values() {
+            numbers.bind_named(id, values);
+        }
     }
     objects.insert(id, object);
     Ok(id)
@@ -1041,6 +1047,25 @@ fn run_nested<F: ObjectFactory>(
                 }
                 return Ok(());
             }
+            if matches!(command.code, 351 | 357 | 358) {
+                **propagate = false;
+                if !running.get(&target).is_some_and(|task| task.deleted) {
+                    let scene = &mut fes_scene.as_mut().unwrap().scene;
+                    if command.code == 351 {
+                        let name = crate::read::zstr(
+                            buffers
+                                .data0
+                                .as_deref()
+                                .ok_or_else(|| Error::new(0, "FES 表达式名称缓冲区缺失"))?,
+                            0,
+                        )?;
+                        scene.register_named_value(name, command.data[1], numbers)?;
+                    } else {
+                        scene.raw_name_command(command.code, command.data[1], buffers)?;
+                    }
+                }
+                return Ok(());
+            }
             if command.code == 345 {
                 **propagate = false;
                 if !running.get(&target).is_some_and(|task| task.deleted) {
@@ -1163,7 +1188,10 @@ fn run_nested<F: ObjectFactory>(
                 if !running.get(&target).is_some_and(|task| task.deleted) {
                     let scene = &mut fes_scene.as_mut().unwrap().scene;
                     if matches!(command.code, 346 | 347) {
-                        numbers.select_local(scene.interpreter().local_numbers());
+                        numbers.select_context(
+                            scene.interpreter().local_numbers(),
+                            scene.interpreter().named_context(),
+                        );
                     }
                     let index = command.data[0] as usize;
                     if command.code == 342 {
@@ -1987,6 +2015,16 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
             task.local_numbers = Some(values.clone());
         }
         self.numbers.bind_local(self.host.task_id, values);
+    }
+    fn set_task_named_values(&mut self, values: crate::expression::NamedValues) {
+        if self
+            .running
+            .get(&self.host.task_id)
+            .is_some_and(|task| task.shared_numbers != Some(true))
+        {
+            return;
+        }
+        self.numbers.bind_named(self.host.task_id, values);
     }
     fn load_kcs_program(&mut self, name: &[u8]) -> Result<Option<Program>> {
         self.resources.images.release_resources(self.host.task_id)?;

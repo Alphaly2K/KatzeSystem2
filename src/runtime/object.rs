@@ -46,6 +46,11 @@ pub trait TaskObject {
         None
     }
 
+    /// 与局部数值一同选择的表达式命名区。
+    fn named_values(&self) -> Option<crate::expression::NamedValues> {
+        None
+    }
+
     /// 显式输入入口使用的状态；其他对象返回 None。
     fn input_state(&self) -> Option<&crate::input::InputState> {
         None

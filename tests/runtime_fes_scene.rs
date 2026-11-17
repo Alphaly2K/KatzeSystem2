@@ -55,7 +55,10 @@ fn frame_waits_use_absolute_scene_time_and_negative_durations_still_yield_one_ro
             update(&mut runtime, &mut scene, now);
             assert_eq!(runtime.numbers().shared[..4], values);
             assert_eq!(scene.deadline(), Some(deadline));
-            assert_eq!(scene.interpreter().named["_FRAME_"][&0], now as i32 - 99);
+            assert_eq!(
+                scene.interpreter().named_values()["_FRAME_"][&0],
+                now as i32 - 99
+            );
         }
     }
 }
@@ -317,7 +320,10 @@ fn preparation_stops_before_start_and_exit_notifications_keep_the_scene_schedule
                     .position(),
                 [if now == 100 { 0. } else { 7. }, 0., 0.],
             );
-            assert_eq!(scene.interpreter().named["_FRAME_"][&0], (now - 99) as i32);
+            assert_eq!(
+                scene.interpreter().named_values()["_FRAME_"][&0],
+                (now - 99) as i32
+            );
             scene
                 .objects_mut()
                 .unwrap()
@@ -402,7 +408,10 @@ fn scenes_freeze_budgeted_time_and_resume_zero_waits_and_repeated_blocks_on_late
                 assert_eq!(&runtime.numbers().shared[..2], [a, b]);
                 assert_eq!(scene.deadline(), Some(deadline));
                 assert_eq!(scene.exit_code(), None);
-                assert_eq!(scene.interpreter().named["_FRAME_"][&0], index as i32 + 1);
+                assert_eq!(
+                    scene.interpreter().named_values()["_FRAME_"][&0],
+                    index as i32 + 1
+                );
             }
         }
     }

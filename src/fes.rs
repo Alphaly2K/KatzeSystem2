@@ -225,8 +225,7 @@ pub struct Interpreter {
     local: crate::expression::LocalNumbers,
     pending: Option<Event>,
     pub return_value: i32,
-    /// 当前 FES 的宿主命名值；对象句柄与系统值均由宿主更新。
-    pub named: BTreeMap<String, BTreeMap<i32, i32>>,
+    named: crate::expression::NamedValues,
     invocation: Option<events::Invocation>,
     dispatch_result: Option<bool>,
     definitions: VecDeque<Line>,
@@ -326,7 +325,7 @@ impl Interpreter {
             local: std::rc::Rc::new(std::cell::RefCell::new(vec![0; 512])),
             pending: None,
             return_value: 0,
-            named: BTreeMap::new(),
+            named: Default::default(),
             invocation: None,
             dispatch_result: None,
             definitions,
@@ -364,6 +363,21 @@ impl Interpreter {
     }
     pub(crate) fn bind_local_numbers(&mut self, values: crate::expression::LocalNumbers) {
         self.local = values;
+    }
+    /// 当前 FES 的表达式命名值；与选中该上下文的普通表达式共用。
+    pub fn named_values(&self) -> std::cell::Ref<'_, BTreeMap<String, BTreeMap<i32, i32>>> {
+        self.named.borrow()
+    }
+    pub fn named_values_mut(
+        &mut self,
+    ) -> std::cell::RefMut<'_, BTreeMap<String, BTreeMap<i32, i32>>> {
+        self.named.borrow_mut()
+    }
+    pub(crate) fn named_context(&self) -> crate::expression::NamedValues {
+        self.named.clone()
+    }
+    pub(crate) fn bind_named_context(&mut self, values: crate::expression::NamedValues) {
+        self.named = values;
     }
     pub(crate) fn initialization_pending(&self) -> bool {
         self.pre_declarations.is_some()
@@ -430,10 +444,8 @@ impl Interpreter {
     ) -> Result<i32> {
         let current = state.current;
         state.current = value;
-        state.select_local(self.local.clone());
-        std::mem::swap(&mut self.named, &mut state.named);
+        state.select_context(self.local.clone(), self.named.clone());
         let result = text::ascii(bytes).and_then(|s| evaluate(s, state));
-        std::mem::swap(&mut self.named, &mut state.named);
         state.current = current;
         result
     }

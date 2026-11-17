@@ -6,6 +6,9 @@ mod fallback;
 /// 一份任务局部数值区；绑定后的长度须保持为 512 个 DWORD 槽。
 pub type LocalNumbers = Rc<RefCell<Vec<i32>>>;
 
+/// 一份任务表达式命名区，按名称和银行号索引。
+pub type NamedValues = Rc<RefCell<BTreeMap<String, BTreeMap<i32, i32>>>>;
+
 #[derive(Debug)]
 pub struct State {
     pub shared: Vec<i32>,
@@ -16,6 +19,8 @@ pub struct State {
     pub current: i32,
     local_contexts: BTreeMap<u32, LocalNumbers>,
     active_local: Option<LocalNumbers>,
+    named_contexts: BTreeMap<u32, NamedValues>,
+    active_named: Option<NamedValues>,
 }
 
 impl Clone for State {
@@ -32,6 +37,18 @@ impl Clone for State {
                 .map(|(id, _)| local_contexts[id].clone())
                 .unwrap_or_else(|| Rc::new(RefCell::new(active.borrow().clone())))
         });
+        let named_contexts: BTreeMap<_, _> = self
+            .named_contexts
+            .iter()
+            .map(|(&id, values)| (id, Rc::new(RefCell::new(values.borrow().clone()))))
+            .collect();
+        let active_named = self.active_named.as_ref().map(|active| {
+            self.named_contexts
+                .iter()
+                .find(|(_, values)| Rc::ptr_eq(values, active))
+                .map(|(id, _)| named_contexts[id].clone())
+                .unwrap_or_else(|| Rc::new(RefCell::new(active.borrow().clone())))
+        });
         Self {
             shared: self.shared.clone(),
             local: self.local.clone(),
@@ -40,6 +57,8 @@ impl Clone for State {
             current: self.current,
             local_contexts,
             active_local,
+            named_contexts,
+            active_named,
         }
     }
 }
@@ -54,22 +73,32 @@ impl State {
             current: 0,
             local_contexts: BTreeMap::new(),
             active_local: None,
+            named_contexts: BTreeMap::new(),
+            active_named: None,
         }
     }
 
     pub(crate) fn bind_local(&mut self, id: u32, values: LocalNumbers) {
         self.active_local = Some(self.local_contexts.entry(id).or_insert(values).clone());
+        self.active_named = Some(self.named_contexts.entry(id).or_default().clone());
     }
 
     pub(crate) fn register_local(&mut self, id: u32, values: LocalNumbers) {
         if let std::collections::btree_map::Entry::Vacant(entry) = self.local_contexts.entry(id) {
             entry.insert(values.clone());
             self.active_local = Some(values);
+            self.active_named = Some(self.named_contexts.entry(id).or_default().clone());
         }
     }
 
-    pub(crate) fn select_local(&mut self, values: LocalNumbers) {
+    pub(crate) fn bind_named(&mut self, id: u32, values: NamedValues) {
+        self.named_contexts.insert(id, values.clone());
+        self.active_named = Some(values);
+    }
+
+    pub(crate) fn select_context(&mut self, values: LocalNumbers, named: NamedValues) {
         self.active_local = Some(values);
+        self.active_named = Some(named);
     }
 
     pub(crate) fn active_local(&self) -> Option<LocalNumbers> {
@@ -84,6 +113,15 @@ impl State {
                 .is_some_and(|active| Rc::ptr_eq(active, &values))
             {
                 self.active_local = None;
+            }
+        }
+        if let Some(values) = self.named_contexts.remove(&id) {
+            if self
+                .active_named
+                .as_ref()
+                .is_some_and(|active| Rc::ptr_eq(active, &values))
+            {
+                self.active_named = None;
             }
         }
     }
@@ -241,9 +279,10 @@ fn evaluate(node: &Node, state: &mut State) -> Result<Value> {
                 Some(index) => evaluate(index, state)?.load(state),
                 None => 0,
             };
+            let active = state.active_named.as_ref().map(|values| values.borrow());
+            let names = active.as_deref().unwrap_or(&state.named);
             Value::Number(
-                state
-                    .named
+                names
                     .get(name)
                     .and_then(|banks| banks.get(&bank))
                     .copied()
