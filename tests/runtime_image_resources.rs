@@ -1167,6 +1167,144 @@ fn resource_resize_updates_pixels_metadata_cache_and_native_stack_together() {
 }
 
 #[test]
+fn resource_and_wrapper_blending_keep_offsets_masks_and_native_protocol() {
+    struct Pixel;
+    impl ResourceServices for Pixel {
+        fn resolve(&mut self, _: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+            Ok(name.to_vec())
+        }
+        fn read(&mut self, name: &[u8], _: ResourceMode) -> Result<Option<Vec<u8>>> {
+            Ok(name
+                .ends_with(b".hg3")
+                .then(|| pixel_blob([80, 96, 112, 128])))
+        }
+    }
+    fn transfer(code: &mut Vec<u8>, native: u32) {
+        for (at, rectangle) in [
+            (
+                if native == 734 { 0u32 } else { 4 },
+                [3, (-4i32) as u32, 0, u32::MAX],
+            ),
+            (if native == 734 { 4 } else { 0 }, [0, 0, 1, 1]),
+        ] {
+            code.extend([0x25, 0x13]);
+            code.extend(at.to_le_bytes());
+            for value in rectangle {
+                ins(code, 0x25, &[value]);
+            }
+        }
+        ins(code, 0x2b, &[native, 40]);
+    }
+
+    for native in [115, 734] {
+        for budget in [1, 4096] {
+            let resource = native == 734;
+            let mut code = Vec::new();
+            call(&mut code, if resource { 710 } else { 111 }, &[64]);
+            ins(&mut code, 0x26, &[0]);
+            call(&mut code, if resource { 733 } else { 112 }, &[4, 3]);
+            ins(&mut code, 0x26, &[4]);
+            code.extend([0x25, 0x13, 4, 0, 0, 0]);
+            for value in [0, 0, 4, 3, 0xc010_2030] {
+                ins(&mut code, 0x25, &[value]);
+            }
+            ins(&mut code, 0x2b, &[if resource { 736 } else { 117 }, 24]);
+            if resource {
+                code.extend([0x25, 0x13, 4, 0, 0, 0]);
+                for value in [(-7i32) as u32, 11] {
+                    ins(&mut code, 0x25, &[value]);
+                }
+                ins(&mut code, 0x2b, &[719, 12]);
+                ins(&mut code, 0x2d, &[]);
+            }
+            ins(&mut code, 0x25, &[0xdead_beef]);
+            call(&mut code, 65, &[]);
+            transfer(&mut code, native);
+            call(&mut code, 65, &[]);
+            handle_call(&mut code, if resource { 728 } else { 564 }, &[1]);
+            transfer(&mut code, native);
+            if resource {
+                handle_call(
+                    &mut code,
+                    native,
+                    &[3, (-4i32) as u32, 1, 1, 0, (-2i32) as u32, 5, 1, 1],
+                );
+                handle_call(
+                    &mut code,
+                    native,
+                    &[u32::MAX, u32::MAX, u32::MAX, u32::MAX, 0],
+                );
+                call(&mut code, native, &[0; 6]);
+            }
+            call(&mut code, 65, &[]);
+            let mut runtime = runtime(&code, budget);
+            runtime.set_resources(Pixel);
+            runtime.drawing_mut().enabled = true;
+            runtime.drawing_mut().active = true;
+            runtime.drawing_mut().target = Some(
+                RenderTarget::from_tiles(
+                    [4, 3],
+                    [1, 1],
+                    vec![Some(
+                        Surface::from_bgra([4, 3], [1, 2, 3, 4].repeat(12)).unwrap(),
+                    )],
+                )
+                .unwrap(),
+            );
+            let task = runtime.create(0, kind::ORDINARY, b"blend", b"").unwrap();
+            runtime
+                .object_mut(task)
+                .unwrap()
+                .interpreter_mut()
+                .unwrap()
+                .write(64, b"pixel:7.hg3\0")
+                .unwrap();
+            runtime.update(0, 1).unwrap();
+            let source = word(vm(&runtime, task), 0);
+            let target = word(vm(&runtime, task), 4);
+            let image = |runtime: &Runtime<KcsFactory<Loader>>, handle| {
+                if resource {
+                    runtime.image_resource(handle)
+                } else {
+                    runtime.images().get(handle)
+                }
+                .unwrap()
+                .clone()
+            };
+            let before = image(&runtime, target);
+            let source_before = image(&runtime, source);
+            if resource {
+                for handle in [source, target] {
+                    runtime.image_resource_updated(handle, true).unwrap();
+                }
+            }
+            for (frame, pixel) in [(1, 0xe146_4441u32), (2, 0x4746_4441)] {
+                runtime.update(frame, 1).unwrap();
+                let after = image(&runtime, target);
+                let mut expected = 0xc010_2030u32.to_le_bytes().repeat(12);
+                expected[20..24].copy_from_slice(&pixel.to_le_bytes());
+                assert_eq!(after.surface().pixels(), expected);
+                assert_eq!(after.info(), before.info());
+                assert_eq!(image(&runtime, source).surface(), source_before.surface());
+                if resource {
+                    for handle in [source, target] {
+                        assert!(!runtime.image_resource_updated(handle, false).unwrap());
+                    }
+                }
+                assert_eq!(
+                    vm(&runtime, task).stack_bytes(),
+                    0xdead_beefu32.to_le_bytes()
+                );
+                assert_eq!(
+                    runtime.drawing().target.as_ref().unwrap().pixel(1, 1),
+                    Some(0x0403_0201)
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn resource_copy_preserves_transparent_bgra_direction_and_update_flags() {
     for budget in [1, 4096] {
         let mut code = Vec::new();
@@ -1231,21 +1369,23 @@ fn resource_copy_preserves_transparent_bgra_direction_and_update_flags() {
             0xdead_beefu32.to_le_bytes()
         );
     }
-    let mut code = Vec::new();
-    call(&mut code, 733, &[1, 1]);
-    ins(&mut code, 0x26, &[0]);
-    for value in [0, 0, 0, 1, 1] {
-        ins(&mut code, 0x25, &[value]);
+    for native in [734, 735] {
+        let mut code = Vec::new();
+        call(&mut code, 733, &[1, 1]);
+        ins(&mut code, 0x26, &[0]);
+        for value in [0, 0, 0, 1, 1] {
+            ins(&mut code, 0x25, &[value]);
+        }
+        code.extend([0x25, 0x13]);
+        code.extend(0u32.to_le_bytes());
+        for value in [0, 0, 1, 1] {
+            ins(&mut code, 0x25, &[value]);
+        }
+        ins(&mut code, 0x2b, &[native, 40]);
+        let mut runtime = runtime(&code, 1);
+        runtime.create(0, kind::ORDINARY, b"null", b"").unwrap();
+        assert!(runtime.update(0, 1).unwrap_err().message.contains("零来源"));
     }
-    code.extend([0x25, 0x13]);
-    code.extend(0u32.to_le_bytes());
-    for value in [0, 0, 1, 1] {
-        ins(&mut code, 0x25, &[value]);
-    }
-    ins(&mut code, 0x2b, &[735, 40]);
-    let mut runtime = runtime(&code, 1);
-    runtime.create(0, kind::ORDINARY, b"null", b"").unwrap();
-    assert!(runtime.update(0, 1).unwrap_err().message.contains("零来源"));
 }
 
 #[test]

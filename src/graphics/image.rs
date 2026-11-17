@@ -224,7 +224,7 @@ impl Image {
         true
     }
 
-    /// 普通 115 的图像目标分支：目标位置叠加源偏移，两端矩形独立裁剪，不缩放。
+    /// 普通颜色混合：目标位置叠加源偏移，两端矩形独立裁剪，不缩放或应用来源掩码。
     pub fn blend_from(&mut self, source: &Self, source_rect: Rect, at: [i32; 2]) -> bool {
         let Some(region) = self.blend_region(source, source_rect, at) else {
             return false;
@@ -346,29 +346,7 @@ impl Image {
             return Ok(());
         };
         if source.alpha_mask != 0 {
-            let channel = if source.is_rgb() {
-                (source.alpha_mask.wrapping_sub(1) as i32).clamp(0, 2) as usize
-            } else {
-                let channel = source.alpha_mask as usize - 1;
-                if channel >= 4 {
-                    return Err(Error::new(0, "图像 Alpha 掩码通道须为零至四"));
-                }
-                channel
-            };
-            let stride = self.surface.stride();
-            let source_stride = source.surface.stride();
-            for row in 0..region.height {
-                for column in 0..region.width {
-                    let target = (region.y + row) * stride + (region.x + column) * 4 + 3;
-                    let mask = (region.source_y + row) * source_stride
-                        + (region.source_x + column) * 4
-                        + channel;
-                    let alpha = u32::from(self.surface.pixels()[target]) + 1;
-                    let weight = u32::from(source.surface.pixels()[mask]) + 1;
-                    self.surface.pixels_mut()[target] = ((alpha * weight - 1) >> 8) as u8;
-                }
-            }
-            return Ok(());
+            return self.mask_region(Some(source), region);
         }
         let has_alpha = !source.is_rgb()
             && *has_alpha.get_or_insert_with(|| {
@@ -392,6 +370,33 @@ impl Image {
         } else {
             self.surface
                 .blend_region_raw(&source.surface, region, opacity);
+        }
+        Ok(())
+    }
+
+    fn mask_region(&mut self, source: Option<&Self>, region: ImageRegion) -> Result<()> {
+        let input = source.unwrap_or(self);
+        let channel = if input.is_rgb() {
+            (input.alpha_mask.wrapping_sub(1) as i32).clamp(0, 2) as usize
+        } else {
+            let channel = input.alpha_mask as usize - 1;
+            if channel >= 4 {
+                return Err(Error::new(0, "图像 Alpha 掩码通道须为零至四"));
+            }
+            channel
+        };
+        let stride = self.surface.stride();
+        let source_stride = input.surface.stride();
+        for row in (0..region.height).rev() {
+            for column in 0..region.width {
+                let target = (region.y + row) * stride + (region.x + column) * 4 + 3;
+                let mask = (region.source_y + row) * source_stride
+                    + (region.source_x + column) * 4
+                    + channel;
+                let alpha = u32::from(self.surface.pixels()[target]) + 1;
+                let weight = u32::from(source.unwrap_or(self).surface.pixels()[mask]) + 1;
+                self.surface.pixels_mut()[target] = ((alpha * weight - 1) >> 8) as u8;
+            }
         }
         Ok(())
     }
@@ -992,6 +997,28 @@ impl Images {
         let result = self
             .get_mut(target)
             .map(|target| target.blend_clipped_from(&source.image, from, to));
+        self.data.insert(source_data, source);
+        result
+    }
+
+    pub(crate) fn blend_rectangles(
+        &mut self,
+        target: u32,
+        source: u32,
+        from: Rect,
+        to: Rect,
+    ) -> Result<bool> {
+        let source_data = self.entry_mut(source)?.data;
+        let target_data = self.entry_mut(target)?.data;
+        self.pixel_image(source_data)?;
+        self.pixel_image(target_data)?;
+        if source_data == target_data {
+            return self.get_mut(target)?.blend_rectangles(None, from, to);
+        }
+        let source = self.data.remove(&source_data).unwrap();
+        let result = self
+            .get_mut(target)
+            .and_then(|target| target.blend_rectangles(Some(&source.image), from, to));
         self.data.insert(source_data, source);
         result
     }

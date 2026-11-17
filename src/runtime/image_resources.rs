@@ -232,7 +232,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                 self.resources.images.resource(handle)?.alpha_mask()
             }));
         }
-        if index == 735 {
+        if matches!(index, 734 | 735) {
             let source = if handle == 0 {
                 None
             } else {
@@ -244,7 +244,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             }
             let target = self.resources.images.resource_entry(target)?.image;
             let source = source
-                .ok_or_else(|| Error::new(vm.pc, "零来源图像资源的拷贝在原入口中访问空包装"))?;
+                .ok_or_else(|| Error::new(vm.pc, "零来源图像资源的像素传输在原入口中访问空包装"))?;
             if arguments.len() != 40 {
                 return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
             }
@@ -256,9 +256,15 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     read::u32_at(arguments, offset + 12)? as i32,
                 ))
             };
-            self.resources
-                .images
-                .copy_scaled(target, source, rect(24)?, rect(4)?)?;
+            if index == 734 {
+                self.resources
+                    .images
+                    .blend_rectangles(target, source, rect(24)?, rect(4)?)?;
+            } else {
+                self.resources
+                    .images
+                    .copy_scaled(target, source, rect(24)?, rect(4)?)?;
+            }
             return Ok(NativeReturn::Continue);
         }
         if index == 736 && handle == 0 {

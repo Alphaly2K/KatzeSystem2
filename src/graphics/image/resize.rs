@@ -107,6 +107,32 @@ impl Image {
         })
     }
 
+    pub(super) fn blend_rectangles(
+        &mut self,
+        source: Option<&Self>,
+        from: Rect,
+        to: Rect,
+    ) -> Result<bool> {
+        // 目标请求只取起点，合成宽高沿用来源矩形。
+        let input = source.unwrap_or(self);
+        let Some(region) = self.blend_region(input, from, [to.left, to.top]) else {
+            return Ok(false);
+        };
+        if input.alpha_mask != 0 {
+            if self.is_rgb() {
+                return Ok(false);
+            }
+            self.mask_region(source, region)?;
+        } else if self.is_rgb() {
+            self.blend_rgb_region(source, region);
+        } else if let Some(source) = source {
+            self.surface.blend_region(&source.surface, region, 255);
+        } else {
+            self.surface.blend_region_within(region, 255);
+        }
+        Ok(true)
+    }
+
     fn scaled_regions(&self, source: &Self, from: Rect, to: Rect) -> Option<(Rect, Rect)> {
         let extent = |rect: Rect| {
             [
@@ -155,5 +181,72 @@ fn low_integer(value: f32) -> u32 {
         value as i64 as u32
     } else {
         0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::graphics::Images;
+
+    #[test]
+    fn masked_blends_keep_channel_rules_and_shared_pixel_feedback() {
+        let mut source = Image::new([1, 1]).unwrap();
+        source.pixels_mut().copy_from_slice(&[10, 20, 30, 255]);
+        source.info.bit_depth = 24;
+        let mut target = Image::new([1, 1]).unwrap();
+        for (channel, alpha) in [(1, 5), (2, 10), (4, 15), (0x8000_0001, 5), (u32::MAX, 5)] {
+            source.set_alpha_mask(channel).unwrap();
+            target.pixels_mut().copy_from_slice(&[40, 50, 60, 128]);
+            assert!(
+                target
+                    .blend_rectangles(Some(&source), Rect::from_xywh(0, 0, 1, 1), Rect::default())
+                    .unwrap()
+            );
+            assert_eq!(target.surface.pixels(), [40, 50, 60, alpha]);
+        }
+        target.info.bit_depth = 24;
+        target.pixels_mut().copy_from_slice(&[40, 50, 60, 255]);
+        let before = target.clone();
+        assert!(
+            !target
+                .blend_rectangles(Some(&source), Rect::from_xywh(0, 0, 1, 1), Rect::default())
+                .unwrap()
+        );
+        assert_eq!(target, before);
+        source.info.bit_depth = 32;
+        target.info.bit_depth = 32;
+        assert!(
+            target
+                .blend_rectangles(Some(&source), Rect::from_xywh(0, 0, 1, 1), Rect::default())
+                .unwrap_err()
+                .message
+                .contains("掩码通道")
+        );
+
+        let mut images = Images::default();
+        let mut image = Image::new([1, 3]).unwrap();
+        image
+            .pixels_mut()
+            .copy_from_slice(&[10, 20, 30, 192, 40, 50, 60, 128, 70, 80, 90, 64]);
+        image.set_alpha_mask(4).unwrap();
+        let source = images.insert_unowned(image, Some(false)).unwrap();
+        let target = images.share(source).unwrap();
+        assert!(
+            images
+                .blend_rectangles(
+                    target,
+                    source,
+                    Rect::from_xywh(0, 0, 1, 2),
+                    Rect::from_xywh(0, 1, 0, 0)
+                )
+                .unwrap()
+        );
+        assert_eq!(
+            images.get(target).unwrap().surface.pixels(),
+            [10, 20, 30, 24, 40, 50, 60, 32, 70, 80, 90, 64,]
+        );
+        assert!(!images.uses_alpha(target).unwrap());
+        assert_eq!(images.get(target).unwrap(), images.get(source).unwrap());
     }
 }

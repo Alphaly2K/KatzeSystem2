@@ -389,7 +389,17 @@ impl Resources {
                     ),
                 )?;
             } else {
-                self.images.blend(args[0], at, args[5], source_rect)?;
+                self.images.blend_rectangles(
+                    args[0],
+                    args[5],
+                    source_rect,
+                    Rect::from_xywh(
+                        args[1] as i32,
+                        args[2] as i32,
+                        args[3] as i32,
+                        args[4] as i32,
+                    ),
+                )?;
             }
             return Ok(NativeReturn::Continue);
         }
