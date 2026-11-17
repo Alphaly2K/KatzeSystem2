@@ -664,3 +664,150 @@ fn copied_images_keep_independent_pixels_and_blur_shared_wrappers_until_release(
         }
     }
 }
+
+#[test]
+fn ordinary_image_properties_keep_shared_geometry_and_explicit_alpha_cache() {
+    for budget in [1, 4096] {
+        for bit_depth in [24, 32] {
+            let mut factory = KcsFactory::new(Loader(Program::from_code(&[], vec![], 0).unwrap()));
+            factory.external = katze_system2::memory::SharedMemory::new(vec![0x5a; 16]).unwrap();
+            let mut rt = Runtime::new(
+                0,
+                kind::ROOT,
+                Box::new(BaseObject::new()),
+                State::new(0),
+                factory,
+            );
+            rt.set_budget(budget, 1 << 20);
+            let handle = rt.images_mut().create(0, [2, 2]).unwrap();
+            *rt.images_mut().get_mut(handle).unwrap() = Image::from_frame(DecodedFrame {
+                id: 7,
+                info: StandardInfo {
+                    size: [2, 2],
+                    bit_depth,
+                    offset: [-2, 5],
+                    canvas_size: [50, 60],
+                    reserved: 0,
+                    base: [11, -9],
+                },
+                pixels: [0x0011_2233u32, 0x0144_5566, 0x7f77_8899, 0xffaa_bbcc]
+                    .into_iter()
+                    .flat_map(u32::to_le_bytes)
+                    .collect(),
+                attributes: Default::default(),
+            })
+            .unwrap();
+            let shared = rt.images_mut().share(handle).unwrap();
+            let mut code = Vec::new();
+            code.extend([0x25, 3]);
+            code.extend(0xdead_beefu32.to_le_bytes());
+            for (x, y, output) in [((-2i32) as u32, 5, 0), (u32::MAX, 6, 4), (100, 100, 8)] {
+                call(&mut code, 370, &[handle, x, y], Some(output));
+            }
+            call(
+                &mut code,
+                371,
+                &[handle, 0x8000_0001, 0x8000_0003],
+                Some(12),
+            );
+            call(
+                &mut code,
+                374,
+                &[shared, i32::MIN as u32, i32::MAX as u32],
+                Some(16),
+            );
+            call(&mut code, 371, &[handle, 20, 24], Some(28));
+            call(&mut code, 377, &[handle], Some(32));
+            call(&mut code, 117, &[handle, 0, 0, 2, 2, 0xff12_3456], None);
+            call(&mut code, 377, &[shared], Some(36));
+            call(&mut code, 378, &[shared, 0], None);
+            call(&mut code, 377, &[handle], Some(40));
+            call(&mut code, 378, &[handle, u32::MAX], None);
+            call(&mut code, 377, &[shared], Some(44));
+            call(&mut code, 370, &[0], Some(48));
+            call(&mut code, 371, &[0, u32::MAX, u32::MAX], Some(52));
+            call(&mut code, 374, &[0], Some(56));
+            call(&mut code, 378, &[0], None);
+            code.extend([0x26, 3]);
+            code.extend(60u32.to_le_bytes());
+            call(&mut code, 65, &[], None);
+            rt.factory_mut().programs.0 = Program::from_code(&code, vec![0xa5; 80], 128).unwrap();
+            let task = rt.create(0, kind::ORDINARY, b"properties", b"").unwrap();
+            rt.update(0, 1).unwrap();
+            let vm = rt.object(task).unwrap().interpreter().unwrap();
+            let word =
+                |at| u32::from_le_bytes(vm.read(at, 4).unwrap().as_ref().try_into().unwrap());
+            assert_eq!(
+                [word(0), word(4), word(8)],
+                if bit_depth == 24 {
+                    [255; 3]
+                } else {
+                    [127, 1, 0]
+                }
+            );
+            assert_eq!(
+                vm.read(0x8000_0000, 8).unwrap(),
+                [0x5a, 11, 0, 0xf7, 0xff, 0xff, 0xff, 0x5a]
+            );
+            assert_eq!([word(20), word(24)], [i32::MIN as u32, i32::MAX as u32]);
+            for at in [12, 16, 28] {
+                assert_eq!(word(at), 1);
+            }
+            assert_eq!(
+                [word(32), word(36), word(40), word(44)],
+                [
+                    u32::from(bit_depth == 32),
+                    u32::from(bit_depth == 32),
+                    0,
+                    u32::from(bit_depth == 32)
+                ]
+            );
+            assert_eq!(
+                [word(48), word(52), word(56), word(60)],
+                [0, 0, 0, 0xdead_beef]
+            );
+            assert!(vm.stack_bytes().is_empty());
+            let image = rt.images().get(handle).unwrap();
+            assert_eq!(image, rt.images().get(shared).unwrap());
+            assert_eq!(image.info().base, [i32::MIN, i32::MAX]);
+            assert_eq!(image.info().offset, [-2, 5]);
+            assert_eq!(image.info().canvas_size, [50, 60]);
+            assert!(
+                image
+                    .surface()
+                    .pixels()
+                    .chunks_exact(4)
+                    .all(|pixel| pixel[3] == 255)
+            );
+        }
+    }
+}
+
+#[test]
+fn ordinary_image_property_errors_keep_written_prefix_and_diagnose_undefined_result() {
+    for (native, args, message, first) in [
+        (377, vec![0], "未初始化", 0xa5a5_a5a5u32),
+        (371, vec![1, 16, 0x7fff_ffff], "越界", 11),
+        (370, vec![2, 0, 0], "句柄", 0xa5a5_a5a5),
+    ] {
+        let mut code = Vec::new();
+        call(&mut code, 374, &[1, 11, (-9i32) as u32], Some(0));
+        code.extend([0x25, 3]);
+        code.extend(0xdead_beefu32.to_le_bytes());
+        call(&mut code, native, &args, None);
+        let program = Program::from_code(&code, vec![0xa5; 32], 64).unwrap();
+        let mut rt = Runtime::new(
+            0,
+            kind::ROOT,
+            Box::new(BaseObject::new()),
+            State::new(0),
+            KcsFactory::new(Loader(program)),
+        );
+        assert_eq!(rt.images_mut().create(0, [1, 1]).unwrap(), 1);
+        let task = rt.create(0, kind::ORDINARY, b"invalid", b"").unwrap();
+        assert!(rt.update(0, 1).unwrap_err().message.contains(message));
+        let vm = rt.object(task).unwrap().interpreter().unwrap();
+        assert_eq!(vm.read(16, 4).unwrap(), first.to_le_bytes());
+        assert_eq!(vm.stack_bytes(), 0xdead_beefu32.to_le_bytes());
+    }
+}

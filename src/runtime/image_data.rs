@@ -12,12 +12,16 @@ impl Resources {
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
         let count = match index {
-            118 => 1,
-            364 | 369 => 2,
+            118 | 377 => 1,
+            364 | 369 | 378 => 2,
             121 => 4,
             _ => 3,
         };
-        if arguments.len() != count * 4 {
+        let short_zero = matches!(index, 370 | 371 | 374 | 378)
+            && (4..count * 4).contains(&arguments.len())
+            && arguments.len().is_multiple_of(4)
+            && arguments.starts_with(&[0; 4]);
+        if arguments.len() != count * 4 && !short_zero {
             return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
         }
         let args: Vec<_> = arguments
@@ -79,11 +83,38 @@ impl Resources {
             return Ok(NativeReturn::Continue);
         }
         if args[0] == 0 {
-            return Ok(if matches!(index, 121 | 122 | 369 | 538) {
+            if index == 377 {
+                return Err(Error::new(vm.pc, "空图像的透明度查询返回未初始化结果"));
+            }
+            return Ok(if matches!(index, 121 | 122 | 369 | 378 | 538) {
                 NativeReturn::Continue
             } else {
                 NativeReturn::Value(0)
             });
+        }
+        if index == 370 {
+            let image = self.images.get(args[0])?;
+            return Ok(NativeReturn::Value(if image.is_rgb() {
+                255
+            } else {
+                image.pixel_from_bottom(args[1], args[2]) >> 24
+            }));
+        }
+        if index == 371 {
+            let base = self.images.get(args[0])?.info().base;
+            for (value, address) in base.into_iter().zip(&args[1..]) {
+                vm.write(*address, &value.to_le_bytes())?;
+            }
+            return Ok(NativeReturn::Value(1));
+        }
+        if index == 377 {
+            return Ok(NativeReturn::Value(u32::from(
+                self.images.uses_alpha(args[0])?,
+            )));
+        }
+        if index == 378 {
+            self.images.set_uses_alpha(args[0], args[1] != 0)?;
+            return Ok(NativeReturn::Continue);
         }
         if index == 121 {
             let rgb = [args[1], args[2], args[3]];
@@ -121,6 +152,7 @@ impl Resources {
         match index {
             372 => info.canvas_size = [args[1], args[2]],
             373 => info.offset = [args[1] as i32, args[2] as i32],
+            374 => info.base = [args[1] as i32, args[2] as i32],
             _ => unreachable!(),
         }
         Ok(NativeReturn::Value(1))
