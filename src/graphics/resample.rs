@@ -1,7 +1,8 @@
 use super::{Rect, Surface};
 use crate::{Error, Result};
 
-/// 两端矩形已经独立裁剪，Y 从底部起算；None 表示即时读取目标自身。
+/// 目标矩形须落在像素范围内，来源保留采样起点；Y 从底部起算。
+/// None 表示即时读取目标自身。
 pub(crate) fn copy_scaled(
     target: &mut Surface,
     source: Option<&Surface>,
@@ -17,19 +18,27 @@ pub(crate) fn copy_scaled(
     };
     let [sw, sh] = extent(from);
     let [dw, dh] = extent(to);
-    if sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0 {
+    if sw < 0 || sh < 0 || dw <= 0 || dh <= 0 {
         return Ok(false);
     }
-    if source.unwrap_or(target).bounds().intersect(from) != Some(from)
-        || target.bounds().intersect(to) != Some(to)
-    {
+    if target.bounds().intersect(to) != Some(to) {
         return Err(Error::new(0, "重采样矩形未裁剪到图像范围"));
     }
     if [sw, sh] == [dw, dh] {
-        for y in 0..dh {
+        let Some(clipped) = source.unwrap_or(target).bounds().intersect(from) else {
+            return Ok(false);
+        };
+        let to = Rect::from_xywh(
+            to.left,
+            to.top,
+            clipped.right - clipped.left,
+            clipped.bottom - clipped.top,
+        );
+        let from = clipped;
+        for y in 0..to.bottom - to.top {
             let start = bottom_offset(source_size, from.left as usize, (from.top + y) as usize);
             let at = bottom_offset(target.size(), to.left as usize, (to.top + y) as usize);
-            let length = dw as usize * 4;
+            let length = (to.right - to.left) as usize * 4;
             if let Some(source) = source {
                 target.pixels_mut()[at..at + length]
                     .copy_from_slice(&source.pixels()[start..start + length]);
@@ -48,9 +57,16 @@ pub(crate) fn copy_scaled(
             let source = source.unwrap_or(target);
             let pixel = if average {
                 let at = [
-                    from.left as usize + (x as f32 * ratio[0]) as usize,
-                    from.top as usize + (y as f32 * ratio[1]) as usize,
+                    from.left.checked_add((x as f32 * ratio[0]) as i32),
+                    from.top.checked_add((y as f32 * ratio[1]) as i32),
                 ];
+                let [Some(sx), Some(sy)] = at else {
+                    return Err(Error::new(0, "重采样平均窗口起点溢出"));
+                };
+                if sx < 0 || sy < 0 {
+                    return Err(Error::new(0, "重采样平均窗口起点超出像素存储"));
+                }
+                let at = [sx as usize, sy as usize];
                 average_pixel(source, at, window)?
             } else {
                 // 原入口把来源起点直接加到定点累加器，不先左移十五位。
@@ -141,7 +157,7 @@ fn bottom_offset(size: [u32; 2], x: usize, y: usize) -> usize {
     ((size[1] as usize - 1 - y) * size[0] as usize + x) * 4
 }
 
-pub(super) fn flip_rows(surface: &mut Surface) {
+pub(crate) fn flip_rows(surface: &mut Surface) {
     let stride = surface.stride();
     let height = surface.size()[1] as usize;
     for y in 0..height / 2 {

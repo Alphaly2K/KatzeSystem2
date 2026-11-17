@@ -225,7 +225,7 @@ pub(crate) fn runtime(index: u32) -> RuntimeHandler {
     match canonical(index) {
         1009 => RuntimeHandler::ImageExport,
         600 | 601 | 1018..=1023 => RuntimeHandler::SystemTask,
-        123..=133 | 418 | 557 => RuntimeHandler::TextWindow,
+        123..=139 | 418 | 557 => RuntimeHandler::TextWindow,
         29 => RuntimeHandler::FileOpen,
         453 => RuntimeHandler::Property,
         361 => RuntimeHandler::Configuration,

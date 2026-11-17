@@ -121,7 +121,7 @@ mod backend;
 pub use backend::{GraphicsBackend, SoftwareBackend};
 #[cfg(target_os = "macos")]
 pub mod metal;
-mod resample;
+pub(crate) mod resample;
 
 /// 包含左上边、不包含右下边的像素矩形。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

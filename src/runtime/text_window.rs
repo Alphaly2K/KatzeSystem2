@@ -11,9 +11,10 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
         let count = match index {
-            123 | 126 => 3,
+            123 | 126 | 134 | 138 => 3,
+            137 => 6,
             418 => 4,
-            124 | 127 | 128 | 131 | 133 | 557 => 2,
+            124 | 127 | 128 | 131 | 133 | 135 | 136 | 139 | 557 => 2,
             125 | 129 | 130 | 132 => 1,
             _ => unreachable!(),
         };
@@ -105,6 +106,62 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             }
             130 | 132 => {
                 self.command_target(target, if index == 130 { 110 } else { 113 }, [0; 3])?;
+            }
+            134 => {
+                let text = vm.read_string(read::u32_at(arguments, 8)?)?;
+                let codes = crate::message::window::character_set(&text);
+                if codes.len() > read::MAX_ITEMS {
+                    return Err(Error::new(vm.pc, "文本窗口字符表超过容量"));
+                }
+                let mut bytes: Vec<_> = codes
+                    .into_iter()
+                    .chain(std::iter::once(0))
+                    .flat_map(u16::to_le_bytes)
+                    .collect();
+                self.command_target_with_buffers(
+                    target,
+                    115,
+                    [read::u32_at(arguments, 4)?, 0, 0],
+                    &mut CommandBuffers {
+                        data1: Some(&mut bytes),
+                        ..Default::default()
+                    },
+                )?;
+            }
+            135 | 139 => {
+                self.command_target(
+                    target,
+                    if index == 135 { 116 } else { 112 },
+                    [0, read::u32_at(arguments, 4)?, 0],
+                )?;
+            }
+            136 => {
+                let handle = read::u32_at(arguments, 4)?;
+                if handle != 0 {
+                    let pixels = self.resources.images.pixel_handle(handle)?;
+                    self.command_target(target, 117, [0, pixels, 0])?;
+                }
+            }
+            137 => {
+                let mut bytes = [0; 20];
+                bytes[..2].copy_from_slice(&(read::u32_at(arguments, 4)? as u16).to_le_bytes());
+                bytes[4..].copy_from_slice(&arguments[8..24]);
+                self.command_target_with_buffers(
+                    target,
+                    118,
+                    [0; 3],
+                    &mut CommandBuffers {
+                        data1: Some(&mut bytes),
+                        ..Default::default()
+                    },
+                )?;
+            }
+            138 => {
+                self.command_target(
+                    target,
+                    119,
+                    [read::u32_at(arguments, 4)?, read::u32_at(arguments, 8)?, 0],
+                )?;
             }
             557 => {
                 self.command_target(target, 122, [0, read::u32_at(arguments, 4)?, 0])?;

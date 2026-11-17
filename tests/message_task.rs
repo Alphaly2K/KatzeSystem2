@@ -1415,3 +1415,151 @@ fn text_window_controls_reveal_segments_and_preserve_literal_mode() {
         assert_eq!(vm.stack_bytes(), 0xdeadbeefu32.to_le_bytes());
     }
 }
+
+#[test]
+fn text_window_atlas_snapshots_survive_source_release_and_reconfiguration() {
+    use std::{cell::RefCell, rc::Rc};
+    struct RecordingFonts(Rc<RefCell<Vec<char>>>);
+    impl FontServices for RecordingFonts {
+        fn validate(&mut self, request: &FontRequest) -> Result<()> {
+            Fonts.validate(request)
+        }
+        fn measure(&mut self, request: &FontRequest, character: char, size: u32) -> Result<i32> {
+            Fonts.measure(request, character, size)
+        }
+        fn rasterize(
+            &mut self,
+            request: &FontRequest,
+            character: char,
+            size: u32,
+        ) -> Result<GlyphMask> {
+            self.0.borrow_mut().push(character);
+            Fonts.rasterize(request, character, size)
+        }
+    }
+    struct AtlasProgram(Program);
+    impl ProgramLoader for AtlasProgram {
+        fn load(&mut self, _: &[u8]) -> Result<Option<Program>> {
+            Ok(Some(self.0.clone()))
+        }
+    }
+    let mut code = vec![0x25, 3];
+    code.extend(0xdeadbeefu32.to_le_bytes());
+    let mut call = |index: u32, args: &[u32]| {
+        for value in args {
+            code.extend([0x25, 3]);
+            code.extend(value.to_le_bytes());
+        }
+        code.extend([0x2b, 3]);
+        code.extend(index.to_le_bytes());
+        code.push(3);
+        code.extend((args.len() as u32 * 4).to_le_bytes());
+    };
+    call(136, &[1, 0]);
+    call(123, &[1, 64, 160]);
+    call(134, &[1, u32::MAX, 232]);
+    call(135, &[1, u32::MAX]);
+    call(137, &[1, 0x12340041, 0, 0, 2, 2]);
+    call(137, &[1, 65, 3, 3, 4, 4]);
+    call(124, &[1, 224]);
+    call(65, &[]);
+    call(125, &[1]);
+    call(136, &[1, 1]);
+    call(136, &[1, 0]);
+    call(117, &[1, 0, 0, 4, 4, 0xffabcdef]);
+    call(114, &[1]);
+    call(138, &[1, 3, 2]);
+    call(124, &[1, 224]);
+    call(139, &[1, 1]);
+    call(138, &[1, 16, 10]);
+    call(124, &[1, 224]);
+    call(65, &[]);
+    call(125, &[1]);
+    call(123, &[1, 64, 160]);
+    call(136, &[1, 0]);
+    call(138, &[1, 2, 8]);
+    call(124, &[1, 224]);
+    call(136, &[1, 3]);
+    call(114, &[3]);
+    call(138, &[1, 14, 8]);
+    call(124, &[1, 224]);
+    call(65, &[]);
+    let mut data = vec![0; 256];
+    for (slot, value) in [
+        (2, 64),
+        (3, 32),
+        (5, 1),
+        (6, 6),
+        (7, 4),
+        (15, 16),
+        (16, 0xff332211),
+    ] {
+        set(&mut data, 64 + slot * 4, value);
+    }
+    data[224] = b'A';
+    data[232..236].copy_from_slice(b"%d\\\0");
+    let program = Program::from_code(&code, data, 128).unwrap();
+    for budget in [1, 4096] {
+        let drawn = Rc::new(RefCell::new(Vec::new()));
+        let mut rt = Runtime::new(
+            0,
+            kind::ROOT,
+            Box::new(BaseObject::new()),
+            State::new(0),
+            MessageFactory {
+                fallback: KcsFactory::new(AtlasProgram(program.clone())),
+            },
+        );
+        rt.set_budget(budget, 1 << 20);
+        rt.set_fonts(RecordingFonts(drawn.clone()));
+        rt.host_mut().message_defaults = Some(MessageDefaults {
+            font_name: vec![84],
+            glyph_parameter: Some(0),
+            ..Default::default()
+        });
+        rt.drawing_mut().enabled = true;
+        rt.drawing_mut().active = true;
+        rt.drawing_mut().target = Some(RenderTarget::new([64, 32]).unwrap());
+        let window = rt.create(0, kind::TEXT_WINDOW, b"text", b"").unwrap();
+        let caller = rt.create(0, kind::ORDINARY, b"atlas", b"").unwrap();
+        for (handle, color) in [(1, 0xff765432), (3, 0xffabcdef)] {
+            assert_eq!(rt.images_mut().create(caller, [4, 4]).unwrap(), handle);
+            rt.images_mut()
+                .get_mut(handle)
+                .unwrap()
+                .fill_rect_from_bottom(Rect::from_xywh(0, 0, 4, 4), color);
+        }
+        let pixel =
+            |rt: &Runtime<_>, x, y| rt.drawing().target.as_ref().unwrap().pixel(x, y).unwrap();
+        rt.update(100, 1).unwrap();
+        rt.dispatch_command(0, command(caller, 163, 0)).unwrap();
+        assert_eq!(&*drawn.borrow(), &['\u{3000}']);
+        assert_eq!(pixel(&rt, 1, 1), 0xff112233);
+        rt.dispatch_command(0, command(caller, 162, 1)).unwrap();
+        rt.update(101, 1).unwrap();
+        rt.dispatch_command(0, command(caller, 163, 0)).unwrap();
+        assert!(rt.images().get(1).is_err());
+        assert_eq!(pixel(&rt, 4, 5), 0xff765432);
+        assert_eq!(pixel(&rt, 7, 5), 0xff765432);
+        assert_eq!(pixel(&rt, 17, 7), 0xff765432);
+        assert_eq!(pixel(&rt, 17, 13), 0);
+        rt.dispatch_command(0, command(caller, 162, 1)).unwrap();
+        rt.update(102, 1).unwrap();
+        rt.dispatch_command(0, command(caller, 163, 0)).unwrap();
+        assert!(rt.images().get(3).is_err());
+        assert_eq!(pixel(&rt, 3, 11), 0xff765432);
+        assert_eq!(pixel(&rt, 15, 11), 0xffabcdef);
+        assert_eq!(pixel(&rt, 4, 5), 0);
+        assert_eq!(&*drawn.borrow(), &['\u{3000}']);
+        assert_eq!(
+            rt.object(caller)
+                .unwrap()
+                .interpreter()
+                .unwrap()
+                .stack_bytes(),
+            0xdeadbeefu32.to_le_bytes()
+        );
+        rt.destroy(window).unwrap();
+        assert!(rt.drawables().get(window).is_none());
+    }
+}

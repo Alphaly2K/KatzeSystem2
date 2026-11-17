@@ -5,6 +5,7 @@ use crate::runtime::{TaskObject, kind};
 use crate::task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock};
 use crate::{Error, Result};
 
+mod atlas;
 mod layout;
 use layout::Layout;
 pub(crate) use layout::codes as character_set;
@@ -19,6 +20,7 @@ pub struct TextWindowObject {
     next: usize,
     active: bool,
     breaks: u32,
+    atlas: atlas::Atlas,
 }
 
 impl TextWindowObject {
@@ -32,6 +34,7 @@ impl TextWindowObject {
             next: 0,
             active: false,
             breaks: 0,
+            atlas: atlas::Atlas::default(),
         }
     }
 
@@ -140,31 +143,38 @@ impl TextWindowObject {
             if size <= 0 {
                 return Err(Error::new(0, "文本窗口字形尺寸必须为正"));
             }
-            let code = glyph.code.to_be_bytes();
-            let bytes = if code[0] == 0 { &code[1..] } else { &code[..] };
-            let character = crate::text::cp932(bytes)?.chars().next().unwrap();
-            let mask =
-                fonts.rasterize(&requests[usize::from(glyph.ruby)], character, size as u32)?;
-            let extent = (size as u32)
-                .max(mask.size()[0])
-                .max(mask.size()[1])
-                .checked_add(8)
-                .ok_or_else(|| Error::new(0, "文本窗口字形尺寸溢出"))?;
-            let mut image = Surface::new([extent; 2])?;
-            mask.paint(
-                &mut image,
-                &GlyphPaint {
-                    color: glyph.color,
-                    shadow_color: self.edge,
-                    font_size: size as u32,
-                    double_coverage: false,
-                    effects: GlyphEffects {
-                        shadow: self.layout.config[21] == 1,
-                        outline: matches!(self.layout.config[21], 2 | 3),
-                        shadow_offset: [2; 2],
-                    },
+            let paint = GlyphPaint {
+                color: glyph.color,
+                shadow_color: self.edge,
+                font_size: size as u32,
+                double_coverage: false,
+                effects: GlyphEffects {
+                    shadow: self.layout.config[21] == 1,
+                    outline: matches!(self.layout.config[21], 2 | 3),
+                    shadow_offset: [2; 2],
                 },
-            )?;
+            };
+            let image = if let Some(image) = self.atlas.render(glyph.code, &paint)? {
+                image
+            } else {
+                let code = glyph.code.to_be_bytes();
+                let bytes = if code[0] == 0 { &code[1..] } else { &code[..] };
+                let character = if self.atlas.contains(glyph.code) {
+                    '\u{3000}'
+                } else {
+                    crate::text::cp932(bytes)?.chars().next().unwrap()
+                };
+                let mask =
+                    fonts.rasterize(&requests[usize::from(glyph.ruby)], character, size as u32)?;
+                let extent = (size as u32)
+                    .max(mask.size()[0])
+                    .max(mask.size()[1])
+                    .checked_add(8)
+                    .ok_or_else(|| Error::new(0, "文本窗口字形尺寸溢出"))?;
+                let mut image = Surface::new([extent; 2])?;
+                mask.paint(&mut image, &paint)?;
+                image
+            };
             surface.blend_from(&image, image.bounds(), glyph.position, 255);
             glyph.drawn = true;
         }
@@ -406,6 +416,10 @@ impl TaskObject for TextWindowObject {
                 }
             }
             111 => self.layout.config[6] = command.data[1] as i32,
+            112 => {
+                self.layout.config[19] = command.data[1] as i32;
+                self.layout.align();
+            }
             113 => {
                 if self.layout.glyphs.len() < self.layout.config[15] as u32 as usize {
                     self.layout.glyphs.push(layout::Glyph {
@@ -420,6 +434,25 @@ impl TaskObject for TextWindowObject {
                 }
                 self.start(host)?;
             }
+            117 | 118 if self.fonts.is_none() => {
+                return Err(Error::new(0, "文本窗口用户字形需要先配置字体"));
+            }
+            117 => self.atlas.set_source(host.pixel_image(command.data[1])?)?,
+            118 => {
+                let bytes = buffers
+                    .data1
+                    .as_deref()
+                    .ok_or_else(|| Error::new(0, "文本窗口用户字形登记需要缓冲区"))?;
+                let raw = crate::read::range(bytes, 0, 20)?;
+                let area = std::array::from_fn::<_, 4, _>(|i| {
+                    crate::read::u32_at(raw, 4 + i * 4).unwrap() as i32
+                });
+                self.atlas.insert(
+                    u16::from_le_bytes(raw[..2].try_into().unwrap()),
+                    Rect::from_xywh(area[0], area[1], area[2], area[3]),
+                );
+            }
+            119 => self.layout.cursor = [command.data[0] as i32, command.data[1] as i32],
             121 => self.layout.hanging_enabled = command.data[1] != 0,
             122 => self.edge = command.data[1],
             123 => {
