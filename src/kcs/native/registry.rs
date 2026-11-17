@@ -7,6 +7,7 @@ pub(super) enum CoreHandler {
     File,
     Database,
     System,
+    Window,
     Achievements,
     Matrix,
     Data,
@@ -36,6 +37,7 @@ pub(super) fn canonical(index: u32) -> u32 {
 
 pub(super) fn core(index: u32) -> CoreHandler {
     match index {
+        628 | 845..=847 => CoreHandler::Window,
         1042 | 1043 => CoreHandler::Achievements,
         29..=32 => CoreHandler::File,
         13..=26

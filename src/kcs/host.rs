@@ -42,6 +42,23 @@ pub struct WindowCloseRequest {
     pub notify: bool,
 }
 
+/// 普通窗口入口提交的异步动作，由窗口宿主依序消费。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WindowAction {
+    /// 重建时读取 `HostState::debug_mode` 的最新值。
+    RebuildMenu,
+    ToggleFullscreen,
+    Minimize,
+    /// 先向应用任务发送退出准备通知，再执行标准窗口关闭流程。
+    CloseFromMenu,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WindowRequest {
+    pub task_id: u32,
+    pub action: WindowAction,
+}
+
 /// 普通任务表的持久宿主状态；数值区由 `CoreHost::state` 单独提供，
 /// 以便同一份状态在多次 native 调用之间保留集合句柄、随机序列和请求队列。
 #[derive(Default)]
@@ -53,6 +70,7 @@ pub struct HostState {
     pub unicode_debug_messages: Vec<Vec<u16>>,
     pub menu_item_requests: Vec<MenuItemRequest>,
     pub window_close_requests: Vec<WindowCloseRequest>,
+    pub window_requests: Vec<WindowRequest>,
     /// 按调用顺序提交的文字复制请求，由外层宿主消费。
     pub clipboard_requests: Vec<super::ClipboardRequest>,
     pub task_time: u32,

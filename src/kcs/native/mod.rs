@@ -12,6 +12,7 @@ mod spline;
 mod storage;
 mod system;
 mod text;
+mod window;
 
 /// 普通任务表的 native 分派；宿主状态由调用者长期持有。
 pub(crate) fn call_native(
@@ -31,6 +32,7 @@ pub(crate) fn call_native(
         registry::CoreHandler::File => super::files::call(host, index, arguments, vm),
         registry::CoreHandler::Database => database::call(host, index, arguments, vm),
         registry::CoreHandler::System => system::call(state, host, task_tree, index, arguments, vm),
+        registry::CoreHandler::Window => window::call(host, index, arguments, vm),
         registry::CoreHandler::Achievements => {
             super::achievements::call(host, index, arguments, vm)
         }

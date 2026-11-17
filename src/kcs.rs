@@ -44,7 +44,9 @@ pub(crate) use database::load as load_database;
 pub use database::{Database, DatabaseRecord};
 pub(crate) use files::open_native as open_file_native;
 pub(crate) use host::hierarchy_query;
-pub use host::{CoreHost, HostState, MenuItemRequest, WindowCloseRequest};
+pub use host::{
+    CoreHost, HostState, MenuItemRequest, WindowAction, WindowCloseRequest, WindowRequest,
+};
 pub(crate) use matrix::{
     multiply as multiply_matrix, normalize4 as normalize_vector, sin_cos as matrix_sin_cos,
     transform as transform_vector,
