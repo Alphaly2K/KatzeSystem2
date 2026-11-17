@@ -68,6 +68,7 @@ pub mod kind {
     pub const FES: u32 = 34;
     pub const RENDER_BLUR: u32 = 35;
     pub const RENDER_MOSAIC: u32 = 36;
+    pub const RENDER_DRAW: u32 = 38;
     pub const RWIPE: u32 = 39;
     pub const SCROLL2: u32 = 41;
     pub const SLIDER: u32 = 42;
@@ -79,8 +80,8 @@ pub mod kind {
     pub const CFLIP: u32 = 58;
     pub const STRING_PLANE_UTF8: u32 = 63;
     pub const CAMERA_2D: u32 = 65;
-    /// 粒子任务（`kcTaskParticle`）；控制属性已接入，装载、播放及绘制待接入。
-    pub const PARTICLE: u32 = 38;
+    /// 粒子任务（`kcTaskParticle`）。
+    pub const PARTICLE: u32 = PARTICLE_3D;
 }
 
 /// 默认的单次推进预算；预算耗尽时同步入口继续推进到完成。

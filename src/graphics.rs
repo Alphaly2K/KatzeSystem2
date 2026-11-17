@@ -25,6 +25,7 @@ mod mosaic_task;
 mod screen_filter;
 mod screen_filter_task;
 pub use screen_filter_task::ScreenFilterObject;
+mod render_draw;
 mod shatter;
 mod shatter_task;
 pub use shatter_task::ShatterObject;

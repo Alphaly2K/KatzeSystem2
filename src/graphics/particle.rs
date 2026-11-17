@@ -3,7 +3,7 @@ use crate::runtime::{BaseObject, TaskObject};
 use crate::task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock};
 use crate::{Error, Result};
 
-/// 类型 38 的粒子控制状态；粒子装载、播放及绘制尚未接入。
+/// 仅实现控制命令的独立粒子对象。
 pub struct ParticleObject {
     base: BaseObject,
     context: Vec<u8>,

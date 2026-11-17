@@ -275,8 +275,48 @@ fn live_mosaic_keeps_its_first_rectangle_and_uses_point_sampling_inside_linear_f
 }
 
 #[test]
+fn render_draw_fades_the_auxiliary_capture_below_the_upper_band() {
+    for budget in [1, 4096] {
+        let mut runtime = engine(budget);
+        let effect = runtime.create(0, 38, b"render draw", b"").unwrap();
+        execute(
+            &mut runtime,
+            &[
+                (859, &[0, 0, 10f32.to_bits()]),
+                (527, &[effect, 8, 9f32.to_bits(), 10f32.to_bits()]),
+                (529, &[0]),
+                (529, &[effect]),
+                (528, &[effect, 0x8000_0001]),
+            ],
+            vec![],
+            false,
+        );
+        runtime.drawables_mut().remove(100);
+        rectangle(&mut runtime, 100, [0., 0.], [8., 6.], 5., 0xff0000ff);
+        for now in [0, 2, 4] {
+            runtime.update(now, 1).unwrap();
+            let image = pixels(&mut runtime);
+            assert_eq!(image.pixel(1, 1), Some(0xffff0000));
+            assert_eq!(image.pixel(0, 0), Some(0xffffff00));
+            assert_eq!(state(&mut runtime, effect), 0x8000_0001);
+        }
+
+        runtime.update(8, 1).unwrap();
+        assert_eq!(pixels(&mut runtime).pixel(1, 1), Some(0xbf80007f));
+        runtime.update(12, 1).unwrap();
+        assert_eq!(pixels(&mut runtime).pixel(1, 1), Some(0xff0000ff));
+        assert_eq!(state(&mut runtime, effect), 0);
+        runtime.destroy(effect).unwrap();
+        assert!(runtime.compositor().auxiliary_targets().is_empty());
+
+        let particle = runtime.create(0, kind::PARTICLE, b"particle", b"").unwrap();
+        assert_eq!(runtime.tree().node(particle).unwrap().kind, 16);
+    }
+}
+
+#[test]
 fn unavailable_filter_targets_ignore_configuration_and_remain_inactive() {
-    for object_kind in [kind::RENDER_BLUR, kind::RENDER_MOSAIC] {
+    for object_kind in [kind::RENDER_BLUR, kind::RENDER_MOSAIC, kind::RENDER_DRAW] {
         let mut runtime = engine(1);
         runtime.host_mut().platform_settings = Some(katze_system2::settings::PlatformSettings {
             d3d_backbuffer: 0,
@@ -285,18 +325,18 @@ fn unavailable_filter_targets_ignore_configuration_and_remain_inactive() {
         let effect = runtime.create(0, object_kind, b"unavailable", b"").unwrap();
         for (code, data) in [
             (
-                if object_kind == kind::RENDER_BLUR {
-                    384
-                } else {
-                    386
+                match object_kind {
+                    kind::RENDER_BLUR => 384,
+                    kind::RENDER_MOSAIC => 386,
+                    _ => 390,
                 },
                 [0; 3],
             ),
             (
-                if object_kind == kind::RENDER_BLUR {
-                    385
-                } else {
-                    387
+                match object_kind {
+                    kind::RENDER_BLUR => 385,
+                    kind::RENDER_MOSAIC => 387,
+                    _ => 391,
                 },
                 [0, u32::MAX, 0],
             ),

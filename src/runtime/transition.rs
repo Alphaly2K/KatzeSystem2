@@ -69,7 +69,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             }
             return Ok(NativeReturn::Continue);
         }
-        if matches!(index, 520 | 527 | 528 | 530..=532 | 905) {
+        if matches!(index, 520 | 527..=532 | 905) {
             let target = read::u32_at(arguments, 0)?;
             let length = match index {
                 527 => 16,
@@ -123,15 +123,16 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                         target,
                         match index {
                             528 => 391,
+                            529 => 392,
                             531 => 394,
                             _ => 395,
                         },
                         [
                             0,
-                            if index == 532 {
-                                0
-                            } else {
+                            if matches!(index, 528 | 531) {
                                 read::u32_at(arguments, 4)?
+                            } else {
+                                0
                             },
                             0,
                         ],

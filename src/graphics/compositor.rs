@@ -8,6 +8,7 @@ pub(super) enum ScreenEffect {
     PageFlip(u32),
     CellFlip(u32),
     RWipe(u32),
+    Draw(u32),
     Filter(u32),
 }
 
@@ -23,6 +24,7 @@ pub struct Compositor {
     pub(crate) page_flips: std::collections::BTreeMap<u32, super::page_flip::PageFlip>,
     pub(crate) cell_flips: std::collections::BTreeMap<u32, super::cell_flip::CellFlip>,
     pub(crate) rwipes: std::collections::BTreeMap<u32, super::rwipe::RWipe>,
+    pub(crate) render_draws: std::collections::BTreeMap<u32, super::render_draw::RenderDraw>,
     pub(super) screen_filters: std::collections::BTreeMap<u32, super::screen_filter::ScreenFilter>,
     pub(crate) drawing_rect: Option<super::Rect>,
     pub(super) screen_effect: Option<ScreenEffect>,
@@ -138,6 +140,21 @@ impl Compositor {
                 .compose(&projection, parent, filter, Some([0., far]))?;
             frame.commands.splice(0..0, effect.background());
             frame.commands.extend(effect.frame()?);
+            frame.commands.extend(
+                self.drawables
+                    .compose(&projection, parent, filter, Some([far, 1_000_000.]))?
+                    .commands,
+            );
+            return Ok(frame);
+        }
+        if let Some(ScreenEffect::Draw(id)) = self.screen_effect {
+            let effect = self.render_draws.get_mut(&id).unwrap();
+            let far = effect.far;
+            let mut frame = self
+                .drawables
+                .compose(&projection, parent, filter, Some([0., far]))?;
+            frame.commands.splice(0..0, effect.background());
+            frame.commands.extend(effect.frame());
             frame.commands.extend(
                 self.drawables
                     .compose(&projection, parent, filter, Some([far, 1_000_000.]))?

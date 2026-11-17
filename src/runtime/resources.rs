@@ -109,6 +109,14 @@ impl Resources {
                 }
             }
         }
+        if index == 0 && !self.compositor.render_draws.is_empty() {
+            if let Some(image) = frame.tiles()[0].as_ref() {
+                let image = std::sync::Arc::new(image.clone());
+                for effect in self.compositor.render_draws.values_mut() {
+                    effect.source = image.clone();
+                }
+            }
+        }
         if !self.compositor.cell_flips.is_empty() {
             if let Some(image) = frame.tiles()[0].as_ref() {
                 let image = std::sync::Arc::new(image.clone());
