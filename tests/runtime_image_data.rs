@@ -853,7 +853,7 @@ fn image_mutation_natives_share_pixels_geometry_mask_and_alpha_classification() 
             let mut code = Vec::new();
             code.extend([0x25, 3]);
             code.extend(0xdead_beefu32.to_le_bytes());
-            for native in [558, 564, 641] {
+            for native in [468, 558, 564, 641] {
                 call(&mut code, native, &[0], None);
             }
             call(&mut code, 378, &[handle, 0], None);
@@ -861,6 +861,12 @@ fn image_mutation_natives_share_pixels_geometry_mask_and_alpha_classification() 
             call(&mut code, 641, &[shared, 50], None);
             call(&mut code, 558, &[shared, 0], None);
             call(&mut code, 558, &[shared, u32::MAX], None);
+            call(
+                &mut code,
+                468,
+                &[shared, if bit_depth == 24 { 0 } else { 180 }],
+                None,
+            );
             call(&mut code, 564, &[shared, u32::MAX], None);
             call(&mut code, 377, &[handle], Some(4));
             code.extend([0x26, 3]);
@@ -878,27 +884,44 @@ fn image_mutation_natives_share_pixels_geometry_mask_and_alpha_classification() 
             assert!(vm.stack_bytes().is_empty());
             let image = rt.images().get(handle).unwrap();
             assert_eq!(image, rt.images().get(shared).unwrap());
-            assert_eq!(image.info().offset, [11, 6]);
-            assert_eq!(image.info().base, [8, 17]);
+            assert_eq!(
+                image.info().offset,
+                if bit_depth == 24 { [11, 6] } else { [-2, 5] }
+            );
+            assert_eq!(
+                image.info().base,
+                if bit_depth == 24 { [8, 17] } else { [3, -4] }
+            );
             assert_eq!(image.info().size, [2, 2]);
             assert_eq!(image.info().canvas_size, [11, 13]);
             assert_eq!(image.info().bit_depth, bit_depth);
             assert_eq!(image.info().reserved, 1);
             assert_eq!(image.id(), 7);
-            assert_eq!(image.attribute(1), Some([4, 5, 9, 10, 11]));
+            assert_eq!(
+                image.attribute(1),
+                Some(if bit_depth == 24 {
+                    [4, 5, 9, 10, 11]
+                } else {
+                    [7, 8, 9, 10, 11]
+                })
+            );
             assert_eq!(image.alpha_mask(), u32::MAX);
             let alphas = if bit_depth == 24 {
                 [255; 4]
             } else {
-                [0, 127, 63, 32]
+                [32, 63, 127, 0]
             };
             assert_eq!(
                 image.surface().pixels(),
-                [4, 3, 2, 1]
-                    .into_iter()
-                    .zip(alphas)
-                    .flat_map(|(color, alpha)| [color, 0, 0, alpha])
-                    .collect::<Vec<_>>()
+                (if bit_depth == 24 {
+                    [4, 3, 2, 1]
+                } else {
+                    [1, 2, 3, 4]
+                })
+                .into_iter()
+                .zip(alphas)
+                .flat_map(|(color, alpha)| [color, 0, 0, alpha])
+                .collect::<Vec<_>>()
             );
         }
     }

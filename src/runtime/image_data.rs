@@ -13,12 +13,14 @@ impl Resources {
     ) -> Result<NativeReturn> {
         let count = match index {
             118 | 377 => 1,
-            364 | 369 | 376 | 378 | 558 | 564 | 641 => 2,
+            364 | 369 | 376 | 378 | 468 | 558 | 564 | 641 => 2,
             120 | 121 => 4,
             _ => 3,
         };
-        let short_zero = matches!(index, 120 | 370 | 371 | 374 | 376 | 378 | 558 | 564 | 641)
-            && (4..count * 4).contains(&arguments.len())
+        let short_zero = matches!(
+            index,
+            120 | 370 | 371 | 374 | 376 | 378 | 468 | 558 | 564 | 641
+        ) && (4..count * 4).contains(&arguments.len())
             && arguments.len().is_multiple_of(4)
             && arguments.starts_with(&[0; 4]);
         if arguments.len() != count * 4 && !short_zero {
@@ -89,7 +91,7 @@ impl Resources {
             return Ok(
                 if matches!(
                     index,
-                    120 | 121 | 122 | 369 | 376 | 378 | 538 | 558 | 564 | 641
+                    120 | 121 | 122 | 369 | 376 | 378 | 468 | 538 | 558 | 564 | 641
                 ) {
                     NativeReturn::Continue
                 } else {
@@ -162,9 +164,12 @@ impl Resources {
             self.images.set_uses_alpha(args[0], args[1] != 0)?;
             return Ok(NativeReturn::Continue);
         }
-        if matches!(index, 558 | 564 | 641) {
+        if matches!(index, 468 | 558 | 564 | 641) {
             let image = self.images.get_mut(args[0])?;
             match index {
+                468 => {
+                    image.rotate_right_angle(args[1] as i32)?;
+                }
                 558 => image.flip(args[1] != 0),
                 564 => image.alpha_mask = args[1],
                 641 => image.adjust_alpha_percent(args[1]),

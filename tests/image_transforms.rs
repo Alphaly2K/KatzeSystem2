@@ -68,6 +68,51 @@ fn orthogonal_transforms_keep_pixels_and_attribute_coordinates_in_the_same_canva
     assert!(empty.rotate_right_angle(90).unwrap());
     assert_eq!(empty.info().size, [3, 0]);
     assert!(empty.surface().pixels().is_empty());
+    for (size, right_angles_valid) in [
+        ([0, 3], true),
+        ([3, 0], true),
+        ([3, 2], false),
+        ([2, 3], false),
+        ([1, 1], true),
+        ([4, 4], true),
+    ] {
+        let rgb = Image::from_frame(DecodedFrame {
+            id: 7,
+            info: StandardInfo {
+                size,
+                bit_depth: 24,
+                ..*image().info()
+            },
+            pixels: (0..size[0] * size[1])
+                .flat_map(|value| [value as u8, 0, 0, 255])
+                .collect(),
+            attributes: Default::default(),
+        })
+        .unwrap();
+        for (angle, expected) in [
+            (0, Some(true)),
+            (90, right_angles_valid.then_some(true)),
+            (180, right_angles_valid.then_some(true)),
+            (270, right_angles_valid.then_some(true)),
+            (360, Some(false)),
+        ] {
+            let mut output = rgb.clone();
+            let result = output.rotate_right_angle(angle);
+            if let Some(expected) = expected {
+                assert_eq!(result.unwrap(), expected);
+                assert!(
+                    output
+                        .surface()
+                        .pixels()
+                        .chunks_exact(4)
+                        .all(|pixel| pixel[3] == 255)
+                );
+            } else {
+                assert!(result.unwrap_err().message.contains("行跨度"));
+                assert_eq!(output, rgb);
+            }
+        }
+    }
 }
 
 #[test]

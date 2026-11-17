@@ -1,6 +1,6 @@
 use super::Image;
-use crate::Result;
 use crate::graphics::Surface;
+use crate::{Error, Result};
 
 impl Image {
     pub(crate) fn multiply_color(&mut self, argb: u32) {
@@ -74,6 +74,7 @@ impl Image {
 
     /// 在顶端起始坐标中逆时针旋转；仅接受原始的零、九十、一百八十、二百七十度。
     /// 其他角度不修改图像并返回 false，不先对三百六十度取余。
+    /// 24 位旋转的原行跨度不足以容纳有效像素时返回诊断，不修改图像。
     pub fn rotate_right_angle(&mut self, degrees: i32) -> Result<bool> {
         if degrees == 0 {
             return Ok(true);
@@ -87,6 +88,9 @@ impl Image {
         } else {
             [height, width]
         };
+        if self.is_rgb() && size[1] != 0 && size[0] > 1 && !size[0].is_multiple_of(4) {
+            return Err(Error::new(0, "24 位图像旋转的原行跨度不足以容纳像素"));
+        }
         let mut surface = Surface::new(size)?;
         for y in 0..height {
             for x in 0..width {
