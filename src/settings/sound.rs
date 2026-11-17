@@ -2,6 +2,20 @@ use super::{SystemSettings, put, word};
 use crate::{Error, Result, resource::XmlDocument};
 
 impl SystemSettings {
+    pub(super) fn apply_system_voice_names(&mut self, xml: &XmlDocument) -> Result<()> {
+        for (index, name) in self.system_voice_names.iter_mut().enumerate() {
+            if let Some(value) = xml.text(format!("SYSTEMVOICE/ch{index:02}/name").as_bytes())? {
+                let value = terminated(value);
+                if value.len() >= name.len() {
+                    return Err(Error::new(0, "系统语音名称超过基线容量"));
+                }
+                name[..value.len()].copy_from_slice(value);
+                name[value.len()] = 0;
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn apply_voice_definitions(&mut self, xml: &XmlDocument) -> Result<()> {
         for index in 0..48 {
             let base = 20 + index * 116;

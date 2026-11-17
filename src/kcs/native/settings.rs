@@ -8,6 +8,35 @@ pub(super) fn call(
     arguments: &[u8],
     vm: &mut Interpreter,
 ) -> Result<NativeReturn> {
+    if matches!(index, 582..=584) {
+        let settings = host
+            .system_settings
+            .as_mut()
+            .ok_or_else(|| Error::new(vm.pc, "宿主未配置全局设置"))?;
+        if index == 583 {
+            let mut enabled = settings
+                .system_voice_play
+                .iter()
+                .enumerate()
+                .filter(|&(_, &value)| value != 0);
+            let count = enabled.clone().count();
+            if count == 0 {
+                return Ok(NativeReturn::Value(u32::MAX));
+            }
+            let selected = host.random.next_integer() as usize % count;
+            return Ok(NativeReturn::Value(enabled.nth(selected).unwrap().0 as u32));
+        }
+        let slot = read::u32_at(arguments, 0)? as usize;
+        let value = settings
+            .system_voice_play
+            .get_mut(slot)
+            .ok_or_else(|| Error::new(vm.pc, "系统声音播放开关索引超出范围"))?;
+        if index == 582 {
+            return Ok(NativeReturn::Value(*value));
+        }
+        *value = read::u32_at(arguments, 4)?;
+        return Ok(NativeReturn::Continue);
+    }
     if index == 674 {
         let args = words(arguments, 2, vm.pc)?;
         let file = strings::format(vm, args[0], 0)?;

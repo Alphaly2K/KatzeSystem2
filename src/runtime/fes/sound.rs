@@ -438,6 +438,9 @@ impl<F: ObjectFactory> Store<'_, F> {
         if args.first().is_some_and(|name| name == b"getsndconfex") {
             return self.fes_sound_config_command(scene, args, offset);
         }
+        if args.first().is_some_and(|name| name == b"sysvoice") {
+            return self.fes_system_voice(scene, args, offset);
+        }
         if args.first().is_none_or(|name| name != b"sysvoiceex") {
             return Ok(false);
         }
@@ -475,6 +478,52 @@ impl<F: ObjectFactory> Store<'_, F> {
                 let index = self.host.random.next_integer() as usize % candidates.len();
                 candidates[index]
             }
+        };
+        if let Some(slot) = self.numbers.shared.get_mut(output as usize) {
+            *slot = value;
+        }
+        Ok(true)
+    }
+
+    fn fes_system_voice(
+        &mut self,
+        scene: &mut Scene,
+        args: &[Vec<u8>],
+        offset: usize,
+    ) -> Result<bool> {
+        let Some(output) = args.get(1) else {
+            return Ok(true);
+        };
+        let settings = self
+            .host
+            .system_settings
+            .as_ref()
+            .ok_or_else(|| Error::new(offset, "运行时未提供系统声音配置"))?;
+        let mut candidates = Vec::new();
+        let enabled = |index: usize| {
+            settings
+                .system_voice_names
+                .get(index)
+                .is_some_and(|name| name[0] != 0 && settings.system_voice_play[index] != 0)
+        };
+        let output = scene.interpreter.eval(output, self.numbers)?;
+        if args.len() == 2 {
+            candidates.extend((0..48).filter(|&index| enabled(index)));
+        } else {
+            for input in &args[2..] {
+                let index = scene.interpreter.eval(input, self.numbers)? as usize;
+                if enabled(index) {
+                    if candidates.len() == 256 {
+                        return Err(Error::new(offset, "FES 系统声音候选超过基线容量"));
+                    }
+                    candidates.push(index);
+                }
+            }
+        }
+        let value = if candidates.is_empty() {
+            -1
+        } else {
+            candidates[self.host.random.next_integer() as usize % candidates.len()] as i32
         };
         if let Some(slot) = self.numbers.shared.get_mut(output as usize) {
             *slot = value;

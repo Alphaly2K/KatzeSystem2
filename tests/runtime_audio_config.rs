@@ -3,7 +3,8 @@ use katze_system2::{
     audio::{SoundConfig, SoundPart},
     expression::State,
     kcs::{OrdinaryTask, Program},
-    runtime::{ObjectFactory, OrdinaryObject, Runtime, TaskObject, kind},
+    runtime::{ObjectFactory, OrdinaryObject, Runtime, TaskObject, fes::Scene, kind},
+    settings::SystemSettings,
 };
 
 struct Reject;
@@ -18,6 +19,84 @@ fn ins(code: &mut Vec<u8>, opcode: u8, values: &[u32]) {
     for value in values {
         code.push(3);
         code.extend(value.to_le_bytes());
+    }
+}
+
+#[test]
+fn legacy_system_voice_natives_and_fes_share_flags_and_randomness() {
+    for budget in [1, 4096] {
+        let mut code = Vec::new();
+        ins(&mut code, 0x25, &[0x1357_9bdf]);
+        for (index, args, output) in [
+            (583, &[][..], Some(0)),
+            (584, &[2, 0x8000_0000], None),
+            (584, &[47, u32::MAX], None),
+            (582, &[47], Some(4)),
+            (583, &[], Some(8)),
+            (584, &[47, 0], None),
+        ] {
+            for &value in args {
+                ins(&mut code, 0x25, &[value]);
+            }
+            ins(&mut code, 0x2b, &[index, (args.len() * 4) as u32]);
+            if let Some(address) = output {
+                ins(&mut code, 0x26, &[address]);
+            }
+        }
+        ins(&mut code, 0x3b, &[]);
+        let task =
+            OrdinaryTask::new(Program::from_code(&code, vec![0; 12], 64).unwrap(), vec![]).unwrap();
+        let mut rt = Runtime::new(
+            0,
+            kind::ORDINARY,
+            Box::new(OrdinaryObject::new(task)),
+            State::new(6),
+            Reject,
+        );
+        let mut settings = SystemSettings::default();
+        settings
+            .apply_startup_xml(br#"<?xml version="1.0" encoding="UTF-8"?><document>
+                <SYSTEMVOICE><ch02><name>voice</name></ch02><ch05><name>other</name></ch05></SYSTEMVOICE>
+            </document>"#)
+            .unwrap();
+        settings.system_voice_play.fill(0);
+        rt.host_mut().system_settings = Some(settings);
+        rt.host_mut().random = katze_system2::kcs::ScriptRandom::seeded(0);
+        rt.host_mut().sound_config_enabled = 1;
+        rt.set_budget(budget, 4096);
+        rt.update(100, 1).unwrap();
+        let vm = rt.object(0).unwrap().interpreter().unwrap();
+        let actual: Vec<_> = vm
+            .read(0, 12)
+            .unwrap()
+            .chunks_exact(4)
+            .map(|bytes| u32::from_le_bytes(bytes.try_into().unwrap()))
+            .collect();
+        assert_eq!(actual, [u32::MAX, u32::MAX, 47]);
+        assert_eq!(vm.stack_bytes(), 0x1357_9bdfu32.to_le_bytes());
+        let settings = rt.host_mut().system_settings.as_mut().unwrap();
+        assert_eq!(settings.system_voice_play[2], 0x8000_0000);
+        assert_eq!(settings.system_voice_play[47], 0);
+        settings.system_voice_play[47] = 1;
+        let program = katze_system2::fes::Program::from_text(
+            b"#START\nsysvoice 1\nsysvoice 2 ($0+=2) 47 5 -1 48\nsysvoice 3 47\nsysvoice -1 2\nwait 77\n",
+        )
+        .unwrap();
+        let mut scene = Scene::new(program, rt.host().handle_allocator()).unwrap();
+        let mut done = false;
+        for _ in 0..128 {
+            if rt.update_fes_scene(0, &mut scene, 100).unwrap() {
+                done = true;
+                break;
+            }
+        }
+        assert!(done);
+        assert_eq!(rt.numbers().shared[..4], [2, 2, 2, -1]);
+        let mut expected = katze_system2::kcs::ScriptRandom::seeded(0);
+        for _ in 0..4 {
+            expected.next_integer();
+        }
+        assert_eq!(rt.host_mut().random.next_integer(), expected.next_integer());
     }
 }
 

@@ -37,6 +37,8 @@ pub struct SystemSettings {
     pub scene_animation_enabled: u32,
     /// 48 项系统声音的原始播放开关，与旧声音通道配置分别保存。
     pub system_voice_play: [u32; 48],
+    /// 从 `SYSTEMVOICE/ch00`～`ch47` 读取的零结尾名称。
+    pub system_voice_names: [[u8; 32]; 48],
     pub always_active: u32,
     pub scene_skip_enabled: u32,
     pub jtalk_enabled: u32,
@@ -73,6 +75,7 @@ impl Default for SystemSettings {
             auto_select: 0,
             scene_animation_enabled: 1,
             system_voice_play: [1; 48],
+            system_voice_names: [[0; 32]; 48],
             always_active: 1,
             scene_skip_enabled: 0,
             jtalk_enabled: 0,
@@ -172,6 +175,7 @@ impl SystemSettings {
     pub fn apply_startup_xml(&mut self, input: &[u8]) -> crate::Result<()> {
         let xml = crate::resource::XmlDocument::parse(input)?;
         self.apply_voice_definitions(&xml)?;
+        self.apply_system_voice_names(&xml)?;
         self.auto_select = xml.integer(b"GAME/autoselect", self.auto_select)?;
         for (index, preset) in self.auto_wait_presets.iter_mut().enumerate() {
             for (field, value) in ["base", "char"].into_iter().zip(preset) {
