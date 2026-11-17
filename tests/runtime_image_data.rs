@@ -333,6 +333,10 @@ fn image_adjustment_natives_keep_shared_storage_alpha_and_null_gates() {
             let shared = rt.images_mut().share(handle).unwrap();
             let empty = rt.images_mut().create_empty(0).unwrap();
             let mut code = Vec::new();
+            call(&mut code, 376, &[0], None);
+            call(&mut code, 376, &[u32::MAX, 0], None);
+            call(&mut code, 376, &[u32::MAX, u32::MAX], None);
+            call(&mut code, 376, &[empty, 4], None);
             call(&mut code, 121, &[0, 1, 2, 3], None);
             call(&mut code, 122, &[0, u32::MAX, u32::MAX], None);
             call(&mut code, 121, &[u32::MAX, 100, 100, 100], None);
@@ -340,6 +344,11 @@ fn image_adjustment_natives_keep_shared_storage_alpha_and_null_gates() {
             call(&mut code, 121, &[handle, 50, 125, 200], None);
             call(&mut code, 65, &[], None);
             call(&mut code, 122, &[shared, 4, 1], None);
+            call(&mut code, 65, &[], None);
+            for mode in 1..=3 {
+                call(&mut code, 376, &[shared, mode], None);
+                call(&mut code, 65, &[], None);
+            }
             code.push(0x3b);
             rt.factory_mut().programs.0 = Program::from_code(&code, vec![], 128).unwrap();
             let id = rt.create(0, kind::ORDINARY, b"adjust", b"").unwrap();
@@ -362,6 +371,27 @@ fn image_adjustment_natives_keep_shared_storage_alpha_and_null_gates() {
             assert_eq!(image.attribute(1), Some([6, 4, 10, 6, 9]));
             assert_eq!(&image.surface().pixels()[..4], &colors[..4]);
             assert_eq!(&image.surface().pixels()[12..], &colors[4..]);
+            for (step, filtered) in [
+                [113, 113, 113, 64, 1, 1, 1, 127],
+                [78, 118, 143, 64, 0, 6, 31, 127],
+                [155, 130, 155, 64, 251, 252, 253, 127],
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                rt.images_mut()
+                    .get_mut(handle)
+                    .unwrap()
+                    .pixels_mut()
+                    .copy_from_slice(&colors.repeat(2));
+                rt.update(30 + step as u32, 1).unwrap();
+                let image = rt.images().get(handle).unwrap();
+                assert_eq!(image, rt.images().get(shared).unwrap());
+                assert_eq!(
+                    image.surface().pixels(),
+                    if bit_depth == 24 { colors } else { filtered }.repeat(2)
+                );
+            }
             assert!(
                 rt.object(id)
                     .unwrap()

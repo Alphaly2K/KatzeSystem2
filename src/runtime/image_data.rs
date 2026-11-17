@@ -1,5 +1,5 @@
 use super::Resources;
-use crate::graphics::Image;
+use crate::graphics::{Image, ImageFilter};
 use crate::kcs::{Interpreter, NativeReturn};
 use crate::{Error, Result};
 
@@ -13,11 +13,11 @@ impl Resources {
     ) -> Result<NativeReturn> {
         let count = match index {
             118 | 377 => 1,
-            364 | 369 | 378 => 2,
+            364 | 369 | 376 | 378 => 2,
             121 => 4,
             _ => 3,
         };
-        let short_zero = matches!(index, 370 | 371 | 374 | 378)
+        let short_zero = matches!(index, 370 | 371 | 374 | 376 | 378)
             && (4..count * 4).contains(&arguments.len())
             && arguments.len().is_multiple_of(4)
             && arguments.starts_with(&[0; 4]);
@@ -86,11 +86,24 @@ impl Resources {
             if index == 377 {
                 return Err(Error::new(vm.pc, "空图像的透明度查询返回未初始化结果"));
             }
-            return Ok(if matches!(index, 121 | 122 | 369 | 378 | 538) {
+            return Ok(if matches!(index, 121 | 122 | 369 | 376 | 378 | 538) {
                 NativeReturn::Continue
             } else {
                 NativeReturn::Value(0)
             });
+        }
+        if index == 376 {
+            let filter = match args[1] {
+                1 => ImageFilter::Mono,
+                2 => ImageFilter::Sepia,
+                3 => ImageFilter::Negative,
+                _ => return Ok(NativeReturn::Continue),
+            };
+            let image = self.images.get_mut(args[0])?;
+            if !image.is_rgb() {
+                filter.apply(image);
+            }
+            return Ok(NativeReturn::Continue);
         }
         if index == 370 {
             let image = self.images.get(args[0])?;
