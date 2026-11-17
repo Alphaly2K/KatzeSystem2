@@ -5,6 +5,9 @@ use std::io::Write;
 
 const BLOCK: usize = 0x80000;
 
+mod tree;
+pub use tree::{StateNode, StateTree};
+
 /// 按任务的存档目录读写 CSS 文件及查询文件修改时间，名称使用 CP932 字节。
 /// `None` 表示文件不存在或无法打开；未接入所需服务时返回诊断。
 pub trait SaveServices {
@@ -179,6 +182,15 @@ impl DataContainer {
             return Ok(None);
         };
         Ok(Some(read::range(&self.bytes, start + 8, length)?))
+    }
+
+    /// 首个同编号记录的定长正文；不改变记录长度及其后布局。
+    pub fn record_mut(&mut self, id: u32) -> Result<Option<&mut [u8]>> {
+        let Some((start, length)) = self.find(id)? else {
+            return Ok(None);
+        };
+        read::range(&self.bytes, start + 8, length)?;
+        Ok(Some(&mut self.bytes[start + 8..start + 8 + length]))
     }
 
     pub fn append(&mut self, id: u32, data: &[u8]) -> Result<()> {

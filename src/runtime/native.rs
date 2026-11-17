@@ -172,6 +172,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             RuntimeHandler::Graphics => self.graphics_native(index, arguments, vm),
             RuntimeHandler::Task => self.task_native(index, arguments, vm),
             RuntimeHandler::MediaRecord => self.media_record_native(index, arguments, vm),
+            RuntimeHandler::StateRecord => self.state_record_native(index, arguments, vm),
             RuntimeHandler::Resource => {
                 self.resources.call(self.host.task_id, index, arguments, vm)
             }

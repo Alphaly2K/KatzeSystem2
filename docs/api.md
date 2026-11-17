@@ -136,6 +136,9 @@ FES `setconf` 更新有效主界面／主文字选择，并在本轮通知处理
 
 运行时普通 240／250 查询目标任务命令 177，将共享数值按指定起始槽位和槽数保存成独立记录，或将指定记录的整四字节值写回共享区；两者均裁剪至区域末尾。命令以 `CommandBuffers::data1` 的四字节可用标记选择当前运行时共享区，支持执行中普通对象；零句柄、缺失记录及未提供数值区分别保留其提前返回顺序。成功标记不取决于复制槽数。
 
+普通 576／688／689 按容器、记录编号和目标任务接入状态记录。576 以 437 传递并写回原始正文；688 以 445 查询状态树、追加编码记录后以 447 释放；689 解析记录后以 446 恢复。`save::StateTree`／`StateNode` 提供相对偏移编解码，保留恢复时逐层反转兄弟顺序的规则；返回值、共享视图及容量契约见[状态树记录](save.md#状态树记录)。默认 14／43 接收者仍待接入。
+
+
 普通 243／253 保存和替换恢复共享字符串表。缺失记录保留原表，有效空表清空；记录格式与重复编号规则见[CSS 数据容器](save.md)。
 
 ## 回看日志
@@ -743,7 +746,7 @@ Scene 消费 `noact`／`lockactive` 并按主体时点处理通知。`preferred_
 
 普通对象的命令 173 从 `CommandBuffers.data1` 读取十六字节消息包，按四个小端 DWORD 同步分派，并将修改后的消息写回；尾部字节保持。该入口由 `OrdinaryObject` 提供，独立 `OrdinaryTask::dispatch_control` 继续使用其已有控制入口。
 
-`Runtime::dispatch_command_with_buffers(origin, command, &mut buffers)` 按相同树规则分派显式字节缓冲区。`task::CommandBuffers` 的 data0／data1 是可选可变借用，对应原 data[0]／data[1] 所引用的数据；external 为可选的共享字节视图，用于 172 的持久绑定；不解释 DWORD 为进程指针或 VM 地址。各接收者共享缓冲区中的修改。对象通过 `TaskObject::dispatch_command_with_buffers` 接收，缺省委托标量入口，所需长度由具体命令检查。`Host::next_task_child(previous)` 查询当前对象在有符号编号游标之后的直属子级，None 从首项开始，`dispatch_task_command(command, buffers, output)` 保留传入返回槽并返回是否找到目标，用于对象内部传播；宿主未提供服务时返回诊断。
+`Runtime::dispatch_command_with_buffers(origin, command, &mut buffers)` 按相同树规则分派显式字节缓冲区。`task::CommandBuffers` 的 data0／data1 是可选可变借用，对应原 data[0]／data[1] 所引用的数据；external 为可选共享字节视图，用于 172 的持久绑定，以及 445／446／447 的状态树编码交换；不解释 DWORD 为进程指针或 VM 地址。各接收者共享缓冲区中的修改。对象通过 `TaskObject::dispatch_command_with_buffers` 接收，缺省委托标量入口，所需长度由具体命令检查。`Host::next_task_child(previous)` 查询当前对象在有符号编号游标之后的直属子级，None 从首项开始，`dispatch_task_command(command, buffers, output)` 保留传入返回槽并返回是否找到目标，用于对象内部传播；宿主未提供服务时返回诊断。
 
 普通图形入口已连接基础图元、属性、几何查询、输入状态及二维相机协议。89／98／107 返回查询值，其余入口保留栈原值；零目标跳过、输出地址别名与完整签名见下文链接。完整参数及对象命令见[基础图元](graphics.md#普通脚本的基础图元)及 [KX2 几何](graphics.md#kx2-几何资源)。对象通过 `Host::resource_services()` 访问与 native 共用的同步资源服务，通过 `Host::canvas_layout()` 查询画布布局；未提供所需服务时返回诊断。
 

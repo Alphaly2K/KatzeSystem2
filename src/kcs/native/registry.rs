@@ -212,6 +212,7 @@ pub(crate) enum RuntimeHandler {
     Graphics,
     Task,
     MediaRecord,
+    StateRecord,
     Resource,
     ImageResource,
     Core,
@@ -346,6 +347,7 @@ pub(crate) fn runtime(index: u32) -> RuntimeHandler {
         | 651
         | 694 => RuntimeHandler::Task,
         241 | 251 | 387 => RuntimeHandler::MediaRecord,
+        576 | 688 | 689 => RuntimeHandler::StateRecord,
         111
         | 112
         | 114..=119

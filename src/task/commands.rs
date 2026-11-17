@@ -20,6 +20,7 @@ pub struct CommandBuffers<'a> {
     pub data0: Option<&'a mut [u8]>,
     pub data1: Option<&'a mut [u8]>,
     /// 172 的外部区指针所引用的共享视图；长度由第一数据项指定。
+    /// 445 的接收者以此返回状态树记录，446 接收待恢复记录，447 释放同一视图。
     pub external: Option<crate::memory::SharedMemory>,
 }
 
