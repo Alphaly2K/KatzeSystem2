@@ -12,9 +12,9 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
     ) -> Result<NativeReturn> {
         let count = match index {
             123 | 126 | 134 | 138 => 3,
-            137 => 6,
+            137 | 599 => 6,
             418 => 4,
-            124 | 127 | 128 | 131 | 133 | 135 | 136 | 139 | 557 => 2,
+            124 | 127 | 128 | 131 | 133 | 135 | 136 | 139 | 456 | 557 | 585 => 2,
             125 | 129 | 130 | 132 => 1,
             _ => unreachable!(),
         };
@@ -128,10 +128,16 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     },
                 )?;
             }
-            135 | 139 => {
+            135 | 139 | 456 | 585 => {
                 self.command_target(
                     target,
-                    if index == 135 { 116 } else { 112 },
+                    match index {
+                        135 => 116,
+                        139 => 112,
+                        456 => 121,
+                        585 => 123,
+                        _ => unreachable!(),
+                    },
                     [0, read::u32_at(arguments, 4)?, 0],
                 )?;
             }
@@ -161,6 +167,18 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     target,
                     119,
                     [read::u32_at(arguments, 4)?, read::u32_at(arguments, 8)?, 0],
+                )?;
+            }
+            599 => {
+                let mut bytes = arguments[4..24].to_vec();
+                self.command_target_with_buffers(
+                    target,
+                    124,
+                    [0; 3],
+                    &mut CommandBuffers {
+                        data1: Some(&mut bytes),
+                        ..Default::default()
+                    },
                 )?;
             }
             557 => {

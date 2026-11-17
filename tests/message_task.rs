@@ -1330,6 +1330,19 @@ fn text_window_controls_reveal_segments_and_preserve_literal_mode() {
     call(&mut code, 131, &[1, 10]);
     call(&mut code, 124, &[1, 272]);
     query(&mut code, 20);
+    call(&mut code, 585, &[1, 0xff665544]);
+    call(&mut code, 65, &[]);
+    call(&mut code, 125, &[1]);
+    call(&mut code, 128, &[1, 1]);
+    call(&mut code, 456, &[1, 2]);
+    call(&mut code, 599, &[1, 6, 8, 10, 12, 14]);
+    call(&mut code, 131, &[1, 6]);
+    call(&mut code, 124, &[1, 288]);
+    call(&mut code, 65, &[]);
+    call(&mut code, 125, &[1]);
+    call(&mut code, 456, &[1, 0]);
+    call(&mut code, 131, &[1, 6]);
+    call(&mut code, 124, &[1, 288]);
     call(&mut code, 65, &[]);
     let mut data = vec![0; 384];
     for (slot, value) in [
@@ -1347,6 +1360,8 @@ fn text_window_controls_reveal_segments_and_preserve_literal_mode() {
     data[240] = b'C';
     data[256] = b'D';
     data[272..274].copy_from_slice(b"\\n");
+    let hanging_text = b"\x81\x75\\fss;A\\n\\fll;BC";
+    data[288..288 + hanging_text.len()].copy_from_slice(hanging_text);
     let program = Program::from_code(&code, data, 128).unwrap();
     for budget in [1, 4096] {
         let mut rt = Runtime::new(
@@ -1403,6 +1418,19 @@ fn text_window_controls_reveal_segments_and_preserve_literal_mode() {
         assert_eq!(pixel(&rt, 1, 1), 0xff11_2233);
         assert_eq!(pixel(&rt, 8, 1), 0xff11_2233);
         assert_eq!(pixel(&rt, 1, 9), 0);
+        rt.dispatch_command(0, command(caller, 162, 1)).unwrap();
+        rt.update(112, 1).unwrap();
+        rt.dispatch_command(0, command(caller, 163, 0)).unwrap();
+        assert_eq!(pixel(&rt, 1, 1), 0xff44_5566);
+        assert_eq!(pixel(&rt, 7, 1), 0xff44_5566);
+        assert_eq!(pixel(&rt, 7, 7), 0xff44_5566);
+        assert_eq!(pixel(&rt, 16, 7), 0xff44_5566);
+        assert_eq!(pixel(&rt, 1, 7), 0);
+        rt.dispatch_command(0, command(caller, 162, 1)).unwrap();
+        rt.update(113, 1).unwrap();
+        rt.dispatch_command(0, command(caller, 163, 0)).unwrap();
+        assert_eq!(pixel(&rt, 1, 7), 0xff44_5566);
+        assert_eq!(pixel(&rt, 10, 7), 0xff44_5566);
         let vm = rt.object(caller).unwrap().interpreter().unwrap();
         assert_eq!(
             vm.read(0, 24)
