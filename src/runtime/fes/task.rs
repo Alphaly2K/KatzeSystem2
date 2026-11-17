@@ -14,6 +14,15 @@ pub trait Services {
     fn copy_local_numbers(&mut self, _from: u32, _to: u32) -> Result<()> {
         Err(Error::new(0, "FES 局部数值复制服务尚未提供"))
     }
+    /// 按 OBJECT 列头及数据行初始化现有对象，不刷新下层媒体。
+    fn initialize_object_line(
+        &mut self,
+        _scene: &mut Scene,
+        _header: &[u8],
+        _row: Option<&[u8]>,
+    ) -> Result<()> {
+        Err(Error::new(0, "FES 动态属性初始化服务尚未提供"))
+    }
     /// 只推进装载期事件；false 表示保留游标等待续跑。
     fn prepare(&mut self, scene: &mut Scene, budget: usize) -> Result<bool>;
     /// 推进当前任务的场景；false 后沿用同一时刻继续本轮。
@@ -96,6 +105,16 @@ impl<F: ObjectFactory> Services for ObjectHost<'_, F> {
     }
     fn copy_local_numbers(&mut self, from: u32, to: u32) -> Result<()> {
         self.numbers.copy_local(from, to)
+    }
+    fn initialize_object_line(
+        &mut self,
+        scene: &mut Scene,
+        header: &[u8],
+        row: Option<&[u8]>,
+    ) -> Result<()> {
+        scene.initialize_object_line(header, row, self.numbers, |name| {
+            self.host.languages.expand_image(name)
+        })
     }
     fn prepare(&mut self, scene: &mut Scene, budget: usize) -> Result<bool> {
         self.numbers.select_local(scene.interpreter.local_numbers());
@@ -1399,7 +1418,21 @@ impl TaskObject for FesObject {
                     .ok_or_else(|| Error::new(0, "FES 控制状态访问需要已初始化对象"))?
                     .control_status_command(command.code, output);
             }
-            178 | 344 | 345 | 351 | 356 => {
+            345 => {
+                let scene = self
+                    .scene
+                    .as_mut()
+                    .ok_or_else(|| Error::new(0, "FES 动态属性初始化需要已初始化对象"))?;
+                let header = crate::read::zstr(
+                    buffers
+                        .data0
+                        .as_deref()
+                        .ok_or_else(|| Error::new(0, "FES 动态属性列头缓冲区缺失"))?,
+                    0,
+                )?;
+                services(host)?.initialize_object_line(scene, header, buffers.data1.as_deref())?;
+            }
+            178 | 344 | 351 | 356 => {
                 return Err(Error::new(0, "FES 专属命令尚未接入"));
             }
             _ => {

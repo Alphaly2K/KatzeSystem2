@@ -55,6 +55,35 @@ struct Factory {
 }
 impl ObjectFactory for Factory {
     fn create(&mut self, id: u32, kind: u32, name: &[u8]) -> Result<Box<dyn TaskObject>> {
+        if kind == kind::ORDINARY && name == b"dynamic initialization driver" {
+            let mut code = vec![0x25, 3];
+            code.extend(0xdead_beefu32.to_le_bytes());
+            let mut ins = |op: u8, values: &[u32]| {
+                code.push(op);
+                for value in values {
+                    code.push(3);
+                    code.extend(value.to_le_bytes());
+                }
+            };
+            for target in [0, u32::MAX, 3] {
+                ins(0x25, &[target]);
+                ins(0x25, &[64]);
+                ins(0x2b, &[632, 8]);
+            }
+            ins(0x25, &[96]);
+            ins(0x2b, &[213, 4]);
+            ins(0x26, &[0]);
+            ins(0x2b, &[65, 0]);
+            let mut data = vec![0; 128];
+            data[64..79].copy_from_slice(b"item COLOR PRI\0");
+            data[96..99].copy_from_slice(b"\\0\0");
+            let mut task = katze_system2::kcs::OrdinaryTask::new(
+                Program::from_code(&code, data, 128)?,
+                Vec::new(),
+            )?;
+            task.task_id = id;
+            return Ok(Box::new(OrdinaryObject::new(task)));
+        }
         if kind == kind::ORDINARY && matches!(name, b"local copy driver" | b"other local driver") {
             fn call(code: &mut Vec<u8>, native: u32, args: &[u32], output: Option<u32>) {
                 let mut ins = |op: u8, args: &[u32]| {
@@ -179,9 +208,13 @@ impl ObjectFactory for Factory {
             ins(0x26, 3, &[20]);
             ins(0x2f, 3, &[32]);
             ins(0x2b, 3, &[668, 4]);
+            ins(0x2f, 3, &[32]);
+            ins(0x25, 3, &[96]);
+            ins(0x2b, 3, &[632, 8]);
             ins(0x29, 3, &[0]);
             let mut data = vec![0; 128];
             data[64..70].copy_from_slice(b"REPLY\0");
+            data[96..107].copy_from_slice(b"item COLOR\0");
             let mut task = katze_system2::kcs::OrdinaryTask::new(
                 Program::from_code(&code, data, 128)?,
                 Vec::new(),
@@ -1287,6 +1320,109 @@ fn local_context_copies_keep_task_isolation_selection_stack_and_lifetimes() {
                 .unwrap()
                 .borrow()[0],
             99
+        );
+    }
+}
+
+#[test]
+fn dynamic_initialization_keeps_record_parsing_selection_and_deferred_media_updates() {
+    let source = b"#DEFINE\nCIMAGE item[3]\n#OBJECT SIZE COLOR PRI\nitem 3,3 0xff112233 10\n#START\nwait 1000\n";
+    for budget in [1, 4096] {
+        let mut runtime = setup(budget, source).runtime;
+        let fes = runtime.create(0, kind::FES, b"scene", b"").unwrap();
+        let list = runtime.create(fes, kind::IMAGE_LIST, b"list", b"").unwrap();
+        send(&mut runtime, list, 285, 8, 6);
+        send(&mut runtime, fes, 337, 0, 0);
+        send(&mut runtime, fes, 340, 0, list);
+        file(&mut runtime, fes, b"complete.fes").unwrap();
+        send(&mut runtime, fes, 346, 0, 77);
+        send(&mut runtime, fes, 339, 0, 0);
+        for (header, valid) in [
+            (b"OBJECT unknown\0".as_slice(), true),
+            (b"OBJECT SIZE\0".as_slice(), false),
+        ] {
+            let mut header = header.to_vec();
+            assert_eq!(
+                runtime
+                    .dispatch_command_with_buffers(
+                        0,
+                        command(fes, 345, 0, 0),
+                        &mut CommandBuffers {
+                            data0: Some(&mut header),
+                            ..Default::default()
+                        },
+                    )
+                    .is_ok(),
+                valid
+            );
+        }
+        let scene = runtime.object(fes).unwrap().fes_scene().unwrap();
+        let deadline = scene.deadline();
+        let item = scene.objects().lookup("item", 1).unwrap();
+        let wrapper = scene.objects().get(item).unwrap().image_handle().unwrap();
+        let record = |runtime: &mut TestRuntime, header: &[u8], row: &[u8]| {
+            let mut header = [header, &[0]].concat();
+            let mut row = [row, &[0]].concat();
+            runtime
+                .dispatch_command_with_buffers(
+                    0,
+                    command(fes, 345, 0, 0),
+                    &mut CommandBuffers {
+                        data0: Some(&mut header),
+                        data1: Some(&mut row),
+                        external: None,
+                    },
+                )
+                .unwrap();
+        };
+        record(
+            &mut runtime,
+            b"OBJECT UNKNOWN SIZE COLOR PRI",
+            b"item[1] 5,6 0xffabcdef 7",
+        );
+        let scene = runtime.object(fes).unwrap().fes_scene().unwrap();
+        let katze_system2::runtime::fes::ObjectState::CImage(image) =
+            &scene.objects().get(item).unwrap().state
+        else {
+            unreachable!()
+        };
+        assert_eq!(
+            (image.size, image.color as u32, image.priority),
+            ([5, 6], 0xffabcdef, 27)
+        );
+        assert_eq!(scene.deadline(), deadline);
+        assert_eq!(runtime.images().get(wrapper).unwrap().info().size, [3, 3]);
+        record(&mut runtime, b"OBJECT unknown", b"item[(\\0+=1)] (\\0+=1)");
+        assert_eq!(send(&mut runtime, fes, 347, 0, 0), 77);
+        record(&mut runtime, b"OBJECT PRI", b"missing (\\0+=1)");
+        assert_eq!(send(&mut runtime, fes, 347, 0, 0), 78);
+        let caller = runtime
+            .create(0, kind::ORDINARY, b"dynamic initialization driver", b"")
+            .unwrap();
+        runtime.update(1, 1).unwrap();
+        let vm = runtime.object(caller).unwrap().interpreter().unwrap();
+        assert_eq!(vm.stack_bytes(), 0xdead_beefu32.to_le_bytes());
+        assert_eq!(vm.read(0, 4).unwrap(), 78u32.to_le_bytes());
+        let scene = runtime.object(fes).unwrap().fes_scene().unwrap();
+        for bank in 0..3 {
+            let handle = scene.objects().lookup("item", bank).unwrap();
+            let katze_system2::runtime::fes::ObjectState::CImage(image) =
+                &scene.objects().get(handle).unwrap().state
+            else {
+                unreachable!()
+            };
+            assert_eq!((image.color, image.priority), (0, bank + 20));
+        }
+        assert_eq!(scene.deadline(), deadline);
+        assert_eq!(runtime.images().get(wrapper).unwrap().info().size, [5, 6]);
+        assert_eq!(
+            runtime.images().get(wrapper).unwrap().surface().pixel(0, 0),
+            Some(0xffabcdef)
+        );
+        runtime.update(2, 1).unwrap();
+        assert_eq!(
+            runtime.images().get(wrapper).unwrap().surface().pixel(0, 0),
+            Some(0)
         );
     }
 }
@@ -2673,7 +2809,7 @@ fn fes_send_allows_synchronous_parameter_access_and_a_block_callback() {
     for budget in [1, 4096] {
         let mut runtime = setup(
             budget,
-            b"#START\nsend 7 8 9\n$0=$0+1\nexit 37\nwait 1000\n#REPLY\n$1=\\7\n",
+            b"#DEFINE\nCIMAGE item\n#OBJECT SIZE COLOR\nitem 1,1 0xff112233\n#START\nsend 7 8 9\n$0=$0+1\nexit 37\nwait 1000\n#REPLY\n$1=\\7\n",
         )
         .runtime;
         let parent = runtime
@@ -2704,6 +2840,14 @@ fn fes_send_allows_synchronous_parameter_access_and_a_block_callback() {
         assert_eq!(&record[28..32], &91u32.to_le_bytes());
         assert_eq!(send(&mut runtime, fes, 23, 0, 0), 37);
         assert_eq!(send(&mut runtime, fes, 354, 0, 0), 0);
+        let scene = runtime.object(fes).unwrap().fes_scene().unwrap();
+        let item = scene.objects().lookup("item", 0).unwrap();
+        let katze_system2::runtime::fes::ObjectState::CImage(image) =
+            &scene.objects().get(item).unwrap().state
+        else {
+            unreachable!()
+        };
+        assert_eq!(image.color, 0);
     }
 }
 

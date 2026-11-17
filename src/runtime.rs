@@ -1023,6 +1023,25 @@ fn run_nested<F: ObjectFactory>(
             ..
         } = &mut execution
         {
+            if command.code == 345 {
+                **propagate = false;
+                if !running.get(&target).is_some_and(|task| task.deleted) {
+                    let header = crate::read::zstr(
+                        buffers
+                            .data0
+                            .as_deref()
+                            .ok_or_else(|| Error::new(0, "FES 动态属性列头缓冲区缺失"))?,
+                        0,
+                    )?;
+                    fes_scene.as_mut().unwrap().scene.initialize_object_line(
+                        header,
+                        buffers.data1.as_deref(),
+                        numbers,
+                        |name| host.languages.expand_image(name),
+                    )?;
+                }
+                return Ok(());
+            }
             if command.code == 343 {
                 **propagate = false;
                 if running.get(&target).is_some_and(|task| task.deleted) {

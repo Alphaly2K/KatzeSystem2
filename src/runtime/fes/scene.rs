@@ -197,6 +197,23 @@ impl Scene {
         self.interpreter.local_values()
     }
 
+    pub(in crate::runtime) fn initialize_object_line(
+        &mut self,
+        header: &[u8],
+        row: Option<&[u8]>,
+        numbers: &mut crate::expression::State,
+        transform_name: impl FnMut(&[u8]) -> Result<Vec<u8>>,
+    ) -> Result<()> {
+        numbers.select_local(self.interpreter.local_numbers());
+        if let Some(initialization) = self
+            .interpreter
+            .initialize_object_line(header, row, numbers)?
+        {
+            self.objects.initialize(&initialization, transform_name)?;
+        }
+        Ok(())
+    }
+
     pub(in crate::runtime) fn parameter_values_mut(&mut self) -> std::cell::RefMut<'_, Vec<i32>> {
         self.interpreter.local_values_mut()
     }

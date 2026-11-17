@@ -101,16 +101,30 @@ const COLUMNS: &[(&[u8], u32)] = &[
 
 impl Interpreter {
     pub(super) fn initialization_columns(&self, header: &[u8], state: &State) -> Result<Vec<u32>> {
+        self.parse_initialization_columns(header, state, false)
+    }
+
+    fn parse_initialization_columns(
+        &self,
+        header: &[u8],
+        state: &State,
+        skip_unknown: bool,
+    ) -> Result<Vec<u32>> {
         let expanded = text::expand(header, &state.strings)?;
         let args = self.parameters(&expanded, state)?;
         let mut columns = Vec::new();
         for arg in args.iter().skip(1) {
             let split = arg.iter().position(|&b| b == b'.').unwrap_or(arg.len());
-            let base = COLUMNS
+            let Some(base) = COLUMNS
                 .iter()
                 .find(|(name, _)| *name == &arg[..split])
                 .map(|&(_, code)| code)
-                .ok_or_else(|| Error::new(0, "未知 FES 初始化列"))?;
+            else {
+                if skip_unknown {
+                    continue;
+                }
+                return Err(Error::new(0, "未知 FES 初始化列"));
+            };
             let suffix = arg.get(split + 1..).unwrap_or(&[]);
             let offset = if suffix.first().is_some_and(u8::is_ascii_digit) {
                 suffix_number(suffix)
@@ -124,11 +138,45 @@ impl Interpreter {
             };
             let code = base.wrapping_add(offset);
             if code == u32::MAX || columns.len() == 67 {
+                if skip_unknown {
+                    if columns.len() == 67 {
+                        break;
+                    }
+                    continue;
+                }
                 return Err(Error::new(0, "FES 初始化列超出上限"));
             }
             columns.push(code);
         }
         Ok(columns)
+    }
+
+    pub(crate) fn initialize_object_line(
+        &mut self,
+        header: &[u8],
+        row: Option<&[u8]>,
+        state: &mut State,
+    ) -> Result<Option<ObjectInitialization>> {
+        let columns = self.parse_initialization_columns(header, state, true)?;
+        if columns.is_empty() {
+            return Ok(None);
+        }
+        let row = crate::read::zstr(
+            row.ok_or_else(|| Error::new(0, "FES 动态属性数据行缓冲区缺失"))?,
+            0,
+        )?;
+        if self.parameters(row, state)?.is_empty() {
+            return Ok(None);
+        }
+        self.initialize_object(
+            &Line {
+                offset: 0,
+                bytes: row.to_vec(),
+            },
+            &columns,
+            state,
+        )
+        .map(Some)
     }
 
     pub fn object_reference(&mut self, input: &[u8], state: &mut State) -> Result<ObjectReference> {

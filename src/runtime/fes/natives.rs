@@ -24,6 +24,23 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         }
         let target = read::u32_at(arguments, 0)?;
         match index {
+            632 => {
+                let address = read::u32_at(arguments, 4)?;
+                let mut header = format_string(vm, address, 0)?;
+                let mut row = format_string(vm, address, 0)?;
+                header.push(0);
+                row.push(0);
+                self.command_target_with_buffers(
+                    target,
+                    345,
+                    [0; 3],
+                    &mut CommandBuffers {
+                        data0: Some(&mut header),
+                        data1: Some(&mut row),
+                        external: None,
+                    },
+                )?;
+            }
             665 | 666 => {
                 self.command_target(
                     target,
