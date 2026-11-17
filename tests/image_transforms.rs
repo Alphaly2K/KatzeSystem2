@@ -71,7 +71,7 @@ fn orthogonal_transforms_keep_pixels_and_attribute_coordinates_in_the_same_canva
 }
 
 #[test]
-fn rgb_percentages_preserve_alpha_and_wrap_before_clamping() {
+fn percentage_adjustments_keep_other_channels_and_wrap_before_clamping() {
     let mut image = Image::new([2, 1]).unwrap();
     image
         .pixels_mut()
@@ -80,6 +80,13 @@ fn rgb_percentages_preserve_alpha_and_wrap_before_clamping() {
     assert_eq!(image.surface().pixels(), [100, 125, 100, 64, 4, 3, 2, 127]);
     image.adjust_rgb_percent([0x8000_0000, u32::MAX, 0x8000_0000]);
     assert_eq!(image.surface().pixels(), [0, 255, 0, 64, 0, 255, 0, 127]);
+    image.adjust_alpha_percent(50);
+    assert_eq!(image.surface().pixels(), [0, 255, 0, 32, 0, 255, 0, 63]);
+    image.adjust_alpha_percent(0x8000_0000);
+    assert_eq!(image.surface().pixels(), [0, 255, 0, 0, 0, 255, 0, 255]);
+    let before = image.clone();
+    image.adjust_alpha_percent(100);
+    assert_eq!(image, before);
 }
 
 #[test]

@@ -823,11 +823,94 @@ fn ordinary_image_properties_keep_shared_geometry_and_explicit_alpha_cache() {
 }
 
 #[test]
+fn image_mutation_natives_share_pixels_geometry_mask_and_alpha_classification() {
+    for budget in [1, 4096] {
+        for bit_depth in [24, 32] {
+            let mut rt = Runtime::new(
+                0,
+                kind::ROOT,
+                Box::new(BaseObject::new()),
+                State::new(0),
+                KcsFactory::new(Loader(Program::from_code(&[], vec![], 0).unwrap())),
+            );
+            rt.set_budget(budget, 1 << 20);
+            let handle = rt.images_mut().create(0, [2, 2]).unwrap();
+            *rt.images_mut().get_mut(handle).unwrap() = Image::from_frame(DecodedFrame {
+                id: 7,
+                info: StandardInfo {
+                    size: [2, 2],
+                    bit_depth,
+                    offset: [-2, 5],
+                    canvas_size: [11, 13],
+                    reserved: 1,
+                    base: [3, -4],
+                },
+                pixels: vec![1, 0, 0, 64, 2, 0, 0, 127, 3, 0, 0, 255, 4, 0, 0, 0],
+                attributes: [(1, [7, 8, 9, 10, 11])].into(),
+            })
+            .unwrap();
+            let shared = rt.images_mut().share(handle).unwrap();
+            let mut code = Vec::new();
+            code.extend([0x25, 3]);
+            code.extend(0xdead_beefu32.to_le_bytes());
+            for native in [558, 564, 641] {
+                call(&mut code, native, &[0], None);
+            }
+            call(&mut code, 378, &[handle, 0], None);
+            call(&mut code, 641, &[handle, 100], None);
+            call(&mut code, 641, &[shared, 50], None);
+            call(&mut code, 558, &[shared, 0], None);
+            call(&mut code, 558, &[shared, u32::MAX], None);
+            call(&mut code, 564, &[shared, u32::MAX], None);
+            call(&mut code, 377, &[handle], Some(4));
+            code.extend([0x26, 3]);
+            code.extend(0u32.to_le_bytes());
+            code.push(0x3b);
+            rt.factory_mut().programs.0 = Program::from_code(&code, vec![0; 8], 128).unwrap();
+            let task = rt.create(0, kind::ORDINARY, b"mutations", b"").unwrap();
+            rt.update(0, 1).unwrap();
+            let vm = rt.object(task).unwrap().interpreter().unwrap();
+            assert_eq!(
+                vm.read(0, 4).unwrap().as_ref(),
+                0xdead_beefu32.to_le_bytes()
+            );
+            assert_eq!(vm.read(4, 4).unwrap(), [0; 4]);
+            assert!(vm.stack_bytes().is_empty());
+            let image = rt.images().get(handle).unwrap();
+            assert_eq!(image, rt.images().get(shared).unwrap());
+            assert_eq!(image.info().offset, [11, 6]);
+            assert_eq!(image.info().base, [8, 17]);
+            assert_eq!(image.info().size, [2, 2]);
+            assert_eq!(image.info().canvas_size, [11, 13]);
+            assert_eq!(image.info().bit_depth, bit_depth);
+            assert_eq!(image.info().reserved, 1);
+            assert_eq!(image.id(), 7);
+            assert_eq!(image.attribute(1), Some([4, 5, 9, 10, 11]));
+            assert_eq!(image.alpha_mask(), u32::MAX);
+            let alphas = if bit_depth == 24 {
+                [255; 4]
+            } else {
+                [0, 127, 63, 32]
+            };
+            assert_eq!(
+                image.surface().pixels(),
+                [4, 3, 2, 1]
+                    .into_iter()
+                    .zip(alphas)
+                    .flat_map(|(color, alpha)| [color, 0, 0, alpha])
+                    .collect::<Vec<_>>()
+            );
+        }
+    }
+}
+
+#[test]
 fn ordinary_image_property_errors_keep_written_prefix_and_diagnose_undefined_result() {
     for (native, args, message, first) in [
         (377, vec![0], "未初始化", 0xa5a5_a5a5u32),
         (371, vec![1, 16, 0x7fff_ffff], "越界", 11),
         (370, vec![2, 0, 0], "句柄", 0xa5a5_a5a5),
+        (641, vec![2, 100], "句柄", 0xa5a5_a5a5),
     ] {
         let mut code = Vec::new();
         call(&mut code, 374, &[1, 11, (-9i32) as u32], Some(0));

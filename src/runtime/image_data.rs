@@ -13,11 +13,11 @@ impl Resources {
     ) -> Result<NativeReturn> {
         let count = match index {
             118 | 377 => 1,
-            364 | 369 | 376 | 378 => 2,
+            364 | 369 | 376 | 378 | 558 | 564 | 641 => 2,
             120 | 121 => 4,
             _ => 3,
         };
-        let short_zero = matches!(index, 120 | 370 | 371 | 374 | 376 | 378)
+        let short_zero = matches!(index, 120 | 370 | 371 | 374 | 376 | 378 | 558 | 564 | 641)
             && (4..count * 4).contains(&arguments.len())
             && arguments.len().is_multiple_of(4)
             && arguments.starts_with(&[0; 4]);
@@ -87,7 +87,10 @@ impl Resources {
                 return Err(Error::new(vm.pc, "空图像的透明度查询返回未初始化结果"));
             }
             return Ok(
-                if matches!(index, 120 | 121 | 122 | 369 | 376 | 378 | 538) {
+                if matches!(
+                    index,
+                    120 | 121 | 122 | 369 | 376 | 378 | 538 | 558 | 564 | 641
+                ) {
                     NativeReturn::Continue
                 } else {
                     NativeReturn::Value(0)
@@ -157,6 +160,16 @@ impl Resources {
         }
         if index == 378 {
             self.images.set_uses_alpha(args[0], args[1] != 0)?;
+            return Ok(NativeReturn::Continue);
+        }
+        if matches!(index, 558 | 564 | 641) {
+            let image = self.images.get_mut(args[0])?;
+            match index {
+                558 => image.flip(args[1] != 0),
+                564 => image.alpha_mask = args[1],
+                641 => image.adjust_alpha_percent(args[1]),
+                _ => unreachable!(),
+            }
             return Ok(NativeReturn::Continue);
         }
         if index == 121 {

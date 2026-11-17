@@ -222,7 +222,7 @@ FES 内部执行宏声明，初始化按以下顺序交给宿主：
 
 `hg3::decode_frame(bytes, id)` 解码首个匹配 ID 的原生 32 位完整帧，缺失 ID 返回 `None`。`decode_frame_from(&source, Some(id))` 校验全部元数据后仅读取选中帧的像素正文；参数为 `None` 时取最小无符号 ID，重复 ID 仍取首帧。读取源可短读，提前结束或读取失败返回诊断。`DecodedFrame` 包含 `id`、标准元数据 `info`、`attributes: BTreeMap<u16, [u32; 5]>` 和从上到下紧密排列的 BGRA8 `pixels`，Alpha 保持独立，不应用裁剪偏移或绘制基点。`Frame::attributes` 提供相同属性记录，`Image::attribute(id)` 查询编号低十六位，未命中返回 `None`。支持范围与约束见 [图像接口](graphics.md)。
 
-`Runtime::image_resource(handle)` 查询普通 710 静态装载或 733 创建的独立图像资源，句柄与普通图像包装、像素句柄分别检查类型。`retain_image_resource`／`release_image_resource_reference` 管理额外使用者的配对持有，最后释放后句柄失效；任务销毁和程序重装只回收仍有登记的任务引用。`image_resource_updated(handle, clear)` 读取更新标记，`clear=true` 同时为所有使用者清零。普通资源入口提供几何设置／查询、Alpha 分类、属性、附加值、矩形填充、RGB 百分比、直角旋转、翻转、模糊、缩放、资源间拷贝及颜色滤镜；`Image::blur` 对画布内图像扩边后依次执行水平、垂直滤波，半径钳制到 0～255；`Image::resize_canvas` 按原始画布比例同步像素和元数据，`copy_scaled_from`／`copy_scaled_within` 提供独立裁剪的 BGRA 拷贝及重采样；`Image::auxiliary_value()` 查询 728 保存的 DWORD。参数和零句柄规则见[独立图像资源](graphics.md#独立图像资源)。DIFIMAGE 捕获／引用与列表共用同一资源表；710 的单图与组合图层使用 `ResourceServices::open` 按帧读取，保留预读缓存优先级。伴随动画来源提供初始快照，资源层动画控制尚未接入。
+`Runtime::image_resource(handle)` 查询普通 710 静态装载或 733 创建的独立图像资源，句柄与普通图像包装、像素句柄分别检查类型。`retain_image_resource`／`release_image_resource_reference` 管理额外使用者的配对持有，最后释放后句柄失效；任务销毁和程序重装只回收仍有登记的任务引用。`image_resource_updated(handle, clear)` 读取更新标记，`clear=true` 同时为所有使用者清零。普通资源入口提供几何设置／查询、Alpha 分类、属性、附加值、矩形填充、RGB 百分比、直角旋转、翻转、模糊、缩放、资源间拷贝及颜色滤镜；`Image::blur` 对画布内图像扩边后依次执行水平、垂直滤波，半径钳制到 0～255；`Image::resize_canvas` 按原始画布比例同步像素和元数据，`copy_scaled_from`／`copy_scaled_within` 提供独立裁剪的 BGRA 拷贝及重采样；`Image::alpha_mask()` 查询 728 保存的通道 DWORD。参数和零句柄规则见[独立图像资源](graphics.md#独立图像资源)。DIFIMAGE 捕获／引用与列表共用同一资源表；710 的单图与组合图层使用 `ResourceServices::open` 按帧读取，保留预读缓存优先级。伴随动画来源提供初始快照，资源层动画控制尚未接入。
 
 `fes::CImageState` 保存 CIMAGE 的坐标、尺寸、颜色、平面引用和显示属性。宿主按具体银行调用 `apply(&attributes, bank)`；返回本次是否使显示属性失效，供宿主递归标记后代。此接口仅应用该类型的有效列，不用于 IMAGE 等其他对象。父子对象关系应由宿主先处理，资源查找和绘制也由宿主负责。
 
@@ -573,6 +573,8 @@ Runtime 的普通 740 向两个地址写回指针退出位置，不移动指针�
 普通 362／363 接收图像包装及两个输出地址，分别查询画布尺寸和原点偏移；画布每轴为零时以对应像素尺寸代替。输出地址零有效，先清零两项再依序写回，零图像返回全零。372／373 以两个 DWORD 设置画布尺寸／有符号偏移，状态一返回一，零图像返回零；不改变像素尺寸或基点。369 按 ARGB 的四个字节分别缩放 BGRA 通道，整数乘积除以 255，包含 Alpha，以状态二保持返回槽；共享像素包装同时看到修改。1026 接收图像及两个有符号坐标，减去原点偏移后按底端起始的像素行查询 ARGB DWORD，越界或零图像返回零。非零失效／空像素包装返回诊断。
 
 普通 370 查询包装图像的 Alpha，371／374 查询／设置基点，376 按模式执行颜色滤镜，377／378 查询／显式设置透明度缓存；共享包装观察同一份几何及缓存。三通道、底端坐标、重叠输出、零句柄及未初始化结果约束见[普通图像属性](graphics.md#空白图像与显式释放)。
+
+普通 558／564／641 分别翻转普通图像、保存 Alpha 掩码通道 DWORD、按百分比调整 32 位 Alpha。558 同步偏移、基点和属性坐标，641 复用 `Image::adjust_alpha_percent`，只修改 Alpha 且保持已有透明度分类。三项均以状态二继续，零包装跳过后续参数；具体约束见[普通图像属性](graphics.md#空白图像与显式释放)。
 
 115 接受目标句柄、目标位置和请求尺寸、源句柄及源矩形。非零目标使用 `Images::blend`，叠加源偏移并按底端起始坐标混合；同图重叠保留即时反馈。零目标使用 `DrawingContext::copy_image`，以全局源矩形直接复制 BGRA，行方向与图像混合分别保留。两条路径均不缩放，状态 2 不压栈；空源只需前六项并直接跳过，非零源需要完整十项。
 

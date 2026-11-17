@@ -29,6 +29,17 @@ impl Image {
         self.filter_revision = self.filter_revision.wrapping_add(1);
     }
 
+    /// 32 位 Alpha 按无符号百分比调整，乘法保留低 DWORD 后除以一百并钳制。
+    pub fn adjust_alpha_percent(&mut self, percent: u32) {
+        if self.is_rgb() || percent == 100 {
+            return;
+        }
+        for pixel in self.pixels_mut().chunks_exact_mut(4) {
+            pixel[3] = (u32::from(pixel[3]).wrapping_mul(percent) / 100).min(255) as u8;
+        }
+        self.filter_revision = self.filter_revision.wrapping_add(1);
+    }
+
     /// 水平或垂直翻转像素，并相对原始画布反射偏移、基点及属性坐标。
     pub fn flip(&mut self, horizontal: bool) {
         let axis = usize::from(!horizontal);

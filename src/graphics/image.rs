@@ -134,7 +134,7 @@ impl Image {
         &mut self.info
     }
 
-    /// 列表合成使用的 Alpha 掩码通道；普通 728 保留原始 DWORD。
+    /// 列表合成使用的 Alpha 掩码通道；普通 564／728 保留原始 DWORD。
     pub fn alpha_mask(&self) -> u32 {
         self.alpha_mask
     }
