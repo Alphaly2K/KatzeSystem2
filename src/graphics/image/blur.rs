@@ -142,7 +142,7 @@ fn rounded(sum: u32, factor: u32) -> u8 {
 }
 
 fn blur_axis(source: &Surface, axis: usize, radius: usize) -> Result<Surface> {
-    let jobs = (source.pixels().len() / (4 * 256 * 1024)).clamp(1, 4);
+    let jobs = (source.pixels().len() / (4 * 256 * 1024)).clamp(1, 8);
     let workers = if jobs > 1 {
         std::thread::available_parallelism().map_or(1, |count| jobs.min(count.get()))
     } else {
@@ -326,7 +326,7 @@ mod tests {
             }
             for axis in 0..2 {
                 let single = blur_axis_with_workers(&source, axis, radius, 1).unwrap();
-                let split = blur_axis_with_workers(&source, axis, radius, 4).unwrap();
+                let split = blur_axis_with_workers(&source, axis, radius, 8).unwrap();
                 assert_eq!(single.pixels(), split.pixels(), "{size:?}, axis {axis}");
             }
         }
