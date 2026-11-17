@@ -409,6 +409,11 @@ fn folder_expansion_preserves_case_literal_tokens_and_single_pass_replacements()
     assert_eq!(paths.expand(&[65, 0, 66]).unwrap(), vec![65]);
     assert_eq!(paths.expand(&vec![65; 259]).unwrap().len(), 259);
     assert!(paths.expand(&vec![65; 260]).is_err());
+    assert_eq!(
+        paths.expand_utf16(&vec![65; 2047], 2047).unwrap().len(),
+        2047
+    );
+    assert!(paths.expand_utf16(&[65], 0).is_err());
     assert!(
         paths
             .expand(&wide(&format!("%{}", "x".repeat(259))))

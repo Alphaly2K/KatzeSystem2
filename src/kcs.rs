@@ -966,6 +966,14 @@ impl Interpreter {
         }
     }
 
+    pub(crate) fn native_argument_word(&self, offset: usize) -> Result<u32> {
+        let position = self
+            .native_arguments
+            .and_then(|base| base.checked_add(offset))
+            .ok_or_else(|| Error::new(self.pc, "KCS 宿主调用没有有效参数区"))?;
+        read::u32_at(&self.memory, position)
+    }
+
     fn local_region(&self, offset: usize) -> Result<(&[u8], usize)> {
         if offset < self.memory.len() || self.allocations.is_empty() {
             return Ok((&self.memory, offset));

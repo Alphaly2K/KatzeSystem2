@@ -29,6 +29,11 @@ impl FolderPaths {
     /// 一次扫描并按大小写展开已知标记；未知或未闭合标记保持字面值。
     /// 不递归展开替换结果，不改写分隔符，输出至多 259 个单元。
     pub fn expand(&self, source: &[u16]) -> Result<Vec<u16>> {
+        self.expand_utf16(source, 259)
+    }
+
+    /// 宽字符入口；规则与 expand 相同，容量由调用方指定，不包含末尾零。
+    pub fn expand_utf16(&self, source: &[u16], max_units: usize) -> Result<Vec<u16>> {
         let source = terminated(source);
         let fields = self.fields();
         let mut output = Vec::new();
@@ -50,7 +55,7 @@ impl FolderPaths {
                 .iter()
                 .find(|(name, _)| token.iter().copied().eq(name.bytes().map(u16::from)))
                 .map_or(token, |(_, value)| terminated(value));
-            if value.len() > 259 - output.len() {
+            if value.len() > max_units - output.len() {
                 return Err(Error::new(0, "目录展开超出字段容量"));
             }
             output.extend_from_slice(value);

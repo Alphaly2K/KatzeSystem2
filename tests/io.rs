@@ -103,13 +103,18 @@ fn wide_file_creation_bridges_cp932_and_stops_at_the_first_zero() {
         }
     }
     let mut files = Files::default();
-    let name: Vec<_> = "あ\u{80}\u{f8f0}\u{f8f1}\u{f8f2}\u{f8f3}\0🌟"
+    let name: Vec<_> = "あ\u{80}\u{f8f0}\u{f8f1}\u{f8f2}\u{f8f3}\u{e000}\u{e757}\0🌟"
         .encode_utf16()
         .collect();
     assert!(files.create_utf16(7, &name).unwrap().is_some());
     assert_eq!(
         files.0,
-        [(7, vec![0x82, 0xa0, 0x80, 0xa0, 0xfd, 0xfe, 0xff])]
+        [(
+            7,
+            vec![
+                0x82, 0xa0, 0x80, 0xa0, 0xfd, 0xfe, 0xff, 0xf0, 0x40, 0xf9, 0xfc
+            ]
+        )]
     );
     assert!(
         files

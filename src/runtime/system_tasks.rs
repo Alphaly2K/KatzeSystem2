@@ -14,7 +14,9 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             600 => 12,
             1018 => 16,
             601 | 1022 => 4,
-            1020 | 1023 => 8,
+            1019 | 1020 | 1023 => 8,
+            1021 if arguments.len() == 4 => 4,
+            1021 => 8,
             _ => unreachable!(),
         };
         if arguments.len() != count {
@@ -68,17 +70,47 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             )?;
             return Ok(NativeReturn::Value(result));
         }
-        let first = format_string(vm, read::u32_at(arguments, 4)?, 0)?;
+        // 1021 的四字节调用仍读取参数区后一字；须保留已退栈槽的内容。
+        let address = if index == 1021 && arguments.len() == 4 {
+            vm.native_argument_word(4)?
+        } else {
+            read::u32_at(arguments, 4)?
+        };
+        let first = format_string(vm, address, 0)?;
         let first = &first[..first
             .iter()
             .position(|&byte| byte == 0)
             .unwrap_or(first.len())];
         if index != 600 {
-            let mut text = first.to_vec();
+            let mut text = if index == 1019 {
+                let name: Vec<_> = crate::text::cp932_replacing(first).encode_utf16().collect();
+                if name.len() >= 2048 {
+                    return Err(Error::new(vm.pc, "网络任务路径超过转换缓冲区范围"));
+                }
+                let expanded = self
+                    .host
+                    .folder_paths
+                    .as_ref()
+                    .ok_or_else(|| Error::new(vm.pc, "运行时未配置目录展开上下文"))?
+                    .expand_utf16(&name, 2047)?;
+                let text = crate::text::cp932_encoded_replacing(&expanded);
+                if text.len() >= 2048 {
+                    return Err(Error::new(vm.pc, "网络任务路径超过字节缓冲区范围"));
+                }
+                text
+            } else {
+                first.to_vec()
+            };
             text.push(0);
             self.command_target_with_buffers(
                 target,
-                if index == 1020 { 585 } else { 588 },
+                match index {
+                    1019 => 584,
+                    1020 => 585,
+                    1021 => 586,
+                    1023 => 588,
+                    _ => unreachable!(),
+                },
                 [0; 3],
                 &mut CommandBuffers {
                     data1: Some(&mut text),

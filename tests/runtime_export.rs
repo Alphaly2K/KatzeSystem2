@@ -83,13 +83,13 @@ impl TaskObject for Receiver {
         host: &mut dyn Host,
         budget: usize,
     ) -> Result<CommandOutcome> {
-        if matches!(command.code, 453 | 454 | 516 | 517 | 583 | 585 | 587 | 588) {
+        if matches!(command.code, 453 | 454 | 516 | 517 | 583..=588) {
             let name = |bytes: &[u8]| bytes[..bytes.iter().position(|&b| b == 0).unwrap()].to_vec();
             self.events.borrow_mut().push(Event {
                 command: *command,
                 first: if matches!(command.code, 453 | 583) {
                     buffers.data1.as_deref().unwrap().to_vec()
-                } else if matches!(command.code, 516 | 585 | 588) {
+                } else if matches!(command.code, 516 | 584..=586 | 588) {
                     name(buffers.data1.as_deref().unwrap())
                 } else {
                     Vec::new()
@@ -496,6 +496,123 @@ fn network_configuration_routes_two_byte_fields_and_a_byte_expanded_folder() -> 
                 .unwrap_err()
                 .to_string()
                 .contains("字段容量")
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn network_paths_use_wide_expansion_and_start_requests_read_retained_argument_slots() -> Result<()>
+{
+    for (path, expected) in [
+        (b"".to_vec(), b"".to_vec()),
+        (vec![0x82, 0xa0], vec![0x82, 0xa0]),
+        (vec![0x81, 0x7f], vec![0x81, 0x45]),
+        (vec![0x82], vec![0x81, 0x45]),
+        (
+            vec![0x80, 0xa0, 0xfd, 0xfe, 0xff, 0xf0, 0x40],
+            vec![0x80, 0xa0, 0xfd, 0xfe, 0xff, 0xf0, 0x40],
+        ),
+        (
+            b"%save%/image.png".to_vec(),
+            b"SAVE/\x8e\x91\x97\xbf/??/image.png".to_vec(),
+        ),
+        (
+            b"before%u[G16]/%%title%%/%%brand%%".to_vec(),
+            b"before7/TITLE/BRAND%title%".to_vec(),
+        ),
+        (
+            b"%userprofile%/%title".to_vec(),
+            b"%userprofile%/%title".to_vec(),
+        ),
+        (vec![b'x'; 2047], vec![b'x'; 2047]),
+    ] {
+        let mut data = vec![0; 4096];
+        data[16..20].copy_from_slice(&7u32.to_le_bytes());
+        data[64..64 + path.len()].copy_from_slice(&path);
+        data[3000..3026].copy_from_slice(b"caption%u[G16]%c[G24]tail\0");
+        for external in [0, 0x8000_0000] {
+            let mut code = Vec::new();
+            instruction(&mut code, 0x25, &[0x1357_9bdf]);
+            for target in [7, u32::MAX, 0] {
+                for (native, arity) in [(1019, 8), (1021, 8), (1021, 4)] {
+                    instruction(&mut code, 0x25, &[target]);
+                    instruction(
+                        &mut code,
+                        0x25,
+                        &[external | if native == 1019 { 64 } else { 3000 }],
+                    );
+                    if arity == 4 {
+                        code.push(0x2d);
+                    }
+                    instruction(&mut code, 0x2b, &[native, arity]);
+                }
+                for (native, output) in [(601, 0), (1022, 8)] {
+                    instruction(&mut code, 0x25, &[target]);
+                    instruction(&mut code, 0x2b, &[native, 4]);
+                    instruction(
+                        &mut code,
+                        0x26,
+                        &[if target == u32::MAX { 4 } else { output }],
+                    );
+                }
+            }
+            code.push(0x3b);
+            for budget in [1, 4096] {
+                let (events, resolutions) = run(&code, &data, budget, 0xabcdef01)?;
+                assert!(resolutions.is_empty());
+                let expected: Vec<_> = [7, 0]
+                    .into_iter()
+                    .flat_map(|target| {
+                        [584, 586, 586, 454, 587]
+                            .into_iter()
+                            .map(|code| Event {
+                                command: Command {
+                                    sender: 8,
+                                    target,
+                                    code,
+                                    data: [0; 3],
+                                },
+                                first: match code {
+                                    584 => expected.clone(),
+                                    586 => b"caption7".to_vec(),
+                                    _ => Vec::new(),
+                                },
+                                second: None,
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .collect();
+                assert_eq!(events, expected);
+            }
+        }
+    }
+    let mut code = Vec::new();
+    for value in [7, u32::MAX] {
+        instruction(&mut code, 0x25, &[value]);
+    }
+    code.push(0x2d);
+    instruction(&mut code, 0x2b, &[1021, 4]);
+    code.push(0x3b);
+    assert!(run(&code, &[0; 64], 1, 0).is_err());
+    for (path, diagnostic) in [
+        (vec![b'x'; 2048], "转换缓冲区"),
+        ([0x82, 0xa0].repeat(1024), "字节缓冲区"),
+        (b"%brand%".repeat(292), "字段容量"),
+    ] {
+        let mut data = vec![0; 4096];
+        data[64..64 + path.len()].copy_from_slice(&path);
+        let mut code = Vec::new();
+        for value in [7, 64] {
+            instruction(&mut code, 0x25, &[value]);
+        }
+        instruction(&mut code, 0x2b, &[1019, 8]);
+        code.push(0x3b);
+        assert!(
+            run(&code, &data, 1, 0)
+                .unwrap_err()
+                .message
+                .contains(diagnostic)
         );
     }
     Ok(())

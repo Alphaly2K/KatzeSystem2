@@ -1,6 +1,9 @@
 use crate::{Error, Result};
 use std::collections::BTreeMap;
 
+mod cp932;
+pub(crate) use cp932::encode_replacing as cp932_encoded_replacing;
+
 pub fn cp932(bytes: &[u8]) -> Result<String> {
     encoding_rs::SHIFT_JIS
         .decode_without_bom_handling_and_without_replacement(bytes)
@@ -39,6 +42,9 @@ pub(crate) fn cp932_encoded(source: &str) -> Result<Vec<u8>> {
     let mut result = Vec::new();
     for character in source.chars() {
         match character {
+            '\u{e000}'..='\u{e757}' => {
+                result.extend(cp932::user_defined(character as u16).to_be_bytes());
+            }
             '\u{80}' => result.push(0x80),
             '\u{f8f0}' => result.push(0xa0),
             '\u{f8f1}'..='\u{f8f3}' => result.push((character as u32 - 0xf8f1) as u8 + 0xfd),

@@ -50,6 +50,8 @@
 
 依赖版本与校验值由 `Cargo.lock` 固定。Zlib 解压使用 zlib-rs 纯 Rust 后端，不要求系统 Zlib。flate2 在 WebAssembly 目标仍声明 miniz_oxide 依赖，相关许可继续保留。zlib-rs 最低 Rust 版本为 1.75，兼容项目的 Rust 1.87，分发时保留版权与 Zlib 声明，修改上游源码时明确标记。字体服务使用 fontdb 统一发现、fontdue 栅格化和 ttf-parser 元数据解析；fontdb 启用 fs／fontconfig，fontconfig-parser 使用纯 Rust 解析配置，关闭 memmap。新增依赖采用上表的 MIT 或 Zlib 许可，分发时保留许可及版权声明；slotmap 的来源与修改标记义务按其 Zlib 许可执行。本地时间由 chrono 和时区发现依赖提供，最低 Rust 版本不超过 1.87；关闭 chrono 默认特性，仅启用 clock。其余目标平台的传递依赖一并登记并保留 MIT 声明。未引入先行实现的源码或资源。
 
+CP932 的最佳匹配补充采用 Unicode 公布的 WindowsBestFit 数据，按 Unicode License v3 使用，与 LGPL-2.1 兼容；未新增代码依赖。来源、原始数据校验值及提取范围见[映射来源](licenses/cp932-mapping/SOURCE.md)，分发时保留[完整版权与许可](licenses/cp932-mapping/LICENSE-UNICODE)，不得使用版权人名称为产品背书。
+
 图像输出使用纯 Rust 的 png 0.17.16 和 jpeg-encoder 0.6.1；四项新增包的最低 Rust 版本均不高于 1.87。其 MIT 许可与 LGPL-2.1 兼容，分发时保留上表中的版权和许可文字。jpeg-encoder 的离散余弦变换另采用 IJG 许可，源码分发保留完整声明，修改上游源码时明确标记，二进制分发文档必须包含以下致谢，不得以 IJG 作者名义背书：
 
 > this software is based in part on the work of the Independent JPEG Group
