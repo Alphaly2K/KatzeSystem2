@@ -49,7 +49,7 @@ impl TaskObject for RootObject {
         kind: u32,
         command: &Command,
         output: &mut u32,
-        _host: &mut dyn Host,
+        host: &mut dyn Host,
         _budget: usize,
     ) -> Result<CommandOutcome> {
         let propagate = self.base.control.dispatch(
@@ -60,10 +60,11 @@ impl TaskObject for RootObject {
             |_, _, command, output| {
                 match command.code {
                     1..=3 => return Ok(true),
+                    33 => *output = u32::from(host.root_index_contains(command.data[0])?),
                     34 => *output = self.input_task,
                     35 => *output = self.sound_task,
                     40 => self.command_40 = command.data[1],
-                    32 | 33 | 37..=39 => {
+                    32 | 37..=39 => {
                         return Err(Error::new(0, "根对象专属命令尚未接入"));
                     }
                     _ => {}

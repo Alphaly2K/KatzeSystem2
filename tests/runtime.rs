@@ -6,8 +6,8 @@ use katze_system2::{
     Error, Result,
     kcs::{Host, Interpreter, OrdinaryTask, Program, TaskClock},
     runtime::{
-        BaseObject, KcsFactory, ObjectFactory, OrdinaryObject, ProgramLoader, Runtime, TaskObject,
-        kind,
+        BaseObject, KcsFactory, ObjectFactory, OrdinaryObject, ProgramLoader, RootObject, Runtime,
+        TaskObject, kind,
     },
     task::{Command, CommandBuffers, CommandOutcome, Control},
 };
@@ -156,6 +156,76 @@ fn fes_send_delivers_evaluated_values_to_the_parent_and_skips_an_absent_child() 
             );
             assert_eq!(vm.waiting_message_address(), Some(32));
         }
+    }
+}
+
+#[test]
+fn root_index_queries_preserve_destroyed_ids_until_sweep_and_restore_caller_state() {
+    for budget in [1, 4096] {
+        let mut asm = Asm::default();
+        for _ in 0..3 {
+            for (offset, id) in [0, 1, 2, 3, 99].into_iter().enumerate() {
+                asm.ins(0x25, &[id])
+                    .ins(0x2b, &[77, 4])
+                    .ins(0x26, &[offset as u32 * 4]);
+            }
+            asm.ins(0x2b, &[68, 0])
+                .ins(0x26, &[20])
+                .ins(0x2b, &[5, 0])
+                .ins(0x26, &[24])
+                .ins(0x2b, &[65, 0]);
+        }
+        asm.ins(0x3b, &[]);
+        let mut source = Source::new();
+        source.add(b"query", asm.build(), data());
+        source.add(b"empty", vec![0x3b], data());
+        let mut runtime = Runtime::new(
+            0,
+            kind::ROOT,
+            Box::new(RootObject::new(0, 0)),
+            katze_system2::expression::State::new(8),
+            KcsFactory::new(source),
+        );
+        runtime.set_budget(budget, 1 << 20);
+        assert_eq!(runtime.create(0, kind::ORDINARY, b"query", b"").unwrap(), 1);
+        assert_eq!(runtime.create(0, kind::ORDINARY, b"empty", b"").unwrap(), 2);
+        assert_eq!(runtime.create(2, kind::ORDINARY, b"empty", b"").unwrap(), 3);
+        runtime.object_mut(1).unwrap().state().1.origin = 5;
+        runtime.update(10, 1).unwrap();
+        let vm = runtime.object(1).unwrap().interpreter().unwrap();
+        assert_eq!(words(vm, 0, 7), [0, 1, 1, 1, 0, 1, 5]);
+        assert!(vm.stack_bytes().is_empty());
+
+        runtime.destroy(2).unwrap();
+        assert!(runtime.object(2).is_none());
+        assert!(runtime.object(3).is_none());
+        assert_eq!(runtime.tree().next_id(), 4);
+        for id in [2, 3] {
+            assert_eq!(
+                runtime
+                    .dispatch_command(
+                        1,
+                        Command {
+                            target: 0,
+                            sender: 1,
+                            code: 33,
+                            data: [id, 0, 0],
+                        },
+                    )
+                    .unwrap(),
+                1
+            );
+        }
+        runtime.update(20, 1).unwrap();
+        let vm = runtime.object(1).unwrap().interpreter().unwrap();
+        assert_eq!(words(vm, 0, 7), [0, 1, 1, 1, 0, 1, 15]);
+        assert!(vm.stack_bytes().is_empty());
+        assert_eq!(runtime.tree().next_id(), 2);
+
+        runtime.update(30, 1).unwrap();
+        let vm = runtime.object(1).unwrap().interpreter().unwrap();
+        assert_eq!(words(vm, 0, 7), [0, 1, 0, 0, 0, 1, 25]);
+        assert!(vm.stack_bytes().is_empty());
     }
 }
 

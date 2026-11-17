@@ -105,6 +105,10 @@ impl<H: Host, S: SystemServices> Host for SystemHost<'_, H, S> {
         self.inner.parent_task_id()
     }
 
+    fn root_index_contains(&self, id: u32) -> Result<bool> {
+        self.inner.root_index_contains(id)
+    }
+
     fn handle_allocator(&self) -> Option<crate::HandleAllocator> {
         self.inner.handle_allocator()
     }

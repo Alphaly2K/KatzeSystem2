@@ -54,6 +54,11 @@ impl TaskTree {
         self.nodes.get(&(id as i32))
     }
 
+    /// 根层后代编号索引包含待清理的已销毁编号，不包含根任务自身。
+    pub fn root_index_contains(&self, id: u32) -> bool {
+        id != self.root_id && self.reserved.contains(&(id as i32))
+    }
+
     pub fn children(&self, id: u32) -> Option<impl DoubleEndedIterator<Item = u32> + '_> {
         Some(
             self.node(id)?

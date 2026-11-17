@@ -110,6 +110,13 @@ impl<H: Host, S: TaskServices> Host for TaskHost<'_, H, S> {
         self.inner.parent_task_id()
     }
 
+    fn root_index_contains(&self, id: u32) -> Result<bool> {
+        if let Some(tree) = self.services.task_tree() {
+            return Ok(tree.root_index_contains(id));
+        }
+        self.inner.root_index_contains(id)
+    }
+
     fn handle_allocator(&self) -> Option<crate::HandleAllocator> {
         self.inner.handle_allocator()
     }
@@ -297,7 +304,7 @@ impl<H: Host, S: TaskServices> Host for TaskHost<'_, H, S> {
         }
         let count = match index {
             66 => 3,
-            67 | 109 | 454 => 1,
+            67 | 77 | 109 | 454 => 1,
             108 | 110 => 2,
             69 | 70 | 72 | 73 => 4,
             _ => return self.inner.call(index, arguments, vm),
@@ -334,6 +341,19 @@ impl<H: Host, S: TaskServices> Host for TaskHost<'_, H, S> {
             return Ok(NativeReturn::Continue);
         }
         match index {
+            77 => {
+                let mut output = 0;
+                self.services.dispatch_command(
+                    Command {
+                        target: 0,
+                        sender: self.task_id,
+                        code: 33,
+                        data: [args[0], 0, 0],
+                    },
+                    &mut output,
+                )?;
+                Ok(NativeReturn::Value(output))
+            }
             108..=110 => {
                 let mut output = 0;
                 let found = self.services.dispatch_command(

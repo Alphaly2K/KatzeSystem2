@@ -514,6 +514,11 @@ pub trait Host {
         Err(Error::new(0, "宿主未提供当前任务父级查询"))
     }
 
+    /// 查询根层后代编号索引，保留销毁后到索引清理前的编号。
+    fn root_index_contains(&self, _id: u32) -> Result<bool> {
+        Err(Error::new(0, "宿主未提供根任务编号索引"))
+    }
+
     /// 同步创建直属子任务；名称及上下文为未展开的原始字节。
     fn create_task_child(&mut self, _kind: u32, _name: &[u8], _context: &[u8]) -> Result<u32> {
         Err(Error::new(0, "宿主未提供子任务创建"))
@@ -797,6 +802,10 @@ impl<T: Host + ?Sized> Host for &mut T {
 
     fn parent_task_id(&self) -> Result<u32> {
         (**self).parent_task_id()
+    }
+
+    fn root_index_contains(&self, id: u32) -> Result<bool> {
+        (**self).root_index_contains(id)
     }
 
     fn dispatch_task_command(

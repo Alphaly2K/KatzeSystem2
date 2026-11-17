@@ -220,12 +220,18 @@ fn args(values: [u32; 4]) -> Vec<u8> {
 #[test]
 fn object_commands_preserve_packets_and_distinguish_missing_routes_from_outputs() {
     let mut services = services(&[0x3b]);
+    services.tree.insert(7, 0, 1).unwrap();
     let mut state = State::new(8);
     let mut core = CoreHost::new(&mut state);
     let mut vm =
         Interpreter::new(Program::from_code(&[], vec![0; 16], 32).unwrap(), vec![]).unwrap();
     let mut host = TaskHost::new(&mut core, &mut services);
     host.set_task_id(7);
+    assert_eq!(
+        host.call(77, &0x8000_0000u32.to_le_bytes(), &mut vm)
+            .unwrap(),
+        NativeReturn::Value(0x8000_0001)
+    );
     assert_eq!(
         host.call(109, &42u32.to_le_bytes(), &mut vm).unwrap(),
         NativeReturn::Value(0x8000_0001)
@@ -255,6 +261,12 @@ fn object_commands_preserve_packets_and_distinguish_missing_routes_from_outputs(
         NativeReturn::Continue
     );
     host.services.tree.unregister(42).unwrap();
+    host.services.tree.unregister(0).unwrap();
+    assert_eq!(
+        host.call(77, &0x8000_0000u32.to_le_bytes(), &mut vm)
+            .unwrap(),
+        NativeReturn::Value(0)
+    );
     assert_eq!(
         host.call(109, &42u32.to_le_bytes(), &mut vm).unwrap(),
         NativeReturn::Value(0)
@@ -267,6 +279,12 @@ fn object_commands_preserve_packets_and_distinguish_missing_routes_from_outputs(
     assert_eq!(
         host.services.commands,
         [
+            Command {
+                target: 0,
+                sender: 7,
+                code: 33,
+                data: [0x8000_0000, 0, 0]
+            },
             Command {
                 target: 42,
                 sender: 7,
@@ -294,6 +312,7 @@ fn object_commands_preserve_packets_and_distinguish_missing_routes_from_outputs(
         ]
     );
     assert!(host.call(109, &[], &mut vm).is_err());
+    assert!(host.call(77, &[], &mut vm).is_err());
     assert!(host.call(108, &update[..4], &mut vm).is_err());
     assert!(host.call(110, &update[..4], &mut vm).is_err());
 }

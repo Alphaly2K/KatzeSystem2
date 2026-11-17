@@ -294,6 +294,10 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
         self.inner.parent_task_id()
     }
 
+    fn root_index_contains(&self, id: u32) -> Result<bool> {
+        self.inner.root_index_contains(id)
+    }
+
     fn handle_allocator(&self) -> Option<HandleAllocator> {
         Some(self.state.handles.clone())
     }

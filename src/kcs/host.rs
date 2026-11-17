@@ -368,6 +368,12 @@ impl Host for CoreHost<'_> {
             .ok_or_else(|| Error::new(0, "当前任务没有可查询的父级"))
     }
 
+    fn root_index_contains(&self, id: u32) -> Result<bool> {
+        self.task_tree
+            .map(|tree| tree.root_index_contains(id))
+            .ok_or_else(|| Error::new(0, "宿主未提供根任务编号索引"))
+    }
+
     fn handle_allocator(&self) -> Option<HandleAllocator> {
         Some(self.host.handle_allocator())
     }

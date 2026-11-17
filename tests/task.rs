@@ -89,6 +89,8 @@ fn unregister_keeps_descendant_aliases_and_internal_routes_until_destruction() {
         tree.insert(parent, id, 12).unwrap();
     }
     tree.unregister(0).unwrap();
+    assert!(!tree.root_index_contains(9));
+    assert!(tree.root_index_contains(0));
     assert!(tree.node(0).is_some());
     assert!(tree.find_in_subtree(9, 0).is_none());
     assert!(tree.find_in_subtree(0, 0).is_some());
@@ -136,7 +138,13 @@ fn unregister_keeps_descendant_aliases_and_internal_routes_until_destruction() {
     tree.unregister(1).unwrap();
     assert_eq!(tree.subtree_ids(0).unwrap(), [0, 1, 2]);
     assert_eq!(tree.remove(0).unwrap(), [0, 1, 2]);
+    for id in [0, 1, 2] {
+        assert!(tree.root_index_contains(id));
+    }
     assert_eq!(tree.next_id(), 4);
     tree.sweep();
+    for id in [0, 1, 2] {
+        assert!(!tree.root_index_contains(id));
+    }
     assert_eq!(tree.next_id(), 0);
 }
