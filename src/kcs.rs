@@ -17,6 +17,7 @@ mod memory;
 mod message_text;
 mod messages;
 mod motion;
+mod name_pairs;
 mod name_table;
 mod native;
 mod numeric;

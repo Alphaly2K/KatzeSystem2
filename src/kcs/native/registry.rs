@@ -13,6 +13,7 @@ pub(super) enum CoreHandler {
     Achievements,
     Matrix,
     Data,
+    NamePairs,
     MapData,
     Sequence,
     RecordStack,
@@ -86,6 +87,7 @@ pub(super) fn core(index: u32) -> CoreHandler {
             CoreHandler::Data
         }
         900 | 901 => CoreHandler::MapData,
+        289 | 291..=293 => CoreHandler::NamePairs,
         424 | 425 => CoreHandler::Sequence,
         863..=868 => CoreHandler::RecordStack,
         350..=358 => CoreHandler::Vector,

@@ -45,6 +45,7 @@ pub(crate) fn call_native(
         }
         registry::CoreHandler::Matrix => matrix::call(host, index, arguments, vm),
         registry::CoreHandler::Data => super::data::call(host, index, arguments, vm),
+        registry::CoreHandler::NamePairs => super::name_pairs::call(host, index, arguments, vm),
         registry::CoreHandler::MapData => super::map_data::call(host, index, arguments, vm),
         registry::CoreHandler::Sequence => super::sequences::call(host, index, arguments, vm),
         registry::CoreHandler::RecordStack => super::record_stack::call(host, index, arguments, vm),
