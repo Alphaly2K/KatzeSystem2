@@ -9,6 +9,7 @@ mod blur;
 mod cache;
 mod export;
 mod layers;
+mod region;
 mod resize;
 mod resource;
 mod transform;

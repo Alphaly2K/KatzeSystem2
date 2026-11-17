@@ -841,3 +841,213 @@ fn ordinary_image_property_errors_keep_written_prefix_and_diagnose_undefined_res
         assert_eq!(vm.stack_bytes(), 0xdead_beefu32.to_le_bytes());
     }
 }
+
+#[test]
+fn region_composition_uses_physical_pixels_record_order_and_shared_feedback() {
+    for budget in [1, 4096] {
+        for bit_depth in [24, 32] {
+            for (source_kind, edges) in [(24, false), (32, false), (0, false), (32, true)] {
+                let mut factory =
+                    KcsFactory::new(Loader(Program::from_code(&[], vec![], 0).unwrap()));
+                factory.external =
+                    katze_system2::memory::SharedMemory::new(vec![0xa5; 32]).unwrap();
+                let mut rt = Runtime::new(
+                    0,
+                    kind::ROOT,
+                    Box::new(BaseObject::new()),
+                    State::new(0),
+                    factory,
+                );
+                rt.set_budget(budget, 1 << 20);
+                let target = rt.images_mut().create(0, [4, 3]).unwrap();
+                let original: Vec<u32> = (0..12)
+                    .map(|i| {
+                        if edges {
+                            0
+                        } else {
+                            0x801e_140a + i * 0x0001_0101
+                        }
+                    })
+                    .collect();
+                let target_image = Image::from_frame(DecodedFrame {
+                    id: 7,
+                    info: StandardInfo {
+                        size: [4, 3],
+                        bit_depth,
+                        offset: [17, 19],
+                        canvas_size: [50, 60],
+                        reserved: 1,
+                        base: [11, -9],
+                    },
+                    pixels: original
+                        .iter()
+                        .flat_map(|value| value.to_le_bytes())
+                        .collect(),
+                    attributes: [(1, [2, 3, 4, 5, 6])].into(),
+                })
+                .unwrap();
+                *rt.images_mut().get_mut(target).unwrap() = target_image.clone();
+                let shared = rt.images_mut().share(target).unwrap();
+                let source_pixels = [0x40aa_bbccu32, 0x80dd_eeff, 0xc011_2233, 0xff44_5566];
+                let source = if source_kind == 0 {
+                    shared
+                } else {
+                    let source = rt.images_mut().create(0, [2, 2]).unwrap();
+                    *rt.images_mut().get_mut(source).unwrap() = Image::from_frame(DecodedFrame {
+                        id: 8,
+                        info: StandardInfo {
+                            size: [2, 2],
+                            bit_depth: source_kind,
+                            offset: [-17, 50],
+                            canvas_size: [90, 80],
+                            reserved: 1,
+                            base: [30, 40],
+                        },
+                        pixels: source_pixels
+                            .into_iter()
+                            .flat_map(u32::to_le_bytes)
+                            .collect(),
+                        attributes: Default::default(),
+                    })
+                    .unwrap();
+                    rt.images_mut()
+                        .get_mut(source)
+                        .unwrap()
+                        .set_alpha_mask(2)
+                        .unwrap();
+                    source
+                };
+                let physical = rt.images().pixel_handle(target).unwrap();
+                let alias = source_kind == 0;
+                let mut code = Vec::new();
+                code.extend([0x25, 3]);
+                code.extend(0xdead_beefu32.to_le_bytes());
+                call(&mut code, 120, &[0], None);
+                call(&mut code, 120, &[target, 0x8000_0001, 2, 128], Some(160));
+                call(&mut code, 65, &[], None);
+                let mut data = vec![0xa5; 176];
+                let clip = if alias || edges {
+                    [1u32, 1, 3, 2]
+                } else {
+                    [0u32, 0, 4, 3]
+                };
+                data[128..144].copy_from_slice(
+                    &clip
+                        .into_iter()
+                        .flat_map(u32::to_le_bytes)
+                        .collect::<Vec<_>>(),
+                );
+                rt.factory_mut().programs.0 = Program::from_code(&code, data.clone(), 128).unwrap();
+                let task = rt.create(0, kind::ORDINARY, b"region", b"").unwrap();
+                let position = if alias {
+                    u32::MAX
+                } else if edges {
+                    0
+                } else {
+                    1
+                };
+                let records = [0, u32::MAX, u32::MAX, source, position, position];
+                let record_bytes: Vec<_> = records.into_iter().flat_map(u32::to_le_bytes).collect();
+                rt.object_mut(task)
+                    .unwrap()
+                    .interpreter_mut()
+                    .unwrap()
+                    .write(0x8000_0001, &record_bytes)
+                    .unwrap();
+                rt.update(0, 1).unwrap();
+                let vm = rt.object(task).unwrap().interpreter().unwrap();
+                assert_eq!(vm.read(160, 4).unwrap(), 0xdead_beefu32.to_le_bytes());
+                assert_eq!(vm.read(128, 16).unwrap(), &data[128..144]);
+                assert_eq!(vm.read(0x8000_0001, 24).unwrap(), record_bytes);
+                assert!(vm.stack_bytes().is_empty());
+                let mut expected = if alias {
+                    original.clone()
+                } else if edges {
+                    vec![0; 12]
+                } else {
+                    vec![0xff00_0000; 12]
+                };
+                if bit_depth == 24 {
+                    expected.iter_mut().for_each(|value| *value |= 0xff00_0000);
+                }
+                if edges {
+                    expected[5] = 0xff00_0000;
+                    expected[6] = 0xff00_0000;
+                    if bit_depth == 32 {
+                        expected[4] = 0x00dd_eeff;
+                    }
+                } else if alias {
+                    expected[5] = if bit_depth == 24 {
+                        expected[2]
+                    } else {
+                        0xff00_0000
+                    };
+                    expected[6] = if bit_depth == 24 {
+                        expected[3]
+                    } else {
+                        0xff00_0000
+                    };
+                } else if source_kind == 24 {
+                    for (index, pixel) in [1, 2, 5, 6].into_iter().zip(source_pixels) {
+                        expected[index] = pixel | 0xff00_0000;
+                    }
+                }
+                let image = rt.images().get(target).unwrap();
+                assert_eq!(
+                    image.surface().pixels(),
+                    expected
+                        .into_iter()
+                        .flat_map(u32::to_le_bytes)
+                        .collect::<Vec<_>>()
+                );
+                assert_eq!(image.info(), target_image.info());
+                assert_eq!(image.attribute(1), target_image.attribute(1));
+                assert_eq!(image, rt.images().get(shared).unwrap());
+                assert_eq!(rt.images().pixel_handle(target).unwrap(), physical);
+            }
+        }
+    }
+}
+
+#[test]
+fn region_composition_keeps_completed_clear_and_skips_null_record_coordinates() {
+    for count in [1, 2] {
+        let mut code = vec![0x25, 3];
+        code.extend(0xdead_beefu32.to_le_bytes());
+        call(&mut code, 120, &[1, 0x8000_0000, count, 0], None);
+        call(&mut code, 65, &[], None);
+        let mut factory = KcsFactory::new(Loader(
+            Program::from_code(
+                &code,
+                [0u32, 0, 1, 1]
+                    .into_iter()
+                    .flat_map(u32::to_le_bytes)
+                    .collect(),
+                64,
+            )
+            .unwrap(),
+        ));
+        factory.external = katze_system2::memory::SharedMemory::new(vec![0; 4]).unwrap();
+        let mut rt = Runtime::new(
+            0,
+            kind::ROOT,
+            Box::new(BaseObject::new()),
+            State::new(0),
+            factory,
+        );
+        assert_eq!(rt.images_mut().create(0, [1, 1]).unwrap(), 1);
+        let task = rt.create(0, kind::ORDINARY, b"prefix", b"").unwrap();
+        let result = rt.update(0, 1);
+        if count == 1 {
+            result.unwrap();
+        } else {
+            assert!(result.unwrap_err().message.contains("越界"));
+        }
+        assert_eq!(
+            rt.images().get(1).unwrap().surface().pixel(0, 0),
+            Some(0xff00_0000)
+        );
+        let vm = rt.object(task).unwrap().interpreter().unwrap();
+        assert_eq!(vm.stack_bytes(), 0xdead_beefu32.to_le_bytes());
+    }
+}

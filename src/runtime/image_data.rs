@@ -1,5 +1,5 @@
 use super::Resources;
-use crate::graphics::{Image, ImageFilter};
+use crate::graphics::{Image, ImageFilter, Rect};
 use crate::kcs::{Interpreter, NativeReturn};
 use crate::{Error, Result};
 
@@ -14,10 +14,10 @@ impl Resources {
         let count = match index {
             118 | 377 => 1,
             364 | 369 | 376 | 378 => 2,
-            121 => 4,
+            120 | 121 => 4,
             _ => 3,
         };
-        let short_zero = matches!(index, 370 | 371 | 374 | 376 | 378)
+        let short_zero = matches!(index, 120 | 370 | 371 | 374 | 376 | 378)
             && (4..count * 4).contains(&arguments.len())
             && arguments.len().is_multiple_of(4)
             && arguments.starts_with(&[0; 4]);
@@ -86,11 +86,41 @@ impl Resources {
             if index == 377 {
                 return Err(Error::new(vm.pc, "空图像的透明度查询返回未初始化结果"));
             }
-            return Ok(if matches!(index, 121 | 122 | 369 | 376 | 378 | 538) {
-                NativeReturn::Continue
-            } else {
-                NativeReturn::Value(0)
+            return Ok(
+                if matches!(index, 120 | 121 | 122 | 369 | 376 | 378 | 538) {
+                    NativeReturn::Continue
+                } else {
+                    NativeReturn::Value(0)
+                },
+            );
+        }
+        if index == 120 {
+            let bytes = vm.read(args[3], 16)?;
+            let values: [i32; 4] = std::array::from_fn(|i| {
+                i32::from_le_bytes(bytes[i * 4..i * 4 + 4].try_into().unwrap())
             });
+            let clip = Rect {
+                left: values[0],
+                top: values[1],
+                right: values[2],
+                bottom: values[3],
+            };
+            self.images
+                .get_mut(args[0])?
+                .fill_rect_from_bottom(clip, 0xff00_0000);
+            for index in 0..args[2] {
+                let address = args[1].wrapping_add(index.wrapping_mul(12));
+                let source = crate::read::u32_at(&vm.read(address, 4)?, 0)?;
+                if source != 0 {
+                    let bytes = vm.read(address.wrapping_add(4), 8)?;
+                    let position = std::array::from_fn(|i| {
+                        i32::from_le_bytes(bytes[i * 4..i * 4 + 4].try_into().unwrap())
+                    });
+                    self.images
+                        .composite_region(args[0], source, position, clip)?;
+                }
+            }
+            return Ok(NativeReturn::Continue);
         }
         if index == 376 {
             let filter = match args[1] {
