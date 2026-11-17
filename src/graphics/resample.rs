@@ -49,9 +49,19 @@ pub(crate) fn copy_scaled(
         return Ok(true);
     }
     let average = sw > dw.wrapping_mul(4) || sh > dh.wrapping_mul(4);
+    let step = [sw.wrapping_shl(15) / dw, sh.wrapping_shl(15) / dh];
+    if let Some(source) = source.filter(|_| !average) {
+        let jobs = (dw as usize * dh as usize / (256 * 1024)).clamp(1, 4);
+        let workers = if jobs > 1 && dh > 1 {
+            std::thread::available_parallelism().map_or(1, |count| jobs.min(count.get()))
+        } else {
+            1
+        };
+        copy_interpolated(target, source, from, to, step, workers);
+        return Ok(true);
+    }
     let ratio = [sw as f32 / dw as f32, sh as f32 / dh as f32];
     let window = ratio.map(|value| (value as i32).max(1) as usize);
-    let step = [sw.wrapping_shl(15) / dw, sh.wrapping_shl(15) / dh];
     for y in 0..dh {
         for x in 0..dw {
             let source = source.unwrap_or(target);
@@ -74,7 +84,10 @@ pub(crate) fn copy_scaled(
                     from.left.wrapping_add(x.wrapping_mul(step[0])),
                     from.top.wrapping_add(y.wrapping_mul(step[1])),
                 ];
-                let Some(pixel) = interpolate(source, at) else {
+                let Some(rows) = InterpolationRow::new(source, at[1]) else {
+                    continue;
+                };
+                let Some(pixel) = rows.sample(at[0]) else {
                     continue;
                 };
                 pixel
@@ -84,6 +97,51 @@ pub(crate) fn copy_scaled(
         }
     }
     Ok(true)
+}
+
+fn copy_interpolated(
+    target: &mut Surface,
+    source: &Surface,
+    from: Rect,
+    to: Rect,
+    step: [i32; 2],
+    workers: usize,
+) {
+    let stride = target.stride();
+    let top = (target.size()[1] as usize - to.bottom as usize) * stride;
+    let height = (to.bottom - to.top) as usize;
+    let columns = to.left as usize * 4..to.right as usize * 4;
+    let output = &mut target.pixels_mut()[top..top + height * stride];
+    let render = |first_row: usize, output: &mut [u8]| {
+        for (index, row) in output.chunks_exact_mut(stride).enumerate() {
+            // 目标行按内存顺序分块，每块从自身底端坐标计算取样相位。
+            let y = (height - 1 - first_row - index) as i32;
+            let sy = from.top.wrapping_add(y.wrapping_mul(step[1]));
+            let Some(source_row) = InterpolationRow::new(source, sy) else {
+                continue;
+            };
+            let mut sx = from.left;
+            for pixel in row[columns.clone()].chunks_exact_mut(4) {
+                if let Some(sample) = source_row.sample(sx) {
+                    pixel.copy_from_slice(&sample);
+                }
+                sx = sx.wrapping_add(step[0]);
+            }
+        }
+    };
+    if workers == 1 {
+        render(0, output);
+    } else {
+        let rows_per_job = height.div_ceil(workers);
+        std::thread::scope(|scope| {
+            let mut chunks = output.chunks_mut(rows_per_job * stride);
+            let first = chunks.next().unwrap();
+            for (index, chunk) in chunks.enumerate() {
+                scope.spawn(move || render((index + 1) * rows_per_job, chunk));
+            }
+            render(0, first);
+        });
+    }
 }
 
 fn average_pixel(source: &Surface, at: [usize; 2], window: [usize; 2]) -> Result<[u8; 4]> {
@@ -107,32 +165,54 @@ fn average_pixel(source: &Surface, at: [usize; 2], window: [usize; 2]) -> Result
     Ok(sum.map(|value| (value / count) as u8))
 }
 
-fn interpolate(source: &Surface, at: [i32; 2]) -> Option<[u8; 4]> {
-    let [x, y] = at.map(|value| (value >> 15) as u32);
-    let [width, height] = source.size();
-    if x >= width || y >= height {
-        return None;
+struct InterpolationRow<'a> {
+    lower: &'a [u8],
+    upper: &'a [u8],
+    fraction: u32,
+}
+
+impl<'a> InterpolationRow<'a> {
+    fn new(source: &'a Surface, y: i32) -> Option<Self> {
+        let height = source.size()[1] as usize;
+        let row = (y >> 15) as usize;
+        if row >= height {
+            return None;
+        }
+        let stride = source.stride();
+        let bottom = (height - 1 - row) * stride;
+        let pixels = source.pixels();
+        Some(Self {
+            lower: &pixels[bottom..bottom + stride],
+            upper: if row + 1 < height {
+                &pixels[bottom - stride..bottom]
+            } else {
+                &[]
+            },
+            fraction: (y & 0x7fff) as u32,
+        })
     }
-    let get = |x, y| {
-        let offset = bottom_offset(source.size(), x as usize, y as usize);
-        <[u8; 4]>::try_from(&source.pixels()[offset..offset + 4]).unwrap()
-    };
-    let first = get(x, y);
-    let pixels = [
-        first,
-        if x + 1 < width { get(x + 1, y) } else { first },
-        if y + 1 < height { get(x, y + 1) } else { first },
-        if x + 1 < width && y + 1 < height {
-            get(x + 1, y + 1)
-        } else {
-            first
-        },
-    ];
+
+    fn sample(&self, x: i32) -> Option<[u8; 4]> {
+        let offset = ((x >> 15) as usize).wrapping_mul(4);
+        let get = |row: &[u8], offset: usize| {
+            <[u8; 4]>::try_from(row.get(offset..offset.saturating_add(4))?).ok()
+        };
+        let first = get(self.lower, offset)?;
+        let pixels = [
+            first,
+            get(self.lower, offset + 4).unwrap_or(first),
+            get(self.upper, offset).unwrap_or(first),
+            get(self.upper, offset + 4).unwrap_or(first),
+        ];
+        mix_neighbors(pixels, (x & 0x7fff) as u32, self.fraction)
+    }
+}
+
+fn mix_neighbors(pixels: [[u8; 4]; 4], fx: u32, fy: u32) -> Option<[u8; 4]> {
     let alpha: u32 = pixels.iter().map(|pixel| u32::from(pixel[3])).sum();
     if alpha == 0 {
         return None;
     }
-    let [fx, fy] = at.map(|value| (value & 0x7fff) as u32);
     let weights = [
         ((32768 - fx) * (32768 - fy)) >> 15,
         (fx * (32768 - fy)) >> 15,
@@ -163,5 +243,48 @@ pub(crate) fn flip_rows(surface: &mut Surface) {
     for y in 0..height / 2 {
         let (first, last) = surface.pixels_mut().split_at_mut((height - y - 1) * stride);
         first[y * stride..(y + 1) * stride].swap_with_slice(&mut last[..stride]);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parallel_rows_preserve_sampling_phase_and_pixels_outside_the_region() {
+        let mut source = Surface::new([7, 5]).unwrap();
+        for y in 0..5 {
+            for x in 0..7 {
+                let offset = (y * 7 + x) * 4;
+                let alpha = if x < 3 { 0 } else { (y * 52 + x * 7) as u8 };
+                source.pixels_mut()[offset..offset + 4].copy_from_slice(&[
+                    (x * 33) as u8,
+                    (y * 58) as u8,
+                    (x * y * 11) as u8,
+                    alpha,
+                ]);
+            }
+        }
+        let from = Rect::from_xywh(2, 1, 7, 5);
+        let to = Rect::from_xywh(3, 2, 18, 11);
+        let step = [(7 << 15) / 18, (5 << 15) / 11];
+        let mut expected = Surface::new([27, 17]).unwrap();
+        expected.clear(0xa511_2233);
+        let mut actual = expected.clone();
+        copy_interpolated(&mut actual, &source, from, to, step, 4);
+        for y in 0..11 {
+            for x in 0..18 {
+                let row = InterpolationRow::new(&source, from.top + y * step[1]).unwrap();
+                if let Some(pixel) = row.sample(from.left + x * step[0]) {
+                    let offset = bottom_offset(
+                        expected.size(),
+                        (to.left + x) as usize,
+                        (to.top + y) as usize,
+                    );
+                    expected.pixels_mut()[offset..offset + 4].copy_from_slice(&pixel);
+                }
+            }
+        }
+        assert_eq!(actual, expected);
     }
 }
