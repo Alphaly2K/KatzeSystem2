@@ -1,4 +1,4 @@
-use super::{Drawables, ProjectedVertex, Projection, Rect, Surface};
+use super::{Drawables, ProjectedVertex, Projection, Rect, Surface, TextureAddress};
 use crate::{Error, Result};
 
 /// 单级纹理过滤。
@@ -224,30 +224,35 @@ impl Surface {
         &self,
         uv: [f64; 2],
         filter: TextureFilter,
-        address: [super::TextureAddress; 2],
+        address: [TextureAddress; 2],
     ) -> [f64; 4] {
         // 先缩到镜像的两个周期内，避免大 UV 乘以尺寸后超出索引范围。
-        let position: [f64; 2] =
-            std::array::from_fn(|i| uv[i].rem_euclid(2.) * self.size[i] as f64);
+        let position: [f64; 2] = std::array::from_fn(|i| {
+            let uv = if (0. ..2.).contains(&uv[i]) {
+                uv[i]
+            } else {
+                uv[i].rem_euclid(2.)
+            };
+            uv * f64::from(self.size[i])
+        });
+        let resolve =
+            |axis: usize, texel| texture_coordinate(texel, self.size[axis], address[axis]);
         if filter == TextureFilter::Point {
-            return self.texel(position.map(|v| v.floor() as i64), address);
+            return self.texel(
+                resolve(0, position[0].floor() as i64),
+                resolve(1, position[1].floor() as i64),
+            );
         }
         let position = position.map(|v| v - 0.5);
         let lower = position.map(|v| v.floor() as i64);
         let fraction: [f64; 2] = std::array::from_fn(|i| position[i] - lower[i] as f64);
+        let x: [usize; 2] = std::array::from_fn(|i| resolve(0, lower[0] + i as i64));
+        let y: [usize; 2] = std::array::from_fn(|i| resolve(1, lower[1] + i as i64));
         let mut sample = [0.; 4];
-        for y in 0..2 {
-            for x in 0..2 {
-                let weight = if x == 0 {
-                    1. - fraction[0]
-                } else {
-                    fraction[0]
-                } * if y == 0 {
-                    1. - fraction[1]
-                } else {
-                    fraction[1]
-                };
-                let texel = self.texel([lower[0] + x, lower[1] + y], address);
+        for (y, wy) in y.into_iter().zip([1. - fraction[1], fraction[1]]) {
+            for (x, wx) in x.into_iter().zip([1. - fraction[0], fraction[0]]) {
+                let weight = wx * wy;
+                let texel = self.texel(x, y);
                 for (value, texel) in sample.iter_mut().zip(texel) {
                     *value += texel * weight;
                 }
@@ -256,21 +261,28 @@ impl Surface {
         sample
     }
 
-    fn texel(&self, at: [i64; 2], address: [super::TextureAddress; 2]) -> [f64; 4] {
-        let at: [usize; 2] = std::array::from_fn(|i| {
-            let size = i64::from(self.size[i]);
-            if address[i] == super::TextureAddress::Wrap {
-                return at[i].rem_euclid(size) as usize;
-            }
-            let value = at[i].rem_euclid(size * 2);
-            if value < size {
-                value as usize
-            } else {
-                (size * 2 - value - 1) as usize
-            }
-        });
-        let offset = at[1] * self.stride() + at[0] * 4;
+    fn texel(&self, x: usize, y: usize) -> [f64; 4] {
+        let offset = y * self.stride() + x * 4;
         std::array::from_fn(|i| f64::from(self.pixels[offset + i]))
+    }
+}
+
+fn texture_coordinate(value: i64, size: u32, address: TextureAddress) -> usize {
+    let size = i64::from(size);
+    let period = if address == TextureAddress::Wrap {
+        size
+    } else {
+        size * 2
+    };
+    let value = if (0..period).contains(&value) {
+        value
+    } else {
+        value.rem_euclid(period)
+    };
+    if value < size {
+        value as usize
+    } else {
+        (period - value - 1) as usize
     }
 }
 
