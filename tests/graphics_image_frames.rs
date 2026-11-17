@@ -186,22 +186,36 @@ struct Programs;
 impl ProgramLoader for Programs {
     fn load(&mut self, name: &[u8]) -> Result<Option<Program>> {
         let mut code = Vec::new();
-        let mut ins = |op, args: &[u32]| {
+        let mut ins = |op, args: &[(u8, u32)]| {
             code.push(op);
-            for value in args {
-                code.push(3);
+            for &(flag, value) in args {
+                code.push(flag);
                 code.extend(value.to_le_bytes());
             }
         };
         if name == b"load" {
-            ins(0x25, &[32]);
-            ins(0x2b, &[365, 4]);
-            ins(0x26, &[0]);
+            ins(0x25, &[(3, 32)]);
+            ins(0x2b, &[(3, 365), (3, 4)]);
+            ins(0x26, &[(3, 0)]);
         } else {
-            code.extend([0x25, 0x13, 0, 0, 0, 0, 0x2b, 3]);
-            code.extend(366u32.to_le_bytes());
-            code.push(3);
-            code.extend(4u32.to_le_bytes());
+            ins(0x25, &[(3, 0x1234_5678)]);
+            for (index, slot, x, source) in [
+                (622, 5, 0.0f32, (0x13, 0)),
+                (623, 5, 1.0, (0x13, 0)),
+                (623, 6, 2.0, (0x13, 0)),
+                (623, 5, 3.0, (3, 0)),
+            ] {
+                ins(0x25, &[(0x13, 4)]);
+                ins(0x25, &[(3, slot)]);
+                ins(0x25, &[source]);
+                for arg in [x.to_bits(), 1f32.to_bits(), 0, 0, 0, 0, 0, u32::MAX, 1, 0] {
+                    ins(0x25, &[(3, arg)]);
+                }
+                ins(0x2b, &[(3, index), (3, 52)]);
+            }
+            ins(0x25, &[(0x13, 0)]);
+            ins(0x2b, &[(3, 366), (3, 4)]);
+            ins(0x26, &[(3, 8)]);
         }
         code.push(0x3b);
         let mut data = vec![0; 64];
@@ -347,15 +361,20 @@ fn runtime_second_source_decodes_raw_handles_and_keeps_pixels_after_native_close
             .unwrap()
             .interpreter_mut()
             .unwrap()
-            .write(0, &raw.to_le_bytes())
+            .write(0, &[raw, list].map(u32::to_le_bytes).concat())
             .unwrap();
         runtime.update(1, 1).unwrap();
         assert!(runtime.image_data(raw).is_err());
+        let vm = runtime.object(consumer).unwrap().interpreter().unwrap();
+        assert_eq!(vm.read(8, 4).unwrap(), 0x1234_5678u32.to_le_bytes());
         runtime.dispatch_command(0, command(298, [0; 3])).unwrap();
-        assert_eq!(
-            runtime.images().get(output).unwrap().surface().pixel(4, 1),
-            Some(0xff44_5566)
-        );
+        let surface = runtime.images().get(output).unwrap().surface();
+        for (x, pixel) in [0, 0xff44_5566, 0xff44_5566, 0, 0xff44_5566]
+            .into_iter()
+            .enumerate()
+        {
+            assert_eq!(surface.pixel(x as u32, 1), Some(pixel));
+        }
         assert_eq!(reads.get(), 1);
         assert!(
             runtime

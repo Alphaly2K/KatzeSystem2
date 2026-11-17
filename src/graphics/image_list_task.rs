@@ -303,9 +303,6 @@ impl TaskObject for ImageListObject {
                         if data[0] != 0 {
                             list.set_pixels(key, data[0], properties, images(host)?)?;
                         } else if data[1] != 0 {
-                            if command.code == 288 {
-                                return Err(Error::new(0, "图像列表原始来源属性更新尚未接入"));
-                            }
                             let frames = ImageList::decode_hg3(host.image_data(data[1])?)?;
                             list.set_frames(key, frames, properties, images(host)?)?;
                         } else {

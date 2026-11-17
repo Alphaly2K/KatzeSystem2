@@ -226,7 +226,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             85 | 86 | 90 => 16,
             96 | 100 | 256 | 260 | 263 | 343 | 344 | 346 | 463 | 625 | 654 | 663 | 879 | 881 => 12,
             104 => 28,
-            257 | 731..=732 => 52,
+            257 | 622 | 623 | 731..=732 => 52,
             _ => unreachable!(),
         };
         if arguments.len() < 4 || arguments.len() > count || !arguments.len().is_multiple_of(4) {
@@ -234,7 +234,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         }
         let route_zero = matches!(
             index,
-            104 | 105 | 106 | 107 | 256 | 257 | 258 | 260..=264 | 339..=342 | 402 | 455 | 731..=732 | 462
+            104 | 105 | 106 | 107 | 256 | 257 | 258 | 260..=264 | 339..=342 | 402 | 455 | 622 | 623 | 731..=732 | 462
                 ..=464 | 534 | 570 | 572 | 625 | 653 | 654 | 655 | 657 | 663 | 702 | 989 | 848 | 849 | 862 | 879..=881 | 1065..=1069
         );
         if route_zero && arguments.len() != count {
@@ -379,7 +379,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     },
                 )?;
             }
-            257 | 731..=732 => {
+            257 | 622 | 623 | 731..=732 => {
                 let mut record = [0; 60];
                 if index == 257 {
                     let source = word(2);
@@ -389,6 +389,8 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                         self.resources.images.pixel_handle(source)?
                     };
                     record[..4].copy_from_slice(&pixels.to_le_bytes());
+                } else if matches!(index, 622 | 623) {
+                    record[4..8].copy_from_slice(&arguments[8..12]);
                 } else {
                     record[12..16].copy_from_slice(&arguments[8..12]);
                 }
@@ -397,7 +399,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                 record[48..56].copy_from_slice(&arguments[44..52]);
                 self.command_target_with_buffers(
                     target,
-                    if index == 732 { 288 } else { 286 },
+                    if matches!(index, 623 | 732) { 288 } else { 286 },
                     [word(1), 0, 0],
                     &mut CommandBuffers {
                         data0: None,
