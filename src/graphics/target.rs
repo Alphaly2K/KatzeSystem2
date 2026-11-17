@@ -204,7 +204,7 @@ impl RenderTarget {
         argb: u32,
         state: super::raster::RasterState,
     ) -> bool {
-        self.draw_tiles(|surface, origin| {
+        self.draw_tiles(state.origin, |surface, origin| {
             surface.blend_triangle_at(points, argb, super::raster::RasterState { origin, ..state })
         })
     }
@@ -214,7 +214,7 @@ impl RenderTarget {
         vertices: [ProjectedVertex; 3],
         state: super::raster::RasterState,
     ) -> bool {
-        self.draw_tiles(|surface, origin| {
+        self.draw_tiles(state.origin, |surface, origin| {
             surface.blend_projected_triangle_at(
                 vertices,
                 super::raster::RasterState { origin, ..state },
@@ -230,7 +230,7 @@ impl RenderTarget {
         filter: TextureFilter,
         state: super::raster::RasterState,
     ) -> bool {
-        self.draw_tiles(|surface, origin| {
+        self.draw_tiles(state.origin, |surface, origin| {
             surface.blend_textured_triangle_at(
                 vertices,
                 uv,
@@ -241,13 +241,20 @@ impl RenderTarget {
         })
     }
 
-    fn draw_tiles(&mut self, mut draw: impl FnMut(&mut Surface, [u32; 2]) -> bool) -> bool {
+    fn draw_tiles(
+        &mut self,
+        start: [u32; 2],
+        mut draw: impl FnMut(&mut Surface, [u32; 2]) -> bool,
+    ) -> bool {
         let mut touched = false;
         for row in 0..self.grid[1] {
             for column in 0..self.grid[0] {
                 let index = row as usize * self.grid[0] as usize + column as usize;
                 if let Some(surface) = &mut self.tiles[index] {
-                    let origin = [column * self.tile_size[0], row * self.tile_size[1]];
+                    let origin = [
+                        start[0] + column * self.tile_size[0],
+                        start[1] + row * self.tile_size[1],
+                    ];
                     if draw(surface, origin) {
                         if self.bit_depths[index] == 16 {
                             quantize_16(&mut surface.pixels);

@@ -419,7 +419,7 @@ impl Drawables {
         range: Option<[f32; 2]>,
     ) -> Result<bool> {
         self.visit_frame(projection, parent, range, |command| {
-            draw_command(output, canvas, &command, filter)
+            draw_command(output, canvas, &command, filter, [0; 2])
         })
     }
 }
@@ -429,9 +429,11 @@ pub(super) fn draw_command(
     canvas: Option<&super::RenderTarget>,
     command: &super::DrawCommand,
     filter: TextureFilter,
+    origin: [u32; 2],
 ) -> Result<bool> {
     let vertices = command.vertices;
     let state = RasterState {
+        origin,
         clip: command.clip,
         blend_mode: command.blend_mode,
         ..Default::default()

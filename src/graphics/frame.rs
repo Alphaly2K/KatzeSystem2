@@ -61,9 +61,18 @@ impl DrawList {
         output: &mut RenderTarget,
         canvas: Option<&RenderTarget>,
     ) -> Result<bool> {
+        self.render_at(output, canvas, [0; 2])
+    }
+
+    pub(super) fn render_at(
+        &self,
+        output: &mut RenderTarget,
+        canvas: Option<&RenderTarget>,
+        origin: [u32; 2],
+    ) -> Result<bool> {
         let mut touched = false;
         for command in &self.commands {
-            touched |= super::raster::draw_command(output, canvas, command, self.filter)?;
+            touched |= super::raster::draw_command(output, canvas, command, self.filter, origin)?;
         }
         Ok(touched)
     }
