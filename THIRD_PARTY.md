@@ -56,7 +56,7 @@ CP932 的最佳匹配补充采用 Unicode 公布的 WindowsBestFit 数据，按 
 
 > this software is based in part on the work of the Independent JPEG Group
 
-启动示例使用开发依赖 `libc` 0.2.191 访问系统接口，选择 MIT 许可，兼容项目 LGPL-2.1；分发示例时保留其[版权及许可声明](licenses/libc-0.2.191/LICENSE-MIT)。
+系统接口的传递依赖 `libc` 0.2.191 选择 MIT 许可，兼容项目 LGPL-2.1；分发时保留其[版权及许可声明](licenses/libc-0.2.191/LICENSE-MIT)。
 
 macOS 图形后端使用 Metal 的 Rust 绑定。以下依赖选择 MIT 分支；`unicode-ident` 另保留 Unicode-3.0 声明，分发时随附全部版权和许可文字。`block`、`malloc_buf` 的发布包通过包元数据声明 MIT，本项目同时保留声明的作者及 MIT 正文。
 
@@ -82,7 +82,7 @@ macOS 图形后端使用 Metal 的 Rust 绑定。以下依赖选择 MIT 分支�
 |unicode-ident|1.0.27|MIT + Unicode-3.0|[声明](licenses/unicode-ident-1.0.27)|
 
 
-桌面窗口的音频设备使用 SDL2：Rust 绑定采用 MIT，所带 SDL 源码采用 Zlib，HIDAPI 选择 BSD-3-Clause，像素转换组件同为 BSD-3-Clause；这些许可与 LGPL-2.1 兼容。分发示例时随附以下声明，保留版权、不得冒用来源或作者背书，修改第三方源码时标明修改。当前直接构建未修改的上游源码，未启用 SDL 扩展库。
+桌面窗口、输入、系统对话框、剪贴板及音频设备使用 SDL2：Rust 绑定采用 MIT，所带 SDL 源码采用 Zlib，HIDAPI 选择 BSD-3-Clause，像素转换组件同为 BSD-3-Clause；这些许可与 LGPL-2.1 兼容。分发示例时随附以下声明，保留版权、不得冒用来源或作者背书，修改第三方源码时标明修改。当前直接构建未修改的上游源码，未启用 SDL 扩展库。
 
 |包|版本|采用的许可|声明|
 |:--|:--|:--|:--|

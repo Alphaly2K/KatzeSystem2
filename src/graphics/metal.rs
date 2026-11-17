@@ -135,6 +135,16 @@ impl Renderer {
         &self.layer
     }
 
+    /// 使用窗口宿主持有的 CAMetalLayer，等待此前已提交的帧后替换。
+    pub fn set_presentation_layer(&mut self, layer: &MetalLayerRef) -> Result<()> {
+        self.wait()?;
+        layer.set_device(&self.device);
+        layer.set_pixel_format(MTLPixelFormat::BGRA8Unorm);
+        layer.set_display_sync_enabled(true);
+        self.layer = layer.to_owned();
+        Ok(())
+    }
+
     pub fn invalidate_canvas(&mut self) {
         self.tiles.clear();
     }

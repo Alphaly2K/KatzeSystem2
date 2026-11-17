@@ -49,7 +49,7 @@ pub enum WindowAction {
     RebuildMenu,
     ToggleFullscreen,
     Minimize,
-    /// 先向应用任务发送退出准备通知，再执行标准窗口关闭流程。
+    /// 先向输入任务发送空闲重置命令，再执行标准窗口关闭流程。
     CloseFromMenu,
 }
 
