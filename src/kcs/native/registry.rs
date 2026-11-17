@@ -22,8 +22,9 @@ pub(super) enum CoreHandler {
     Unknown,
 }
 
-pub(super) fn canonical(index: u32) -> u32 {
+pub(crate) fn canonical(index: u32) -> u32 {
     match index {
+        705 => 122,
         675 | 885 | 894 => 515,
         676 | 886 | 895 => 516,
         887 => 896,
@@ -221,7 +222,7 @@ pub(crate) enum RuntimeHandler {
 }
 
 pub(crate) fn runtime(index: u32) -> RuntimeHandler {
-    match index {
+    match canonical(index) {
         1009 => RuntimeHandler::ImageExport,
         600 | 601 | 1018..=1023 => RuntimeHandler::SystemTask,
         123..=125 | 418 | 557 => RuntimeHandler::TextWindow,

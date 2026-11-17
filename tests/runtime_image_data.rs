@@ -334,6 +334,7 @@ fn image_adjustment_natives_keep_shared_storage_alpha_and_null_gates() {
             let empty = rt.images_mut().create_empty(0).unwrap();
             let mut code = Vec::new();
             call(&mut code, 376, &[0], None);
+            call(&mut code, 705, &[0, u32::MAX, u32::MAX], None);
             call(&mut code, 376, &[u32::MAX, 0], None);
             call(&mut code, 376, &[u32::MAX, u32::MAX], None);
             call(&mut code, 376, &[empty, 4], None);
@@ -349,6 +350,7 @@ fn image_adjustment_natives_keep_shared_storage_alpha_and_null_gates() {
                 call(&mut code, 376, &[shared, mode], None);
                 call(&mut code, 65, &[], None);
             }
+            call(&mut code, 705, &[shared, 8, 2], None);
             code.push(0x3b);
             rt.factory_mut().programs.0 = Program::from_code(&code, vec![], 128).unwrap();
             let id = rt.create(0, kind::ORDINARY, b"adjust", b"").unwrap();
@@ -392,6 +394,13 @@ fn image_adjustment_natives_keep_shared_storage_alpha_and_null_gates() {
                     if bit_depth == 24 { colors } else { filtered }.repeat(2)
                 );
             }
+            rt.update(40, 1).unwrap();
+            let image = rt.images().get(handle).unwrap();
+            assert_eq!(image, rt.images().get(shared).unwrap());
+            assert_eq!(image.info().size, [8, 2]);
+            assert_eq!(image.info().canvas_size, [8, 2]);
+            assert_eq!(image.info().base, [4, 0]);
+            assert_eq!(image.attribute(1), Some([12, 8, 20, 12, 9]));
             assert!(
                 rt.object(id)
                     .unwrap()

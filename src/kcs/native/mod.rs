@@ -8,7 +8,9 @@ mod memory;
 mod rectangle;
 pub(crate) use rectangle::unite_at as unite_rectangle;
 mod registry;
-pub(crate) use registry::{RuntimeHandler, runtime as runtime_native_handler};
+pub(crate) use registry::{
+    RuntimeHandler, canonical as canonical_native, runtime as runtime_native_handler,
+};
 mod scalar;
 mod settings;
 mod spline;

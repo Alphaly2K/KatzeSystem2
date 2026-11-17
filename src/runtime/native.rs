@@ -1,5 +1,8 @@
 use super::{ObjectFactory, ObjectHost};
-use crate::kcs::{Interpreter, NativeReturn, RuntimeHandler, call_native, runtime_native_handler};
+use crate::kcs::{
+    Interpreter, NativeReturn, RuntimeHandler, call_native, canonical_native,
+    runtime_native_handler,
+};
 use crate::{Error, Result, read};
 
 impl<F: ObjectFactory> ObjectHost<'_, F> {
@@ -30,6 +33,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             index,
             std::env::var_os("KATZE_TRACE_TIMING").map(|_| std::time::Instant::now()),
         );
+        let index = canonical_native(index);
         self.resources.images.set_cache_limit(
             (self
                 .host
