@@ -17,6 +17,7 @@ pub struct SoundState {
 pub(super) struct GroupRange {
     pub(super) id: u32,
     pub(super) range: [i32; 2],
+    pub(super) parameter: u32,
 }
 
 impl Default for SoundState {
@@ -42,6 +43,7 @@ impl SoundState {
             ranges.entry(group.key).or_insert(GroupRange {
                 id: group.id,
                 range: group.range,
+                parameter: 100,
             });
         }
         self.groups = Some(ranges);
@@ -50,6 +52,45 @@ impl SoundState {
 
     pub fn group_range(&self, key: u32) -> Option<[i32; 2]> {
         self.groups.as_ref()?.get(&key).map(|group| group.range)
+    }
+
+    /// 组记录中的分类编号、两个有符号通道端点及原始末项 DWORD。
+    pub fn group_parameters(&self, key: u32) -> Option<[u32; 4]> {
+        self.groups.as_ref()?.get(&key).map(|group| {
+            [
+                group.id,
+                group.range[0] as u32,
+                group.range[1] as u32,
+                group.parameter,
+            ]
+        })
+    }
+
+    pub(super) fn register_group(&mut self, key: u32, bytes: Option<&[u8]>) -> Result<()> {
+        let groups = self.groups.get_or_insert_with(BTreeMap::new);
+        if groups.contains_key(&key) {
+            return Ok(());
+        }
+        if groups.len() >= read::MAX_ITEMS {
+            return Err(Error::new(0, "声音组数量超过上限"));
+        }
+        let bytes = bytes.ok_or_else(|| Error::new(0, "声音组登记缺少记录缓冲区"))?;
+        let group = GroupRange {
+            id: read::u32_at(bytes, 0)?,
+            range: [
+                read::u32_at(bytes, 4)? as i32,
+                read::u32_at(bytes, 8)? as i32,
+            ],
+            parameter: read::u32_at(bytes, 12)?,
+        };
+        groups.insert(key, group);
+        Ok(())
+    }
+
+    pub(super) fn remove_group(&mut self, key: u32) {
+        if let Some(groups) = &mut self.groups {
+            groups.remove(&key);
+        }
     }
 
     pub(super) fn select_channel(&mut self, range: [i32; 2]) -> Result<u32> {

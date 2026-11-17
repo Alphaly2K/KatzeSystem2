@@ -121,6 +121,7 @@ impl TaskObject for Receiver {
         if command.code != 35
             && !(182..=194).contains(&command.code)
             && !(196..=198).contains(&command.code)
+            && !matches!(command.code, 201 | 202 | 204 | 205)
         {
             return self.0.dispatch_command(kind, command, output, host, budget);
         }
@@ -223,6 +224,15 @@ fn control_wrappers_route_words_and_raw_float_buffers_without_changing_sources()
         ),
         (348, vec![5, 0xffa23456], 0, vec![0xffa23456]),
         (349, vec![5], 0, vec![]),
+        (569, vec![u32::MAX], 0, vec![]),
+        (587, vec![63], 0, vec![]),
+        (
+            602,
+            vec![u32::MAX, 0x80000000, 4, 6, u32::MAX],
+            0,
+            vec![0x80000000, 4, 6, u32::MAX],
+        ),
+        (603, vec![u32::MAX], 0, vec![]),
     ];
     for budget in [1, 4096] {
         for (index, words, data1, buffer) in &cases {
@@ -254,10 +264,13 @@ fn control_wrappers_route_words_and_raw_float_buffers_without_changing_sources()
                             Command {
                                 target: 1,
                                 sender: 2,
-                                code: if *index >= 347 {
-                                    196 + index - 347
-                                } else {
-                                    182 + index - 156
+                                code: match *index {
+                                    569 => 201,
+                                    587 => 202,
+                                    602 => 204,
+                                    603 => 205,
+                                    347..=349 => 196 + index - 347,
+                                    _ => 182 + index - 156,
                                 },
                                 data: [words[0], *data1, 0]
                             },
@@ -268,7 +281,7 @@ fn control_wrappers_route_words_and_raw_float_buffers_without_changing_sources()
                 let vm = rt.object(2).unwrap().interpreter().unwrap();
                 let mut expected = 0xdeadbeefu32.to_le_bytes().to_vec();
                 expected.extend(vec![0xa5; (4 - args.len() % 4) % 4]);
-                if matches!(index, 160 | 162 | 165) {
+                if matches!(index, 160 | 162 | 165 | 569 | 587) {
                     expected.extend(0x81234567u32.to_le_bytes());
                 } else if *index == 349 {
                     expected.extend(0x734512abu32.to_le_bytes());
@@ -293,6 +306,9 @@ fn invalid_queries_and_short_arguments_diagnose_after_the_root_lookup() {
         (347, 16),
         (348, 8),
         (349, 4),
+        (569, 4),
+        (587, 4),
+        (603, 4),
     ] {
         let (mut rt, trace) = setup(program(index, &vec![0; length - 1]), 0);
         trace.borrow_mut().events.clear();
@@ -300,7 +316,7 @@ fn invalid_queries_and_short_arguments_diagnose_after_the_root_lookup() {
         assert_eq!(trace.borrow().events.len(), 1);
         assert_eq!(trace.borrow().events[0].0.code, 35);
     }
-    for index in [160, 162, 165, 349] {
+    for index in [160, 162, 165, 349, 569, 587] {
         for target in [2, u32::MAX] {
             let (mut rt, trace) = setup(program(index, &arguments(&[0])), 0);
             trace.borrow_mut().events.clear();
@@ -314,6 +330,19 @@ fn invalid_queries_and_short_arguments_diagnose_after_the_root_lookup() {
             assert_eq!(trace.borrow().events.len(), 1);
         }
     }
+    let (mut rt, trace) = setup(program(602, &arguments(&[7, 20, 4, 6])), 0);
+    trace.borrow_mut().events.clear();
+    assert!(rt.update(0, 0).unwrap_err().message.contains("范围"));
+    assert!(trace.borrow().events.is_empty());
+    let (mut rt, trace) = setup(program(587, &arguments(&[64])), 0);
+    trace.borrow_mut().events.clear();
+    assert!(
+        rt.update(0, 0)
+            .unwrap_err()
+            .message
+            .contains("未定义返回值")
+    );
+    assert_eq!(trace.borrow().events.len(), 1);
     let (mut rt, trace) = setup(program(349, &arguments(&[0])), 0);
     trace.borrow_mut().write_buffer = false;
     assert!(rt.update(0, 0).unwrap_err().message.contains("结果缓冲区"));

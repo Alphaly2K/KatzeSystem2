@@ -52,6 +52,9 @@ impl TaskObject for SoundObject {
     fn audio_state_mut(&mut self) -> Option<&mut SoundState> {
         Some(&mut self.audio)
     }
+    fn audio_enabled(&self) -> bool {
+        self.enabled
+    }
     fn set_creation_context(&mut self, context: &[u8]) -> Result<()> {
         self.base.set_creation_context(context)
     }
@@ -274,6 +277,21 @@ impl TaskObject for SoundObject {
                 *output = self.audio.duration_ms(command.data[0]);
                 return Ok(CommandOutcome::finished(false));
             }
+            202 => {
+                if let Some(index) = self.audio.property_channel(command.data[0]) {
+                    *output = self.audio.channels[index].completed_passes() as u32;
+                }
+                return Ok(CommandOutcome::finished(false));
+            }
+            204 => {
+                self.audio
+                    .register_group(command.data[0], buffers.data1.as_deref())?;
+                return Ok(CommandOutcome::finished(false));
+            }
+            205 => {
+                self.audio.remove_group(command.data[0]);
+                return Ok(CommandOutcome::finished(false));
+            }
             _ => {}
         }
         if command.code == 199 {
@@ -357,6 +375,42 @@ mod tests {
         channel.source = Some(pcm);
         channel.requested_volume = 100.0;
         sound
+    }
+
+    #[test]
+    fn completed_pass_queries_follow_links_and_preserve_invalid_output() {
+        let mut numbers = State::new(0);
+        let mut host = CoreHost::new(&mut numbers);
+        for enabled in [true, false] {
+            let mut sound = SoundObject::new(enabled);
+            sound.audio.channels[5].playback.completed = 2;
+            sound.audio.channels[5].linked = Some(37);
+            sound.audio.channels[37].playback.completed = 0x1_0000_0004;
+            for (channel, expected) in [
+                (5, 4),
+                (37, 4),
+                (63, 0),
+                (64, 0xabcdef01),
+                (u32::MAX, 0xabcdef01),
+            ] {
+                let mut output = 0xabcdef01;
+                sound
+                    .dispatch_command(
+                        kind::SOUND,
+                        &Command {
+                            sender: 0,
+                            target: 1,
+                            code: 202,
+                            data: [channel, 0, 0],
+                        },
+                        &mut output,
+                        &mut host,
+                        1,
+                    )
+                    .unwrap();
+                assert_eq!(output, if enabled { expected } else { 0 });
+            }
+        }
     }
 
     #[test]

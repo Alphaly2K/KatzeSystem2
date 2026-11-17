@@ -116,6 +116,24 @@ fn load(runtime: &mut Runtime<SoundFactory<Reject>>, bytes: &mut [u8]) -> Result
     )
 }
 
+fn load_group(
+    runtime: &mut Runtime<SoundFactory<Reject>>,
+    group: u32,
+    mode: i32,
+    name: &[u8],
+) -> Result<u32> {
+    let mut bytes = record(55, mode, 17, name);
+    bytes[4..8].copy_from_slice(&group.to_le_bytes());
+    runtime.dispatch_command_with_buffers(
+        0,
+        command(206, 0),
+        &mut CommandBuffers {
+            data1: Some(&mut bytes),
+            ..Default::default()
+        },
+    )
+}
+
 fn audio(runtime: &Runtime<SoundFactory<Reject>>) -> &katze_system2::audio::SoundState {
     runtime.object(1).unwrap().audio_state().unwrap()
 }
@@ -150,6 +168,80 @@ fn ramp_status(runtime: &mut Runtime<SoundFactory<Reject>>, channel: u32) -> u32
     );
     assert_eq!(&bytes[4..], &[0xa5; 4]);
     u32::from_le_bytes(bytes[..4].try_into().unwrap())
+}
+
+#[test]
+fn dynamic_groups_keep_first_parameters_and_removal_preserves_playback_progress() {
+    for connected in [false, true] {
+        let (mut runtime, _) = setup();
+        let register = |runtime: &mut Runtime<SoundFactory<Reject>>, values: [u32; 4]| {
+            runtime
+                .dispatch_command_with_buffers(
+                    0,
+                    command(204, 7),
+                    &mut CommandBuffers {
+                        data1: Some(
+                            &mut values
+                                .into_iter()
+                                .flat_map(u32::to_le_bytes)
+                                .collect::<Vec<_>>(),
+                        ),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+        };
+        register(&mut runtime, [20, 5, 5, 80]);
+        register(&mut runtime, [30, 6, 6, 90]);
+        runtime.dispatch_command(0, command(204, 7)).unwrap();
+        assert_eq!(audio(&runtime).group_parameters(7), Some([20, 5, 5, 80]));
+        assert_eq!(
+            load_group(&mut runtime, 7, 0, b"audio/tone.ogg").unwrap(),
+            5
+        );
+        let mut mixer = connected.then(|| {
+            runtime
+                .object_mut(1)
+                .unwrap()
+                .audio_state_mut()
+                .unwrap()
+                .connect_output()
+                .unwrap()
+        });
+        let mut start = command(183, 5);
+        start.data[1] = 2;
+        runtime.dispatch_command(0, start).unwrap();
+        assert_eq!(runtime.dispatch_command(0, command(202, 5)).unwrap(), 0);
+        runtime.dispatch_command(0, command(205, 7)).unwrap();
+        runtime.dispatch_command(0, command(205, 7)).unwrap();
+        assert_eq!(audio(&runtime).group_parameters(7), None);
+        assert!(audio(&runtime).channel(5).unwrap().is_playing());
+        let mut output = vec![0.0; (1379 * 2 + 4) * 2];
+        if let Some(mixer) = &mut mixer {
+            mixer.render(44_100, &mut output).unwrap();
+        } else {
+            runtime
+                .object_mut(1)
+                .unwrap()
+                .audio_state_mut()
+                .unwrap()
+                .mix_stereo(44_100, &mut output)
+                .unwrap();
+        }
+        assert_eq!(runtime.dispatch_command(0, command(202, 5)).unwrap(), 2);
+        assert_eq!(
+            load_group(&mut runtime, 7, 0, b"audio/tone.ogg").unwrap(),
+            u32::MAX
+        );
+        register(&mut runtime, [30, 6, 6, 90]);
+        assert_eq!(audio(&runtime).group_range(7), Some([6, 6]));
+        assert_eq!(audio(&runtime).group_parameters(7), Some([30, 6, 6, 90]));
+        assert_eq!(
+            load_group(&mut runtime, 7, 0, b"audio/tone.ogg").unwrap(),
+            6
+        );
+        assert_eq!(runtime.dispatch_command(0, command(202, 6)).unwrap(), 0);
+    }
 }
 
 #[test]
@@ -483,19 +575,6 @@ fn grouped_loads_allocate_physical_channels_recycle_busy_sources_and_preserve_fa
         .collect(),
     };
     let (mut runtime, source) = setup_with_groups(Some(groups));
-    let load_group =
-        |runtime: &mut Runtime<SoundFactory<Reject>>, group: u32, mode, name: &[u8]| {
-            let mut bytes = record(55, mode, 17, name);
-            bytes[4..8].copy_from_slice(&group.to_le_bytes());
-            runtime.dispatch_command_with_buffers(
-                0,
-                command(206, 0),
-                &mut CommandBuffers {
-                    data1: Some(&mut bytes),
-                    ..Default::default()
-                },
-            )
-        };
     let play = |runtime: &mut Runtime<SoundFactory<Reject>>, channel| {
         let mut request = command(183, channel);
         request.data[1] = 1;
@@ -656,6 +735,7 @@ fn streaming_task_count_changes_preserve_samples_prefetched_with_the_registered_
         &expected.samples()[1000..2000]
     );
     assert_eq!(audio(&runtime).channel(5).unwrap().completed_passes(), 0);
+    assert_eq!(runtime.dispatch_command(0, command(202, 5)).unwrap(), 0);
     runtime.dispatch_command(0, command(185, 5)).unwrap();
     play.data[1] = 1;
     runtime.dispatch_command(0, play).unwrap();

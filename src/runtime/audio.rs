@@ -12,10 +12,14 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         arguments: &[u8],
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
+        let mut record = if index == 602 {
+            read::range(arguments, 4, 16)?.to_vec()
+        } else {
+            Vec::new()
+        };
         let sound = self.command_target(0, 35, [0; 3])?;
         let channel = read::u32_at(arguments, 0)?;
         let mut data = [channel, 0, 0];
-        let mut record = Vec::new();
         match index {
             157 | 161 | 164 => data[1] = read::u32_at(arguments, 4)?,
             163 | 166 => {
@@ -45,7 +49,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             }
             _ => {}
         }
-        let query = matches!(index, 160 | 162 | 165 | 349 | 903);
+        let query = matches!(index, 160 | 162 | 165 | 349 | 569 | 587 | 903);
         if query {
             let supported = self
                 .tree
@@ -59,12 +63,25 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             if !supported || deleted {
                 return Err(Error::new(vm.pc, "声音查询目标不可达、已删除或类型未接入"));
             }
+            if index == 587
+                && channel >= 64
+                && self
+                    .objects
+                    .get(&sound)
+                    .is_none_or(|object| object.audio_enabled())
+            {
+                return Err(Error::new(vm.pc, "声音完成遍数查询的通道未定义返回值"));
+            }
         }
         let output = self.command_target_with_buffers(
             sound,
             match index {
                 156..=168 => 182 + index - 156,
                 347..=349 => 196 + index - 347,
+                569 => 201,
+                587 => 202,
+                602 => 204,
+                603 => 205,
                 903 => 215,
                 _ => unreachable!(),
             },

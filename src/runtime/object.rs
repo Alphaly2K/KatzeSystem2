@@ -67,6 +67,11 @@ pub trait TaskObject {
         None
     }
 
+    /// 声音命令是否启用；禁用接收者将命令输出置零。
+    fn audio_enabled(&self) -> bool {
+        true
+    }
+
     /// 已配置的消息页；查询不触发准备或播放。
     fn message_page(&self) -> Option<&crate::message::Page> {
         None

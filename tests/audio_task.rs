@@ -430,7 +430,7 @@ fn sound_commands_gate_buffers_and_preserve_unwritten_return_slots() {
             .is_err()
     );
     sound.state().0.deletion_requested = -1;
-    for code in [181, 199, 206, 207, 208, 209, 210] {
+    for code in [181, 199, 201, 202, 204, 205, 206, 207, 208, 209, 210] {
         sound
             .dispatch_command_with_buffers(
                 kind::SOUND,
@@ -447,7 +447,7 @@ fn sound_commands_gate_buffers_and_preserve_unwritten_return_slots() {
         assert_eq!(output, 0xdeadbeef);
     }
     let mut disabled = SoundObject::new(false);
-    for code in [181, 199, 206, 207, 208, 209, 210] {
+    for code in [181, 199, 201, 202, 204, 205, 206, 207, 208, 209, 210] {
         output = 0xdeadbeef;
         disabled
             .dispatch_command_with_buffers(

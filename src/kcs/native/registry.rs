@@ -270,7 +270,7 @@ pub(crate) fn runtime(index: u32) -> RuntimeHandler {
         240 | 250 => RuntimeHandler::SharedRecord,
         609 | 610 => RuntimeHandler::FlagBackup,
         400 => RuntimeHandler::SoundLoop,
-        156..=168 | 347..=349 | 903 => RuntimeHandler::SoundControl,
+        156..=168 | 347..=349 | 569 | 587 | 602 | 603 | 903 => RuntimeHandler::SoundControl,
         604 | 935 | 936 => RuntimeHandler::SoundLoad,
         144..=148 | 150 | 154 | 285 | 286 | 401 | 403 | 404 | 937 => RuntimeHandler::Input,
         611..=621 | 695 | 884 => RuntimeHandler::Message,

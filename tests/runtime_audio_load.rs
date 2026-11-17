@@ -32,7 +32,10 @@ impl ProgramLoader for Source {
                 instruction(&mut code, 0x25, &[*arg]);
             }
             instruction(&mut code, 0x2b, &[*index, args.len() as u32 * 4]);
-            if matches!(index, 160 | 162 | 165 | 349 | 604 | 903 | 935 | 936) {
+            if matches!(
+                index,
+                160 | 162 | 165 | 349 | 569 | 587 | 604 | 903 | 935 | 936
+            ) {
                 instruction(&mut code, 0x26, &[256 + i as u32 * 4]);
             }
         }
@@ -255,6 +258,33 @@ fn native_loads_diagnose_uninitialized_results_and_short_arguments() {
                 .pcm()
                 .is_none()
         );
+    }
+    for budget in [1, 4096] {
+        let factory = SoundFactory {
+            enabled: false,
+            fallback: KcsFactory::new(Source {
+                calls: vec![
+                    (569, vec![u32::MAX]),
+                    (587, vec![64]),
+                    (587, vec![u32::MAX]),
+                ],
+            }),
+        };
+        let mut rt = Runtime::new(
+            0,
+            kind::ROOT,
+            Box::new(RootObject::new(u32::MAX, 1)),
+            State::new(0),
+            factory,
+        );
+        rt.set_budget(budget, 1 << 20);
+        rt.create(0, kind::SOUND, b"sound", b"").unwrap();
+        rt.create(0, kind::ORDINARY, b"caller", b"").unwrap();
+        rt.update(0, 0).unwrap();
+        let vm = rt.object(2).unwrap().interpreter().unwrap();
+        assert!(vm.stack_bytes().is_empty());
+        assert_eq!(vm.read(0, 4).unwrap(), 0xdeadbeefu32.to_le_bytes());
+        assert_eq!(vm.read(256, 12).unwrap(), [0; 12]);
     }
 }
 
