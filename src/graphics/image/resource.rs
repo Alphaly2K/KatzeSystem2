@@ -161,7 +161,87 @@ impl Images {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graphics::{ImageList, ImageListProperties};
+    use crate::graphics::{ImageList, ImageListProperties, Rect};
+    use crate::hg3::{DecodedFrame, StandardInfo};
+
+    #[test]
+    fn rgb_masks_clamp_raw_channels_and_keep_clipped_rgb_and_opacity() {
+        let mut images = Images::default();
+        let source = images
+            .insert_resource(
+                None,
+                Image::from_frame(DecodedFrame {
+                    id: 0,
+                    info: StandardInfo {
+                        size: [3, 2],
+                        bit_depth: 24,
+                        canvas_size: [3, 2],
+                        offset: [0; 2],
+                        base: [0; 2],
+                        reserved: 0,
+                    },
+                    pixels: vec![
+                        1, 2, 3, 255, 4, 5, 6, 255, 127, 128, 129, 255, 7, 8, 9, 255, 10, 11, 12,
+                        255, 254, 255, 0, 255,
+                    ],
+                    attributes: Default::default(),
+                })
+                .unwrap(),
+                true,
+                Some(false),
+            )
+            .unwrap();
+        let background = images.create(99, [3, 3]).unwrap();
+        images
+            .get_mut(background)
+            .unwrap()
+            .pixels_mut()
+            .copy_from_slice(&0x8012_3456u32.to_le_bytes().repeat(9));
+        let mut list = ImageList::new(99, [3, 3], &mut images).unwrap();
+        list.set(0, background, ImageListProperties::default(), &mut images)
+            .unwrap();
+        for opacity in [1, 255] {
+            list.set_resource(
+                1,
+                source,
+                ImageListProperties {
+                    position: [-1., 0.],
+                    opacity,
+                    ..Default::default()
+                },
+                &mut images,
+            )
+            .unwrap();
+            list.set_clip(1, Some(Rect::from_xywh(1, 0, 2, 3)), &images)
+                .unwrap();
+            for (channel, alphas) in [
+                (1, [64, 128]),
+                (2, [65, 128]),
+                (3, [65, 0]),
+                (4, [65, 0]),
+                (5, [65, 0]),
+                (0x7fff_ffff, [65, 0]),
+                (0x8000_0000, [65, 0]),
+                (0x8000_0001, [64, 128]),
+                (u32::MAX, [64, 128]),
+            ] {
+                let wrapper = images.resource_entry(source).unwrap().image;
+                images
+                    .get_mut(wrapper)
+                    .unwrap()
+                    .set_alpha_mask(channel)
+                    .unwrap();
+                list.redraw(&mut images).unwrap();
+                let mut expected = 0x8012_3456u32.to_le_bytes().repeat(9);
+                expected[4 * 4 + 3] = alphas[0];
+                expected[7 * 4 + 3] = alphas[1];
+                assert_eq!(
+                    images.get(list.image()).unwrap().surface().pixels(),
+                    expected
+                );
+            }
+        }
+    }
 
     #[test]
     fn rebuilt_resource_discards_empty_bounds_before_position_can_wrap_them_onscreen() {

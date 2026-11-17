@@ -119,9 +119,10 @@ impl Image {
         &self.info
     }
 
-    /// 零为普通合成；一至四分别以 B、G、R、A 通道乘目标 Alpha，保持目标 RGB。
+    /// 零为普通合成；一至四以 B、G、R、A 乘目标 Alpha，24 位来源的四仍取 R。
+    /// 24 位来源保留完整通道值，绘制时将回绕减一后的 i32 钳制到零至二。
     pub fn set_alpha_mask(&mut self, channel: u32) -> Result<()> {
-        if channel > 4 {
+        if channel > 4 && !self.is_rgb() {
             return Err(Error::new(0, "图像 Alpha 掩码通道须为零至四"));
         }
         self.alpha_mask = channel;
@@ -344,13 +345,15 @@ impl Image {
             return Ok(());
         };
         if source.alpha_mask != 0 {
-            if source.is_rgb() {
-                return Err(Error::new(0, "24 位图像的列表通道掩码尚未接入"));
-            }
-            let channel = source.alpha_mask as usize - 1;
-            if channel >= 4 {
-                return Err(Error::new(0, "图像 Alpha 掩码通道须为零至四"));
-            }
+            let channel = if source.is_rgb() {
+                (source.alpha_mask.wrapping_sub(1) as i32).clamp(0, 2) as usize
+            } else {
+                let channel = source.alpha_mask as usize - 1;
+                if channel >= 4 {
+                    return Err(Error::new(0, "图像 Alpha 掩码通道须为零至四"));
+                }
+                channel
+            };
             let stride = self.surface.stride();
             let source_stride = source.surface.stride();
             for row in 0..region.height {
