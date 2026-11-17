@@ -222,7 +222,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             880 => 16,
             339 => 24,
             84 | 87 | 93 | 101 | 345 | 433 | 862 => 20,
-            85 | 86 => 16,
+            85 | 86 | 90 => 16,
             96 | 100 | 256 | 260 | 263 | 343 | 344 | 346 | 463 | 625 | 654 | 663 | 879 | 881 => 12,
             104 => 28,
             257 | 732 => 52,
@@ -464,18 +464,23 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     },
                 )?;
             }
-            84 | 93 | 101 => {
+            84 | 90 | 93 | 101 => {
                 let mut vector = [0; 12];
                 vector.copy_from_slice(&arguments[4..16]);
                 let code = match index {
                     84 => 51,
+                    90 => 53,
                     93 => 55,
                     _ => 66,
                 };
                 self.command_target_with_buffers(
                     target,
                     code,
-                    [word(4), 0, u32::from(index == 93)],
+                    [
+                        if index == 90 { 0 } else { word(4) },
+                        0,
+                        u32::from(index == 93),
+                    ],
                     &mut CommandBuffers {
                         data0: None,
                         data1: Some(&mut vector),

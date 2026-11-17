@@ -157,7 +157,7 @@ fn bound_planes_query_running_ancestors_and_stop_inheriting_after_unbind() {
         Box::new(BaseObject::new()),
         State::new(0),
         GraphicsFactory {
-            fallback: BaseFactory,
+            fallback: KcsFactory::new(Programs),
         },
     );
     let parent = runtime.create(0, kind::PLANE, b"parent", b"").unwrap();
@@ -187,8 +187,9 @@ fn bound_planes_query_running_ancestors_and_stop_inheriting_after_unbind() {
     };
     vector(&mut runtime, parent, 49, [10., 20., 100.]);
     vector(&mut runtime, parent, 51, [100., 200., 3.]);
-    vector(&mut runtime, child, 53, [2., 3., 4.]);
-    vector(&mut runtime, grandchild, 53, [1., 2., 5.]);
+    assert_eq!((parent, child, grandchild), (1, 2, 3));
+    runtime.create(0, kind::ORDINARY, b"inherit", b"").unwrap();
+    runtime.update(0, 1).unwrap();
     assert_eq!(
         runtime
             .drawables()
@@ -857,6 +858,23 @@ impl ProgramLoader for Programs {
         }
         let mut code = vec![];
         ins(&mut code, 0x25, &[0xdeadbeef]);
+        if name == b"inherit" {
+            for (target, offset) in [(2, [2f32, 3., 4.]), (3, [1f32, 2., 5.])] {
+                call(
+                    &mut code,
+                    90,
+                    &[
+                        target,
+                        offset[0].to_bits(),
+                        offset[1].to_bits(),
+                        offset[2].to_bits(),
+                    ],
+                );
+            }
+            ins(&mut code, 0x26, &[0]);
+            ins(&mut code, 0x3b, &[]);
+            return Ok(Some(Program::from_code(&code, vec![0; 16], 128)?));
+        }
         if name == b"base-z" {
             call(&mut code, 88, &[0]);
             call(&mut code, 92, &[0]);
@@ -868,7 +886,7 @@ impl ProgramLoader for Programs {
             ins(&mut code, 0x3b, &[]);
             return Ok(Some(Program::from_code(&code, vec![0; 16], 128)?));
         }
-        for native in [79, 80, 83, 84, 100, 101] {
+        for native in [79, 80, 83, 84, 90, 100, 101] {
             call(&mut code, native, &[0]);
         }
         call(
