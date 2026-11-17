@@ -1393,7 +1393,13 @@ impl TaskObject for FesObject {
                     services(host)?.copy_local_numbers(from, to)?;
                 }
             }
-            178 | 344 | 345 | 351 | 354..=356 => {
+            354 | 355 => {
+                self.scene
+                    .as_mut()
+                    .ok_or_else(|| Error::new(0, "FES 控制状态访问需要已初始化对象"))?
+                    .control_status_command(command.code, output);
+            }
+            178 | 344 | 345 | 351 | 356 => {
                 return Err(Error::new(0, "FES 专属命令尚未接入"));
             }
             _ => {

@@ -64,7 +64,7 @@
 |粒子|本项目已接入蒸汽、雷光、纸片、冰晶、星形及爆炸等实际效果；通用 `cmnptcl` 已按原入口校正并接入，对方另有 `em_question_a`、`blur` 等处理|复用公开参数及生命周期线索，分别核实插件身份、版本、随机序列和数值边界|
 |存档与运行验证|两边都具有 CSS 容器和界面相关接口；本项目已有两款游戏的 Backlog 回放／回跳及存档读回记录|分别检查具体恢复流程；本次未独立运行 CrySirror 的完整游戏流程|
 
-2026-11-17 按该修订的普通调用与类调用目录交叉检查，排除 KCS 指令及粒子专用 native 表，再补入粒子对象的普通调用编号，共 492 个去重编号，当前统一注册表均有分派。目标版本普通表仍有 302 个槽位尚未注册；两款实际脚本引用的缺项仍为不初始化结果的 549。已注册接口所需的默认开发窗口、导出及系统任务、窗口菜单重建和成就平台 SDK 仍待提供具体服务。后续继续核对已注册入口的副作用，并按目标版本的对象消息拓展公开目录外的接口。
+2026-11-17 按该修订的普通调用与类调用目录交叉检查，排除 KCS 指令及粒子专用 native 表，再补入粒子对象的普通调用编号，共 492 个去重编号，当前统一注册表均有分派。目标版本普通表仍有 300 个槽位尚未注册；两款实际脚本引用的缺项仍为不初始化结果的 549。已注册接口所需的默认开发窗口、导出及系统任务、窗口菜单重建和成就平台 SDK 仍待提供具体服务。后续继续核对已注册入口的副作用，并按目标版本的对象消息拓展公开目录外的接口。
 
 首批采用名称表及字符串接口核对这种工作方式。公开名称表分支使用忽略 ASCII 大小写的前缀比较，2.6.1.90 的普通 639 实际区分大小写，并分别匹配名称与扩展名中的通配符。普通 640 的 `%c`／`%r` 按当前输出字节数选取输入；后缀扫描还有有符号字符界限。正式实现采用目标版本的批量原入口结果，验证记录见[运行验证](runtime-probes.md)。
 
@@ -208,3 +208,5 @@ CrySirror 自有代码采用 MPL-2.0，归档及 HG-3 所在的 `crysirror-forma
 - [HG-3 图像](https://github.com/trigger-segfault/TriggersTools.CatSystem2/wiki/HG%E2%80%903-Image)、[HG 图像编码](https://github.com/trigger-segfault/TriggersTools.CatSystem2/wiki/HG%E2%80%90X-ProcessImage)
 - [工具链](https://github.com/trigger-segfault/TriggersTools.CatSystem2/wiki/Category:-Tools)、[KCS 编译线索](https://github.com/trigger-segfault/TriggersTools.CatSystem2/wiki/Tool:-wsd.exe)、[调试功能](https://github.com/trigger-segfault/TriggersTools.CatSystem2/wiki/Debug-Mode)
 - [版本差异](https://github.com/trigger-segfault/TriggersTools.CatSystem2/wiki/Engine-Versions)、[UTF-8 移植案例](https://github.com/trigger-segfault/TriggersTools.CatSystem2/wiki/Case-3:-Grisaia-no-Kajitsu-UTF8-transplant)
+
+FES 参数记录存在上下文差异：公开实现按目标播放器选择数值银行；2.6.1.90 的 349／350 直接使用当前选中局部区，346／347 才选择目标 FES。正式实现另接入 665～668 的双向局部复制和原始控制状态查询／清零；后者使用独立控制字，保持与任务退出属性分别存储。

@@ -14,7 +14,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             return self.fes_local_record_native(index, arguments, vm);
         }
         let length = match index {
-            448 | 665 | 666 => 4,
+            448 | 665..=668 => 4,
             630 => 16,
             645 | 882 => 12,
             _ => 8,
@@ -30,6 +30,9 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     if index == 665 { 352 } else { 353 },
                     [0, self.host.task_id, 0],
                 )?;
+            }
+            668 => {
+                self.command_target(target, 355, [0; 3])?;
             }
             447 => {
                 let formatted = format_string(vm, read::u32_at(arguments, 4)?, 0)?;
@@ -122,7 +125,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     [read::u32_at(arguments, 4)?, read::u32_at(arguments, 8)?, 0],
                 )?;
             }
-            646 => {
+            646 | 667 => {
                 let supported = self
                     .tree
                     .find_reachable(self.host.task_id, target)
@@ -133,15 +136,20 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     .map(|object| object.control().deletion_requested == 0)
                     .unwrap_or_else(|| self.running.get(&target).is_some_and(|task| !task.deleted));
                 if !supported || !active {
-                    return Err(Error::new(
-                        vm.pc,
-                        "FES 参数查询目标不可达、已删除或类型未接入",
-                    ));
+                    return Err(Error::new(vm.pc, "FES 查询目标不可达、已删除或类型未接入"));
                 }
                 return Ok(NativeReturn::Value(self.command_target(
                     target,
-                    347,
-                    [read::u32_at(arguments, 4)?, 0, 0],
+                    if index == 646 { 347 } else { 354 },
+                    [
+                        if index == 646 {
+                            read::u32_at(arguments, 4)?
+                        } else {
+                            0
+                        },
+                        0,
+                        0,
+                    ],
                 )?));
             }
             882 | 883 => {

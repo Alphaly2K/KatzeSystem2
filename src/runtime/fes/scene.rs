@@ -28,6 +28,7 @@ pub struct Scene {
     wait_target: Option<fes::ObjectReference>,
     wait_private_flag: u32,
     exit_code: Option<i32>,
+    control_status: u32,
     exit_request: Option<i32>,
     notifications: VecDeque<Notification>,
     scripts: ChildScripts,
@@ -132,6 +133,7 @@ impl Scene {
             wait_target: None,
             wait_private_flag: 0,
             exit_code: None,
+            control_status: 0,
             exit_request: None,
             notifications: VecDeque::new(),
             scripts: ChildScripts::default(),
@@ -158,6 +160,14 @@ impl Scene {
 
     pub fn interpreter(&self) -> &fes::Interpreter {
         &self.interpreter
+    }
+
+    pub(in crate::runtime) fn control_status_command(&mut self, code: u32, output: &mut u32) {
+        if code == 354 {
+            *output = self.control_status;
+        } else {
+            self.control_status = 0;
+        }
     }
 
     /// 最近一次 fontcom init 的结果；未初始化或初始化失败时为 None。

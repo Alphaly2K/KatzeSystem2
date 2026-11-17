@@ -1110,6 +1110,17 @@ fn run_nested<F: ObjectFactory>(
                 }
                 return Ok(());
             }
+            if matches!(command.code, 354 | 355) {
+                **propagate = false;
+                if !running.get(&target).is_some_and(|task| task.deleted) {
+                    fes_scene
+                        .as_mut()
+                        .unwrap()
+                        .scene
+                        .control_status_command(command.code, output);
+                }
+                return Ok(());
+            }
             if matches!(command.code, 342 | 346 | 347) {
                 **propagate = false;
                 if !running.get(&target).is_some_and(|task| task.deleted) {

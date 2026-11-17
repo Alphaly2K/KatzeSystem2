@@ -97,6 +97,9 @@ impl ObjectFactory for Factory {
                 for target in [0, u32::MAX, 6] {
                     call(&mut code, 665, &[target], None);
                 }
+                call(&mut code, 667, &[3], Some(20));
+                call(&mut code, 668, &[3], None);
+                call(&mut code, 667, &[3], Some(24));
             }
             call(&mut code, 65, &[], None);
             let mut data = vec![0; 256];
@@ -171,6 +174,11 @@ impl ObjectFactory for Factory {
             ins(0x25, 3, &[0]);
             ins(0x25, 3, &[0]);
             ins(0x2b, 3, &[630, 16]);
+            ins(0x2f, 3, &[32]);
+            ins(0x2b, 3, &[667, 4]);
+            ins(0x26, 3, &[20]);
+            ins(0x2f, 3, &[32]);
+            ins(0x2b, 3, &[668, 4]);
             ins(0x29, 3, &[0]);
             let mut data = vec![0; 128];
             data[64..70].copy_from_slice(b"REPLY\0");
@@ -1171,6 +1179,15 @@ fn local_context_copies_keep_task_isolation_selection_stack_and_lifetimes() {
             .unwrap();
         let uninitialized = runtime.create(0, kind::FES, b"uninitialized", b"").unwrap();
         assert_eq!((fes, first, second, uninitialized), (3, 4, 5, 6));
+        for code in [354, 355] {
+            assert!(
+                runtime
+                    .dispatch_command(0, command(uninitialized, code, 0, 0))
+                    .unwrap_err()
+                    .message
+                    .contains("初始化")
+            );
+        }
         runtime.update(0, 1).unwrap();
         let mut snapshot = runtime.numbers().clone();
         assert_eq!(
@@ -1236,6 +1253,16 @@ fn local_context_copies_keep_task_isolation_selection_stack_and_lifetimes() {
         );
         assert_eq!(send(&mut runtime, fes, 347, 0, 0), 27);
         assert_eq!(send(&mut runtime, fes, 347, 511, 0), 0x8000_0001);
+        assert_eq!(
+            runtime
+                .object(first)
+                .unwrap()
+                .interpreter()
+                .unwrap()
+                .read(20, 8)
+                .unwrap(),
+            [0; 8]
+        );
         let released = Rc::downgrade(&runtime.object(first).unwrap().local_numbers().unwrap());
         runtime.destroy(first).unwrap();
         assert!(released.upgrade().is_none());
@@ -2646,7 +2673,7 @@ fn fes_send_allows_synchronous_parameter_access_and_a_block_callback() {
     for budget in [1, 4096] {
         let mut runtime = setup(
             budget,
-            b"#START\nsend 7 8 9\n$0=$0+1\nwait 1000\n#REPLY\n$1=\\7\n",
+            b"#START\nsend 7 8 9\n$0=$0+1\nexit 37\nwait 1000\n#REPLY\n$1=\\7\n",
         )
         .runtime;
         let parent = runtime
@@ -2663,7 +2690,7 @@ fn fes_send_allows_synchronous_parameter_access_and_a_block_callback() {
         runtime.update(101, 1).unwrap();
         assert_eq!(&runtime.numbers().shared[..2], &[1, 91]);
         let vm = runtime.object(parent).unwrap().interpreter().unwrap();
-        for (address, value) in [(4, 91u32), (12, 1), (16, 1)] {
+        for (address, value) in [(4, 91u32), (12, 1), (16, 1), (20, 0)] {
             assert_eq!(&*vm.read(address, 4).unwrap(), &value.to_le_bytes());
         }
         let container = u32::from_le_bytes(vm.read(8, 4).unwrap().try_into().unwrap());
@@ -2675,6 +2702,8 @@ fn fes_send_allows_synchronous_parameter_access_and_a_block_callback() {
             .unwrap()
             .unwrap();
         assert_eq!(&record[28..32], &91u32.to_le_bytes());
+        assert_eq!(send(&mut runtime, fes, 23, 0, 0), 37);
+        assert_eq!(send(&mut runtime, fes, 354, 0, 0), 0);
     }
 }
 
