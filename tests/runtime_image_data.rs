@@ -218,7 +218,7 @@ fn call(code: &mut Vec<u8>, native: u32, args: &[u32], output: Option<u32>) {
 }
 
 #[test]
-fn rectangle_image_union_uses_pixel_handles_physical_size_and_wrapping_endpoints() {
+fn rectangle_image_union_uses_wrappers_physical_size_and_wrapping_endpoints() {
     for budget in [1, 4096] {
         for base in [0, 0x8000_0000u32] {
             let mut rt = Runtime::new(
@@ -246,14 +246,15 @@ fn rectangle_image_union_uses_pixel_handles_physical_size_and_wrapping_endpoints
             })
             .unwrap();
             let zero = rt.images_mut().create(0, [0, 4]).unwrap();
-            let zero_pixels = rt.images().pixel_handle(zero).unwrap();
+            let empty = rt.images_mut().create_empty(0).unwrap();
             let cases = [
-                ([0i32; 4], pixels, [-2, -3], [-2i32, -3, 1, -1]),
-                ([-4, -4, 10, 10], pixels, [-2, -3], [-4, -4, 10, 10]),
-                ([7, 8, 1, 2], pixels, [0, 0], [0, 0, 3, 2]),
-                ([1, 2, 3, 4], pixels, [i32::MAX, 0], [1, 2, 3, 4]),
+                ([0i32; 4], wrapper, [-2, -3], [-2i32, -3, 1, -1]),
+                ([-4, -4, 10, 10], wrapper, [-2, -3], [-4, -4, 10, 10]),
+                ([7, 8, 1, 2], wrapper, [0, 0], [0, 0, 3, 2]),
+                ([1, 2, 3, 4], wrapper, [i32::MAX, 0], [1, 2, 3, 4]),
                 ([8, 7, 2, 1], 0, [10, 20], [0; 4]),
-                ([1, 2, 3, 4], zero_pixels, [10, 20], [1, 2, 3, 4]),
+                ([1, 2, 3, 4], zero, [10, 20], [1, 2, 3, 4]),
+                ([8, 7, 2, 1], empty, [10, 20], [0; 4]),
             ];
             let mut memory = vec![0xa5; 128];
             let mut code = Vec::new();
@@ -268,6 +269,7 @@ fn rectangle_image_union_uses_pixel_handles_physical_size_and_wrapping_endpoints
                     None,
                 );
             }
+            call(&mut code, 119, &[wrapper, base + 112, base + 116], None);
             code.push(0x3b);
             rt.factory_mut().programs.0 = Program::from_code(&code, memory.clone(), 128).unwrap();
             let id = rt.create(0, kind::ORDINARY, b"union", b"").unwrap();
@@ -285,15 +287,16 @@ fn rectangle_image_union_uses_pixel_handles_physical_size_and_wrapping_endpoints
                 let bytes: Vec<_> = expected.iter().flat_map(|n| n.to_le_bytes()).collect();
                 assert_eq!(vm.read(base + i as u32 * 16, 16).unwrap(), bytes);
             }
-            assert_eq!(vm.read(base + 96, 32).unwrap(), [0xa5; 32]);
+            assert_eq!(vm.read(base + 112, 8).unwrap(), [3, 0, 0, 0, 2, 0, 0, 0]);
+            assert_eq!(vm.read(base + 120, 8).unwrap(), [0xa5; 8]);
             assert!(vm.stack_bytes().is_empty());
 
             let mut code = Vec::new();
-            call(&mut code, 216, &[0, wrapper, 0, 0], None);
+            call(&mut code, 216, &[0, pixels, 0, 0], None);
             code.push(0x3b);
             rt.factory_mut().programs.0 = Program::from_code(&code, vec![0xa5; 16], 64).unwrap();
             let id = rt.create(0, kind::ORDINARY, b"invalid", b"").unwrap();
-            assert!(rt.update(20, 1).unwrap_err().message.contains("像素句柄"));
+            assert!(rt.update(20, 1).unwrap_err().message.contains("对象句柄"));
             let vm = rt.object(id).unwrap().interpreter().unwrap();
             assert_eq!(vm.read(0, 16).unwrap(), [0xa5; 16]);
         }

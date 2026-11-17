@@ -283,10 +283,10 @@ impl Resources {
         }
         if index == 216 {
             vm.read(args[0], 16)?;
-            let size = if args[1] == 0 {
+            let size = if args[1] == 0 || self.images.pixel_handle(args[1])? == 0 {
                 [0; 2]
             } else {
-                self.images.pixel_image(args[1])?.info().size
+                self.images.get(args[1])?.info().size
             };
             crate::kcs::unite_rectangle(
                 vm,
