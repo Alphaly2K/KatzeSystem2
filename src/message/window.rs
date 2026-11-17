@@ -18,6 +18,7 @@ pub struct TextWindowObject {
     edge: u32,
     next: usize,
     active: bool,
+    breaks: u32,
 }
 
 impl TextWindowObject {
@@ -30,6 +31,7 @@ impl TextWindowObject {
             edge: 0xff00_0000,
             next: 0,
             active: false,
+            breaks: 0,
         }
     }
 
@@ -276,6 +278,32 @@ impl TextWindowObject {
         }
         Ok(())
     }
+
+    fn reveal(&mut self, now: Option<u32>, host: &mut dyn Host) -> Result<()> {
+        while let Some(glyph) = self.layout.glyphs.get(self.next) {
+            if glyph.code == 0xffff {
+                if self.breaks != u32::MAX && self.breaks != 0 {
+                    self.breaks -= 1;
+                }
+                self.next += 1;
+                if self.breaks == 0 {
+                    self.active = false;
+                    break;
+                }
+            } else {
+                if now.is_some_and(|now| glyph.time > now) {
+                    break;
+                }
+                self.next += 1;
+                self.paint(self.next, host)?;
+            }
+        }
+        self.publish(host)?;
+        if self.next == self.layout.glyphs.len() {
+            self.active = false;
+        }
+        Ok(())
+    }
 }
 
 impl TaskObject for TextWindowObject {
@@ -305,16 +333,7 @@ impl TaskObject for TextWindowObject {
             return Ok(false);
         }
         if self.active && self.layout.config[17] == 1 {
-            let now = self.clock().elapsed();
-            while self.next < self.layout.glyphs.len() && self.layout.glyphs[self.next].time <= now
-            {
-                self.next += 1;
-                self.paint(self.next, host)?;
-            }
-            self.publish(host)?;
-            if self.next == self.layout.glyphs.len() {
-                self.active = false;
-            }
+            self.reveal(Some(self.clock().elapsed()), host)?;
         }
         Ok(true)
     }
@@ -367,9 +386,40 @@ impl TaskObject for TextWindowObject {
                     surface.clear(0);
                 }
                 self.next = 0;
+                self.breaks = 0;
                 self.publish_whole(host)?;
             }
+            106 => self.layout.config[20] = command.data[1] as i32,
+            107 => {
+                self.layout.config[17] = command.data[0] as i32;
+                self.layout.config[18] = command.data[1] as i32;
+                self.next = 0;
+            }
+            108 => self.layout.config[9] = command.data[1] as i32,
             109 => *output = u32::from(!self.active),
+            110 => {
+                if host
+                    .message_plane_display(self.plane.id())?
+                    .is_some_and(|v| v != 0)
+                {
+                    self.reveal(None, host)?;
+                }
+            }
+            111 => self.layout.config[6] = command.data[1] as i32,
+            113 => {
+                if self.layout.glyphs.len() < self.layout.config[15] as u32 as usize {
+                    self.layout.glyphs.push(layout::Glyph {
+                        code: 0xffff,
+                        ..Default::default()
+                    });
+                }
+            }
+            114 => {
+                if self.breaks != u32::MAX {
+                    self.breaks = self.breaks.wrapping_add(command.data[1]);
+                }
+                self.start(host)?;
+            }
             121 => self.layout.hanging_enabled = command.data[1] != 0,
             122 => self.edge = command.data[1],
             123 => {

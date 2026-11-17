@@ -47,6 +47,8 @@
 
 `message::MessageFactory { fallback }` 创建类型 48／63 的 `MessageObject`，复用平面属性与生命周期，接入默认配置、配置、追加、分隔、逐字／渐显、强制显示、速度、剩余数量、禁则字符集合配置和画布提交。调用前通过 `Runtime::set_fonts` 绑定 `FontServices`，通过 `host_mut().message_time_scale` 配置消息全局时间比例，按需设置 `host_mut().message_defaults = Some(MessageDefaults { .. })`；独立宿主提供相应字体、默认配置、可见性与提交服务。原配置使用显式 `CommandBuffers`，不解引用进程指针。运行时接入普通 611～621、695 和 884，配置地址可来自 VM 普通区或外部区，数量查询要求有效类型 48 对象。具体契约见[消息任务对象](message.md#消息任务对象)和[普通 KCS 调用](message.md#默认配置与普通-kcs-调用)；CST 消息及其余完成等待继续接入。
 
+同一工厂另提供类型 8 的 `TextWindowObject`，使用 CP932、独立像素面及旧文本窗口布局规则。普通 123～133、418 和 557 接入配置、追加、清空、显示模式、间距、标签开关、字号、完成查询和分段推进；129 要求可达且未删除的类型 8 目标。该类型同样需要字体、可见性和画布提交服务，详见[文本窗口契约](message.md#消息任务对象)。
+
 FES `fontcom add name` 调用同一字体服务的 `add_resource`，名称为已展开的 CP932 直接文件名；缺失／空名称跳过。返回 false 时继续脚本，服务错误保留当前事件。init 调用 `FontServices::enumerate`，每份 Scene 独立保存字体列表，count／get／search／default 分别提供数量、UTF-8 名称、名称查询和全局默认名称；`Scene::font_names()` 提供只读视图。默认服务方法返回未支持诊断，宿主应实现实际注册与枚举，完整契约见 [字体枚举命令](fes-text.md#字体枚举命令)。
 
 `audio::parse_loop_table(bytes)` 读取循环点表，保留待补全的字节名称及原始 64 位起点／终点。`LoopPoints::register(name, start, end)` 保存声音命令 199 的原始循环范围。首次登记追加记录；同名更新只改起点，保留原终点、名称与顺序。`find(name)` 和 `entries()` 提供只读查询，名称及范围限制见[声音接口](audio.md)。当前接口不解码音频，也不执行播放。
@@ -222,7 +224,7 @@ FES 内部执行宏声明，初始化按以下顺序交给宿主：
 
 `hg3::decode_frame(bytes, id)` 解码首个匹配 ID 的原生 32 位完整帧，缺失 ID 返回 `None`。`decode_frame_from(&source, Some(id))` 校验全部元数据后仅读取选中帧的像素正文；参数为 `None` 时取最小无符号 ID，重复 ID 仍取首帧。读取源可短读，提前结束或读取失败返回诊断。`DecodedFrame` 包含 `id`、标准元数据 `info`、`attributes: BTreeMap<u16, [u32; 5]>` 和从上到下紧密排列的 BGRA8 `pixels`，Alpha 保持独立，不应用裁剪偏移或绘制基点。`Frame::attributes` 提供相同属性记录，`Image::attribute(id)` 查询编号低十六位，未命中返回 `None`。支持范围与约束见 [图像接口](graphics.md)。
 
-`Runtime::image_resource(handle)` 查询普通 710 静态装载或 733 创建的独立图像资源，句柄与普通图像包装、像素句柄分别检查类型。`retain_image_resource`／`release_image_resource_reference` 管理额外使用者的配对持有，最后释放后句柄失效；任务销毁和程序重装只回收仍有登记的任务引用。`image_resource_updated(handle, clear)` 读取更新标记，`clear=true` 同时为所有使用者清零。普通资源入口提供几何设置／查询、Alpha 分类、属性、附加值、矩形填充、ARGB 乘法、RGB／Alpha 百分比、直角旋转、翻转、模糊、缩放、资源间拷贝及颜色滤镜；`Image::blur` 对画布内图像扩边后依次执行水平、垂直滤波，半径钳制到 0～255；`Image::resize_canvas` 按原始画布比例同步像素和元数据，`copy_scaled_from`／`copy_scaled_within` 提供独立裁剪的 BGRA 拷贝及重采样；`Image::alpha_mask()` 查询 728 保存的通道 DWORD。参数和零句柄规则见[独立图像资源](graphics.md#独立图像资源)。DIFIMAGE 捕获／引用与列表共用同一资源表；710 的单图与组合图层使用 `ResourceServices::open` 按帧读取，保留预读缓存优先级。多来源资源保留独立图层及合成缓存，ARGB 乘法、RGB／Alpha 百分比和滤镜到绘图更新时刷新缓存；单来源共享当前图像，旋转、翻转和缩放立即重建。伴随动画来源提供初始快照，资源层动画控制尚未接入。
+`Runtime::image_resource(handle)` 查询普通 710 静态装载或 733 创建的独立图像资源，句柄与普通图像包装、像素句柄分别检查类型。`retain_image_resource`／`release_image_resource_reference` 管理额外使用者的配对持有，最后释放后句柄失效；任务销毁和程序重装只回收仍有登记的任务引用。`image_resource_updated(handle, clear)` 读取更新标记，`clear=true` 同时为所有使用者清零。普通资源入口提供几何设置／查询、Alpha 分类、属性、附加值、矩形填充、ARGB 乘法、RGB／Alpha 百分比、直角旋转、翻转、模糊、缩放、资源间拷贝及颜色滤镜；`Image::blur` 对画布内图像扩边后依次执行水平、垂直滤波，半径钳制到 0～255；`Image::resize_canvas` 按原始画布比例同步像素和元数据，`copy_scaled_from`／`copy_scaled_within` 提供独立裁剪的 BGRA 拷贝及重采样；`Image::alpha_mask()` 查询 728 保存的通道 DWORD。参数和零句柄规则见[独立图像资源](graphics.md#独立图像资源)。DIFIMAGE 捕获／引用与列表共用同一资源表；710 的单图与组合图层使用 `ResourceServices::open` 按帧读取，保留预读缓存优先级。多来源资源保留独立图层及合成缓存，ARGB 乘法、RGB／Alpha 百分比和滤镜到绘图更新时刷新缓存；单来源共享当前图像，旋转、翻转和缩放立即重建。伴随动画来源保持暂停，提供最小无符号帧 ID 的初始快照；普通脚本调用不推进该动画。
 
 `fes::CImageState` 保存 CIMAGE 的坐标、尺寸、颜色、平面引用和显示属性。宿主按具体银行调用 `apply(&attributes, bank)`；返回本次是否使显示属性失效，供宿主递归标记后代。此接口仅应用该类型的有效列，不用于 IMAGE 等其他对象。父子对象关系应由宿主先处理，资源查找和绘制也由宿主负责。
 

@@ -11,10 +11,10 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
         let count = match index {
-            123 => 3,
+            123 | 126 => 3,
             418 => 4,
-            124 | 557 => 2,
-            125 => 1,
+            124 | 127 | 128 | 131 | 133 | 557 => 2,
+            125 | 129 | 130 | 132 => 1,
             _ => unreachable!(),
         };
         if arguments.len() != count * 4 {
@@ -66,6 +66,45 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             }
             125 => {
                 self.command_target(target, 105, [0; 3])?;
+            }
+            126 => {
+                self.command_target(
+                    target,
+                    107,
+                    [read::u32_at(arguments, 4)?, read::u32_at(arguments, 8)?, 0],
+                )?;
+            }
+            127 | 128 | 131 | 133 => {
+                let code = match index {
+                    127 => 108,
+                    128 => 106,
+                    131 => 111,
+                    133 => 114,
+                    _ => unreachable!(),
+                };
+                self.command_target(target, code, [0, read::u32_at(arguments, 4)?, 0])?;
+            }
+            129 => {
+                let supported = self
+                    .tree
+                    .find_reachable(self.host.task_id, target)
+                    .is_some_and(|node| node.kind == super::kind::TEXT_WINDOW);
+                let deleted = self
+                    .objects
+                    .get(&target)
+                    .is_some_and(|object| object.control().deletion_requested != 0);
+                if !supported || deleted {
+                    return Err(Error::new(
+                        vm.pc,
+                        "文本窗口完成查询目标不可达、已删除或类型未接入",
+                    ));
+                }
+                return Ok(NativeReturn::Value(
+                    self.command_target(target, 109, [0; 3])?,
+                ));
+            }
+            130 | 132 => {
+                self.command_target(target, if index == 130 { 110 } else { 113 }, [0; 3])?;
             }
             557 => {
                 self.command_target(target, 122, [0, read::u32_at(arguments, 4)?, 0])?;

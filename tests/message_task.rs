@@ -175,7 +175,7 @@ fn defaults_write_only_tagged_configuration_and_require_explicit_global_settings
 }
 
 #[test]
-fn ordinary_message_queries_reject_missing_deleted_and_unconfigured_targets() {
+fn ordinary_text_queries_reject_missing_deleted_and_unconfigured_targets() {
     struct Query {
         native: u32,
         target: u32,
@@ -196,15 +196,26 @@ fn ordinary_message_queries_reject_missing_deleted_and_unconfigured_targets() {
             Ok(Some(Program::from_code(&code, vec![], 64)?))
         }
     }
-    for native in [616, 884] {
-        for (target, object_kind, delete, extra, diagnostic) in [
-            (0, kind::STRING_PLANE, false, false, "目标"),
-            (99, kind::STRING_PLANE, false, false, "目标"),
-            (1, kind::STRING_PLANE_UTF8, false, false, "目标"),
-            (1, kind::STRING_PLANE, true, false, "目标"),
-            (1, kind::STRING_PLANE, false, false, "显示对象"),
-            (1, kind::STRING_PLANE, false, true, "参数字节数"),
-        ] {
+    for native in [129, 616, 884] {
+        let cases = if native == 129 {
+            vec![
+                (0, kind::TEXT_WINDOW, false, false, "目标"),
+                (99, kind::TEXT_WINDOW, false, false, "目标"),
+                (1, kind::STRING_PLANE, false, false, "目标"),
+                (1, kind::TEXT_WINDOW, true, false, "目标"),
+                (1, kind::TEXT_WINDOW, false, true, "参数字节数"),
+            ]
+        } else {
+            vec![
+                (0, kind::STRING_PLANE, false, false, "目标"),
+                (99, kind::STRING_PLANE, false, false, "目标"),
+                (1, kind::STRING_PLANE_UTF8, false, false, "目标"),
+                (1, kind::STRING_PLANE, true, false, "目标"),
+                (1, kind::STRING_PLANE, false, false, "显示对象"),
+                (1, kind::STRING_PLANE, false, true, "参数字节数"),
+            ]
+        };
+        for (target, object_kind, delete, extra, diagnostic) in cases {
             let mut rt = Runtime::new(
                 0,
                 kind::ROOT,
@@ -1257,5 +1268,150 @@ fn text_window_natives_render_independent_colors_and_resume_timed_pages() {
             rt.destroy(window).unwrap();
             assert!(rt.drawables().get(window).is_none());
         }
+    }
+}
+
+#[test]
+fn text_window_controls_reveal_segments_and_preserve_literal_mode() {
+    struct Controls(Program);
+    impl ProgramLoader for Controls {
+        fn load(&mut self, _: &[u8]) -> Result<Option<Program>> {
+            Ok(Some(self.0.clone()))
+        }
+    }
+    fn instruction(code: &mut Vec<u8>, opcode: u8, values: &[u32]) {
+        code.push(opcode);
+        for value in values {
+            code.push(3);
+            code.extend(value.to_le_bytes());
+        }
+    }
+    fn call(code: &mut Vec<u8>, native: u32, args: &[u32]) {
+        for &arg in args {
+            instruction(code, 0x25, &[arg]);
+        }
+        instruction(code, 0x2b, &[native, args.len() as u32 * 4]);
+    }
+    fn query(code: &mut Vec<u8>, address: u32) {
+        call(code, 129, &[1]);
+        instruction(code, 0x26, &[address]);
+    }
+    let mut code = Vec::new();
+    instruction(&mut code, 0x25, &[0xdeadbeef]);
+    call(&mut code, 123, &[1, 64, 160]);
+    call(&mut code, 126, &[1, 1, 3]);
+    call(&mut code, 127, &[1, 2]);
+    call(&mut code, 128, &[1, 1]);
+    call(&mut code, 131, &[1, 6]);
+    call(&mut code, 124, &[1, 224]);
+    call(&mut code, 132, &[1]);
+    call(&mut code, 124, &[1, 240]);
+    call(&mut code, 132, &[1]);
+    call(&mut code, 124, &[1, 256]);
+    query(&mut code, 0);
+    call(&mut code, 65, &[]);
+    call(&mut code, 133, &[1, 0]);
+    query(&mut code, 4);
+    call(&mut code, 65, &[]);
+    query(&mut code, 8);
+    call(&mut code, 133, &[1, 1]);
+    call(&mut code, 65, &[]);
+    query(&mut code, 12);
+    call(&mut code, 126, &[1, 1, u32::MAX]);
+    call(&mut code, 130, &[1]);
+    call(&mut code, 133, &[1, u32::MAX]);
+    call(&mut code, 130, &[1]);
+    query(&mut code, 16);
+    call(&mut code, 65, &[]);
+    call(&mut code, 125, &[1]);
+    call(&mut code, 126, &[1, 0, 0]);
+    call(&mut code, 127, &[1, 0]);
+    call(&mut code, 128, &[1, 0]);
+    call(&mut code, 131, &[1, 10]);
+    call(&mut code, 124, &[1, 272]);
+    query(&mut code, 20);
+    call(&mut code, 65, &[]);
+    let mut data = vec![0; 384];
+    for (slot, value) in [
+        (2, 64),
+        (3, 32),
+        (5, 1),
+        (6, 10),
+        (7, 4),
+        (15, 16),
+        (16, 0xff33_2211),
+    ] {
+        set(&mut data, 64 + slot * 4, value);
+    }
+    data[224..228].copy_from_slice(b"A\\nB");
+    data[240] = b'C';
+    data[256] = b'D';
+    data[272..274].copy_from_slice(b"\\n");
+    let program = Program::from_code(&code, data, 128).unwrap();
+    for budget in [1, 4096] {
+        let mut rt = Runtime::new(
+            0,
+            kind::ROOT,
+            Box::new(BaseObject::new()),
+            State::new(0),
+            MessageFactory {
+                fallback: KcsFactory::new(Controls(program.clone())),
+            },
+        );
+        rt.set_budget(budget, 1 << 20);
+        rt.set_fonts(Fonts);
+        rt.host_mut().message_defaults = Some(MessageDefaults {
+            font_name: vec![84],
+            glyph_parameter: Some(0),
+            ..Default::default()
+        });
+        rt.drawing_mut().enabled = true;
+        rt.drawing_mut().active = true;
+        rt.drawing_mut().target = Some(RenderTarget::new([64, 32]).unwrap());
+        let window = rt.create(0, kind::TEXT_WINDOW, b"text", b"").unwrap();
+        let caller = rt.create(0, kind::ORDINARY, b"controls", b"").unwrap();
+        let pixel =
+            |rt: &Runtime<_>, x, y| rt.drawing().target.as_ref().unwrap().pixel(x, y).unwrap();
+        rt.update(100, 1).unwrap();
+        rt.dispatch_command(0, command(caller, 163, 0)).unwrap();
+        rt.dispatch_command(0, command(window, 47, 1)).unwrap();
+        rt.dispatch_command(0, command(caller, 162, 1)).unwrap();
+        rt.update(100, 0).unwrap();
+        rt.dispatch_command(0, command(caller, 163, 0)).unwrap();
+        assert_eq!(pixel(&rt, 1, 1), 0);
+        rt.update(101, 1).unwrap();
+        assert_eq!(pixel(&rt, 1, 1), 0xff11_2233);
+        assert_eq!(pixel(&rt, 1, 9), 0);
+        rt.update(106, 1).unwrap();
+        assert_eq!(pixel(&rt, 1, 9), 0xff11_2233);
+        assert_eq!(pixel(&rt, 6, 9), 0);
+        assert_eq!(rt.dispatch_command(0, command(window, 109, 0)).unwrap(), 1);
+        rt.dispatch_command(0, command(caller, 162, 1)).unwrap();
+        rt.update(107, 1).unwrap();
+        rt.dispatch_command(0, command(caller, 163, 0)).unwrap();
+        rt.update(108, 1).unwrap();
+        assert_eq!(pixel(&rt, 6, 9), 0xff11_2233);
+        assert_eq!(pixel(&rt, 11, 9), 0);
+        assert_eq!(rt.dispatch_command(0, command(window, 109, 0)).unwrap(), 1);
+        rt.dispatch_command(0, command(caller, 162, 1)).unwrap();
+        rt.update(110, 1).unwrap();
+        rt.dispatch_command(0, command(caller, 163, 0)).unwrap();
+        assert_eq!(pixel(&rt, 11, 9), 0xff11_2233);
+        rt.dispatch_command(0, command(caller, 162, 1)).unwrap();
+        rt.update(111, 1).unwrap();
+        rt.dispatch_command(0, command(caller, 163, 0)).unwrap();
+        assert_eq!(pixel(&rt, 1, 1), 0xff11_2233);
+        assert_eq!(pixel(&rt, 8, 1), 0xff11_2233);
+        assert_eq!(pixel(&rt, 1, 9), 0);
+        let vm = rt.object(caller).unwrap().interpreter().unwrap();
+        assert_eq!(
+            vm.read(0, 24)
+                .unwrap()
+                .chunks_exact(4)
+                .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
+                .collect::<Vec<_>>(),
+            [1, 0, 1, 1, 1, 1]
+        );
+        assert_eq!(vm.stack_bytes(), 0xdeadbeefu32.to_le_bytes());
     }
 }
