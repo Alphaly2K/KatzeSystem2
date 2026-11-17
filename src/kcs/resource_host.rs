@@ -3,6 +3,8 @@ use crate::resource::{ResourceMode, XmlDocument};
 use crate::{Error, HandleAllocator, Result, read};
 use std::collections::BTreeMap;
 
+mod image_metadata;
+
 /// 普通脚本的同步资源读取服务；None 表示未找到或无法打开。
 pub trait ResourceServices {
     /// 依类别补全名称；可直接委托 ArchiveConfig::resolve。
@@ -597,7 +599,7 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
             }
             return Ok(NativeReturn::Continue);
         }
-        if !matches!(index, 284 | 365 | 366 | 368 | 590..=597) {
+        if !matches!(index, 284 | 365 | 366 | 368 | 375 | 590..=597) {
             return self.inner.call(index, arguments, vm);
         }
         self.state
@@ -614,7 +616,7 @@ impl ResourceState {
         services: Option<&mut dyn ResourceServices>,
     ) -> Result<NativeReturn> {
         let count = match index {
-            284 => 2,
+            284 | 375 => 2,
             365 | 366 | 590 | 591 | 594 | 595 => 1,
             368 | 592 | 593 => 3,
             596 | 597 => 5,
@@ -695,31 +697,27 @@ impl ResourceState {
                 return Ok(NativeReturn::Value(0));
             }
             vm.write(args[2], &[0; 36])?;
-            let bytes = self.image_data(args[0])?;
-            if bytes.starts_with(b"HG-2") || bytes.starts_with(&[0xff, 0xd8]) {
-                return Err(Error::new(vm.pc, "未支持的 HG-2／JPEG 元数据查询"));
-            }
-            if !bytes.starts_with(b"HG-3") {
+            let info = image_metadata::query(self.image_data(args[0])?, args[1])?;
+            return image_metadata::write(info, vm, args[2]);
+        }
+        if index == 375 {
+            if vm.read(args[1], 1).is_err() {
                 return Ok(NativeReturn::Value(0));
             }
-            let metadata = crate::hg3::Metadata::parse(bytes)?;
-            let Some(info) = metadata.frame(args[1] as i32).and_then(|frame| frame.info) else {
+            let name = strings::format(vm, args[0], 0)?;
+            let name = name.split(|&byte| byte == 0).next().unwrap_or_default();
+            let services = services.ok_or_else(|| Error::new(vm.pc, "运行时未配置资源服务"))?;
+            let name = services.resolve(b"image", name)?;
+            let Some(source) = services.open(&name, ResourceMode::LooseFirst)? else {
                 return Ok(NativeReturn::Value(0));
             };
-            let fields = [
-                info.offset[0] as u32,
-                info.offset[1] as u32,
-                info.size[0],
-                info.size[1],
-                info.canvas_size[0],
-                info.canvas_size[1],
-                ((info.bit_depth as i16 as i32) / 8) as u32,
-                info.base[0] as u32,
-                info.base[1] as u32,
-            ];
-            let fields: Vec<_> = fields.into_iter().flat_map(u32::to_le_bytes).collect();
-            vm.write(args[2], &fields)?;
-            return Ok(NativeReturn::Value(1));
+            let mut header = [0; 1024];
+            let size = source.len()?.min(header.len() as u64) as usize;
+            if source.read_exact_at(0, &mut header[..size]).is_err() {
+                return Ok(NativeReturn::Value(0));
+            }
+            let info = image_metadata::query(&header[..size], 0).ok().flatten();
+            return image_metadata::write(info, vm, args[1]);
         }
         if index == 590 {
             let name = strings::format(vm, args[0], 0)?;

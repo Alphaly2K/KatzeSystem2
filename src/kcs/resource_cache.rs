@@ -1,7 +1,7 @@
 use super::{Interpreter, NativeReturn, ResourceServices, format_string};
 use crate::resource::ResourceMode;
 use crate::{Error, Result, read, text};
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 /// 可由资源服务及程序装载器共享的预读队列和原始字节缓存。
 #[derive(Clone, Default)]
@@ -13,7 +13,7 @@ struct Entry {
     life: i32,
     priority: i32,
     attempted: bool,
-    bytes: Option<Vec<u8>>,
+    bytes: Option<Arc<Vec<u8>>>,
 }
 
 struct State {
@@ -139,7 +139,7 @@ impl ResourceCache {
                 .get_mut(index)
                 .filter(|entry| entry.key == key)
             {
-                entry.bytes = bytes;
+                entry.bytes = bytes.map(Arc::new);
                 entry.attempted = true;
                 group = entry.life;
             }
@@ -164,6 +164,10 @@ impl ResourceCache {
 
     /// 返回独立副本；清空或老化预读队列不改变已交出的正文。
     pub fn read_cached(&self, name: &[u8]) -> Result<Option<Vec<u8>>> {
+        Ok(self.source_cached(name)?.map(|bytes| (*bytes).clone()))
+    }
+
+    fn source_cached(&self, name: &[u8]) -> Result<Option<Arc<Vec<u8>>>> {
         let state = self.0.borrow();
         if !state.enabled || state.entries.is_empty() {
             return Ok(None);
@@ -236,8 +240,8 @@ impl<S: ResourceServices> ResourceServices for CachedResources<S> {
     }
 
     fn open(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<crate::io::SharedSource>> {
-        if let Some(bytes) = self.cache.read_cached(name)? {
-            return Ok(Some(std::sync::Arc::new(bytes)));
+        if let Some(bytes) = self.cache.source_cached(name)? {
+            return Ok(Some(bytes));
         }
         self.inner.open(name, mode)
     }

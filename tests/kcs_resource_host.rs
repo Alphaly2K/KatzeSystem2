@@ -332,13 +332,16 @@ fn image_data_uses_category_resolution_and_keeps_each_load_alive_until_release()
 
 #[test]
 fn image_metadata_queries_select_first_frame_and_write_only_the_nine_fields() {
-    struct Bytes(Vec<u8>);
+    struct Bytes(Vec<Vec<u8>>);
     impl ResourceServices for Bytes {
         fn resolve(&mut self, _: &[u8], name: &[u8]) -> Result<Vec<u8>> {
             Ok(name.to_vec())
         }
-        fn read(&mut self, _: &[u8], _: ResourceMode) -> Result<Option<Vec<u8>>> {
-            Ok(Some(self.0.clone()))
+        fn read(&mut self, name: &[u8], _: ResourceMode) -> Result<Option<Vec<u8>>> {
+            Ok(self
+                .0
+                .get(usize::from(name.first().copied().unwrap_or(1)) - 1)
+                .cloned())
         }
     }
     let mut image = b"HG-3".to_vec();
@@ -366,7 +369,42 @@ fn image_metadata_queries_select_first_frame_and_write_only_the_nine_fields() {
             .flat_map(u32::to_le_bytes),
         );
     }
-    let mut services = Bytes(image);
+    let mut bad_link = image.clone();
+    bad_link[12..16].copy_from_slice(&1u32.to_le_bytes());
+    let mut services = Bytes(vec![image, bad_link]);
+    for version in [0x10, 0x20, 0x25] {
+        let mut image = b"HG-2".to_vec();
+        image.extend([12u32, version].into_iter().flat_map(u32::to_le_bytes));
+        image.extend(
+            [
+                31u32,
+                47,
+                0xffe1_0018,
+                0,
+                0,
+                3000,
+                3000,
+                0,
+                0,
+                40,
+                7,
+                640,
+                480,
+                (-3i32) as u32,
+                11,
+                1,
+                0,
+                100,
+                (-21i32) as u32,
+            ]
+            .into_iter()
+            .flat_map(u32::to_le_bytes),
+        );
+        services.0.push(image);
+    }
+    let jpeg = b"\xff\xd8\xff\xc2\0\x0b\x08\0\x2f\0\x1f\x01\x01\x11\0\xff\xda\0\x08\x01\x01";
+    services.0.push(jpeg.to_vec());
+    services.0.push(jpeg[..jpeg.len() - 1].to_vec());
     let mut vm = Interpreter::new(
         Program::from_code(&[], vec![0; 64], 64).unwrap(),
         vec![0x5a; 64],
@@ -406,4 +444,38 @@ fn image_metadata_queries_select_first_frame_and_write_only_the_nine_fields() {
     assert_eq!(vm.read(0x80000008, 36).unwrap(), [0; 36]);
     assert_eq!(vm.read(0x80000000, 8).unwrap(), [0x5a; 8]);
     assert_eq!(vm.read(0x8000002c, 20).unwrap(), [0x5a; 20]);
+
+    for (name, frame, expected) in [
+        (3, u32::MAX, Some([0i32, 0, 31, 47, 31, 47, -3, 0, 0])),
+        (4, 7, Some([-3, 11, 31, 47, 640, 480, -3, 0, 0])),
+        (5, 7, Some([-3, 11, 31, 47, 640, 480, -3, 100, -21])),
+        (5, 0, None),
+        (6, u32::MAX, Some([0, 0, 31, 47, 31, 47, 3, 0, 0])),
+        (7, 0, None),
+    ] {
+        vm.write(0, &[name, 0]).unwrap();
+        let NativeReturn::Value(handle) = call(&mut host, &mut vm, 365, &[0]) else {
+            panic!()
+        };
+        assert_ne!(handle, 0);
+        assert_eq!(
+            call(&mut host, &mut vm, 368, &[handle, frame, 0x80000008]),
+            NativeReturn::Value(u32::from(expected.is_some()))
+        );
+        let fields: Vec<_> = expected
+            .unwrap_or([0; 9])
+            .into_iter()
+            .flat_map(i32::to_le_bytes)
+            .collect();
+        assert_eq!(vm.read(0x80000008, 36).unwrap(), fields);
+    }
+    vm.write(0, &[2, 0]).unwrap();
+    let NativeReturn::Value(handle) = call(&mut host, &mut vm, 365, &[0]) else {
+        panic!()
+    };
+    let args: Vec<_> = [handle, 7, 0x80000008]
+        .into_iter()
+        .flat_map(u32::to_le_bytes)
+        .collect();
+    assert!(host.call(368, &args, &mut vm).is_err());
 }

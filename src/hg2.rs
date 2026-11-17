@@ -2,6 +2,48 @@ use crate::hg3::{DecodedFrame, StandardInfo};
 use crate::{Error, Result, hg_pixels, read};
 use std::io::Write;
 
+pub(crate) fn frame_info(data: &[u8], id: u32) -> Result<Option<StandardInfo>> {
+    let version = read::u32_at(data, 8)? as u16;
+    if !matches!(version, 0x10 | 0x20 | 0x25) {
+        return Ok(None);
+    }
+    let mut frame = 12;
+    if version != 0x10 {
+        while read::u32_at(data, frame + 0x28)? != id {
+            let next = read::sized(read::u32_at(data, frame + 0x40)?, frame + 0x40)?;
+            if next == 0 {
+                return Ok(None);
+            }
+            if next < if version == 0x25 { 0x4c } else { 0x44 } {
+                return Err(Error::new(frame + 0x40, "HG-2 帧偏移与帧头重叠"));
+            }
+            frame += next;
+        }
+    }
+    let word = |offset| read::u32_at(data, frame + offset);
+    let size = [word(0)?, word(4)?];
+    Ok(Some(StandardInfo {
+        size,
+        bit_depth: word(8)? >> 16,
+        offset: if version == 0x10 {
+            [0, 0]
+        } else {
+            [word(0x34)? as i32, word(0x38)? as i32]
+        },
+        canvas_size: if version == 0x10 {
+            size
+        } else {
+            [word(0x2c)?, word(0x30)?]
+        },
+        reserved: 0,
+        base: if version == 0x25 {
+            [word(0x44)? as i32, word(0x48)? as i32]
+        } else {
+            [0, 0]
+        },
+    }))
+}
+
 /// 解码 HG-2 0x25 的单帧 24／32 位图像，输出顶端起始 BGRA8。
 pub fn decode_frame(data: &[u8]) -> Result<DecodedFrame> {
     if data.get(..4) != Some(b"HG-2") || data.len() > read::MAX_BYTES {

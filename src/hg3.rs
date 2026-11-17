@@ -17,6 +17,65 @@ pub struct StandardInfo {
     pub base: [i32; 2],
 }
 
+impl StandardInfo {
+    fn parse(payload: &[u8]) -> Result<Self> {
+        let word = |offset| read::u32_at(payload, offset);
+        Ok(Self {
+            size: [word(0)?, word(4)?],
+            bit_depth: word(8)?,
+            offset: [word(12)? as i32, word(16)? as i32],
+            canvas_size: [word(20)?, word(24)?],
+            reserved: word(28)?,
+            base: [word(32)? as i32, word(36)? as i32],
+        })
+    }
+}
+
+/// 查询一个帧的标准字段；允许后续帧和像素正文位于读取前缀之外。
+pub(crate) fn frame_info(data: &[u8], id: u32) -> Result<Option<StandardInfo>> {
+    if read::u32_at(data, 4)? != 12 || read::u32_at(data, 8)? != 0x300 {
+        return Err(Error::new(4, "未支持的 HG-3 头或版本"));
+    }
+    let mut frame = 12;
+    loop {
+        let next = read::sized(read::u32_at(data, frame)?, frame)?;
+        if next != 0 && next < 8 {
+            return Err(Error::new(frame, "HG-3 帧偏移与帧头重叠"));
+        }
+        if read::u32_at(data, frame + 4)? == id {
+            let end = if next == 0 {
+                data.len()
+            } else {
+                (frame + next).min(data.len())
+            };
+            let data = &data[..end];
+            let mut tag = frame + 8;
+            loop {
+                let header = read::range(data, tag, 16)?;
+                let length = read::u32_at(header, 12)?;
+                if &header[..8] == b"stdinfo\0" {
+                    if length < 40 {
+                        return Err(Error::new(tag, "HG-3 标准字段长度不足"));
+                    }
+                    return StandardInfo::parse(read::range(data, tag + 16, 40)?).map(Some);
+                }
+                let next = read::sized(read::u32_at(header, 8)?, tag + 8)?;
+                if next == 0 {
+                    return Ok(None);
+                }
+                if next < 16 || (next - 16) < length as usize {
+                    return Err(Error::new(tag + 8, "HG-3 标签偏移与当前标签重叠"));
+                }
+                tag += next;
+            }
+        }
+        if next == 0 {
+            return Ok(None);
+        }
+        frame += next;
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Frame {
     pub offset: usize,
@@ -86,21 +145,7 @@ impl Metadata {
                     if length < 40 {
                         return Err(Error::new(0, "输入范围越界"));
                     }
-                    let payload = &bounded.array::<40>(tag + 16)?;
-                    frame.info = Some(StandardInfo {
-                        size: [read::u32_at(payload, 0)?, read::u32_at(payload, 4)?],
-                        bit_depth: read::u32_at(payload, 8)?,
-                        offset: [
-                            read::u32_at(payload, 12)? as i32,
-                            read::u32_at(payload, 16)? as i32,
-                        ],
-                        canvas_size: [read::u32_at(payload, 20)?, read::u32_at(payload, 24)?],
-                        reserved: read::u32_at(payload, 28)?,
-                        base: [
-                            read::u32_at(payload, 32)? as i32,
-                            read::u32_at(payload, 36)? as i32,
-                        ],
-                    });
+                    frame.info = Some(StandardInfo::parse(&bounded.array::<40>(tag + 16)?)?);
                 }
                 if header[..3] == *b"ats" {
                     // 编号可越过名称末尾；已校验的 next_tag 高字节会终止前缀。

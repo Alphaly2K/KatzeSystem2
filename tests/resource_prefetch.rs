@@ -58,6 +58,8 @@ fn source_opening_forwards_host_overrides_and_keeps_cached_sources_after_evictio
     cache.start();
     assert!(cache.advance(&mut files).unwrap());
     let cached = files.open(b"X", ResourceMode::Archive).unwrap().unwrap();
+    let again = files.open(b"x", ResourceMode::Archive).unwrap().unwrap();
+    assert!(std::sync::Arc::ptr_eq(&cached, &again));
     assert_eq!((files.opens, files.reads), (1, 1));
     cache.clear();
     cached.read_exact_at(0, &mut bytes).unwrap();

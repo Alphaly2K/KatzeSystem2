@@ -1,11 +1,12 @@
 use katze_system2::{
     Error, Result,
     expression::State,
+    io::{ReadSource, SharedSource},
     kcs::{Program, ResourceServices},
     resource::ResourceMode,
     runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, kind},
 };
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 type Requests = Rc<RefCell<Vec<Vec<u8>>>>;
 
@@ -85,6 +86,19 @@ impl ProgramLoader for Programs {
                         push(&mut code, *value);
                     }
                     ins(&mut code, 0x2b, &[native, args.len() as u32 * 4]);
+                    ins(&mut code, 0x26, &[result]);
+                }
+            }
+            b"metadata" => {
+                data[48..60].copy_from_slice(b"art%d[G16]\0\0");
+                data[16..20].copy_from_slice(&7u32.to_le_bytes());
+                data[124..240].fill(0x5a);
+                for (name, output, result) in
+                    [(48, 128, 0), (64, 164, 4), (80, 200, 8), (48, u32::MAX, 12)]
+                {
+                    push(&mut code, name);
+                    push(&mut code, output);
+                    ins(&mut code, 0x2b, &[375, 8]);
                     ins(&mut code, 0x26, &[result]);
                 }
             }
@@ -201,6 +215,88 @@ fn runtime() -> Runtime<KcsFactory<Programs>> {
         State::new(0),
         KcsFactory::new(Programs),
     )
+}
+
+#[test]
+fn named_image_metadata_reads_only_the_prefix_and_preserves_unwritten_outputs() {
+    struct Prefix {
+        data: Vec<u8>,
+        short: bool,
+    }
+
+    impl ReadSource for Prefix {
+        fn len(&self) -> Result<u64> {
+            Ok(80_000)
+        }
+        fn read_at(&self, offset: u64, output: &mut [u8]) -> Result<usize> {
+            assert!(offset + output.len() as u64 <= 1024);
+            if self.short && offset > 0 {
+                return Ok(0);
+            }
+            if offset == 0 {
+                assert_eq!(output.len(), 1024);
+                output[..self.data.len()].copy_from_slice(&self.data);
+            }
+            Ok(if self.short {
+                self.data.len()
+            } else {
+                output.len()
+            })
+        }
+    }
+
+    struct MetadataFiles;
+
+    impl ResourceServices for MetadataFiles {
+        fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+            assert_eq!(category, b"image");
+            Ok([b"image/".as_slice(), name, b".hg3"].concat())
+        }
+        fn read(&mut self, _: &[u8], _: ResourceMode) -> Result<Option<Vec<u8>>> {
+            panic!("named metadata must not load the whole image")
+        }
+        fn open(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<SharedSource>> {
+            assert_eq!(mode, ResourceMode::LooseFirst);
+            let short = match name {
+                b"image/art7.hg3" => false,
+                b"image/value.hg3" => true,
+                b"image/text.hg3" => return Ok(None),
+                _ => panic!("unexpected resolved image name"),
+            };
+            let mut data = b"HG-3".to_vec();
+            data.extend(
+                [12u32, 0x300, 2048, 0]
+                    .into_iter()
+                    .flat_map(u32::to_le_bytes),
+            );
+            data.extend(b"stdinfo\0");
+            data.extend(
+                [56u32, 40, 3, 2, 32, (-2i32) as u32, 5, 9, 8, 0, 6, 7]
+                    .into_iter()
+                    .flat_map(u32::to_le_bytes),
+            );
+            data.extend(b"img0000\0");
+            data.extend([0u32, 1920].into_iter().flat_map(u32::to_le_bytes));
+            Ok(Some(Arc::new(Prefix { data, short })))
+        }
+    }
+
+    let mut runtime = runtime();
+    runtime.set_resources(MetadataFiles);
+    let task = runtime.create(0, kind::ORDINARY, b"metadata", b"").unwrap();
+    runtime.update(0, 0).unwrap();
+    let vm = runtime.object(task).unwrap().interpreter().unwrap();
+    assert_eq!(
+        vm.read(0, 16).unwrap(),
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    );
+    let fields: Vec<_> = [-2i32, 5, 3, 2, 9, 8, 4, 6, 7]
+        .into_iter()
+        .flat_map(i32::to_le_bytes)
+        .collect();
+    assert_eq!(vm.read(128, 36).unwrap(), fields);
+    assert_eq!(vm.read(124, 4).unwrap(), [0x5a; 4]);
+    assert_eq!(vm.read(164, 76).unwrap(), [0x5a; 76]);
 }
 
 #[test]
