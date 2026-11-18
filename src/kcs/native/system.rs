@@ -111,8 +111,8 @@ pub(super) fn call(
     }
     let count = match index {
         11 => 7,
-        1 | 6 | 9 | 10 | 71 | 75 | 209 | 210 | 212 | 213 | 393 | 1039 | 1040 => 1,
-        8 | 149 | 211 | 392 | 1049 => 2,
+        1 | 6 | 9 | 10 | 71 | 75 | 209 | 210 | 212 | 213 | 393 | 658 | 1039 | 1040 => 1,
+        8 | 149 | 211 | 392 | 659 | 1049 => 2,
         787 => 4,
         5 | 76 => 0,
         _ => unreachable!(),
@@ -220,6 +220,24 @@ pub(super) fn call(
         213 => {
             let bytes = vm.read_string(args[0])?;
             NativeReturn::Value(expression::eval_parameter_bytes(&bytes, state)? as u32)
+        }
+        658 | 659 => {
+            let active = state.active_local();
+            let mut active = active.as_ref().map(|local| local.borrow_mut());
+            let local = active.as_deref_mut().unwrap_or(&mut state.local);
+            let slot = if args[0] < 512 {
+                local.get_mut(args[0] as usize)
+            } else {
+                None
+            };
+            if index == 658 {
+                NativeReturn::Value(slot.copied().unwrap_or(0) as u32)
+            } else {
+                if let Some(slot) = slot {
+                    *slot = args[1] as i32;
+                }
+                NativeReturn::Continue
+            }
         }
         _ => unreachable!(),
     })

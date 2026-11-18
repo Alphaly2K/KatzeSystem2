@@ -368,16 +368,21 @@ fn language_requests_keep_task_identity_and_stack_across_budget_resumption() {
     use katze_system2::language::{LanguageChangeRequest, LanguageTarget::*};
     let mut code = Vec::new();
     ins(&mut code, 0x25, &[(3, 0x1234_5678)]);
-    for (mode, value) in [(0, 1), (1, 2), (2, 1), (1, 2), (3, 9)] {
+    for (mode, value) in [(0, 1), (1, 2), (2, 0x8000_0001), (1, 2), (3, 9)] {
         ins(&mut code, 0x25, &[(3, mode)]);
         ins(&mut code, 0x25, &[(3, value)]);
         ins(&mut code, 0x2b, &[(3, 1053), (3, 8)]);
+    }
+    for (mode, address) in [(0, 8), (1, 12), (2, 16), (u32::MAX, 20)] {
+        ins(&mut code, 0x25, &[(3, mode)]);
+        ins(&mut code, 0x2b, &[(3, 1079), (3, 4)]);
+        ins(&mut code, 0x26, &[(3, address)]);
     }
     ins(&mut code, 0x26, &[(3, 0)]);
     ins(&mut code, 0x2b, &[(3, 68), (3, 0)]);
     ins(&mut code, 0x26, &[(3, 4)]);
     code.push(0x3b);
-    let program = Program::from_code(&code, vec![0; 16], 128).unwrap();
+    let program = Program::from_code(&code, vec![0xff; 24], 128).unwrap();
     for budget in [1, 4096] {
         let mut state = State::new(8);
         let mut host = CoreHost::new(&mut state);
@@ -394,7 +399,12 @@ fn language_requests_keep_task_identity_and_stack_across_budget_resumption() {
             }
             assert!(complete);
             assert!(task.interpreter.stack_bytes().is_empty());
-            assert_eq!(values(&task)[..2], [0x1234_5678, id]);
+            assert_eq!(values(&task), [0x1234_5678, id, 1, 2]);
+            assert_eq!(
+                task.interpreter.read(16, 4).unwrap(),
+                0x8000_0001u32.to_le_bytes()
+            );
+            assert_eq!(task.interpreter.read(20, 4).unwrap(), [0; 4]);
             assert_eq!(host.system_settings_dirty, 1);
         }
         assert_eq!(
@@ -406,4 +416,30 @@ fn language_requests_keep_task_identity_and_stack_across_budget_resumption() {
                 .collect::<Vec<_>>()
         );
     }
+}
+
+#[test]
+fn scene_skip_switch_preserves_raw_bits_without_marking_configuration_dirty() {
+    use katze_system2::settings::SystemSettings;
+    let mut code = Vec::new();
+    ins(&mut code, 0x2b, &[(3, 1078), (3, 0)]);
+    ins(&mut code, 0x26, &[(3, 0)]);
+    ins(&mut code, 0x25, &[(3, 0x8000_0001)]);
+    ins(&mut code, 0x2b, &[(3, 1077), (3, 4)]);
+    ins(&mut code, 0x2b, &[(3, 1078), (3, 0)]);
+    ins(&mut code, 0x26, &[(3, 4)]);
+    code.push(0x3b);
+    let mut task =
+        OrdinaryTask::new(Program::from_code(&code, vec![0; 16], 128).unwrap(), vec![]).unwrap();
+    let mut state = State::new(0);
+    let mut host = CoreHost::new(&mut state);
+    host.system_settings = Some(SystemSettings {
+        scene_skip_enabled: 37,
+        ..SystemSettings::default()
+    });
+    host.system_settings_dirty = 45;
+    assert!(task.update(100, 1, &mut host, 4096).unwrap());
+    assert_eq!(values(&task), [37, 0x8000_0001, 0, 0]);
+    assert!(task.interpreter.stack_bytes().is_empty());
+    assert_eq!(host.system_settings_dirty, 45);
 }

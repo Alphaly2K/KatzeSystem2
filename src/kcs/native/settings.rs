@@ -226,9 +226,17 @@ pub(super) fn call(
             0
         }));
     }
+    if index == 1078 {
+        let settings = host
+            .system_settings
+            .as_ref()
+            .ok_or_else(|| Error::new(vm.pc, "宿主未配置全局设置"))?;
+        return Ok(NativeReturn::Value(settings.scene_skip_enabled));
+    }
     let count = match index {
         533 | 789 => 0,
         1053 => 2,
+        1077 | 1079 => 1,
         790 => 4,
         _ => unreachable!(),
     };
@@ -261,6 +269,21 @@ pub(super) fn call(
             NativeReturn::Continue
         }
         789 => NativeReturn::Value(host.configured_shared_slots),
+        1077 => {
+            let settings = host
+                .system_settings
+                .as_mut()
+                .ok_or_else(|| Error::new(vm.pc, "宿主未配置全局设置"))?;
+            settings.scene_skip_enabled = args[0];
+            NativeReturn::Continue
+        }
+        1079 => NativeReturn::Value(
+            host.languages
+                .selection()
+                .get(args[0] as usize)
+                .copied()
+                .unwrap_or(0),
+        ),
         790 => {
             if args[1] >= 8 {
                 return Ok(NativeReturn::Value(0));

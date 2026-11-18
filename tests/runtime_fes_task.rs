@@ -273,7 +273,12 @@ impl ObjectFactory for Factory {
             let mut code = vec![0x25, 3];
             code.extend(0xdead_beefu32.to_le_bytes());
             call(&mut code, 213, &[64], Some(0));
-            call(&mut code, 213, &[96], Some(0));
+            call(
+                &mut code,
+                659,
+                &[511, if copying { 0x8000_0001 } else { 99 }],
+                None,
+            );
             call(&mut code, 65, &[], None);
             if copying {
                 call(&mut code, 665, &[3], None);
@@ -281,15 +286,18 @@ impl ObjectFactory for Factory {
                 call(&mut code, 646, &[3, 511], Some(8));
                 call(&mut code, 645, &[3, 0, 27], None);
             } else {
-                call(&mut code, 213, &[128], Some(4));
-                call(&mut code, 213, &[160], Some(8));
+                call(&mut code, 658, &[0], Some(4));
+                call(&mut code, 658, &[511], Some(8));
             }
             call(&mut code, 213, &[128], Some(12));
             if copying {
+                call(&mut code, 658, &[0], Some(28));
                 call(&mut code, 666, &[3], None);
+                call(&mut code, 659, &[512, 0x1122_3344], None);
+                call(&mut code, 658, &[u32::MAX], Some(32));
             }
             call(&mut code, 65, &[], None);
-            call(&mut code, 213, &[128], Some(16));
+            call(&mut code, 658, &[0], Some(16));
             if copying {
                 for target in [0, u32::MAX, 6] {
                     call(&mut code, 665, &[target], None);
@@ -300,6 +308,7 @@ impl ObjectFactory for Factory {
             }
             call(&mut code, 65, &[], None);
             let mut data = vec![0; 256];
+            data[32..36].fill(0xff);
             for (at, text) in [
                 (
                     64,
@@ -309,16 +318,7 @@ impl ObjectFactory for Factory {
                         b"\\0=99\0"
                     },
                 ),
-                (
-                    96,
-                    if copying {
-                        b"\\511=0x80000001\0".as_slice()
-                    } else {
-                        b"\\511=99\0"
-                    },
-                ),
                 (128, b"\\0\0"),
-                (160, b"\\511\0"),
             ] {
                 data[at..at + text.len()].copy_from_slice(text);
             }
@@ -1736,16 +1736,10 @@ fn local_context_copies_keep_task_isolation_selection_stack_and_lifetimes() {
         );
         assert_eq!(send(&mut runtime, fes, 347, 0, 0), 27);
         assert_eq!(send(&mut runtime, fes, 347, 511, 0), 0x8000_0001);
-        assert_eq!(
-            runtime
-                .object(first)
-                .unwrap()
-                .interpreter()
-                .unwrap()
-                .read(20, 8)
-                .unwrap(),
-            [0; 8]
-        );
+        let vm = runtime.object(first).unwrap().interpreter().unwrap();
+        assert_eq!(vm.read(20, 8).unwrap(), [0; 8]);
+        assert_eq!(vm.read(28, 4).unwrap(), 27u32.to_le_bytes());
+        assert_eq!(vm.read(32, 4).unwrap(), [0; 4]);
         let released = Rc::downgrade(&runtime.object(first).unwrap().local_numbers().unwrap());
         runtime.destroy(first).unwrap();
         assert!(released.upgrade().is_none());

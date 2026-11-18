@@ -81,7 +81,8 @@ pub(super) fn core(index: u32) -> CoreHandler {
         | 1036
         | 1050
         | 1053
-        | 1062 => CoreHandler::Settings,
+        | 1062
+        | 1077..=1079 => CoreHandler::Settings,
         243 | 253 | 419..=423 | 459 | 515..=518 | 896..=899 | 902 | 1052 => CoreHandler::Storage,
         869..=873 | 878 => CoreHandler::Database,
         238 | 242 | 244..=248 | 252 | 254 | 290 | 389 | 390 | 469 | 833..=836 | 990 | 1031 => {
@@ -119,6 +120,8 @@ pub(super) fn core(index: u32) -> CoreHandler {
         | 609
         | 610
         | 629
+        | 658
+        | 659
         | 1024
         | 1039
         | 1040
@@ -211,7 +214,7 @@ pub(crate) enum RuntimeHandler {
     SequenceFile,
     DatabaseLoad,
     SharedRecord,
-    FlagBackup,
+    SharedNumbers,
     SoundLoop,
     SoundControl,
     SoundLoad,
@@ -268,7 +271,7 @@ pub(crate) fn runtime(index: u32) -> RuntimeHandler {
         458 => RuntimeHandler::SequenceFile,
         869 => RuntimeHandler::DatabaseLoad,
         240 | 250 => RuntimeHandler::SharedRecord,
-        609 | 610 => RuntimeHandler::FlagBackup,
+        609 | 610 | 658 | 659 => RuntimeHandler::SharedNumbers,
         400 => RuntimeHandler::SoundLoop,
         156..=168 | 347..=349 | 569 | 587 | 602 | 603 | 903 => RuntimeHandler::SoundControl,
         604 | 935 | 936 => RuntimeHandler::SoundLoad,

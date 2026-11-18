@@ -132,16 +132,26 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                 Ok(NativeReturn::Value(self.host.create_database(database)?))
             }
             RuntimeHandler::SharedRecord => self.shared_record(index, arguments, vm),
-            RuntimeHandler::FlagBackup => {
-                if !arguments.is_empty() {
+            RuntimeHandler::SharedNumbers => {
+                let length = match index {
+                    658 => 4,
+                    659 => 8,
+                    _ => 0,
+                };
+                if arguments.len() != length {
                     return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
                 }
                 if !self
                     .running
                     .get(&self.host.task_id)
                     .is_some_and(|task| task.shared_numbers == Some(true))
+                    || (matches!(index, 658 | 659) && self.numbers.active_local().is_none())
                 {
-                    return Ok(NativeReturn::Continue);
+                    return Ok(if index == 658 {
+                        NativeReturn::Value(0)
+                    } else {
+                        NativeReturn::Continue
+                    });
                 }
                 call_native(self.numbers, self.host, None, index, arguments, vm)
             }
