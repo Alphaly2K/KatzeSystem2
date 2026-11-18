@@ -166,7 +166,28 @@ fn blur_axis_with_workers(
     if output.pixels().is_empty() {
         return Ok(output);
     }
-    if workers > 1 && height > 1 {
+    if axis == 0 && workers > 1 && height >= workers * 4 {
+        // 水平滤波的行彼此独立，交错分配可分散集中在少数行上的混合窗口。
+        let rows_per_job = height.div_ceil(workers * 4);
+        let bytes_per_job = rows_per_job * output.stride();
+        let mut groups: Vec<Vec<_>> = (0..workers).map(|_| Vec::new()).collect();
+        for (index, chunk) in output.pixels_mut().chunks_mut(bytes_per_job).enumerate() {
+            groups[index % workers].push((index * rows_per_job, chunk));
+        }
+        let run = |group: Vec<(usize, &mut [u8])>| {
+            for (row, output) in group {
+                blur_rows(source, axis, radius, row, output);
+            }
+        };
+        std::thread::scope(|scope| {
+            let mut groups = groups.into_iter();
+            let first = groups.next().unwrap();
+            for group in groups.filter(|group| !group.is_empty()) {
+                scope.spawn(move || run(group));
+            }
+            run(first);
+        });
+    } else if workers > 1 && height > 1 {
         let rows_per_job = height.div_ceil(workers);
         let bytes_per_job = rows_per_job * output.stride();
         std::thread::scope(|scope| {
@@ -174,7 +195,7 @@ fn blur_axis_with_workers(
             let first = chunks.next().unwrap();
             for (index, chunk) in chunks.enumerate() {
                 scope.spawn(move || {
-                    blur_rows(source, axis, radius, (index + 1) * rows_per_job, chunk);
+                    blur_rows(source, axis, radius, (index + 1) * rows_per_job, chunk)
                 });
             }
             blur_rows(source, axis, radius, 0, first);
@@ -312,7 +333,7 @@ mod tests {
 
     #[test]
     fn blur_workers_sample_across_output_stripes() {
-        for (size, radius) in [([1031, 17], 7), ([19, 1033], 16), ([23, 9], 255)] {
+        for (size, radius) in [([1031, 37], 7), ([19, 1033], 16), ([23, 9], 255)] {
             let mut source = Surface::new(size).unwrap();
             for (index, pixel) in source.pixels_mut().chunks_exact_mut(4).enumerate() {
                 let x = index as u32 % size[0];
