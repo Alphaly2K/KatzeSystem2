@@ -13,13 +13,13 @@ impl Resources {
     ) -> Result<NativeReturn> {
         let count = match index {
             118 | 377 => 1,
-            364 | 369 | 376 | 378 | 468 | 537 | 558 | 564 | 641 => 2,
+            364 | 369 | 376 | 378 | 446 | 468 | 537 | 558 | 564 | 641 => 2,
             120 | 121 => 4,
             _ => 3,
         };
         let short_zero = matches!(
             index,
-            120 | 370 | 371 | 374 | 376 | 378 | 428 | 468 | 558 | 564 | 641
+            120 | 370 | 371 | 374 | 376 | 378 | 428 | 446 | 468 | 558 | 564 | 641
         ) && (4..count * 4).contains(&arguments.len())
             && arguments.len().is_multiple_of(4)
             && arguments.starts_with(&[0; 4]);
@@ -169,6 +169,15 @@ impl Resources {
             } else {
                 image.pixel_from_bottom(args[1], args[2]) >> 24
             }));
+        }
+        if index == 446 {
+            if vm.read(args[1], 1).is_err() {
+                return Ok(NativeReturn::Value(0));
+            }
+            vm.read(args[1], 16)?;
+            // 原扫描只修改临时矩形；返回值表示位图存在，与 Alpha 无关。
+            self.images.get(args[0])?;
+            return Ok(NativeReturn::Value(1));
         }
         if index == 371 {
             let base = self.images.get(args[0])?.info().base;

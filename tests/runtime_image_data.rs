@@ -946,6 +946,77 @@ fn ordinary_image_properties_keep_shared_geometry_and_explicit_alpha_cache() {
 }
 
 #[test]
+fn image_region_check_keeps_the_rectangle_and_reports_bound_bitmaps() {
+    let runtime = |budget| {
+        let mut factory = KcsFactory::new(Loader(Program::from_code(&[], vec![], 0).unwrap()));
+        factory.external = katze_system2::memory::SharedMemory::new(vec![0x5a; 32]).unwrap();
+        let mut rt = Runtime::new(
+            0,
+            kind::ROOT,
+            Box::new(BaseObject::new()),
+            State::new(0),
+            factory,
+        );
+        rt.set_budget(budget, 4096);
+        rt
+    };
+    for budget in [1, 4096] {
+        let mut rt = runtime(budget);
+        let transparent = rt.images_mut().create(0, [3, 2]).unwrap();
+        let zero_size = rt.images_mut().create(0, [0, 2]).unwrap();
+        let empty = rt.images_mut().create_empty(0).unwrap();
+        let mut code = Vec::new();
+        for (args, output) in [
+            (vec![0], 0),
+            (vec![transparent, u32::MAX], 4),
+            (vec![empty, u32::MAX], 8),
+            (vec![transparent, 32], 12),
+            (vec![zero_size, 0x8000_0003], 16),
+        ] {
+            call(&mut code, 446, &args, Some(output));
+        }
+        code.push(0x3b);
+        let rect: Vec<_> = [8i32, 6, -4, -1]
+            .into_iter()
+            .flat_map(i32::to_le_bytes)
+            .collect();
+        let mut data = vec![0xa5; 64];
+        data[32..48].copy_from_slice(&rect);
+        rt.factory_mut().programs.0 = Program::from_code(&code, data, 64).unwrap();
+        let task = rt.create(0, kind::ORDINARY, b"image", b"").unwrap();
+        rt.update(0, 1).unwrap();
+        let vm = rt.object(task).unwrap().interpreter().unwrap();
+        assert_eq!(
+            vm.read(0, 20).unwrap(),
+            [0u32, 0, 0, 1, 1]
+                .into_iter()
+                .flat_map(u32::to_le_bytes)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(vm.read(32, 16).unwrap(), rect);
+        assert_eq!(vm.read(0x8000_0000, 32).unwrap(), [0x5a; 32]);
+        assert!(vm.stack_bytes().is_empty());
+
+        for (bound, address, diagnostic) in
+            [(true, 0x8000_001f, "越界"), (false, 32, "尚未绑定像素")]
+        {
+            let mut rt = runtime(budget);
+            let image = if bound {
+                rt.images_mut().create(0, [3, 2]).unwrap()
+            } else {
+                rt.images_mut().create_empty(0).unwrap()
+            };
+            let mut code = Vec::new();
+            call(&mut code, 446, &[image, address], Some(0));
+            rt.factory_mut().programs.0 = Program::from_code(&code, vec![0; 64], 64).unwrap();
+            rt.create(0, kind::ORDINARY, b"image", b"").unwrap();
+            let error = rt.update(1, 1).unwrap_err();
+            assert!(error.message.contains(diagnostic), "{error}");
+        }
+    }
+}
+
+#[test]
 fn image_mutation_natives_share_pixels_geometry_mask_and_alpha_classification() {
     for budget in [1, 4096] {
         for bit_depth in [24, 32] {
