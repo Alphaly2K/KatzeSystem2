@@ -226,7 +226,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             85 | 86 | 90 => 16,
             96 | 100 | 256 | 260 | 263 | 343 | 344 | 346 | 463 | 625 | 654 | 663 | 879 | 881 => 12,
             104 => 28,
-            257 | 622 | 623 | 731..=732 => 52,
+            257 | 259 | 622..=623 | 707..=708 | 731..=732 => 52,
             _ => unreachable!(),
         };
         if arguments.len() < 4 || arguments.len() > count || !arguments.len().is_multiple_of(4) {
@@ -234,7 +234,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         }
         let route_zero = matches!(
             index,
-            104 | 105 | 106 | 107 | 256 | 257 | 258 | 260..=264 | 339..=342 | 402 | 455 | 622 | 623 | 731..=732 | 462
+            104 | 105 | 106 | 107 | 256..=264 | 339..=342 | 402 | 455 | 622..=623 | 707..=708 | 731..=732 | 462
                 ..=464 | 534 | 570 | 572 | 625 | 653 | 654 | 655 | 657 | 663 | 702 | 989 | 848 | 849 | 862 | 879..=881 | 1065..=1069
         );
         if route_zero && arguments.len() != count {
@@ -379,27 +379,28 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     },
                 )?;
             }
-            257 | 622 | 623 | 731..=732 => {
+            257 | 259 | 622..=623 | 707..=708 | 731..=732 => {
                 let mut record = [0; 60];
-                if index == 257 {
-                    let source = word(2);
-                    let pixels = if source == 0 {
-                        0
-                    } else {
-                        self.resources.images.pixel_handle(source)?
-                    };
-                    record[..4].copy_from_slice(&pixels.to_le_bytes());
-                } else if matches!(index, 622 | 623) {
-                    record[4..8].copy_from_slice(&arguments[8..12]);
-                } else {
-                    record[12..16].copy_from_slice(&arguments[8..12]);
-                }
+                let source = word(2);
+                let (offset, source) = match index {
+                    257 | 259 if source != 0 => (0, self.resources.images.pixel_handle(source)?),
+                    257 | 259 => (0, source),
+                    622 | 623 => (4, source),
+                    707 | 708 => (8, source),
+                    731 | 732 => (12, source),
+                    _ => unreachable!(),
+                };
+                record[offset..offset + 4].copy_from_slice(&source.to_le_bytes());
                 record[16..44].copy_from_slice(&arguments[12..40]);
                 record[44..48].copy_from_slice(&word(10).min(255).to_le_bytes());
                 record[48..56].copy_from_slice(&arguments[44..52]);
                 self.command_target_with_buffers(
                     target,
-                    if matches!(index, 623 | 732) { 288 } else { 286 },
+                    if matches!(index, 259 | 623 | 708 | 732) {
+                        288
+                    } else {
+                        286
+                    },
                     [word(1), 0, 0],
                     &mut CommandBuffers {
                         data0: None,

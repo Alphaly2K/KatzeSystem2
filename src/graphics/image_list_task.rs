@@ -290,7 +290,7 @@ impl TaskObject for ImageListObject {
             286 | 288 => {
                 if let Some(list) = &mut self.list {
                     let data = words::<15>(buffers.data1.as_deref())?;
-                    if data[0] != 0 || data[1] != 0 || data[3] != 0 {
+                    if data[..4].iter().any(|&value| value != 0) {
                         if data[13] != 0 {
                             return Err(Error::new(0, "图像列表变换来源尚未接入"));
                         }
@@ -305,11 +305,13 @@ impl TaskObject for ImageListObject {
                         } else if data[1] != 0 {
                             let frames = ImageList::decode_hg3(host.image_data(data[1])?)?;
                             list.set_frames(key, frames, properties, images(host)?)?;
+                        } else if data[2] != 0 {
+                            if !list.update_properties(key, properties, images(host)?)? {
+                                return Err(Error::new(0, "图像列表共享条目来源尚未接入"));
+                            }
                         } else {
                             list.set_resource(key, data[3], properties, images(host)?)?;
                         }
-                    } else if data[1..4].iter().any(|&value| value != 0) {
-                        return Err(Error::new(0, "图像列表其他来源类型尚未接入"));
                     }
                     if command.code == 286 && data[14] != 0 {
                         list.set_source_identity(key, data[14]);

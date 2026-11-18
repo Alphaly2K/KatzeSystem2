@@ -1040,6 +1040,119 @@ fn ordinary_and_resource_registration_keep_pixels_after_source_and_owner_release
     Ok(())
 }
 
+#[test]
+fn ordinary_list_reregistration_can_replace_pixels_or_update_properties() -> Result<()> {
+    struct Registration;
+    impl ProgramLoader for Registration {
+        fn load(&mut self, _: &[u8]) -> Result<Option<Program>> {
+            let mut code = Vec::new();
+            push(&mut code, 0xdead_beef);
+            for (step, (native, slot, source, x)) in [
+                (257, 7, Some(32_u32), 0.0_f32),
+                (259, 7, Some(36), 0.0),
+                (259, 8, Some(32), 1.0),
+                (259, 7, None, 1.0),
+                (707, 7, Some(40), 2.0),
+                (708, 8, Some(40), 0.0),
+                (708, 7, None, 1.0),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                push(&mut code, 1);
+                push(&mut code, slot);
+                if let Some(address) = source {
+                    code.extend([0x25, 0x13]);
+                    code.extend(address.to_le_bytes());
+                } else {
+                    push(&mut code, 0);
+                }
+                for value in [
+                    x.to_bits(),
+                    0,
+                    0,
+                    0,
+                    1f32.to_bits(),
+                    1f32.to_bits(),
+                    0,
+                    u32::MAX,
+                    1,
+                    0,
+                ] {
+                    push(&mut code, value);
+                }
+                call(&mut code, native, 52);
+                push(&mut code, 1);
+                push(&mut code, slot);
+                call(&mut code, 657, 8);
+                code.extend([0x26, 3]);
+                code.extend((step as u32 * 4).to_le_bytes());
+            }
+            call(&mut code, 65, 0);
+            Ok(Some(Program::from_code(&code, vec![0; 44], 128)?))
+        }
+    }
+
+    let mut runtime = Runtime::new(
+        0,
+        kind::ROOT,
+        Box::new(BaseObject::new()),
+        State::new(0),
+        GraphicsFactory {
+            fallback: KcsFactory::new(Registration),
+        },
+    );
+    runtime.host_mut().surface_size = [3, 2];
+    runtime.drawing_mut().target = Some(RenderTarget::new([3, 2])?);
+    let list = runtime.create(0, kind::IMAGE_LIST, b"list", b"")?;
+    assert_eq!(list, 1);
+    send(&mut runtime, list, 285, 3, 2);
+    let script = runtime.create(0, kind::ORDINARY, b"registration", b"")?;
+    let mut make_source = |color: u32| -> Result<(u32, u32)> {
+        let source = runtime.images_mut().create(99, [1, 1])?;
+        runtime
+            .images_mut()
+            .get_mut(source)?
+            .pixels_mut()
+            .copy_from_slice(&color.to_le_bytes());
+        Ok((source, runtime.images().pixel_handle(source)?))
+    };
+    let (first, first_pixels) = make_source(0xff00_00ff)?;
+    let (second, second_pixels) = make_source(0xff00_ff00)?;
+    let vm = runtime
+        .object_mut(script)
+        .unwrap()
+        .interpreter_mut()
+        .unwrap();
+    for (address, value) in [(32, first), (36, second), (40, 0x1357_2468)] {
+        vm.write(address, &value.to_le_bytes())?;
+    }
+    runtime.update(1, 1)?;
+    let vm = runtime.object(script).unwrap().interpreter().unwrap();
+    let expected = [
+        first_pixels,
+        second_pixels,
+        first_pixels,
+        second_pixels,
+        second_pixels,
+        first_pixels,
+        second_pixels,
+    ]
+    .map(u32::to_le_bytes);
+    assert_eq!(vm.read(0, 28)?, expected.as_flattened());
+    assert_eq!(vm.stack_bytes(), 0xdead_beefu32.to_le_bytes());
+    runtime.images_mut().release(first)?;
+    runtime.images_mut().release(second)?;
+    runtime.destroy(script)?;
+    send(&mut runtime, list, 296, 0, 0);
+    let output = output_image(&mut runtime, list);
+    let surface = runtime.images().get(output)?.surface();
+    assert_eq!(surface.pixel(0, 1), Some(0xff00_00ff));
+    assert_eq!(surface.pixel(1, 1), Some(0));
+    assert_eq!(surface.pixel(2, 1), Some(0xff00_ff00));
+    Ok(())
+}
+
 fn buffer_command<F: ObjectFactory>(
     runtime: &mut Runtime<F>,
     id: u32,

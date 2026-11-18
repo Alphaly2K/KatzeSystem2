@@ -538,6 +538,32 @@ impl ImageList {
         Ok((history, clip, priority))
     }
 
+    pub(crate) fn update_properties(
+        &mut self,
+        key: u32,
+        properties: ImageListProperties,
+        images: &Images,
+    ) -> Result<bool> {
+        if !self.contains_key(key) {
+            return Ok(false);
+        }
+        let (history, clip, _) = self.source_history(key, images)?;
+        let entry = self.entries.get_mut(&key).unwrap();
+        let previous_base = entry.properties.base_point;
+        entry.properties = properties;
+        entry.history = accumulate(history, entry.bounds(images, previous_base)?, clip);
+        if entry.visible() {
+            entry.history = accumulate(
+                entry.history,
+                entry.bounds(images, entry.properties.base_point)?,
+                clip,
+            );
+            let history = entry.history;
+            self.mark(history);
+        }
+        Ok(true)
+    }
+
     fn finish_source(
         &mut self,
         key: u32,
