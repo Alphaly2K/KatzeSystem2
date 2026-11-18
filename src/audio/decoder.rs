@@ -1,6 +1,9 @@
 use crate::io::{ReadSource, SharedSource, SourceReader};
 use crate::{Error, Result, read};
-use lewton::inside_ogg::OggStreamReader;
+use lewton::{
+    inside_ogg::OggStreamReader,
+    samples::{InterleavedSamples, Samples},
+};
 
 /// 单个 Ogg Vorbis 流的逐包解码器；构造读取格式与末页长度，不解码音频包。
 /// 返回交错的有符号 16 位采样，最后一包裁到末页声明的帧数。
@@ -19,6 +22,44 @@ struct Metadata {
     serial: u32,
     frames: u64,
     granules: Vec<u64>,
+}
+
+struct Packet {
+    samples: Vec<i16>,
+    channels: usize,
+}
+
+impl Samples for Packet {
+    fn num_samples(&self) -> usize {
+        self.samples.len() / self.channels
+    }
+
+    fn truncate(&mut self, limit: usize) {
+        self.samples.truncate(limit * self.channels);
+    }
+
+    fn from_floats(floats: Vec<Vec<f32>>) -> Self {
+        let channels = floats.len();
+        if !matches!(channels, 1 | 2) {
+            let packet = InterleavedSamples::from_floats(floats);
+            return Self {
+                samples: packet.samples,
+                channels,
+            };
+        }
+        let to_i16 = |value: f32| (value * 32768.0) as i16;
+        let mut floats = floats.into_iter();
+        let left = floats.next().unwrap();
+        let samples = match floats.next() {
+            None => left.into_iter().map(to_i16).collect(),
+            Some(right) => left
+                .into_iter()
+                .zip(right)
+                .flat_map(|(left, right)| [to_i16(left), to_i16(right)])
+                .collect(),
+        };
+        Self { samples, channels }
+    }
 }
 
 impl<'a, S: ReadSource + ?Sized> VorbisDecoder<'a, S> {
@@ -73,7 +114,11 @@ impl<'a, S: ReadSource + ?Sized> VorbisDecoder<'a, S> {
         }
         let expected = self.frames * self.channels() as usize;
         loop {
-            let Some(mut packet) = self.decoder.read_dec_packet_itl().map_err(decode_error)? else {
+            let Some(Packet { mut samples, .. }) = self
+                .decoder
+                .read_dec_packet_generic::<Packet>()
+                .map_err(decode_error)?
+            else {
                 if self.decoded < expected {
                     return Err(Error::new(0, "Ogg Vorbis 采样不足末页声明的帧数"));
                 }
@@ -83,15 +128,15 @@ impl<'a, S: ReadSource + ?Sized> VorbisDecoder<'a, S> {
             if self.decoder.stream_serial() != self.serial {
                 return Err(Error::new(0, "Ogg Vorbis 不支持串联或混合逻辑流"));
             }
-            let count = packet.len();
+            let count = samples.len();
             let next = self
                 .decoded
                 .checked_add(count)
                 .ok_or_else(|| Error::new(0, "Ogg Vorbis 采样位置溢出"))?;
-            packet.truncate(expected.saturating_sub(self.decoded));
+            samples.truncate(expected.saturating_sub(self.decoded));
             self.decoded = next.min(expected);
-            if !packet.is_empty() {
-                return Ok(Some(packet));
+            if !samples.is_empty() {
+                return Ok(Some(samples));
             }
         }
     }
@@ -115,7 +160,7 @@ impl<'a, S: ReadSource + ?Sized> VorbisDecoder<'a, S> {
             loop {
                 if self
                     .decoder
-                    .read_dec_packet_itl()
+                    .read_dec_packet_generic::<Packet>()
                     .map_err(decode_error)?
                     .is_none()
                 {
@@ -237,4 +282,25 @@ fn read_source<S: ReadSource + ?Sized>(
         return Err(Error::new(position, "输入范围越界"));
     }
     source.read_exact_at(position as u64, output)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn packet_matches_lewton_clipping_channel_order_and_frame_truncation() {
+        let left = vec![f32::NEG_INFINITY, -1., -0.5, -0., 0.99999, 1., 2., f32::NAN];
+        let right = left.iter().rev().map(|sample| -*sample).collect::<Vec<_>>();
+        for channels in [vec![left.clone()], vec![left, right]] {
+            let mut baseline = InterleavedSamples::<i16>::from_floats(channels.clone());
+            let mut packet = Packet::from_floats(channels);
+            assert_eq!(packet.num_samples(), baseline.num_samples());
+            assert_eq!(packet.samples, baseline.samples);
+            packet.truncate(5);
+            baseline.truncate(5);
+            assert_eq!(packet.num_samples(), 5);
+            assert_eq!(packet.samples, baseline.samples);
+        }
+    }
 }
