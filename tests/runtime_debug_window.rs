@@ -83,7 +83,7 @@ impl TaskObject for Receiver {
         host: &mut dyn Host,
         budget: usize,
     ) -> Result<CommandOutcome> {
-        if matches!(command.code, 328..=335 | 518 | 519 | 524) {
+        if matches!(command.code, 328..=335 | 518..=524) {
             let text = if command.code == 331 {
                 buffers
                     .data1
@@ -307,5 +307,79 @@ fn legacy_natives_preserve_task_targets_raw_values_and_stack() -> Result<()> {
             }
         },),
     );
+    Ok(())
+}
+
+#[test]
+fn quiz_debug_queries_distinguish_zero_reply_from_unavailable_receiver() -> Result<()> {
+    for (target, deleted, reply) in [
+        (2, false, None),
+        (2, false, Some(0xf135_79bd)),
+        (2, true, None),
+        (0, false, None),
+        (99, false, None),
+    ] {
+        let mut code = Vec::new();
+        for index in 839..=842 {
+            instruction(&mut code, 0x25, &[target]);
+            instruction(&mut code, 0x2b, &[index, 4]);
+        }
+        code.push(0x3b);
+        let program = Program::from_code(&code, vec![0; 8], 64)?;
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let (root_id, root_kind, root): (_, _, Box<dyn TaskObject>) = match reply {
+            Some(reply) => (
+                target,
+                kind::QUIZ_DEBUG,
+                Box::new(Receiver {
+                    base: BaseObject::new(),
+                    events: events.clone(),
+                    reply,
+                }),
+            ),
+            None => (0, kind::ROOT, Box::new(BaseObject::new())),
+        };
+        let mut runtime = Runtime::new(
+            root_id,
+            root_kind,
+            root,
+            State::new(0),
+            KcsFactory::new(Programs(program)),
+        );
+        runtime.set_budget(1, 1024);
+        let caller = runtime.create(root_id, kind::ORDINARY, b"caller", b"")?;
+        if reply.is_none() {
+            let receiver = runtime.create(root_id, 53, b"quiz", b"")?;
+            assert_eq!(receiver, 2);
+            if deleted {
+                runtime
+                    .object_mut(receiver)
+                    .unwrap()
+                    .state()
+                    .0
+                    .deletion_requested = 1;
+            }
+        }
+        if target == 2 && !deleted {
+            runtime.update(0, 1)?;
+            let vm = runtime.object(caller).unwrap().interpreter().unwrap();
+            assert_eq!(vm.stack_bytes(), reply.unwrap_or(0).to_le_bytes().repeat(4));
+            if reply.is_some() {
+                let codes: Vec<_> = events
+                    .borrow()
+                    .iter()
+                    .map(|event| event.command.code)
+                    .collect();
+                assert_eq!(codes, [520, 522, 521, 523]);
+            }
+        } else {
+            let error = runtime.update(0, 1).unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("问答调试查询没有可用的结果接收者")
+            );
+        }
+    }
     Ok(())
 }

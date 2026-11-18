@@ -244,7 +244,7 @@ pub(crate) fn runtime(index: u32) -> RuntimeHandler {
         29 => RuntimeHandler::FileOpen,
         453 => RuntimeHandler::Property,
         361 => RuntimeHandler::Configuration,
-        279..=283 | 287 | 288 => RuntimeHandler::DebugWindow,
+        279..=283 | 287 | 288 | 837..=843 => RuntimeHandler::DebugWindow,
         690..=692 => RuntimeHandler::Export,
         1055..=1061 => RuntimeHandler::Emocon,
         696..=700 | 785 | 850 | 851 | 876 | 977 | 1034 => RuntimeHandler::Backlog,
@@ -358,10 +358,7 @@ pub(crate) fn runtime(index: u32) -> RuntimeHandler {
         | 454
         | 577
         | 651
-        | 694
-        | 837
-        | 838
-        | 843 => RuntimeHandler::Task,
+        | 694 => RuntimeHandler::Task,
         241 | 251 | 387 => RuntimeHandler::MediaRecord,
         576 | 688 | 689 => RuntimeHandler::StateRecord,
         111
