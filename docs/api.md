@@ -419,6 +419,8 @@ Runtime 的普通 740 向两个地址写回指针退出位置，不移动指针�
 
 `ResourceServices::resolve_utf16(category, name)` 接受首零结束的宽字符名称，返回补全后的 UTF-16。默认桥接现有 CP932 `resolve`，保留 Windows 私有字符映射；输入不能表示为 CP932 时诊断，宿主可覆盖此方法提供完整宽字符补全。缓存包装和借用包装均保留覆盖实现。
 
+普通 322 先以 `scene` 类别补全格式展开后的名称，再按 CP932 转为 UTF-16，以 `LooseFirst` 调用 `ResourceServices::open_utf16`。打开成功即返回一并释放读取源，空资源也算成功；不读取正文，也不创建 CST 上下文。`open_utf16` 默认桥接 CP932 的 `open`，宿主可覆盖以直接打开宽字符路径。
+
 `ResourceCache` 的 `enqueue(full_name, life)` 登记完整名称；`start()` 排序并重置完成等级，`advance(&mut services)` 推进一个工作段，返回 true 表示遍历至末尾。`is_ready(priority)` 查询等级，`len()`／`is_empty()` 查询保留条目数量，`read_cached(name)` 返回成功预读的独立副本。`age()` 推进寿命，`clear()` 撤销缓存持有；`with_enabled(false)` 创建关闭预读的配置。普通 434～438 使用这一缓存；当前同步宿主的 436 完成全部读取后返回。名称、寿命及失败重试契约见 [资源预读](kcs.md#资源预读与缓存)。
 
 同一 `ResourceHost` 提供 365／366 的图像原始数据装载及释放。服务需实现 `resolve(category, name)`，以 `ArchiveConfig::resolve` 等价规则补全 image 类别，随后 `read` 按散装优先读取完整字节。空资源或 None 返回零，其他成功数据创建独立句柄；`image_data(handle)` 可借用其内容，366 释放装载方的一份引用；最后一份引用释放后结束生命周期。解析 XML 与加载图像使用不同类型的句柄，错误类型和失效句柄返回诊断。图像解码及绘制对象尚未通过这组接口创建。

@@ -253,6 +253,14 @@ impl<S: ResourceServices> ResourceServices for CachedResources<S> {
     fn read_utf16(&mut self, name: &[u16], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
         self.inner.read_utf16(name, mode)
     }
+
+    fn open_utf16(
+        &mut self,
+        name: &[u16],
+        mode: ResourceMode,
+    ) -> Result<Option<crate::io::SharedSource>> {
+        self.inner.open_utf16(name, mode)
+    }
 }
 
 pub(crate) fn call(

@@ -47,7 +47,7 @@ pub(super) fn core(index: u32) -> CoreHandler {
         441 | 457 | 628 | 845..=847 | 1054 => CoreHandler::Window,
         1041..=1044 => CoreHandler::Achievements,
         29..=32 => CoreHandler::File,
-        27 | 28 | 35 | 36 => CoreHandler::Memory,
+        27 | 28 | 35 | 36 | 237 => CoreHandler::Memory,
         214 | 215 | 217 | 218 => CoreHandler::Rectangle,
         13..=26
         | 37..=49
@@ -382,6 +382,7 @@ pub(crate) fn runtime(index: u32) -> RuntimeHandler {
         | 121
         | 122
         | 284
+        | 322
         | 362..=378
         | 428
         | 431

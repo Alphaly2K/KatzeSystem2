@@ -53,6 +53,15 @@ pub trait ResourceServices {
             .map(|bytes| std::sync::Arc::new(bytes) as crate::io::SharedSource))
     }
 
+    /// 打开宽字符资源名称，默认转为 CP932，由宿主提供其他字符的支持。
+    fn open_utf16(
+        &mut self,
+        name: &[u16],
+        mode: ResourceMode,
+    ) -> Result<Option<crate::io::SharedSource>> {
+        self.open(&encode_resource_name(name)?, mode)
+    }
+
     /// CST 与名称表原始文字的编码；默认沿用基线 CP932。
     fn script_encoding(&self) -> &'static encoding_rs::Encoding {
         encoding_rs::SHIFT_JIS
@@ -60,23 +69,23 @@ pub trait ResourceServices {
 
     /// 宽字符资源读取；默认转为 CP932，无法无损表示时由宿主覆盖此方法。
     fn read_utf16(&mut self, name: &[u16], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
-        let name = &name[..name
-            .iter()
-            .position(|&unit| unit == 0)
-            .unwrap_or(name.len())];
-        let name =
-            String::from_utf16(name).map_err(|_| Error::new(0, "资源名称包含无效 UTF-16"))?;
-        let (bytes, _, errors) = encoding_rs::SHIFT_JIS.encode(&name);
-        if errors {
-            return Err(Error::new(0, "资源服务需要宽字符名称读取能力"));
-        }
-        self.read(&bytes, mode)
+        self.read(&encode_resource_name(name)?, mode)
     }
 
     /// 返回与普通读取共用的预读缓存；默认由 CachedResources 提供。
     fn resource_cache(&self) -> Option<ResourceCache> {
         None
     }
+}
+
+fn encode_resource_name(name: &[u16]) -> Result<Vec<u8>> {
+    let name = name.split(|&unit| unit == 0).next().unwrap_or_default();
+    let name = String::from_utf16(name).map_err(|_| Error::new(0, "资源名称包含无效 UTF-16"))?;
+    let (bytes, _, errors) = encoding_rs::SHIFT_JIS.encode(&name);
+    if errors {
+        return Err(Error::new(0, "资源服务需要宽字符名称读取能力"));
+    }
+    Ok(bytes.into_owned())
 }
 
 impl<S: ResourceServices + ?Sized> ResourceServices for &mut S {
@@ -100,6 +109,13 @@ impl<S: ResourceServices + ?Sized> ResourceServices for &mut S {
     }
     fn open(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<crate::io::SharedSource>> {
         (**self).open(name, mode)
+    }
+    fn open_utf16(
+        &mut self,
+        name: &[u16],
+        mode: ResourceMode,
+    ) -> Result<Option<crate::io::SharedSource>> {
+        (**self).open_utf16(name, mode)
     }
     fn read_utf16(&mut self, name: &[u16], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
         (**self).read_utf16(name, mode)
@@ -648,7 +664,7 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
             }
             return Ok(NativeReturn::Continue);
         }
-        if !matches!(index, 284 | 365 | 366 | 368 | 375 | 431 | 590..=597) {
+        if !matches!(index, 284 | 322 | 365 | 366 | 368 | 375 | 431 | 590..=597) {
             return self.inner.call(index, arguments, vm);
         }
         self.state
@@ -666,7 +682,7 @@ impl ResourceState {
     ) -> Result<NativeReturn> {
         let count = match index {
             284 | 375 | 431 => 2,
-            365 | 366 | 590 | 591 | 594 | 595 => 1,
+            322 | 365 | 366 | 590 | 591 | 594 | 595 => 1,
             368 | 592 | 593 => 3,
             596 | 597 => 5,
             _ => unreachable!(),
@@ -679,6 +695,29 @@ impl ResourceState {
             .chunks_exact(4)
             .map(|bytes| u32::from_le_bytes(bytes.try_into().unwrap()))
             .collect();
+        if index == 322 {
+            let mut name = strings::format(vm, args[0], 0)?;
+            name.truncate(
+                name.iter()
+                    .position(|&byte| byte == 0)
+                    .unwrap_or(name.len()),
+            );
+            if name.len() >= 260 {
+                return Err(Error::new(vm.pc, "CST 文件名超过缓冲区上限"));
+            }
+            let services =
+                services.ok_or_else(|| Error::new(vm.pc, "运行时未配置 CST 资源服务"))?;
+            let resolved = services.resolve(b"scene", &name)?;
+            let resolved = crate::text::cp932_replacing(
+                resolved.split(|&byte| byte == 0).next().unwrap_or_default(),
+            );
+            let wide: Vec<_> = resolved.encode_utf16().collect();
+            return Ok(NativeReturn::Value(u32::from(
+                services
+                    .open_utf16(&wide, ResourceMode::LooseFirst)?
+                    .is_some(),
+            )));
+        }
         if index == 284 {
             let mut name = strings::format(vm, args[1], 0)?;
             name.truncate(name.iter().position(|&b| b == 0).unwrap_or(name.len()));

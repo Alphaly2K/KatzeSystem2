@@ -74,6 +74,15 @@ impl ProgramLoader for Programs {
         data[64..70].copy_from_slice(b"value\0");
         data[80..85].copy_from_slice(b"text\0");
         match name {
+            b"scene_exists" => {
+                data[..4].copy_from_slice(&17u32.to_le_bytes());
+                data[16..27].copy_from_slice(b"\x82\xa0%d[G0]\0\0\0");
+                data[32..40].copy_from_slice(b"missing\0");
+                for address in [16, 32, 96] {
+                    push(&mut code, address);
+                    ins(&mut code, 0x2b, &[322, 4]);
+                }
+            }
             b"mixed" => {
                 for (native, args, result) in [
                     (112, vec![2, 1], 8),
@@ -219,6 +228,72 @@ fn runtime() -> Runtime<KcsFactory<Programs>> {
         State::new(0),
         KcsFactory::new(Programs),
     )
+}
+
+#[test]
+fn scene_probe_opens_and_releases_wide_resources_without_reading() -> Result<()> {
+    struct EmptySource;
+
+    impl ReadSource for EmptySource {
+        fn len(&self) -> Result<u64> {
+            Ok(0)
+        }
+
+        fn read_at(&self, _: u64, _: &mut [u8]) -> Result<usize> {
+            panic!("the scene probe must not read the source")
+        }
+    }
+
+    #[derive(Default)]
+    struct SceneFiles {
+        paths: Rc<RefCell<Vec<String>>>,
+        opened: Rc<RefCell<Vec<std::sync::Weak<dyn ReadSource>>>>,
+    }
+
+    impl ResourceServices for SceneFiles {
+        fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+            assert_eq!(category, b"scene");
+            Ok([b"scene/".as_slice(), name, b".cst\0ignored"].concat())
+        }
+
+        fn read(&mut self, _: &[u8], _: ResourceMode) -> Result<Option<Vec<u8>>> {
+            panic!("the scene probe must open without reading")
+        }
+
+        fn open_utf16(&mut self, name: &[u16], mode: ResourceMode) -> Result<Option<SharedSource>> {
+            assert_eq!(mode, ResourceMode::LooseFirst);
+            let name = String::from_utf16(name).unwrap();
+            self.paths.borrow_mut().push(name.clone());
+            if name == "scene/\u{3042}17.cst" {
+                let source: SharedSource = Arc::new(EmptySource);
+                self.opened.borrow_mut().push(Arc::downgrade(&source));
+                return Ok(Some(source));
+            }
+            Ok(None)
+        }
+    }
+
+    let services = SceneFiles::default();
+    let paths = services.paths.clone();
+    let opened = services.opened.clone();
+    let mut runtime = runtime();
+    runtime.set_resources(katze_system2::kcs::CachedResources::new(services));
+    let task = runtime.create(0, kind::ORDINARY, b"scene_exists", b"")?;
+    runtime.update(0, 1)?;
+    let vm = runtime.object(task).unwrap().interpreter().unwrap();
+    assert_eq!(
+        vm.stack_bytes(),
+        [1u32, 0, 0]
+            .into_iter()
+            .flat_map(u32::to_le_bytes)
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        *paths.borrow(),
+        ["scene/\u{3042}17.cst", "scene/missing.cst", "scene/.cst"]
+    );
+    assert!(opened.borrow()[0].upgrade().is_none());
+    Ok(())
 }
 
 #[test]

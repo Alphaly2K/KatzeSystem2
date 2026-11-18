@@ -9,7 +9,7 @@ pub(super) fn call(
 ) -> Result<NativeReturn> {
     let args = super::words(
         arguments,
-        if matches!(index, 27 | 28) { 1 } else { 3 },
+        if matches!(index, 27 | 28 | 237) { 1 } else { 3 },
         vm.pc,
     )?;
     Ok(match index {
@@ -22,6 +22,10 @@ pub(super) fn call(
             })
         }
         28 => NativeReturn::Value(u32::from(vm.release_bytes(args[0]))),
+        237 => {
+            vm.release_bytes(args[0]);
+            NativeReturn::Continue
+        }
         35 => {
             memory::copy(
                 vm,

@@ -3,6 +3,34 @@ use katze_system2::{
     kcs::{CoreHost, OrdinaryTask, Program},
 };
 
+#[test]
+fn silent_release_compacts_allocations_without_pushing_a_result() {
+    let mut code = Vec::new();
+    for (index, argument) in [(237, 65), (237, 0x8000_0040), (237, 64), (28, 64)] {
+        ins(&mut code, 0x25, &[(3, argument)]);
+        ins(&mut code, 0x2b, &[(3, index), (3, 4)]);
+    }
+    code.push(0x3b);
+    let program = Program::from_code(&code, vec![0; 32], 32).unwrap();
+    let mut task = OrdinaryTask::new(program, vec![0; 80]).unwrap();
+    let mut state = State::new(0);
+    let mut host = CoreHost::new(&mut state);
+    use katze_system2::kcs::{Host, NativeReturn};
+    let vm = &mut task.interpreter;
+    for (address, bytes) in [(64u32, b"abc".as_slice()), (67, b"de"), (69, b"tail")] {
+        assert_eq!(
+            host.call(27, &(bytes.len() as u32).to_le_bytes(), vm)
+                .unwrap(),
+            NativeReturn::Value(address),
+        );
+        vm.write(address, bytes).unwrap();
+    }
+    assert!(task.update(0, 1, &mut host, 64).unwrap());
+    assert_eq!(task.interpreter.stack_bytes(), 1u32.to_le_bytes());
+    assert_eq!(task.interpreter.read(64, 4).unwrap(), b"tail");
+    assert!(task.interpreter.read(68, 1).is_err());
+}
+
 fn ins(code: &mut Vec<u8>, opcode: u8, arguments: &[(u8, u32)]) {
     code.push(opcode);
     for &(flags, value) in arguments {

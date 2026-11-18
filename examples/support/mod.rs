@@ -468,14 +468,15 @@ impl ResourceServices for Router {
     }
 
     fn read_utf16(&mut self, name: &[u16], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
-        let name = &name[..name
-            .iter()
-            .position(|&unit| unit == 0)
-            .unwrap_or(name.len())];
+        self.open_utf16(name, mode)?.map(read_source).transpose()
+    }
+
+    fn open_utf16(&mut self, name: &[u16], mode: ResourceMode) -> Result<Option<SharedSource>> {
+        let name = name.split(|&unit| unit == 0).next().unwrap_or_default();
         let name = String::from_utf16(name)
             .map_err(|_| Error::new(0, "资源名称包含无效 UTF-16"))?
             .replace('\\', "/");
-        self.read_name(&name, mode)
+        self.open_name(&name, mode)
     }
 }
 
