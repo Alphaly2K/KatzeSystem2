@@ -4,9 +4,9 @@ use std::collections::BTreeMap;
 mod input;
 mod pixels;
 use input::Input;
-pub(crate) use pixels::FrameDirectory;
 use pixels::FramePayload;
 pub use pixels::{DecodedFrame, decode_frame, decode_frame_from};
+pub(crate) use pixels::{FrameDirectory, IndexedFrame};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StandardInfo {

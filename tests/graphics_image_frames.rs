@@ -655,7 +655,10 @@ fn native_image_pack_keeps_shared_frames_until_the_last_list_releases_them() -> 
             Ok(Some(Program::from_code(&code, data, 256)?))
         }
     }
-    struct PackFiles(Vec<u8>);
+    struct PackFiles {
+        image: Vec<u8>,
+        bad_frames: bool,
+    }
     impl ResourceServices for PackFiles {
         fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
             assert_eq!(category, b"image");
@@ -668,11 +671,14 @@ fn native_image_pack_keeps_shared_frames_until_the_last_list_releases_them() -> 
         fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
             assert_eq!(mode, ResourceMode::LooseFirst);
             Ok(match name {
-                b"image/shared.hg3" | b"image/parts_a.hg3.hg3" => Some(self.0.clone()),
+                b"image/shared.hg3" | b"image/parts_a.hg3.hg3" => Some(self.image.clone()),
                 b"image/still.hg3" | b"image/parts.hg3" => {
                     Some(hg3(&[(0, 0xff00_ff00, [0; 2], [0; 2])]))
                 }
                 b"image/shared.anm" => Some(animation(&[(0, [2, 100, 100])])),
+                b"shared.anm" if self.bad_frames => {
+                    Some(animation(&[(0, [9, 2, 2]), (0, [5, 100, 100])]))
+                }
                 b"image/panes,1.anm" | b"shared.anm" => {
                     Some(animation(&[(0, [9, 100, 100])]))
                 }
@@ -684,7 +690,8 @@ fn native_image_pack_keeps_shared_frames_until_the_last_list_releases_them() -> 
             })
         }
     }
-    for (budget, grouped) in [(1, false), (4096, true)] {
+    for (budget, grouped, bad_frames) in [(1, false, false), (4096, true, false), (1, false, true)]
+    {
         let mut runtime = Runtime::new(
             0,
             kind::ROOT,
@@ -697,10 +704,23 @@ fn native_image_pack_keeps_shared_frames_until_the_last_list_releases_them() -> 
         runtime.set_budget(budget, 10000);
         runtime.host_mut().surface_size = [4, 3];
         runtime.drawing_mut().target = Some(RenderTarget::new([4, 3])?);
-        runtime.set_resources(PackFiles(hg3(&[
+        let mut frames = vec![
             (9, 0xff12_3456, [0; 2], [0; 2]),
             (2, 0xff98_7654, [0; 2], [0; 2]),
-        ])));
+        ];
+        if bad_frames {
+            frames.push((5, 0xff12_3456, [0; 2], [0; 2]));
+        }
+        let mut image = hg3(&frames);
+        if bad_frames {
+            let next =
+                |at: usize| at + u32::from_le_bytes(image[at..at + 4].try_into().unwrap()) as usize;
+            let offsets = [next(12), next(next(12))];
+            for offset in offsets {
+                image[offset + 104] = 0;
+            }
+        }
+        runtime.set_resources(PackFiles { image, bad_frames });
         let owner = runtime.create(0, kind::ORDINARY, b"pack", b"")?;
         let first = runtime.create(0, kind::IMAGE_LIST, b"first", b"")?;
         let second = runtime.create(0, kind::IMAGE_LIST, b"second", b"")?;
@@ -725,16 +745,20 @@ fn native_image_pack_keeps_shared_frames_until_the_last_list_releases_them() -> 
             Ok(u32::from_le_bytes(vm.read(address, 4)?.try_into().unwrap()))
         };
         assert_eq!(
-            [word(0)?, word(4)?, word(24)?, word(108)?],
-            [1 + u32::from(grouped), 1, 1, 0]
+            [word(0)?, word(4)?, word(24)?],
+            [1 + u32::from(grouped), 1, u32::from(!bad_frames)]
         );
         assert_eq!([word(112)?, word(116)?, word(120)?], [1, 0, 0]);
         assert!(vm.stack_bytes().is_empty());
         assert_eq!(
             vm.read(64, 36)?,
-            [0u32, 0, 1, 1, 10, 20, 32, 0, 0]
-                .map(u32::to_le_bytes)
-                .as_flattened()
+            if bad_frames {
+                [0u32; 9]
+            } else {
+                [0, 0, 1, 1, 10, 20, 32, 0, 0]
+            }
+            .map(u32::to_le_bytes)
+            .as_flattened()
         );
         for address in [128, 264, 512] {
             assert_eq!(vm.read(address, 8)?, [0; 8]);
@@ -754,9 +778,18 @@ fn native_image_pack_keeps_shared_frames_until_the_last_list_releases_them() -> 
                 assert_eq!(vm.read(address + 8, 4)?, [0xa5; 4]);
             }
         }
-        let (still, early_frame, late_frame) = (word(12)?, word(100)?, word(104)?);
+        let (still, early_frame, late_frame) = (
+            word(12)?,
+            word(100)?,
+            word(if bad_frames { 108 } else { 104 })?,
+        );
         assert!(runtime.images().get(still).is_err());
-        assert_eq!(runtime.images().get(early_frame)?.id(), 2);
+        if bad_frames {
+            assert_eq!([early_frame, word(104)?], [0; 2]);
+        } else {
+            assert_eq!(word(108)?, 0);
+            assert_eq!(runtime.images().get(early_frame)?.id(), 2);
+        }
         assert_eq!(runtime.images().get(late_frame)?.id(), 9);
         runtime.destroy(owner)?;
         runtime.dispatch_command(0, command(first, 301, [3, 1, 0]))?;
@@ -771,12 +804,19 @@ fn native_image_pack_keeps_shared_frames_until_the_last_list_releases_them() -> 
                 },
             )?;
             runtime.dispatch_command(0, command(list, 298, [0; 3]))?;
-            let surface = runtime.images().get(u32::from_le_bytes(output))?.surface();
+            let output = u32::from_le_bytes(output);
+            let surface = runtime.images().get(output)?.surface();
             assert_eq!(surface.pixel(2, 2), Some(0xff12_3456));
             assert_eq!(surface.pixel(1, 2), Some(0));
+            if bad_frames && list == second {
+                runtime.update(2, 2)?;
+                runtime.update(4, 4)?;
+                runtime.dispatch_command(0, command(list, 298, [0; 3]))?;
+                assert_eq!(runtime.images().get(output)?.surface().pixel(2, 2), Some(0));
+            }
             runtime.destroy(list)?;
             if list == first {
-                assert!(runtime.images().get(early_frame).is_ok());
+                assert!(runtime.images().get(late_frame).is_ok());
             }
         }
         assert!(runtime.images().get(early_frame).is_err());

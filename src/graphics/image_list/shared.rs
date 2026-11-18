@@ -1,4 +1,4 @@
-use super::{Entry, EntryRef, ImageList, ImageListProperties};
+use super::{Entry, EntryRef, ImageList, ImageListProperties, list_frame_image};
 use crate::anm::ImageAnimation;
 use crate::graphics::{Image, Images, Rect};
 use crate::hg3::StandardInfo;
@@ -24,10 +24,14 @@ impl SharedEntries {
 pub(super) fn insert_frames(
     images: &mut Images,
     owner: Option<u32>,
-    decoded: BTreeMap<u32, Image>,
+    decoded: impl IntoIterator<Item = (u32, Option<Image>)>,
 ) -> Result<(BTreeMap<u32, u32>, u32)> {
     let mut frames = BTreeMap::new();
     for (id, image) in decoded {
+        let Some(image) = image else {
+            frames.insert(id, 0);
+            continue;
+        };
         let alpha = Some(image.info().reserved != 0);
         let inserted = match owner {
             Some(owner) => images.insert(owner, image, alpha),
@@ -57,13 +61,27 @@ impl Images {
         if self.shared_entries.0.len() == read::MAX_ITEMS {
             return Err(Error::new(0, "共享图像条目超过数量上限"));
         }
-        let decoded = ImageList::decode_hg3(bytes)?;
+        let decoded = ImageList::decode_frame_set(bytes, |frame, length| {
+            frame
+                .decode_shared(bytes)?
+                .map(|image| list_frame_image(image, frame.metadata.offset, length))
+                .transpose()
+        })?;
         let handle = self.handles.allocate()?;
         let (frames, image) = insert_frames(self, None, decoded)?;
-        let info = self.get(image)?.info();
+        let (base, clip) = if image == 0 {
+            ([0.; 2], Rect::default())
+        } else {
+            let info = self.get(image)?.info();
+            (
+                info.base.map(|v| v as f32),
+                Rect::from_xywh(0, 0, info.size[0] as i32, info.size[1] as i32),
+            )
+        };
         let entry = EntryRef::new(Entry {
             shared: Some(handle),
             image,
+            detached_image: false,
             frames,
             source_identity: 0,
             capture_revision: None,
@@ -72,11 +90,11 @@ impl Images {
             animation: ImageAnimation::default(),
             priority: 0,
             properties: ImageListProperties {
-                base_point: info.base.map(|v| v as f32),
+                base_point: base,
                 ..Default::default()
             },
             history: None,
-            clip: Rect::from_xywh(0, 0, info.size[0] as i32, info.size[1] as i32),
+            clip,
         });
         self.shared_entries.0.insert(
             handle,
@@ -104,7 +122,7 @@ impl Images {
             .frames
             .first_key_value()
             .map_or(entry.image, |(_, &image)| image);
-        if self.pixel_handle(image)? == 0 {
+        if image == 0 || self.pixel_handle(image)? == 0 {
             Ok(None)
         } else {
             Ok(Some(*self.get(image)?.info()))

@@ -1,6 +1,7 @@
 use super::image::ResourceGeometry;
 use super::{Image, Images, Rect};
 use crate::anm::{DisplayState, ImageAnimation};
+use crate::hg3::{DecodedFrame, IndexedFrame};
 use crate::{Error, Result, read};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -35,6 +36,7 @@ struct Entry {
     shared: Option<u32>,
     // 有帧缓存时只借用其中的包装；生命周期由整个条目及所属任务管理。
     image: u32,
+    detached_image: bool,
     frames: BTreeMap<u32, u32>,
     source_identity: u32,
     capture_revision: Option<u64>,
@@ -94,10 +96,31 @@ impl Entry {
     }
 
     fn bounds(&self, images: &Images, base: [f32; 2]) -> Result<Rect> {
+        if self.image == 0 {
+            return Ok(Rect::default());
+        }
         self.resource_geometry.map_or_else(
             || images.list_bounds(self.image, self.properties.position, base),
             |geometry| Ok(geometry.bounds(self.properties.position, base)),
         )
+    }
+
+    fn pixels(&self, images: &Images) -> Result<u32> {
+        if self.image == 0 {
+            Ok(0)
+        } else {
+            images.pixel_handle(self.image)
+        }
+    }
+
+    fn bind_pixels(&mut self, images: &mut Images, pixels: u32) -> Result<()> {
+        if self.image == 0 {
+            self.image = images.share_pixels_for(None, pixels)?;
+            self.detached_image = true;
+            Ok(())
+        } else {
+            images.bind_pixels(self.image, pixels)
+        }
     }
 
     fn display(&self) -> DisplayState {
@@ -126,7 +149,7 @@ impl Entry {
         if let Some(resource) = self.resource {
             images.release_resource_reference(resource)?;
         }
-        if self.frames.is_empty() {
+        if self.frames.is_empty() || self.detached_image {
             images.release(self.image)?;
         }
         for &image in self.frames.values() {
@@ -139,6 +162,14 @@ impl Entry {
 struct Block {
     bounds: Rect,
     dirty: Option<Rect>,
+}
+
+fn list_frame_image(frame: DecodedFrame, offset: usize, length: &mut usize) -> Result<Image> {
+    *length = length
+        .checked_add(frame.pixels.len())
+        .filter(|&length| length <= read::MAX_BYTES)
+        .ok_or_else(|| Error::new(offset, "图像列表帧集合超过像素存储上限"))?;
+    Image::from_frame(frame)
 }
 
 /// 持有自有图像及独立来源包装的无变换图像列表。
@@ -335,7 +366,7 @@ impl ImageList {
         let source = images.resource_entry(resource)?;
         let image = source.image;
         let geometry = source.geometry;
-        images.bind_pixels(entry.image, images.pixel_handle(image)?)?;
+        entry.bind_pixels(images, images.pixel_handle(image)?)?;
         entry.resource_geometry = Some(geometry);
         entry.properties.base_point = geometry.base.map(|value| value as f32);
         Ok(())
@@ -372,7 +403,7 @@ impl ImageList {
             .map_or(0, |entry| entry.read().source_identity);
         let entry = if let Some(existing) = self.entries.get(&key) {
             let mut entry = existing.write()?;
-            images.bind_pixels(entry.image, pixels)?;
+            entry.bind_pixels(images, pixels)?;
             if let Some(resource) = entry.resource.take() {
                 images.release_resource_reference(resource)?;
             }
@@ -385,6 +416,7 @@ impl ImageList {
             EntryRef::new(Entry {
                 shared: None,
                 image: images.share_pixels_for(self.owner, pixels)?,
+                detached_image: false,
                 frames: BTreeMap::new(),
                 animation: ImageAnimation::default(),
                 source_identity,
@@ -412,21 +444,24 @@ impl ImageList {
     }
 
     pub(crate) fn decode_hg3(data: &[u8]) -> Result<BTreeMap<u32, Image>> {
+        Self::decode_frame_set(data, |frame, length| {
+            list_frame_image(frame.decode(data)?, frame.metadata.offset, length)
+        })
+    }
+
+    fn decode_frame_set<T>(
+        data: &[u8],
+        mut decode: impl FnMut(IndexedFrame, &mut usize) -> Result<T>,
+    ) -> Result<BTreeMap<u32, T>> {
         let directory = crate::hg3::FrameDirectory::parse(data)?;
         let mut frames = BTreeMap::new();
         let mut length = 0usize;
         for frame in directory.frames {
-            if frames.contains_key(&frame.metadata.id) {
-                continue;
+            if let std::collections::btree_map::Entry::Vacant(entry) =
+                frames.entry(frame.metadata.id)
+            {
+                entry.insert(decode(frame, &mut length)?);
             }
-            let image = frame.decode(data)?;
-            length = length
-                .checked_add(image.pixels.len())
-                .filter(|&length| length <= read::MAX_BYTES)
-                .ok_or_else(|| {
-                    Error::new(frame.metadata.offset, "图像列表帧集合超过像素存储上限")
-                })?;
-            frames.insert(frame.metadata.id, Image::from_frame(image)?);
         }
         Ok(frames)
     }
@@ -450,7 +485,11 @@ impl ImageList {
                 .as_ref()
                 .is_none_or(|entry| entry.shared.is_none())
         });
-        let (frames, image) = insert_frames(images, frame_owner, decoded)?;
+        let (frames, image) = insert_frames(
+            images,
+            frame_owner,
+            decoded.into_iter().map(|(id, image)| (id, Some(image))),
+        )?;
         let source_base = images.get(image)?.info().base.map(|v| v as f32);
         let mut animation = previous_entry
             .as_mut()
@@ -464,6 +503,7 @@ impl ImageList {
         let fresh = Entry {
             shared: previous_entry.as_ref().and_then(|entry| entry.shared),
             image,
+            detached_image: false,
             frames,
             animation,
             source_identity,
@@ -496,9 +536,15 @@ impl ImageList {
         let Some(&image) = entry.frames.get(&id) else {
             return Ok(false);
         };
+        if entry.detached_image {
+            images.release(entry.image)?;
+            entry.detached_image = false;
+        }
         entry.image = image;
-        entry.properties.base_point = images.get(image)?.info().base.map(|v| v as f32);
-        Ok(true)
+        if image != 0 {
+            entry.properties.base_point = images.get(image)?.info().base.map(|v| v as f32);
+        }
+        Ok(image != 0)
     }
 
     /// 保存不增加引用的来源身份；没有条目时返回 false，不产生脏区。
@@ -526,14 +572,14 @@ impl ImageList {
     pub fn source_pixels(&self, key: u32, images: &Images) -> Result<u32> {
         self.entries
             .get(&key)
-            .map_or(Ok(0), |entry| images.pixel_handle(entry.read().image))
+            .map_or(Ok(0), |entry| entry.read().pixels(images))
     }
 
     /// 按有符号 key 查找当前像素身份；不增加引用或推进动画。
     pub fn find_pixels(&self, pixels: u32, images: &Images) -> Result<Option<u32>> {
         let mut found = None;
         for (&key, entry) in &self.entries {
-            if images.pixel_handle(entry.read().image)? == pixels
+            if entry.read().pixels(images)? == pixels
                 && found.is_none_or(|current| (key as i32) < current as i32)
             {
                 found = Some(key);
@@ -798,7 +844,7 @@ impl ImageList {
             let entry = entry.read();
             let display = entry.display();
             let p = entry.properties;
-            if display.visible != 0 && display.blend != 0 {
+            if entry.image != 0 && display.visible != 0 && display.blend != 0 {
                 for clip in updates.clone() {
                     let Some(clip) = clip.intersect(entry.clip) else {
                         continue;

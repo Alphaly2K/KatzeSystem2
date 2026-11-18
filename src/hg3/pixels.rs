@@ -98,6 +98,21 @@ impl IndexedFrame {
         self.decode_input(Input::Bytes(data))
     }
 
+    /// 共享列表保留解码失败的帧位置；尚未支持的编码继续报告诊断。
+    pub(crate) fn decode_shared(&self, data: &[u8]) -> Result<Option<DecodedFrame>> {
+        let unsupported = matches!(self.payload, FramePayload::Unsupported(..))
+            || self
+                .metadata
+                .info
+                .is_some_and(|info| info.bit_depth as i16 != 32);
+        let decoded = self.decode(data);
+        if unsupported {
+            decoded.map(Some)
+        } else {
+            Ok(decoded.ok())
+        }
+    }
+
     fn decode_input(&self, data: Input<'_>) -> Result<DecodedFrame> {
         let frame = &self.metadata;
         let info = frame
