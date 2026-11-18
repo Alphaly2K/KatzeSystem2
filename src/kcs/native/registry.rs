@@ -16,6 +16,7 @@ pub(super) enum CoreHandler {
     NamePairs,
     MapData,
     Sequence,
+    RecordQueue,
     RecordStack,
     Vector,
     Continue,
@@ -42,6 +43,7 @@ pub(crate) fn canonical(index: u32) -> u32 {
 
 pub(super) fn core(index: u32) -> CoreHandler {
     match index {
+        1010..=1013 => CoreHandler::RecordQueue,
         441 | 457 | 628 | 845..=847 | 1054 => CoreHandler::Window,
         1041..=1044 => CoreHandler::Achievements,
         29..=32 => CoreHandler::File,

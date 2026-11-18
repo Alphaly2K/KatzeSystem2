@@ -48,6 +48,7 @@ pub(crate) fn call_native(
         registry::CoreHandler::NamePairs => super::name_pairs::call(host, index, arguments, vm),
         registry::CoreHandler::MapData => super::map_data::call(host, index, arguments, vm),
         registry::CoreHandler::Sequence => super::sequences::call(host, index, arguments, vm),
+        registry::CoreHandler::RecordQueue => super::record_queue::call(host, index, arguments, vm),
         registry::CoreHandler::RecordStack => super::record_stack::call(host, index, arguments, vm),
         registry::CoreHandler::Vector => super::vectors::call(index, arguments, vm),
         registry::CoreHandler::Continue => Ok(NativeReturn::Continue),

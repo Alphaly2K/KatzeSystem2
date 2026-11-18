@@ -145,6 +145,7 @@ pub struct HostState {
     pub(super) integer_maps: BTreeMap<u32, BTreeMap<Vec<u8>, u32>>,
     pub(super) sequence_maps: BTreeMap<u32, super::sequences::SequenceMap>,
     pub(super) record_stacks: BTreeMap<u32, super::record_stack::RecordStack>,
+    pub(super) record_queues: BTreeMap<u32, super::record_queue::RecordQueue>,
     pub(super) containers: BTreeMap<u32, crate::save::DataContainer>,
     pub(super) databases: BTreeMap<u32, super::Database>,
     pub(super) raw_buffers: BTreeMap<u32, Vec<u8>>,

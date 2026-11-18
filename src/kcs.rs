@@ -26,6 +26,7 @@ mod particle;
 mod queue;
 mod quiz;
 mod random;
+mod record_queue;
 mod record_stack;
 mod resource_cache;
 mod resource_host;
