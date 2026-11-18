@@ -31,6 +31,7 @@ pub fn pump<F: ObjectFactory>(
                 runtime.host_mut().system_settings_dirty = 1;
             }
             WindowAction::Minimize => window.minimize()?,
+            WindowAction::NotifyTasks => runtime.notify_window_tasks()?,
             WindowAction::CloseFromMenu => {
                 runtime.dispatch_command(
                     0,

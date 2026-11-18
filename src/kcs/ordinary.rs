@@ -122,6 +122,8 @@ impl OrdinaryTask {
     }
 
     fn apply_effects(&mut self, host: &mut impl Host) -> Result<()> {
+        self.clock.one_tick_pending |=
+            std::mem::take(&mut self.interpreter.ordinary_one_tick_requested);
         let effects = host.take_task_effects(self.messages.len());
         if effects.messages.len() > read::MAX_ITEMS.saturating_sub(self.messages.len()) {
             return Err(Error::new(self.interpreter.pc, "普通任务消息数量超过上限"));

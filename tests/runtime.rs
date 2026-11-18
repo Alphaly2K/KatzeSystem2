@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use katze_system2::{
     Error, Result,
-    kcs::{Host, Interpreter, OrdinaryTask, Program, TaskClock},
+    kcs::{Host, Interpreter, OrdinaryTask, Program, TaskClock, WindowAction, WindowRequest},
     runtime::{
         BaseObject, KcsFactory, ObjectFactory, OrdinaryObject, ProgramLoader, RootObject, Runtime,
         TaskObject, kind,
@@ -441,6 +441,79 @@ fn frame_configuration_changes_queue_messages_after_task_updates() {
             let kind = messages.last().unwrap()[1];
             assert_eq!(words(object.interpreter().unwrap(), 32, 4), [0, kind, 0, 0]);
             assert_eq!(words(object.interpreter().unwrap(), 52, 1), [kind]);
+        }
+    }
+}
+
+#[test]
+fn window_notification_is_deferred_and_one_tick_applies_to_the_calling_task() {
+    for budget in [1, 4096] {
+        for paused in [0, -1] {
+            let mut source = Source::new();
+            source.add(b"receiver", waiting_child(), data());
+            let mut asm = Asm::default();
+            asm.ins(0x25, &[0xdead_beef])
+                .ins(0x2b, &[1054, 0])
+                .ins(0x2b, &[1074, 0])
+                .ins(0x2b, &[1074, 0])
+                .ins(0x26, &[0])
+                .ins(0x3b, &[]);
+            source.add(b"writer", asm.build(), data());
+            let mut runtime = runtime(source);
+            runtime.set_budget(budget, 10000);
+            let writer = runtime.create(0, kind::ORDINARY, b"writer", b"").unwrap();
+            let child = runtime
+                .create(writer, kind::ORDINARY, b"receiver", b"")
+                .unwrap();
+            let sibling = runtime.create(0, kind::ORDINARY, b"receiver", b"").unwrap();
+            let tasks = [writer, child, sibling];
+
+            runtime.update(100, 1).unwrap();
+            assert_eq!(
+                runtime.host().window_requests,
+                [WindowRequest {
+                    task_id: writer,
+                    action: WindowAction::NotifyTasks
+                }]
+            );
+            for id in tasks {
+                let object = runtime.object(id).unwrap();
+                assert!(object.queued_messages().unwrap().is_empty());
+                assert_eq!(object.clock().one_tick_pending, id == writer);
+            }
+            assert_eq!(
+                words(runtime.object(writer).unwrap().interpreter().unwrap(), 0, 1),
+                [0xdead_beef]
+            );
+
+            runtime.host_mut().window_requests.clear();
+            runtime.notify_window_tasks().unwrap();
+            for id in tasks {
+                let object = runtime.object(id).unwrap();
+                assert_eq!(object.queued_messages().unwrap(), &[[0, 0xffff0013, 0, 0]]);
+                assert_eq!(words(object.interpreter().unwrap(), 52, 1), [0]);
+            }
+            runtime.object_mut(writer).unwrap().state().1.paused = paused;
+            runtime.update(140, 1).unwrap();
+            let clock = runtime.object(writer).unwrap().clock();
+            assert!(!clock.one_tick_pending);
+            assert_eq!(clock.origin, if paused == 0 { 39 } else { 40 });
+            assert_eq!(clock.time, if paused == 0 { 140 } else { 100 });
+            for id in [child, sibling] {
+                let object = runtime.object(id).unwrap();
+                assert_eq!(object.clock().elapsed(), 140);
+                assert_eq!(
+                    words(object.interpreter().unwrap(), 32, 4),
+                    [0, 0xffff0013, 0, 0]
+                );
+                assert!(object.queued_messages().unwrap().is_empty());
+            }
+            runtime.object_mut(writer).unwrap().state().1.paused = 0;
+            runtime.update(160, 1).unwrap();
+            assert_eq!(
+                runtime.object(writer).unwrap().clock().origin,
+                if paused == 0 { 39 } else { 40 }
+            );
         }
     }
 }

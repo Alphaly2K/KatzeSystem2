@@ -628,6 +628,26 @@ impl<F: ObjectFactory> Runtime<F> {
         route(self.store(), origin, command)
     }
 
+    /// 消费窗口的任务通知请求，从根广播命令 21。
+    pub fn notify_window_tasks(&mut self) -> Result<()> {
+        let root = self.tree.root_id();
+        route_command_mode(
+            self.store(),
+            root,
+            Command {
+                target: root,
+                sender: 0,
+                code: 21,
+                data: [0; 3],
+            },
+            &mut CommandBuffers::default(),
+            &mut 0,
+            crate::input::InputDelivery::Broadcast,
+            None,
+        )?;
+        Ok(())
+    }
+
     /// 按同一路由分派带显式输入／输出缓冲区的对象命令。
     pub fn dispatch_command_with_buffers(
         &mut self,

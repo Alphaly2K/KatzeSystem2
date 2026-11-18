@@ -42,7 +42,7 @@ pub(crate) fn canonical(index: u32) -> u32 {
 
 pub(super) fn core(index: u32) -> CoreHandler {
     match index {
-        441 | 457 | 628 | 845..=847 => CoreHandler::Window,
+        441 | 457 | 628 | 845..=847 | 1054 => CoreHandler::Window,
         1042 | 1043 => CoreHandler::Achievements,
         29..=32 => CoreHandler::File,
         27 | 28 | 35 | 36 => CoreHandler::Memory,
@@ -124,7 +124,8 @@ pub(super) fn core(index: u32) -> CoreHandler {
         | 1024
         | 1039
         | 1040
-        | 1049 => CoreHandler::System,
+        | 1049
+        | 1074 => CoreHandler::System,
         0
         | 2
         | 3

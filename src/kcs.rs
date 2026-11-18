@@ -940,6 +940,7 @@ pub struct Interpreter {
     execution_mode: u32,
     native_arguments: Option<usize>,
     ordinary_increment: Option<u32>,
+    ordinary_one_tick_requested: bool,
 }
 
 impl Interpreter {
@@ -975,6 +976,7 @@ impl Interpreter {
             execution_mode: 1,
             native_arguments: None,
             ordinary_increment: None,
+            ordinary_one_tick_requested: false,
         })
     }
     /// 当前解释器执行的程序。

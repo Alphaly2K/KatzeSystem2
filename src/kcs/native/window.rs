@@ -40,6 +40,7 @@ pub(super) fn call(
         845 => WindowAction::ToggleFullscreen,
         846 => WindowAction::Minimize,
         847 => WindowAction::CloseFromMenu,
+        1054 => WindowAction::NotifyTasks,
         _ => unreachable!(),
     };
     host.window_requests.push(WindowRequest {

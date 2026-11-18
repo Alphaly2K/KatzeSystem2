@@ -13,6 +13,14 @@ pub(super) fn call(
     arguments: &[u8],
     vm: &mut Interpreter,
 ) -> Result<NativeReturn> {
+    if index == 1074 {
+        super::words(arguments, 0, vm.pc)?;
+        if vm.ordinary_increment.is_none() {
+            return Err(Error::new(vm.pc, "KCS 当前没有普通任务时钟"));
+        }
+        vm.ordinary_one_tick_requested = true;
+        return Ok(NativeReturn::Continue);
+    }
     if matches!(index, 442 | 443) {
         let increment = vm
             .ordinary_increment

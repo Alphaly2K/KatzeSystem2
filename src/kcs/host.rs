@@ -52,6 +52,8 @@ pub enum WindowAction {
     Minimize,
     /// 先向输入任务发送空闲重置命令，再执行标准窗口关闭流程。
     CloseFromMenu,
+    /// 由窗口接收后向任务树广播命令 21。
+    NotifyTasks,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
