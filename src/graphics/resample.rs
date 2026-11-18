@@ -51,7 +51,7 @@ pub(crate) fn copy_scaled(
     let average = sw > dw.wrapping_mul(4) || sh > dh.wrapping_mul(4);
     let step = [sw.wrapping_shl(15) / dw, sh.wrapping_shl(15) / dh];
     if let Some(source) = source.filter(|_| !average) {
-        let jobs = (dw as usize * dh as usize / (256 * 1024)).clamp(1, 4);
+        let jobs = (dw as usize * dh as usize / (256 * 1024)).clamp(1, 8);
         let workers = if jobs > 1 && dh > 1 {
             std::thread::available_parallelism().map_or(1, |count| jobs.min(count.get()))
         } else {
@@ -266,13 +266,13 @@ mod tests {
             }
         }
         let from = Rect::from_xywh(2, 1, 7, 5);
-        let to = Rect::from_xywh(3, 2, 18, 11);
-        let step = [(7 << 15) / 18, (5 << 15) / 11];
-        let mut expected = Surface::new([27, 17]).unwrap();
+        let to = Rect::from_xywh(3, 2, 18, 23);
+        let step = [(7 << 15) / 18, (5 << 15) / 23];
+        let mut expected = Surface::new([27, 29]).unwrap();
         expected.clear(0xa511_2233);
         let mut actual = expected.clone();
-        copy_interpolated(&mut actual, &source, from, to, step, 4);
-        for y in 0..11 {
+        copy_interpolated(&mut actual, &source, from, to, step, 8);
+        for y in 0..23 {
             for x in 0..18 {
                 let row = InterpolationRow::new(&source, from.top + y * step[1]).unwrap();
                 if let Some(pixel) = row.sample(from.left + x * step[0]) {
