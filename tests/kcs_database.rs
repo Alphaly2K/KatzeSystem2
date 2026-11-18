@@ -397,3 +397,107 @@ fn runtime_registers_database_loading_and_keeps_handles_across_budget_continuati
         );
     }
 }
+
+#[test]
+fn raw_kcdb_queries_preserve_field_width_and_vm_bytes() {
+    let columns = [
+        (b"Num".as_slice(), &b"\x9a\xbc\xde"[..]),
+        (b"Blob", &b"a\0b\xffc"[..]),
+        (b"Num", &b"\x77"[..]),
+    ];
+    let mut plain = (columns.len() as u32).to_le_bytes().to_vec();
+    for (name, cell) in columns {
+        let mut column = [0; 24];
+        column[..name.len()].copy_from_slice(name);
+        column[20..].copy_from_slice(&(cell.len() as u32).to_le_bytes());
+        plain.extend(column);
+    }
+    plain.extend(1u32.to_le_bytes());
+    plain.extend(9u32.to_le_bytes());
+    for (_, cell) in columns {
+        plain.extend(cell);
+    }
+
+    let mut state = State::new(0);
+    let mut core = CoreHost::new(&mut state);
+    let mut files = Files(Some(pack(&plain)));
+    let mut host = ResourceHost::new(&mut core, &mut files);
+    let mut data = data();
+    data[64..72].copy_from_slice(b"Blob\0\0\0\0");
+    data[96..100].copy_from_slice(b"num\0");
+    let mut external = vec![0xa5; 16];
+    external[..4].copy_from_slice(b"Num\0");
+    let mut vm = Interpreter::new(Program::from_code(&[], data, 64).unwrap(), external).unwrap();
+    let handle = value(call(&mut host, &mut vm, 791, &[32]));
+    assert_ne!(handle, 0);
+    assert_eq!(
+        value(call(&mut host, &mut vm, 793, &[handle, 0x8000_0000, 0])),
+        0x00de_bc9a
+    );
+    for (name, row) in [(64, 0), (96, 0), (0x8000_0000, 1)] {
+        assert_eq!(
+            value(call(&mut host, &mut vm, 793, &[handle, name, row])),
+            0
+        );
+    }
+    assert_eq!(
+        value(call(&mut host, &mut vm, 794, &[handle, 64, 0, 0x8000_0004])),
+        5
+    );
+    assert_eq!(
+        vm.read(0x8000_0004, 8).unwrap().as_ref(),
+        b"a\0b\xffc\xa5\xa5\xa5"
+    );
+    assert_eq!(
+        value(call(
+            &mut host,
+            &mut vm,
+            794,
+            &[handle, u32::MAX, 0, u32::MAX]
+        )),
+        0
+    );
+    assert!(matches!(
+        call(&mut host, &mut vm, 792, &[handle]),
+        NativeReturn::Continue
+    ));
+    let args: Vec<_> = [handle, 64, 0]
+        .into_iter()
+        .flat_map(u32::to_le_bytes)
+        .collect();
+    assert!(host.call(793, &args, &mut vm).is_err());
+}
+
+#[test]
+fn runtime_reads_a_raw_kcdb_handle_across_native_calls() {
+    let mut code = Vec::new();
+    let native = |code: &mut Vec<u8>, index: u32, byte_count: u32| {
+        code.extend([0x2b, 3]);
+        code.extend(index.to_le_bytes());
+        code.push(3);
+        code.extend(byte_count.to_le_bytes());
+    };
+    code.extend([0x25, 3, 32, 0, 0, 0]);
+    native(&mut code, 791, 4);
+    code.extend([0x26, 3, 0, 0, 0, 0]);
+    code.extend([0x25, 0x13, 0, 0, 0, 0]);
+    code.extend([0x25, 3, 64, 0, 0, 0]);
+    code.extend([0x25, 3, 1, 0, 0, 0]);
+    native(&mut code, 793, 12);
+    code.push(0x3b);
+    let mut data = data();
+    data[64..69].copy_from_slice(b"ID\0\0\0");
+    let mut runtime = Runtime::new(
+        0,
+        kind::ROOT,
+        Box::new(BaseObject::new()),
+        State::new(0),
+        KcsFactory::new(Loader(Program::from_code(&code, data, 64).unwrap())),
+    );
+    runtime.set_resources(Files(Some(table())));
+    runtime.set_budget(1, 1024);
+    let id = runtime.create(0, kind::ORDINARY, b"", b"").unwrap();
+    runtime.update(0, 1).unwrap();
+    let vm = runtime.object(id).unwrap().interpreter().unwrap();
+    assert_eq!(vm.stack_bytes(), 7u32.to_le_bytes());
+}

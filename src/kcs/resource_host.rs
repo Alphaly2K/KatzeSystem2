@@ -150,6 +150,7 @@ pub(crate) struct ResourceState {
     triples: BTreeMap<u32, super::triples::TripleTable>,
     pub(super) name_tables: BTreeMap<u32, super::name_table::NameTable>,
     pub(super) section_tables: BTreeMap<u32, super::section_table::SectionTable>,
+    pub(super) database_tables: BTreeMap<u32, super::database::table::Table>,
     handles: HandleAllocator,
 }
 
@@ -322,6 +323,7 @@ impl ResourceState {
             + self.triples.len()
             + self.name_tables.len()
             + self.section_tables.len()
+            + self.database_tables.len()
             >= read::MAX_ITEMS
         {
             return Err(Error::new(offset, "KCS 资源对象数量超过上限"));
@@ -581,6 +583,11 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
             return self
                 .state
                 .section_table_call(index, arguments, vm, Some(&mut self.services));
+        }
+        if matches!(index, 791..=794) {
+            return self
+                .state
+                .database_table_call(index, arguments, vm, Some(&mut self.services));
         }
         if matches!(index, 633..=640) {
             return self.state.name_table_call(

@@ -2,6 +2,8 @@ use super::{Interpreter, ResourceServices, strings};
 use crate::{Error, Result, read, resource::ResourceMode};
 use std::collections::BTreeMap;
 
+pub(super) mod table;
+
 pub(super) const SAVED_ENTRY_SIZE: usize = 268;
 
 /// KCDB 的一个词条；字符串保留 CP932 字节。
@@ -98,78 +100,40 @@ impl Database {
             formatting: formatting.map(|value| text(&value).to_vec()),
             ..Default::default()
         };
-        if !bytes.starts_with(b"KCDB") {
-            return Ok(database);
-        }
-        let packed = read::sized(read::u32_at(bytes, 4)?, 4)?;
-        let plain = read::sized(read::u32_at(bytes, 8)?, 8)?;
-        let Ok(plain) = read::inflate(read::range(bytes, 12, packed)?, plain) else {
+        let Some(table) = table::Table::parse(bytes)? else {
             return Ok(database);
         };
-        let count = read::u32_at(&plain, 0)? as usize;
-        if count > read::MAX_ITEMS {
-            return Err(Error::new(0, "数据库字段数量超过上限"));
-        }
-        let columns = read::range(&plain, 4, count * 24)?;
-        let mut layout = BTreeMap::new();
-        let mut offset = 0usize;
-        for column in columns.chunks_exact(24) {
-            let size = read::sized(read::u32_at(column, 20)?, 20)?;
-            layout
-                .entry(text(&column[..16]).to_vec())
-                .or_insert((offset, size));
-            offset = offset
-                .checked_add(size)
-                .filter(|&size| size <= read::MAX_BYTES)
-                .ok_or_else(|| Error::new(4, "数据库行布局超过上限"))?;
-        }
-        let rows_at = 4 + columns.len();
-        let count = read::u32_at(&plain, rows_at)? as usize;
-        let stride = read::sized(read::u32_at(&plain, rows_at + 4)?, rows_at + 4)?;
-        if count > read::MAX_ITEMS || offset > stride {
-            return Err(Error::new(rows_at, "数据库行数量或布局无效"));
-        }
-        let length = count
-            .checked_mul(stride)
-            .filter(|&n| n <= read::MAX_BYTES)
-            .ok_or_else(|| Error::new(rows_at, "数据库行数据超过上限"))?;
-        let rows = read::range(&plain, rows_at + 8, length)?;
-        let Some(&(_, id_size)) = layout.get(b"ID".as_slice()) else {
+        let Some(id_size) = table.width(b"ID") else {
             return Ok(database);
         };
-        if id_size == 0 || count == 0 {
+        if id_size == 0 || table.len() == 0 {
             return Ok(database);
         }
-        if id_size != 4 || stride == 0 {
-            return Err(Error::new(rows_at, "数据库 ID 字段尺寸无效"));
+        if id_size != 4 {
+            return Err(Error::new(table.header(), "数据库 ID 字段尺寸无效"));
         }
         for name in [b"INDEX".as_slice(), b"TITLE", b"TITLE_S"] {
-            if !layout.contains_key(name) {
-                return Err(Error::new(rows_at, "数据库缺少必要文本字段"));
+            if table.width(name).is_none() {
+                return Err(Error::new(table.header(), "数据库缺少必要文本字段"));
             }
         }
-        for row in rows.chunks_exact(stride) {
-            let cell = |name: &[u8]| -> Result<&[u8]> {
-                let Some(&(offset, size)) = layout.get(name) else {
-                    return Ok(&[]);
-                };
-                read::range(row, offset, size)
-            };
-            let name = key(read::zstr(cell(b"INDEX")?, 0)?);
+        for row in 0..table.len() {
+            let cell = |name: &[u8]| table.cell(row, name).unwrap_or_default();
+            let name = key(read::zstr(cell(b"INDEX"), 0)?);
             if name.len() >= 256 {
-                return Err(Error::new(rows_at, "数据库词条名称超过存档字段上限"));
+                return Err(Error::new(table.header(), "数据库词条名称超过存档字段上限"));
             }
             if database.entries.contains_key(&name) {
                 continue;
             }
             let mut record = DatabaseRecord {
-                id: read::u32_at(cell(b"ID")?, 0)?,
-                title: read::zstr(cell(b"TITLE")?, 0)?.to_vec(),
-                short_title: read::zstr(cell(b"TITLE_S")?, 0)?.to_vec(),
+                id: read::u32_at(cell(b"ID"), 0)?,
+                title: read::zstr(cell(b"TITLE"), 0)?.to_vec(),
+                short_title: read::zstr(cell(b"TITLE_S"), 0)?.to_vec(),
                 ..Default::default()
             };
             for (i, term) in record.terms.iter_mut().enumerate() {
-                let bytes = cell(format!("IND{}", i + 1).as_bytes())?;
+                let bytes = cell(format!("IND{}", i + 1).as_bytes());
                 let value = if bytes.is_empty() {
                     bytes
                 } else {
