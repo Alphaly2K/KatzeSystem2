@@ -147,7 +147,7 @@ fn parse_frames<T>(
             info: None,
             attributes: BTreeMap::new(),
         };
-        let mut image = FramePayload::Missing;
+        let mut image = FramePayload::default();
         let mut tag = position + 8;
         loop {
             if tags == read::MAX_ITEMS {

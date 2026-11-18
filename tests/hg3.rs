@@ -109,7 +109,7 @@ const LITERALS: &[u8] = &[
 ];
 const COMMANDS: &[u8] = &[0x61, 0x40, 0x96, 0x01];
 
-fn pixel_image(size: [u32; 2], literals: &[u8], commands: &[u8]) -> Vec<u8> {
+fn pixel_block(start: u32, rows: u32, literals: &[u8], commands: &[u8]) -> Vec<u8> {
     fn compress(bytes: &[u8]) -> Vec<u8> {
         let mut encoder =
             flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
@@ -118,6 +118,23 @@ fn pixel_image(size: [u32; 2], literals: &[u8], commands: &[u8]) -> Vec<u8> {
     }
     let data = compress(literals);
     let control = compress(commands);
+    let mut out = Vec::new();
+    for value in [
+        start,
+        rows,
+        data.len() as u32,
+        literals.len() as u32,
+        control.len() as u32,
+        commands.len() as u32,
+    ] {
+        out.extend(value.to_le_bytes());
+    }
+    out.extend(data);
+    out.extend(control);
+    out
+}
+
+fn pixel_image(size: [u32; 2], literals: &[u8], commands: &[u8]) -> Vec<u8> {
     let mut out = b"HG-3".to_vec();
     for value in [12u32, 0x300, 0, 0x8000_0001] {
         out.extend(value.to_le_bytes());
@@ -139,21 +156,11 @@ fn pixel_image(size: [u32; 2], literals: &[u8], commands: &[u8]) -> Vec<u8> {
     ] {
         out.extend(value.to_le_bytes());
     }
+    let block = pixel_block(0, size[1], literals, commands);
     out.extend(b"img0000\0");
-    for value in [
-        0,
-        (24 + data.len() + control.len()) as u32,
-        0,
-        size[1],
-        data.len() as u32,
-        literals.len() as u32,
-        control.len() as u32,
-        commands.len() as u32,
-    ] {
-        out.extend(value.to_le_bytes());
-    }
-    out.extend(data);
-    out.extend(control);
+    out.extend(0u32.to_le_bytes());
+    out.extend((block.len() as u32).to_le_bytes());
+    out.extend(block);
     out
 }
 
@@ -185,6 +192,56 @@ fn native_pixels_restore_bit_planes_signed_deltas_and_top_down_bgra() {
             .pixels,
         [0; 4]
     );
+}
+
+#[test]
+fn three_channel_slices_use_number_order_and_skip_unused_payloads() {
+    let first = pixel_block(1, 2, &[120, 5, 113, 5, 41, 0, 162, 10], &[17, 8]);
+    let second = pixel_block(0, 2, &[120, 5, 102, 5, 63, 0, 184, 10], &[17, 8]);
+    let mut bytes = pixel_image([1, 3], &[], &[]);
+    bytes.truncate(76);
+    let stored_depth = 0x0005_0018u32;
+    bytes[44..48].copy_from_slice(&stored_depth.to_le_bytes());
+    let mut forbidden = Vec::new();
+    for (index, (name, block)) in [
+        (b"img0001\0", second.as_slice()),
+        (b"img0000\0", first.as_slice()),
+        (b"img0001\0", &[0; 24]),
+        (b"img0003\0", &[0; 24]),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        bytes.extend(name);
+        let length = block.len() as u32;
+        let next = if index == 3 { 0 } else { length + 16 };
+        bytes.extend(next.to_le_bytes());
+        bytes.extend(length.to_le_bytes());
+        if index >= 2 {
+            forbidden.push(bytes.len()..bytes.len() + block.len());
+        }
+        bytes.extend(block);
+    }
+    let mut source = ShortSource::new(&bytes);
+    source.forbidden = forbidden;
+    let id = 0x8000_0001u32 as i32;
+    assert_eq!(
+        hg3::Metadata::read(&source).unwrap().frames[0]
+            .info
+            .unwrap()
+            .bit_depth,
+        stored_depth
+    );
+    let decoded = hg3::decode_frame_from(&source, Some(id)).unwrap().unwrap();
+    assert_eq!(decoded.info.bit_depth, 32);
+    assert_eq!(
+        decoded.pixels,
+        [22, 79, 136, 255, 63, 120, 177, 255, 52, 109, 166, 255]
+    );
+
+    bytes[40..44].copy_from_slice(&4u32.to_le_bytes());
+    let error = hg3::decode_frame(&bytes, id).unwrap_err();
+    assert_eq!(error.message, "HG-3 原生像素数据未覆盖全部行");
 }
 
 #[test]
@@ -275,7 +332,7 @@ fn native_pixels_reject_bad_runs_dimensions_streams_and_unsupported_encodings() 
         pixel_image([u32::MAX, u32::MAX], &[], COMMANDS),
     ];
     let good = pixel_image([2, 3], LITERALS, COMMANDS);
-    for (offset, value) in [(44, 24), (92, 1), (96, 2), (104, u32::MAX)] {
+    for (offset, value) in [(44, 16), (92, 1), (96, 2), (104, u32::MAX)] {
         let mut invalid = good.clone();
         invalid[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
         cases.push(invalid);

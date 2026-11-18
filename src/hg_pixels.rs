@@ -35,10 +35,6 @@ pub(crate) fn inflate_streams(
     Ok((literals, commands))
 }
 
-pub(crate) fn decode(literals: &[u8], commands: &[u8], dimensions: [u32; 2]) -> Result<Vec<u8>> {
-    decode_channels(literals, commands, dimensions, 4)
-}
-
 pub(crate) fn decode_channels(
     literals: &[u8],
     commands: &[u8],
