@@ -1,4 +1,4 @@
-use super::{BaseObject, ObjectFactory, ObjectHost, TaskObject, kind};
+use super::{BaseObject, ObjectFactory, ObjectHost, Runtime, TaskObject, kind};
 use crate::kcs::{Host, Interpreter, NativeReturn, decode_utf8_units, format_string};
 use crate::task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock};
 use crate::{Error, Result, read};
@@ -99,8 +99,124 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
     }
 }
 
+/// 问答调试面板的状态。索引从零开始，题号保留原始 DWORD。
+#[derive(Debug)]
+pub struct QuizDebugSession {
+    bank: u32,
+    pub packs: Vec<Vec<u8>>,
+    pub pack: Option<usize>,
+    pub questions: Vec<u32>,
+    pub question: Option<usize>,
+    pub visible: bool,
+    pub enabled: bool,
+    pub lock_question_and_answers: bool,
+    pub pause_counting: bool,
+    pub auto_advance: bool,
+}
+
+/// 已打开会话接收的面板输入。
+#[derive(Clone, Copy, Debug)]
+pub enum QuizDebugInput {
+    Close,
+    Enable(bool),
+    SelectPack(usize),
+    SelectQuestion(usize),
+    LockQuestionAndAnswers(bool),
+    PauseCounting(bool),
+    AutoAdvance(bool),
+}
+
+impl QuizDebugSession {
+    fn new(bank: u32, packs: Vec<Vec<u8>>) -> Self {
+        Self {
+            bank,
+            pack: (!packs.is_empty()).then_some(0),
+            packs,
+            questions: Vec::new(),
+            question: None,
+            visible: false,
+            enabled: false,
+            lock_question_and_answers: false,
+            pause_counting: false,
+            auto_advance: false,
+        }
+    }
+
+    fn advance(&mut self) {
+        if self.enabled && self.auto_advance && !self.questions.is_empty() {
+            self.question = Some(
+                self.question
+                    .map_or(0, |id| (id + 1) % self.questions.len()),
+            );
+        }
+    }
+
+    fn select_pack(
+        &mut self,
+        index: usize,
+        resources: &mut crate::kcs::ResourceState,
+    ) -> Result<()> {
+        let pack = self
+            .packs
+            .get(index)
+            .ok_or_else(|| Error::new(0, "问答调试题库选项越界"))?;
+        self.questions = resources.quiz_debug_select(self.bank, pack)?;
+        self.pack = Some(index);
+        self.question = (!self.questions.is_empty()).then_some(0);
+        Ok(())
+    }
+}
+
+impl<F: ObjectFactory> Runtime<F> {
+    /// 查询该任务已打开的调试面板。
+    pub fn quiz_debug_session(&self, id: u32) -> Option<&QuizDebugSession> {
+        let object = self.object(id)?;
+        (object.control().deletion_requested == 0)
+            .then(|| object.quiz_debug_session())
+            .flatten()
+    }
+
+    /// 提交面板输入。会话不可用或控件被禁用时返回 false。
+    pub fn quiz_debug_input(&mut self, id: u32, input: QuizDebugInput) -> Result<bool> {
+        let Some(object) = self.objects.get_mut(&id) else {
+            return Ok(false);
+        };
+        if object.control().deletion_requested != 0 {
+            return Ok(false);
+        }
+        let Some(session) = object.quiz_debug_session_mut() else {
+            return Ok(false);
+        };
+        match input {
+            QuizDebugInput::Close => session.visible = false,
+            QuizDebugInput::Enable(enabled) => {
+                if let Some(index) = session.pack.filter(|_| enabled) {
+                    session.select_pack(index, &mut self.resources.raw)?;
+                }
+                session.enabled = enabled;
+            }
+            _ if !session.enabled => return Ok(false),
+            QuizDebugInput::SelectPack(index) => {
+                session.select_pack(index, &mut self.resources.raw)?;
+            }
+            QuizDebugInput::SelectQuestion(index) => {
+                if index >= session.questions.len() {
+                    return Err(Error::new(0, "问答调试题目选项越界"));
+                }
+                session.question = Some(index);
+            }
+            QuizDebugInput::LockQuestionAndAnswers(value) => {
+                session.lock_question_and_answers = value
+            }
+            QuizDebugInput::PauseCounting(value) => session.pause_counting = value,
+            QuizDebugInput::AutoAdvance(value) => session.auto_advance = value,
+        }
+        Ok(true)
+    }
+}
+
 #[derive(Default)]
-pub(super) struct QuizDebugObject(BaseObject);
+pub(super) struct QuizDebugObject(BaseObject, Option<QuizDebugSession>);
 
 impl TaskObject for QuizDebugObject {
     fn control(&self) -> &Control {
@@ -123,6 +239,14 @@ impl TaskObject for QuizDebugObject {
         None
     }
 
+    fn quiz_debug_session(&self) -> Option<&QuizDebugSession> {
+        self.1.as_ref()
+    }
+
+    fn quiz_debug_session_mut(&mut self) -> Option<&mut QuizDebugSession> {
+        self.1.as_mut()
+    }
+
     fn set_creation_context(&mut self, context: &[u8]) -> Result<()> {
         self.0.set_creation_context(context)
     }
@@ -141,14 +265,36 @@ impl TaskObject for QuizDebugObject {
     ) -> Result<CommandOutcome> {
         if self.0.control.deletion_requested == 0 {
             match command.code {
-                518 => return Err(Error::new(0, "问答调试界面尚未接入")),
-                519 => return Ok(CommandOutcome::finished(false)),
-                520..=524 => {
-                    *output = command.data[1];
-                    return Ok(CommandOutcome::finished(false));
+                518 => {
+                    let bank = command.data[1];
+                    self.1 = Some(QuizDebugSession::new(bank, host.quiz_debug_packs(bank)?));
                 }
-                _ => {}
+                519 => {
+                    if let Some(session) = &mut self.1 {
+                        session.visible = command.data[1] != 0;
+                    }
+                }
+                520..=523 => {
+                    *output =
+                        self.1
+                            .as_ref()
+                            .map_or(command.data[1], |session| match command.code {
+                                520 => u32::from(session.enabled),
+                                521 => u32::from(session.lock_question_and_answers),
+                                522 => u32::from(session.pause_counting),
+                                523 => session.question.map_or(u32::MAX, |id| id as u32),
+                                _ => unreachable!(),
+                            });
+                }
+                524 => {
+                    if let Some(session) = &mut self.1 {
+                        session.advance();
+                    }
+                    *output = command.data[1];
+                }
+                _ => return self.0.dispatch_command(kind, command, output, host, budget),
             }
+            return Ok(CommandOutcome::finished(false));
         }
         self.0.dispatch_command(kind, command, output, host, budget)
     }
@@ -168,6 +314,7 @@ impl TaskObject for QuizDebugObject {
     }
 
     fn request_delete(&mut self, host: &mut dyn Host, budget: usize) -> Result<bool> {
+        self.1 = None;
         self.0.request_delete(host, budget)
     }
 }

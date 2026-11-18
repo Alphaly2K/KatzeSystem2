@@ -17,6 +17,7 @@ mod audio;
 mod backlog;
 mod cst;
 mod debug_window;
+pub use debug_window::{QuizDebugInput, QuizDebugSession};
 mod emocon;
 mod export;
 pub use export::{ExportDestination, ExportServices};
@@ -2368,6 +2369,10 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
             Some(services) => Some(services.as_mut()),
             None => None,
         }
+    }
+
+    fn quiz_debug_packs(&self, handle: u32) -> Result<Vec<Vec<u8>>> {
+        self.resources.raw.quiz_debug_packs(handle)
     }
 
     fn export_services(&mut self) -> Option<&mut dyn ExportServices> {

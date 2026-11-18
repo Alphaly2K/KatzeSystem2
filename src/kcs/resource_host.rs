@@ -521,6 +521,10 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
         Some(&mut self.services)
     }
 
+    fn quiz_debug_packs(&self, handle: u32) -> Result<Vec<Vec<u8>>> {
+        self.state.quiz_debug_packs(handle)
+    }
+
     fn export_services(&mut self) -> Option<&mut dyn crate::runtime::ExportServices> {
         self.inner.export_services()
     }

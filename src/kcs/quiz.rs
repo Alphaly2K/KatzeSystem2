@@ -346,6 +346,35 @@ fn state_size(count: usize, pc: usize) -> Result<usize> {
 }
 
 impl ResourceState {
+    pub(crate) fn quiz_debug_packs(&self, handle: u32) -> Result<Vec<Vec<u8>>> {
+        let bank = self
+            .quiz_banks
+            .get(&handle)
+            .ok_or_else(|| Error::new(0, "问答调试题库句柄无效"))?;
+        let mut names: Vec<_> = bank.packs.iter().map(|pack| pack.name.clone()).collect();
+        names.sort_unstable();
+        Ok(names)
+    }
+
+    pub(crate) fn quiz_debug_select(&mut self, handle: u32, name: &[u8]) -> Result<Vec<u32>> {
+        let bank = self
+            .quiz_banks
+            .get_mut(&handle)
+            .ok_or_else(|| Error::new(0, "问答调试题库句柄无效"))?;
+        bank.active.clear();
+        if let Some(pack) = bank.packs.iter().find(|pack| pack.name == name) {
+            bank.active.extend(pack.first_by_id.values().copied());
+            bank.active
+                .sort_unstable_by_key(|&i| bank.questions[i].id as i32);
+        }
+        Ok(bank
+            .active
+            .iter()
+            .map(|&i| bank.questions[i].id)
+            .take_while(|&id| id != u32::MAX)
+            .collect())
+    }
+
     pub(crate) fn quiz_call(
         &mut self,
         index: u32,

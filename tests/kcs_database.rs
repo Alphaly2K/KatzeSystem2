@@ -516,6 +516,168 @@ fn quiz_table(prefix: u8) -> Vec<u8> {
 }
 
 #[test]
+fn quiz_debug_session_rebuilds_the_scripts_question_index_and_advances_on_request() -> Result<()> {
+    use katze_system2::{runtime::QuizDebugInput, task::Command};
+
+    struct Programs(Program, Program);
+    impl ProgramLoader for Programs {
+        fn load(&mut self, name: &[u8]) -> Result<Option<Program>> {
+            Ok(Some(
+                if name == b"load" { &self.0 } else { &self.1 }.clone(),
+            ))
+        }
+    }
+    struct QuizFiles;
+    impl ResourceServices for QuizFiles {
+        fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+            assert_eq!(category, b"database");
+            Ok(name.to_vec())
+        }
+        fn read(&mut self, name: &[u8], _: ResourceMode) -> Result<Option<Vec<u8>>> {
+            Ok(match name {
+                b"B.kcdb" => Some(pack_quiz(b'B', &[([1, 2, 3, 8, 81], b'b')])),
+                b"A.kcdb" => Some(pack_quiz(
+                    b'A',
+                    &[
+                        ([3, 5, 7, 19, 1], b'z'),
+                        ([3, 5, 7, 3, 2], b'a'),
+                        ([3, 5, 2, 19, 4], b'o'),
+                        ([5, 5, 7, u32::MAX - 1, 5], b'n'),
+                    ],
+                )),
+                _ => None,
+            })
+        }
+    }
+    fn operand(code: &mut Vec<u8>, flag: u8, value: u32) {
+        code.push(flag);
+        code.extend(value.to_le_bytes());
+    }
+    fn push(code: &mut Vec<u8>, value: u32) {
+        code.push(0x25);
+        operand(code, 3, value);
+    }
+    fn handle(code: &mut Vec<u8>) {
+        code.push(0x25);
+        operand(code, 0x13, 0);
+    }
+    fn native(code: &mut Vec<u8>, index: u32, count: u32) {
+        code.push(0x2b);
+        operand(code, 3, index);
+        operand(code, 3, count * 4);
+    }
+    let mut load = Vec::new();
+    native(&mut load, 742, 0);
+    load.push(0x26);
+    operand(&mut load, 3, 0);
+    for at in [4, 11] {
+        handle(&mut load);
+        push(&mut load, at);
+        native(&mut load, 744, 2);
+        load.push(0x2d);
+    }
+    handle(&mut load);
+    native(&mut load, 764, 1);
+    push(&mut load, 2);
+    handle(&mut load);
+    native(&mut load, 837, 2);
+    for index in 839..=842 {
+        push(&mut load, 2);
+        native(&mut load, index, 1);
+    }
+    load.push(0x3b);
+
+    let mut query = Vec::new();
+    for index in [839, 840, 841, 842, 843, 842] {
+        push(&mut query, 2);
+        native(&mut query, index, 1);
+    }
+    for index in 0..4 {
+        handle(&mut query);
+        push(&mut query, index);
+        native(&mut query, 747, 2);
+    }
+    query.push(0x3b);
+
+    let mut runtime = Runtime::new(
+        0,
+        kind::ROOT,
+        Box::new(BaseObject::new()),
+        State::new(0),
+        KcsFactory::new(Programs(
+            Program::from_code(&load, b"\0\0\0\0B.kcdb\0A.kcdb\0".to_vec(), 64)?,
+            Program::from_code(&query, vec![0; 4], 64)?,
+        )),
+    );
+    runtime.set_resources(QuizFiles);
+    runtime.set_budget(1, 1024);
+    let loader = runtime.create(0, kind::ORDINARY, b"load", b"")?;
+    let debug = runtime.create(0, kind::QUIZ_DEBUG, b"debug", b"")?;
+    assert_eq!(debug, 2);
+    assert!(runtime.quiz_debug_session(debug).is_none());
+    runtime.update(0, 1)?;
+    let vm = runtime.object(loader).unwrap().interpreter().unwrap();
+    let saved = vm.read(0, 4)?.to_vec();
+    let words = |values: &[u32]| {
+        values
+            .iter()
+            .flat_map(|value| value.to_le_bytes())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(vm.stack_bytes(), words(&[0, 0, 0, u32::MAX]));
+
+    let session = runtime.quiz_debug_session(debug).unwrap();
+    assert_eq!(session.packs, [b"A", b"B"]);
+    assert_eq!(session.pack, Some(0));
+    assert!(!session.visible && session.questions.is_empty());
+    assert!(!runtime.quiz_debug_input(debug, QuizDebugInput::SelectPack(1))?);
+    runtime.dispatch_command(
+        0,
+        Command {
+            target: debug,
+            sender: 0,
+            code: 519,
+            data: [0, 9, 0],
+        },
+    )?;
+    assert!(runtime.quiz_debug_session(debug).unwrap().visible);
+    runtime.quiz_debug_input(debug, QuizDebugInput::Enable(true))?;
+    runtime.quiz_debug_input(debug, QuizDebugInput::SelectPack(1))?;
+    assert_eq!(runtime.quiz_debug_session(debug).unwrap().questions, [8]);
+    runtime.quiz_debug_input(debug, QuizDebugInput::SelectPack(0))?;
+    assert_eq!(
+        runtime.quiz_debug_session(debug).unwrap().questions,
+        [u32::MAX - 1, 3, 19]
+    );
+    for input in [
+        QuizDebugInput::PauseCounting(true),
+        QuizDebugInput::LockQuestionAndAnswers(true),
+        QuizDebugInput::AutoAdvance(true),
+        QuizDebugInput::SelectQuestion(2),
+        QuizDebugInput::Close,
+    ] {
+        assert!(runtime.quiz_debug_input(debug, input)?);
+    }
+    assert!(!runtime.quiz_debug_session(debug).unwrap().visible);
+
+    let reader = runtime.create(0, kind::ORDINARY, b"query", b"")?;
+    runtime
+        .object_mut(reader)
+        .unwrap()
+        .interpreter_mut()
+        .unwrap()
+        .write(0, &saved)?;
+    runtime.update(1, 1)?;
+    let vm = runtime.object(reader).unwrap().interpreter().unwrap();
+    assert_eq!(vm.stack_bytes(), words(&[1, 1, 1, 2, 0, 5, 2, 1, u32::MAX]));
+    assert_eq!(runtime.quiz_debug_session(debug).unwrap().question, Some(0));
+    runtime.destroy(debug)?;
+    assert!(runtime.quiz_debug_session(debug).is_none());
+    assert!(!runtime.quiz_debug_input(debug, QuizDebugInput::Close)?);
+    Ok(())
+}
+
+#[test]
 fn quiz_option_tables_preserve_selection_and_share_the_integer_random_stream() {
     fn options_table() -> Vec<u8> {
         let columns = [b"TBL", b"P00", b"P01", b"P02", b"P03", b"P04", b"P18"];

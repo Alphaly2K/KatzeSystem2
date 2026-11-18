@@ -491,6 +491,10 @@ pub trait Host {
         None
     }
 
+    fn quiz_debug_packs(&self, _handle: u32) -> Result<Vec<Vec<u8>>> {
+        Err(Error::new(0, "宿主未提供问答调试题库"))
+    }
+
     fn export_services(&mut self) -> Option<&mut dyn crate::runtime::ExportServices> {
         None
     }
@@ -802,6 +806,10 @@ impl<T: Host + ?Sized> Host for &mut T {
 
     fn resource_services(&mut self) -> Option<&mut dyn ResourceServices> {
         (**self).resource_services()
+    }
+
+    fn quiz_debug_packs(&self, handle: u32) -> Result<Vec<Vec<u8>>> {
+        (**self).quiz_debug_packs(handle)
     }
 
     fn export_services(&mut self) -> Option<&mut dyn crate::runtime::ExportServices> {

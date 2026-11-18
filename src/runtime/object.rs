@@ -59,6 +59,14 @@ pub trait TaskObject {
         None
     }
 
+    fn quiz_debug_session(&self) -> Option<&super::QuizDebugSession> {
+        None
+    }
+
+    fn quiz_debug_session_mut(&mut self) -> Option<&mut super::QuizDebugSession> {
+        None
+    }
+
     fn audio_state(&self) -> Option<&crate::audio::SoundState> {
         None
     }

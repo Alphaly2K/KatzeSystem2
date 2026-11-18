@@ -134,6 +134,10 @@ FES `setconf` 更新有效主界面／主文字选择，并在本轮通知处理
 
 `kcs::Database::from_bytes(bytes, formatting)` 装载 KCDB 词条，三个文本配置按普通 869 后三个参数的顺序保存。`record(name)` 按归一化 CP932 名称查找，`records()` 按名称字节序遍历；记录包含标题、IND1～IND24 和三个已读／更新字段。`HostState::database(handle)` 借用存活数据库，870 释放后失效。`ResourceHost` 和 `Runtime` 的普通 869 读取 database 类别资源，经 `Host::create_database` 登记；871 标记，872／873 与原始缓冲区交换存档，878 只清全库脏标记。八项 FES `dic_*` 查询和更新清理共用该状态，在主体、系统块及对象事件中可用。参数、布局及失败约束见 [词条数据库](kcs.md#词条数据库)。
 
+### 问答调试会话
+
+`Runtime::quiz_debug_session(task_id)` 借用已启动的类型 53 会话。宿主读取可见状态、题库名称、题号、选中索引及复选状态，并用 `Runtime::quiz_debug_input(task_id, QuizDebugInput)` 提交控件动作。会话未启动、已删除或控件未启用时返回 `false`；可用控件收到越界索引时返回错误。启用和选择题库会更新脚本共用的题目索引。面板呈现由宿主负责；脚本命令见[问答调试任务](kcs.md#问答调试任务)。
+
 `save::SaveServices::modified_time(task_id, name)` 接收相对存档名称的 CP932 字节，返回可选的 Windows FILETIME 计数；默认实现返回未接入诊断。FES `newsave destination first last` 用该接口选择最新槽号，预算续跑和服务错误保留已求值参数、已完成文件及当前选择，结果在扫描完成后写入共享变量。空范围不调用服务，目的编号越界仍查询全部文件。文件名、时间比较及范围约束见[槽号时间查询](save.md#fes-槽号时间查询)。
 
 `SaveServices::modified_date(task_id, name)` 返回文件修改时间的本地年、月、日、时、分、秒，无法查询时返回 None，默认实现返回未接入诊断。FES `setsave` 在 CSS 装载成功后查询该日期，独立保存面板数值区和最近成功装载的数据；`getflag` 读取面板数值。银行、缺参、文件失败及截断规则见[面板槽位数据](fes.md#槽位数据与数值查询)。
