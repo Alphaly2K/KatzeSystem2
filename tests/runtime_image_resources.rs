@@ -257,6 +257,72 @@ impl ResourceServices for Files {
 }
 
 #[test]
+fn combined_bitmap_uses_frame_zero_and_survives_its_loading_task() {
+    struct BitmapFiles;
+    impl ResourceServices for BitmapFiles {
+        fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+            assert_eq!(category, b"image");
+            Ok([name, b".hg3"].concat())
+        }
+
+        fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
+            assert_eq!(mode, ResourceMode::LooseFirst);
+            let mut bytes = blob();
+            match name {
+                b"art.hg3" => {}
+                b"art_a.hg3" => bytes[16..20].fill(0),
+                b"art_0b.hg3" => {
+                    bytes[16..20].fill(0);
+                    bytes[48..52].copy_from_slice(&1i32.to_le_bytes());
+                    bytes[68..72].copy_from_slice(&4i32.to_le_bytes());
+                }
+                _ => return Ok(None),
+            }
+            Ok(Some(bytes))
+        }
+    }
+
+    let mut code = Vec::new();
+    call(&mut code, 460, &[64]);
+    ins(&mut code, 0x26, &[0]);
+    handle_call(&mut code, 377, &[]);
+    ins(&mut code, 0x26, &[4]);
+    for (address, output) in [(80, 8), (u32::MAX, 12)] {
+        call(&mut code, 460, &[address]);
+        ins(&mut code, 0x26, &[output]);
+    }
+    ins(&mut code, 0x3b, &[]);
+    let mut rt = runtime(&code, 1);
+    rt.set_resources(BitmapFiles);
+    let task = rt.create(0, kind::ORDINARY, b"load", b"").unwrap();
+    let script = rt.object_mut(task).unwrap().interpreter_mut().unwrap();
+    script.write(64, b"art,a,b\0").unwrap();
+    script.write(80, b"art\0").unwrap();
+    rt.update(0, 1).unwrap();
+    let script = vm(&rt, task);
+    let handle = word(script, 0);
+    assert_eq!(
+        [word(script, 4), word(script, 8), word(script, 12)],
+        [1, 0, 0]
+    );
+    assert!(script.stack_bytes().is_empty());
+    rt.destroy(task).unwrap();
+    let image = rt.images().get(handle).unwrap();
+    assert_eq!(image.info().size, [4, 1]);
+    assert_eq!(image.info().offset, [-2, 5]);
+    assert_eq!(image.info().base, [3, 4]);
+    assert_eq!(image.attribute(1), Some([9, 8, 7, 6, 5]));
+
+    let mut release = Vec::new();
+    call(&mut release, 114, &[handle]);
+    ins(&mut release, 0x3b, &[]);
+    rt.factory_mut().programs.0 = Program::from_code(&release, vec![], 128).unwrap();
+    rt.create(0, kind::ORDINARY, b"release", b"").unwrap();
+    rt.update(1, 1).unwrap();
+    assert!(rt.images().get(handle).is_err());
+}
+
+#[test]
 fn loaded_resources_resolve_before_frame_selection_and_preserve_geometry_and_attributes() {
     for budget in [1, 4096] {
         for unicode in [0, 1] {

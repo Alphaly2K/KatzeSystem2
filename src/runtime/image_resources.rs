@@ -5,6 +5,12 @@ use crate::{Error, Result, read};
 
 type ImageLayers = Vec<(Image, Option<bool>)>;
 
+enum ImageSources {
+    Empty,
+    Single,
+    Layers(Vec<Vec<u8>>),
+}
+
 impl<F: ObjectFactory> Runtime<F> {
     /// 借用独立图像资源当前的解码图像；句柄属于普通 710／733 资源表。
     pub fn image_resource(&self, handle: u32) -> Result<&Image> {
@@ -27,57 +33,72 @@ impl<F: ObjectFactory> Runtime<F> {
     }
 }
 
+fn image_sources(name: &[u8]) -> Result<ImageSources> {
+    if name.len() >= 260 {
+        return Err(Error::new(0, "图像资源名超过基线缓冲区范围"));
+    }
+    let end = name
+        .iter()
+        .rposition(|byte| matches!(byte, b'.' | b'/' | b'\\'))
+        .filter(|&position| name[position] == b'.')
+        .unwrap_or(name.len());
+    let parts: Vec<_> = name[..end]
+        .split(|&byte| byte == b',')
+        .filter(|part| !part.is_empty())
+        .collect();
+    if parts.is_empty() {
+        return Ok(ImageSources::Empty);
+    }
+    let table_length = parts.iter().map(|part| part.len() + 1).sum::<usize>()
+        + 1
+        + usize::from(name[..end].last() == Some(&b','));
+    if table_length > 256 || parts.len() > 65 {
+        return Err(Error::new(0, "独立图像资源名称分量超过缓冲区上限"));
+    }
+    if parts.len() > 1 {
+        let mut names = Vec::new();
+        for (index, part) in parts[1..].iter().enumerate() {
+            let value = part[0];
+            if value == b'0' {
+                continue;
+            }
+            let mut layer = parts[0].to_vec();
+            layer.push(b'_');
+            layer.resize(layer.len() + index, b'0');
+            // 分量来自有符号 char 的 DWORD，字符串在第四字节处终止。
+            let value = (value as i8 as i32).to_le_bytes();
+            layer.extend(value[..3].iter().take_while(|&&byte| byte != 0));
+            let extension = name.get(end + 1..).unwrap_or_default();
+            if layer.len() + 1 + extension.len() >= 260 {
+                return Err(Error::new(0, "图层资源名超过基线缓冲区范围"));
+            }
+            layer.push(b'.');
+            layer.extend_from_slice(extension);
+            names.push(layer);
+        }
+        return Ok(ImageSources::Layers(names));
+    }
+    Ok(ImageSources::Single)
+}
+
 impl Resources {
     pub(super) fn load_image_resource(
         &mut self,
         name: &[u8],
         preload: bool,
     ) -> Result<Option<ImageLayers>> {
-        if name.len() >= 260 {
-            return Err(Error::new(0, "图像资源名超过基线缓冲区范围"));
-        }
-        let end = name
-            .iter()
-            .rposition(|byte| matches!(byte, b'.' | b'/' | b'\\'))
-            .filter(|&position| name[position] == b'.')
-            .unwrap_or(name.len());
-        let parts: Vec<_> = name[..end]
-            .split(|&byte| byte == b',')
-            .filter(|part| !part.is_empty())
-            .collect();
-        if parts.is_empty() {
-            return Ok(None);
-        }
-        let table_length = parts.iter().map(|part| part.len() + 1).sum::<usize>()
-            + 1
-            + usize::from(name[..end].last() == Some(&b','));
-        if table_length > 256 || parts.len() > 65 {
-            return Err(Error::new(0, "独立图像资源名称分量超过缓冲区上限"));
-        }
-        if parts.len() > 1 {
-            let mut layers = Vec::new();
-            for (index, part) in parts[1..].iter().enumerate() {
-                let value = part[0];
-                if value == b'0' {
-                    continue;
+        match image_sources(name)? {
+            ImageSources::Empty => return Ok(None),
+            ImageSources::Single => {}
+            ImageSources::Layers(names) => {
+                let mut layers = Vec::new();
+                for name in names {
+                    if let Some(layer) = self.decode_image_layer(&name, &name, 0, preload)? {
+                        layers.push(layer);
+                    }
                 }
-                let mut layer = parts[0].to_vec();
-                layer.push(b'_');
-                layer.resize(layer.len() + index, b'0');
-                // 分量来自有符号 char 的 DWORD，字符串在第四字节处终止。
-                let value = (value as i8 as i32).to_le_bytes();
-                layer.extend(value[..3].iter().take_while(|&&byte| byte != 0));
-                let extension = name.get(end + 1..).unwrap_or_default();
-                if layer.len() + 1 + extension.len() >= 260 {
-                    return Err(Error::new(0, "图层资源名超过基线缓冲区范围"));
-                }
-                layer.push(b'.');
-                layer.extend_from_slice(extension);
-                if let Some(layer) = self.decode_image_layer(&layer, &layer, 0, preload)? {
-                    layers.push(layer);
-                }
+                return Ok((!layers.is_empty()).then_some(layers));
             }
-            return Ok((!layers.is_empty()).then_some(layers));
         }
         let reference = if preload {
             ImageReference {
@@ -90,6 +111,29 @@ impl Resources {
         Ok(self
             .decode_image_layer(name, &reference.name, reference.frame, preload)?
             .map(|layer| vec![layer]))
+    }
+
+    fn load_bitmap(&mut self, name: &[u8]) -> Result<u32> {
+        let services = self
+            .services
+            .as_deref_mut()
+            .ok_or_else(|| Error::new(0, "运行时未配置资源服务"))?;
+        let (image, composed) = match image_sources(name)? {
+            ImageSources::Empty => return Ok(0),
+            ImageSources::Single => (self.images.decode(name, Some(0), false, services)?, false),
+            ImageSources::Layers(names) => {
+                let mut layers = Vec::new();
+                for name in names {
+                    if let Some(image) = self.images.decode(&name, Some(0), false, services)? {
+                        layers.push(image);
+                    }
+                }
+                (Image::compose_bitmap_layers(&layers)?, true)
+            }
+        };
+        let Some(image) = image else { return Ok(0) };
+        let alpha = (!composed).then(|| image.info().reserved != 0);
+        self.images.insert_unowned(image, alpha)
     }
 
     fn decode_image_layer(
@@ -121,7 +165,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         arguments: &[u8],
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
-        if matches!(index, 681 | 682) {
+        if matches!(index, 460 | 681 | 682) {
             if arguments.len() != 4 {
                 return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
             }
@@ -129,6 +173,9 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             if index == 682 {
                 self.resources.images.set_automatic_cache(value != 0);
             } else {
+                if index == 460 && vm.read(value, 1).is_err() {
+                    return Ok(NativeReturn::Value(0));
+                }
                 let mut name = format_string(vm, value, 0)?;
                 name.truncate(
                     name.iter()
@@ -141,6 +188,9 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     .as_deref_mut()
                     .ok_or_else(|| Error::new(vm.pc, "运行时未配置资源服务"))?
                     .resolve(b"image", &name)?;
+                if index == 460 {
+                    return Ok(NativeReturn::Value(self.resources.load_bitmap(&name)?));
+                }
                 self.resources.load_image_resource(&name, true)?;
             }
             return Ok(NativeReturn::Continue);
