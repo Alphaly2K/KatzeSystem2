@@ -37,6 +37,8 @@ pub struct SystemSettings {
     pub scene_animation_enabled: u32,
     /// 48 项系统声音的原始播放开关，与旧声音通道配置分别保存。
     pub system_voice_play: [u32; 48],
+    /// 外部配置可提供的两个原始 DWORD，供普通 589 查询。
+    pub query_589_words: [u32; 2],
     /// 从 `SYSTEMVOICE/ch00`～`ch47` 读取的零结尾名称。
     pub system_voice_names: [[u8; 32]; 48],
     pub always_active: u32,
@@ -75,6 +77,7 @@ impl Default for SystemSettings {
             auto_select: 0,
             scene_animation_enabled: 1,
             system_voice_play: [1; 48],
+            query_589_words: [0; 2],
             system_voice_names: [[0; 32]; 48],
             always_active: 1,
             scene_skip_enabled: 0,

@@ -59,6 +59,46 @@ pub(crate) fn normalize4(v: V) -> V {
     mul(v, [factor; 4])
 }
 
+pub(crate) fn rotation_yaw_pitch_roll(yaw: f32, pitch: f32, roll: f32) -> [f32; 16] {
+    let half_angle = |angle: f32| {
+        let (s, c) = sin_cos(angle * 0.5);
+        (f64::from(s), f64::from(c))
+    };
+    let (sy, cy) = half_angle(yaw);
+    let (sp, cp) = half_angle(pitch);
+    let (sr, cr) = half_angle(roll);
+    let round = |n: f64| f64::from(n as f32);
+    let x = round((cy * sp) * cr + (sy * cp) * sr);
+    let y = round((sy * cp) * cr - (cy * sp) * sr);
+    let z = round((cy * cp) * sr - (sy * sp) * cr);
+    let w = round((cy * cp) * cr + (sy * sp) * sr);
+
+    // 矩阵转换只在部分中间积写回单精度，最后一项对角线复用已舍入的差值。
+    let (x2, y2, z2) = (2.0 * x, 2.0 * y, 2.0 * z);
+    let (xx, xy, xz) = (round(x2 * x), round(y2 * x), round(z2 * x));
+    let (yy, yz, zz) = (round(y2 * y), round(z2 * y), z2 * z);
+    let (xw, yw, zw) = (x2 * w, y2 * w, z2 * w);
+    [
+        1.0 - yy - zz,
+        xy + zw,
+        xz - yw,
+        0.0,
+        xy - zw,
+        1.0 - xx - zz,
+        yz + xw,
+        0.0,
+        xz + yw,
+        yz - xw,
+        round(1.0 - xx) - yy,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+    ]
+    .map(|n| n as f32)
+}
+
 pub(super) fn rotation_axis(axis: [f32; 3], angle: f32) -> [f32; 16] {
     let square = (axis[0] * axis[0] + axis[1] * axis[1]) + axis[2] * axis[2];
     let axis = if square.is_nan() || square < f32::from_bits(0x2880_0000) {

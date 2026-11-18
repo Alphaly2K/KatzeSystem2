@@ -38,6 +38,37 @@ fn call(host: &mut CoreHost<'_>, vm: &mut Interpreter, index: u32, args: &[u32])
 }
 
 #[test]
+fn yaw_pitch_roll_writes_a_complete_quaternion_rotation_matrix() {
+    let mut vm = Interpreter::new(
+        Program::from_code(&[], vec![0; 64], 0).unwrap(),
+        vec![0x55; 72],
+    )
+    .unwrap();
+    let mut state = State::new(0);
+    let mut host = CoreHost::new(&mut state);
+    let angle_bits = [0.5f32, -0.5, 1.57].map(f32::to_bits);
+    let address = 0x8000_0003;
+    assert_eq!(
+        call(
+            &mut host,
+            &mut vm,
+            662,
+            &[address, angle_bits[0], angle_bits[1], angle_bits[2]]
+        ),
+        NativeReturn::Continue
+    );
+    assert_eq!(
+        words(&vm, address, 16),
+        [
+            3194660424, 1063299386, 3201801384, 0, 3210786105, 976695882, 1056262997, 0,
+            1054304932, 1056274243, 1061496992, 0, 0, 0, 0, 1065353216,
+        ]
+    );
+    assert_eq!(vm.read(address - 1, 1).unwrap(), [0x55]);
+    assert_eq!(vm.read(address + 64, 1).unwrap(), [0x55]);
+}
+
+#[test]
 fn ordinary_vectors_keep_alias_feedback_matrix_snapshots_and_native_stack_contracts() {
     let mut code = Vec::new();
     ins(&mut code, 0x25, &[0x1357_9bdf]);

@@ -37,6 +37,18 @@ pub(super) fn call(
         *value = read::u32_at(arguments, 4)?;
         return Ok(NativeReturn::Continue);
     }
+    if index == 589 {
+        let addresses = words(arguments, 2, vm.pc)?;
+        let values = host
+            .system_settings
+            .as_ref()
+            .ok_or_else(|| Error::new(vm.pc, "宿主未配置全局设置"))?
+            .query_589_words;
+        for (address, value) in addresses.into_iter().zip(values) {
+            vm.write(address, &value.to_le_bytes())?;
+        }
+        return Ok(NativeReturn::Continue);
+    }
     if index == 674 {
         let args = words(arguments, 2, vm.pc)?;
         let file = strings::format(vm, args[0], 0)?;

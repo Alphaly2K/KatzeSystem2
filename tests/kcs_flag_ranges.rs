@@ -12,6 +12,35 @@ fn arguments(values: &[u32]) -> Vec<u8> {
 }
 
 #[test]
+fn raw_settings_query_keeps_address_and_write_order() {
+    let mut numbers = State::new(0);
+    let mut host = CoreHost::new(&mut numbers);
+    host.system_settings = Some(SystemSettings {
+        query_589_words: [0x1122_3344, 0x89ab_cdef],
+        ..SystemSettings::default()
+    });
+    let mut vm = Interpreter::new(
+        Program::from_code(&[], vec![0xaa; 16], 0).unwrap(),
+        vec![0xbb; 8],
+    )
+    .unwrap();
+    assert_eq!(
+        host.call(589, &arguments(&[0, 0x8000_0001]), &mut vm)
+            .unwrap(),
+        NativeReturn::Continue
+    );
+    assert_eq!(vm.read(0, 4).unwrap(), [0x44, 0x33, 0x22, 0x11]);
+    assert_eq!(
+        vm.read(0x8000_0000, 6).unwrap(),
+        [0xbb, 0xef, 0xcd, 0xab, 0x89, 0xbb]
+    );
+    host.call(589, &arguments(&[4, 5]), &mut vm).unwrap();
+    assert_eq!(vm.read(4, 5).unwrap(), [0x44, 0xef, 0xcd, 0xab, 0x89]);
+    assert!(host.call(589, &arguments(&[9, 16]), &mut vm).is_err());
+    assert_eq!(vm.read(9, 5).unwrap(), [0x44, 0x33, 0x22, 0x11, 0xaa]);
+}
+
+#[test]
 fn flag_range_outputs_keep_selector_bits_overlap_and_partial_failure_order() {
     let mut numbers = State::new(0);
     let mut host = CoreHost::new(&mut numbers);

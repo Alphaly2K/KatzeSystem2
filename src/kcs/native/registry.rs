@@ -66,6 +66,7 @@ pub(super) fn core(index: u32) -> CoreHandler {
         | 565
         | 566
         | 582..=584
+        | 589
         | 605
         | 606
         | 607
@@ -93,7 +94,7 @@ pub(super) fn core(index: u32) -> CoreHandler {
         424 | 425 => CoreHandler::Sequence,
         863..=868 => CoreHandler::RecordStack,
         350..=358 => CoreHandler::Vector,
-        204..=207 => CoreHandler::Matrix,
+        204..=207 | 662 => CoreHandler::Matrix,
         1
         | 4
         | 5

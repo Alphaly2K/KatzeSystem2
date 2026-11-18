@@ -8,6 +8,15 @@ pub(super) fn call(
     vm: &mut Interpreter,
 ) -> Result<NativeReturn> {
     let args = super::words(arguments, if index == 207 { 1 } else { 4 }, vm.pc)?;
+    if index == 662 {
+        let [yaw, pitch, roll] = [args[1], args[2], args[3]].map(f32::from_bits);
+        let bytes: Vec<_> = matrix::rotation_yaw_pitch_roll(yaw, pitch, roll)
+            .into_iter()
+            .flat_map(f32::to_le_bytes)
+            .collect();
+        vm.write(args[0], &bytes)?;
+        return Ok(NativeReturn::Continue);
+    }
     let mapped = vm.read(args[0], 1).is_ok();
     let identity = || std::array::from_fn(|i| if i % 5 == 0 { 1.0 } else { 0.0 });
     let result = if index == 207 {
