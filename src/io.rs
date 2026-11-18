@@ -50,23 +50,31 @@ pub trait ReadSource: Send + Sync {
     /// 允许短读；到达末尾时返回零，返回量不得超过输出缓冲区。
     fn read_at(&self, offset: u64, output: &mut [u8]) -> Result<usize>;
 
-    fn read_exact_at(&self, mut offset: u64, mut output: &mut [u8]) -> Result<()> {
-        while !output.is_empty() {
-            let position = usize::try_from(offset).unwrap_or(usize::MAX);
-            let count = self.read_at(offset, output)?;
-            if count == 0 {
-                return Err(Error::new(position, "读取源提前结束"));
-            }
-            if count > output.len() {
-                return Err(Error::new(position, "读取源返回量超过输出缓冲区"));
-            }
-            offset = offset
-                .checked_add(count as u64)
-                .ok_or_else(|| Error::new(position, "读取源位置溢出"))?;
-            output = &mut output[count..];
-        }
-        Ok(())
+    fn read_exact_at(&self, offset: u64, output: &mut [u8]) -> Result<()> {
+        read_exact_from(self, offset, output)
     }
+}
+
+pub(crate) fn read_exact_from<S: ReadSource + ?Sized>(
+    source: &S,
+    mut offset: u64,
+    mut output: &mut [u8],
+) -> Result<()> {
+    while !output.is_empty() {
+        let position = usize::try_from(offset).unwrap_or(usize::MAX);
+        let count = source.read_at(offset, output)?;
+        if count == 0 {
+            return Err(Error::new(position, "读取源提前结束"));
+        }
+        if count > output.len() {
+            return Err(Error::new(position, "读取源返回量超过输出缓冲区"));
+        }
+        offset = offset
+            .checked_add(count as u64)
+            .ok_or_else(|| Error::new(position, "读取源位置溢出"))?;
+        output = &mut output[count..];
+    }
+    Ok(())
 }
 
 impl ReadSource for [u8] {

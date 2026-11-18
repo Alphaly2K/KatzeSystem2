@@ -1,11 +1,15 @@
 use crate::{
     Error, Result,
-    io::{ReadSource, SharedSource},
+    io::{ReadSource, SharedSource, read_exact_from},
 };
 use blowfish::{
     BlowfishLE,
     cipher::{BlockDecrypt, KeyInit},
 };
+
+const READ_CHUNK: usize = 32 * 1024;
+const BLOCK_BATCH: usize = 128 * 1024;
+const BULK_CHUNK: usize = 2 * 1024 * 1024;
 
 /// 归档条目的独立随机读取视图；完整八字节块解密，短尾保留原值。
 pub struct KifEntrySource {
@@ -34,6 +38,41 @@ impl KifEntrySource {
             cipher,
         })
     }
+
+    fn read_encrypted(
+        &self,
+        cipher: &BlowfishLE,
+        offset: u64,
+        output: &mut [u8],
+        workers: usize,
+    ) -> Result<()> {
+        let start = offset & !7;
+        let end = ((offset + output.len() as u64 + 7) & !7).min(self.length);
+        let mut bytes = vec![0; (end - start) as usize];
+        self.source.read_exact_at(self.offset + start, &mut bytes)?;
+        if workers > 1 {
+            let step = bytes.len().div_ceil(workers * 8) * 8;
+            std::thread::scope(|scope| {
+                let mut parts = bytes.chunks_mut(step);
+                let first = parts.next().unwrap();
+                for part in parts {
+                    scope.spawn(move || decrypt_blocks(cipher, part));
+                }
+                decrypt_blocks(cipher, first);
+            });
+        } else {
+            decrypt_blocks(cipher, &mut bytes);
+        }
+        let prefix = (offset - start) as usize;
+        output.copy_from_slice(&bytes[prefix..prefix + output.len()]);
+        Ok(())
+    }
+}
+
+fn decrypt_blocks(cipher: &BlowfishLE, bytes: &mut [u8]) {
+    for block in bytes.chunks_exact_mut(8) {
+        cipher.decrypt_block(block.into());
+    }
 }
 
 impl ReadSource for KifEntrySource {
@@ -55,16 +94,30 @@ impl ReadSource for KifEntrySource {
             }
             return Ok(read);
         };
-        let count = count.min(32768);
-        let start = offset & !7;
-        let end = ((offset + count as u64 + 7) & !7).min(self.length);
-        let mut bytes = vec![0; (end - start) as usize];
-        self.source.read_exact_at(self.offset + start, &mut bytes)?;
-        for block in bytes.chunks_exact_mut(8) {
-            cipher.decrypt_block(block.into());
-        }
-        let prefix = (offset - start) as usize;
-        output[..count].copy_from_slice(&bytes[prefix..prefix + count]);
+        let count = count.min(READ_CHUNK);
+        self.read_encrypted(cipher, offset, &mut output[..count], 1)?;
         Ok(count)
+    }
+
+    fn read_exact_at(&self, mut offset: u64, output: &mut [u8]) -> Result<()> {
+        let Some(cipher) = &self.cipher else {
+            return read_exact_from(self, offset, output);
+        };
+        if output.len() < 2 * BLOCK_BATCH
+            || output.len() as u64 > self.length.saturating_sub(offset)
+        {
+            return read_exact_from(self, offset, output);
+        }
+        let max_workers =
+            std::thread::available_parallelism().map_or(1, |count| count.get().min(4));
+        for chunk in output.chunks_mut(BULK_CHUNK) {
+            let workers = (chunk.len() / BLOCK_BATCH).clamp(1, max_workers);
+            if self.read_encrypted(cipher, offset, chunk, workers).is_err() {
+                // 分块回退保留已成功解码的前缀，以及实际失败分块的诊断。
+                read_exact_from(self, offset, chunk)?;
+            }
+            offset += chunk.len() as u64;
+        }
+        Ok(())
     }
 }

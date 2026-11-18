@@ -55,3 +55,48 @@ fn random_entry_reads_decrypt_relative_blocks_preserve_short_tails_and_bound_buf
         assert_eq!(full, plain);
     }
 }
+
+#[test]
+fn bulk_encrypted_reads_keep_block_boundaries_and_commit_the_prefix_on_failure() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct Limited {
+        bytes: Vec<u8>,
+        limit: AtomicUsize,
+    }
+    impl ReadSource for Limited {
+        fn len(&self) -> Result<u64> {
+            Ok(self.bytes.len() as u64)
+        }
+        fn read_at(&self, offset: u64, output: &mut [u8]) -> Result<usize> {
+            self.bytes[..self.limit.load(Ordering::Relaxed)].read_at(offset, output)
+        }
+    }
+
+    let length = (2 << 20) + 37;
+    let plain: Vec<_> = (0..length).map(|i| (i * 37 + i / 113) as u8).collect();
+    let key = 0x12345678u32;
+    let cipher = BlowfishLE::new_from_slice(&key.to_le_bytes()).unwrap();
+    let mut bytes = [vec![0; 11], plain.clone()].concat();
+    for block in bytes[11..].chunks_exact_mut(8) {
+        cipher.encrypt_block(block.into());
+    }
+    let parent = Arc::new(Limited {
+        limit: AtomicUsize::new(bytes.len()),
+        bytes,
+    });
+    let entry = KifEntrySource::new(parent.clone(), 11, length as u32, Some(key)).unwrap();
+    let mut output = vec![0xa5; length - 3];
+    assert_eq!(entry.read_at(3, &mut output).unwrap(), 32 * 1024);
+    entry.read_exact_at(3, &mut output).unwrap();
+    assert_eq!(output, &plain[3..]);
+
+    let prefix = 3 * 32 * 1024;
+    let limit = 11 + prefix + 123;
+    parent.limit.store(limit, Ordering::Relaxed);
+    output.fill(0xa5);
+    let error = entry.read_exact_at(3, &mut output).unwrap_err();
+    assert_eq!(error.offset, limit);
+    assert_eq!(&output[..prefix], &plain[3..3 + prefix]);
+    assert!(output[prefix..].iter().all(|&byte| byte == 0xa5));
+}
