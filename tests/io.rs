@@ -64,11 +64,19 @@ fn file_source_reads_concurrently_without_sharing_reader_positions() {
         .unwrap();
     let scratch = Scratch(path);
     assert!(FileSource::open(scratch.0.parent().unwrap()).is_err());
-    let bytes: Vec<_> = (0..4096).map(|i| i as u8).collect();
+    let bytes: Vec<_> = (0..192 * 1024 + 37u32)
+        .map(|i| (i ^ (i >> 7) ^ (i >> 14)) as u8)
+        .collect();
     file.write_all(&bytes).unwrap();
     drop(file);
     let source = FileSource::open(&scratch.0).unwrap();
     assert_eq!(source.len().unwrap(), bytes.len() as u64);
+    let mut head = [0; 12];
+    source.read_exact_at(0, &mut head).unwrap();
+    for offset in [64 * 1024 - 5, 64 * 1024 + 10, 64 * 1024, 1] {
+        source.read_exact_at(offset as u64, &mut head).unwrap();
+        assert_eq!(head, bytes[offset..offset + head.len()]);
+    }
     let barrier = Barrier::new(2);
     std::thread::scope(|scope| {
         for worker in 0..2 {
@@ -78,7 +86,7 @@ fn file_source_reads_concurrently_without_sharing_reader_positions() {
             scope.spawn(move || {
                 barrier.wait();
                 for iteration in 0..64 {
-                    let offset = iteration * 37 + worker * 11;
+                    let offset = (iteration * 3001 + worker * 180_000) % (bytes.len() - 12);
                     let mut actual = [0; 12];
                     source.read_exact_at(offset as u64, &mut actual).unwrap();
                     assert_eq!(&actual, &bytes[offset..offset + actual.len()]);
@@ -86,6 +94,14 @@ fn file_source_reads_concurrently_without_sharing_reader_positions() {
             });
         }
     });
+    let mut large = vec![0; 128 * 1024 + 18];
+    source.read_exact_at(32 * 1024, &mut large).unwrap();
+    assert_eq!(&large, &bytes[32 * 1024..32 * 1024 + large.len()]);
+    let end = bytes.len() as u64;
+    assert_eq!(source.read_at(end + 32, &mut head).unwrap(), 0);
+    source.read_exact_at(end - 7, &mut head[..7]).unwrap();
+    assert_eq!(head[..7], bytes[bytes.len() - 7..]);
+    assert_eq!(source.read_at(end, &mut head).unwrap(), 0);
 }
 
 #[test]

@@ -3,7 +3,7 @@
 use crate::{Error, Result};
 use std::{
     fs::File,
-    io::{Read, Seek, SeekFrom},
+    io::{BufReader, Read, Seek, SeekFrom},
     path::Path,
     sync::{Arc, Mutex},
 };
@@ -107,7 +107,14 @@ impl ReadSource for Vec<u8> {
 
 /// 独占打开的文件句柄；文件游标由随机读取操作内部协调。
 pub struct FileSource {
-    file: Mutex<File>,
+    file: Mutex<BufferedFile>,
+}
+
+const FILE_BUFFER_SIZE: usize = 64 * 1024;
+
+struct BufferedFile {
+    reader: BufReader<File>,
+    position: Option<u64>,
 }
 
 impl FileSource {
@@ -122,7 +129,10 @@ impl FileSource {
             return Err(Error::new(0, "文件读取源需要普通文件"));
         }
         Ok(Self {
-            file: Mutex::new(file),
+            file: Mutex::new(BufferedFile {
+                reader: BufReader::with_capacity(FILE_BUFFER_SIZE, file),
+                position: Some(0),
+            }),
         })
     }
 }
@@ -132,6 +142,8 @@ impl ReadSource for FileSource {
         self.file
             .lock()
             .unwrap_or_else(|error| error.into_inner())
+            .reader
+            .get_ref()
             .metadata()
             .map(|metadata| metadata.len())
             .map_err(|error| Error::new(0, format!("文件长度查询失败：{error}")))
@@ -148,8 +160,20 @@ impl ReadSource for FileSource {
                 format!("文件读取失败：{error}"),
             )
         };
-        file.seek(SeekFrom::Start(offset)).map_err(error)?;
-        file.read(output).map_err(error)
+        let position = file.position.take();
+        if let Some(position) =
+            position.filter(|&position| offset.abs_diff(position) < FILE_BUFFER_SIZE as u64)
+        {
+            if offset != position {
+                let distance = (i128::from(offset) - i128::from(position)) as i64;
+                file.reader.seek_relative(distance).map_err(error)?;
+            }
+        } else {
+            file.reader.seek(SeekFrom::Start(offset)).map_err(error)?;
+        }
+        let count = file.reader.read(output).map_err(error)?;
+        file.position = offset.checked_add(count as u64);
+        Ok(count)
     }
 }
 
