@@ -79,6 +79,15 @@ fn fallback_name_key(name: &[u8], encoded: bool) -> Vec<u8> {
         .collect()
 }
 
+fn archive_fallback_key(raw: &[u8]) -> Vec<u8> {
+    // 位移以原始字节为单位；替换无效 UTF-8 字节应在消除位移之后进行。
+    let key = fallback_name_key(raw, true);
+    match String::from_utf8_lossy(&key) {
+        std::borrow::Cow::Borrowed(_) => key,
+        std::borrow::Cow::Owned(value) => value.into_bytes(),
+    }
+}
+
 fn name_score(name: &[u8]) -> i32 {
     let mut score = 0;
     for &b in name {
@@ -206,12 +215,9 @@ impl Archive {
         let mut fallback_index = BTreeMap::new();
         if encrypted {
             for (position, entry) in entries.iter().enumerate() {
-                let raw = entry.name_bytes();
-                if raw.is_ascii() {
-                    fallback_index
-                        .entry(fallback_name_key(raw, true))
-                        .or_insert(position);
-                }
+                fallback_index
+                    .entry(archive_fallback_key(entry.name_bytes()))
+                    .or_insert(position);
             }
         }
         Ok(Self {
@@ -231,18 +237,9 @@ impl Archive {
             return Some(position);
         }
         self.key?;
-        if name.is_ascii() {
-            return self
-                .fallback_index
-                .get(&fallback_name_key(name.as_bytes(), false))
-                .copied();
-        }
-        self.entries.iter().position(|entry| {
-            (0..52).any(|shift| {
-                String::from_utf8_lossy(&decode(entry.name_bytes(), shift))
-                    .eq_ignore_ascii_case(name)
-            })
-        })
+        self.fallback_index
+            .get(&fallback_name_key(name.as_bytes(), false))
+            .copied()
     }
 
     pub fn open_source(&self, name: &str) -> Result<Option<SharedSource>> {
@@ -284,6 +281,10 @@ mod archive_tests {
             decode(b"A_08/bCd.Hg3", 14),
             b"314.159".to_vec(),
             decode(b"\xc3\xa9.XyZ", 3),
+            decode(b"\xffA\xe7\x8cB.ogg", 11),
+            decode(b"\xef\xbf\xbdA\xef\xbf\xbdB.ogg", 7),
+            decode(b"\xe7\x8c\xab.ogg", 19),
+            b"\xff\xff".to_vec(),
         ];
         let mut data = vec![0; 8 + (raw.len() + 1) * 72];
         let seed = 23u32;
@@ -299,10 +300,16 @@ mod archive_tests {
             cipher.encrypt_block(block.into());
         }
         let archive = Archive::from_source(Arc::new(data)).unwrap();
-        let mut requests = vec!["missing.hg3".to_string(), "314.159".to_string()];
+        let mut requests = vec![
+            "missing.hg3".to_string(),
+            "314.159".to_string(),
+            "\u{732b}.missing".to_string(),
+            "\u{fffd}".to_string(),
+        ];
         for encrypted_name in &raw {
             for shift in 0..52 {
-                let name = String::from_utf8(decode(encrypted_name, shift)).unwrap();
+                let bytes = decode(encrypted_name, shift);
+                let name = String::from_utf8_lossy(&bytes);
                 requests.extend([name.to_ascii_uppercase(), name.to_ascii_lowercase()]);
             }
         }
