@@ -5,6 +5,7 @@ use super::{
 use crate::{Error, Result, read, resource::ResourceMode};
 use std::collections::{BTreeMap, BTreeSet};
 
+pub(super) mod options;
 mod order;
 mod settings;
 

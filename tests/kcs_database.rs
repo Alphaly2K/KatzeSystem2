@@ -515,6 +515,140 @@ fn quiz_table(prefix: u8) -> Vec<u8> {
     )
 }
 
+#[test]
+fn quiz_option_tables_preserve_selection_and_share_the_integer_random_stream() {
+    fn options_table() -> Vec<u8> {
+        let columns = [b"TBL", b"P00", b"P01", b"P02", b"P03", b"P04", b"P18"];
+        let mut plain = (columns.len() as u32).to_le_bytes().to_vec();
+        for name in columns {
+            let mut column = [0; 24];
+            column[..name.len()].copy_from_slice(name);
+            column[20..].copy_from_slice(&4u32.to_le_bytes());
+            plain.extend(column);
+        }
+        plain.extend(3u32.to_le_bytes());
+        plain.extend(28u32.to_le_bytes());
+        for (id, options) in [
+            (
+                7u32,
+                [
+                    b"a\0\0\0", b"A\0\0\0", b"nil\0", b"h\0\0\0", b"x\0\0\0", b"B\0\0\0",
+                ],
+            ),
+            (7, [b"B\0\0\0"; 6]),
+            (u32::MAX, [b"B\0\0\0"; 6]),
+        ] {
+            plain.extend(id.to_le_bytes());
+            for bytes in options {
+                plain.extend(bytes);
+            }
+        }
+        pack(&plain)
+    }
+
+    struct OptionFiles;
+    impl ResourceServices for OptionFiles {
+        fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+            assert_eq!(category, b"database");
+            Ok(name.to_vec())
+        }
+
+        fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
+            assert_eq!(mode, ResourceMode::LooseFirst);
+            Ok(match name {
+                b"options" => Some(options_table()),
+                b"empty" => Some(pack(&[0; 12])),
+                b"invalid" => Some(b"invalid".to_vec()),
+                _ => None,
+            })
+        }
+    }
+
+    let mut numbers = State::new(0);
+    let mut core = CoreHost::new(&mut numbers);
+    let mut files = OptionFiles;
+    let mut host = ResourceHost::new(&mut core, &mut files);
+    let mut vm = Interpreter::new(
+        Program::from_code(
+            &[],
+            b"a\0A\0B\0h\0x\0options\0empty\0invalid\0".to_vec(),
+            64,
+        )
+        .unwrap(),
+        vec![],
+    )
+    .unwrap();
+    let empty = u32::MAX;
+    let hidden = -10i32 as u32;
+    let handle = value(call(&mut host, &mut vm, 779, &[]));
+    assert_eq!(value(call(&mut host, &mut vm, 784, &[handle, 0])), empty);
+    for (id, address) in [
+        (10, 0),
+        (99, 0),
+        (20, 2),
+        (30, 4),
+        (hidden, 6),
+        (0x8000_0004, 8),
+    ] {
+        assert!(matches!(
+            call(&mut host, &mut vm, 781, &[handle, id, address]),
+            NativeReturn::Continue
+        ));
+    }
+    assert_eq!(value(call(&mut host, &mut vm, 782, &[handle, 10])), 1);
+    assert_eq!(value(call(&mut host, &mut vm, 783, &[handle])), 2);
+    assert_eq!(value(call(&mut host, &mut vm, 784, &[handle, 0])), empty);
+    let slots = |host: &mut _, vm: &mut _| {
+        std::array::from_fn(|i| value(call(host, vm, 784, &[handle, i as u32])))
+    };
+    let mut row = [empty; 19];
+    row[..5].copy_from_slice(&[10, 20, empty, hidden, 4]);
+    row[18] = 30;
+    call(&mut host, &mut vm, 829, &[handle, 7]);
+    assert_eq!(slots(&mut host, &mut vm), row);
+    call(&mut host, &mut vm, 830, &[handle, 20, 2]);
+    call(&mut host, &mut vm, 830, &[handle, 20, 3]);
+    row.swap(1, 2);
+    assert_eq!(slots(&mut host, &mut vm), row);
+    call(&mut host, &mut vm, 832, &[handle, 1]);
+    call(&mut host, &mut vm, 832, &[handle, 2]);
+    assert_eq!(slots(&mut host, &mut vm), row);
+    call(&mut host, &mut vm, 831, &[handle, 1]);
+    call(&mut host, &mut vm, 831, &[handle, 2]);
+    row[1..=2].fill(hidden);
+    assert_eq!(slots(&mut host, &mut vm), row);
+
+    let mut random = katze_system2::kcs::ScriptRandom::default();
+    assert_eq!(
+        value(call(&mut host, &mut vm, 33, &[])),
+        random.next_integer()
+    );
+    let mut positions = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17];
+    for _ in 0..1000 {
+        let a = random.next_integer() as usize % positions.len();
+        let b = random.next_integer() as usize % positions.len();
+        positions.swap(a, b);
+    }
+    call(&mut host, &mut vm, 832, &[handle, 0]);
+    row[positions[0]] = 10;
+    row[0] = hidden;
+    assert_eq!(slots(&mut host, &mut vm), row);
+    assert_eq!(
+        value(call(&mut host, &mut vm, 33, &[])),
+        random.next_integer()
+    );
+
+    assert_eq!(value(call(&mut host, &mut vm, 782, &[handle, 24])), 0);
+    assert_eq!(value(call(&mut host, &mut vm, 783, &[handle])), 2);
+    assert_eq!(value(call(&mut host, &mut vm, 782, &[handle, 18])), 1);
+    assert_eq!(value(call(&mut host, &mut vm, 783, &[handle])), 0);
+    assert_eq!(slots(&mut host, &mut vm), row);
+    call(&mut host, &mut vm, 829, &[handle, 7]);
+    assert_eq!(slots(&mut host, &mut vm), [empty; 19]);
+    call(&mut host, &mut vm, 780, &[handle]);
+    assert!(host.call(783, &handle.to_le_bytes(), &mut vm).is_err());
+}
+
 fn pack_quiz(prefix: u8, rows: &[([u32; 5], u8)]) -> Vec<u8> {
     let names = [
         b"G_A".as_slice(),
