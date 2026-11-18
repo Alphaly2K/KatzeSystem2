@@ -10,20 +10,21 @@ pub(super) struct Pass {
 }
 
 impl ImageList {
-    pub fn animation(&self, key: u32) -> Option<&ImageAnimation> {
-        self.entries.get(&key).map(|entry| &entry.animation)
+    pub fn animation(&self, key: u32) -> Option<std::cell::Ref<'_, ImageAnimation>> {
+        self.entries
+            .get(&key)
+            .map(|entry| std::cell::Ref::map(entry.read(), |entry| &entry.animation))
     }
 
     /// 只写已经装载的 ANM；缺失条目、时间线或超出 64 项的下标均跳过，不标脏。
     pub fn set_animation_variable(&mut self, key: u32, index: u32, value: i32) -> Result<()> {
         self.check_animation_pass()?;
-        if let Some(timeline) = self
-            .entries
-            .get_mut(&key)
-            .and_then(|entry| entry.animation.timeline.as_mut())
-        {
-            if let Some(slot) = timeline.interpreter.variables.get_mut(index as usize) {
-                *slot = value;
+        if let Some(entry) = self.entries.get(&key) {
+            let mut entry = entry.write()?;
+            if let Some(timeline) = entry.animation.timeline.as_mut() {
+                if let Some(slot) = timeline.interpreter.variables.get_mut(index as usize) {
+                    *slot = value;
+                }
             }
         }
         Ok(())
@@ -35,6 +36,7 @@ impl ImageList {
         let Some(entry) = self.entries.get_mut(&key) else {
             return Ok(false);
         };
+        let mut entry = entry.write()?;
         let max_id = entry
             .frames
             .last_key_value()
@@ -49,6 +51,7 @@ impl ImageList {
         let Some(entry) = self.entries.get_mut(&key) else {
             return Ok(false);
         };
+        let mut entry = entry.write()?;
         entry.animation.time = time;
         if let Some(timeline) = &mut entry.animation.timeline {
             timeline.origin = time;
@@ -62,6 +65,7 @@ impl ImageList {
         let Some(entry) = self.entries.get_mut(&key) else {
             return Ok(false);
         };
+        let mut entry = entry.write()?;
         entry.animation.playing = playing;
         Ok(true)
     }
@@ -161,36 +165,25 @@ impl ImageList {
                 self.refresh_resource(key, images)?;
                 pass.started = true;
             }
-            let entry = self.entries.get_mut(&key).unwrap();
+            let reference = self.entries.get(&key).unwrap();
+            let mut entry = reference.write()?;
             entry.history = accumulate(
                 entry.history,
                 entry.bounds(images, entry.properties.base_point)?,
                 entry.clip,
             );
+            let has_end = entry.frames.contains_key(&10000);
             let result = if pass.restart && first {
                 match random.as_mut() {
-                    Some(random) => entry.animation.restart_with_random(
-                        budget,
-                        entry.frames.contains_key(&10000),
-                        random,
-                    ),
-                    None => entry
-                        .animation
-                        .restart(budget, entry.frames.contains_key(&10000)),
+                    Some(random) => entry.animation.restart_with_random(budget, has_end, random),
+                    None => entry.animation.restart(budget, has_end),
                 }
             } else {
                 match random.as_mut() {
-                    Some(random) => entry.animation.update_with_random(
-                        pass.now,
-                        budget,
-                        entry.frames.contains_key(&10000),
-                        random,
-                    ),
-                    None => {
-                        entry
-                            .animation
-                            .update(pass.now, budget, entry.frames.contains_key(&10000))
-                    }
+                    Some(random) => entry
+                        .animation
+                        .update_with_random(pass.now, budget, has_end, random),
+                    None => entry.animation.update(pass.now, budget, has_end),
                 }
             };
             if !result? {
@@ -198,10 +191,11 @@ impl ImageList {
                 return Ok(false);
             }
             let frame_change = entry.animation.frame_change();
+            drop(entry);
             if let Some(id) = frame_change {
                 self.select_frame(key, id as u32, images)?;
             }
-            let entry = self.entries.get_mut(&key).unwrap();
+            let mut entry = self.entries.get(&key).unwrap().write()?;
             if pass.restart || (frame_change.is_some() && entry.visible()) {
                 let previous = entry.history;
                 entry.history = accumulate(
@@ -210,6 +204,7 @@ impl ImageList {
                     entry.clip,
                 );
                 let next = entry.history;
+                drop(entry);
                 self.mark(previous);
                 self.mark(next);
             }

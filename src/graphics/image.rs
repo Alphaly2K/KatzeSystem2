@@ -496,7 +496,8 @@ pub struct Images {
     entries: BTreeMap<u32, ImageEntry>,
     data: BTreeMap<u32, ImageData>,
     resources: BTreeMap<u32, ImageResource>,
-    handles: HandleAllocator,
+    pub(super) handles: HandleAllocator,
+    pub(super) shared_entries: super::image_list::SharedEntries,
     cache: cache::DecodedCache,
 }
 
@@ -508,6 +509,7 @@ impl Images {
             data: BTreeMap::new(),
             resources: BTreeMap::new(),
             handles,
+            shared_entries: Default::default(),
             cache: cache::DecodedCache::default(),
         }
     }

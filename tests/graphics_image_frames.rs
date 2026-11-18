@@ -460,6 +460,7 @@ fn animated_lists_freeze_budgeted_time_and_keep_hidden_pixels_until_visible_inva
     assert_eq!(state.time, 100);
     assert_eq!(state.timeline.as_ref().unwrap().origin, 100);
     assert_eq!(state.display().image, 7);
+    drop(state);
     list.update(&mut images).unwrap();
     let painted = images
         .get(list.image())
@@ -549,6 +550,7 @@ fn list_restart_runs_once_across_budget_yields_and_invalidates_hidden_or_unanima
             assert_eq!(state.timeline.as_ref().unwrap().interpreter.variables[0], 1);
             assert_eq!(state.display().image, if reset_frame { 10000 } else { 7 });
             assert_eq!(state.display().visible, i32::from(!hidden));
+            drop(state);
             assert!(list.dirty_rectangles().next().is_some());
             list.update(&mut images).unwrap();
             let pixel = images
@@ -576,4 +578,178 @@ fn list_restart_runs_once_across_budget_yields_and_invalidates_hidden_or_unanima
             list.release(&mut images).unwrap();
         }
     }
+}
+
+#[test]
+fn native_image_pack_keeps_shared_frames_until_the_last_list_releases_them() -> Result<()> {
+    struct Pack(bool);
+    impl ProgramLoader for Pack {
+        fn load(&mut self, _: &[u8]) -> Result<Option<Program>> {
+            let mut code = Vec::new();
+            let mut ins = |op, args: &[(u8, u32)]| {
+                code.push(op);
+                for (flag, value) in args {
+                    code.push(*flag);
+                    code.extend(value.to_le_bytes());
+                }
+            };
+            for (name, address, count, output) in [(32, 128, 2, 0), (48, 512, 1, 4)] {
+                for value in [name, address, count] {
+                    ins(0x25, &[(3, value)]);
+                }
+                ins(0x2b, &[(3, 703), (3, 12)]);
+                ins(0x26, &[(3, output)]);
+            }
+            ins(0x25, &[(0x13, 132)]);
+            ins(0x26, &[(3, 8)]);
+            ins(0x25, &[(0x13, 516)]);
+            ins(0x26, &[(3, 12)]);
+            for (native, list, slot, x) in [(707, 16, 3, 1f32), (708, 20, 5, 2f32)] {
+                ins(0x25, &[(0x13, list)]);
+                ins(0x25, &[(3, slot)]);
+                ins(0x25, &[(0x13, 8)]);
+                for value in [x.to_bits(), 0, 0, 0, 0, 0, 0, 255, 1, 0] {
+                    ins(0x25, &[(3, value)]);
+                }
+                ins(0x2b, &[(3, native), (3, 52)]);
+            }
+            for (address, count) in [(128, 2), (512, 1)] {
+                ins(0x25, &[(3, address)]);
+                ins(0x25, &[(3, count)]);
+                ins(0x2b, &[(3, 704), (3, 8)]);
+            }
+            ins(0x25, &[(0x13, 8)]);
+            ins(0x25, &[(3, 64)]);
+            ins(0x2b, &[(3, 706), (3, 8)]);
+            ins(0x26, &[(3, 24)]);
+            for (ordinal, output) in [(u32::MAX, 100), (1, 104), (2, 108)] {
+                ins(0x25, &[(0x13, 8)]);
+                ins(0x25, &[(3, ordinal)]);
+                ins(0x2b, &[(3, 709), (3, 8)]);
+                ins(0x26, &[(3, output)]);
+            }
+            code.push(0x3b);
+            let mut data = vec![0xa5; 648];
+            let name: &[u8] = if self.0 { b"parts,a,b\0" } else { b"shared\0" };
+            data[32..32 + name.len()].copy_from_slice(name);
+            data[48..54].copy_from_slice(b"still\0");
+            Ok(Some(Program::from_code(&code, data, 256)?))
+        }
+    }
+    struct PackFiles(Vec<u8>);
+    impl ResourceServices for PackFiles {
+        fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+            assert_eq!(category, b"image");
+            Ok(if name.contains(&b'.') {
+                name.to_vec()
+            } else {
+                [name, b".hg3"].concat()
+            })
+        }
+        fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
+            assert_eq!(mode, ResourceMode::LooseFirst);
+            Ok(match name {
+                b"shared.hg3" | b"parts_a.hg3.hg3" => Some(self.0.clone()),
+                b"still.hg3" | b"parts.hg3" => Some(hg3(&[(0, 0xff00_ff00, [0; 2], [0; 2])])),
+                b"shared.anm" | b"parts_a.anm" => Some(vec![1]),
+                _ => None,
+            })
+        }
+    }
+    for (budget, grouped) in [(1, false), (4096, true)] {
+        let mut runtime = Runtime::new(
+            0,
+            kind::ROOT,
+            Box::new(BaseObject::new()),
+            State::new(0),
+            GraphicsFactory {
+                fallback: KcsFactory::new(Pack(grouped)),
+            },
+        );
+        runtime.set_budget(budget, 10000);
+        runtime.host_mut().surface_size = [4, 3];
+        runtime.drawing_mut().target = Some(RenderTarget::new([4, 3])?);
+        runtime.set_resources(PackFiles(hg3(&[
+            (9, 0xff12_3456, [0; 2], [0; 2]),
+            (2, 0xff98_7654, [0; 2], [0; 2]),
+        ])));
+        let owner = runtime.create(0, kind::ORDINARY, b"pack", b"")?;
+        let first = runtime.create(0, kind::IMAGE_LIST, b"first", b"")?;
+        let second = runtime.create(0, kind::IMAGE_LIST, b"second", b"")?;
+        let command = |target, code, data| Command {
+            target,
+            code,
+            sender: owner,
+            data,
+        };
+        for list in [first, second] {
+            runtime.dispatch_command(0, command(list, 285, [4, 3, 0]))?;
+        }
+        runtime
+            .object_mut(owner)
+            .unwrap()
+            .interpreter_mut()
+            .unwrap()
+            .write(16, [first, second].map(u32::to_le_bytes).as_flattened())?;
+        runtime.update(0, 0)?;
+        let vm = runtime.object(owner).unwrap().interpreter().unwrap();
+        let word = |address| -> Result<u32> {
+            Ok(u32::from_le_bytes(vm.read(address, 4)?.try_into().unwrap()))
+        };
+        assert_eq!(
+            [word(0)?, word(4)?, word(24)?, word(108)?],
+            [1 + u32::from(grouped), 1, 1, 0]
+        );
+        assert_eq!(
+            vm.read(64, 36)?,
+            [0u32, 0, 1, 1, 10, 20, 32, 0, 0]
+                .map(u32::to_le_bytes)
+                .as_flattened()
+        );
+        for address in [128, 264, 512] {
+            assert_eq!(vm.read(address, 8)?, [0; 8]);
+            let label: Option<&str> = match (grouped, address) {
+                (true, 128) => Some("parts_a.hg3.hg3"),
+                (true, 264) => Some("parts_0b.hg3"),
+                _ => None,
+            };
+            if let Some(label) = label {
+                let bytes: Vec<_> = label
+                    .encode_utf16()
+                    .chain([0])
+                    .flat_map(u16::to_le_bytes)
+                    .collect();
+                assert_eq!(vm.read(address + 8, bytes.len())?, bytes);
+            } else {
+                assert_eq!(vm.read(address + 8, 4)?, [0xa5; 4]);
+            }
+        }
+        let (still, early_frame, late_frame) = (word(12)?, word(100)?, word(104)?);
+        assert!(runtime.images().get(still).is_err());
+        assert_eq!(runtime.images().get(early_frame)?.id(), 2);
+        assert_eq!(runtime.images().get(late_frame)?.id(), 9);
+        runtime.destroy(owner)?;
+        for list in [first, second] {
+            let mut output = [0; 4];
+            runtime.dispatch_command_with_buffers(
+                0,
+                command(list, 291, [0; 3]),
+                &mut CommandBuffers {
+                    data1: Some(&mut output),
+                    ..Default::default()
+                },
+            )?;
+            runtime.dispatch_command(0, command(list, 298, [0; 3]))?;
+            let surface = runtime.images().get(u32::from_le_bytes(output))?.surface();
+            assert_eq!(surface.pixel(2, 2), Some(0xff98_7654));
+            assert_eq!(surface.pixel(1, 2), Some(0));
+            runtime.destroy(list)?;
+            if list == first {
+                assert!(runtime.images().get(early_frame).is_ok());
+            }
+        }
+        assert!(runtime.images().get(early_frame).is_err());
+        assert!(runtime.images().get(late_frame).is_err());
+    }
+    Ok(())
 }

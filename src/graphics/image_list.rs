@@ -2,9 +2,14 @@ use super::image::ResourceGeometry;
 use super::{Image, Images, Rect};
 use crate::anm::{DisplayState, ImageAnimation};
 use crate::{Error, Result, read};
+use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::rc::Rc;
 
 mod animation;
+mod shared;
+pub(super) use shared::SharedEntries;
+use shared::insert_frames;
 
 /// 图像列表的无变换来源属性；位置和基点分别截断为整数。
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -27,6 +32,7 @@ impl Default for ImageListProperties {
 }
 
 struct Entry {
+    shared: Option<u32>,
     // 有帧缓存时只借用其中的包装；生命周期由整个条目及所属任务管理。
     image: u32,
     frames: BTreeMap<u32, u32>,
@@ -41,7 +47,52 @@ struct Entry {
     clip: Rect,
 }
 
+#[derive(Clone)]
+pub(super) struct EntryRef(Rc<RefCell<Entry>>);
+
+impl EntryRef {
+    fn new(entry: Entry) -> Self {
+        Self(Rc::new(RefCell::new(entry)))
+    }
+
+    fn read(&self) -> std::cell::Ref<'_, Entry> {
+        self.0.borrow()
+    }
+
+    fn write(&self) -> Result<std::cell::RefMut<'_, Entry>> {
+        self.0
+            .try_borrow_mut()
+            .map_err(|_| Error::new(0, "图像列表条目仍有活动读取视图"))
+    }
+
+    fn release(self, images: &mut Images) -> Result<()> {
+        if let Some(entry) = Rc::into_inner(self.0) {
+            let entry = entry.into_inner();
+            if let Some(handle) = entry.shared {
+                images.shared_entries.remove(handle);
+            }
+            entry.release(images)?;
+        }
+        Ok(())
+    }
+}
+
 impl Entry {
+    fn register_bounds(&mut self, images: &Images, source_base: [f32; 2]) -> Result<Option<Rect>> {
+        // 显示状态先按原基点更新几何，再使用请求基点标记脏区。
+        self.history = accumulate(self.history, self.bounds(images, source_base)?, self.clip);
+        if self.visible() {
+            self.history = accumulate(
+                self.history,
+                self.bounds(images, self.properties.base_point)?,
+                self.clip,
+            );
+            Ok(self.history)
+        } else {
+            Ok(None)
+        }
+    }
+
     fn bounds(&self, images: &Images, base: [f32; 2]) -> Result<Rect> {
         self.resource_geometry.map_or_else(
             || images.list_bounds(self.image, self.properties.position, base),
@@ -95,7 +146,7 @@ struct Block {
 pub struct ImageList {
     owner: Option<u32>,
     image: u32,
-    entries: BTreeMap<u32, Entry>,
+    entries: BTreeMap<u32, EntryRef>,
     blocks: Vec<Block>,
     offset: [i32; 2],
     animation_pass: Option<animation::Pass>,
@@ -241,7 +292,7 @@ impl ImageList {
         images: &mut Images,
     ) -> Result<()> {
         self.set(key, source, properties, images)?;
-        self.entries.get_mut(&key).unwrap().capture_revision =
+        self.entries.get(&key).unwrap().write()?.capture_revision =
             Some(images.get(source)?.filter_revision);
         Ok(())
     }
@@ -263,7 +314,7 @@ impl ImageList {
             images.release_resource_reference(resource)?;
             return Err(error);
         }
-        let entry = self.entries.get_mut(&key).unwrap();
+        let mut entry = self.entries.get(&key).unwrap().write()?;
         entry.resource = Some(resource);
         // 可见条目在写入显示属性时先刷新资源的共享更新状态。
         if entry.visible() {
@@ -273,7 +324,7 @@ impl ImageList {
     }
 
     fn refresh_resource(&mut self, key: u32, images: &mut Images) -> Result<()> {
-        let entry = self.entries.get_mut(&key).unwrap();
+        let mut entry = self.entries.get(&key).unwrap().write()?;
         let Some(resource) = entry.resource else {
             return Ok(());
         };
@@ -318,37 +369,24 @@ impl ImageList {
         let source_identity = self
             .entries
             .get(&key)
-            .map_or(0, |entry| entry.source_identity);
-        let image = if let Some(entry) = self.entries.get(&key) {
-            let image = entry.image;
-            images.bind_pixels(image, pixels)?;
-            image
+            .map_or(0, |entry| entry.read().source_identity);
+        let entry = if let Some(existing) = self.entries.get(&key) {
+            let mut entry = existing.write()?;
+            images.bind_pixels(entry.image, pixels)?;
+            if let Some(resource) = entry.resource.take() {
+                images.release_resource_reference(resource)?;
+            }
+            entry.capture_revision = None;
+            entry.resource_geometry = geometry;
+            entry.properties = properties;
+            entry.history = history;
+            existing.clone()
         } else {
-            images.share_pixels_for(self.owner, pixels)?
-        };
-        let (frames, animation) = self
-            .entries
-            .get_mut(&key)
-            .map(|entry| {
-                (
-                    std::mem::take(&mut entry.frames),
-                    std::mem::take(&mut entry.animation),
-                )
-            })
-            .unwrap_or_default();
-        if let Some(resource) = self
-            .entries
-            .get_mut(&key)
-            .and_then(|entry| entry.resource.take())
-        {
-            images.release_resource_reference(resource)?;
-        }
-        self.finish_source(
-            key,
-            Entry {
-                image,
-                frames,
-                animation,
+            EntryRef::new(Entry {
+                shared: None,
+                image: images.share_pixels_for(self.owner, pixels)?,
+                frames: BTreeMap::new(),
+                animation: ImageAnimation::default(),
                 source_identity,
                 capture_revision: None,
                 resource: None,
@@ -357,10 +395,9 @@ impl ImageList {
                 properties,
                 history,
                 clip,
-            },
-            source_base,
-            images,
-        )
+            })
+        };
+        self.finish_source(key, entry, source_base, images)
     }
 
     /// 登记完整 HG-3 原始数据，独立持有全部帧；初始显示最小无符号 ID。
@@ -405,69 +442,57 @@ impl ImageList {
         let source_identity = self
             .entries
             .get(&key)
-            .map_or(0, |entry| entry.source_identity);
-        let mut frames = BTreeMap::new();
-        for (id, image) in decoded {
-            let alpha = Some(image.info().reserved != 0);
-            let inserted = match self.owner {
-                Some(owner) => images.insert(owner, image, alpha),
-                None => images.insert_unowned(image, alpha),
-            };
-            match inserted {
-                Ok(image) => {
-                    frames.insert(id, image);
-                }
-                Err(error) => {
-                    for &image in frames.values() {
-                        images.release(image)?;
-                    }
-                    return Err(error);
-                }
-            }
-        }
-        let image = *frames
-            .first_key_value()
-            .ok_or_else(|| Error::new(0, "图像列表原始来源没有可用帧"))?
-            .1;
+            .map_or(0, |entry| entry.read().source_identity);
+        let previous = self.entries.get(&key).cloned();
+        let mut previous_entry = previous.as_ref().map(EntryRef::write).transpose()?;
+        let frame_owner = self.owner.filter(|_| {
+            previous_entry
+                .as_ref()
+                .is_none_or(|entry| entry.shared.is_none())
+        });
+        let (frames, image) = insert_frames(images, frame_owner, decoded)?;
         let source_base = images.get(image)?.info().base.map(|v| v as f32);
-        let mut animation = if let Some(mut previous) = self.entries.remove(&key) {
-            let animation = std::mem::take(&mut previous.animation);
-            previous.release(images)?;
-            animation
-        } else {
-            ImageAnimation::default()
-        };
+        let mut animation = previous_entry
+            .as_mut()
+            .map_or_else(ImageAnimation::default, |entry| {
+                std::mem::take(&mut entry.animation)
+            });
         animation.reset_time_on_update = true;
         if let Some(timeline) = &mut animation.timeline {
             timeline.interpreter.max_image_id = *frames.last_key_value().unwrap().0 as i32;
         }
-        self.finish_source(
-            key,
-            Entry {
-                image,
-                frames,
-                animation,
-                source_identity,
-                capture_revision: None,
-                resource: None,
-                resource_geometry: None,
-                priority,
-                properties,
-                history,
-                clip,
-            },
-            source_base,
-            images,
-        )
+        let fresh = Entry {
+            shared: previous_entry.as_ref().and_then(|entry| entry.shared),
+            image,
+            frames,
+            animation,
+            source_identity,
+            capture_revision: None,
+            resource: None,
+            resource_geometry: None,
+            priority,
+            properties,
+            history,
+            clip,
+        };
+        let entry = if let Some(mut entry) = previous_entry.take() {
+            std::mem::replace(&mut *entry, fresh).release(images)?;
+            drop(entry);
+            previous.as_ref().unwrap().clone()
+        } else {
+            EntryRef::new(fresh)
+        };
+        self.finish_source(key, entry, source_base, images)
     }
 
     /// 选择缓存帧并恢复该帧基点；缺失 key 或 ID 保持当前来源并返回 false。
     /// 选帧本身不产生脏区；重新登记或显式失效后才重绘。
     pub fn select_frame(&mut self, key: u32, id: u32, images: &mut Images) -> Result<bool> {
         self.check_animation_pass()?;
-        let Some(entry) = self.entries.get_mut(&key) else {
+        let Some(entry) = self.entries.get(&key) else {
             return Ok(false);
         };
+        let mut entry = entry.write()?;
         let Some(&image) = entry.frames.get(&id) else {
             return Ok(false);
         };
@@ -481,6 +506,9 @@ impl ImageList {
         let Some(entry) = self.entries.get_mut(&key) else {
             return false;
         };
+        let Ok(mut entry) = entry.write() else {
+            return false;
+        };
         entry.source_identity = identity;
         true
     }
@@ -489,7 +517,7 @@ impl ImageList {
     pub fn find_source_identity(&self, identity: u32) -> Option<u32> {
         self.entries
             .iter()
-            .filter(|(_, entry)| entry.source_identity == identity)
+            .filter(|(_, entry)| entry.read().source_identity == identity)
             .map(|(&key, _)| key)
             .min_by_key(|&key| key as i32)
     }
@@ -498,14 +526,14 @@ impl ImageList {
     pub fn source_pixels(&self, key: u32, images: &Images) -> Result<u32> {
         self.entries
             .get(&key)
-            .map_or(Ok(0), |entry| images.pixel_handle(entry.image))
+            .map_or(Ok(0), |entry| images.pixel_handle(entry.read().image))
     }
 
     /// 按有符号 key 查找当前像素身份；不增加引用或推进动画。
     pub fn find_pixels(&self, pixels: u32, images: &Images) -> Result<Option<u32>> {
         let mut found = None;
         for (&key, entry) in &self.entries {
-            if images.pixel_handle(entry.image)? == pixels
+            if images.pixel_handle(entry.read().image)? == pixels
                 && found.is_none_or(|current| (key as i32) < current as i32)
             {
                 found = Some(key);
@@ -520,7 +548,8 @@ impl ImageList {
         let mut history = None;
         let mut clip = viewport;
         let mut priority = (key >> 16) as i32;
-        if let Some(entry) = self.entries.get(&key) {
+        if let Some(entry) = self.entries.get(&key).cloned() {
+            let entry = entry.read();
             history = entry.history;
             clip = entry.clip;
             priority = entry.priority;
@@ -548,7 +577,7 @@ impl ImageList {
             return Ok(false);
         }
         let (history, clip, _) = self.source_history(key, images)?;
-        let entry = self.entries.get_mut(&key).unwrap();
+        let mut entry = self.entries.get(&key).unwrap().write()?;
         let previous_base = entry.properties.base_point;
         entry.properties = properties;
         entry.history = accumulate(history, entry.bounds(images, previous_base)?, clip);
@@ -559,6 +588,7 @@ impl ImageList {
                 clip,
             );
             let history = entry.history;
+            drop(entry);
             self.mark(history);
         }
         Ok(true)
@@ -567,24 +597,11 @@ impl ImageList {
     fn finish_source(
         &mut self,
         key: u32,
-        mut entry: Entry,
+        entry: EntryRef,
         source_base: [f32; 2],
         images: &Images,
     ) -> Result<()> {
-        // 设置显示状态时先使用来源基点更新几何，再写入请求基点。
-        entry.history = accumulate(
-            entry.history,
-            entry.bounds(images, source_base)?,
-            entry.clip,
-        );
-        if entry.visible() {
-            entry.history = accumulate(
-                entry.history,
-                entry.bounds(images, entry.properties.base_point)?,
-                entry.clip,
-            );
-            self.mark(entry.history);
-        }
+        self.mark(entry.write()?.register_bounds(images, source_base)?);
         self.entries.insert(key, entry);
         Ok(())
     }
@@ -594,21 +611,25 @@ impl ImageList {
         let Some(entry) = self.entries.get(&key) else {
             return Ok(false);
         };
-        if entry.visible() {
-            let history = accumulate(
+        let entry = entry.read();
+        let history = if entry.visible() {
+            accumulate(
                 entry.history,
                 entry.bounds(images, entry.properties.base_point)?,
                 entry.clip,
-            );
-            self.mark(history);
-        }
+            )
+        } else {
+            None
+        };
+        drop(entry);
+        self.mark(history);
         self.entries.remove(&key).unwrap().release(images)?;
         Ok(true)
     }
 
     /// 初始优先级取 key 的高 16 位；显式优先级按有符号整数排序。
     pub fn priority(&self, key: u32) -> Option<i32> {
-        self.entries.get(&key).map(|entry| entry.priority)
+        self.entries.get(&key).map(|entry| entry.read().priority)
     }
 
     /// 相同优先级也将可见条目的历史范围标脏；来源重登记保留优先级。
@@ -618,8 +639,10 @@ impl ImageList {
         let Some(entry) = self.entries.get_mut(&key) else {
             return Ok(false);
         };
+        let mut entry = entry.write()?;
         entry.priority = priority;
         let history = entry.visible().then_some(entry.history).flatten();
+        drop(entry);
         self.mark(history);
         Ok(true)
     }
@@ -631,6 +654,7 @@ impl ImageList {
         let Some(entry) = self.entries.get_mut(&key) else {
             return Ok(false);
         };
+        let mut entry = entry.write()?;
         if entry.visible() != visible {
             entry.properties.visible = visible;
             entry.history = accumulate(
@@ -639,6 +663,7 @@ impl ImageList {
                 entry.clip,
             );
             let history = entry.history;
+            drop(entry);
             self.mark(history);
         }
         Ok(true)
@@ -651,6 +676,7 @@ impl ImageList {
         let Some(entry) = self.entries.get_mut(&key) else {
             return Ok(false);
         };
+        let mut entry = entry.write()?;
         let Some(clip) = clip else {
             entry.clip = viewport;
             entry.history = entry
@@ -669,6 +695,7 @@ impl ImageList {
                 .history
                 .and_then(|history| history.intersect(entry.clip));
             let next = entry.visible().then_some(entry.history).flatten();
+            drop(entry);
             self.mark(previous);
             self.mark(next);
         }
@@ -708,7 +735,7 @@ impl ImageList {
     }
 
     pub(crate) fn invalidate_source(&mut self, key: u32, images: &Images) -> Result<()> {
-        let entry = self.entries.get_mut(&key).unwrap();
+        let mut entry = self.entries.get(&key).unwrap().write()?;
         if entry.visible() {
             entry.history = accumulate(
                 entry.history,
@@ -716,6 +743,7 @@ impl ImageList {
                 entry.clip,
             );
             let history = entry.history;
+            drop(entry);
             self.mark(history);
         }
         Ok(())
@@ -743,12 +771,14 @@ impl ImageList {
         self.check_animation_pass()?;
         images.get(self.image)?;
         let mut changed = Vec::new();
-        for entry in self.entries.values_mut() {
-            if let Some(previous) = entry.capture_revision.as_mut() {
-                let revision = images.get(entry.image)?.filter_revision;
-                if *previous != revision {
-                    *previous = revision;
-                    changed.push(entry.history);
+        for entry in self.entries.values() {
+            let current = entry.read();
+            if let Some(previous) = current.capture_revision {
+                let revision = images.get(current.image)?.filter_revision;
+                if previous != revision {
+                    changed.push(current.history);
+                    drop(current);
+                    entry.write()?.capture_revision = Some(revision);
                 }
             }
         }
@@ -763,8 +793,9 @@ impl ImageList {
             images.get_mut(self.image)?.fill_rect_from_bottom(region, 0);
         }
         let mut entries: Vec<_> = self.entries.iter().collect();
-        entries.sort_unstable_by_key(|&(&key, entry)| (entry.priority, key));
+        entries.sort_unstable_by_key(|&(&key, entry)| (entry.read().priority, key));
         for (_, entry) in entries {
+            let entry = entry.read();
             let display = entry.display();
             let p = entry.properties;
             if display.visible != 0 && display.blend != 0 {

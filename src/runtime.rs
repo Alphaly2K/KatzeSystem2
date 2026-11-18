@@ -35,6 +35,7 @@ pub use motion::MotionSnapshot;
 mod frame_capture;
 mod image_data;
 mod image_export;
+mod image_pack;
 mod image_resources;
 mod object;
 mod ordinary;
@@ -2104,6 +2105,9 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
     }
     fn load_kcs_program(&mut self, name: &[u8]) -> Result<Option<Program>> {
         self.resources.images.release_resources(self.host.task_id)?;
+        self.resources
+            .images
+            .release_shared_image_owner(self.host.task_id)?;
         self.resources.images.release_owner(self.host.task_id);
         self.resources.raw.release_owner(self.host.task_id);
         self.factory.load_kcs_program(name)
@@ -2586,6 +2590,7 @@ impl<F: ObjectFactory> Lifecycle for TaskLifecycle<'_, F> {
         object.release()?;
         self.resources.release_plane_movies(self.objects, id);
         self.resources.images.release_resources(id)?;
+        self.resources.images.release_shared_image_owner(id)?;
         self.resources.images.release_owner(id);
         self.resources.raw.release_owner(id);
         self.resources.compositor.drawables.remove(id);

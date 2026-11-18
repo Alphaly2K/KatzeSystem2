@@ -29,7 +29,11 @@ impl<F: ObjectFactory> Runtime<F> {
 }
 
 impl Resources {
-    fn load_image_resource(&mut self, name: &[u8], preload: bool) -> Result<Option<ImageLayers>> {
+    pub(super) fn load_image_resource(
+        &mut self,
+        name: &[u8],
+        preload: bool,
+    ) -> Result<Option<ImageLayers>> {
         if name.len() >= 260 {
             return Err(Error::new(0, "图像资源名超过基线缓冲区范围"));
         }

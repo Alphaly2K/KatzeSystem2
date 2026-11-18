@@ -306,9 +306,7 @@ impl TaskObject for ImageListObject {
                             let frames = ImageList::decode_hg3(host.image_data(data[1])?)?;
                             list.set_frames(key, frames, properties, images(host)?)?;
                         } else if data[2] != 0 {
-                            if !list.update_properties(key, properties, images(host)?)? {
-                                return Err(Error::new(0, "图像列表共享条目来源尚未接入"));
-                            }
+                            list.set_shared(key, data[2], properties, images(host)?)?;
                         } else {
                             list.set_resource(key, data[3], properties, images(host)?)?;
                         }

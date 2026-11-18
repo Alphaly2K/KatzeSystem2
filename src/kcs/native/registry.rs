@@ -229,12 +229,14 @@ pub(crate) enum RuntimeHandler {
     StateRecord,
     Resource,
     ImageResource,
+    ImagePack,
     Core,
 }
 
 pub(crate) fn runtime(index: u32) -> RuntimeHandler {
     match canonical(index) {
         1009 => RuntimeHandler::ImageExport,
+        703 | 704 | 706 | 709 => RuntimeHandler::ImagePack,
         600 | 601 | 1018..=1023 => RuntimeHandler::SystemTask,
         123..=139 | 391 | 418 | 456 | 557 | 585 | 599 => RuntimeHandler::TextWindow,
         29 => RuntimeHandler::FileOpen,
