@@ -1,4 +1,5 @@
 use super::{BaseObject, ObjectFactory, ObjectHost, TaskObject, route_command};
+use crate::graphics::{Drawable, Drawables, query_geometry};
 use crate::kcs::{Host, Interpreter, NativeReturn, format_string};
 use crate::task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock};
 use crate::{Error, Result, read};
@@ -14,11 +15,17 @@ pub trait EffectPlayer {
     /// Load the effect at the given directly formatted resource name. False means unavailable.
     fn load(&mut self, name: &[u8]) -> Result<bool>;
     fn unload(&mut self);
-    /// Start the current asset and return its instance handle, if allocated.
-    fn play(&mut self) -> Option<u32>;
+    /// Start the current asset at a position in backend coordinates.
+    fn play(&mut self, position: [f32; 3]) -> Option<u32>;
     fn stop(&mut self, instance: u32);
     fn is_playing(&mut self, instance: u32) -> bool;
     fn set_color(&mut self, instance: u32, rgba: [u8; 4]);
+    fn set_location(&mut self, instance: u32, position: [f32; 3]);
+    fn set_rotation(&mut self, instance: u32, rotation: [f32; 3]);
+    /// Update the task's draw entry, selecting source geometry when requested.
+    fn set_base_point(&mut self, point: [f32; 3], source: bool);
+    /// Set the effect renderer's row-major projection and view matrices.
+    fn set_camera(&mut self, projection: [f32; 16], view: [f32; 16]);
 }
 
 pub(super) struct EffectObject {
@@ -29,6 +36,7 @@ pub(super) struct EffectObject {
     instance: Option<u32>,
     playback: Option<bool>,
     color: u32,
+    position: [f32; 3],
 }
 
 impl EffectObject {
@@ -41,6 +49,7 @@ impl EffectObject {
             instance: None,
             playback: None,
             color: u32::MAX,
+            position: [0.; 3],
         }
     }
 
@@ -62,12 +71,80 @@ impl EffectObject {
 
     fn play(&mut self) {
         if let Some(player) = self.player.as_mut() {
-            self.instance = player.play();
+            self.instance = player.play(backend_position(self.position));
             if let Some(instance) = self.instance {
                 player.set_color(instance, self.color.to_le_bytes());
             }
         }
     }
+
+    fn forward(
+        &self,
+        code: u32,
+        command: &Command,
+        buffers: &mut CommandBuffers<'_>,
+        output: &mut u32,
+        host: &mut dyn Host,
+    ) -> Result<()> {
+        let mut previous = None;
+        let mut visits = 0;
+        while let Some(target) = host.next_task_child(previous)? {
+            visits += 1;
+            if visits > read::MAX_ITEMS {
+                return Err(Error::new(0, "效果子任务传播超过上限"));
+            }
+            previous = Some(target);
+            host.dispatch_task_command(
+                Command {
+                    target,
+                    sender: self.id,
+                    code,
+                    data: command.data,
+                },
+                buffers,
+                output,
+            )?;
+        }
+        Ok(())
+    }
+}
+
+fn command_vector(buffers: &CommandBuffers<'_>) -> Result<[f32; 3]> {
+    let bytes = buffers
+        .data1
+        .as_deref()
+        .ok_or_else(|| Error::new(0, "缺少效果变换参数"))?;
+    Ok([
+        f32::from_bits(read::u32_at(bytes, 0)?),
+        f32::from_bits(read::u32_at(bytes, 4)?),
+        f32::from_bits(read::u32_at(bytes, 8)?),
+    ])
+}
+
+fn backend_position([x, y, z]: [f32; 3]) -> [f32; 3] {
+    [x * 0.0625, y * -0.0625, z]
+}
+
+fn configure_camera(player: &mut dyn EffectPlayer, size: [u32; 2], scale: [f32; 3]) {
+    let mut projection = [0.; 16];
+    for (axis, slot) in [0, 5].into_iter().enumerate() {
+        let extent = size[axis] as f32 / (scale[axis] * 16.);
+        projection[slot] = (1. / extent) * 2.;
+    }
+    projection[10] = 1. / 299.;
+    projection[14] = -1. / 299.;
+    projection[15] = 1.;
+
+    // Fixed camera: the original normalizes its basis with approximate reciprocals.
+    let mut view = [0.; 16];
+    view[0] = f32::from_bits(0x3f7fffb7);
+    view[5] = f32::from_bits(0x3f7fffb9);
+    view[10] = f32::from_bits(0x3f7fffbc);
+    view[12] = -0.;
+    view[13] = -0.;
+    view[14] = f32::from_bits(0x42c7ffcb);
+    view[15] = 1.;
+    player.set_camera(projection, view);
 }
 
 impl Drop for EffectObject {
@@ -105,8 +182,19 @@ impl TaskObject for EffectObject {
     }
 
     fn initialize_resources(&mut self, host: &mut dyn Host) -> Result<()> {
+        let size = host.surface_size();
         if let Some(services) = host.effect_services() {
             self.player = services.create_player(self.id)?;
+            if let Some(player) = self.player.as_deref_mut() {
+                configure_camera(player, size, [1.; 3]);
+            }
+        }
+        Ok(())
+    }
+
+    fn register_graphics(&mut self, drawables: &mut Drawables) -> Result<()> {
+        if self.player.is_some() {
+            drawables.insert(self.id, Drawable::new(Vec::new())?)?;
         }
         Ok(())
     }
@@ -155,11 +243,56 @@ impl TaskObject for EffectObject {
     ) -> Result<CommandOutcome> {
         if self.control().deletion_requested == 0 && self.player.is_some() {
             match command.code {
+                19 | 63 => {}
+                49 => {
+                    let point = command_vector(buffers)?;
+                    let source = command.data[0] != 0;
+                    if let Some(drawables) = host.drawables() {
+                        drawables.set_geometry_base_point(self.id, point, source);
+                    }
+                    self.player.as_mut().unwrap().set_base_point(point, source);
+                    self.forward(50, command, buffers, output, host)?;
+                }
+                51 => {
+                    self.position = command_vector(buffers)?;
+                    if let Some(instance) = self.instance {
+                        self.player
+                            .as_mut()
+                            .unwrap()
+                            .set_location(instance, backend_position(self.position));
+                    }
+                    self.forward(52, command, buffers, output, host)?;
+                }
+                55 => {
+                    if let Some(instance) = self.instance {
+                        let rotation = command_vector(buffers)?;
+                        self.player
+                            .as_mut()
+                            .unwrap()
+                            .set_rotation(instance, rotation);
+                    }
+                    self.forward(56, command, buffers, output, host)?;
+                }
+                57 => self.forward(58, command, buffers, output, host)?,
                 59 => {
                     self.color = command.data[1];
                     if let (Some(player), Some(instance)) = (self.player.as_mut(), self.instance) {
                         player.set_color(instance, self.color.to_le_bytes());
                     }
+                }
+                61 | 62 => {
+                    if let Some(drawables) = host.drawables() {
+                        query_geometry(drawables, self.id, command, buffers)?;
+                    }
+                }
+                66 => {
+                    let scale = command_vector(buffers)?;
+                    configure_camera(
+                        self.player.as_deref_mut().unwrap(),
+                        host.surface_size(),
+                        scale,
+                    );
+                    self.forward(67, command, buffers, output, host)?;
                 }
                 578 => {
                     let name = read::zstr(

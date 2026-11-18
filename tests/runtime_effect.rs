@@ -1,9 +1,10 @@
 use katze_system2::{
     Result,
     expression::State,
+    graphics::{Drawable, GraphicsFactory},
     kcs::Program,
     runtime::{BaseObject, EffectPlayer, EffectServices, KcsFactory, ProgramLoader, Runtime, kind},
-    task::Command,
+    task::{Command, CommandBuffers},
 };
 use std::{cell::RefCell, collections::BTreeSet, rc::Rc};
 
@@ -29,6 +30,11 @@ struct Backend {
     events: Vec<Event>,
     next_instance: u32,
     active: BTreeSet<u32>,
+    initial_positions: Vec<[f32; 3]>,
+    locations: Vec<(u32, [f32; 3])>,
+    rotations: Vec<(u32, [f32; 3])>,
+    base_points: Vec<([f32; 3], bool)>,
+    cameras: Vec<([f32; 16], [f32; 16])>,
 }
 
 struct Player(Rc<RefCell<Backend>>);
@@ -43,8 +49,9 @@ impl EffectPlayer for Player {
         self.0.borrow_mut().events.push(Event::Unload);
     }
 
-    fn play(&mut self) -> Option<u32> {
+    fn play(&mut self, position: [f32; 3]) -> Option<u32> {
         let mut backend = self.0.borrow_mut();
+        backend.initial_positions.push(position);
         let instance = backend.next_instance;
         backend.next_instance += 1;
         backend.active.insert(instance);
@@ -68,6 +75,22 @@ impl EffectPlayer for Player {
             .events
             .push(Event::Color(instance, rgba));
     }
+
+    fn set_location(&mut self, instance: u32, position: [f32; 3]) {
+        self.0.borrow_mut().locations.push((instance, position));
+    }
+
+    fn set_rotation(&mut self, instance: u32, rotation: [f32; 3]) {
+        self.0.borrow_mut().rotations.push((instance, rotation));
+    }
+
+    fn set_base_point(&mut self, point: [f32; 3], source: bool) {
+        self.0.borrow_mut().base_points.push((point, source));
+    }
+
+    fn set_camera(&mut self, projection: [f32; 16], view: [f32; 16]) {
+        self.0.borrow_mut().cameras.push((projection, view));
+    }
 }
 
 impl EffectServices for Player {
@@ -76,7 +99,9 @@ impl EffectServices for Player {
     }
 }
 
-fn runtime(calls: &[(u32, &[u32])]) -> Result<Runtime<KcsFactory<Loader>>> {
+type EffectRuntime = Runtime<GraphicsFactory<KcsFactory<Loader>>>;
+
+fn runtime(calls: &[(u32, &[u32])]) -> Result<EffectRuntime> {
     let mut code = Vec::new();
     for &(index, args) in calls {
         for arg in args {
@@ -94,17 +119,19 @@ fn runtime(calls: &[(u32, &[u32])]) -> Result<Runtime<KcsFactory<Loader>>> {
         kind::ROOT,
         Box::new(BaseObject::new()),
         State::new(0),
-        KcsFactory::new(Loader(Program::from_code(
-            &code,
-            b"a%%.efk\0".to_vec(),
-            64,
-        )?)),
+        GraphicsFactory {
+            fallback: KcsFactory::new(Loader(Program::from_code(
+                &code,
+                b"a%%.efk\0".to_vec(),
+                64,
+            )?)),
+        },
     );
     runtime.set_budget(1, 1024);
     Ok(runtime)
 }
 
-fn command(runtime: &mut Runtime<KcsFactory<Loader>>, code: u32) -> Result<u32> {
+fn command(runtime: &mut EffectRuntime, code: u32) -> Result<u32> {
     runtime.dispatch_command(
         0,
         Command {
@@ -114,6 +141,100 @@ fn command(runtime: &mut Runtime<KcsFactory<Loader>>, code: u32) -> Result<u32> 
             data: [0; 3],
         },
     )
+}
+
+fn transform<const N: usize>(
+    runtime: &mut EffectRuntime,
+    target: u32,
+    code: u32,
+    source: u32,
+    value: [f32; N],
+) -> Result<()> {
+    let mut bytes: Vec<_> = value.into_iter().flat_map(f32::to_le_bytes).collect();
+    runtime.dispatch_command_with_buffers(
+        0,
+        Command {
+            target,
+            sender: 0,
+            code,
+            data: [source, 0, 0],
+        },
+        &mut CommandBuffers {
+            data1: Some(&mut bytes),
+            ..Default::default()
+        },
+    )?;
+    Ok(())
+}
+
+#[test]
+fn effect_transforms_separate_backend_coordinates_from_child_matrices() -> Result<()> {
+    let backend = Rc::new(RefCell::new(Backend::default()));
+    let mut runtime = runtime(&[(1014, &[1, 0]), (1016, &[1, 1])])?;
+    runtime.host_mut().surface_size = [1280, 720];
+    runtime.set_effect_services(Player(backend.clone()));
+    let effect = runtime.create(0, kind::EFFEKSEER, b"", b"")?;
+    let child = runtime.create(effect, kind::PLANE, b"", b"")?;
+    assert!(
+        runtime
+            .drawables_mut()
+            .insert(child, Drawable::new(vec![])?)?
+    );
+    transform(&mut runtime, child, 53, 0, [0.; 3])?;
+    transform(&mut runtime, effect, 49, 1, [9., 4., 450.])?;
+    assert_eq!(
+        runtime
+            .drawables()
+            .get(child)
+            .unwrap()
+            .transform()
+            .base_point(),
+        [0., 0., 5000.]
+    );
+    transform(&mut runtime, effect, 49, 0, [5., 3., 400.])?;
+    transform(&mut runtime, effect, 51, 1, [32., -16., 100.])?;
+    transform(&mut runtime, effect, 55, 0, [1., 2., 3.])?;
+    assert!(backend.borrow().rotations.is_empty());
+    let child_transform = runtime.drawables().get(child).unwrap().transform();
+    assert_eq!(child_transform.base_point(), [5., 3., 400.]);
+    assert_eq!(child_transform.position(), [0.; 3]);
+    assert_eq!(child_transform.rotation(), [1., 2., 3.]);
+
+    runtime.create(0, kind::ORDINARY, b"caller", b"")?;
+    runtime.update(0, 1)?;
+    assert_eq!(backend.borrow().initial_positions, [[2., 1., 100.]]);
+    transform(&mut runtime, effect, 51, 0, [-16., 8., 10.])?;
+    transform(&mut runtime, effect, 55, 0, [7., 8., 9.])?;
+    transform(&mut runtime, effect, 66, 0, [2., -0.5, 9.])?;
+    let matrix = std::array::from_fn(|i| i as f32);
+    transform(&mut runtime, effect, 57, 0, matrix)?;
+    let child_transform = runtime.drawables().get(child).unwrap().transform();
+    assert_eq!(child_transform.scale(), [2., -0.5, 9.]);
+    assert_eq!(child_transform.matrix_override(), Some(&matrix));
+    {
+        let backend = backend.borrow();
+        assert_eq!(
+            backend.base_points,
+            [([9., 4., 450.], true), ([5., 3., 400.], false)]
+        );
+        assert_eq!(backend.locations, [(0, [-1., -0.5, 10.])]);
+        assert_eq!(backend.rotations, [(0, [7., 8., 9.])]);
+        assert_eq!(backend.cameras.len(), 2);
+        let (projection, view) = backend.cameras[1];
+        assert_eq!(projection[0], 0.05);
+        assert_eq!(projection[5].to_bits(), 0xbcb60b61);
+        assert_eq!(projection[10], 1. / 299.);
+        assert_eq!(view[14].to_bits(), 0x42c7ffcb);
+        assert_eq!(view[13].to_bits(), 0x80000000);
+    }
+    backend.borrow_mut().active.remove(&0);
+    runtime.update(1, 1)?;
+    assert_eq!(
+        backend.borrow().initial_positions,
+        [[2., 1., 100.], [-1., -0.5, 10.]]
+    );
+    assert_eq!(backend.borrow().rotations.len(), 1);
+    Ok(())
 }
 
 #[test]

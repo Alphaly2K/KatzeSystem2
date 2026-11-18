@@ -1041,7 +1041,7 @@ fn run_nested<F: ObjectFactory>(
             **propagate = false;
             return Ok(());
         }
-        if *kind == kind::PLANE && matches!(command.code, 61 | 62) {
+        if matches!(*kind, kind::PLANE | kind::EFFEKSEER) && matches!(command.code, 61 | 62) {
             if !task.deleted {
                 crate::graphics::query_geometry(
                     &resources.compositor.drawables,
