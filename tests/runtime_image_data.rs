@@ -218,6 +218,100 @@ fn call(code: &mut Vec<u8>, native: u32, args: &[u32], output: Option<u32>) {
 }
 
 #[test]
+fn standalone_jpeg_uses_the_decoded_layout_for_each_native() -> Result<()> {
+    struct Photo(Vec<u8>);
+    impl ResourceServices for Photo {
+        fn resolve(&mut self, _: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+            Ok(name.to_vec())
+        }
+        fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
+            assert_eq!(mode, ResourceMode::LooseFirst);
+            Ok(match name {
+                b"photo.jpg" => Some(self.0.clone()),
+                b"photo.anm" => Some(vec![1]),
+                _ => None,
+            })
+        }
+    }
+
+    let top = [45, 85, 195];
+    let bottom = [190, 55, 25];
+    let mut jpeg = Vec::new();
+    let mut encoder = jpeg_encoder::Encoder::new(&mut jpeg, 100);
+    encoder.set_sampling_factor(jpeg_encoder::SamplingFactor::F_1_1);
+    encoder
+        .encode(
+            &[top.repeat(8), bottom.repeat(8)].concat(),
+            1,
+            16,
+            jpeg_encoder::ColorType::Rgb,
+        )
+        .unwrap();
+
+    let mut code = Vec::new();
+    call(&mut code, 365, &[32], Some(0));
+    stored_call(&mut code, 364, 0, &[u32::MAX], Some(4));
+    call(&mut code, 111, &[48], Some(8));
+    call(&mut code, 703, &[32, 128, 1], Some(12));
+    stored_call(&mut code, 706, 132, &[64], Some(16));
+    stored_call(&mut code, 709, 132, &[0], Some(20));
+    stored_call(&mut code, 709, 132, &[1], Some(24));
+    stored_call(&mut code, 366, 0, &[], None);
+    call(&mut code, 65, &[], None);
+    call(&mut code, 704, &[128, 1], None);
+    code.push(0x3b);
+    let mut data = vec![0; 264];
+    data[32..42].copy_from_slice(b"photo.jpg\0");
+    data[48..60].copy_from_slice(b"photo:7.jpg\0");
+    let program = Program::from_code(&code, data, 64)?;
+    let mut rt = Runtime::new(
+        0,
+        kind::ROOT,
+        Box::new(BaseObject::new()),
+        State::new(0),
+        KcsFactory::new(Loader(program)),
+    );
+    rt.set_resources(Photo(jpeg));
+    let task = rt.create(0, kind::ORDINARY, b"photo", b"")?;
+    rt.update(0, 0)?;
+    let vm = rt.object(task).unwrap().interpreter().unwrap();
+    let word = |at| -> Result<u32> {
+        Ok(u32::from_le_bytes(
+            vm.read(at, 4)?.as_ref().try_into().unwrap(),
+        ))
+    };
+    assert_eq!([word(12)?, word(16)?, word(24)?, word(128)?], [1, 1, 0, 2]);
+    let fields = (0..9)
+        .map(|i| word(64 + i * 4))
+        .collect::<Result<Vec<_>>>()?;
+    assert_eq!(fields, [0, 0, 1, 16, 1, 16, 3, 0, 0]);
+    let shared = word(20)?;
+    let raw = word(0)?;
+    for (handle, depth) in [(word(4)?, 32), (word(8)?, 24), (shared, 24)] {
+        let image = rt.images().get(handle)?;
+        assert_eq!(
+            (image.id(), image.info().bit_depth, image.info().reserved),
+            (0, depth, 0)
+        );
+        assert_eq!(image.info().canvas_size, [1, 16]);
+        for (row, pixel) in image.surface().pixels().chunks_exact(4).enumerate() {
+            let expected = if row < 8 { bottom } else { top };
+            assert!(
+                pixel[..3]
+                    .iter()
+                    .zip(expected)
+                    .all(|(&a, b)| a.abs_diff(b) <= 2)
+            );
+            assert_eq!(pixel[3], 255);
+        }
+    }
+    assert!(rt.image_data(raw).is_err());
+    rt.update(1, 0)?;
+    assert!(rt.images().get(shared).is_err());
+    Ok(())
+}
+
+#[test]
 fn rectangle_image_union_uses_wrappers_physical_size_and_wrapping_endpoints() {
     for budget in [1, 4096] {
         for base in [0, 0x8000_0000u32] {

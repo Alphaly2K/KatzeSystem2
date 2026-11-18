@@ -2,7 +2,7 @@ use super::{ImageRegion, Rect, Surface};
 use crate::hg3::{DecodedFrame, StandardInfo};
 use crate::kcs::ResourceServices;
 use crate::resource::ResourceMode;
-use crate::{Error, HandleAllocator, Result, hg3, read};
+use crate::{Error, HandleAllocator, Result, hg3, jpeg, read};
 use std::collections::BTreeMap;
 
 mod blur;
@@ -119,6 +119,30 @@ impl Image {
             alpha_mask: 0,
             filter_revision: 0,
         })
+    }
+
+    fn decode_source(
+        source: &dyn crate::io::ReadSource,
+        frame: Option<i32>,
+    ) -> Result<Option<Self>> {
+        let length = source.len()?;
+        if length == 0 {
+            return Ok(None);
+        }
+        if length > read::MAX_BYTES as u64 {
+            return Err(Error::new(0, "图像输入超过读取上限"));
+        }
+        if length >= 2 {
+            let mut signature = [0; 2];
+            source.read_exact_at(0, &mut signature)?;
+            if signature == jpeg::SIGNATURE {
+                let reader = std::io::BufReader::new(crate::io::SourceReader::new(source));
+                return Self::from_frame(jpeg::decode_frame(reader, 24)?).map(Some);
+            }
+        }
+        hg3::decode_frame_from(source, frame)?
+            .map(Self::from_frame)
+            .transpose()
     }
 
     pub fn id(&self) -> u32 {
@@ -702,12 +726,7 @@ impl Images {
                 let Some(source) = services.open(&name, ResourceMode::LooseFirst)? else {
                     continue;
                 };
-                if source.is_empty()? {
-                    continue;
-                }
-                hg3::decode_frame_from(source.as_ref(), Some(frame))?
-                    .map(Image::from_frame)
-                    .transpose()?
+                Image::decode_source(source.as_ref(), Some(frame))?
             } else {
                 self.decode(&name, Some(frame), false, services)?
             };

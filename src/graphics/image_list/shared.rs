@@ -66,6 +66,12 @@ impl Images {
                 .map(Image::from_frame)
                 .transpose()?;
             BTreeMap::from([(0, image)])
+        } else if bytes.starts_with(&crate::jpeg::SIGNATURE) {
+            let image = crate::jpeg::decode_frame(bytes, 24)
+                .ok()
+                .map(Image::from_frame)
+                .transpose()?;
+            BTreeMap::from([(0, image)])
         } else {
             ImageList::decode_frame_set(bytes, |frame, length| {
                 frame

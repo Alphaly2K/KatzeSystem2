@@ -1,5 +1,5 @@
 use super::{Frame, Input, StandardInfo, compressed, parse_frames};
-use crate::{Error, Result, hg_pixels, read};
+use crate::{Error, Result, hg_pixels, jpeg, read};
 use std::ops::Range;
 
 /// 从上到下、紧密排列的 BGRA8 像素；Alpha 保持独立通道。
@@ -163,16 +163,17 @@ impl IndexedFrame {
                     .flat_map(|c| [c[0], c[1], c[2], 255])
                     .collect();
             }
-            compressed::reverse_rows(&mut pixels, width);
+            jpeg::reverse_rows(&mut pixels, width);
             pixels
         } else if let Some((offset, len)) = self.payload.jpeg {
-            let mut pixels = compressed::jpeg(&data.bytes(offset, len)?, offset, info.size)?;
+            let (_, mut pixels) =
+                jpeg::decode(data.bytes(offset, len)?.as_ref(), offset, Some(info.size))?;
             if channels == 4 {
                 if let Some((at, length)) = self.payload.alpha {
                     compressed::apply_alpha(&data.bytes(at, length)?, &mut pixels);
                 }
             }
-            compressed::reverse_rows(&mut pixels, width);
+            jpeg::reverse_rows(&mut pixels, width);
             pixels
         } else {
             self.decode_slices(data, info.size, size, channels)?

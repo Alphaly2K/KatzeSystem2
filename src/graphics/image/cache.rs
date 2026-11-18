@@ -1,7 +1,7 @@
 use super::{Image, Images};
+use crate::Result;
 use crate::kcs::ResourceServices;
 use crate::resource::ResourceMode;
-use crate::{Result, hg3};
 use std::collections::VecDeque;
 
 struct Entry {
@@ -76,12 +76,7 @@ impl Images {
         let Some(source) = services.open(name, ResourceMode::LooseFirst)? else {
             return Ok(None);
         };
-        if source.is_empty()? {
-            return Ok(None);
-        }
-        let image = hg3::decode_frame_from(source.as_ref(), frame)?
-            .map(Image::from_frame)
-            .transpose()?;
+        let image = Image::decode_source(source.as_ref(), frame)?;
         if retain {
             if let (Some(name), Some(image)) = (key, &image) {
                 let bytes = image.surface().pixels().len();
