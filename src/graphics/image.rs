@@ -999,6 +999,65 @@ impl Images {
         result
     }
 
+    pub(super) fn prepare_transition_colors(
+        &mut self,
+        source: u32,
+        source_at: [i32; 2],
+        target: u32,
+        target_at: [i32; 2],
+        size: [u32; 2],
+        fill_target: bool,
+    ) -> Result<()> {
+        if size.contains(&0) {
+            return Ok(());
+        }
+        let source_data = self.pixel_handle(source)?;
+        let target_data = self.pixel_handle(target)?;
+        let source_size = self.pixel_image(source_data)?.info.size;
+        let target_size = self.pixel_image(target_data)?.info.size;
+        let width = size[0] as usize * 4;
+        let row_start = |at: [i32; 2], extent: [u32; 2], y: u32| {
+            ((extent[1] - at[1] as u32 - y - 1) as usize * extent[0] as usize + at[0] as usize) * 4
+        };
+        if source_data == target_data {
+            let pixels = self.pixel_image_mut(source_data)?.pixels_mut();
+            // 重叠区域的下一像素可以读到本次准备刚写入的颜色。
+            for y in 0..size[1] {
+                let from = row_start(source_at, source_size, y);
+                let to = row_start(target_at, target_size, y);
+                for x in (0..width).step_by(4) {
+                    let (from, to) = (from + x, to + x);
+                    if pixels[from + 3] == 0 {
+                        pixels.copy_within(to..to + 3, from);
+                    } else if fill_target && pixels[to + 3] == 0 {
+                        pixels.copy_within(from..from + 3, to);
+                    }
+                }
+            }
+            return Ok(());
+        }
+        let mut source = self.data.remove(&source_data).unwrap();
+        let target = self.data.get_mut(&target_data).unwrap();
+        let from = source.image.pixels_mut();
+        let to = target.image.pixels_mut();
+        for y in 0..size[1] {
+            let src = row_start(source_at, source_size, y);
+            let dst = row_start(target_at, target_size, y);
+            for (src, dst) in from[src..src + width]
+                .chunks_exact_mut(4)
+                .zip(to[dst..dst + width].chunks_exact_mut(4))
+            {
+                if src[3] == 0 {
+                    src[..3].copy_from_slice(&dst[..3]);
+                } else if fill_target && dst[3] == 0 {
+                    dst[..3].copy_from_slice(&src[..3]);
+                }
+            }
+        }
+        self.data.insert(source_data, source);
+        Ok(())
+    }
+
     pub fn release_owner(&mut self, owner: u32) {
         let data = &mut self.data;
         self.entries.retain(|_, entry| {

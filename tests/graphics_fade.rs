@@ -198,6 +198,17 @@ fn aliased_image_wrappers_keep_preparation_feedback_and_bottom_origin_regions() 
     let canvas = rt.drawing().target.as_ref().unwrap();
     assert_eq!(canvas.pixel(1, 1), Some(0x002a2a2a));
     assert_eq!(canvas.pixel(2, 1), Some(0x7f333333));
+
+    let image = image(&mut rt, [3, 1], &[0xff111111, 0x00222222, 0x00333333]);
+    let alias = rt.images_mut().share(image).unwrap();
+    prepare(
+        &mut rt,
+        id,
+        &mut context(image, alias, [1, 0], [0, 0], [2, 1]),
+    );
+    let pixels = rt.images().get(alias).unwrap().surface();
+    assert_eq!(pixels.pixel(1, 0), Some(0x00111111));
+    assert_eq!(pixels.pixel(2, 0), Some(0x00111111));
 }
 
 struct Empty;

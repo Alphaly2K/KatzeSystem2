@@ -1,4 +1,4 @@
-use super::{Images, Surface};
+use super::Surface;
 use crate::kcs::{Host, Interpreter};
 use crate::runtime::{BaseObject, TaskObject};
 use crate::task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock};
@@ -112,18 +112,16 @@ impl FadeObject {
                 return Err(Error::new(0, "淡入淡出尺寸不能为负数"));
             }
         }
-        self.frame = Some(Surface::new(p.size.map(|n| n as u32))?);
-        for y in 0..p.size[1] {
-            for x in 0..p.size[0] {
-                let from = pixel(images, p.source, p.source_at, [x, y])?;
-                let to = pixel(images, p.target, p.target_at, [x, y])?;
-                if from >> 24 == 0 {
-                    set_pixel(images, p.source, p.source_at, [x, y], to & 0x00ff_ffff)?;
-                } else if to >> 24 == 0 {
-                    set_pixel(images, p.target, p.target_at, [x, y], from & 0x00ff_ffff)?;
-                }
-            }
-        }
+        let size = p.size.map(|n| n as u32);
+        self.frame = Some(Surface::new(size)?);
+        images.prepare_transition_colors(
+            p.source,
+            p.source_at,
+            p.target,
+            p.target_at,
+            size,
+            true,
+        )?;
         self.ready = true;
         Ok(())
     }
@@ -194,38 +192,6 @@ fn row(image: &Surface, at: [i32; 2], y: i32, width: u32) -> Result<&[u8]> {
         .ok_or_else(invalid)?;
     let start = y as usize * image.stride() + at[0] as usize * 4;
     Ok(&image.pixels()[start..start + width as usize * 4])
-}
-
-fn pixel(images: &Images, handle: u32, at: [i32; 2], point: [i32; 2]) -> Result<u32> {
-    let image = images.get(handle)?.surface();
-    let invalid = || Error::new(0, "淡入淡出来源图像尺寸已改变");
-    let x = at[0]
-        .checked_add(point[0])
-        .filter(|&n| n >= 0)
-        .ok_or_else(invalid)?;
-    let y = at[1]
-        .checked_add(point[1])
-        .filter(|&n| n >= 0)
-        .ok_or_else(invalid)?;
-    let y = image.size()[1]
-        .checked_sub(y as u32 + 1)
-        .ok_or_else(invalid)?;
-    image.pixel(x as u32, y).ok_or_else(invalid)
-}
-
-fn set_pixel(
-    images: &mut Images,
-    handle: u32,
-    at: [i32; 2],
-    point: [i32; 2],
-    value: u32,
-) -> Result<()> {
-    let image = images.get_mut(handle)?;
-    let x = at[0] + point[0];
-    let y = image.info().size[1] as i32 - at[1] - point[1] - 1;
-    let offset = (y as usize * image.info().size[0] as usize + x as usize) * 4;
-    image.pixels_mut()[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
-    Ok(())
 }
 
 impl TaskObject for FadeObject {
