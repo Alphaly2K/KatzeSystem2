@@ -3,9 +3,10 @@ use super::{
     Interpreter, NativeReturn, ResourceServices, ResourceState, ScriptRandom, native, strings,
 };
 use crate::{Error, Result, read, resource::ResourceMode};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 mod order;
+mod settings;
 
 type Groups<T> = Vec<(u32, T)>;
 type Packs = Vec<(usize, Vec<usize>)>;
@@ -19,6 +20,10 @@ pub(super) struct QuizBank {
     packs: Vec<Pack>,
     questions: Vec<Question>,
     active: Vec<usize>,
+    settings: BTreeMap<Vec<u8>, settings::Settings>,
+    selected: settings::Settings,
+    member_flags: [bool; 20],
+    dynamic_genres: [Vec<i32>; 3],
 }
 
 struct Pack {
@@ -198,7 +203,30 @@ impl QuizBank {
 
     fn rebuild(&mut self) {
         self.active.clear();
-        self.active.extend(Self::ordered_ids(&self.groups));
+        let filters: [BTreeSet<i32>; 3] = std::array::from_fn(|level| {
+            let mut filter = BTreeSet::new();
+            for &genre in &self.selected.genres[level] {
+                if genre == settings::DYNAMIC_GENRE {
+                    filter.extend(self.dynamic_genres[level].iter().copied());
+                } else {
+                    filter.insert(genre);
+                }
+            }
+            filter
+        });
+
+        for (_, groups) in filtered_groups(&self.groups, &filters[0]) {
+            for (_, groups) in filtered_groups(groups, &filters[1]) {
+                for (_, packs) in filtered_groups(groups, &filters[2]) {
+                    self.active.extend(
+                        packs
+                            .iter()
+                            .rev()
+                            .flat_map(|(_, ids)| ids.iter().rev().copied()),
+                    );
+                }
+            }
+        }
         for &id in &self.active {
             let progress = &mut self.questions[id].progress;
             progress.priority = progress.counts[0];
@@ -296,6 +324,18 @@ impl QuizBank {
     }
 }
 
+fn filtered_groups<'a, T>(groups: &'a Groups<T>, filter: &BTreeSet<i32>) -> Vec<&'a (u32, T)> {
+    if filter.is_empty() {
+        return groups.iter().rev().collect();
+    }
+    let mut groups: Vec<_> = groups
+        .iter()
+        .filter(|&&(id, _)| filter.contains(&(id as i32)))
+        .collect();
+    groups.sort_unstable_by_key(|&&(id, _)| id as i32);
+    groups
+}
+
 fn state_size(count: usize, pc: usize) -> Result<usize> {
     count
         .checked_mul(STATE_RECORD)
@@ -316,10 +356,24 @@ impl ResourceState {
         use NativeReturn::{Continue, Value};
         let count = match index {
             742 => 0,
-            743 | 745 | 764 | 765 | 769 | 770 => 1,
-            744 | 747 | 749 | 766..=768 | 771 | 772 => 2,
-            746 | 776 => 3,
+            743
+            | 745
+            | 752
+            | 753
+            | 755
+            | 756
+            | 760..=762
+            | 764
+            | 765
+            | 769
+            | 770
+            | 773
+            | 775
+            | 778 => 1,
+            744 | 747 | 749..=751 | 754 | 757 | 759 | 766..=768 | 771 | 772 | 774 => 2,
+            746 | 758 | 776 | 777 => 3,
             748 => 4,
+            763 => 5,
             _ => unreachable!(),
         };
         let args = native::words(arguments, count, vm.pc)?;
@@ -330,8 +384,8 @@ impl ResourceState {
         }
         let handle = args[0];
         let null = match index {
-            743 | 749 | 764 | 766 | 769 | 770 => Continue,
-            765 | 776 => Value(u32::MAX),
+            743 | 749 | 757 | 763 | 764 | 766 | 769 | 770 | 773 | 774 | 777 | 778 => Continue,
+            755 | 765 | 776 => Value(u32::MAX),
             _ => Value(0),
         };
         if handle == 0 {
@@ -370,6 +424,80 @@ impl ResourceState {
                 Ok(Value(1))
             }
             745 => Ok(Value(quiz.questions.len() as u32)),
+            750 => {
+                let name = strings::format(vm, args[1], 0)?;
+                let name = take_before_zero(&name);
+                if name.len() >= 256 {
+                    return Err(Error::new(vm.pc, "问答设置文件名超过固定缓冲区上限"));
+                }
+                quiz.settings.clear();
+                let services =
+                    services.ok_or_else(|| Error::new(vm.pc, "问答设置装载需要资源服务"))?;
+                let path = services.resolve(b"database", name)?;
+                let Some(bytes) = services
+                    .read(&path, ResourceMode::LooseFirst)?
+                    .filter(|bytes| !bytes.is_empty())
+                else {
+                    return Ok(Value(0));
+                };
+                quiz.settings = settings::parse(&bytes)?;
+                Ok(Value(1))
+            }
+            751 => {
+                let name = strings::format(vm, args[1], 0)?;
+                let Some(settings) = quiz.settings.get(take_before_zero(&name)) else {
+                    return Ok(Value(0));
+                };
+                quiz.selected = settings.clone();
+                Ok(Value(1))
+            }
+            752 => Ok(Value(quiz.selected.count)),
+            753 => Ok(Value(quiz.selected.quota)),
+            754 | 757 => {
+                if vm.read(args[1], 1).is_ok() {
+                    let name = if index == 754 {
+                        &quiz.selected.background
+                    } else {
+                        &quiz.selected.rival_image
+                    };
+                    native::write_string(vm, args[1], name, 1)?;
+                    if index == 754 {
+                        return Ok(Value(1));
+                    }
+                }
+                Ok(null)
+            }
+            755 => Ok(Value(quiz.selected.rival)),
+            756 => Ok(Value(quiz.selected.rival_type)),
+            758 => {
+                if args[1..]
+                    .iter()
+                    .any(|&address| vm.read(address, 1).is_err())
+                {
+                    return Ok(Value(0));
+                }
+                let [has_position, x, y] = quiz.selected.rival_position;
+                vm.write(args[1], &x.to_le_bytes())?;
+                vm.write(args[2], &y.to_le_bytes())?;
+                Ok(Value(has_position))
+            }
+            759 => {
+                let id = args[1];
+                Ok(Value(u32::from(
+                    quiz.selected.partners.contains(&id)
+                        || (!quiz.selected.members.contains(&id)
+                            && quiz.member_flags.get(id as usize) == Some(&true)),
+                )))
+            }
+            760 => Ok(Value(quiz.selected.music)),
+            761 => Ok(Value(quiz.selected.disabled)),
+            762 => Ok(Value(quiz.selected.experience)),
+            763 => {
+                for (&address, value) in args[1..].iter().zip(quiz.selected.results) {
+                    vm.write(address, &value.to_le_bytes())?;
+                }
+                Ok(Continue)
+            }
             764 => {
                 quiz.rebuild();
                 Ok(Continue)
@@ -378,6 +506,32 @@ impl ResourceState {
             767 => Ok(Value(quiz.export_state(vm, args[1])?)),
             768 => Ok(Value(quiz.import_state(vm, args[1])?)),
             769 | 770 => Ok(Continue),
+            773 => {
+                quiz.member_flags.fill(false);
+                Ok(Continue)
+            }
+            774 => {
+                if let Some(flag) = quiz.member_flags.get_mut(args[1] as usize) {
+                    *flag = true;
+                }
+                Ok(Continue)
+            }
+            775 => Ok(Value(u32::from(!quiz.selected.partners.is_empty()))),
+            777 => {
+                if let Some(ids) = quiz.dynamic_genres.get_mut(args[1] as usize) {
+                    if ids.len() >= read::MAX_ITEMS {
+                        return Err(Error::new(vm.pc, "问答分组选项超过存储上限"));
+                    }
+                    ids.push(args[2] as i32);
+                }
+                Ok(Continue)
+            }
+            778 => {
+                for ids in &mut quiz.dynamic_genres {
+                    ids.clear();
+                }
+                Ok(Continue)
+            }
             _ => {
                 let output = match index {
                     746 => Some(args[2]),

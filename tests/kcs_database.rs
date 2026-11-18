@@ -503,6 +503,19 @@ fn runtime_reads_a_raw_kcdb_handle_across_native_calls() {
 }
 
 fn quiz_table(prefix: u8) -> Vec<u8> {
+    pack_quiz(
+        prefix,
+        &[
+            ([3, 5, 7, 19, 1], b'z'),
+            ([3, 5, 7, 3, 2], b'a'),
+            ([3, 5, 7, 19, 3], b'd'),
+            ([3, 5, 2, 19, 4], b'o'),
+            ([5, 5, 7, u32::MAX - 1, 5], b'n'),
+        ],
+    )
+}
+
+fn pack_quiz(prefix: u8, rows: &[([u32; 5], u8)]) -> Vec<u8> {
     let names = [
         b"G_A".as_slice(),
         b"G_B",
@@ -522,16 +535,9 @@ fn quiz_table(prefix: u8) -> Vec<u8> {
         column[20..].copy_from_slice(&4u32.to_le_bytes());
         plain.extend(column);
     }
-    let rows = [
-        ([3, 5, 7, 19, 1], b'z'),
-        ([3, 5, 7, 3, 2], b'a'),
-        ([3, 5, 7, 19, 3], b'd'),
-        ([3, 5, 2, 19, 4], b'o'),
-        ([5, 5, 7, u32::MAX - 1, 5], b'n'),
-    ];
     plain.extend((rows.len() as u32).to_le_bytes());
     plain.extend(40u32.to_le_bytes());
-    for (words, q) in rows {
+    for &(words, q) in rows {
         for word in words {
             plain.extend(word.to_le_bytes());
         }
@@ -541,6 +547,126 @@ fn quiz_table(prefix: u8) -> Vec<u8> {
         }
     }
     pack(&plain)
+}
+
+#[test]
+fn quiz_configuration_selects_settings_and_filters_the_next_rebuild() {
+    struct QuizFiles;
+    impl ResourceServices for QuizFiles {
+        fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+            assert_eq!(category, b"database");
+            Ok(name.to_vec())
+        }
+
+        fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
+            assert_eq!(mode, ResourceMode::LooseFirst);
+            Ok(match name {
+                b"CFG" => Some(
+                    b"// comment\r\n#Stage  One\rCNT\t3\rNORMA 4\nBG BG_A\nRIVAL -7\nRTYPE 2\nRIMG face\n\
+                      RPOS -3 6\nDISABLE 1 32 33\nMEMBER 2 4\nPARTNER 4 5\nBGM 0xa\nEXP 8\n\
+                      PWIN 12\nPLOSE 13\nRWIN 14\nRLOSE 15\n$GEN\nGENRE_A 5 2-4 @\nGENRE_B 5\nGENRE_C 1-3\n\
+                      #Empty\nCNT\n#Stage One\nCNT 90\n#Another\nNORMA 50\nEND\n"
+                        .to_vec(),
+                ),
+                b"BANK" => Some(pack_quiz(
+                    b'Q',
+                    &[
+                        ([5, 5, 2, 5, 1], b'a'),
+                        ([3, 5, 7, 6, 2], b'b'),
+                        ([3, 5, 2, 7, 3], b'c'),
+                        ([5, 5, 3, 8, 4], b'd'),
+                        ([5, 1, 2, 9, 5], b'e'),
+                        ([7, 5, 2, 10, 6], b'f'),
+                        ([u32::MAX, 5, 2, 11, 7], b'g'),
+                    ],
+                )),
+                b"ZERO" => Some(Vec::new()),
+                _ => None,
+            })
+        }
+    }
+
+    let mut numbers = State::new(0);
+    let mut core = CoreHost::new(&mut numbers);
+    let mut files = QuizFiles;
+    let mut host = ResourceHost::new(&mut core, &mut files);
+    let mut data = vec![0xa5; 256];
+    for (offset, name) in [
+        (16, b"CFG\0".as_slice()),
+        (32, b"Stage One\0"),
+        (48, b"BANK\0"),
+        (64, b"empty\0"),
+        (80, b"Empty\0"),
+        (96, b"ZERO\0"),
+    ] {
+        data[offset..offset + name.len()].copy_from_slice(name);
+    }
+    let mut vm = Interpreter::new(Program::from_code(&[], data, 64).unwrap(), vec![]).unwrap();
+    let read_words = |vm: &Interpreter, address, count: usize| {
+        vm.read(address, count * 4)
+            .unwrap()
+            .chunks_exact(4)
+            .map(|word| u32::from_le_bytes(word.try_into().unwrap()))
+            .collect::<Vec<_>>()
+    };
+    let handle = value(call(&mut host, &mut vm, 742, &[]));
+    assert_eq!(value(call(&mut host, &mut vm, 750, &[handle, 16])), 1);
+    assert_eq!(value(call(&mut host, &mut vm, 751, &[handle, 32])), 1);
+    let settings = [752, 753, 755, 756, 760, 761, 762, 775]
+        .map(|index| value(call(&mut host, &mut vm, index, &[handle])));
+    assert_eq!(settings, [3, 4, -7i32 as u32, 2, 10, 0x8000_0001, 8, 1]);
+    assert_eq!(value(call(&mut host, &mut vm, 754, &[handle, 128])), 1);
+    assert_eq!(vm.read(128, 6).unwrap().as_ref(), b"BG_A\0\xa5");
+    assert!(matches!(
+        call(&mut host, &mut vm, 757, &[handle, 144]),
+        NativeReturn::Continue
+    ));
+    assert_eq!(vm.read(144, 6).unwrap().as_ref(), b"face\0\xa5");
+    assert_eq!(value(call(&mut host, &mut vm, 758, &[handle, 128, 132])), 1);
+    assert_eq!(read_words(&vm, 128, 2), [-3i32 as u32, 6]);
+    call(&mut host, &mut vm, 763, &[handle, 128, 132, 136, 140]);
+    assert_eq!(read_words(&vm, 128, 4), [12, 13, 14, 15]);
+
+    for id in 0..6 {
+        call(&mut host, &mut vm, 774, &[handle, id]);
+    }
+    let mut member_flags =
+        || [0, 1, 2, 3, 4, 5].map(|id| value(call(&mut host, &mut vm, 759, &[handle, id])));
+    assert_eq!(member_flags(), [1, 1, 0, 1, 1, 1]);
+    call(&mut host, &mut vm, 773, &[handle]);
+    assert_eq!(value(call(&mut host, &mut vm, 759, &[handle, 1])), 0);
+    assert_eq!(value(call(&mut host, &mut vm, 759, &[handle, 4])), 1);
+
+    assert_eq!(value(call(&mut host, &mut vm, 744, &[handle, 48])), 1);
+    let images = |host: &mut _, vm: &mut _| {
+        [0, 1, 2, 3, 4, 5, 6, 7].map(|i| value(call(host, vm, 747, &[handle, i])))
+    };
+    let missing = u32::MAX;
+    let filtered = [3, 1, 4, missing, missing, missing, missing, missing];
+    call(&mut host, &mut vm, 764, &[handle]);
+    assert_eq!(images(&mut host, &mut vm), filtered);
+    for id in [7, 1, u32::MAX, 2, 7] {
+        call(&mut host, &mut vm, 777, &[handle, 0, id]);
+    }
+    assert_eq!(images(&mut host, &mut vm), filtered);
+    call(&mut host, &mut vm, 764, &[handle]);
+    assert_eq!(
+        images(&mut host, &mut vm),
+        [7, 3, 1, 4, 6, missing, missing, missing]
+    );
+    call(&mut host, &mut vm, 778, &[handle]);
+    call(&mut host, &mut vm, 764, &[handle]);
+    assert_eq!(images(&mut host, &mut vm), filtered);
+    assert_eq!(value(call(&mut host, &mut vm, 751, &[handle, 64])), 0);
+    assert_eq!(value(call(&mut host, &mut vm, 751, &[handle, 80])), 1);
+    assert_eq!(value(call(&mut host, &mut vm, 753, &[handle])), 4);
+    assert_eq!(value(call(&mut host, &mut vm, 755, &[handle])), u32::MAX);
+    assert_eq!(images(&mut host, &mut vm), filtered);
+    call(&mut host, &mut vm, 764, &[handle]);
+    assert_eq!(images(&mut host, &mut vm), [7, 6, 3, 2, 5, 4, 1, missing]);
+    assert_eq!(value(call(&mut host, &mut vm, 750, &[handle, 96])), 0);
+    assert_eq!(value(call(&mut host, &mut vm, 751, &[handle, 32])), 0);
+    assert_eq!(value(call(&mut host, &mut vm, 753, &[handle])), 4);
 }
 
 #[test]
