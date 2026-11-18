@@ -504,6 +504,10 @@ pub trait Host {
         None
     }
 
+    fn effect_services(&mut self) -> Option<&mut dyn crate::runtime::EffectServices> {
+        None
+    }
+
     /// 是否允许图形对象装载电影；关闭时仍执行图元替换和名称补全。
     fn movie_enabled(&self) -> bool {
         true
@@ -823,6 +827,10 @@ impl<T: Host + ?Sized> Host for &mut T {
 
     fn platform_job_services(&mut self) -> Option<&mut dyn crate::runtime::PlatformJobServices> {
         (**self).platform_job_services()
+    }
+
+    fn effect_services(&mut self) -> Option<&mut dyn crate::runtime::EffectServices> {
+        (**self).effect_services()
     }
 
     fn movie_enabled(&self) -> bool {

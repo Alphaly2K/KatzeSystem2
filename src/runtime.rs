@@ -23,7 +23,9 @@ mod export;
 pub use export::{ExportDestination, ExportServices};
 pub mod fes;
 pub use cst::CstContext;
+mod effect;
 mod graphics;
+pub use effect::{EffectPlayer, EffectServices};
 mod image_cursor;
 mod input;
 mod message;
@@ -90,6 +92,7 @@ pub mod kind {
     pub const CFLIP: u32 = 58;
     pub const PLATFORM_PLUGIN: u32 = 59;
     pub const IMAGE_IMPORT: u32 = 60;
+    pub const EFFEKSEER: u32 = 61;
     pub const STRING_PLANE_UTF8: u32 = 63;
     pub const CAMERA_2D: u32 = 65;
     /// 粒子任务（`kcTaskParticle`）。
@@ -167,6 +170,9 @@ impl<L: ProgramLoader> ObjectFactory for KcsFactory<L> {
         }
         if matches!(kind, kind::PLATFORM_PLUGIN | kind::IMAGE_IMPORT) {
             return Ok(Box::new(platform_job::PlatformJobObject::new(id, kind)));
+        }
+        if kind == kind::EFFEKSEER {
+            return Ok(Box::new(effect::EffectObject::new(id)));
         }
         if kind != kind::ORDINARY {
             return Err(Error::new(0, format!("对象类型 {kind} 需要对应子系统工厂")));
@@ -413,6 +419,10 @@ impl<F: ObjectFactory> Runtime<F> {
 
     pub fn set_platform_job_services(&mut self, services: impl PlatformJobServices + 'static) {
         self.resources.platform_jobs = Some(Box::new(services));
+    }
+
+    pub fn set_effect_services(&mut self, services: impl EffectServices + 'static) {
+        self.resources.effects = Some(Box::new(services));
     }
 
     pub fn set_configuration_services(
@@ -2398,6 +2408,13 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
             .platform_jobs
             .as_deref_mut()
             .map(|service| service as _)
+    }
+
+    fn effect_services(&mut self) -> Option<&mut dyn EffectServices> {
+        match &mut self.resources.effects {
+            Some(services) => Some(services.as_mut()),
+            None => None,
+        }
     }
 
     fn movie_enabled(&self) -> bool {
