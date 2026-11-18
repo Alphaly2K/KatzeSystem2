@@ -578,7 +578,7 @@ fn quiz_packs_merge_without_reordering_existing_indices_until_rebuild() {
         data[at..at + name.len()].copy_from_slice(name);
     }
     let mut vm =
-        Interpreter::new(Program::from_code(&[], data, 64).unwrap(), vec![0xa5; 32]).unwrap();
+        Interpreter::new(Program::from_code(&[], data, 64).unwrap(), vec![0xa5; 512]).unwrap();
     let handle = value(call(&mut host, &mut vm, 742, &[]));
     assert_eq!(value(call(&mut host, &mut vm, 744, &[handle, 16])), 1);
     assert_eq!(value(call(&mut host, &mut vm, 744, &[handle, 32])), 0);
@@ -622,6 +622,62 @@ fn quiz_packs_merge_without_reordering_existing_indices_until_rebuild() {
     assert_eq!(value(call(&mut host, &mut vm, 771, &[handle, 1])), 1);
     assert_eq!(value(call(&mut host, &mut vm, 772, &[handle, 1])), 1);
     assert_eq!(value(call(&mut host, &mut vm, 771, &[handle, 0])), 0);
+    let size = value(call(&mut host, &mut vm, 767, &[handle, 0]));
+    assert_eq!(size, 12 + 8 * 88);
+    let buffer = value(call(&mut host, &mut vm, 27, &[size + 4]));
+    vm.write(buffer, &vec![0xa5; size as usize + 4]).unwrap();
+
+    let source = 0x8000_0080;
+    let mut imported: Vec<_> = [12u32, 88, 3]
+        .into_iter()
+        .flat_map(u32::to_le_bytes)
+        .collect();
+    let words = [0x1234, 0x8000_0000, 42, 200, 1];
+    for (name, id) in [(b'a', 19u32), (b'B', 999), (b'A', 19)] {
+        let mut field = [0xbd; 64];
+        field[..2].copy_from_slice(&[name, 0]);
+        imported.extend(field);
+        imported.extend([id].into_iter().chain(words).flat_map(u32::to_le_bytes));
+    }
+    vm.write(source, &imported).unwrap();
+    assert_eq!(value(call(&mut host, &mut vm, 768, &[handle, source])), 1);
+    assert_eq!(vm.read(source, imported.len()).unwrap().as_ref(), imported);
+    assert_eq!(value(call(&mut host, &mut vm, 771, &[handle, 3])), 0);
+    assert_eq!(value(call(&mut host, &mut vm, 771, &[handle, 7])), 42);
+    assert_eq!(
+        value(call(&mut host, &mut vm, 772, &[handle, 7])),
+        0x8000_0000
+    );
+    assert_eq!(
+        value(call(&mut host, &mut vm, 767, &[handle, buffer])),
+        size
+    );
+    let read_words = |vm: &Interpreter, address, count: usize| {
+        vm.read(address, count * 4)
+            .unwrap()
+            .chunks_exact(4)
+            .map(|bytes| u32::from_le_bytes(bytes.try_into().unwrap()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(read_words(&vm, buffer, 3), [12, 88, 8]);
+    let restored = buffer + 12 + 7 * 88;
+    assert_eq!(vm.read(restored, 4).unwrap().as_ref(), b"A\0\xa5\xa5");
+    assert_eq!(
+        read_words(&vm, restored + 64, 6),
+        [19, 0x1234, 0x8000_0000, 42, 200, 1]
+    );
+    assert_eq!(
+        vm.read(buffer + size, 4).unwrap().as_ref(),
+        b"\xa5\xa5\xa5\xa5"
+    );
+    call(&mut host, &mut vm, 764, &[handle]);
+    call(&mut host, &mut vm, 767, &[handle, buffer]);
+    assert_eq!(
+        read_words(&vm, restored + 64, 6),
+        [19, 0x1234, 0x8000_0000, 42, 42, 0]
+    );
+    vm.write(source, &13u32.to_le_bytes()).unwrap();
+    assert_eq!(value(call(&mut host, &mut vm, 768, &[handle, source])), 0);
     assert_eq!(
         value(call(&mut host, &mut vm, 776, &[0, 0, u32::MAX])),
         u32::MAX
