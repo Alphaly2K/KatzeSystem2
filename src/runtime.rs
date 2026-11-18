@@ -33,6 +33,7 @@ mod particle;
 mod text_window;
 pub use motion::MotionSnapshot;
 mod frame_capture;
+mod image_animation;
 mod image_data;
 mod image_export;
 mod image_pack;
@@ -316,6 +317,7 @@ impl<F: ObjectFactory> Runtime<F> {
     /// 配置同步资源读取与类别名称补全；已有资源对象继续保留。
     pub fn set_resources(&mut self, services: impl crate::kcs::ResourceServices + 'static) {
         self.resources.services = Some(Box::new(crate::kcs::CachedResources::new(services)));
+        self.resources.animation_aliases = None;
     }
 
     /// 处理平台语言请求的字符串表部分；请求队列和平台控件由宿主管理。

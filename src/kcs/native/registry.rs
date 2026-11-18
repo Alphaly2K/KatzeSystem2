@@ -228,6 +228,7 @@ pub(crate) enum RuntimeHandler {
     MediaRecord,
     StateRecord,
     Resource,
+    ImageAnimation,
     ImageResource,
     ImagePack,
     Core,
@@ -236,6 +237,7 @@ pub(crate) enum RuntimeHandler {
 pub(crate) fn runtime(index: u32) -> RuntimeHandler {
     match canonical(index) {
         1009 => RuntimeHandler::ImageExport,
+        430 | 624 => RuntimeHandler::ImageAnimation,
         703 | 704 | 706 | 709 => RuntimeHandler::ImagePack,
         600 | 601 | 1018..=1023 => RuntimeHandler::SystemTask,
         123..=139 | 391 | 418 | 456 | 557 | 585 | 599 => RuntimeHandler::TextWindow,

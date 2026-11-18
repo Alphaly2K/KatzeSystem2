@@ -136,7 +136,7 @@ impl Resources {
         };
         let parts: Vec<_> = parts.map(|part| part[0]).collect();
         if parts.is_empty() {
-            let (kind, handle) = if self.has_pack_animation(stem)? {
+            let (kind, handle) = if self.find_image_animation(name)?.is_some() {
                 (2, self.load_shared_image(owner, name)?)
             } else {
                 (1, self.load_pack_image(owner, name)?)
@@ -161,7 +161,8 @@ impl Resources {
             let part = (part as i8 as i32).to_le_bytes();
             let part = &part[..if part[1] == 0 { 1 } else { 3 }];
             layer.extend_from_slice(part);
-            let animated = self.has_pack_animation(&layer)?;
+            append_extension(&mut layer, extension);
+            let animated = self.find_image_animation(&layer)?.is_some();
             if !animated && !after_animated {
                 group.push(b',');
                 group.extend_from_slice(part);
@@ -170,7 +171,6 @@ impl Resources {
             if count == capacity {
                 return Err(Error::new(vm.pc, "图像组合记录容量不足"));
             }
-            append_extension(&mut layer, extension);
             if animated {
                 // 带动画的分量使用已补全名称，再追加一份原扩展名。
                 append_extension(&mut layer, extension);
@@ -193,19 +193,6 @@ impl Resources {
             after_animated = animated;
         }
         Ok(count)
-    }
-
-    fn has_pack_animation(&mut self, stem: &[u8]) -> Result<bool> {
-        let name = [stem, b".anm"].concat();
-        let services = self.services.as_deref_mut().unwrap();
-        if services.open(&name, ResourceMode::LooseFirst)?.is_some() {
-            return Ok(true);
-        }
-        let Some(base) = stem.rsplit(|byte| matches!(byte, b'/' | b'\\')).next() else {
-            return Ok(false);
-        };
-        let alias = services.resolve(b"image", &[base, b".anm"].concat())?;
-        Ok(alias != name && services.open(&alias, ResourceMode::LooseFirst)?.is_some())
     }
 
     fn load_shared_image(&mut self, owner: u32, name: &[u8]) -> Result<u32> {
@@ -247,12 +234,7 @@ impl Resources {
 }
 
 fn split_extension(name: &[u8]) -> (&[u8], &[u8]) {
-    let end = name
-        .iter()
-        .rposition(|byte| matches!(byte, b'.' | b'/' | b'\\'))
-        .filter(|&offset| name[offset] == b'.')
-        .unwrap_or(name.len());
-    (&name[..end], &name[end..])
+    name.split_at(super::image_animation::name_parts(name).1)
 }
 
 fn append_extension(name: &mut Vec<u8>, extension: &[u8]) {

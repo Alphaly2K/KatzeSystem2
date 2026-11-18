@@ -191,6 +191,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                 self.resources.call(self.host.task_id, index, arguments, vm)
             }
             RuntimeHandler::ImageResource => self.image_resource_native(index, arguments, vm),
+            RuntimeHandler::ImageAnimation => self.image_animation_native(index, arguments, vm),
             RuntimeHandler::ImagePack => self.image_pack_native(index, arguments, vm),
             RuntimeHandler::Core => call_native(
                 &mut *self.numbers,

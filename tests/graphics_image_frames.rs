@@ -613,6 +613,17 @@ fn native_image_pack_keeps_shared_frames_until_the_last_list_releases_them() -> 
                 }
                 ins(0x2b, &[(3, native), (3, 52)]);
             }
+            for (address, output) in [(704, 112), (728, 116), (752, 120)] {
+                ins(0x25, &[(3, address)]);
+                ins(0x2b, &[(3, 430), (3, 4)]);
+                ins(0x26, &[(3, output)]);
+            }
+            for name in [704, 728, 752] {
+                ins(0x25, &[(0x13, 16)]);
+                ins(0x25, &[(3, 3)]);
+                ins(0x25, &[(3, name)]);
+                ins(0x2b, &[(3, 624), (3, 12)]);
+            }
             for (address, count) in [(128, 2), (512, 1)] {
                 ins(0x25, &[(3, address)]);
                 ins(0x25, &[(3, count)]);
@@ -629,10 +640,18 @@ fn native_image_pack_keeps_shared_frames_until_the_last_list_releases_them() -> 
                 ins(0x26, &[(3, output)]);
             }
             code.push(0x3b);
-            let mut data = vec![0xa5; 648];
+            let mut data = vec![0xa5; 768];
             let name: &[u8] = if self.0 { b"parts,a,b\0" } else { b"shared\0" };
             data[32..32 + name.len()].copy_from_slice(name);
             data[48..54].copy_from_slice(b"still\0");
+            let companion: &[u8] = if self.0 {
+                b"dir/\x83\x5cA.hg3\0"
+            } else {
+                b"shared.hg3\0"
+            };
+            data[704..704 + companion.len()].copy_from_slice(companion);
+            data[728..736].copy_from_slice(b"missing\0");
+            data[752] = 0;
             Ok(Some(Program::from_code(&code, data, 256)?))
         }
     }
@@ -640,18 +659,27 @@ fn native_image_pack_keeps_shared_frames_until_the_last_list_releases_them() -> 
     impl ResourceServices for PackFiles {
         fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
             assert_eq!(category, b"image");
-            Ok(if name.contains(&b'.') {
-                name.to_vec()
-            } else {
-                [name, b".hg3"].concat()
-            })
+            katze_system2::resource::Category {
+                prefix: b"image".to_vec(),
+                extension: b"hg3".to_vec(),
+            }
+            .resolve(name)
         }
         fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
             assert_eq!(mode, ResourceMode::LooseFirst);
             Ok(match name {
-                b"shared.hg3" | b"parts_a.hg3.hg3" => Some(self.0.clone()),
-                b"still.hg3" | b"parts.hg3" => Some(hg3(&[(0, 0xff00_ff00, [0; 2], [0; 2])])),
-                b"shared.anm" | b"parts_a.anm" => Some(vec![1]),
+                b"image/shared.hg3" | b"image/parts_a.hg3.hg3" => Some(self.0.clone()),
+                b"image/still.hg3" | b"image/parts.hg3" => {
+                    Some(hg3(&[(0, 0xff00_ff00, [0; 2], [0; 2])]))
+                }
+                b"image/shared.anm" => Some(animation(&[(0, [2, 100, 100])])),
+                b"image/panes,1.anm" | b"shared.anm" => {
+                    Some(animation(&[(0, [9, 100, 100])]))
+                }
+                b"image/anmtable.csv" => Some(
+                    b"PARTS_A\tignored\r\n\"parts_a\"\t\"panes,1.hg3\"\r\nparts_a\tignored\n\x83\x5ca\tpanes,1.hg3\n".to_vec(),
+                ),
+                b"" => panic!("an empty animation command must not read a file"),
                 _ => None,
             })
         }
@@ -700,6 +728,8 @@ fn native_image_pack_keeps_shared_frames_until_the_last_list_releases_them() -> 
             [word(0)?, word(4)?, word(24)?, word(108)?],
             [1 + u32::from(grouped), 1, 1, 0]
         );
+        assert_eq!([word(112)?, word(116)?, word(120)?], [1, 0, 0]);
+        assert!(vm.stack_bytes().is_empty());
         assert_eq!(
             vm.read(64, 36)?,
             [0u32, 0, 1, 1, 10, 20, 32, 0, 0]
@@ -709,8 +739,8 @@ fn native_image_pack_keeps_shared_frames_until_the_last_list_releases_them() -> 
         for address in [128, 264, 512] {
             assert_eq!(vm.read(address, 8)?, [0; 8]);
             let label: Option<&str> = match (grouped, address) {
-                (true, 128) => Some("parts_a.hg3.hg3"),
-                (true, 264) => Some("parts_0b.hg3"),
+                (true, 128) => Some("image/parts_a.hg3.hg3"),
+                (true, 264) => Some("image/parts_0b.hg3"),
                 _ => None,
             };
             if let Some(label) = label {
@@ -729,6 +759,7 @@ fn native_image_pack_keeps_shared_frames_until_the_last_list_releases_them() -> 
         assert_eq!(runtime.images().get(early_frame)?.id(), 2);
         assert_eq!(runtime.images().get(late_frame)?.id(), 9);
         runtime.destroy(owner)?;
+        runtime.dispatch_command(0, command(first, 301, [3, 1, 0]))?;
         for list in [first, second] {
             let mut output = [0; 4];
             runtime.dispatch_command_with_buffers(
@@ -741,7 +772,7 @@ fn native_image_pack_keeps_shared_frames_until_the_last_list_releases_them() -> 
             )?;
             runtime.dispatch_command(0, command(list, 298, [0; 3]))?;
             let surface = runtime.images().get(u32::from_le_bytes(output))?.surface();
-            assert_eq!(surface.pixel(2, 2), Some(0xff98_7654));
+            assert_eq!(surface.pixel(2, 2), Some(0xff12_3456));
             assert_eq!(surface.pixel(1, 2), Some(0));
             runtime.destroy(list)?;
             if list == first {

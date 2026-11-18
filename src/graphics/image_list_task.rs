@@ -454,6 +454,9 @@ impl TaskObject for ImageListObject {
                     .iter()
                     .position(|&byte| byte == 0)
                     .ok_or_else(|| Error::new(0, "图像列表动画名称缺少结尾零"))?;
+                if end == 0 {
+                    return Ok(CommandOutcome::finished(false));
+                }
                 let services = host
                     .resource_services()
                     .ok_or_else(|| Error::new(0, "宿主未提供动画资源读取服务"))?;
