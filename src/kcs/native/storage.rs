@@ -91,10 +91,13 @@ pub(super) fn call(
         }
         return Ok(NativeReturn::Value(handle));
     }
+    if matches!(index, 677 | 678) && arguments == [0; 4] {
+        return Ok(NativeReturn::Continue);
+    }
     let count = match index {
         420 | 421 | 516 | 898 | 899 => 1,
-        422 | 423 | 518 | 897 | 1052 => 2,
-        517 | 896 | 902 => 3,
+        422 | 423 | 518 | 678 | 897 | 1052 => 2,
+        517 | 677 | 679 | 680 | 896 | 902 => 3,
         _ => unreachable!(),
     };
     let args = words(arguments, count, vm.pc)?;
@@ -159,12 +162,12 @@ pub(super) fn call(
                 NativeReturn::Continue
             }
         }
-        896..=899 | 902 | 1052 => {
+        677..=680 | 896..=899 | 902 | 1052 => {
             if (index == 902 && vm.read(args[2], 1).is_err()) || args[0] == 0 {
-                return Ok(if matches!(index, 897 | 899 | 902 | 1052) {
-                    NativeReturn::Value(0)
-                } else {
-                    NativeReturn::Continue
+                return Ok(match index {
+                    679 => NativeReturn::Value(args[2]),
+                    680 | 897 | 899 | 902 | 1052 => NativeReturn::Value(0),
+                    _ => NativeReturn::Continue,
                 });
             }
             let entries = host
@@ -186,17 +189,33 @@ pub(super) fn call(
                             .unwrap_or(0),
                     )
                 }
-                896 | 897 => {
+                677..=679 | 896 | 897 => {
                     let key = strings::format(vm, args[1], 0)?;
                     let key = key.split(|&byte| byte == 0).next().unwrap();
-                    if index == 897 {
-                        NativeReturn::Value(entries.get(key).copied().unwrap_or(0))
-                    } else {
-                        if entries.len() >= read::MAX_ITEMS && !entries.contains_key(key) {
-                            return Err(Error::new(vm.pc, "KCS 整数字典条目超过上限"));
+                    match index {
+                        678 => {
+                            entries.remove(key);
+                            NativeReturn::Continue
                         }
-                        entries.insert(key.to_vec(), args[2]);
-                        NativeReturn::Continue
+                        679 | 897 => {
+                            let fallback = if index == 679 { args[2] } else { 0 };
+                            NativeReturn::Value(entries.get(key).copied().unwrap_or(fallback))
+                        }
+                        _ => {
+                            if entries.len() >= read::MAX_ITEMS && !entries.contains_key(key) {
+                                return Err(Error::new(vm.pc, "KCS 整数字典条目超过上限"));
+                            }
+                            entries.insert(key.to_vec(), args[2]);
+                            NativeReturn::Continue
+                        }
+                    }
+                }
+                680 => {
+                    if let Some((key, _)) = entries.iter().find(|(_, value)| **value == args[1]) {
+                        write_string(vm, args[2], key, 1)?;
+                        NativeReturn::Value(1)
+                    } else {
+                        NativeReturn::Value(0)
                     }
                 }
                 898 => {

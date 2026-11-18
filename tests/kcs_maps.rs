@@ -110,6 +110,79 @@ fn null_integer_map_operations_skip_key_address_resolution() {
 }
 
 #[test]
+fn named_map_removes_formatted_keys_and_finds_first_key_by_raw_value() {
+    let mut state = State::new(0);
+    let mut host = CoreHost::new(&mut state);
+    let mut vm = Interpreter::new(
+        Program::from_code(&[], vec![0; 128], 0).unwrap(),
+        vec![0xcc; 12],
+    )
+    .unwrap();
+    for (address, bytes) in [
+        (0, 17u32.to_le_bytes().as_slice()),
+        (8, b"%d[G0]\0"),
+        (24, b"17\0"),
+        (32, b"a\0"),
+    ] {
+        vm.write(address, bytes).unwrap();
+    }
+    let map = create(&mut host, &mut vm);
+    let value = 0x80000000;
+    let output = 0x80000001;
+    call(&mut host, &mut vm, 517, &[map, 24, 7]);
+    call(&mut host, &mut vm, 677, &[map, 32, value]);
+    assert_eq!(
+        call(&mut host, &mut vm, 677, &[map, 8, value]),
+        NativeReturn::Continue
+    );
+    assert_eq!(
+        call(&mut host, &mut vm, 518, &[map, 24]),
+        NativeReturn::Value(value)
+    );
+    assert_eq!(
+        call(&mut host, &mut vm, 679, &[map, 8, 99]),
+        NativeReturn::Value(value)
+    );
+    assert_eq!(
+        call(&mut host, &mut vm, 680, &[map, value, output]),
+        NativeReturn::Value(1)
+    );
+    assert_eq!(vm.read(output - 1, 5).unwrap(), b"\xcc17\0\xcc");
+    assert_eq!(
+        call(&mut host, &mut vm, 678, &[map, 8]),
+        NativeReturn::Continue
+    );
+    assert_eq!(
+        call(&mut host, &mut vm, 679, &[map, 24, 99]),
+        NativeReturn::Value(99)
+    );
+    assert_eq!(
+        call(&mut host, &mut vm, 680, &[map, value, output]),
+        NativeReturn::Value(1)
+    );
+    assert_eq!(vm.read_string(output).unwrap(), b"a");
+    assert_eq!(
+        call(&mut host, &mut vm, 680, &[map, 99, u32::MAX]),
+        NativeReturn::Value(0)
+    );
+    let args = [map, value, u32::MAX]
+        .into_iter()
+        .flat_map(u32::to_le_bytes)
+        .collect::<Vec<_>>();
+    assert!(host.call(680, &args, &mut vm).is_err());
+    assert_eq!(
+        call(&mut host, &mut vm, 679, &[0, u32::MAX, 99]),
+        NativeReturn::Value(99)
+    );
+    for index in [677, 678] {
+        assert_eq!(
+            call(&mut host, &mut vm, index, &[0]),
+            NativeReturn::Continue
+        );
+    }
+}
+
+#[test]
 fn named_values_share_dictionary_handles_and_keep_formatted_updates_and_sorted_keys() {
     for (new, release, set, query, clear, size, key, export, import) in [
         (894, 886, 887, 897, 898, 899, 902, 891, 892),

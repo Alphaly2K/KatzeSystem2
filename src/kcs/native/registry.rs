@@ -86,7 +86,9 @@ pub(super) fn core(index: u32) -> CoreHandler {
         | 1053
         | 1062
         | 1077..=1079 => CoreHandler::Settings,
-        243 | 253 | 419..=423 | 459 | 515..=518 | 896..=899 | 902 | 1052 => CoreHandler::Storage,
+        243 | 253 | 419..=423 | 459 | 515..=518 | 677..=680 | 896..=899 | 902 | 1052 => {
+            CoreHandler::Storage
+        }
         869..=873 | 878 => CoreHandler::Database,
         238 | 242 | 244..=248 | 252 | 254 | 290 | 389 | 390 | 469 | 833..=836 | 990 | 1031 => {
             CoreHandler::Data
