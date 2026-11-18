@@ -603,7 +603,7 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
             }
             return Ok(NativeReturn::Continue);
         }
-        if !matches!(index, 284 | 365 | 366 | 368 | 375 | 590..=597) {
+        if !matches!(index, 284 | 365 | 366 | 368 | 375 | 431 | 590..=597) {
             return self.inner.call(index, arguments, vm);
         }
         self.state
@@ -620,7 +620,7 @@ impl ResourceState {
         services: Option<&mut dyn ResourceServices>,
     ) -> Result<NativeReturn> {
         let count = match index {
-            284 | 375 => 2,
+            284 | 375 | 431 => 2,
             365 | 366 | 590 | 591 | 594 | 595 => 1,
             368 | 592 | 593 => 3,
             596 | 597 => 5,
@@ -703,6 +703,14 @@ impl ResourceState {
             vm.write(args[2], &[0; 36])?;
             let info = image_metadata::query(self.image_data(args[0])?, args[1])?;
             return image_metadata::write(info, vm, args[2]);
+        }
+        if index == 431 {
+            if args[0] == 0 || vm.read(args[1], 1).is_err() {
+                return Ok(NativeReturn::Value(0));
+            }
+            vm.write(args[1], &[0; 36])?;
+            let info = image_metadata::bounds(self.image_data(args[0])?)?;
+            return image_metadata::write(info, vm, args[1]);
         }
         if index == 375 {
             if vm.read(args[1], 1).is_err() {

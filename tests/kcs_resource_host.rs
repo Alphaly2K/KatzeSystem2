@@ -354,7 +354,7 @@ fn image_metadata_queries_select_first_frame_and_write_only_the_nine_fields() {
         let i = i as u32;
         image.extend(
             [
-                31 + i,
+                if i == 1 { 5000 } else { 31 + i },
                 47 + i,
                 if i == 2 { 0x8000 } else { 32 },
                 (-3i32).wrapping_sub(i as i32) as u32,
@@ -400,6 +400,14 @@ fn image_metadata_queries_select_first_frame_and_write_only_the_nine_fields() {
             .into_iter()
             .flat_map(u32::to_le_bytes),
         );
+        if version == 0x25 {
+            let mut next = image[12..].to_vec();
+            image[76..80].copy_from_slice(&76u32.to_le_bytes());
+            for (offset, value) in [(0, 80i32), (0x28, 3), (0x34, -7), (0x44, -8), (0x48, 42)] {
+                next[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+            }
+            image.extend(next);
+        }
         services.0.push(image);
     }
     let jpeg = b"\xff\xd8\xff\xc2\0\x0b\x08\0\x2f\0\x1f\x01\x01\x11\0\xff\xda\0\x08\x01\x01";
@@ -427,9 +435,29 @@ fn image_metadata_queries_select_first_frame_and_write_only_the_nine_fields() {
         let expected: Vec<_> = expected.into_iter().flat_map(i32::to_le_bytes).collect();
         assert_eq!(vm.read(0x80000008, 36).unwrap(), expected);
     }
+    assert_eq!(
+        call(&mut host, &mut vm, 431, &[handle, 0x80000008]),
+        NativeReturn::Value(1)
+    );
+    assert_eq!(
+        vm.read(0x80000008, 36).unwrap(),
+        [-5i32, 11, 33, 49, 642, 482, 0, 100, -21]
+            .into_iter()
+            .flat_map(i32::to_le_bytes)
+            .collect::<Vec<_>>()
+    );
     let before = vm.read(0x80000000, 64).unwrap().to_vec();
     assert_eq!(
         call(&mut host, &mut vm, 368, &[0, 7, 0x80000008]),
+        NativeReturn::Value(0)
+    );
+    assert_eq!(vm.read(0x80000000, 64).unwrap(), before);
+    assert_eq!(
+        call(&mut host, &mut vm, 431, &[0, 0x80000008]),
+        NativeReturn::Value(0)
+    );
+    assert_eq!(
+        call(&mut host, &mut vm, 431, &[handle, u32::MAX]),
         NativeReturn::Value(0)
     );
     assert_eq!(vm.read(0x80000000, 64).unwrap(), before);
@@ -468,6 +496,24 @@ fn image_metadata_queries_select_first_frame_and_write_only_the_nine_fields() {
             .flat_map(i32::to_le_bytes)
             .collect();
         assert_eq!(vm.read(0x80000008, 36).unwrap(), fields);
+        if (3..=5).contains(&name) {
+            let fields = if name == 5 {
+                [-7i32, 11, 80, 47, 640, 480, 0, -8, -21]
+            } else {
+                [0; 9]
+            };
+            assert_eq!(
+                call(&mut host, &mut vm, 431, &[handle, 0x80000008]),
+                NativeReturn::Value(u32::from(name == 5))
+            );
+            assert_eq!(
+                vm.read(0x80000008, 36).unwrap(),
+                fields
+                    .into_iter()
+                    .flat_map(i32::to_le_bytes)
+                    .collect::<Vec<_>>()
+            );
+        }
     }
     vm.write(0, &[2, 0]).unwrap();
     let NativeReturn::Value(handle) = call(&mut host, &mut vm, 365, &[0]) else {

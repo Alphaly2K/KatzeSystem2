@@ -150,6 +150,10 @@ impl ProgramLoader for Programs {
                 }
                 ins(&mut code, 0x2b, &[368, 12]);
                 ins(&mut code, 0x26, &[16]);
+                load(&mut code, 0);
+                push(&mut code, 196);
+                ins(&mut code, 0x2b, &[431, 8]);
+                ins(&mut code, 0x26, &[120]);
                 push(&mut code, 0x1234_5678);
                 for (address, native) in [(0, 366), (4, 591)] {
                     load(&mut code, address);
@@ -385,6 +389,14 @@ fn runtime_resource_handles_survive_task_release_and_service_replacement_until_e
                 .collect::<Vec<_>>()
         );
         assert_eq!(vm.read_string(96).unwrap(), b"raw%d[G0]");
+        assert_eq!(vm.read(120, 4).unwrap(), 1u32.to_le_bytes());
+        assert_eq!(
+            vm.read(196, 36).unwrap(),
+            [-2i32, 5, 3, 2, 9, 8, 0, 6, 7]
+                .into_iter()
+                .flat_map(i32::to_le_bytes)
+                .collect::<Vec<_>>()
+        );
         assert_eq!(
             vm.read(128, 36).unwrap(),
             [-2i32, 5, 3, 2, 9, 8, 4, 6, 7]

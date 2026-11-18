@@ -20,9 +20,42 @@ pub(crate) fn frame_info(data: &[u8], id: u32) -> Result<Option<StandardInfo>> {
             frame += next;
         }
     }
+    frame_metadata(data, version, frame).map(Some)
+}
+
+/// 遍历 0x25 的标准字段，不读取像素数据。
+pub(crate) fn visit_bounds_frames(
+    data: &[u8],
+    mut visit: impl FnMut(u32, StandardInfo),
+) -> Result<bool> {
+    let version = read::u32_at(data, 8)? as u16;
+    if matches!(version, 0x10 | 0x20) {
+        return Ok(false);
+    }
+    if version != 0x25 || read::u32_at(data, 4)? != 12 {
+        return Err(Error::new(4, "未支持的 HG-2 头或版本"));
+    }
+    let mut frame = 12;
+    for _ in 0..read::MAX_ITEMS {
+        let id = read::u32_at(data, frame + 0x28)?;
+        visit(id, frame_metadata(data, version, frame)?);
+        let next = read::sized(read::u32_at(data, frame + 0x40)?, frame + 0x40)?;
+        if next == 0 {
+            return Ok(true);
+        }
+        if next < 0x4c {
+            return Err(Error::new(frame + 0x40, "HG-2 帧偏移与帧头重叠"));
+        }
+        read::range(data, frame, next)?;
+        frame += next;
+    }
+    Err(Error::new(frame, "HG-2 帧数超过读取上限"))
+}
+
+fn frame_metadata(data: &[u8], version: u16, frame: usize) -> Result<StandardInfo> {
     let word = |offset| read::u32_at(data, frame + offset);
     let size = [word(0)?, word(4)?];
-    Ok(Some(StandardInfo {
+    Ok(StandardInfo {
         size,
         bit_depth: word(8)? >> 16,
         offset: if version == 0x10 {
@@ -41,7 +74,7 @@ pub(crate) fn frame_info(data: &[u8], id: u32) -> Result<Option<StandardInfo>> {
         } else {
             [0, 0]
         },
-    }))
+    })
 }
 
 /// 解码 HG-2 文件中的第一帧，输出顶端起始 BGRA8。

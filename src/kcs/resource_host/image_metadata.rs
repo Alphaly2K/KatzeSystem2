@@ -1,4 +1,5 @@
 use crate::{Result, hg2, hg3, kcs::Interpreter, kcs::NativeReturn};
+use std::collections::BTreeSet;
 
 pub(super) fn query(bytes: &[u8], frame: u32) -> Result<Option<[u32; 9]>> {
     let info = if bytes.starts_with(b"HG-3") {
@@ -37,6 +38,38 @@ pub(super) fn write(
     }
     vm.write(address, &bytes)?;
     Ok(NativeReturn::Value(1))
+}
+
+pub(super) fn bounds(bytes: &[u8]) -> Result<Option<[u32; 9]>> {
+    let hg3 = bytes.starts_with(b"HG-3");
+    let mut seen = BTreeSet::new();
+    let mut fields = [i32::MAX, i32::MAX, 0, 0, 0, 0, 0, i32::MAX, i32::MAX];
+    let mut add = |id, info: Option<hg3::StandardInfo>| {
+        if !seen.insert(id) {
+            return;
+        }
+        if let Some(info) = info {
+            for axis in 0..2 {
+                fields[axis] = fields[axis].min(info.offset[axis]);
+                fields[axis + 2] = fields[axis + 2].max(info.size[axis] as i32);
+                fields[axis + 4] = fields[axis + 4].max(info.canvas_size[axis] as i32);
+                let base = &mut fields[axis + 7];
+                if !hg3 || *base == i32::MAX {
+                    *base = (*base).min(info.base[axis]);
+                }
+            }
+        }
+    };
+    if hg3 {
+        for frame in hg3::Metadata::parse(bytes)?.frames {
+            add(frame.id, frame.info);
+        }
+    } else if !bytes.starts_with(b"HG-2")
+        || !hg2::visit_bounds_frames(bytes, |id, info| add(id, Some(info)))?
+    {
+        return Ok(None);
+    }
+    Ok(Some(fields.map(|field| field as u32)))
 }
 
 fn jpeg_size(bytes: &[u8]) -> Option<[u32; 2]> {
