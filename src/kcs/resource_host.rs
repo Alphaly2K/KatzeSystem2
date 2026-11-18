@@ -151,6 +151,7 @@ pub(crate) struct ResourceState {
     pub(super) name_tables: BTreeMap<u32, super::name_table::NameTable>,
     pub(super) section_tables: BTreeMap<u32, super::section_table::SectionTable>,
     pub(super) database_tables: BTreeMap<u32, super::database::table::Table>,
+    pub(super) quiz_banks: BTreeMap<u32, super::quiz::QuizBank>,
     handles: HandleAllocator,
 }
 
@@ -324,6 +325,7 @@ impl ResourceState {
             + self.name_tables.len()
             + self.section_tables.len()
             + self.database_tables.len()
+            + self.quiz_banks.len()
             >= read::MAX_ITEMS
         {
             return Err(Error::new(offset, "KCS 资源对象数量超过上限"));
@@ -588,6 +590,14 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
             return self
                 .state
                 .database_table_call(index, arguments, vm, Some(&mut self.services));
+        }
+        if matches!(
+            super::native::runtime_native_handler(index),
+            super::native::RuntimeHandler::Quiz
+        ) {
+            return self
+                .state
+                .quiz_call(index, arguments, vm, Some(&mut self.services));
         }
         if matches!(index, 633..=640) {
             return self.state.name_table_call(

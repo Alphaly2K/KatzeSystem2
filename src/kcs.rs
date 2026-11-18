@@ -24,6 +24,7 @@ mod numeric;
 mod ordinary;
 mod particle;
 mod queue;
+mod quiz;
 mod random;
 mod record_stack;
 mod resource_cache;

@@ -62,7 +62,7 @@ impl Table {
         self.columns.get(column).map(|&(_, size)| size)
     }
 
-    pub(super) fn len(&self) -> usize {
+    pub(in crate::kcs) fn len(&self) -> usize {
         self.count
     }
 
@@ -70,7 +70,7 @@ impl Table {
         self.header
     }
 
-    pub(super) fn cell(&self, row: usize, column: &[u8]) -> Option<&[u8]> {
+    pub(in crate::kcs) fn cell(&self, row: usize, column: &[u8]) -> Option<&[u8]> {
         let &(offset, size) = self.columns.get(column)?;
         if row >= self.count {
             return None;

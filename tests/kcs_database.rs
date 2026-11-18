@@ -501,3 +501,138 @@ fn runtime_reads_a_raw_kcdb_handle_across_native_calls() {
     let vm = runtime.object(id).unwrap().interpreter().unwrap();
     assert_eq!(vm.stack_bytes(), 7u32.to_le_bytes());
 }
+
+fn quiz_table(prefix: u8) -> Vec<u8> {
+    let names = [
+        b"G_A".as_slice(),
+        b"G_B",
+        b"G_C",
+        b"ID",
+        b"IMG",
+        b"Q",
+        b"A1",
+        b"A2",
+        b"A3",
+        b"A4",
+    ];
+    let mut plain = (names.len() as u32).to_le_bytes().to_vec();
+    for name in names {
+        let mut column = [0; 24];
+        column[..name.len()].copy_from_slice(name);
+        column[20..].copy_from_slice(&4u32.to_le_bytes());
+        plain.extend(column);
+    }
+    let rows = [
+        ([3, 5, 7, 19, 1], b'z'),
+        ([3, 5, 7, 3, 2], b'a'),
+        ([3, 5, 7, 19, 3], b'd'),
+        ([3, 5, 2, 19, 4], b'o'),
+        ([5, 5, 7, u32::MAX - 1, 5], b'n'),
+    ];
+    plain.extend((rows.len() as u32).to_le_bytes());
+    plain.extend(40u32.to_le_bytes());
+    for (words, q) in rows {
+        for word in words {
+            plain.extend(word.to_le_bytes());
+        }
+        plain.extend([prefix, q, 0, 0]);
+        for answer in b"abcd" {
+            plain.extend([*answer, 0, 0, 0]);
+        }
+    }
+    pack(&plain)
+}
+
+#[test]
+fn quiz_packs_merge_without_reordering_existing_indices_until_rebuild() {
+    #[derive(Default)]
+    struct QuizFiles(Vec<Vec<u8>>);
+    impl ResourceServices for QuizFiles {
+        fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+            assert_eq!(category, b"database");
+            Ok(name.to_vec())
+        }
+
+        fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
+            assert_eq!(mode, ResourceMode::LooseFirst);
+            self.0.push(name.to_vec());
+            Ok(match name {
+                b"db/A.kcdb" => Some(quiz_table(b'A')),
+                b"db/B.kcdb" => Some(quiz_table(b'B')),
+                _ => None,
+            })
+        }
+    }
+
+    let mut numbers = State::new(0);
+    let mut core = CoreHost::new(&mut numbers);
+    let mut files = QuizFiles::default();
+    let mut host = ResourceHost::new(&mut core, &mut files);
+    let mut data = vec![0xa5; 256];
+    for (at, name) in [
+        (16, &b"db/A.kcdb\0"[..]),
+        (32, b"else/a.other\0"),
+        (48, b"db/B.kcdb\0"),
+        (64, b"absent/pack.kcdb\0"),
+    ] {
+        data[at..at + name.len()].copy_from_slice(name);
+    }
+    let mut vm =
+        Interpreter::new(Program::from_code(&[], data, 64).unwrap(), vec![0xa5; 32]).unwrap();
+    let handle = value(call(&mut host, &mut vm, 742, &[]));
+    assert_eq!(value(call(&mut host, &mut vm, 744, &[handle, 16])), 1);
+    assert_eq!(value(call(&mut host, &mut vm, 744, &[handle, 32])), 0);
+    assert_eq!(value(call(&mut host, &mut vm, 745, &[handle])), 4);
+    assert_eq!(value(call(&mut host, &mut vm, 746, &[handle, 0, 128])), 0);
+    assert_eq!(vm.read(128, 1).unwrap().as_ref(), b"\xa5");
+    call(&mut host, &mut vm, 764, &[handle]);
+    call(&mut host, &mut vm, 749, &[handle, 0]);
+    call(&mut host, &mut vm, 766, &[handle, 0]);
+    assert_eq!(value(call(&mut host, &mut vm, 744, &[handle, 48])), 1);
+    assert_eq!(value(call(&mut host, &mut vm, 744, &[handle, 64])), 0);
+    assert_eq!(value(call(&mut host, &mut vm, 745, &[handle])), 8);
+    assert_eq!(
+        value(call(&mut host, &mut vm, 776, &[handle, 0, 128])),
+        u32::MAX - 1
+    );
+    assert_eq!(vm.read(128, 3).unwrap().as_ref(), b"A\0\xa5");
+
+    call(&mut host, &mut vm, 764, &[handle]);
+    for (index, prompt) in [b"Bn", b"An", b"Bo", b"Ao", b"Ba", b"Bz", b"Aa", b"Az"]
+        .into_iter()
+        .enumerate()
+    {
+        assert_eq!(
+            value(call(
+                &mut host,
+                &mut vm,
+                746,
+                &[handle, index as u32, 0x8000_0000]
+            )),
+            1
+        );
+        assert_eq!(vm.read(0x8000_0000, 2).unwrap().as_ref(), prompt);
+    }
+    assert_eq!(value(call(&mut host, &mut vm, 747, &[handle, 8])), u32::MAX);
+    assert_eq!(
+        value(call(&mut host, &mut vm, 748, &[handle, 1, 3, 0x8000_0000])),
+        1
+    );
+    assert_eq!(vm.read(0x8000_0000, 4).unwrap().as_ref(), b"d\0\0\xa5");
+    assert_eq!(value(call(&mut host, &mut vm, 771, &[handle, 1])), 1);
+    assert_eq!(value(call(&mut host, &mut vm, 772, &[handle, 1])), 1);
+    assert_eq!(value(call(&mut host, &mut vm, 771, &[handle, 0])), 0);
+    assert_eq!(
+        value(call(&mut host, &mut vm, 776, &[0, 0, u32::MAX])),
+        u32::MAX
+    );
+    assert!(matches!(
+        call(&mut host, &mut vm, 743, &[handle]),
+        NativeReturn::Continue
+    ));
+    assert!(host.call(745, &handle.to_le_bytes(), &mut vm).is_err());
+    assert_eq!(
+        files.0,
+        [b"db/A.kcdb".as_slice(), b"db/B.kcdb", b"absent/pack.kcdb"]
+    );
+}

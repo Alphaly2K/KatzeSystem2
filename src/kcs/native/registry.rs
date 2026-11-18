@@ -210,6 +210,7 @@ pub(crate) enum RuntimeHandler {
     NameTable,
     SectionTable,
     DatabaseTable,
+    Quiz,
     Cst,
     Motion,
     SequenceFile,
@@ -258,6 +259,7 @@ pub(crate) fn runtime(index: u32) -> RuntimeHandler {
         633..=640 => RuntimeHandler::NameTable,
         683..=685 => RuntimeHandler::SectionTable,
         791..=794 => RuntimeHandler::DatabaseTable,
+        742..=749 | 764 | 766 | 769..=772 | 776 => RuntimeHandler::Quiz,
         323..=338
         | 608
         | 385

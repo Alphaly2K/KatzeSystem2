@@ -114,6 +114,15 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     .as_mut()
                     .map(|services| services.as_mut() as _),
             ),
+            RuntimeHandler::Quiz => self.resources.raw.quiz_call(
+                index,
+                arguments,
+                vm,
+                self.resources
+                    .services
+                    .as_mut()
+                    .map(|services| services.as_mut() as _),
+            ),
             RuntimeHandler::Cst => self.cst_native(index, arguments, vm),
             RuntimeHandler::Motion => self.motion_native(index, arguments, vm),
             RuntimeHandler::SequenceFile => {
