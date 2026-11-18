@@ -144,6 +144,7 @@ impl Entry {
 
 pub struct Archive {
     file: SharedSource,
+    generation: Arc<()>,
     key: Option<u32>,
     entries: Vec<Entry>,
     index: BTreeMap<String, usize>,
@@ -222,6 +223,7 @@ impl Archive {
         }
         Ok(Self {
             file,
+            generation: Arc::new(()),
             key: archive_key,
             entries,
             index,
@@ -247,12 +249,14 @@ impl Archive {
             return Ok(None);
         };
         let entry = &self.entries[position];
-        Ok(Some(Arc::new(KifEntrySource::new(
+        let source = KifEntrySource::new(
             self.file.clone(),
             entry.offset as u64,
             entry.length,
             self.key,
-        )?)))
+        )?;
+        let snapshot = katze_system2::io::ReadSnapshot::new(self.generation.clone(), position);
+        Ok(Some(Arc::new(source.with_snapshot(snapshot))))
     }
 
     /// 枚举已还原的条目名及原始名称字节；仅服务诊断输出。

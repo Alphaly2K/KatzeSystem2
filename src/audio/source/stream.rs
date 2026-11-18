@@ -49,13 +49,13 @@ impl Stream {
     pub(super) fn new(
         channels: u8,
         frames: usize,
-        prefix: Vec<i16>,
+        prefix: Arc<[i16]>,
         source: SharedSource,
         next: impl FnMut(Option<usize>) -> Result<Option<Vec<i16>>> + Send + 'static,
     ) -> Result<Self> {
         let end = prefix.len();
         let state = Arc::new(Shared {
-            prefix: prefix.into(),
+            prefix,
             source,
             channels,
             frames,

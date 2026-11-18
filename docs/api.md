@@ -65,6 +65,8 @@ FES `fontcom add name` 调用同一字体服务的 `add_resource`，名称为已
 
 `audio::Source::from_vorbis(source, whole)` 持有共享读取源；长流式来源准备前四秒后在后台继续解码。`read_frames(offset, output)` 等待所需采样，`try_read_frames` 在数据未就绪时返回 `false` 并保留输出。`pcm()` 等待完整数据并报告解码错误；`SoundChannel::pcm()` 同样可能等待，失败返回 `None`。设备混音使用非阻塞读取，离线混音与通道读取等待所需数据。
 
+`io::ReadSource::snapshot()` 默认为 `None`。宿主可用 `io::ReadSnapshot::new(generation, entry)` 标识不可变归档快照中的条目；同一 `Arc<()>` 世代内每个条目使用不同编号。内容替换或重新挂载时使用新的世代。`KifEntrySource::with_snapshot` 将该标识随读取源交给声音装载缓存。散装文件沿用默认行为。
+
 FES SOUND 文件请求通过 `Objects::set_sound_task` 的绑定发送 180／182／201／206／210，新配置下属性刷新依次发送 187 音量与 190 声像；未绑定的独立对象更新向根 35 查询。`fes::SoundState::channel_result()` 查询最近装载后的原始结果。场景媒体更新按文件播放／系统语音开关发送播放、停止及首次毫秒命令，同步执行对象自身 PLAY 处理器；`started_tick()` 查询对象首次毫秒。仅持有 Objects 的更新在需要回调时要求所属场景。缓冲区、请求消费及失败契约见[声音媒体提交](audio.md#文件请求的媒体提交)与[播放动作](audio.md#播放动作与-play-处理器)；组通道自动回收、淡变和设备继续接入。
 
 `audio::SoundFactory { enabled, fallback }` 创建类型 13 声音任务。`SoundObject::audio()` 及 `TaskObject::audio_state()` 查询 `SoundState`，其中 `loop_points()` 为循环范围，`channel_time(0..64)` 为原始空闲通道累计时刻，`channel(0..64)` 借用物理通道的 PCM、名称、装载参数和关联。180／181 装载单个 Ogg Vorbis 来源，非零 mode 使用加 32 的备用通道；181 强制整段播放并关联备用通道自身。182 按普通／分组状态处理自身及关联资源，187／188 设置及查询资源音量，190／191 设置及查询资源声像，201 查询时长毫秒，202 查询沿关联通道的整段播放完成遍数；普通 569／587 分别返回这两项查询。`TaskObject::audio_enabled()` 默认一，默认声音对象返回构造开关，禁用时查询先返回零。运行时普通 400 使用资源服务按 sound 类别补全／读取表，经根 35 查询目标并逐条发送 199；没有返回值。普通 604／935／936 格式展开名称并向声音任务发送相应装载命令，返回命令输出；资源提供者负责声音分类配置，未接入的播放命令返回诊断。禁用、删除、缓冲区、附加资源和部分失败契约见[声音任务](audio.md#声音任务)及[普通装载](audio.md#普通-kcs-装载)。

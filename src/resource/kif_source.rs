@@ -1,6 +1,6 @@
 use crate::{
     Error, Result,
-    io::{ReadSource, SharedSource, read_exact_from},
+    io::{ReadSnapshot, ReadSource, SharedSource, read_exact_from},
 };
 use blowfish::{
     BlowfishLE,
@@ -17,6 +17,7 @@ pub struct KifEntrySource {
     offset: u64,
     length: u64,
     cipher: Option<BlowfishLE>,
+    snapshot: Option<ReadSnapshot>,
 }
 
 impl KifEntrySource {
@@ -36,7 +37,14 @@ impl KifEntrySource {
             offset,
             length,
             cipher,
+            snapshot: None,
         })
+    }
+
+    /// 为不可变的挂载归档登记条目身份；调用方保证该世代内的条目字节不变。
+    pub fn with_snapshot(mut self, snapshot: ReadSnapshot) -> Self {
+        self.snapshot = Some(snapshot);
+        self
     }
 
     fn read_encrypted(
@@ -78,6 +86,10 @@ fn decrypt_blocks(cipher: &BlowfishLE, bytes: &mut [u8]) {
 impl ReadSource for KifEntrySource {
     fn len(&self) -> Result<u64> {
         Ok(self.length)
+    }
+
+    fn snapshot(&self) -> Option<ReadSnapshot> {
+        self.snapshot.clone()
     }
 
     fn read_at(&self, offset: u64, output: &mut [u8]) -> Result<usize> {

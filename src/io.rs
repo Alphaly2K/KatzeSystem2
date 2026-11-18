@@ -10,6 +10,27 @@ use std::{
 
 pub type SharedSource = Arc<dyn ReadSource>;
 
+/// 同一不可变资源快照中的条目身份。重挂载或替换内容时必须使用新世代。
+#[derive(Clone)]
+pub struct ReadSnapshot {
+    generation: Arc<()>,
+    entry: usize,
+}
+
+impl ReadSnapshot {
+    pub fn new(generation: Arc<()>, entry: usize) -> Self {
+        Self { generation, entry }
+    }
+}
+
+impl PartialEq for ReadSnapshot {
+    fn eq(&self, other: &Self) -> bool {
+        self.entry == other.entry && Arc::ptr_eq(&self.generation, &other.generation)
+    }
+}
+
+impl Eq for ReadSnapshot {}
+
 /// 脚本文件写入；名称为 CP932 字节，目录策略独立于资源与存档路由。
 pub trait FileServices {
     /// 创建或截断宽字符名称指向的文件；默认桥接 CP932 创建服务。
@@ -42,6 +63,11 @@ pub trait FileServices {
 /// 读取不改变共享游标；多个读取者可独立访问同一来源。
 pub trait ReadSource: Send + Sync {
     fn len(&self) -> Result<u64>;
+
+    /// 仅在内容由宿主管理为不可变快照时提供；其他来源每次都从当前内容读取。
+    fn snapshot(&self) -> Option<ReadSnapshot> {
+        None
+    }
 
     fn is_empty(&self) -> Result<bool> {
         Ok(self.len()? == 0)

@@ -12,6 +12,7 @@ pub struct SoundState {
     pub(super) groups: Option<BTreeMap<u32, GroupRange>>,
     pub(super) output: Option<super::output::Link>,
     pub(super) movies: BTreeMap<u32, crate::movie::AudioOutput>,
+    pub(super) sources: super::source::Cache,
 }
 
 pub(super) struct GroupRange {
@@ -28,6 +29,7 @@ impl Default for SoundState {
             groups: None,
             output: None,
             movies: BTreeMap::new(),
+            sources: super::source::Cache::default(),
         }
     }
 }

@@ -62,7 +62,7 @@ impl SoundState {
         sound.resampler = super::mix::Resampler::default();
         self.output_replace(physical as usize);
         let sound = &mut self.channels[physical as usize];
-        if let Some(pcm) = load_source(services, name, whole)? {
+        if let Some(pcm) = load_source(&mut self.sources, services, name, whole)? {
             let mut playback = Playback::new(&pcm, whole, options)?;
             playback.prepare_signal(&pcm, sound.signal_enabled)?;
             sound.file.extend_from_slice(name);
@@ -112,6 +112,7 @@ impl SoundState {
 }
 
 fn load_source(
+    cache: &mut super::source::Cache,
     services: &mut dyn ResourceServices,
     file: &[u8],
     whole: bool,
@@ -122,7 +123,7 @@ fn load_source(
     if source.is_empty()? {
         return Ok(None);
     }
-    Source::from_vorbis(source, whole).map(Some)
+    cache.load(source, whole).map(Some)
 }
 
 fn load_metadata(

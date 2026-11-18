@@ -3,7 +3,9 @@ use crate::io::SharedSource;
 use crate::{Error, Result, read};
 use std::sync::Arc;
 
+mod cache;
 mod stream;
+pub(super) use cache::Cache;
 use stream::Stream;
 
 /// 可重复读取的音频来源；流式 Vorbis 先准备四秒采样，再由独立线程按需预取。
@@ -54,7 +56,7 @@ impl Source {
             };
             samples.extend(packet);
         }
-        let stream = Stream::new(channels, frames, samples, source, move |seek| {
+        let stream = Stream::new(channels, frames, samples.into(), source, move |seek| {
             if let Some(frame) = seek {
                 decoder.seek_frame(frame)?;
             }
@@ -127,7 +129,7 @@ impl Source {
         prefix: Vec<i16>,
         next: impl FnMut(Option<usize>) -> Result<Option<Vec<i16>>> + Send + 'static,
     ) -> Result<Self> {
-        let stream = Stream::new(channels, frames, prefix, Arc::new(Vec::new()), next)?;
+        let stream = Stream::new(channels, frames, prefix.into(), Arc::new(Vec::new()), next)?;
         Ok(Self {
             rate,
             channels,
