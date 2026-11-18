@@ -580,6 +580,8 @@ fn quiz_packs_merge_without_reordering_existing_indices_until_rebuild() {
     let mut vm =
         Interpreter::new(Program::from_code(&[], data, 64).unwrap(), vec![0xa5; 512]).unwrap();
     let handle = value(call(&mut host, &mut vm, 742, &[]));
+    assert_eq!(value(call(&mut host, &mut vm, 765, &[0])), u32::MAX);
+    assert_eq!(value(call(&mut host, &mut vm, 765, &[handle])), 0);
     assert_eq!(value(call(&mut host, &mut vm, 744, &[handle, 16])), 1);
     assert_eq!(value(call(&mut host, &mut vm, 744, &[handle, 32])), 0);
     assert_eq!(value(call(&mut host, &mut vm, 745, &[handle])), 4);
@@ -678,6 +680,32 @@ fn quiz_packs_merge_without_reordering_existing_indices_until_rebuild() {
     );
     vm.write(source, &13u32.to_le_bytes()).unwrap();
     assert_eq!(value(call(&mut host, &mut vm, 768, &[handle, source])), 0);
+
+    let mut random = katze_system2::kcs::ScriptRandom::default();
+    assert_eq!(
+        value(call(&mut host, &mut vm, 33, &[])),
+        random.next_integer()
+    );
+    let expected = random.next_integer() % 6;
+    let picked = value(call(&mut host, &mut vm, 765, &[handle]));
+    assert_eq!(picked, expected);
+    for (index, image) in [5, 4, 4, 2, 1, 2, 5, 1].into_iter().enumerate() {
+        assert_eq!(
+            value(call(&mut host, &mut vm, 747, &[handle, index as u32])),
+            image
+        );
+    }
+    assert_eq!(
+        value(call(&mut host, &mut vm, 33, &[])),
+        random.next_integer()
+    );
+    call(&mut host, &mut vm, 767, &[handle, buffer]);
+    let record = [0, 2, 3, 4, 5, 6][picked as usize];
+    assert_eq!(
+        read_words(&vm, buffer + 12 + 88 * record + 76, 3),
+        [0, 1, 1]
+    );
+
     assert_eq!(
         value(call(&mut host, &mut vm, 776, &[0, 0, u32::MAX])),
         u32::MAX

@@ -1,7 +1,11 @@
 use super::database::table::Table;
-use super::{Interpreter, NativeReturn, ResourceServices, ResourceState, native, strings};
+use super::{
+    Interpreter, NativeReturn, ResourceServices, ResourceState, ScriptRandom, native, strings,
+};
 use crate::{Error, Result, read, resource::ResourceMode};
 use std::collections::BTreeMap;
+
+mod order;
 
 type Groups<T> = Vec<(u32, T)>;
 type Packs = Vec<(usize, Vec<usize>)>;
@@ -202,6 +206,30 @@ impl QuizBank {
         }
     }
 
+    fn draw(&mut self, random: Option<&mut ScriptRandom>, pc: usize) -> Result<u32> {
+        order::sort(&mut self.active, |index| {
+            let state = &self.questions[index].progress;
+            if state.drawn == 0 {
+                (false, state.priority)
+            } else {
+                (true, 0)
+            }
+        });
+        let count = order::candidate_count(&self.active, |index| {
+            let state = &self.questions[index].progress;
+            (state.priority, state.drawn)
+        });
+        if count == 0 {
+            return Ok(0);
+        }
+        let random = random.ok_or_else(|| Error::new(pc, "问答抽题需要整数随机流"))?;
+        let index = random.next_integer() as usize % count;
+        let state = &mut self.questions[self.active[index]].progress;
+        state.priority = state.priority.wrapping_add(1);
+        state.drawn = 1;
+        Ok(index as u32)
+    }
+
     fn export_state(&self, vm: &mut Interpreter, output: u32) -> Result<u32> {
         let length = state_size(self.questions.len(), vm.pc)?;
         if output != 0 {
@@ -283,11 +311,12 @@ impl ResourceState {
         arguments: &[u8],
         vm: &mut Interpreter,
         services: Option<&mut dyn ResourceServices>,
+        random: Option<&mut ScriptRandom>,
     ) -> Result<NativeReturn> {
         use NativeReturn::{Continue, Value};
         let count = match index {
             742 => 0,
-            743 | 745 | 764 | 769 | 770 => 1,
+            743 | 745 | 764 | 765 | 769 | 770 => 1,
             744 | 747 | 749 | 766..=768 | 771 | 772 => 2,
             746 | 776 => 3,
             748 => 4,
@@ -302,7 +331,7 @@ impl ResourceState {
         let handle = args[0];
         let null = match index {
             743 | 749 | 764 | 766 | 769 | 770 => Continue,
-            776 => Value(u32::MAX),
+            765 | 776 => Value(u32::MAX),
             _ => Value(0),
         };
         if handle == 0 {
@@ -345,6 +374,7 @@ impl ResourceState {
                 quiz.rebuild();
                 Ok(Continue)
             }
+            765 => Ok(Value(quiz.draw(random, vm.pc)?)),
             767 => Ok(Value(quiz.export_state(vm, args[1])?)),
             768 => Ok(Value(quiz.import_state(vm, args[1])?)),
             769 | 770 => Ok(Continue),

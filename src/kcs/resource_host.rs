@@ -595,9 +595,14 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
             super::native::runtime_native_handler(index),
             super::native::RuntimeHandler::Quiz
         ) {
+            let random = if index == 765 {
+                self.inner.random()
+            } else {
+                None
+            };
             return self
                 .state
-                .quiz_call(index, arguments, vm, Some(&mut self.services));
+                .quiz_call(index, arguments, vm, Some(&mut self.services), random);
         }
         if matches!(index, 633..=640) {
             return self.state.name_table_call(

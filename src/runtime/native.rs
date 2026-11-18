@@ -122,6 +122,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     .services
                     .as_mut()
                     .map(|services| services.as_mut() as _),
+                Some(&mut self.host.random),
             ),
             RuntimeHandler::Cst => self.cst_native(index, arguments, vm),
             RuntimeHandler::Motion => self.motion_native(index, arguments, vm),
