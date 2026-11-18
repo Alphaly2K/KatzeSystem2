@@ -130,10 +130,63 @@ impl Image {
 }
 
 #[derive(Clone, Copy, Default)]
-struct LineSum {
-    colors: [u32; 3],
+struct LineSum<C> {
+    colors: C,
     visible: u32,
     opaque: u32,
+}
+
+trait ColorSum: Copy + Default {
+    fn from_pixel(pixel: [u8; 4]) -> Self;
+    fn channels(self) -> [u32; 3];
+    fn add(self, right: Self) -> Self;
+    fn sub(self, right: Self) -> Self;
+    fn scale(self, factor: i32) -> Self;
+}
+
+impl ColorSum for u64 {
+    fn from_pixel([b, g, r, _]: [u8; 4]) -> Self {
+        u64::from(b) | (u64::from(g) << 21) | (u64::from(r) << 42)
+    }
+
+    fn channels(self) -> [u32; 3] {
+        std::array::from_fn(|i| ((self >> (21 * i)) & 0x1f_ffff) as u32)
+    }
+
+    fn add(self, right: Self) -> Self {
+        self.wrapping_add(right)
+    }
+
+    fn sub(self, right: Self) -> Self {
+        self.wrapping_sub(right)
+    }
+
+    fn scale(self, factor: i32) -> Self {
+        // 修正系数可为负；所有修正累加后，才解包最终的非负通道值。
+        self.wrapping_mul(factor as u64)
+    }
+}
+
+impl ColorSum for [u32; 3] {
+    fn from_pixel([b, g, r, _]: [u8; 4]) -> Self {
+        [b.into(), g.into(), r.into()]
+    }
+
+    fn channels(self) -> [u32; 3] {
+        self
+    }
+
+    fn add(self, right: Self) -> Self {
+        std::array::from_fn(|i| self[i].wrapping_add(right[i]))
+    }
+
+    fn sub(self, right: Self) -> Self {
+        std::array::from_fn(|i| self[i].wrapping_sub(right[i]))
+    }
+
+    fn scale(self, factor: i32) -> Self {
+        self.map(|value| value.wrapping_mul(factor as u32))
+    }
 }
 
 fn rounded(sum: u32, factor: u32) -> u8 {
@@ -152,6 +205,20 @@ fn blur_axis(source: &Surface, axis: usize, radius: usize) -> Result<Surface> {
 }
 
 fn blur_axis_with_workers(
+    source: &Surface,
+    axis: usize,
+    radius: usize,
+    workers: usize,
+) -> Result<Surface> {
+    // 至半径 31，最终权重和最多 8192，乘 255 后仍能装进 21 位。
+    if radius <= 31 {
+        blur_axis_with_sum::<u64>(source, axis, radius, workers)
+    } else {
+        blur_axis_with_sum::<[u32; 3]>(source, axis, radius, workers)
+    }
+}
+
+fn blur_axis_with_sum<C: ColorSum>(
     source: &Surface,
     axis: usize,
     radius: usize,
@@ -176,7 +243,7 @@ fn blur_axis_with_workers(
         }
         let run = |group: Vec<(usize, &mut [u8])>| {
             for (row, output) in group {
-                blur_rows(source, axis, radius, row, output);
+                blur_rows::<C>(source, axis, radius, row, output);
             }
         };
         std::thread::scope(|scope| {
@@ -195,18 +262,24 @@ fn blur_axis_with_workers(
             let first = chunks.next().unwrap();
             for (index, chunk) in chunks.enumerate() {
                 scope.spawn(move || {
-                    blur_rows(source, axis, radius, (index + 1) * rows_per_job, chunk)
+                    blur_rows::<C>(source, axis, radius, (index + 1) * rows_per_job, chunk)
                 });
             }
-            blur_rows(source, axis, radius, 0, first);
+            blur_rows::<C>(source, axis, radius, 0, first);
         });
     } else {
-        blur_rows(source, axis, radius, 0, output.pixels_mut());
+        blur_rows::<C>(source, axis, radius, 0, output.pixels_mut());
     }
     Ok(output)
 }
 
-fn blur_rows(source: &Surface, axis: usize, radius: usize, first_row: usize, output: &mut [u8]) {
+fn blur_rows<C: ColorSum>(
+    source: &Surface,
+    axis: usize,
+    radius: usize,
+    first_row: usize,
+    output: &mut [u8],
+) {
     let [w, h] = source.size().map(|value| value as usize);
     let stride = source.stride();
     let rows = first_row..first_row + output.len() / stride;
@@ -240,7 +313,7 @@ fn blur_rows(source: &Surface, axis: usize, radius: usize, first_row: usize, out
     // 并行分块只限制输出行；取样始终以完整来源图像钳制坐标。
     let capacity = span.len().min(1024) + radius * 2;
     let mut pixels = vec![[0u8; 4]; capacity];
-    let mut prefix = vec![LineSum::default(); capacity + 1];
+    let mut prefix = vec![LineSum::<C>::default(); capacity + 1];
     let width = radius + 1;
     for line in lines.clone() {
         let base = line * line_stride;
@@ -257,18 +330,14 @@ fn blur_rows(source: &Surface, axis: usize, radius: usize, first_row: usize, out
                 let mut sum = prefix[i];
                 if pixel[3] != 0 {
                     sum.visible += 1;
-                    for (channel, color) in pixel[..3].iter().enumerate() {
-                        sum.colors[channel] += u32::from(*color);
-                    }
+                    sum.colors = sum.colors.add(C::from_pixel(pixel));
                 }
                 sum.opaque += u32::from(pixel[3] == 255);
                 prefix[i + 1] = sum;
             }
-            let mut triangle = [0u32; 3];
+            let mut triangle = C::default();
             for i in 0..width {
-                for (channel, sum) in triangle.iter_mut().enumerate() {
-                    *sum += prefix[i + width].colors[channel] - prefix[i].colors[channel];
-                }
+                triangle = triangle.add(prefix[i + width].colors.sub(prefix[i].colors));
             }
             for x in 0..count {
                 let left = prefix[x];
@@ -276,19 +345,20 @@ fn blur_rows(source: &Surface, axis: usize, radius: usize, first_row: usize, out
                 let visible = right.visible - left.visible;
                 if visible != 0 {
                     let sums = if right.opaque - left.opaque == weights.len() as u32 {
-                        let mut sums = triangle.map(|value| value as i32 * slope);
+                        let mut sum = triangle.scale(slope);
                         for &(distance, coefficient) in &corrections {
                             let left = prefix[x + radius - distance];
                             let right = prefix[x + radius + distance + 1];
-                            for (channel, sum) in sums.iter_mut().enumerate() {
-                                *sum += (right.colors[channel] - left.colors[channel]) as i32
-                                    * coefficient;
-                            }
+                            sum = sum.add(right.colors.sub(left.colors).scale(coefficient));
                         }
-                        [sums[0] as u32, sums[1] as u32, sums[2] as u32, opaque_alpha]
+                        let [b, g, r] = sum.channels();
+                        [b, g, r, opaque_alpha]
                     } else {
-                        let mean: [u32; 3] =
-                            std::array::from_fn(|i| (right.colors[i] - left.colors[i]) / visible);
+                        let mean = right
+                            .colors
+                            .sub(left.colors)
+                            .channels()
+                            .map(|v| v / visible);
                         mixed_sum(&pixels[x..x + weights.len()], &weights, mean)
                     };
                     let at = target_base + (start - span.start + x) * pixel_stride;
@@ -297,12 +367,10 @@ fn blur_rows(source: &Surface, axis: usize, radius: usize, first_row: usize, out
                     }
                 }
                 if x + 1 < count {
-                    for (channel, sum) in triangle.iter_mut().enumerate() {
-                        *sum = *sum
-                            + (prefix[x + width * 2].colors[channel]
-                                - prefix[x + width].colors[channel])
-                            - (prefix[x + width].colors[channel] - prefix[x].colors[channel]);
-                    }
+                    let middle = prefix[x + width].colors;
+                    triangle = triangle
+                        .add(prefix[x + width * 2].colors.sub(middle))
+                        .sub(middle.sub(prefix[x].colors));
                 }
             }
         }
@@ -333,20 +401,37 @@ mod tests {
 
     #[test]
     fn blur_workers_sample_across_output_stripes() {
-        for (size, radius) in [([1031, 37], 7), ([19, 1033], 16), ([23, 9], 255)] {
+        for (size, radius) in [
+            ([1031, 37], 7),
+            ([19, 1033], 16),
+            ([71, 83], 18),
+            ([1031, 83], 31),
+            ([23, 9], 32),
+            ([23, 9], 255),
+        ] {
             let mut source = Surface::new(size).unwrap();
             for (index, pixel) in source.pixels_mut().chunks_exact_mut(4).enumerate() {
                 let x = index as u32 % size[0];
                 let y = index as u32 / size[0];
-                let alpha = match (x / 5 + y / 13) % 5 {
-                    0 | 1 => 0,
-                    2 => 127,
-                    _ => 255,
-                };
-                pixel.copy_from_slice(&[(3 * x + y) as u8, (index % 239) as u8, y as u8, alpha]);
+                if x >= 3 && y >= 5 {
+                    // 接近通道位宽上限的不透明区域，混合区另保留不同通道颜色。
+                    pixel.copy_from_slice(&[255, 253, 251, 255]);
+                } else {
+                    let alpha = match (x / 5 + y / 13) % 5 {
+                        0 | 1 => 0,
+                        2 => 127,
+                        _ => 255,
+                    };
+                    pixel.copy_from_slice(&[
+                        (3 * x + y) as u8,
+                        (index % 239) as u8,
+                        y as u8,
+                        alpha,
+                    ]);
+                }
             }
             for axis in 0..2 {
-                let single = blur_axis_with_workers(&source, axis, radius, 1).unwrap();
+                let single = blur_axis_with_sum::<[u32; 3]>(&source, axis, radius, 1).unwrap();
                 let split = blur_axis_with_workers(&source, axis, radius, 8).unwrap();
                 assert_eq!(single.pixels(), split.pixels(), "{size:?}, axis {axis}");
             }
