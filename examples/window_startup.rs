@@ -20,12 +20,15 @@ mod window_actions;
 mod window_input;
 #[path = "support/window_output.rs"]
 mod window_output;
+#[path = "support/window_text.rs"]
+mod window_text;
 
 use katze_system2::{
     graphics::{Projection, RenderTarget, TextureFilter, Transform},
     language::LanguageTarget,
     runtime::kind,
 };
+use sdl2::event::{Event, WindowEvent};
 use std::cell::RefCell;
 use std::rc::Rc;
 use support::{advance_frame, build_runtime, load_game};
@@ -76,6 +79,8 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|| "katze-system2".encode_utf16().collect());
     let mut title = String::from_utf16_lossy(runtime.host().string_tables.resolve(&title_source));
     let mut window = window_output::Output::new(&title, [1280, 720])?;
+    window.window.subsystem().text_input().stop();
+    let mut text_window = window_text::TextWindow::default();
     runtime.host_mut().windowed_mode = Some(1);
     if runtime
         .host()
@@ -116,21 +121,36 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         shared.borrow_mut().begin_frame();
         let events = window.poll();
         let size = window.window.size();
+        let editing = text_window.active();
         let mut close = false;
         for event in events {
-            close |= shared.borrow_mut().event(
-                &event,
-                window.window.id(),
-                [size.0, size.1],
-                [1280, 720],
-            );
+            if editing {
+                text_window.event(&event, runtime.input_state_mut(input))?;
+            }
+            if !editing
+                || matches!(
+                    event,
+                    Event::Quit { .. }
+                        | Event::Window {
+                            win_event: WindowEvent::Close,
+                            ..
+                        }
+                )
+            {
+                close |= shared.borrow_mut().event(
+                    &event,
+                    window.window.id(),
+                    [size.0, size.1],
+                    [1280, 720],
+                );
+            }
         }
         if close && window.confirm_close() {
             break;
         }
         {
             let mut shared = shared.borrow_mut();
-            shared.set_foreground(window.window.has_input_focus());
+            shared.set_foreground(!editing && window.window.has_input_focus());
             let mouse = window.events.mouse_state();
             shared.sample_pointer([mouse.x(), mouse.y()], [size.0, size.1], [1280, 720]);
             shared.set_mouse_focus(window.window.has_mouse_focus());
@@ -171,10 +191,10 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         if window_actions::pump(&mut runtime, input, &mut window)? {
             break;
         }
-        window
-            .context
-            .mouse()
-            .show_cursor(shared.borrow().cursor(runtime.uses_image_cursor()));
+        text_window.sync(&window.window, runtime.input_state(input))?;
+        window.context.mouse().show_cursor(
+            text_window.active() || shared.borrow().cursor(runtime.uses_image_cursor()),
+        );
         if !runtime.host().window_requests.is_empty() && !menu_pending_noted {
             eprintln!("窗口菜单重建尚待接入");
             menu_pending_noted = true;
@@ -218,6 +238,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 runtime.capture_sequence_frame(output)?;
             }
         }
+        text_window.draw()?;
         let frame_limit = std::time::Duration::from_secs_f64(1.0 / 60.0);
         if let Some(remaining) = frame_limit.checked_sub(frame_started.elapsed()) {
             std::thread::sleep(remaining);
