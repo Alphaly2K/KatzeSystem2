@@ -76,9 +76,12 @@ pub fn decode_frame(data: &[u8]) -> Result<DecodedFrame> {
     let data_size = read::sized(read::u32_at(data, 36)?, 36)?;
     let command_length = read::sized(read::u32_at(data, 40)?, 40)?;
     let command_size = read::sized(read::u32_at(data, 44)?, 44)?;
-    let literals = read::inflate(read::range(data, 88, data_length)?, data_size)?;
-    let commands = read::inflate(
-        read::range(data, 88 + data_length, command_length)?,
+    let (literals, commands) = hg_pixels::inflate_streams(
+        data,
+        88,
+        data_length,
+        data_size,
+        command_length,
         command_size,
     )?;
     let pixels = if bit_depth == 24 {

@@ -134,9 +134,12 @@ fn decode_payload(
     let data_size = read::sized(read::u32_at(payload, 12)?, offset + 12)?;
     let command_length = read::sized(read::u32_at(payload, 16)?, offset + 16)?;
     let command_size = read::sized(read::u32_at(payload, 20)?, offset + 20)?;
-    let literals = read::inflate(read::range(payload, 24, data_length)?, data_size)?;
-    let commands = read::inflate(
-        read::range(payload, 24 + data_length, command_length)?,
+    let (literals, commands) = crate::hg_pixels::inflate_streams(
+        payload,
+        24,
+        data_length,
+        data_size,
+        command_length,
         command_size,
     )?;
     let pixels = crate::hg_pixels::decode(&literals, &commands, info.size)?;

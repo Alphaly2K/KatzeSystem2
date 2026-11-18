@@ -1,5 +1,40 @@
 use crate::{Error, Result, read};
 
+const PARALLEL_INFLATE_MIN: usize = 32 * 1024;
+
+pub(crate) fn inflate_streams(
+    input: &[u8],
+    offset: usize,
+    literal_length: usize,
+    literal_size: usize,
+    command_length: usize,
+    command_size: usize,
+) -> Result<(Vec<u8>, Vec<u8>)> {
+    let literal_bytes = read::range(input, offset, literal_length)?;
+    // 即使命令范围无效，也先返回字面量流的错误。
+    let command_bytes = read::range(input, offset + literal_length, command_length);
+    let parallel_command = command_bytes.as_ref().ok().filter(|bytes| {
+        literal_bytes.len() >= PARALLEL_INFLATE_MIN
+            && bytes.len() >= PARALLEL_INFLATE_MIN
+            && std::thread::available_parallelism().is_ok_and(|count| count.get() > 1)
+    });
+    if let Some(command_bytes) = parallel_command {
+        return std::thread::scope(|scope| {
+            let commands = std::thread::Builder::new()
+                .spawn_scoped(scope, || read::inflate(command_bytes, command_size));
+            let literals = read::inflate(literal_bytes, literal_size)?;
+            let commands = match commands {
+                Ok(worker) => worker.join().unwrap(),
+                Err(_) => read::inflate(command_bytes, command_size),
+            }?;
+            Ok((literals, commands))
+        });
+    }
+    let literals = read::inflate(literal_bytes, literal_size)?;
+    let commands = read::inflate(command_bytes?, command_size)?;
+    Ok((literals, commands))
+}
+
 pub(crate) fn decode(literals: &[u8], commands: &[u8], dimensions: [u32; 2]) -> Result<Vec<u8>> {
     decode_channels(literals, commands, dimensions, 4)
 }
@@ -265,6 +300,52 @@ impl BitWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn paired_inflate_preserves_exact_stream_lengths_and_literal_error_order() {
+        use std::io::Write;
+
+        let stored = |bytes: &[u8]| {
+            let mut writer =
+                flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::none());
+            writer.write_all(bytes).unwrap();
+            writer.finish().unwrap()
+        };
+        let plain_literals = vec![11; PARALLEL_INFLATE_MIN];
+        let plain_commands = vec![37; PARALLEL_INFLATE_MIN + 7];
+        let literals = stored(&plain_literals);
+        let commands = stored(&plain_commands);
+        let mut payload = [&[42][..], &literals, &commands].concat();
+        let decode = |bytes: &[u8], l_size: usize, c_length: usize| {
+            inflate_streams(
+                bytes,
+                1,
+                literals.len(),
+                l_size,
+                c_length,
+                plain_commands.len(),
+            )
+        };
+        let literal_size = plain_literals.len();
+        assert_eq!(
+            decode(&payload, literal_size, commands.len()).unwrap(),
+            (plain_literals, plain_commands.clone())
+        );
+        let length_error = Error::new(0, "Zlib 长度或流末尾不匹配");
+        assert_eq!(
+            decode(&payload, literal_size + 1, commands.len() + 1).unwrap_err(),
+            length_error
+        );
+        assert_eq!(
+            decode(&payload, literal_size, commands.len() + 1).unwrap_err(),
+            Error::new(1 + literals.len(), "输入范围越界")
+        );
+        payload.push(0);
+        assert_eq!(
+            decode(&payload, literal_size, commands.len() + 1).unwrap_err(),
+            length_error
+        );
+    }
 
     #[test]
     fn gamma_keeps_unaligned_suffix_order_long_codes_and_tail_errors() {
