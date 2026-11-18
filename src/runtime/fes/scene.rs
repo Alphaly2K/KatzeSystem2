@@ -5,6 +5,7 @@ use crate::{
 };
 use std::collections::{BTreeMap, VecDeque};
 
+mod achievements;
 mod background;
 mod config;
 mod database;
@@ -746,15 +747,6 @@ impl<F: ObjectFactory> Store<'_, F> {
         Ok(true)
     }
 
-    fn fes_achievement_command(&mut self, owner: u32, args: &[Vec<u8>]) -> Result<bool> {
-        match args.first().map(Vec::as_slice) {
-            Some(b"steam_init") => self.host.initialize_achievements(owner)?,
-            Some(b"steam_achievement_reset") => self.host.reset_achievements(owner)?,
-            _ => return Ok(false),
-        }
-        Ok(true)
-    }
-
     pub(in crate::runtime) fn refresh_fes_media(
         &mut self,
         owner: u32,
@@ -1222,7 +1214,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                     } else if scene.string_command(&args, line.offset, self.numbers)?
                         || self.fes_database_command(scene, &args, line.offset)?
                         || self.fes_config_command(scene, &args, line.offset)?
-                        || self.fes_achievement_command(owner, &args)?
+                        || self.fes_achievement_command(owner, scene, &args, line.offset)?
                         || self.fes_debug_command(scene, &args)?
                         || self.fes_font_command(scene, &args, &line)?
                         || self.fes_sound_command(scene, &args, line.offset)?
@@ -1724,7 +1716,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                             if scene.string_command(&args, line.offset, self.numbers)?
                                 || self.fes_database_command(scene, &args, line.offset)?
                                 || self.fes_config_command(scene, &args, line.offset)?
-                                || self.fes_achievement_command(owner, &args)?
+                                || self.fes_achievement_command(owner, scene, &args, line.offset)?
                                 || self.fes_debug_command(scene, &args)?
                                 || self.fes_font_command(scene, &args, &line)?
                                 || self.fes_sound_command(scene, &args, line.offset)?

@@ -354,7 +354,7 @@ pub(super) fn split(source: &[u8], separators: &[u8]) -> Vec<u8> {
     output
 }
 
-pub(super) fn replace(source: &[u8], find: &[u8], replacement: &[u8]) -> Result<(Vec<u8>, usize)> {
+pub(crate) fn replace(source: &[u8], find: &[u8], replacement: &[u8]) -> Result<(Vec<u8>, usize)> {
     if source.is_empty() {
         return Ok((Vec::new(), 2));
     }

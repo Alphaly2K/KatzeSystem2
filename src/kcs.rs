@@ -32,6 +32,7 @@ mod section_table;
 mod sequences;
 mod sse;
 mod strings;
+pub(crate) use strings::replace as replace_script_bytes;
 mod system_host;
 mod task_host;
 mod triples;

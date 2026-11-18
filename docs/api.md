@@ -323,6 +323,8 @@ Runtime 的普通 690／692 依次展开首参数之后的路径，并经 `Resou
 
 普通 1041 和 FES `steam_init` 通过 `AchievementServices::initialize` 共享一次初始化尝试。普通 1041 无参数，以状态二继续。平台初始化失败仍算完成尝试，只有宿主替换服务后才重新尝试。普通 1044 和 FES `steam_achievement_reset` 共用 `reset`。清零保留管理器和登记名称，清零后可重新解锁；普通 1044 无参数，执行后诊断原入口未初始化的返回值，FES 继续执行。可用 `HostState::set_achievement_services` 或同名 Runtime 方法绑定服务；平台 SDK 由宿主提供。
 
+FES `steam_achievement` 将首个参数按 FES 字符串变量和全局脚本替换表展开，再提交同一解锁服务。`steam_isenable`、`steam_isbroadcast` 将目标表达式求值为共享数值槽号，写入原始 DWORD；无目标参数时跳过。启用值由服务提供，默认零。配信查询在管理器启用时调用 `poll_broadcast`，采用 `HostState::steam_broadcast_override` 作为引擎值；已建立管理器且调试模式为零时写入零。`steam_enablescreenshot` 在管理器启用时调用 `hook_screenshots`，参数零表示游戏接管截图，缺省参数一表示交还平台处理。
+
 普通 445 展开一个格式地址，以 CP932 转换为 UTF-16，经 `SystemServices::message_box` 同步显示标题为 `system error` 的单按钮对话框。字面换行保持原样，文字最多 1,023 个 UTF-16 单元，不附末尾零。状态二，不压值；普通平台显示失败不影响脚本续跑，缺失服务及集成错误诊断。`CoreHost`、Runtime 与 `SystemHost` 共用同一协议，窗口示例复用 SDL 对话框服务。系统服务的方法缺省均提供未接入诊断，可只实现所需能力。
 
 普通 674 接收文件名格式地址、类别格式地址，依次展开后查询 `HostState::archive_config` 的槽号。类别按 ASCII 忽略大小写匹配，返回首个同名槽，未找到返回全一；空名称匹配首个空槽。类别为 `sound` 时先按已启用的新声音树或旧声音定义匹配文件，再用其归档类别查槽；命中的空归档名仍参与查找。宿主提供对应的归档及声音配置，窗口／离屏启动示例由启动配置初始化。两项格式输出分别最多 259 字节，返回状态一且保持源存储。

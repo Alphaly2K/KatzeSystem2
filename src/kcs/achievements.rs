@@ -10,6 +10,21 @@ pub trait AchievementServices {
         Ok(())
     }
 
+    /// 管理器的原始启用字段。`None` 表示服务未建立管理器。
+    fn enabled(&self) -> Option<u32> {
+        None
+    }
+
+    /// 查询时轮询已启用的平台接口；脚本返回值来自引擎的配信字段。
+    fn poll_broadcast(&mut self, _task_id: u32) -> Result<()> {
+        Ok(())
+    }
+
+    /// 设置平台截图是否由游戏接管。平台不可用时保持状态。
+    fn hook_screenshots(&mut self, _task_id: u32, _hooked: bool) -> Result<()> {
+        Ok(())
+    }
+
     /// 首次解锁已登记名称时先更新本地状态，再提交解锁及保存请求。
     /// 未知、重复或服务不可用时保持状态；平台拒绝不回退本地状态。
     fn unlock(&mut self, task_id: u32, name: &[u8]) -> Result<()>;
@@ -35,8 +50,8 @@ impl HostState {
         if !self.achievement_initialization_attempted {
             if let Some(services) = &mut self.achievement_services {
                 services.initialize(task_id)?;
-                self.achievement_initialization_attempted = true;
             }
+            self.achievement_initialization_attempted = true;
         }
         Ok(())
     }
@@ -44,6 +59,47 @@ impl HostState {
     pub(crate) fn reset_achievements(&mut self, task_id: u32) -> Result<()> {
         if let Some(services) = &mut self.achievement_services {
             services.reset(task_id)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn achievement_enabled(&self) -> Option<u32> {
+        self.achievement_services
+            .as_ref()
+            .and_then(|services| services.enabled())
+            .or(self.achievement_initialization_attempted.then_some(0))
+    }
+
+    pub(crate) fn achievement_broadcast(&mut self, task_id: u32) -> Result<u32> {
+        let enabled = self.achievement_enabled();
+        if enabled.is_some_and(|value| value != 0) {
+            if let Some(services) = &mut self.achievement_services {
+                services.poll_broadcast(task_id)?;
+            }
+        }
+        Ok(if enabled.is_none() || self.debug_mode != 0 {
+            self.steam_broadcast_override
+        } else {
+            0
+        })
+    }
+
+    pub(crate) fn hook_achievement_screenshots(
+        &mut self,
+        task_id: u32,
+        hooked: bool,
+    ) -> Result<()> {
+        if self.achievement_enabled().is_some_and(|value| value != 0) {
+            if let Some(services) = &mut self.achievement_services {
+                services.hook_screenshots(task_id, hooked)?;
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn unlock_achievement(&mut self, task_id: u32, name: &[u8]) -> Result<()> {
+        if let Some(services) = &mut self.achievement_services {
+            services.unlock(task_id, name)?;
         }
         Ok(())
     }
@@ -66,19 +122,14 @@ pub(super) fn call(
     }
     let args = super::native::words(arguments, 1, vm.pc)?;
     let name = strings::format(vm, args[0], 0)?;
-    let Some(services) = host.achievement_services.as_mut() else {
-        return Ok(if index == 1042 {
-            NativeReturn::Continue
-        } else {
-            NativeReturn::Value(0)
-        });
-    };
     if index == 1042 {
-        services.unlock(host.task_id, &name)?;
+        host.unlock_achievement(host.task_id, &name)?;
         Ok(NativeReturn::Continue)
-    } else {
+    } else if let Some(services) = &mut host.achievement_services {
         Ok(NativeReturn::Value(u32::from(
             services.is_unlocked(host.task_id, &name)?,
         )))
+    } else {
+        Ok(NativeReturn::Value(0))
     }
 }

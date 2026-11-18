@@ -215,3 +215,112 @@ fn achievement_management_shares_one_initialization_and_keeps_reset_side_effects
     );
     Ok(())
 }
+
+#[test]
+fn fes_platform_commands_keep_raw_status_replacements_and_screenshot_polarity() -> Result<()> {
+    #[derive(Debug, PartialEq, Eq)]
+    enum Call {
+        Unlock(Vec<u8>),
+        Poll,
+        Hook(bool),
+    }
+    struct Platform(Rc<RefCell<Vec<Call>>>, u32);
+    impl AchievementServices for Platform {
+        fn enabled(&self) -> Option<u32> {
+            Some(self.1)
+        }
+        fn unlock(&mut self, task_id: u32, name: &[u8]) -> Result<()> {
+            assert_eq!(task_id, 0);
+            self.0.borrow_mut().push(Call::Unlock(name.to_vec()));
+            Ok(())
+        }
+        fn is_unlocked(&mut self, _task_id: u32, _name: &[u8]) -> Result<bool> {
+            Ok(false)
+        }
+        fn poll_broadcast(&mut self, task_id: u32) -> Result<()> {
+            assert_eq!(task_id, 0);
+            self.0.borrow_mut().push(Call::Poll);
+            Ok(())
+        }
+        fn hook_screenshots(&mut self, task_id: u32, hooked: bool) -> Result<()> {
+            assert_eq!(task_id, 0);
+            self.0.borrow_mut().push(Call::Hook(hooked));
+            Ok(())
+        }
+    }
+    struct Empty;
+    impl ProgramLoader for Empty {
+        fn load(&mut self, _name: &[u8]) -> Result<Option<Program>> {
+            Ok(None)
+        }
+    }
+
+    let call_log = Rc::new(RefCell::new(Vec::new()));
+    let mut runtime = Runtime::new(
+        0,
+        kind::ROOT,
+        Box::new(BaseObject::new()),
+        State::new(8),
+        KcsFactory::new(Empty),
+    );
+    runtime.set_budget(1, 2048);
+    runtime.host_mut().steam_broadcast_override = 0x89ab_cdef;
+    runtime.host_mut().script_replacements.extend([
+        (b"Alpha".to_vec(), b"Beta\0discard".to_vec()),
+        (b"Beta".to_vec(), b"FINAL".to_vec()),
+        (b"dst".to_vec(), b"(1+2)".to_vec()),
+    ]);
+    runtime.numbers_mut().strings.insert(4, b"Alpha".to_vec());
+    let mut run = |source: &[u8], mode, debug| -> Result<Vec<i32>> {
+        if let Some(raw) = mode {
+            runtime.set_achievement_services(Platform(call_log.clone(), raw));
+        }
+        runtime.host_mut().debug_mode = debug;
+        runtime.numbers_mut().shared.fill(-1);
+        let mut scene = Scene::new(
+            fes::Program::from_text(source)?,
+            runtime.host().handle_allocator(),
+        )?;
+        for _ in 0..64 {
+            if runtime.update_fes_scene(0, &mut scene, 100)? {
+                return Ok(runtime.numbers().shared.clone());
+            }
+        }
+        panic!("FES scene did not finish its update");
+    };
+    let absent = run(b"#START\nsteam_isbroadcast 1\nsteam_init\nsteam_isbroadcast 2\nsteam_isenable 3\nwait 100\n", None, 0)?;
+    assert_eq!(&absent[..4], &[-1, 0x89ab_cdefu32 as i32, 0, 0]);
+    let program = b"#START\nsteam_achievement \"$str4; Win\" ignored\nsteam_achievement\nsteam_isenable dst\nsteam_isbroadcast 1\nsteam_isbroadcast -1\nsteam_isenable\nsteam_isbroadcast\nsteam_enablescreenshot\nsteam_enablescreenshot 0\nsteam_enablescreenshot -1\nwait 100\n";
+    for debug in [0, 2] {
+        let flags = run(program, Some(0x8000_0001), debug)?;
+        assert_eq!(
+            &flags[..4],
+            &[
+                -1,
+                if debug == 0 { 0 } else { 0x89ab_cdefu32 as i32 },
+                -1,
+                0x8000_0001u32 as i32
+            ]
+        );
+        assert_eq!(
+            *call_log.borrow(),
+            [
+                Call::Unlock(b"FINAL Win".to_vec()),
+                Call::Poll,
+                Call::Poll,
+                Call::Hook(false),
+                Call::Hook(true),
+                Call::Hook(false)
+            ]
+        );
+        call_log.borrow_mut().clear();
+    }
+    let disabled = run(
+        b"#START\nsteam_isbroadcast 1\nsteam_isenable 2\nsteam_enablescreenshot 0\nwait 100\n",
+        Some(0),
+        0,
+    )?;
+    assert_eq!(&disabled[..3], &[-1, 0, 0]);
+    assert!(call_log.borrow().is_empty());
+    Ok(())
+}

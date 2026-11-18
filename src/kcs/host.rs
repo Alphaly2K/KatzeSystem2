@@ -132,6 +132,8 @@ pub struct HostState {
     /// None 对应未绑定成就服务；通过 `set_achievement_services` 替换已使用的服务。
     pub achievement_services: Option<Box<dyn super::AchievementServices>>,
     pub(super) achievement_initialization_attempted: bool,
+    /// 引擎的调试配信状态，供 FES `steam_isbroadcast` 查询。
+    pub steam_broadcast_override: u32,
     pub file_services: Option<Box<dyn crate::io::FileServices>>,
     pub(super) files: BTreeMap<u32, super::files::OpenedFile>,
     /// 外层输入宿主提供的当前逻辑画布坐标；保留画布外的值。
