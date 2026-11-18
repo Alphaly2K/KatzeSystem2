@@ -5,7 +5,11 @@
 |包|版本|采用的许可|声明|
 |:--|:--|:--|:--|
 |flate2|1.1.9|MIT|[许可](licenses/flate2-1.1.9/LICENSE-MIT)|
+|jpeg-decoder|0.3.2|MIT|[许可](licenses/jpeg-decoder-0.3.2/LICENSE-MIT)|
 |jpeg-encoder|0.6.1|MIT + IJG|[MIT](licenses/jpeg-encoder-0.6.1/LICENSE-MIT)、[IJG](licenses/jpeg-encoder-0.6.1/LICENSE-IJG)|
+|image-webp|0.2.4|MIT|[许可](licenses/image-webp-0.2.4/LICENSE-MIT)|
+|byteorder-lite|0.1.0|MIT|[许可](licenses/byteorder-lite-0.1.0/LICENSE-MIT)|
+|quick-error|2.0.1|MIT|[许可](licenses/quick-error-2.0.1/LICENSE-MIT)|
 |png|0.17.16|MIT|[许可](licenses/png-0.17.16/LICENSE-MIT)|
 |crc32fast|1.5.5|MIT|[许可](licenses/crc32fast-1.5.5/LICENSE-MIT)|
 |fdeflate|0.3.7|MIT|[许可](licenses/fdeflate-0.3.7/LICENSE-MIT)|

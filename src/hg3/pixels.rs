@@ -1,4 +1,4 @@
-use super::{Frame, Input, StandardInfo, parse_frames};
+use super::{Frame, Input, StandardInfo, compressed, parse_frames};
 use crate::{Error, Result, hg_pixels, read};
 use std::ops::Range;
 
@@ -12,7 +12,7 @@ pub struct DecodedFrame {
     pub attributes: std::collections::BTreeMap<u16, [u32; 5]>,
 }
 
-/// 解码首个匹配 ID 的原生 24／32 位帧；缺失 ID 返回 None。
+/// 解码首个匹配 ID 的 24／32 位帧；缺失 ID 返回 None。
 pub fn decode_frame(data: &[u8], id: i32) -> Result<Option<DecodedFrame>> {
     decode_input(Input::Bytes(data), Some(id))
 }
@@ -70,30 +70,50 @@ pub(crate) struct IndexedFrame {
 
 #[derive(Default)]
 pub(super) struct FramePayload {
-    first: Option<(usize, usize)>,
+    first: Option<Payload>,
     rest: Vec<(u16, usize, usize)>,
-    unsupported: Option<usize>,
+    jpeg: Option<Payload>,
+    webp: Option<Payload>,
+    alpha: Option<Payload>,
+    mode: Option<Payload>,
+    jpa: Option<usize>,
 }
+
+type Payload = (usize, usize);
 
 impl FramePayload {
     pub(super) fn record(&mut self, name: &[u8], tag: usize, length: usize) {
-        if self.unsupported.is_some() {
-            return;
-        }
-        match name {
-            b"img_jpg\0" | b"img_wbp\0" | b"img_jpa\0" => {
-                self.unsupported = Some(tag);
+        let range = (tag + 16, length);
+        let target = match name {
+            b"img_jpg\0" => &mut self.jpeg,
+            b"img_wbp\0" => &mut self.webp,
+            [b'i', b'm', b'g', b'_', b'a', b'l', 0, _] => &mut self.alpha,
+            b"imgmode\0" => {
+                self.mode = Some(range);
+                return;
             }
-            b"img0000\0" => {
-                self.first.get_or_insert((tag + 16, length));
+            b"img_jpa\0" => {
+                self.jpa.get_or_insert(tag);
+                return;
             }
+            b"img0000\0" => &mut self.first,
             [b'i', b'm', b'g', digits @ .., 0] if digits.iter().all(u8::is_ascii_digit) => {
                 let id = digits
                     .iter()
                     .fold(0, |id, &byte| id * 10 + u16::from(byte - b'0'));
                 self.rest.push((id, tag + 16, length));
+                return;
             }
-            _ => {}
+            _ => return,
+        };
+        target.get_or_insert(range);
+    }
+
+    fn unsupported(&self) -> Option<usize> {
+        if self.first.is_none() && self.jpeg.is_none() && self.webp.is_none() {
+            self.jpa
+        } else {
+            None
         }
     }
 }
@@ -106,7 +126,7 @@ impl IndexedFrame {
 
     /// 共享列表保留解码失败的帧位置；尚未支持的编码继续报告诊断。
     pub(crate) fn decode_shared(&self, data: &[u8]) -> Result<Option<DecodedFrame>> {
-        let unsupported = self.payload.unsupported.is_some()
+        let unsupported = self.payload.unsupported().is_some()
             || self
                 .metadata
                 .info
@@ -130,17 +150,71 @@ impl IndexedFrame {
             _ => return Err(Error::new(frame.offset, "未支持的 HG-3 像素位深")),
         };
         let size = hg_pixels::byte_size(info.size)?;
-        if let Some(tag) = self.payload.unsupported {
+        if let Some(tag) = self.payload.unsupported() {
             return Err(Error::new(tag, "未支持的 HG-3 图像编码"));
         }
+        let width = info.size[0] as usize;
+        let mut pixels = if let Some((offset, len)) = self.payload.webp {
+            let mut pixels = compressed::webp(&data.bytes(offset, len)?, offset, info.size)?;
+            if channels == 3 {
+                // 原入口按三字节布局复制 RGBA 解码缓冲的前缀。
+                pixels = pixels[..size / 4 * 3]
+                    .chunks_exact(3)
+                    .flat_map(|c| [c[0], c[1], c[2], 255])
+                    .collect();
+            }
+            compressed::reverse_rows(&mut pixels, width);
+            pixels
+        } else if let Some((offset, len)) = self.payload.jpeg {
+            let mut pixels = compressed::jpeg(&data.bytes(offset, len)?, offset, info.size)?;
+            if channels == 4 {
+                if let Some((at, length)) = self.payload.alpha {
+                    compressed::apply_alpha(&data.bytes(at, length)?, &mut pixels);
+                }
+            }
+            compressed::reverse_rows(&mut pixels, width);
+            pixels
+        } else {
+            self.decode_slices(data, info.size, size, channels)?
+        };
+        let swap = if let Some((offset, len)) = self.payload.mode {
+            if len < 4 {
+                return Err(Error::new(offset, "HG-3 图像模式字段过短"));
+            }
+            data.u32_at(offset)? == 1
+        } else {
+            self.payload.jpeg.is_some() || self.payload.jpa.is_some()
+        };
+        if swap {
+            for pixel in pixels.chunks_exact_mut(4) {
+                pixel.swap(0, 2);
+            }
+        }
+        info.bit_depth = 32;
+        Ok(DecodedFrame {
+            id: frame.id,
+            info,
+            pixels,
+            attributes: frame.attributes.clone(),
+        })
+    }
+
+    fn decode_slices(
+        &self,
+        data: Input<'_>,
+        dimensions: [u32; 2],
+        size: usize,
+        channels: usize,
+    ) -> Result<Vec<u8>> {
+        let frame = &self.metadata;
         let first = self
             .payload
             .first
             .ok_or_else(|| Error::new(frame.offset, "HG-3 帧缺少原生像素数据"))?;
-        let stride = info.size[0] as usize * 4;
-        let height = info.size[1] as usize;
+        let stride = dimensions[0] as usize * 4;
+        let height = dimensions[1] as usize;
         let decode = |(offset, length)| {
-            decode_block(&data.bytes(offset, length)?, offset, info.size, channels)
+            decode_block(&data.bytes(offset, length)?, offset, dimensions, channels)
         };
         let (rows, block) = decode(first)?;
         let (mut pixels, mut covered) = if rows.len() == height {
@@ -172,13 +246,7 @@ impl IndexedFrame {
         if covered.is_some_and(|rows| rows.contains(&false)) {
             return Err(Error::new(frame.offset, "HG-3 原生像素数据未覆盖全部行"));
         }
-        info.bit_depth = 32;
-        Ok(DecodedFrame {
-            id: frame.id,
-            info,
-            pixels,
-            attributes: frame.attributes.clone(),
-        })
+        Ok(pixels)
     }
 }
 

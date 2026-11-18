@@ -109,13 +109,13 @@ const LITERALS: &[u8] = &[
 ];
 const COMMANDS: &[u8] = &[0x61, 0x40, 0x96, 0x01];
 
+fn compress(bytes: &[u8]) -> Vec<u8> {
+    let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder.write_all(bytes).unwrap();
+    encoder.finish().unwrap()
+}
+
 fn pixel_block(start: u32, rows: u32, literals: &[u8], commands: &[u8]) -> Vec<u8> {
-    fn compress(bytes: &[u8]) -> Vec<u8> {
-        let mut encoder =
-            flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
-        encoder.write_all(bytes).unwrap();
-        encoder.finish().unwrap()
-    }
     let data = compress(literals);
     let control = compress(commands);
     let mut out = Vec::new();
@@ -135,6 +135,11 @@ fn pixel_block(start: u32, rows: u32, literals: &[u8], commands: &[u8]) -> Vec<u
 }
 
 fn pixel_image(size: [u32; 2], literals: &[u8], commands: &[u8]) -> Vec<u8> {
+    let block = pixel_block(0, size[1], literals, commands);
+    tagged_frame(size, 32, &[(b"img0000\0", &block)])
+}
+
+fn tagged_frame(size: [u32; 2], depth: u32, tags: &[(&[u8; 8], &[u8])]) -> Vec<u8> {
     let mut out = b"HG-3".to_vec();
     for value in [12u32, 0x300, 0, 0x8000_0001] {
         out.extend(value.to_le_bytes());
@@ -145,7 +150,7 @@ fn pixel_image(size: [u32; 2], literals: &[u8], commands: &[u8]) -> Vec<u8> {
         40,
         size[0],
         size[1],
-        32,
+        depth,
         u32::MAX,
         7,
         20,
@@ -156,12 +161,101 @@ fn pixel_image(size: [u32; 2], literals: &[u8], commands: &[u8]) -> Vec<u8> {
     ] {
         out.extend(value.to_le_bytes());
     }
-    let block = pixel_block(0, size[1], literals, commands);
-    out.extend(b"img0000\0");
-    out.extend(0u32.to_le_bytes());
-    out.extend((block.len() as u32).to_le_bytes());
-    out.extend(block);
+    for (i, &(name, payload)) in tags.iter().enumerate() {
+        out.extend(name);
+        let len = payload.len() as u32;
+        let next = if i + 1 == tags.len() { 0 } else { 16 + len };
+        out.extend(next.to_le_bytes());
+        out.extend(len.to_le_bytes());
+        out.extend(payload);
+    }
     out
+}
+
+#[test]
+fn jpeg_uses_the_color_tag_before_native_and_reverses_valid_alpha_with_color() {
+    let mut color = [32; 16];
+    color[8..].fill(160);
+    let mut jpeg = Vec::new();
+    jpeg_encoder::Encoder::new(&mut jpeg, 100)
+        .encode(&color, 1, 16, jpeg_encoder::ColorType::Luma)
+        .unwrap();
+    let packed = compress(&(0u8..20).collect::<Vec<_>>());
+    let mut alpha = (packed.len() as u32).to_le_bytes().to_vec();
+    alpha.extend(20u32.to_le_bytes());
+    alpha.extend(packed);
+    let id = 0x8000_0001u32 as i32;
+    for (depth, declared) in [(32, 20u32), (24, 20), (32, 21)] {
+        alpha[4..8].copy_from_slice(&declared.to_le_bytes());
+        let source = tagged_frame(
+            [1, 16],
+            depth,
+            &[
+                (b"img0000\0", &[]),
+                (b"img_al\0\0", &alpha),
+                (b"img_jpg\0", &jpeg),
+            ],
+        );
+        let frame = hg3::decode_frame(&source, id).unwrap().unwrap();
+        let expected: Vec<_> = color
+            .into_iter()
+            .enumerate()
+            .rev()
+            .flat_map(|(i, c)| {
+                [
+                    c,
+                    c,
+                    c,
+                    if (depth, declared) == (32, 20) {
+                        i as u8
+                    } else {
+                        255
+                    },
+                ]
+            })
+            .collect();
+        assert_eq!(frame.pixels, expected);
+    }
+}
+
+#[test]
+fn webp_takes_precedence_and_mode_overrides_the_jpeg_swap_hint() {
+    let mut webp = Vec::new();
+    image_webp::WebPEncoder::new(&mut webp)
+        .encode(
+            &[11, 22, 33, 44, 55, 66, 77, 88],
+            1,
+            2,
+            image_webp::ColorType::Rgba8,
+        )
+        .unwrap();
+    for (depth, mode, expected) in [
+        (32, None, [77, 66, 55, 88, 33, 22, 11, 44]),
+        (32, Some(0u32), [55, 66, 77, 88, 11, 22, 33, 44]),
+        (24, Some(1), [66, 55, 44, 255, 33, 22, 11, 255]),
+    ] {
+        let mode = mode.map(u32::to_le_bytes);
+        let mut tags: Vec<(&[u8; 8], &[u8])> = vec![
+            (b"img_jpg\0", &[0xff, 0xd8]),
+            (b"img_wbp\0", &webp),
+            (b"img_al\0\0", &[0; 8]),
+        ];
+        if let Some(mode) = &mode {
+            tags.push((b"imgmode\0", mode));
+        }
+        let bytes = tagged_frame([1, 2], depth, &tags);
+        let mut source = ShortSource::new(&bytes);
+        source
+            .forbidden
+            .extend([92..94, 126 + webp.len()..134 + webp.len()]);
+        assert_eq!(
+            hg3::decode_frame_from(&source, None)
+                .unwrap()
+                .unwrap()
+                .pixels,
+            expected
+        );
+    }
 }
 
 #[test]
@@ -416,7 +510,7 @@ fn selective_reads_skip_unselected_pixels_and_keep_unsigned_and_duplicate_select
     let last = metadata.frames[3].offset;
     let tag = payloads[3].start - 16;
     let mut unsupported = bytes.clone();
-    unsupported[tag..tag + 8].copy_from_slice(b"img_jpg\0");
+    unsupported[tag..tag + 8].copy_from_slice(b"img_jpa\0");
     assert_eq!(hg3::Metadata::parse(&unsupported).unwrap(), metadata);
     assert_eq!(
         hg3::decode_frame(&unsupported, 2),

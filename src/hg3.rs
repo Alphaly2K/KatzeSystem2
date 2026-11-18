@@ -1,6 +1,7 @@
 use crate::{Error, Result, read};
 use std::collections::BTreeMap;
 
+mod compressed;
 mod input;
 mod pixels;
 use input::Input;
