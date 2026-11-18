@@ -48,6 +48,7 @@ struct Event(Command, Vec<u8>);
 
 struct Trace {
     events: Vec<Event>,
+    speech_first: Vec<u8>,
     output: u32,
     sound_target: u32,
     buffer_output: u32,
@@ -121,7 +122,7 @@ impl TaskObject for Receiver {
         if command.code != 35
             && !(182..=194).contains(&command.code)
             && !(196..=198).contains(&command.code)
-            && !matches!(command.code, 201 | 202 | 204 | 205 | 225..=227)
+            && !matches!(command.code, 201..=205 | 225..=228)
         {
             return self.0.dispatch_command(kind, command, output, host, budget);
         }
@@ -134,6 +135,11 @@ impl TaskObject for Receiver {
                 buffers.data1.as_deref().unwrap_or_default().to_vec()
             },
         ));
+        if command.code == 228 {
+            let first = buffers.data0.as_deref_mut().unwrap();
+            trace.speech_first = first.to_vec();
+            first.fill(0xff);
+        }
         *output = if command.code == 35 {
             trace.sound_target
         } else {
@@ -168,6 +174,7 @@ impl TaskObject for Receiver {
 fn setup(program: Program, output: u32) -> (Runtime<Factory>, Rc<RefCell<Trace>>) {
     let trace = Rc::new(RefCell::new(Trace {
         events: vec![],
+        speech_first: vec![],
         output,
         sound_target: 1,
         buffer_output: 0x734512ab,
@@ -226,6 +233,7 @@ fn control_wrappers_route_words_and_raw_float_buffers_without_changing_sources()
         (349, vec![5], 0, vec![]),
         (569, vec![u32::MAX], 0, vec![]),
         (587, vec![63], 0, vec![]),
+        (588, vec![63], 0, vec![0]),
         (
             602,
             vec![u32::MAX, 0x80000000, 4, 6, u32::MAX],
@@ -267,6 +275,7 @@ fn control_wrappers_route_words_and_raw_float_buffers_without_changing_sources()
                                 code: match *index {
                                     569 => 201,
                                     587 => 202,
+                                    588 => 203,
                                     602 => 204,
                                     603 => 205,
                                     347..=349 => 196 + index - 347,
@@ -281,7 +290,7 @@ fn control_wrappers_route_words_and_raw_float_buffers_without_changing_sources()
                 let vm = rt.object(2).unwrap().interpreter().unwrap();
                 let mut expected = 0xdeadbeefu32.to_le_bytes().to_vec();
                 expected.extend(vec![0xa5; (4 - args.len() % 4) % 4]);
-                if matches!(index, 160 | 162 | 165 | 569 | 587) {
+                if matches!(index, 160 | 162 | 165 | 569 | 587 | 588) {
                     expected.extend(0x81234567u32.to_le_bytes());
                 } else if *index == 349 {
                     expected.extend(0x734512abu32.to_le_bytes());
@@ -345,6 +354,52 @@ fn speech_load_routes_formatted_bytes_and_unsigned_delay_without_a_resource_look
 }
 
 #[test]
+fn speech_configuration_routes_both_formatted_strings_without_consuming_the_stack() {
+    for (budget, first) in [(1, 64), (4096, u32::MAX)] {
+        let (mut rt, trace) = setup(program(1075, &arguments(&[first, 0x8000_0040])), 91);
+        let first_input = b"voice_%u[G8]\0";
+        let second_input = b"\x82\xa0%%\0";
+        let vm = rt.object_mut(2).unwrap().interpreter_mut().unwrap();
+        vm.write(8, &37u32.to_le_bytes()).unwrap();
+        vm.write(64, first_input).unwrap();
+        vm.write(0x8000_0040, second_input).unwrap();
+        rt.set_budget(budget, 4096);
+        rt.update(0, 0).unwrap();
+
+        let trace = trace.borrow();
+        assert_eq!(trace.events.len(), 2);
+        assert_eq!(trace.events[0].0.code, 35);
+        assert_eq!(
+            trace.events[1],
+            Event(
+                Command {
+                    target: 1,
+                    sender: 2,
+                    code: 228,
+                    data: [0; 3]
+                },
+                b"\x82\xa0%\0".to_vec()
+            )
+        );
+        assert_eq!(
+            trace.speech_first,
+            if first == 64 {
+                &b"voice_37\0"[..]
+            } else {
+                b"\0"
+            }
+        );
+        let vm = rt.object(2).unwrap().interpreter().unwrap();
+        assert_eq!(vm.stack_bytes(), 0xdead_beefu32.to_le_bytes());
+        assert_eq!(vm.read(64, first_input.len()).unwrap(), first_input);
+        assert_eq!(
+            vm.read(0x8000_0040, second_input.len()).unwrap(),
+            second_input
+        );
+    }
+}
+
+#[test]
 fn invalid_queries_and_short_arguments_diagnose_after_the_root_lookup() {
     for (index, length) in [
         (156, 4),
@@ -358,6 +413,7 @@ fn invalid_queries_and_short_arguments_diagnose_after_the_root_lookup() {
         (349, 4),
         (569, 4),
         (587, 4),
+        (588, 4),
         (603, 4),
     ] {
         let (mut rt, trace) = setup(program(index, &vec![0; length - 1]), 0);
@@ -366,7 +422,7 @@ fn invalid_queries_and_short_arguments_diagnose_after_the_root_lookup() {
         assert_eq!(trace.borrow().events.len(), 1);
         assert_eq!(trace.borrow().events[0].0.code, 35);
     }
-    for index in [160, 162, 165, 349, 569, 587] {
+    for index in [160, 162, 165, 349, 569, 587, 588] {
         for target in [2, u32::MAX] {
             let (mut rt, trace) = setup(program(index, &arguments(&[0])), 0);
             trace.borrow_mut().events.clear();

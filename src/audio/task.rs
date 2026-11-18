@@ -4,11 +4,14 @@ use crate::runtime::{BaseObject, ObjectFactory, TaskObject, kind};
 use crate::task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock};
 use crate::{Error, Result, read};
 
+type SpeechConfiguration = dyn FnMut(&[u8], &[u8]) -> Result<()>;
+
 /// 类型 13 的声音任务，持有通道 PCM、装载参数及循环范围。
 pub struct SoundObject {
     base: BaseObject,
     audio: SoundState,
     enabled: bool,
+    speech_configuration: Option<Box<SpeechConfiguration>>,
 }
 
 impl SoundObject {
@@ -18,6 +21,7 @@ impl SoundObject {
             base: BaseObject::new(),
             audio: SoundState::default(),
             enabled,
+            speech_configuration: None,
         }
     }
 
@@ -27,6 +31,14 @@ impl SoundObject {
 
     pub fn enabled(&self) -> bool {
         self.enabled
+    }
+
+    /// 为命令 228 安装语音后端配置回调，按脚本参数顺序接收两段字节。
+    pub fn set_speech_configuration(
+        &mut self,
+        configure: impl FnMut(&[u8], &[u8]) -> Result<()> + 'static,
+    ) {
+        self.speech_configuration = Some(Box::new(configure));
     }
 }
 
@@ -134,6 +146,21 @@ impl TaskObject for SoundObject {
                     return Err(Error::new(0, "语音合成关闭时直接装载未定义返回值"));
                 }
                 *output = u32::MAX;
+                return Ok(CommandOutcome::finished(false));
+            }
+            228 => {
+                if let (Some(configure), Some(first), Some(second)) = (
+                    self.speech_configuration.as_mut(),
+                    buffers.data0.as_deref(),
+                    buffers.data1.as_deref(),
+                ) {
+                    let first = read::zstr(first, 0)?;
+                    let second = read::zstr(second, 0)?;
+                    if first.len() >= 256 || second.len() >= 256 {
+                        return Err(Error::new(0, "语音合成配置超过后端缓冲区容量"));
+                    }
+                    configure(first, second)?;
+                }
                 return Ok(CommandOutcome::finished(false));
             }
             210 => {
@@ -292,6 +319,9 @@ impl TaskObject for SoundObject {
                     *output = self.audio.channels[index].completed_passes() as u32;
                 }
                 return Ok(CommandOutcome::finished(false));
+            }
+            203 => {
+                return Err(Error::new(0, "声音命令 203 的原入口未写入查询结果"));
             }
             204 => {
                 self.audio

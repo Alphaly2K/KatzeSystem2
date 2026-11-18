@@ -39,6 +39,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                 )?);
             }
             349 => record.resize(4, 0xcc),
+            588 => record.resize(4, 0),
             903 => {
                 record = format_string(vm, read::u32_at(arguments, 4)?, 0)?;
                 record.truncate(terminated(&record).len());
@@ -49,7 +50,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             }
             _ => {}
         }
-        let query = matches!(index, 160 | 162 | 165 | 349 | 569 | 587 | 903);
+        let query = matches!(index, 160 | 162 | 165 | 349 | 569 | 587 | 588 | 903);
         if query {
             let supported = self
                 .tree
@@ -80,6 +81,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                 347..=349 => 196 + index - 347,
                 569 => 201,
                 587 => 202,
+                588 => 203,
                 602 => 204,
                 603 => 205,
                 903 => 215,
@@ -112,6 +114,38 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         arguments: &[u8],
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
+        if index == 1075 {
+            if arguments.len() != 8 {
+                return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+            }
+            let sound = self.command_target(0, 35, [0; 3])?;
+            let expand = |address| -> Result<Vec<u8>> {
+                let mut text = if vm.read(address, 1).is_ok() {
+                    format_string(vm, address, 0)?
+                } else {
+                    Vec::new()
+                };
+                text.truncate(terminated(&text).len());
+                if text.len() >= 2048 {
+                    return Err(Error::new(vm.pc, "语音合成配置超过格式缓冲区容量"));
+                }
+                text.push(0);
+                Ok(text)
+            };
+            let mut first = expand(read::u32_at(arguments, 0)?)?;
+            let mut second = expand(read::u32_at(arguments, 4)?)?;
+            self.command_target_with_buffers(
+                sound,
+                228,
+                [0; 3],
+                &mut CommandBuffers {
+                    data0: Some(&mut first),
+                    data1: Some(&mut second),
+                    ..Default::default()
+                },
+            )?;
+            return Ok(NativeReturn::Continue);
+        }
         let arguments = read::range(
             arguments,
             0,

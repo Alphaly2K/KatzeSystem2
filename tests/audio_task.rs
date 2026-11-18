@@ -237,6 +237,57 @@ fn loop_load_failures_keep_completed_registrations_and_check_parameters_first() 
 }
 
 #[test]
+fn speech_configuration_calls_an_installed_backend_and_keeps_query_results_distinct() -> Result<()>
+{
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let mut numbers = State::new(0);
+    let mut host = CoreHost::new(&mut numbers);
+    for enabled in [false, true] {
+        let mut sound = SoundObject::new(enabled);
+        let mut output = 0xdead_beef;
+        let query =
+            sound.dispatch_command(kind::SOUND, &command(1, 203, 0), &mut output, &mut host, 1);
+        if enabled {
+            assert!(query.unwrap_err().message.contains("未写入查询结果"));
+            assert_eq!(output, 0xdead_beef);
+        } else {
+            assert!(query?.done);
+            assert_eq!(output, 0);
+        }
+
+        let log = seen.clone();
+        sound.set_speech_configuration(move |first, second| {
+            log.borrow_mut().push((first.to_vec(), second.to_vec()));
+            Ok(())
+        });
+        let mut first = b"voice\0ignored".to_vec();
+        let mut second = b"\x82\xa0\0".to_vec();
+        output = 0xdead_beef;
+        assert!(
+            sound
+                .dispatch_command_with_buffers(
+                    kind::SOUND,
+                    &command(1, 228, 0),
+                    &mut CommandBuffers {
+                        data0: Some(&mut first),
+                        data1: Some(&mut second),
+                        ..Default::default()
+                    },
+                    &mut output,
+                    &mut host,
+                    1,
+                )?
+                .done
+        );
+        assert_eq!(output, if enabled { 0xdead_beef } else { 0 });
+        assert_eq!(first, b"voice\0ignored");
+        assert_eq!(second, b"\x82\xa0\0");
+    }
+    assert_eq!(*seen.borrow(), [(b"voice".to_vec(), b"\x82\xa0".to_vec())]);
+    Ok(())
+}
+
+#[test]
 fn sound_commands_gate_buffers_and_preserve_unwritten_return_slots() {
     let mut numbers = State::new(0);
     let mut host = CoreHost::new(&mut numbers);
