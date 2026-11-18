@@ -1805,12 +1805,15 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
     ) -> Result<NativeReturn> {
         let count = match index {
             66 => 12,
-            67 | 74 | 75 | 77 | 109 | 272..=274 | 452 | 454 | 577 | 651 => 4,
-            108 | 110 | 275 | 426 | 427 | 694 => 8,
+            67 | 74 | 75 | 77 | 109 | 272..=274 | 452 | 454 | 577 | 651 | 843 => 4,
+            108 | 110 | 275 | 426 | 427 | 694 | 837 | 838 => 8,
             69 | 70 | 72 | 73 => 16,
             76 => 0,
             _ => unreachable!(),
         };
+        if index == 837 && matches!(arguments.len(), 4 | 8) && read::u32_at(arguments, 0)? == 0 {
+            return Ok(NativeReturn::Continue);
+        }
         if arguments.len() != count {
             return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
         }
@@ -1847,6 +1850,10 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             }
             651 => {
                 self.command_target(args[0], 24, [0, u32::MAX, 0])?;
+                Ok(NativeReturn::Continue)
+            }
+            837 | 838 | 843 => {
+                self.command_target(args[0], index - 319, [0, args[1], 0])?;
                 Ok(NativeReturn::Continue)
             }
             454 => {

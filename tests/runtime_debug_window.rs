@@ -83,7 +83,7 @@ impl TaskObject for Receiver {
         host: &mut dyn Host,
         budget: usize,
     ) -> Result<CommandOutcome> {
-        if matches!(command.code, 328..=335) {
+        if matches!(command.code, 328..=335 | 518 | 519 | 524) {
             let text = if command.code == 331 {
                 buffers
                     .data1
@@ -273,5 +273,39 @@ fn developer_natives_route_raw_values_and_formatted_utf16_without_a_window() -> 
             assert_eq!(events, expected);
         }
     }
+    Ok(())
+}
+
+#[test]
+fn legacy_natives_preserve_task_targets_raw_values_and_stack() -> Result<()> {
+    let mut code = Vec::new();
+    instruction(&mut code, 0x25, &[0x1357_9bdf]);
+    for (index, args) in [
+        (837, &[0][..]),
+        (837, &[0, u32::MAX]),
+        (837, &[7, 0x8000_0000]),
+        (838, &[0, u32::MAX]),
+        (838, &[u32::MAX, 1]),
+        (843, &[7]),
+    ] {
+        for arg in args {
+            instruction(&mut code, 0x25, &[*arg]);
+        }
+        instruction(&mut code, 0x2b, &[index, args.len() as u32 * 4]);
+    }
+    code.push(0x3b);
+    let events = run(&code, &[0; 8], 1, 0xf135_79bd)?;
+    let commands: Vec<_> = events.into_iter().map(|event| event.command).collect();
+    assert_eq!(
+        commands,
+        [(7, 518, 0x8000_0000), (0, 519, u32::MAX), (7, 524, 0)].map(|(target, code, value)| {
+            Command {
+                target,
+                sender: 8,
+                code,
+                data: [0, value, 0],
+            }
+        },),
+    );
     Ok(())
 }

@@ -1410,6 +1410,17 @@ fn core_scalar_math_keeps_table_mapping_sse_angle_order_and_pow_nan_signs() {
         (319, vec![(-1.5f32).to_bits()], u32::MAX),
         (319, vec![0.5f32.to_bits()], 1),
         (319, vec![f32::INFINITY.to_bits()], i32::MIN as u32),
+        (
+            321,
+            vec![3.0f32.to_bits(), 8.0f32.to_bits()],
+            0.5f32.to_bits(),
+        ),
+        (
+            321,
+            vec![(-5.0f32).to_bits(), 8.0f32.to_bits()],
+            (-0.5f32).to_bits(),
+        ),
+        (321, vec![1.0f32.to_bits(), 0], 0xffc0_0000),
         (461, vec![1000.0f32.to_bits()], 3.0f32.to_bits()),
         (461, vec![0], f32::NEG_INFINITY.to_bits()),
         (461, vec![0x8000_0000], f32::NEG_INFINITY.to_bits()),

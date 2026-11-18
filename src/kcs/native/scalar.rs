@@ -15,7 +15,7 @@ pub(super) fn call(
         return Ok(NativeReturn::Value(host.random.next_float().to_bits()));
     }
     let count = match index {
-        59 | 61 | 320 | 397 | 874 => 2,
+        59 | 61 | 320 | 321 | 397 | 874 => 2,
         875 | 786 => 3,
         318 => 5,
         _ => 1,
@@ -58,6 +58,9 @@ pub(super) fn call(
             let rounded = numeric::native_math(15, &[shifted]);
             NativeReturn::Value(numeric::convert(0x39, rounded))
         }
+        321 => NativeReturn::Value(
+            numeric::native_triangle(f32::from_bits(args[0]), f32::from_bits(args[1])).to_bits(),
+        ),
         397 => NativeReturn::Value(if f32::from_bits(args[1]).is_nan() {
             args[1] | 0x0040_0000
         } else {

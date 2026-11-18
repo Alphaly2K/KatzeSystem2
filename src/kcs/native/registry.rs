@@ -60,7 +60,7 @@ pub(super) fn core(index: u32) -> CoreHandler {
         | 1051
         | 1063 => CoreHandler::Text,
         904 => CoreHandler::Text,
-        33 | 34 | 50..=64 | 318..=320 | 397 | 461 | 786 | 874 | 875 => CoreHandler::Scalar,
+        33 | 34 | 50..=64 | 318..=321 | 397 | 461 | 786 | 874 | 875 => CoreHandler::Scalar,
         359..=361
         | 533
         | 565
@@ -358,7 +358,10 @@ pub(crate) fn runtime(index: u32) -> RuntimeHandler {
         | 454
         | 577
         | 651
-        | 694 => RuntimeHandler::Task,
+        | 694
+        | 837
+        | 838
+        | 843 => RuntimeHandler::Task,
         241 | 251 | 387 => RuntimeHandler::MediaRecord,
         576 | 688 | 689 => RuntimeHandler::StateRecord,
         111
