@@ -238,6 +238,9 @@ impl ResourceServices for Files {
     fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
         assert_eq!(category, b"image");
         self.0.borrow_mut().push(name.to_vec());
+        if name == b"anmtable.csv" {
+            return Ok(b"image/anmtable.csv".to_vec());
+        }
         Ok([b"image/".as_slice(), name, b".hg3"].concat())
     }
 
@@ -311,6 +314,8 @@ fn loaded_resources_resolve_before_frame_selection_and_preserve_geometry_and_att
                 [
                     b"\x89\xe6\x91\x9c:7".to_vec(),
                     b"image/\x89\xe6\x91\x9c:7.anm".to_vec(),
+                    b"anmtable.csv".to_vec(),
+                    b"image/anmtable.csv".to_vec(),
                     b"image/\x89\xe6\x91\x9c.hg3".to_vec(),
                 ]
             );
@@ -540,10 +545,13 @@ fn snapshot_loading_uses_open_and_preserves_prefetched_image_precedence() {
     struct Sources(Rc<RefCell<usize>>);
     impl ResourceServices for Sources {
         fn resolve(&mut self, _: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+            if name == b"anmtable.csv" {
+                return Ok(name.to_vec());
+            }
             Ok([name, b".hg3"].concat())
         }
         fn read(&mut self, name: &[u8], _: ResourceMode) -> Result<Option<Vec<u8>>> {
-            if name.ends_with(b".anm") {
+            if name == b"anmtable.csv" {
                 return Ok(None);
             }
             assert_eq!(name, b"art.hg3");
@@ -556,6 +564,9 @@ fn snapshot_loading_uses_open_and_preserves_prefetched_image_precedence() {
             name: &[u8],
             _: ResourceMode,
         ) -> Result<Option<katze_system2::io::SharedSource>> {
+            if name.ends_with(b".anm") {
+                return Ok(None);
+            }
             assert_eq!(name, b"art.hg3");
             *self.0.borrow_mut() += 1;
             Ok(Some(std::sync::Arc::new(blob())))
@@ -599,14 +610,23 @@ fn animation_sources_start_with_the_smallest_cached_frame_for_single_and_layered
     struct Animated {
         sidecar: Option<Vec<u8>>,
         image: Vec<u8>,
+        alias: bool,
     }
     impl ResourceServices for Animated {
         fn resolve(&mut self, _: &[u8], name: &[u8]) -> Result<Vec<u8>> {
-            Ok([name, b".hg3"].concat())
+            Ok(if name == b"anmtable.csv" {
+                name.to_vec()
+            } else {
+                [name, b".hg3"].concat()
+            })
         }
         fn read(&mut self, name: &[u8], _: ResourceMode) -> Result<Option<Vec<u8>>> {
             Ok(match name {
-                b"single.anm" | b"art_1.anm" => self.sidecar.clone(),
+                b"single.anm" | b"art_1.anm" if !self.alias => self.sidecar.clone(),
+                b"companion.anm" if self.alias => self.sidecar.clone(),
+                b"anmtable.csv" if self.alias => {
+                    Some(b"single\tcompanion\nart_1\tcompanion\n".to_vec())
+                }
                 b"single.hg3" | b"art_1.hg3" => Some(self.image.clone()),
                 _ => None,
             })
@@ -626,7 +646,13 @@ fn animation_sources_start_with_the_smallest_cached_frame_for_single_and_layered
     animation.resize(100, 0);
     animation[40..44].copy_from_slice(&9u32.to_le_bytes());
     for name in [b"single\0".as_slice(), b"art,1\0"] {
-        for sidecar in [None, Some(animation.clone()), Some(vec![]), Some(vec![1])] {
+        for (sidecar, alias) in [
+            (None, false),
+            (Some(animation.clone()), false),
+            (Some(vec![]), false),
+            (Some(vec![1]), false),
+            (Some(animation.clone()), true),
+        ] {
             let loaded = sidecar.is_some();
             let mut code = Vec::new();
             call(&mut code, 710, &[64]);
@@ -636,6 +662,7 @@ fn animation_sources_start_with_the_smallest_cached_frame_for_single_and_layered
             runtime.set_resources(Animated {
                 sidecar,
                 image: image.clone(),
+                alias,
             });
             let task = runtime.create(0, kind::ORDINARY, b"snapshot", b"").unwrap();
             runtime
@@ -666,7 +693,11 @@ fn layered_resource_names_expand_each_component_and_scan_composite_alpha() {
     struct Layers(Requests);
     impl ResourceServices for Layers {
         fn resolve(&mut self, _: &[u8], name: &[u8]) -> Result<Vec<u8>> {
-            Ok([name, b".hg3"].concat())
+            Ok(if name == b"anmtable.csv" {
+                name.to_vec()
+            } else {
+                [name, b".hg3"].concat()
+            })
         }
 
         fn read(&mut self, name: &[u8], _: ResourceMode) -> Result<Option<Vec<u8>>> {
@@ -713,6 +744,7 @@ fn layered_resource_names_expand_each_component_and_scan_composite_alpha() {
             *requests.borrow(),
             [
                 b"art_1.anm".to_vec(),
+                b"anmtable.csv".to_vec(),
                 b"art_1.hg3".to_vec(),
                 b"art_0m.anm".to_vec(),
                 b"art_0m.hg3".to_vec(),

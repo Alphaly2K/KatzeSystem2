@@ -1,7 +1,6 @@
 use super::{ObjectFactory, ObjectHost, Resources, Runtime};
 use crate::graphics::{Image, ImageFilter, ImageReference, Rect, ResourceTransform};
 use crate::kcs::{Interpreter, NativeReturn, format_string};
-use crate::resource::ResourceMode;
 use crate::{Error, Result, read};
 
 type ImageLayers = Vec<(Image, Option<bool>)>;
@@ -55,10 +54,6 @@ impl Resources {
         if table_length > 256 || parts.len() > 65 {
             return Err(Error::new(0, "独立图像资源名称分量超过缓冲区上限"));
         }
-        let services = self
-            .services
-            .as_deref_mut()
-            .ok_or_else(|| Error::new(0, "运行时未配置资源服务"))?;
         if parts.len() > 1 {
             let mut layers = Vec::new();
             for (index, part) in parts[1..].iter().enumerate() {
@@ -76,28 +71,14 @@ impl Resources {
                 if layer.len() + 1 + extension.len() >= 260 {
                     return Err(Error::new(0, "图层资源名超过基线缓冲区范围"));
                 }
-                let animation_name = [&layer, b".anm".as_slice()].concat();
-                let animated = !preload
-                    && services
-                        .read(&animation_name, ResourceMode::LooseFirst)?
-                        .is_some();
                 layer.push(b'.');
                 layer.extend_from_slice(extension);
-                if let Some(image) =
-                    self.images
-                        .decode(&layer, (!animated).then_some(0), preload, services)?
-                {
-                    let alpha = Some(image.info().reserved != 0);
-                    layers.push((image, alpha));
+                if let Some(layer) = self.decode_image_layer(&layer, &layer, 0, preload)? {
+                    layers.push(layer);
                 }
             }
             return Ok((!layers.is_empty()).then_some(layers));
         }
-        let animation_name = [&name[..end], b".anm"].concat();
-        let animated = !preload
-            && services
-                .read(&animation_name, ResourceMode::LooseFirst)?
-                .is_some();
         let reference = if preload {
             ImageReference {
                 name: name.to_vec(),
@@ -106,15 +87,29 @@ impl Resources {
         } else {
             ImageReference::parse(name)?
         };
-        let image = self.images.decode(
-            &reference.name,
-            (!animated).then_some(reference.frame),
-            preload,
-            services,
-        )?;
-        Ok(image.map(|image| {
+        Ok(self
+            .decode_image_layer(name, &reference.name, reference.frame, preload)?
+            .map(|layer| vec![layer]))
+    }
+
+    fn decode_image_layer(
+        &mut self,
+        name: &[u8],
+        image: &[u8],
+        frame: i32,
+        preload: bool,
+    ) -> Result<Option<(Image, Option<bool>)>> {
+        let animated = !preload && self.find_image_animation(name)?.is_some();
+        let services = self
+            .services
+            .as_deref_mut()
+            .ok_or_else(|| Error::new(0, "运行时未配置资源服务"))?;
+        let loaded = self
+            .images
+            .decode(image, (!animated).then_some(frame), preload, services)?;
+        Ok(loaded.map(|image| {
             let has_alpha = image.info().reserved != 0;
-            vec![(image, Some(has_alpha))]
+            (image, Some(has_alpha))
         }))
     }
 }
