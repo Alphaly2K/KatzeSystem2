@@ -335,16 +335,32 @@ fn blur_rows<C: ColorSum>(
                 sum.opaque += u32::from(pixel[3] == 255);
                 prefix[i + 1] = sum;
             }
+            let total = prefix[padded].visible;
+            if total == 0 {
+                continue;
+            }
+            // 首尾没有可见样本的窗口不写输出；垂直轴因此保留原有透明像素。
+            let window = weights.len();
+            let first = if prefix[window].visible == 0 {
+                prefix[window..window + count].partition_point(|sum| sum.visible == 0)
+            } else {
+                0
+            };
+            let end = if prefix[count - 1].visible == total {
+                prefix[..count].partition_point(|sum| sum.visible < total)
+            } else {
+                count
+            };
             let mut triangle = C::default();
-            for i in 0..width {
+            for i in first..first + width {
                 triangle = triangle.add(prefix[i + width].colors.sub(prefix[i].colors));
             }
-            for x in 0..count {
+            for x in first..end {
                 let left = prefix[x];
-                let right = prefix[x + weights.len()];
+                let right = prefix[x + window];
                 let visible = right.visible - left.visible;
                 if visible != 0 {
-                    let sums = if right.opaque - left.opaque == weights.len() as u32 {
+                    let sums = if right.opaque - left.opaque == window as u32 {
                         let mut sum = triangle.scale(slope);
                         for &(distance, coefficient) in &corrections {
                             let left = prefix[x + radius - distance];
@@ -359,14 +375,14 @@ fn blur_rows<C: ColorSum>(
                             .sub(left.colors)
                             .channels()
                             .map(|v| v / visible);
-                        mixed_sum(&pixels[x..x + weights.len()], &weights, mean)
+                        mixed_sum(&pixels[x..x + window], &weights, mean)
                     };
                     let at = target_base + (start - span.start + x) * pixel_stride;
                     for (channel, sum) in sums.into_iter().enumerate() {
                         output[at + channel] = rounded(sum, factor);
                     }
                 }
-                if x + 1 < count {
+                if x + 1 < end {
                     let middle = prefix[x + width].colors;
                     triangle = triangle
                         .add(prefix[x + width * 2].colors.sub(middle))
@@ -398,6 +414,37 @@ fn mixed_sum(pixels: &[[u8; 4]], weights: &[u32], mean: [u32; 3]) -> [u32; 4] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn transparent_ends_keep_axis_defaults_and_filter_across_a_chunk_boundary() {
+        for (axis, size) in [(0, [2050, 1]), (1, [1, 2050])] {
+            let mut source = Surface::new(size).unwrap();
+            let invisible = [17, 33, 65, 0];
+            let visible = [50, 120, 210, 255];
+            for pixel in source.pixels_mut().chunks_exact_mut(4) {
+                pixel.copy_from_slice(&invisible);
+            }
+            source.pixels_mut()[1024 * 4..1025 * 4].copy_from_slice(&visible);
+
+            let result = blur_axis_with_workers(&source, axis, 3, 1).unwrap();
+            for (i, pixel) in result.pixels().chunks_exact(4).enumerate() {
+                let distance = i.abs_diff(1024);
+                if distance <= 3 {
+                    assert_eq!(
+                        pixel,
+                        [50, 120, 210, [64, 48, 32, 16][distance]],
+                        "{axis}, {i}"
+                    );
+                } else {
+                    assert_eq!(
+                        pixel,
+                        if axis == 0 { [0; 4] } else { invisible },
+                        "{axis}, {i}"
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn blur_workers_sample_across_output_stripes() {
