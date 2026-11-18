@@ -95,6 +95,40 @@ fn ins(code: &mut Vec<u8>, opcode: u8, args: &[u32]) {
 }
 
 #[test]
+fn engine_version_writes_four_words_in_order_without_pushing_a_result() -> Result<()> {
+    let mut state = State::new(0);
+    let mut host = CoreHost::new(&mut state);
+    let mut code = Vec::new();
+    ins(&mut code, 0x25, &[0x1234_abcd]);
+    for address in [0, 0x8000_0001, 8, 0] {
+        ins(&mut code, 0x25, &[address]);
+    }
+    ins(&mut code, 0x2b, &[444, 16]);
+    ins(&mut code, 0x26, &[4]);
+    code.push(0x3b);
+    let mut task = OrdinaryTask::new(
+        Program::from_code(&code, vec![0xa5; 16], 64)?,
+        vec![0x5a; 8],
+    )?;
+    assert!(task.update(0, 1, &mut host, 64)?);
+    let vm = &mut task.interpreter;
+    assert_eq!(
+        vm.read(0, 12)?,
+        [90u32, 0x1234_abcd, 1].map(u32::to_le_bytes).concat()
+    );
+    assert_eq!(
+        vm.read(0x8000_0000, 8)?,
+        [0x5a, 6, 0, 0, 0, 0x5a, 0x5a, 0x5a]
+    );
+    assert!(vm.stack_bytes().is_empty());
+
+    let args = [0u32, 4, u32::MAX, 8].map(u32::to_le_bytes).concat();
+    assert!(host.call(444, &args, vm).is_err());
+    assert_eq!(vm.read(0, 12)?, [2u32, 6, 1].map(u32::to_le_bytes).concat());
+    Ok(())
+}
+
+#[test]
 fn system_open_formats_each_field_and_completes_the_service_before_vm_continuation() {
     let mut code = Vec::new();
     for call in 0..2 {

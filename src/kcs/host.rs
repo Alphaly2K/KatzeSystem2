@@ -45,6 +45,7 @@ pub struct WindowCloseRequest {
 /// 普通窗口入口提交的异步动作，由窗口宿主依序消费。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WindowAction {
+    OpenSystemProperties,
     /// 重建时读取 `HostState::debug_mode` 的最新值。
     RebuildMenu,
     ToggleFullscreen,

@@ -112,7 +112,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     } else {
         Some(RenderTarget::new([1280, 720])?)
     };
-    let mut menu_pending_noted = false;
+    let mut window_pending_noted = false;
     let limit = std::env::var("KATZE_WINDOW_FRAMES")
         .ok()
         .and_then(|s| s.parse::<u32>().ok());
@@ -201,9 +201,12 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         window.context.mouse().show_cursor(
             text_window.active() || shared.borrow().cursor(runtime.uses_image_cursor()),
         );
-        if !runtime.host().window_requests.is_empty() && !menu_pending_noted {
-            eprintln!("窗口菜单重建尚待接入");
-            menu_pending_noted = true;
+        if !runtime.host().window_requests.is_empty() && !window_pending_noted {
+            eprintln!(
+                "窗口动作尚未接入：{:?}",
+                runtime.host().window_requests[0].action
+            );
+            window_pending_noted = true;
         }
         if let Some(position) = shared.borrow_mut().take_warp() {
             let size = window.window.size();

@@ -45,7 +45,9 @@ pub fn pump<F: ObjectFactory>(
                     return Ok(true);
                 }
             }
-            WindowAction::RebuildMenu => runtime.host_mut().window_requests.push(request),
+            WindowAction::OpenSystemProperties | WindowAction::RebuildMenu => {
+                runtime.host_mut().window_requests.push(request);
+            }
         }
     }
     Ok(false)

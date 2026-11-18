@@ -25,6 +25,13 @@ pub(super) fn call(
             NativeReturn::Value(increment.wrapping_add(*increment >> 2))
         });
     }
+    if index == 444 {
+        let addresses = super::words(arguments, 4, vm.pc)?;
+        for (address, version) in addresses.into_iter().zip([2u32, 6, 1, 90]) {
+            vm.write(address, &version.to_le_bytes())?;
+        }
+        return Ok(NativeReturn::Continue);
+    }
     if index == 445 {
         return super::super::system_host::message_box(
             host.system_services

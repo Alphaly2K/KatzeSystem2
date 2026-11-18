@@ -32,6 +32,7 @@ pub(super) fn call(
         return Err(Error::new(vm.pc, "KCS 窗口请求数量超过上限"));
     }
     let action = match index {
+        457 => WindowAction::OpenSystemProperties,
         628 => {
             host.debug_mode = mode.unwrap();
             WindowAction::RebuildMenu

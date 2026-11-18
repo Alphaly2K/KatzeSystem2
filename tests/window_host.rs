@@ -209,7 +209,7 @@ impl window_actions::Services for Window {
     }
 }
 #[test]
-fn window_actions_apply_state_after_success_reset_input_before_close_and_keep_menu_pending()
+fn window_actions_apply_state_after_success_reset_input_before_close_and_keep_pending_requests()
 -> Result<()> {
     let mut rt = Runtime::new(
         0,
@@ -232,6 +232,7 @@ fn window_actions_apply_state_after_success_reset_input_before_close_and_keep_me
     };
     rt.host_mut().window_requests = [
         WindowAction::ToggleFullscreen,
+        WindowAction::OpenSystemProperties,
         WindowAction::Minimize,
         WindowAction::RebuildMenu,
         WindowAction::CloseFromMenu,
@@ -244,10 +245,16 @@ fn window_actions_apply_state_after_success_reset_input_before_close_and_keep_me
     assert_eq!(rt.host().system_settings_dirty, 1);
     assert_eq!(rt.host().system_settings.as_ref().unwrap().fullscreen, 1);
     assert_eq!(rt.input_state(input).unwrap().pointer().idle_count, 0);
-    assert_eq!(rt.host().window_requests.len(), 1);
     assert_eq!(
-        rt.host().window_requests[0].action,
-        WindowAction::RebuildMenu
+        rt.host()
+            .window_requests
+            .iter()
+            .map(|request| request.action)
+            .collect::<Vec<_>>(),
+        [
+            WindowAction::OpenSystemProperties,
+            WindowAction::RebuildMenu
+        ]
     );
     rt.host_mut().window_requests.push(WindowRequest {
         task_id: 0,

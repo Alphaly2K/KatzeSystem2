@@ -29,6 +29,7 @@ fn queued_window_actions_share_debug_mode_and_preserve_void_stack_across_hosts()
     for (index, mode) in [
         (628, Some(0)),
         (845, None),
+        (457, None),
         (628, Some(u32::MAX)),
         (846, None),
         (847, None),
@@ -62,6 +63,7 @@ fn queued_window_actions_share_debug_mode_and_preserve_void_stack_across_hosts()
             [
                 WindowAction::RebuildMenu,
                 WindowAction::ToggleFullscreen,
+                WindowAction::OpenSystemProperties,
                 WindowAction::RebuildMenu,
                 WindowAction::Minimize,
                 WindowAction::CloseFromMenu,
@@ -97,7 +99,7 @@ fn queued_window_actions_share_debug_mode_and_preserve_void_stack_across_hosts()
         let id = rt.create(0, kind::ORDINARY, b"window", b"")?;
         for _ in 0..100 {
             rt.update(0, 1)?;
-            if rt.host().window_requests.len() == 5
+            if rt.host().window_requests.len() == 6
                 && rt.object(id).unwrap().interpreter().unwrap().pc == code.len()
             {
                 break;
@@ -115,6 +117,7 @@ fn invalid_window_arguments_do_not_change_mode_or_queue() -> Result<()> {
     host.debug_mode = 7;
     let mut vm = Interpreter::new(Program::from_code(&[], vec![], 0)?, vec![])?;
     for (index, arguments) in [
+        (457, vec![0; 4]),
         (628, vec![]),
         (628, vec![0; 8]),
         (845, vec![0; 4]),
