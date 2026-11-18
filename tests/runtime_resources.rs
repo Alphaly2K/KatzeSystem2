@@ -74,6 +74,68 @@ impl ProgramLoader for Programs {
         data[64..70].copy_from_slice(b"value\0");
         data[80..85].copy_from_slice(b"text\0");
         match name {
+            b"gallery" | b"gallery_wrong_type" | b"gallery_released" => {
+                data[96..99].copy_from_slice(b"bg\0");
+                data[100..103].copy_from_slice(b"cg\0");
+                data[104..112].copy_from_slice(b"missing\0");
+                data[112..118].copy_from_slice(b"short\0");
+                data[160..192].fill(0x5a);
+                for (native, address, result) in [
+                    (405, 96, 0),
+                    (412, 100, 4),
+                    (405, 104, 8),
+                    (405, 112, 12),
+                    (412, 104, 16),
+                ] {
+                    push(&mut code, address);
+                    ins(&mut code, 0x2b, &[native, 4]);
+                    ins(&mut code, 0x26, &[result]);
+                }
+                match name {
+                    b"gallery" => {
+                        for (native, handle, args, result) in [
+                            (407, 0, &[][..], 20),
+                            (407, 8, &[], 24),
+                            (407, 12, &[], 28),
+                            (408, 0, &[0], 32),
+                            (408, 0, &[6], 36),
+                            (409, 0, &[0, 3], 40),
+                            (410, 0, &[0, 3], 44),
+                            (411, 0, &[0, 0, 0, 0, 160], 48),
+                            (411, 0, &[0, 3, 0, 0, 176], 52),
+                            (414, 4, &[], 56),
+                            (415, 4, &[0, 1], 60),
+                            (416, 4, &[1, 3, 0x8000_0000], 64),
+                            (416, 4, &[0, 1, 0x8000_0008], 68),
+                            (416, 16, &[0, 0, u32::MAX], 72),
+                        ] {
+                            load(&mut code, handle);
+                            for &value in args {
+                                push(&mut code, value);
+                            }
+                            ins(&mut code, 0x2b, &[native, (args.len() as u32 + 1) * 4]);
+                            ins(&mut code, 0x26, &[result]);
+                        }
+                        push(&mut code, 0x1234_5678);
+                        for (native, handle) in [(406, 0), (406, 8), (406, 12), (413, 4), (413, 16)]
+                        {
+                            load(&mut code, handle);
+                            ins(&mut code, 0x2b, &[native, 4]);
+                        }
+                        ins(&mut code, 0x26, &[76]);
+                    }
+                    b"gallery_wrong_type" => {
+                        load(&mut code, 4);
+                        ins(&mut code, 0x2b, &[406, 4]);
+                    }
+                    _ => {
+                        load(&mut code, 4);
+                        ins(&mut code, 0x2b, &[413, 4]);
+                        load(&mut code, 4);
+                        ins(&mut code, 0x2b, &[414, 4]);
+                    }
+                }
+            }
             b"scene_exists" => {
                 data[..4].copy_from_slice(&17u32.to_le_bytes());
                 data[16..27].copy_from_slice(b"\x82\xa0%d[G0]\0\0\0");
@@ -228,6 +290,91 @@ fn runtime() -> Runtime<KcsFactory<Programs>> {
         State::new(0),
         KcsFactory::new(Programs),
     )
+}
+
+#[test]
+fn gallery_tables_keep_sparse_slots_and_typed_handles() -> Result<()> {
+    struct GalleryFiles;
+
+    impl ResourceServices for GalleryFiles {
+        fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+            assert_eq!(category, b"fes");
+            Ok([b"fes/".as_slice(), name].concat())
+        }
+
+        fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
+            assert_eq!(mode, ResourceMode::LooseFirst);
+            let body = match name {
+                b"fes/bg" => {
+                    let mut data = vec![0; 0x15180];
+                    for at in [0, 3 * 0x21c, 6 * 8 * 0x21c] {
+                        data[at] = 1;
+                        data[at + 4..at + 8].copy_from_slice(b"sky\0");
+                        data[at + 0x14..at + 0x18].copy_from_slice(&1u32.to_le_bytes());
+                        data[at + 0x118..at + 0x11c].copy_from_slice(&1u32.to_le_bytes());
+                    }
+                    data[0x18..0x1c].copy_from_slice(b"A0CB");
+                    data[0x11c..0x120].copy_from_slice(b"0\0D0");
+                    let at = 3 * 0x21c + 0x118;
+                    data[at..at + 4].copy_from_slice(&0x1234_5678u32.to_le_bytes());
+                    data
+                }
+                b"fes/cg" => {
+                    let mut data = vec![0; 4 + 2 * 128];
+                    data[0] = 2;
+                    data[228..232].copy_from_slice(b"art\0");
+                    data
+                }
+                b"fes/short" => vec![0; 12],
+                b"fes/missing" => return Ok(None),
+                _ => return Err(Error::new(0, "合成资源名称错误")),
+            };
+            Ok(Some(body))
+        }
+    }
+
+    let mut game = runtime();
+    game.factory_mut().external = katze_system2::memory::SharedMemory::new(vec![0x5a; 16])?;
+    game.set_resources(GalleryFiles);
+    let task = game.create(0, kind::ORDINARY, b"gallery", b"")?;
+    game.update(0, 1)?;
+    let vm = game.object(task).unwrap().interpreter().unwrap();
+    let handles = vm.read(0, 20)?;
+    assert!(handles[..16].chunks_exact(4).all(|handle| handle != [0; 4]));
+    assert_eq!(&handles[16..], &[0; 4]);
+    let expected: Vec<_> = [
+        2u32,
+        0,
+        0,
+        2,
+        1,
+        1,
+        0x1234_5678,
+        1,
+        0,
+        2,
+        0,
+        1,
+        0,
+        0,
+        0x1234_5678,
+    ]
+    .into_iter()
+    .flat_map(u32::to_le_bytes)
+    .collect();
+    assert_eq!(vm.read(20, expected.len())?, expected);
+    assert_eq!(vm.read(160, 14)?, b"sky,A,0,D,B\0\0Z".as_slice());
+    assert_eq!(vm.read(176, 16)?, [0x5a; 16]);
+    assert_eq!(vm.read(0x8000_0000, 16)?, b"art\0ZZZZZZZZZZZZ".as_slice());
+
+    for program in [b"gallery_wrong_type".as_slice(), b"gallery_released"] {
+        let mut runtime = runtime();
+        runtime.set_resources(GalleryFiles);
+        runtime.create(0, kind::ORDINARY, program, b"")?;
+        let error = runtime.update(0, 1).unwrap_err();
+        assert!(error.to_string().contains("图鉴表句柄无效"));
+    }
+    Ok(())
 }
 
 #[test]

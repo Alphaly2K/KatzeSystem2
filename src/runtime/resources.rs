@@ -268,7 +268,7 @@ impl Resources {
                     .map(|services| services.as_mut() as _),
             );
         }
-        if matches!(index, 284 | 322 | 365 | 366 | 368 | 375 | 431 | 590..=597) {
+        if matches!(index, 284 | 322 | 365 | 366 | 368 | 375 | 405..=416 | 431 | 590..=597) {
             return self.raw.call(
                 index,
                 arguments,

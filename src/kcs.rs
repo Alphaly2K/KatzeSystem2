@@ -10,6 +10,7 @@ mod data;
 mod database;
 mod debug;
 mod files;
+mod gallery_table;
 mod host;
 mod map_data;
 mod matrix;

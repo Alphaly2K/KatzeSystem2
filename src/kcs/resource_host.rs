@@ -164,6 +164,7 @@ pub(crate) struct ResourceState {
     images: BTreeMap<u32, ImageData>,
     owned_images: BTreeMap<u32, BTreeMap<u32, u32>>,
     triples: BTreeMap<u32, super::triples::TripleTable>,
+    pub(super) gallery_tables: BTreeMap<u32, super::gallery_table::GalleryTable>,
     pub(super) name_tables: BTreeMap<u32, super::name_table::NameTable>,
     pub(super) section_tables: BTreeMap<u32, super::section_table::SectionTable>,
     pub(super) database_tables: BTreeMap<u32, super::database::table::Table>,
@@ -339,6 +340,7 @@ impl ResourceState {
         if self.xml.len()
             + self.images.len()
             + self.triples.len()
+            + self.gallery_tables.len()
             + self.name_tables.len()
             + self.section_tables.len()
             + self.database_tables.len()
@@ -664,7 +666,7 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
             }
             return Ok(NativeReturn::Continue);
         }
-        if !matches!(index, 284 | 322 | 365 | 366 | 368 | 375 | 431 | 590..=597) {
+        if !matches!(index, 284 | 322 | 365 | 366 | 368 | 375 | 405..=416 | 431 | 590..=597) {
             return self.inner.call(index, arguments, vm);
         }
         self.state
@@ -680,6 +682,9 @@ impl ResourceState {
         vm: &mut Interpreter,
         services: Option<&mut dyn ResourceServices>,
     ) -> Result<NativeReturn> {
+        if matches!(index, 405..=416) {
+            return self.gallery_table_call(index, arguments, vm, services);
+        }
         let count = match index {
             284 | 375 | 431 => 2,
             322 | 365 | 366 | 590 | 591 | 594 | 595 => 1,
