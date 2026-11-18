@@ -61,12 +61,19 @@ impl Images {
         if self.shared_entries.0.len() == read::MAX_ITEMS {
             return Err(Error::new(0, "共享图像条目超过数量上限"));
         }
-        let decoded = ImageList::decode_frame_set(bytes, |frame, length| {
-            frame
-                .decode_shared(bytes)?
-                .map(|image| list_frame_image(image, frame.metadata.offset, length))
-                .transpose()
-        })?;
+        let decoded = if bytes.starts_with(b"HG-2") {
+            let image = crate::hg2::decode_shared_frame(bytes)?
+                .map(Image::from_frame)
+                .transpose()?;
+            BTreeMap::from([(0, image)])
+        } else {
+            ImageList::decode_frame_set(bytes, |frame, length| {
+                frame
+                    .decode_shared(bytes)?
+                    .map(|image| list_frame_image(image, frame.metadata.offset, length))
+                    .transpose()
+            })?
+        };
         let handle = self.handles.allocate()?;
         let (frames, image) = insert_frames(self, None, decoded)?;
         let (base, clip) = if image == 0 {

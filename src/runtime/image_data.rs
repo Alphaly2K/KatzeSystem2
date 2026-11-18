@@ -48,7 +48,7 @@ impl Resources {
             let frame = if bytes.starts_with(b"HG-3") {
                 crate::hg3::decode_frame(bytes, args[1] as i32)?
             } else if bytes.starts_with(b"HG-2") {
-                Some(crate::hg2::decode_frame(bytes)?).filter(|frame| frame.id == args[1])
+                crate::hg2::decode_frame_id(bytes, args[1])?
             } else if bytes.starts_with(&[0xff, 0xd8]) {
                 return Err(Error::new(vm.pc, "未支持的 JPEG 图像解码"));
             } else {

@@ -21,7 +21,7 @@ fn thumbnail_encoding_crops_transparency_and_preserves_top_down_pixels() {
     let mut malformed = bytes.clone();
     for (at, value) in [
         (4, 11u32),
-        (8, 0x20),
+        (8, 0x21),
         (12, u32::MAX),
         (20, 16),
         (32, u32::MAX),
@@ -34,6 +34,54 @@ fn thumbnail_encoding_crops_transparency_and_preserves_top_down_pixels() {
         malformed.copy_from_slice(&bytes);
     }
     assert!(hg2::decode_frame(&bytes[..bytes.len() - 1]).is_err());
+}
+
+#[test]
+fn legacy_headers_and_linked_frames_preserve_selection_and_pixels() {
+    let pixel = [20, 49, 127, 202];
+    let encoded = hg2::encode_frame_with_depth([1, 1], &pixel, 24).unwrap();
+    let mut legacy = encoded[..48].to_vec();
+    legacy[8..12].copy_from_slice(&0x10u32.to_le_bytes());
+    legacy[22..24].copy_from_slice(&5u16.to_le_bytes());
+    legacy.extend_from_slice(&encoded[88..]);
+    let decoded = hg2::decode_frame_id(&legacy, u32::MAX).unwrap().unwrap();
+    assert_eq!(decoded.id, 0);
+    assert_eq!(decoded.pixels, [0xa5, 0x8c, 0xff, 255]);
+    assert_eq!(decoded.info.canvas_size, [1, 1]);
+
+    let encoded = hg2::encode_frame([1, 1], &pixel).unwrap();
+    for version in [0x20u32, 0x25] {
+        let extra = usize::from(version == 0x25) * 8;
+        let make_frame = |id: u32, x: i32, padding: usize, linked: bool| {
+            let mut frame = encoded[12..80 + extra].to_vec();
+            frame[0x24..0x28].copy_from_slice(&((32 + extra + padding) as u32).to_le_bytes());
+            frame[0x28..0x2c].copy_from_slice(&id.to_le_bytes());
+            frame[0x34..0x38].copy_from_slice(&x.to_le_bytes());
+            if version == 0x25 {
+                frame[0x44..0x48].copy_from_slice(&3i32.to_le_bytes());
+            }
+            frame.resize(frame.len() + padding, 0);
+            frame.extend_from_slice(&encoded[88..]);
+            if linked {
+                let size = frame.len() as u32;
+                frame[0x40..0x44].copy_from_slice(&size.to_le_bytes());
+            }
+            frame
+        };
+        let mut data = encoded[..12].to_vec();
+        data[8..12].copy_from_slice(&version.to_le_bytes());
+        let mut skipped = make_frame(7, 11, 0, true);
+        skipped[68 + extra] = 0;
+        data.extend(skipped);
+        data.extend(make_frame(0, -2, 4, true));
+        data.extend(make_frame(0, 99, 0, false));
+        let decoded = hg2::decode_frame_id(&data, 0).unwrap().unwrap();
+        assert_eq!(decoded.pixels, pixel);
+        assert_eq!(decoded.info.offset, [-2, 0]);
+        assert_eq!(decoded.info.base, [if version == 0x25 { 3 } else { 0 }, 0]);
+        assert!(hg2::decode_frame_id(&data, 7).is_err());
+        assert!(hg2::decode_frame_id(&data, 1).unwrap().is_none());
+    }
 }
 
 #[test]

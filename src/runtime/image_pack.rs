@@ -91,7 +91,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                             info.canvas_size[axis]
                         };
                     }
-                    words[6] = info.bit_depth;
+                    words[6] = (info.bit_depth & 0xffff) / 8;
                     words[7..].copy_from_slice(&info.base.map(|value| value as u32));
                 }
                 vm.write(second, words.map(u32::to_le_bytes).as_flattened())?;

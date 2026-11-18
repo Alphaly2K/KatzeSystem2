@@ -44,60 +44,174 @@ pub(crate) fn frame_info(data: &[u8], id: u32) -> Result<Option<StandardInfo>> {
     }))
 }
 
-/// 解码 HG-2 0x25 的单帧 24／32 位图像，输出顶端起始 BGRA8。
+/// 解码 HG-2 文件中的第一帧，输出顶端起始 BGRA8。
 pub fn decode_frame(data: &[u8]) -> Result<DecodedFrame> {
+    let frame = find_frame(data, None)?.ok_or_else(|| Error::new(12, "HG-2 缺少首帧"))?;
+    frame.decode()
+}
+
+/// 解码第一个匹配 ID 的 HG-2 帧。0x10 只有一帧，忽略所请求的 ID。
+pub fn decode_frame_id(data: &[u8], id: u32) -> Result<Option<DecodedFrame>> {
+    find_frame(data, Some(id))?
+        .map(Hg2Frame::decode)
+        .transpose()
+}
+
+pub(crate) fn decode_shared_frame(data: &[u8]) -> Result<Option<DecodedFrame>> {
+    let Some(frame) = find_frame(data, Some(0))? else {
+        return Ok(None);
+    };
+    if !matches!(frame.info.bit_depth, 24 | 32) {
+        return Err(Error::new(frame.offset + 8, "未支持的 HG-2 位深"));
+    }
+    Ok(frame.decode().ok())
+}
+
+struct Hg2Frame<'a> {
+    bytes: &'a [u8],
+    offset: usize,
+    id: u32,
+    info: StandardInfo,
+    payload: usize,
+    significant: u32,
+}
+
+fn find_frame(data: &[u8], id: Option<u32>) -> Result<Option<Hg2Frame<'_>>> {
     if data.get(..4) != Some(b"HG-2") || data.len() > read::MAX_BYTES {
         return Err(Error::new(0, "无效 HG-2 容器"));
     }
-    read::range(data, 0, 88)?;
-    if read::u32_at(data, 4)? != 12 || read::u32_at(data, 8)? != 0x25 {
+    let version = read::u32_at(data, 8)? as u16;
+    if read::u32_at(data, 4)? != 12 || !matches!(version, 0x10 | 0x20 | 0x25) {
         return Err(Error::new(4, "未支持的 HG-2 头或版本"));
     }
-    let bit_depth = read::u32_at(data, 20)?;
-    if !matches!(bit_depth, 24 | 32) || read::u32_at(data, 76)? != 0 {
-        return Err(Error::new(20, "未支持的 HG-2 位深或多帧图像"));
+    let header = match version {
+        0x10 => 36,
+        0x20 => 68,
+        _ => 76,
+    };
+    let mut offset = 12;
+    for _ in 0..read::MAX_ITEMS {
+        let word = |at| read::u32_at(data, offset + at);
+        read::range(data, offset, header)?;
+        let frame_id = if version == 0x10 { 0 } else { word(0x28)? };
+        let next = if version == 0x10 {
+            0
+        } else {
+            read::sized(word(0x40)?, offset + 0x40)?
+        };
+        if next != 0 && next < header {
+            return Err(Error::new(offset + 0x40, "HG-2 帧偏移与帧头重叠"));
+        }
+        if version == 0x10 || id.is_none_or(|id| id == frame_id) {
+            let payload = if version == 0x10 {
+                header
+            } else {
+                let start = 0x24 + read::sized(word(0x24)?, offset + 0x24)?;
+                if start < header {
+                    return Err(Error::new(offset + 0x24, "HG-2 像素偏移与帧头重叠"));
+                }
+                start
+            };
+            let bytes = if next == 0 {
+                &data[offset..]
+            } else {
+                read::range(data, offset, next)?
+            };
+            let size = [word(0)?, word(4)?];
+            let depth = word(8)?;
+            let info = StandardInfo {
+                size,
+                bit_depth: depth & 0xffff,
+                canvas_size: if version == 0x10 {
+                    size
+                } else {
+                    [word(0x2c)?, word(0x30)?]
+                },
+                offset: if version == 0x10 {
+                    [0; 2]
+                } else {
+                    [word(0x34)? as i32, word(0x38)? as i32]
+                },
+                reserved: if version == 0x10 { 0 } else { word(0x3c)? },
+                base: if version == 0x25 {
+                    [word(0x44)? as i32, word(0x48)? as i32]
+                } else {
+                    [0; 2]
+                },
+            };
+            return Ok(Some(Hg2Frame {
+                bytes,
+                offset,
+                id: frame_id,
+                info,
+                payload,
+                significant: depth >> 16,
+            }));
+        }
+        if next == 0 {
+            return Ok(None);
+        }
+        offset += next;
     }
-    let info = StandardInfo {
-        size: [read::u32_at(data, 12)?, read::u32_at(data, 16)?],
-        bit_depth,
-        canvas_size: [read::u32_at(data, 56)?, read::u32_at(data, 60)?],
-        offset: [
-            read::u32_at(data, 64)? as i32,
-            read::u32_at(data, 68)? as i32,
-        ],
-        reserved: read::u32_at(data, 72)?,
-        base: [
-            read::u32_at(data, 80)? as i32,
-            read::u32_at(data, 84)? as i32,
-        ],
-    };
-    hg_pixels::byte_size(info.size)?;
-    let data_length = read::sized(read::u32_at(data, 32)?, 32)?;
-    let data_size = read::sized(read::u32_at(data, 36)?, 36)?;
-    let command_length = read::sized(read::u32_at(data, 40)?, 40)?;
-    let command_size = read::sized(read::u32_at(data, 44)?, 44)?;
-    let (literals, commands) = hg_pixels::inflate_streams(
-        data,
-        88,
-        data_length,
-        data_size,
-        command_length,
-        command_size,
-    )?;
-    let pixels = if bit_depth == 24 {
-        hg_pixels::decode_channels(&literals, &commands, info.size, 3)?
-            .chunks_exact(3)
-            .flat_map(|pixel| [pixel[0], pixel[1], pixel[2], 255])
-            .collect()
-    } else {
-        hg_pixels::decode(&literals, &commands, info.size)?
-    };
-    Ok(DecodedFrame {
-        id: read::u32_at(data, 52)?,
-        info,
-        pixels,
-        attributes: Default::default(),
-    })
+    Err(Error::new(offset, "HG-2 帧数超过读取上限"))
+}
+
+impl Hg2Frame<'_> {
+    fn decode(self) -> Result<DecodedFrame> {
+        let info = self.info;
+        if !matches!(info.bit_depth, 24 | 32) {
+            return Err(Error::new(self.offset + 8, "未支持的 HG-2 位深"));
+        }
+        hg_pixels::byte_size(info.size)?;
+        let stream_size = |at| read::sized(read::u32_at(self.bytes, at)?, self.offset + at);
+        let (literals, commands) = hg_pixels::inflate_streams(
+            self.bytes,
+            self.payload,
+            stream_size(20)?,
+            stream_size(24)?,
+            stream_size(28)?,
+            stream_size(32)?,
+        )?;
+        let channels = (info.bit_depth / 8) as usize;
+        let mut pixels = hg_pixels::decode_channels(&literals, &commands, info.size, channels)?;
+        if self.significant != 0 {
+            expand_significant(
+                &mut pixels,
+                info.size[0] as usize * channels,
+                self.significant,
+            );
+        }
+        if channels == 3 {
+            pixels = pixels
+                .chunks_exact(3)
+                .flat_map(|pixel| [pixel[0], pixel[1], pixel[2], 255])
+                .collect();
+        }
+        Ok(DecodedFrame {
+            id: self.id,
+            info,
+            pixels,
+            attributes: Default::default(),
+        })
+    }
+}
+
+fn expand_significant(pixels: &mut [u8], stride: usize, significant: u32) {
+    let left = 8u32.wrapping_sub(significant);
+    let right = significant.wrapping_sub(left);
+    let mask = (255u32.wrapping_shl(left) & 255) * 0x0101_0101;
+    for row in pixels.chunks_exact_mut(stride) {
+        let mut groups = row.chunks_exact_mut(4);
+        for group in groups.by_ref() {
+            let value = u32::from_le_bytes(group.try_into().unwrap());
+            let expanded = (value.wrapping_shl(left) & mask) | (value.wrapping_shr(right) & !mask);
+            group.copy_from_slice(&expanded.to_le_bytes());
+        }
+        for value in groups.into_remainder() {
+            let byte = u32::from(*value);
+            *value = (byte.wrapping_shl(left) | byte.wrapping_shr(right)) as u8;
+        }
+    }
 }
 
 /// 编码完整 BGRA8 图像；裁去透明边界，画布保持原尺寸，基点及帧号为零。

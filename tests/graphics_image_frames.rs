@@ -712,10 +712,13 @@ fn native_image_pack_keeps_shared_frames_until_the_last_list_releases_them() -> 
             frames.push((5, 0xff12_3456, [0; 2], [0; 2]));
         }
         let mut image = hg3(&frames);
+        let next = |image: &[u8], at: usize| {
+            at + u32::from_le_bytes(image[at..at + 4].try_into().unwrap()) as usize
+        };
+        let second_frame = next(&image, 12);
+        image[second_frame + 34..second_frame + 36].copy_from_slice(&8u16.to_le_bytes());
         if bad_frames {
-            let next =
-                |at: usize| at + u32::from_le_bytes(image[at..at + 4].try_into().unwrap()) as usize;
-            let offsets = [next(12), next(next(12))];
+            let offsets = [second_frame, next(&image, second_frame)];
             for offset in offsets {
                 image[offset + 104] = 0;
             }
@@ -755,7 +758,7 @@ fn native_image_pack_keeps_shared_frames_until_the_last_list_releases_them() -> 
             if bad_frames {
                 [0u32; 9]
             } else {
-                [0, 0, 1, 1, 10, 20, 32, 0, 0]
+                [0, 0, 1, 1, 10, 20, 4, 0, 0]
             }
             .map(u32::to_le_bytes)
             .as_flattened()
@@ -821,6 +824,103 @@ fn native_image_pack_keeps_shared_frames_until_the_last_list_releases_them() -> 
         }
         assert!(runtime.images().get(early_frame).is_err());
         assert!(runtime.images().get(late_frame).is_err());
+    }
+    Ok(())
+}
+
+#[test]
+fn native_image_pack_uses_only_hg2_frame_zero() -> Result<()> {
+    struct Loader(Program);
+    impl ProgramLoader for Loader {
+        fn load(&mut self, _: &[u8]) -> Result<Option<Program>> {
+            Ok(Some(self.0.clone()))
+        }
+    }
+    struct Assets(Vec<u8>);
+    impl ResourceServices for Assets {
+        fn resolve(&mut self, _: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+            Ok(name.to_vec())
+        }
+        fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
+            assert_eq!(mode, ResourceMode::LooseFirst);
+            Ok(match name {
+                b"shared.hg2" => Some(self.0.clone()),
+                b"shared.anm" => Some(vec![1]),
+                _ => None,
+            })
+        }
+    }
+    let mut code = Vec::new();
+    let mut ins = |op, args: &[(u8, u32)]| {
+        code.push(op);
+        for (flag, value) in args {
+            code.push(*flag);
+            code.extend(value.to_le_bytes());
+        }
+    };
+    for value in [32, 128, 1] {
+        ins(0x25, &[(3, value)]);
+    }
+    ins(0x2b, &[(3, 703), (3, 12)]);
+    ins(0x26, &[(3, 0)]);
+    for (native, parameter, output) in [(706, 64, 4), (709, 0, 8), (709, 1, 12)] {
+        ins(0x25, &[(0x13, 132)]);
+        ins(0x25, &[(3, parameter)]);
+        ins(0x2b, &[(3, native), (3, 8)]);
+        ins(0x26, &[(3, output)]);
+    }
+    code.push(0x3b);
+    let mut data = vec![0xa5; 264];
+    data[32..43].copy_from_slice(b"shared.hg2\0");
+    let program = Program::from_code(&code, data, 128)?;
+    for (id, corrupt) in [(0u32, false), (7, false), (0, true)] {
+        let mut bytes = katze_system2::hg2::encode_frame_with_depth([1, 1], &[10, 20, 30, 0], 24)?;
+        bytes[52..56].copy_from_slice(&id.to_le_bytes());
+        if corrupt {
+            bytes[88] = 0;
+        }
+        let mut runtime = Runtime::new(
+            0,
+            kind::ROOT,
+            Box::new(BaseObject::new()),
+            State::new(0),
+            KcsFactory::new(Loader(program.clone())),
+        );
+        runtime.set_resources(Assets(bytes));
+        let task = runtime.create(0, kind::ORDINARY, b"pack", b"")?;
+        runtime.update(0, 0)?;
+        let vm = runtime.object(task).unwrap().interpreter().unwrap();
+        let word = |at| -> Result<u32> {
+            Ok(u32::from_le_bytes(
+                vm.read(at, 4)?.as_ref().try_into().unwrap(),
+            ))
+        };
+        let loaded = id == 0 && !corrupt;
+        assert_eq!(
+            [word(0)?, word(4)?, word(12)?, word(128)?],
+            [1, u32::from(loaded), 0, 2]
+        );
+        assert_eq!(
+            vm.read(64, 36)?,
+            if loaded {
+                [0u32, 0, 1, 1, 1, 1, 3, 0, 0]
+            } else {
+                [0; 9]
+            }
+            .map(u32::to_le_bytes)
+            .as_flattened()
+        );
+        let image = word(8)?;
+        if loaded {
+            assert_eq!(
+                runtime.images().get(image)?.surface().pixel(0, 0),
+                Some(0xff1e_140a)
+            );
+        } else {
+            assert_eq!(image, 0);
+        }
+        runtime.destroy(task)?;
+        assert!(runtime.images().get(image).is_err());
     }
     Ok(())
 }

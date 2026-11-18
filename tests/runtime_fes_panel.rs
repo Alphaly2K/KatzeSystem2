@@ -453,12 +453,13 @@ fn panel_images_use_frame_zero_and_keep_pixels_when_a_replacement_cannot_load() 
         .into_iter()
         .flat_map(u32::to_le_bytes)
         .collect::<Vec<_>>();
+    let mut hg2 = katze_system2::hg2::encode_frame([1, 1], &[30, 40, 50, 255]).unwrap();
+    let next = (hg2.len() - 12) as u32;
+    hg2[52..56].copy_from_slice(&7u32.to_le_bytes());
+    hg2[76..80].copy_from_slice(&next.to_le_bytes());
+    hg2.extend_from_slice(&katze_system2::hg2::encode_frame([2, 3], &pixels).unwrap()[12..]);
     let mut data = DataContainer::new(0);
-    data.append(
-        77,
-        &katze_system2::hg2::encode_frame([2, 3], &pixels).unwrap(),
-    )
-    .unwrap();
+    data.append(77, &hg2).unwrap();
     panel(&mut scene).data = Some(data);
     panel(&mut scene).apply_data().unwrap();
     let content = panel(&mut scene).contents[&7].clone();
