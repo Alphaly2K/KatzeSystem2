@@ -388,7 +388,7 @@ impl<F: ObjectFactory> Runtime<F> {
         &mut self,
         services: impl crate::kcs::AchievementServices + 'static,
     ) {
-        self.host.achievement_services = Some(Box::new(services));
+        self.host.set_achievement_services(services);
     }
 
     pub fn set_file_services(&mut self, services: impl crate::io::FileServices + 'static) {

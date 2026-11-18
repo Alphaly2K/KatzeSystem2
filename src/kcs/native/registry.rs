@@ -43,7 +43,7 @@ pub(crate) fn canonical(index: u32) -> u32 {
 pub(super) fn core(index: u32) -> CoreHandler {
     match index {
         441 | 457 | 628 | 845..=847 | 1054 => CoreHandler::Window,
-        1042 | 1043 => CoreHandler::Achievements,
+        1041..=1044 => CoreHandler::Achievements,
         29..=32 => CoreHandler::File,
         27 | 28 | 35 | 36 => CoreHandler::Memory,
         214 | 215 | 217 | 218 => CoreHandler::Rectangle,

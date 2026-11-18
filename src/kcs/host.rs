@@ -129,8 +129,9 @@ pub struct HostState {
     pub save_services: Option<Box<dyn crate::save::SaveServices>>,
     /// 普通 445／629 使用的同步系统服务；未配置时对应入口返回诊断。
     pub system_services: Option<Box<dyn super::SystemServices>>,
-    /// None 对应未建立成就管理器；命名和解锁状态由服务维护。
+    /// None 对应未绑定成就服务；通过 `set_achievement_services` 替换已使用的服务。
     pub achievement_services: Option<Box<dyn super::AchievementServices>>,
+    pub(super) achievement_initialization_attempted: bool,
     pub file_services: Option<Box<dyn crate::io::FileServices>>,
     pub(super) files: BTreeMap<u32, super::files::OpenedFile>,
     /// 外层输入宿主提供的当前逻辑画布坐标；保留画布外的值。

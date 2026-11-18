@@ -136,7 +136,9 @@ impl<F: ObjectFactory> Store<'_, F> {
                 return self.finish_fes_sound_action(owner, &mut scene.objects, handle);
             }
         }
-        crate::runtime::drain(self.budget, self.limit, || self.run_fes_handler(scene))?;
+        crate::runtime::drain(self.budget, self.limit, || {
+            self.run_fes_handler(owner, scene)
+        })?;
         self.finish_fes_sound_action(owner, &mut scene.objects, handle)
     }
 

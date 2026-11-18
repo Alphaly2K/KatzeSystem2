@@ -1,7 +1,9 @@
 use katze_system2::{
     Result,
     expression::State,
+    fes,
     kcs::{AchievementServices, CoreHost, Host, Interpreter, NativeReturn, OrdinaryTask, Program},
+    runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, fes::Scene, kind},
 };
 use std::{cell::RefCell, rc::Rc};
 
@@ -100,6 +102,116 @@ fn achievement_natives_format_before_optional_services_and_keep_vm_returns() -> 
     assert_eq!(
         host.call(1043, &0u32.to_le_bytes(), &mut vm)?,
         NativeReturn::Value(0)
+    );
+    Ok(())
+}
+
+#[test]
+fn achievement_management_shares_one_initialization_and_keeps_reset_side_effects() -> Result<()> {
+    #[derive(Default)]
+    struct Record {
+        calls: Vec<(&'static str, u32)>,
+        unlocked: bool,
+    }
+    struct Lifecycle(Rc<RefCell<Record>>);
+    impl AchievementServices for Lifecycle {
+        fn initialize(&mut self, task_id: u32) -> Result<()> {
+            self.0.borrow_mut().calls.push(("initialize", task_id));
+            Ok(())
+        }
+        fn unlock(&mut self, _task_id: u32, _name: &[u8]) -> Result<()> {
+            self.0.borrow_mut().unlocked = true;
+            Ok(())
+        }
+        fn is_unlocked(&mut self, _task_id: u32, _name: &[u8]) -> Result<bool> {
+            Ok(self.0.borrow().unlocked)
+        }
+        fn reset(&mut self, task_id: u32) -> Result<()> {
+            let mut record = self.0.borrow_mut();
+            record.calls.push(("reset", task_id));
+            record.unlocked = false;
+            Ok(())
+        }
+    }
+    struct Source;
+    impl ProgramLoader for Source {
+        fn load(&mut self, _name: &[u8]) -> Result<Option<Program>> {
+            let mut code = Vec::new();
+            for index in [1041, 1041] {
+                instruction(&mut code, 0x2b, &[index, 0]);
+            }
+            code.push(0x3b);
+            Ok(Some(Program::from_code(&code, vec![], 32)?))
+        }
+    }
+
+    let record = Rc::new(RefCell::new(Record {
+        unlocked: true,
+        ..Record::default()
+    }));
+    let mut runtime = Runtime::new(
+        0,
+        kind::ROOT,
+        Box::new(BaseObject::new()),
+        State::new(8),
+        KcsFactory::new(Source),
+    );
+    runtime.set_budget(1, 1024);
+    runtime.set_achievement_services(Lifecycle(record.clone()));
+    let writer = runtime.create(0, kind::ORDINARY, b"writer", b"")?;
+    runtime.update(1, 1)?;
+    let mut scene = Scene::new(
+        fes::Program::from_text(b"#START\nsteam_init\nsteam_achievement_reset\n$1=7\nwait 100\n")?,
+        runtime.host().handle_allocator(),
+    )?;
+    let mut done = false;
+    for _ in 0..32 {
+        done = runtime.update_fes_scene(0, &mut scene, 2)?;
+        if done {
+            break;
+        }
+    }
+    assert!(done);
+    assert_eq!(runtime.numbers().shared[1], 7);
+    assert_eq!(
+        record.borrow().calls,
+        [("initialize", writer), ("reset", 0)]
+    );
+    assert!(!record.borrow().unlocked);
+
+    let mut state = State::new(0);
+    let mut host = CoreHost::new(&mut state);
+    host.task_id = 19;
+    let mut vm = Interpreter::new(Program::from_code(&[0x3b], vec![0; 8], 0)?, vec![])?;
+    assert_eq!(host.call(1041, &[], &mut vm)?, NativeReturn::Continue);
+    assert!(
+        host.call(1044, &[], &mut vm)
+            .unwrap_err()
+            .message
+            .contains("未初始化返回值")
+    );
+    host.set_achievement_services(Lifecycle(record.clone()));
+    assert!(host.call(1041, &[0; 4], &mut vm).is_err());
+    assert_eq!(host.call(1041, &[], &mut vm)?, NativeReturn::Continue);
+    record.borrow_mut().unlocked = true;
+    assert!(host.call(1044, &[0; 4], &mut vm).is_err());
+    assert!(record.borrow().unlocked);
+    assert!(
+        host.call(1044, &[], &mut vm)
+            .unwrap_err()
+            .message
+            .contains("未初始化返回值")
+    );
+    assert_eq!(host.call(1043, &[0; 4], &mut vm)?, NativeReturn::Value(0));
+    assert_eq!(host.call(1041, &[], &mut vm)?, NativeReturn::Continue);
+    assert_eq!(
+        record.borrow().calls,
+        [
+            ("initialize", writer),
+            ("reset", 0),
+            ("initialize", 19),
+            ("reset", 19)
+        ]
     );
     Ok(())
 }
