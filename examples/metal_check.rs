@@ -299,7 +299,11 @@ fn check() -> Result<(), Box<dyn std::error::Error>> {
         renderer.render_offscreen(&independent, &mut canvas, [32, 24], TextureFilter::Point)?
     );
     drop(independent);
-    renderer.render_offscreen(&[], &mut canvas, [32, 24], TextureFilter::Point)?;
+    let cleared = renderer.render_offscreen(&[], &mut canvas, [32, 24], TextureFilter::Point)?;
+    assert!(cleared.pixels().iter().all(|&byte| byte == 0));
+    let resized = renderer.render_offscreen(&[], &mut canvas, [24, 32], TextureFilter::Point)?;
+    assert_eq!(resized.size(), [24, 32]);
+    assert!(resized.pixels().iter().all(|&byte| byte == 0));
     assert!(released.upgrade().is_none());
     println!("通过 {comparisons} 组合成帧、缓存复用与变更上传；最大通道误差 {largest_error}");
     Ok(())

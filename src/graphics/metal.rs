@@ -41,6 +41,7 @@ pub struct Renderer {
     vertices: Vec<Vertex>,
     buffer: Option<Buffer>,
     previous: Option<CommandBuffer>,
+    offscreen: Option<Texture>,
 }
 
 impl Renderer {
@@ -123,6 +124,7 @@ impl Renderer {
             vertices: Vec::new(),
             buffer: None,
             previous: None,
+            offscreen: None,
         })
     }
 
@@ -197,18 +199,23 @@ impl Renderer {
         validate_size(size)?;
         let mut surface = Surface::new(size)?;
         self.prepare(triangles, canvas, size, filter)?;
-        let target = texture(&self.device, size, MTLTextureUsage::RenderTarget);
+        if self.offscreen.as_ref().is_none_or(|target| {
+            target.width() != u64::from(size[0]) || target.height() != u64::from(size[1])
+        }) {
+            self.offscreen = Some(texture(&self.device, size, MTLTextureUsage::RenderTarget));
+        }
+        let target = self.offscreen.as_deref().unwrap();
         let command = self.queue.new_command_buffer();
-        self.encode(command, &target, triangles, canvas, filter);
+        self.encode(command, target, triangles, canvas, filter);
         if target.storage_mode() == MTLStorageMode::Managed {
             let blit = command.new_blit_command_encoder();
-            blit.synchronize_resource(&target);
+            blit.synchronize_resource(target);
             blit.end_encoding();
         }
         command.commit();
         self.previous = Some(command.to_owned());
         self.wait()?;
-        target.get_bytes(
+        self.offscreen.as_deref().unwrap().get_bytes(
             surface.pixels_mut().as_mut_ptr().cast(),
             u64::from(size[0]) * 4,
             region(size),
