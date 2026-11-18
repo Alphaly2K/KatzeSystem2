@@ -110,7 +110,7 @@ pub struct FileSource {
     file: Mutex<BufferedFile>,
 }
 
-const FILE_BUFFER_SIZE: usize = 64 * 1024;
+const FILE_BUFFER_SIZE: usize = 256 * 1024;
 
 struct BufferedFile {
     reader: BufReader<File>,
