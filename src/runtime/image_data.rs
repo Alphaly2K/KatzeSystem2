@@ -19,7 +19,7 @@ impl Resources {
         };
         let short_zero = matches!(
             index,
-            120 | 370 | 371 | 374 | 376 | 378 | 468 | 558 | 564 | 641
+            120 | 370 | 371 | 374 | 376 | 378 | 428 | 468 | 558 | 564 | 641
         ) && (4..count * 4).contains(&arguments.len())
             && arguments.len().is_multiple_of(4)
             && arguments.starts_with(&[0; 4]);
@@ -40,23 +40,38 @@ impl Resources {
             self.images.copy_attributes(args[0], args[1])?;
             return Ok(NativeReturn::Value(1));
         }
-        if index == 364 {
+        if matches!(index, 364 | 428) {
             if args[0] == 0 {
                 return Ok(NativeReturn::Value(0));
             }
             let bytes = self.raw.image_data(args[0])?;
             let frame = if bytes.starts_with(b"HG-3") {
-                crate::hg3::decode_frame(bytes, args[1] as i32)?
+                if index == 428 {
+                    crate::hg3::FrameDirectory::parse(bytes)?
+                        .frame_at(args[1])
+                        .map(|frame| frame.decode(bytes))
+                        .transpose()?
+                } else {
+                    crate::hg3::decode_frame(bytes, args[1] as i32)?
+                }
             } else if bytes.starts_with(b"HG-2") {
-                crate::hg2::decode_frame_id(bytes, args[1])?
-            } else if bytes.starts_with(&crate::jpeg::SIGNATURE) {
+                if index == 428 {
+                    crate::hg2::decode_frame_at(bytes, args[1])?
+                } else {
+                    crate::hg2::decode_frame_id(bytes, args[1])?
+                }
+            } else if index == 364 && bytes.starts_with(&crate::jpeg::SIGNATURE) {
                 Some(crate::jpeg::decode_frame(bytes, 32)?)
             } else {
                 None
             };
-            let Some(frame) = frame else {
+            let Some(mut frame) = frame else {
                 return Ok(NativeReturn::Value(0));
             };
+            if index == 428 {
+                vm.write(args[2], &frame.id.to_le_bytes())?;
+                frame.info.bit_depth = 32;
+            }
             let has_alpha = Some(frame.info.reserved != 0);
             return Ok(NativeReturn::Value(self.images.insert(
                 owner,

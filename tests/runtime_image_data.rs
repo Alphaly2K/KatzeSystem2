@@ -45,6 +45,11 @@ impl ProgramLoader for RawPrograms {
                 stored_call(&mut code, 364, 0, &[frame], Some(output));
             }
             call(&mut code, 364, &[0, 7], Some(20));
+            data[40..60].fill(0xa5);
+            for (ordinal, id, output) in [(0, 40, 24), (2, 44, 28), (7, 48, 32)] {
+                stored_call(&mut code, 428, 0, &[ordinal, id], Some(output));
+            }
+            call(&mut code, 428, &[0], Some(36));
             call(&mut code, 65, &[], None);
             stored_call(&mut code, 366, 0, &[], None);
             stored_call(&mut code, 114, 4, &[], None);
@@ -167,7 +172,23 @@ fn raw_decode_selects_frame_ids_and_owns_independent_images_until_release() {
             assert_ne!(first, second);
             assert_eq!(words[2] != 0, hg3);
             assert_eq!(&words[3..], &[0, 0]);
-            for image in [first, second] {
+            let decoded: Vec<_> = vm
+                .read(24, 28)
+                .unwrap()
+                .chunks_exact(4)
+                .map(|bytes| u32::from_le_bytes(bytes.try_into().unwrap()))
+                .collect();
+            assert_ne!(decoded[0], first);
+            assert_eq!(decoded[1] != 0, hg3);
+            assert_eq!(
+                &decoded[2..],
+                &[0, 0, 7, if hg3 { 7 } else { 0xa5a5_a5a5 }, 0xa5a5_a5a5]
+            );
+            let ordinal_images = &decoded[..if hg3 { 2 } else { 1 }];
+            for image in [first, second]
+                .into_iter()
+                .chain(ordinal_images.iter().copied())
+            {
                 let image = rt.images().get(image).unwrap();
                 assert_eq!(image.id(), 7);
                 assert_eq!(image.info().offset, [-2, 5]);
@@ -188,9 +209,15 @@ fn raw_decode_selects_frame_ids_and_owns_independent_images_until_release() {
             rt.update(2, 0).unwrap();
             assert!(rt.image_data(raw).is_err());
             assert!(rt.images().get(first).is_ok());
+            for &image in ordinal_images {
+                assert_eq!(rt.images().get(image).unwrap().surface().pixels(), pixels);
+            }
             rt.destroy(decoder).unwrap();
             assert!(rt.images().get(first).is_ok());
             assert!(rt.images().get(second).is_err());
+            for &image in ordinal_images {
+                assert!(rt.images().get(image).is_err());
+            }
             assert_eq!(rt.images().get(shared).unwrap().surface().pixels(), pixels);
             rt.images_mut().release_reference(first).unwrap();
             rt.images_mut().release_reference(shared).unwrap();
@@ -251,6 +278,7 @@ fn standalone_jpeg_uses_the_decoded_layout_for_each_native() -> Result<()> {
     let mut code = Vec::new();
     call(&mut code, 365, &[32], Some(0));
     stored_call(&mut code, 364, 0, &[u32::MAX], Some(4));
+    stored_call(&mut code, 428, 0, &[0, u32::MAX], Some(28));
     call(&mut code, 111, &[48], Some(8));
     call(&mut code, 703, &[32, 128, 1], Some(12));
     stored_call(&mut code, 706, 132, &[64], Some(16));
@@ -281,6 +309,7 @@ fn standalone_jpeg_uses_the_decoded_layout_for_each_native() -> Result<()> {
         ))
     };
     assert_eq!([word(12)?, word(16)?, word(24)?, word(128)?], [1, 1, 0, 2]);
+    assert_eq!(word(28)?, 0);
     let fields = (0..9)
         .map(|i| word(64 + i * 4))
         .collect::<Result<Vec<_>>>()?;

@@ -90,6 +90,36 @@ pub fn decode_frame_id(data: &[u8], id: u32) -> Result<Option<DecodedFrame>> {
         .transpose()
 }
 
+pub(crate) fn decode_frame_at(data: &[u8], ordinal: u32) -> Result<Option<DecodedFrame>> {
+    let version = read::u32_at(data, 8)? as u16;
+    if matches!(version, 0x10 | 0x20) {
+        return if ordinal == 0 {
+            decode_frame_id(data, 0)
+        } else {
+            Ok(None)
+        };
+    }
+    if version != 0x25 || read::u32_at(data, 4)? != 12 {
+        return Err(Error::new(4, "未支持的 HG-2 头或版本"));
+    }
+    let mut offset = 12;
+    for index in 0..read::MAX_ITEMS {
+        if index as u32 == ordinal {
+            return decode_frame_id(data, read::u32_at(data, offset + 0x28)?);
+        }
+        let next = read::sized(read::u32_at(data, offset + 0x40)?, offset + 0x40)?;
+        if next == 0 {
+            return Ok(None);
+        }
+        if next < 0x4c {
+            return Err(Error::new(offset + 0x40, "HG-2 帧偏移与帧头重叠"));
+        }
+        read::range(data, offset, next)?;
+        offset += next;
+    }
+    Err(Error::new(offset, "HG-2 帧数超过读取上限"))
+}
+
 pub(crate) fn decode_shared_frame(data: &[u8]) -> Result<Option<DecodedFrame>> {
     let Some(frame) = find_frame(data, Some(0))? else {
         return Ok(None);

@@ -252,7 +252,7 @@ impl Resources {
     ) -> Result<NativeReturn> {
         if matches!(
             index,
-            118..=122 | 362..=364 | 369..=374 | 376..=378 | 468 | 537 | 538 | 558 | 564 | 641 | 1026
+            118..=122 | 362..=364 | 369..=374 | 376..=378 | 428 | 468 | 537 | 538 | 558 | 564 | 641 | 1026
         ) {
             return self.image_data_native(owner, index, arguments, vm);
         }

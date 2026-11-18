@@ -61,6 +61,11 @@ impl FrameDirectory {
             .iter()
             .find(|frame| frame.metadata.id == id as u32)
     }
+
+    pub(crate) fn frame_at(&self, ordinal: u32) -> Option<&IndexedFrame> {
+        let id = self.frames.get(ordinal as usize)?.metadata.id;
+        self.frame(id as i32)
+    }
 }
 
 pub(crate) struct IndexedFrame {
