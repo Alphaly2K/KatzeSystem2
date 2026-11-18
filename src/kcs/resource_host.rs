@@ -515,6 +515,10 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
         Some(&mut self.services)
     }
 
+    fn export_services(&mut self) -> Option<&mut dyn crate::runtime::ExportServices> {
+        self.inner.export_services()
+    }
+
     fn movie_enabled(&self) -> bool {
         self.inner.movie_enabled()
     }

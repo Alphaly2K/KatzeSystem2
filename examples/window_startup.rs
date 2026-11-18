@@ -2,12 +2,15 @@
 //!
 //! 用法：`cargo run --release --example window_startup -- <游戏目录>`。
 //! macOS 默认使用 Metal；KATZE_WINDOW_RENDERER=software 选择软件绘制。
+//! KATZE_EXPORT_ROOT 可指定接收游戏导出文件的现有目录。
 //! 关闭窗口执行退出确认，键盘输入交给游戏。
 
 #[path = "support/audio_output.rs"]
 mod audio_output;
 #[path = "support/clipboard_output.rs"]
 mod clipboard_output;
+#[path = "support/export_output.rs"]
+mod export_output;
 #[cfg(target_os = "macos")]
 #[path = "support/metal_output.rs"]
 mod metal_output;
@@ -54,6 +57,9 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         [1280, 720],
     )?;
     runtime.set_system_services(system_output::Output);
+    if let Some(path) = std::env::var_os("KATZE_EXPORT_ROOT") {
+        runtime.set_export_services(export_output::Directory::new(path.into())?);
+    }
     let shared = Rc::new(RefCell::new(Shared::default()));
     let keys = runtime
         .host_mut()

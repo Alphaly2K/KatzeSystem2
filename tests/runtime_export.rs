@@ -1,11 +1,20 @@
 use katze_system2::{
-    Result,
+    Error, Result,
     expression::State,
-    kcs::{Host, Interpreter, Program, SharedMemory},
-    runtime::{BaseObject, KcsFactory, ObjectFactory, ProgramLoader, Runtime, TaskObject, kind},
+    kcs::{Host, Interpreter, Program, ResourceServices, SharedMemory},
+    resource::ResourceMode,
+    runtime::{
+        BaseObject, ExportDestination, ExportServices, KcsFactory, ObjectFactory, ProgramLoader,
+        Runtime, TaskObject, kind,
+    },
     task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock},
 };
 use std::{cell::RefCell, rc::Rc};
+use std::{
+    io::Write,
+    sync::mpsc::{self, Receiver as ChannelReceiver, Sender},
+    time::{Duration, Instant},
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Event {
@@ -286,6 +295,243 @@ fn export_natives_route_ordered_paths_and_keep_status_results_without_files() ->
                 assert_eq!(resolutions, expected);
             }
         }
+    }
+    Ok(())
+}
+
+type ExportReads = Rc<RefCell<Vec<(Vec<u8>, ResourceMode)>>>;
+
+struct ExportResources {
+    bytes: Option<Vec<u8>>,
+    reads: ExportReads,
+}
+
+impl ResourceServices for ExportResources {
+    fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+        assert_eq!(category, b"export");
+        Ok(name.to_vec())
+    }
+
+    fn read(&mut self, path: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
+        self.reads.borrow_mut().push((path.to_vec(), mode));
+        Ok(self.bytes.take())
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum ExportEvent {
+    Selected(u32),
+    Directory(String),
+    File(String, Vec<u8>),
+    Done(std::result::Result<(), String>),
+}
+
+struct MemoryExport {
+    events: Sender<ExportEvent>,
+    destination: Option<MemoryDestination>,
+}
+
+impl ExportServices for MemoryExport {
+    fn select_destination(&mut self, id: u32) -> Result<Option<Box<dyn ExportDestination>>> {
+        self.events.send(ExportEvent::Selected(id)).unwrap();
+        Ok(self.destination.take().map(|dest| Box::new(dest) as _))
+    }
+
+    fn finished(&mut self, _: u32, result: Result<()>) {
+        self.events
+            .send(ExportEvent::Done(result.map_err(|error| error.message)))
+            .unwrap();
+    }
+}
+
+struct MemoryDestination {
+    events: Sender<ExportEvent>,
+    gate: Option<ChannelReceiver<()>>,
+}
+
+impl ExportDestination for MemoryDestination {
+    fn create_directory(&mut self, path: &[String]) -> Result<()> {
+        self.events
+            .send(ExportEvent::Directory(path.join("/")))
+            .unwrap();
+        if let Some(gate) = self.gate.take() {
+            gate.recv_timeout(Duration::from_secs(5))
+                .map_err(|e| Error::new(0, e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    fn write_file(&mut self, path: &[String], bytes: &[u8]) -> Result<()> {
+        self.events
+            .send(ExportEvent::File(path.join("/"), bytes.to_vec()))
+            .unwrap();
+        Ok(())
+    }
+}
+
+fn bundle_node(name: &[u8], contents: Option<&[u8]>) -> Vec<u8> {
+    let mut bytes = vec![0; 12 + 272];
+    bytes[12..16].copy_from_slice(&u32::from(contents.is_none()).to_le_bytes());
+    bytes[16..16 + name.len()].copy_from_slice(name);
+    if let Some(contents) = contents {
+        let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
+        encoder.write_all(contents).unwrap();
+        let packed = encoder.finish().unwrap();
+        bytes[276..280].copy_from_slice(&(packed.len() as u32).to_le_bytes());
+        bytes[280..284].copy_from_slice(&(contents.len() as u32).to_le_bytes());
+        bytes.extend(packed);
+        bytes.resize(bytes.len().next_multiple_of(4), 0);
+    }
+    let size = (bytes.len() - 12) as u32;
+    bytes[8..12].copy_from_slice(&size.to_le_bytes());
+    bytes
+}
+
+fn start_export(
+    native: u32,
+    bundle: Option<Vec<u8>>,
+    events: Sender<ExportEvent>,
+    destination: Option<MemoryDestination>,
+    budget: usize,
+) -> Result<(Runtime<KcsFactory<Programs>>, u32, u32)> {
+    let mut code = Vec::new();
+    let task = 1;
+    for (index, args) in [
+        (691, vec![task]),
+        (
+            native,
+            if native == 692 {
+                vec![task, 32, 48]
+            } else {
+                vec![task, 32]
+            },
+        ),
+        (691, vec![task]),
+        (690, vec![task, 48]),
+    ] {
+        for &arg in &args {
+            instruction(&mut code, 0x25, &[arg]);
+        }
+        instruction(&mut code, 0x2b, &[index, args.len() as u32 * 4]);
+    }
+    code.push(0x3b);
+    let mut data = vec![0; 128];
+    data[32..41].copy_from_slice(b"first.zt\0");
+    data[48..58].copy_from_slice(b"second.zt\0");
+    let factory = KcsFactory::new(Programs(Program::from_code(&code, data, 64)?));
+    let mut runtime = Runtime::new(
+        0,
+        kind::ROOT,
+        Box::new(BaseObject::new()),
+        State::new(0),
+        factory,
+    );
+    runtime.set_budget(budget, 4096);
+    let reads = Rc::new(RefCell::new(Vec::new()));
+    let expected_open = destination.is_some();
+    runtime.set_resources(ExportResources {
+        bytes: bundle,
+        reads: reads.clone(),
+    });
+    runtime.set_export_services(MemoryExport {
+        events,
+        destination,
+    });
+    assert_eq!(task, runtime.create(0, kind::EXPORT, b"export", b"")?);
+    let caller = runtime.create(0, kind::ORDINARY, b"caller", b"")?;
+    runtime.update(0, 1)?;
+    let reads = reads.borrow();
+    if expected_open {
+        assert_eq!(*reads, [(b"first.zt".to_vec(), ResourceMode::LooseFirst)]);
+    } else {
+        assert!(reads.is_empty());
+    }
+    Ok((runtime, task, caller))
+}
+
+fn wait_export(runtime: &mut Runtime<KcsFactory<Programs>>, task: u32) -> Result<()> {
+    let query = Command {
+        sender: 0,
+        target: task,
+        code: 517,
+        data: [0; 3],
+    };
+    let until = Instant::now() + Duration::from_secs(5);
+    while runtime.dispatch_command(0, query)? == 0 {
+        assert!(Instant::now() < until, "export did not finish");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    Ok(())
+}
+
+#[test]
+fn export_worker_uses_first_resource_and_polls_without_blocking() -> Result<()> {
+    let mut bundle = bundle_node(b"bonus", None);
+    let child = bundle_node(b"\x83\x5c.txt", Some(b"hello"));
+    let sibling = bundle_node(b"empty.txt", Some(b""));
+    let size = bundle.len() as u32;
+    bundle[0..4].copy_from_slice(&(size + child.len() as u32).to_le_bytes());
+    bundle[4..8].copy_from_slice(&size.to_le_bytes());
+    bundle.extend(child);
+    bundle.extend(sibling);
+
+    for budget in [1, 4096] {
+        let (events, receive) = mpsc::channel();
+        let (release, gate) = mpsc::channel();
+        let destination = MemoryDestination {
+            events: events.clone(),
+            gate: Some(gate),
+        };
+        let (mut runtime, task, caller) =
+            start_export(692, Some(bundle.clone()), events, Some(destination), budget)?;
+        let recv = || receive.recv_timeout(Duration::from_secs(5)).unwrap();
+        let vm = runtime.object(caller).unwrap().interpreter().unwrap();
+        assert_eq!(vm.stack_bytes(), [1, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(recv(), ExportEvent::Selected(task));
+        assert_eq!(recv(), ExportEvent::File("empty.txt".into(), Vec::new()));
+        assert_eq!(recv(), ExportEvent::Directory("bonus".into()));
+        release.send(()).unwrap();
+        wait_export(&mut runtime, task)?;
+        assert_eq!(
+            recv(),
+            ExportEvent::File("bonus/ソ.txt".into(), b"hello".to_vec())
+        );
+        assert_eq!(recv(), ExportEvent::Done(Ok(())));
+        assert!(receive.try_recv().is_err());
+    }
+    Ok(())
+}
+
+#[test]
+fn cancelled_or_invalid_exports_finish_without_writing_files() -> Result<()> {
+    let (events, receive) = mpsc::channel();
+    let (mut runtime, task, _) = start_export(690, None, events, None, 4096)?;
+    assert_eq!(receive.try_recv(), Ok(ExportEvent::Selected(task)));
+    wait_export(&mut runtime, task)?;
+    assert!(receive.try_recv().is_err());
+
+    let mut bad_link = bundle_node(b"file.txt", Some(b"content"));
+    bad_link[..4].copy_from_slice(&1u32.to_le_bytes());
+    let mut bad_length = bundle_node(b"file.txt", Some(b"content"));
+    bad_length[280..284].copy_from_slice(&1u32.to_le_bytes());
+    for (bundle, message) in [
+        (None, "找不到导出资源"),
+        (Some(bundle_node(b"..", Some(b"content"))), "路径组件"),
+        (Some(bad_link), "节点链接"),
+        (Some(bad_length), "Zlib"),
+    ] {
+        let (events, receive) = mpsc::channel();
+        let destination = MemoryDestination {
+            events: events.clone(),
+            gate: None,
+        };
+        let (mut runtime, task, _) = start_export(690, bundle, events, Some(destination), 4096)?;
+        wait_export(&mut runtime, task)?;
+        assert_eq!(receive.try_recv(), Ok(ExportEvent::Selected(task)));
+        assert!(
+            matches!(receive.try_recv(), Ok(ExportEvent::Done(Err(error))) if error.contains(message))
+        );
+        assert!(receive.try_recv().is_err());
     }
     Ok(())
 }

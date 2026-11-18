@@ -5,6 +5,7 @@ use crate::{Error, Result};
 #[derive(Default)]
 pub(super) struct Resources {
     pub services: Option<Box<dyn ResourceServices>>,
+    pub exports: Option<Box<dyn super::ExportServices>>,
     pub fonts: Option<Box<dyn crate::message::FontServices>>,
     pub images: Images,
     pub compositor: Compositor,

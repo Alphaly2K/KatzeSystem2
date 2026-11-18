@@ -19,6 +19,7 @@ mod cst;
 mod debug_window;
 mod emocon;
 mod export;
+pub use export::{ExportDestination, ExportServices};
 pub mod fes;
 pub use cst::CstContext;
 mod graphics;
@@ -74,6 +75,7 @@ pub mod kind {
     pub const RWIPE: u32 = 39;
     pub const SCROLL2: u32 = 41;
     pub const SLIDER: u32 = 42;
+    pub const EXPORT: u32 = 45;
     pub const STRING_PLANE: u32 = 48;
     pub const RENDER_WMOSAIC: u32 = 50;
     pub const RENDER_FMOSAIC: u32 = 51;
@@ -116,7 +118,7 @@ pub trait ProgramLoader {
     fn load(&mut self, name: &[u8]) -> Result<Option<Program>>;
 }
 
-/// 只创建普通 KCS 对象的工厂；其他类型由子系统提供的工厂接入。
+/// 创建普通 KCS 和脚本导出任务；其他类型由子系统工厂接入。
 pub struct KcsFactory<L> {
     pub programs: L,
     /// 新建普通任务与 FES 任务持有的共享外部区。
@@ -149,6 +151,9 @@ impl<L: ProgramLoader> ObjectFactory for KcsFactory<L> {
     }
 
     fn create(&mut self, id: u32, kind: u32, name: &[u8]) -> Result<Box<dyn TaskObject>> {
+        if kind == kind::EXPORT {
+            return Ok(Box::new(export::ExportObject::new(id)));
+        }
         if kind != kind::ORDINARY {
             return Err(Error::new(0, format!("对象类型 {kind} 需要对应子系统工厂")));
         }
@@ -385,6 +390,10 @@ impl<F: ObjectFactory> Runtime<F> {
 
     pub fn set_file_services(&mut self, services: impl crate::io::FileServices + 'static) {
         self.host.file_services = Some(Box::new(services));
+    }
+
+    pub fn set_export_services(&mut self, services: impl ExportServices + 'static) {
+        self.resources.exports = Some(Box::new(services));
     }
 
     pub fn set_configuration_services(
@@ -2326,6 +2335,13 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
 
     fn resource_services(&mut self) -> Option<&mut dyn crate::kcs::ResourceServices> {
         match &mut self.resources.services {
+            Some(services) => Some(services.as_mut()),
+            None => None,
+        }
+    }
+
+    fn export_services(&mut self) -> Option<&mut dyn ExportServices> {
+        match &mut self.resources.exports {
             Some(services) => Some(services.as_mut()),
             None => None,
         }
