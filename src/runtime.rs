@@ -41,6 +41,8 @@ mod image_pack;
 mod image_resources;
 mod object;
 mod ordinary;
+mod platform_job;
+pub use platform_job::{PlatformJob, PlatformJobRequest, PlatformJobServices};
 mod resources;
 mod root;
 mod save;
@@ -86,6 +88,8 @@ pub mod kind {
     pub const QUIZ_DEBUG: u32 = 53;
     pub const PFLIP: u32 = 57;
     pub const CFLIP: u32 = 58;
+    pub const PLATFORM_PLUGIN: u32 = 59;
+    pub const IMAGE_IMPORT: u32 = 60;
     pub const STRING_PLANE_UTF8: u32 = 63;
     pub const CAMERA_2D: u32 = 65;
     /// 粒子任务（`kcTaskParticle`）。
@@ -160,6 +164,9 @@ impl<L: ProgramLoader> ObjectFactory for KcsFactory<L> {
         }
         if kind == kind::QUIZ_DEBUG {
             return Ok(Box::new(debug_window::QuizDebugObject::default()));
+        }
+        if matches!(kind, kind::PLATFORM_PLUGIN | kind::IMAGE_IMPORT) {
+            return Ok(Box::new(platform_job::PlatformJobObject::new(id, kind)));
         }
         if kind != kind::ORDINARY {
             return Err(Error::new(0, format!("对象类型 {kind} 需要对应子系统工厂")));
@@ -402,6 +409,10 @@ impl<F: ObjectFactory> Runtime<F> {
 
     pub fn set_export_services(&mut self, services: impl ExportServices + 'static) {
         self.resources.exports = Some(Box::new(services));
+    }
+
+    pub fn set_platform_job_services(&mut self, services: impl PlatformJobServices + 'static) {
+        self.resources.platform_jobs = Some(Box::new(services));
     }
 
     pub fn set_configuration_services(
@@ -2380,6 +2391,13 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
             Some(services) => Some(services.as_mut()),
             None => None,
         }
+    }
+
+    fn platform_job_services(&mut self) -> Option<&mut dyn PlatformJobServices> {
+        self.resources
+            .platform_jobs
+            .as_deref_mut()
+            .map(|service| service as _)
     }
 
     fn movie_enabled(&self) -> bool {
