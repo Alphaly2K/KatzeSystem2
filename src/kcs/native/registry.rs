@@ -278,7 +278,7 @@ pub(crate) fn runtime(index: u32) -> RuntimeHandler {
         609 | 610 | 658 | 659 => RuntimeHandler::SharedNumbers,
         400 => RuntimeHandler::SoundLoop,
         156..=168 | 347..=349 | 569 | 587 | 602 | 603 | 903 => RuntimeHandler::SoundControl,
-        604 | 935 | 936 => RuntimeHandler::SoundLoad,
+        155 | 604 | 935 | 936 | 1070..=1073 => RuntimeHandler::SoundLoad,
         144..=148 | 150..=154 | 285 | 286 | 395 | 396 | 401 | 403 | 404 | 937 => {
             RuntimeHandler::Input
         }

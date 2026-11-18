@@ -112,10 +112,22 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         arguments: &[u8],
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
-        let arguments = read::range(arguments, 0, if index == 936 { 24 } else { 20 })?;
+        let arguments = read::range(
+            arguments,
+            0,
+            match index {
+                1070 => 12,
+                155 | 1071 => 16,
+                936 | 1073 => 24,
+                _ => 20,
+            },
+        )?;
         let sound = self.command_target(0, 35, [0; 3])?;
         let name = format_string(vm, read::u32_at(arguments, 8)?, 0)?;
         let name = terminated(&name);
+        if matches!(index, 1070..=1073) {
+            return self.load_speech_native(index, sound, arguments, name, vm.pc);
+        }
         if name.len() >= 260 {
             return Err(Error::new(vm.pc, "声音装载名称超过格式缓冲区容量"));
         }
@@ -131,14 +143,18 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         }
         let mut record = [0; 0x124];
         let channel = read::u32_at(arguments, 0)?;
-        let offset = if index == 935 { 0 } else { 4 };
+        let offset = if matches!(index, 155 | 935) { 0 } else { 4 };
         record[offset..offset + 4].copy_from_slice(&channel.to_le_bytes());
         record[12..12 + name.len()].copy_from_slice(name);
         record[0x110..0x114].copy_from_slice(&u32::from(channel & 0xffff_0000 == 0).to_le_bytes());
-        let (selector, frames, base) = if index == 935 {
+        let (selector, frames, base) = if matches!(index, 155 | 935) {
             (
                 read::u32_at(arguments, 12)?,
-                read::u32_at(arguments, 16)?,
+                if index == 155 {
+                    0
+                } else {
+                    read::u32_at(arguments, 16)?
+                },
                 180,
             )
         } else {
@@ -167,6 +183,53 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         let output = self.command_target_with_buffers(
             sound,
             base + selector - 1,
+            [0; 3],
+            &mut CommandBuffers {
+                data1: Some(&mut record),
+                ..Default::default()
+            },
+        )?;
+        Ok(NativeReturn::Value(output))
+    }
+
+    fn load_speech_native(
+        &mut self,
+        index: u32,
+        sound: u32,
+        arguments: &[u8],
+        text: &[u8],
+        pc: usize,
+    ) -> Result<NativeReturn> {
+        if text.len() >= 2048 {
+            return Err(Error::new(pc, "语音合成文字超过格式缓冲区容量"));
+        }
+        if !self.require_reachable(sound) {
+            return Err(Error::new(pc, "语音合成目标不可达"));
+        }
+        let grouped = matches!(index, 1071 | 1073);
+        let code = if !grouped {
+            225
+        } else if read::u32_at(arguments, 12)? != 0 {
+            226
+        } else {
+            227
+        };
+        let frames = match index {
+            1072 => read::u32_at(arguments, 16)?,
+            1073 => read::u32_at(arguments, 20)?,
+            _ => 0,
+        };
+        // 文本紧随固定字段，以 VM 字节传递，无需在记录中保存宿主指针。
+        let mut record = vec![0; 0x120];
+        let offset = if grouped { 4 } else { 0 };
+        record[offset..offset + 4].copy_from_slice(&arguments[..4]);
+        record[0x114..0x118]
+            .copy_from_slice(&((u64::from(frames) * 1000 / 60) as u32).to_le_bytes());
+        record.extend_from_slice(text);
+        record.push(0);
+        let output = self.command_target_with_buffers(
+            sound,
+            code,
             [0; 3],
             &mut CommandBuffers {
                 data1: Some(&mut record),

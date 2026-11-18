@@ -34,7 +34,7 @@ impl ProgramLoader for Source {
             instruction(&mut code, 0x2b, &[*index, args.len() as u32 * 4]);
             if matches!(
                 index,
-                160 | 162 | 165 | 349 | 569 | 587 | 604 | 903 | 935 | 936
+                155 | 160 | 162 | 165 | 349 | 569 | 587 | 604 | 903 | 935 | 936 | 1070..=1073
             ) {
                 instruction(&mut code, 0x26, &[256 + i as u32 * 4]);
             }
@@ -112,6 +112,8 @@ fn native_loads_preserve_unsigned_options_and_reach_all_four_group_variants() {
                 (936, vec![7, u32::MAX, address, 0, 1, 1]),
                 (936, vec![7, 0, address, 0, 2, 59]),
                 (935, vec![7, 0, 63, 1, 1]),
+                (155, vec![8, u32::MAX, address, 1]),
+                (155, vec![11, 0, address, 2]),
             ]);
             rt.set_budget(budget, 1 << 20);
             let mut point = [0; 48];
@@ -138,12 +140,12 @@ fn native_loads_preserve_unsigned_options_and_reach_all_four_group_variants() {
             assert!(vm.stack_bytes().is_empty());
             assert_eq!(vm.read(0, 4).unwrap(), 0xdeadbeefu32.to_le_bytes());
             let returned: Vec<_> = vm
-                .read(256, 28)
+                .read(256, 36)
                 .unwrap()
                 .chunks_exact(4)
                 .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
                 .collect();
-            assert_eq!(returned, [1, 1, 4, 10, 9, 9, 0]);
+            assert_eq!(returned, [1, 1, 4, 10, 9, 9, 0, 1, 1]);
             let sound = rt.object(1).unwrap().audio_state().unwrap();
             for (channel, options, loops) in [
                 (5, 1016, [1, 20]),
@@ -151,6 +153,8 @@ fn native_loads_preserve_unsigned_options_and_reach_all_four_group_variants() {
                 (4, (0x80000000u64 * 1000 / 60) as u32, [0, -1]),
                 (10, 1000, [0, -1]),
                 (9, 983, [1, 20]),
+                (8, 0, [1, 20]),
+                (11, 0, [0, -1]),
             ] {
                 let channel = sound.channel(channel).unwrap();
                 assert_eq!(channel.file(), name);
@@ -237,6 +241,7 @@ fn legacy_group_loads_replay_audio_without_adding_leading_silence() {
 #[test]
 fn native_loads_diagnose_uninitialized_results_and_short_arguments() {
     for (index, args, message) in [
+        (155, vec![5, 0, 64, 3], "选择器"),
         (935, vec![5, 0, 64, 0, 1], "选择器"),
         (936, vec![7, 0, 64, 1, 3, 1], "选择器"),
         (935, vec![5, 0, 64, 1], "范围"),
@@ -267,6 +272,8 @@ fn native_loads_diagnose_uninitialized_results_and_short_arguments() {
                     (569, vec![u32::MAX]),
                     (587, vec![64]),
                     (587, vec![u32::MAX]),
+                    (1070, vec![5, 0, 64]),
+                    (1072, vec![5, 0, 64, 0, u32::MAX]),
                 ],
             }),
         };
@@ -284,7 +291,34 @@ fn native_loads_diagnose_uninitialized_results_and_short_arguments() {
         let vm = rt.object(2).unwrap().interpreter().unwrap();
         assert!(vm.stack_bytes().is_empty());
         assert_eq!(vm.read(0, 4).unwrap(), 0xdeadbeefu32.to_le_bytes());
-        assert_eq!(vm.read(256, 12).unwrap(), [0; 12]);
+        assert_eq!(vm.read(256, 20).unwrap(), [0; 20]);
+    }
+}
+
+#[test]
+fn speech_load_reports_disabled_groups_and_missing_synthesizer_distinctly() {
+    for budget in [1, 4096] {
+        let mut rt = setup(vec![
+            (1071, vec![5, u32::MAX, 64, 1]),
+            (1073, vec![5, 0, 0x8000_0040, 0, 0, u32::MAX]),
+        ]);
+        rt.set_budget(budget, 1 << 20);
+        rt.update(0, 0).unwrap();
+        let vm = rt.object(2).unwrap().interpreter().unwrap();
+        assert_eq!(vm.read(256, 8).unwrap(), [0xff; 8]);
+        assert_eq!(vm.read(0, 4).unwrap(), 0xdeadbeefu32.to_le_bytes());
+        assert!(vm.stack_bytes().is_empty());
+    }
+
+    for (jtalk_enabled, expected) in [(0, "未定义返回值"), (1, "宿主未提供语音合成")]
+    {
+        let mut rt = setup(vec![(1070, vec![5, 0, 64])]);
+        rt.host_mut().system_settings = Some(katze_system2::settings::SystemSettings {
+            jtalk_enabled,
+            ..Default::default()
+        });
+        let error = rt.update(0, 0).unwrap_err();
+        assert!(error.message.contains(expected), "{error}");
     }
 }
 

@@ -126,6 +126,16 @@ impl TaskObject for SoundObject {
                     .load(bytes, host.resource_services(), output, command.code)?;
                 return Ok(CommandOutcome::finished(false));
             }
+            225..=227 => {
+                if host.jtalk_enabled() != 0 {
+                    return Err(Error::new(0, "宿主未提供语音合成"));
+                }
+                if command.code == 225 {
+                    return Err(Error::new(0, "语音合成关闭时直接装载未定义返回值"));
+                }
+                *output = u32::MAX;
+                return Ok(CommandOutcome::finished(false));
+            }
             210 => {
                 let name = buffers
                     .data1

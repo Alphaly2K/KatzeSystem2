@@ -121,7 +121,7 @@ impl TaskObject for Receiver {
         if command.code != 35
             && !(182..=194).contains(&command.code)
             && !(196..=198).contains(&command.code)
-            && !matches!(command.code, 201 | 202 | 204 | 205)
+            && !matches!(command.code, 201 | 202 | 204 | 205 | 225..=227)
         {
             return self.0.dispatch_command(kind, command, output, host, budget);
         }
@@ -290,6 +290,56 @@ fn control_wrappers_route_words_and_raw_float_buffers_without_changing_sources()
                 assert_eq!(vm.read(0, 1024).unwrap(), vec![0x5a; 1024]);
                 assert_eq!(vm.read(0x80000000, 512).unwrap(), vec![0x6b; 512]);
             }
+        }
+    }
+}
+
+#[test]
+fn speech_load_routes_formatted_bytes_and_unsigned_delay_without_a_resource_lookup() {
+    for (index, selector, code, milliseconds) in [
+        (1070, 0, 225, 0u32),
+        (1071, 1, 226, 0),
+        (1072, 0, 225, 0xaaaa_aa9a),
+        (1073, 0, 227, 0xaaaa_aa9a),
+    ] {
+        for budget in [1, 4096] {
+            let channel = 0x8123_4567u32;
+            let (mut rt, trace) = setup(
+                program(
+                    index,
+                    &arguments(&[channel, 99, 0x8000_0040, selector, u32::MAX, u32::MAX]),
+                ),
+                0x8765_4321,
+            );
+            let vm = rt.object_mut(2).unwrap().interpreter_mut().unwrap();
+            vm.write(0x8000_0040, b"\x82\xa0%u[G8]\0").unwrap();
+            vm.write(8, &37u32.to_le_bytes()).unwrap();
+            rt.set_budget(budget, 4096);
+            rt.update(0, 0).unwrap();
+
+            let mut expected = vec![0; 288];
+            let offset = if code == 225 { 0 } else { 4 };
+            expected[offset..offset + 4].copy_from_slice(&channel.to_le_bytes());
+            expected[276..280].copy_from_slice(&milliseconds.to_le_bytes());
+            expected.extend_from_slice(b"\x82\xa037\0");
+            let trace = trace.borrow();
+            assert_eq!(trace.events.len(), 2);
+            assert_eq!(trace.events[0].0.code, 35);
+            assert_eq!(
+                trace.events[1],
+                Event(
+                    Command {
+                        target: 1,
+                        sender: 2,
+                        code,
+                        data: [0; 3]
+                    },
+                    expected
+                )
+            );
+            let vm = rt.object(2).unwrap().interpreter().unwrap();
+            assert_eq!(vm.stack_bytes(), arguments(&[0xdead_beef, 0x8765_4321]));
+            assert_eq!(vm.read(0x8000_0040, 9).unwrap(), b"\x82\xa0%u[G8]\0");
         }
     }
 }
