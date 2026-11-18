@@ -268,6 +268,110 @@ fn ins(code: &mut Vec<u8>, op: u8, args: &[u32]) {
     }
 }
 
+#[test]
+fn ordinary_canvas_triangles_unpack_shared_records_and_render_the_canvas() -> Result<()> {
+    struct Script(Program);
+    impl ProgramLoader for Script {
+        fn load(&mut self, _: &[u8]) -> Result<Option<Program>> {
+            Ok(Some(self.0.clone()))
+        }
+    }
+
+    let mut external = vec![0x5a; 3];
+    for words in [
+        [
+            0., 0., 2., 2., 0., 0., 2., 0., 0., 0., 0., 1., 1., 0., 0., 1.,
+        ],
+        [
+            0., 0., 2., 0., 0., 2., 2., 0., 0., 0., 0., 1., 0., 0., 1., 1.,
+        ],
+    ] {
+        for value in words {
+            external.extend(f32::to_bits(value).to_le_bytes());
+        }
+    }
+    for budget in [1, 4096] {
+        let mut code = Vec::new();
+        for args in [&[0u32][..], &[1, 0x8000_0003, 2]] {
+            ins(&mut code, 0x25, &[0x1234_abcd]);
+            for &value in args {
+                ins(&mut code, 0x25, &[value]);
+            }
+            ins(&mut code, 0x2b, &[467, (args.len() * 4) as u32]);
+            ins(&mut code, 0x26, &[if args.len() == 1 { 0 } else { 4 }]);
+        }
+        ins(&mut code, 0x2b, &[65, 0]);
+        for n in [1, u32::MAX, 0] {
+            ins(&mut code, 0x25, &[n]);
+        }
+        ins(&mut code, 0x2b, &[467, 12]);
+        ins(&mut code, 0x3b, &[]);
+        let mut factory = KcsFactory::new(Script(Program::from_code(&code, vec![0; 8], 64)?));
+        factory.external = katze_system2::memory::SharedMemory::new(external.clone())?;
+        let mut runtime = Runtime::new(
+            0,
+            kind::ROOT,
+            Box::new(BaseObject::new()),
+            State::new(0),
+            GraphicsFactory { fallback: factory },
+        );
+        runtime.set_budget(budget, 4096);
+        let plane = runtime.create(0, kind::PLANE, b"plane", b"")?;
+        assert_eq!(plane, 1);
+        let mut tile = Surface::new([2, 2])?;
+        tile.clear(0xff123456);
+        let texture = RenderTarget::from_tiles([2, 2], [1, 1], vec![Some(tile)])?;
+        *runtime.drawing_mut() = DrawingContext {
+            mode: 0,
+            enabled: true,
+            active: true,
+            target: Some(texture),
+        };
+        let script = runtime.create(0, kind::ORDINARY, b"submit", b"")?;
+        runtime.update(0, 1)?;
+        let vm = runtime.object(script).unwrap().interpreter().unwrap();
+        assert!(vm.stack_bytes().is_empty());
+        assert_eq!(vm.read(0, 8)?, [0x1234_abcdu32.to_le_bytes(); 2].concat());
+        assert_eq!(vm.read(0x8000_0000, external.len())?, external);
+        let expected = Drawable::from_canvas(&rectangle(0, 2.), 2)?;
+        let actual = runtime
+            .drawables()
+            .get(plane)
+            .unwrap()
+            .canvas_triangles()
+            .unwrap();
+        for (index, (actual, expected)) in actual
+            .iter()
+            .zip(expected.canvas_triangles().unwrap())
+            .enumerate()
+        {
+            assert_eq!((actual.tag, actual.tile), (index as u32, 0));
+            assert_eq!(
+                actual.vertices.map(|vertex| vertex.position),
+                expected.vertices.map(|vertex| vertex.position)
+            );
+            assert_eq!(actual.uv, expected.uv);
+        }
+        assert_eq!(actual.len(), 2);
+        runtime.drawables_mut().set_display(plane, 1);
+        let mut output = RenderTarget::new([2, 2])?;
+        runtime.render_frame(
+            &mut output,
+            &Projection::default(),
+            IDENTITY,
+            TextureFilter::Point,
+        )?;
+        assert_eq!(output.pixel(1, 1), Some(0xff123456));
+
+        runtime.update(1, 1)?;
+        assert_eq!(
+            runtime.drawables().get(plane).unwrap().canvas_triangles(),
+            Some(&[][..])
+        );
+    }
+    Ok(())
+}
+
 struct Programs {
     canvas_rectangle: bool,
 }

@@ -224,7 +224,8 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             339 => 24,
             84 | 87 | 93 | 101 | 345 | 433 | 862 => 20,
             85 | 86 | 90 => 16,
-            96 | 100 | 256 | 260 | 263 | 343 | 344 | 346 | 463 | 625 | 654 | 663 | 879 | 881 => 12,
+            96 | 100 | 256 | 260 | 263 | 343 | 344 | 346 | 463 | 467 | 625 | 654 | 663 | 879
+            | 881 => 12,
             104 => 28,
             257 | 259 | 622..=623 | 707..=708 | 731..=732 => 52,
             _ => unreachable!(),
@@ -253,6 +254,39 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         }
         let word = |i: usize| u32::from_le_bytes(arguments[i * 4..i * 4 + 4].try_into().unwrap());
         match index {
+            467 => {
+                let count = word(2) as usize;
+                if count > read::MAX_BYTES / 80 {
+                    return Err(Error::new(vm.pc, "画布三角形数量超过上限"));
+                }
+                let mut records = Vec::new();
+                if count != 0 {
+                    let source = vm.read(word(1), count * 64)?;
+                    records.resize(count * 80, 0xff);
+                    for (index, (source, record)) in source
+                        .chunks_exact(64)
+                        .zip(records.chunks_exact_mut(80))
+                        .enumerate()
+                    {
+                        record[..4].copy_from_slice(&(index as u32).to_le_bytes());
+                        // 原包装未初始化顶点颜色；用白色保持纹理本色。
+                        const SLOTS: [usize; 16] =
+                            [1, 2, 8, 14, 3, 9, 15, 4, 10, 16, 6, 12, 18, 7, 13, 19];
+                        for (word, slot) in source.chunks_exact(4).zip(SLOTS) {
+                            record[slot * 4..slot * 4 + 4].copy_from_slice(word);
+                        }
+                    }
+                }
+                self.command_target_with_buffers(
+                    target,
+                    83,
+                    [count as u32, 0, 0],
+                    &mut CommandBuffers {
+                        data1: Some(&mut records),
+                        ..CommandBuffers::default()
+                    },
+                )?;
+            }
             433 => {
                 let mut record = [0; 40];
                 record[12..20].copy_from_slice(&arguments[4..12]);
