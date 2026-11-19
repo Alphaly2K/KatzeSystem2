@@ -3,9 +3,10 @@ use katze_system2::{
     expression::State,
     fes,
     graphics::{
-        GraphicsFactory, ImageList, ImageListProperties, ImageListTransform, Images, Projection,
-        RenderTarget, Surface, TextureFilter, Transform,
+        GraphicsFactory, Image, ImageList, ImageListProperties, ImageListTransform, Images,
+        Projection, RenderTarget, Surface, TextureFilter, Transform,
     },
+    hg3::{DecodedFrame, StandardInfo},
     kcs::Program,
     runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, fes::Objects, kind},
 };
@@ -237,6 +238,70 @@ fn affine_list_matches_reference_pixels_and_clears_previous_bounds() -> Result<(
     list.remove(0, &mut images)?;
     list.update(&mut images)?;
     assert!(points(&images, &list)?.is_empty());
+    Ok(())
+}
+
+#[test]
+fn affine_list_skips_channel_masks_and_rgb24_sources() -> Result<()> {
+    let mut images = Images::default();
+    let background = images.create(1, [16, 12])?;
+    let background_color = 0xc113_0b07u32.to_le_bytes().repeat(16 * 12);
+    images
+        .get_mut(background)?
+        .pixels_mut()
+        .copy_from_slice(&background_color);
+    let pixels = [
+        0xff4c_2183u32,
+        0x3cc9_50ad,
+        0xffb5_0c21,
+        0xe9b3_7953,
+        0x8080_ff14,
+        0xfe7c_ef1b,
+    ];
+    let bgra = images.create(1, [3, 2])?;
+    images
+        .get_mut(bgra)?
+        .pixels_mut()
+        .copy_from_slice(&pixels.map(u32::to_le_bytes).concat());
+    let rgb = images.create(1, [3, 2])?;
+    *images.get_mut(rgb)? = Image::from_frame(DecodedFrame {
+        id: 0,
+        info: StandardInfo {
+            size: [3, 2],
+            bit_depth: 24,
+            offset: [0; 2],
+            canvas_size: [3, 2],
+            reserved: 0,
+            base: [0; 2],
+        },
+        pixels: pixels
+            .map(|pixel| (pixel | 0xff00_0000).to_le_bytes())
+            .concat(),
+        attributes: Default::default(),
+    })?;
+    images.get_mut(rgb)?.set_alpha_mask(3)?;
+    let mut list = ImageList::new(2, [16, 12], &mut images)?;
+    list.set(0, background, ImageListProperties::default(), &mut images)?;
+    let affine = ImageListProperties {
+        position: [6.75, 5.5],
+        base_point: [0.5, 1.75],
+        opacity: 128,
+        transform: Some(ImageListTransform {
+            rotation: 0.45,
+            scale: [1.3, 0.7],
+        }),
+        ..Default::default()
+    };
+    let key = 1 << 16;
+    for (source, mask) in [(bgra, 0), (bgra, 1), (bgra, 4), (rgb, 0), (rgb, 3)] {
+        images.get_mut(source)?.set_alpha_mask(mask)?;
+        list.set(key, source, affine, &mut images)?;
+        list.update(&mut images)?;
+        assert_eq!(
+            images.get(list.image())?.surface().pixels() == background_color,
+            source == rgb || mask != 0
+        );
+    }
     Ok(())
 }
 

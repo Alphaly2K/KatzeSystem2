@@ -1199,10 +1199,14 @@ impl Images {
         let geometry = source.1;
         let source_data = self.entry_mut(source.0)?.data;
         let target_data = self.entry_mut(target)?.data;
-        self.pixel_image(source_data)?;
+        let source_image = self.pixel_image(source_data)?;
         self.pixel_image(target_data)?;
         if source_data == target_data {
             return Err(Error::new(0, "图像列表自有图像不能同时用作绘制来源"));
+        }
+        // The affine dispatcher writes no pixels for RGB24 or a channel mask.
+        if source_image.is_rgb() || source_image.alpha_mask != 0 {
+            return Ok(());
         }
         let image = self.data.remove(&source_data).unwrap();
         let source = &image.image;

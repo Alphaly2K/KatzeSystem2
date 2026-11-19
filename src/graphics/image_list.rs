@@ -105,20 +105,18 @@ impl Entry {
             return Ok(Rect::default());
         }
         if let Some(transform) = self.properties.transform {
-            let image = images.get(self.image)?;
-            if !image.is_rgb() && image.alpha_mask() == 0 {
-                let geometry = self
-                    .resource_geometry
-                    .unwrap_or_else(|| ResourceGeometry::from_image(image));
-                return Ok(Affine::new(
-                    transform,
-                    self.properties.position,
-                    base,
-                    geometry.offset,
-                    geometry.size,
-                )
-                .dirty_bounds());
-            }
+            let geometry = match self.resource_geometry {
+                Some(geometry) => geometry,
+                None => ResourceGeometry::from_image(images.get(self.image)?),
+            };
+            return Ok(Affine::new(
+                transform,
+                self.properties.position,
+                base,
+                geometry.offset,
+                geometry.size,
+            )
+            .dirty_bounds());
         }
         self.resource_geometry.map_or_else(
             || images.list_bounds(self.image, self.properties.position, base),
@@ -873,21 +871,15 @@ impl ImageList {
                     else {
                         continue;
                     };
-                    let image = images.get(entry.image)?;
-                    if !image.is_rgb() && image.alpha_mask() == 0 {
-                        images.draw_transformed_list_entry(
-                            self.image,
-                            (entry.image, entry.resource_geometry),
-                            entry.properties,
-                            transform,
-                            display.blend as u32,
-                            affine_clip,
-                        )?;
-                        continue;
-                    }
-                    if !transform.is_identity() {
-                        return Err(Error::new(0, "图像列表尚不支持该来源的非单位变换"));
-                    }
+                    images.draw_transformed_list_entry(
+                        self.image,
+                        (entry.image, entry.resource_geometry),
+                        entry.properties,
+                        transform,
+                        display.blend as u32,
+                        affine_clip,
+                    )?;
+                    continue;
                 }
                 for clip in updates.clone() {
                     let Some(clip) = clip.intersect(entry.clip) else {

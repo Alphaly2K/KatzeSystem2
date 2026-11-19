@@ -10,12 +10,6 @@ pub struct ImageListTransform {
     pub scale: [f32; 2],
 }
 
-impl ImageListTransform {
-    pub(in crate::graphics) fn is_identity(self) -> bool {
-        self.rotation == 0. && self.scale == [1.; 2]
-    }
-}
-
 pub(in crate::graphics) struct Affine {
     forward: [i32; 4],
     origin: [f32; 2],
