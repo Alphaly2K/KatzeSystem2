@@ -192,6 +192,15 @@ fn movie_natives_play_present_finish_and_release_through_runtime_services() {
         }
         call(&mut code, 788, &[8, 8, 16, 16], true);
         call(&mut code, 65, &[], false);
+        instruction(&mut code, 0x25, &[0x1234_5678]);
+        call(&mut code, 996, &[0, 0], false);
+        call(&mut code, 996, &[0], true);
+        instruction(&mut code, 0x26, &[28]);
+        call(&mut code, 269, &[], true);
+        instruction(&mut code, 0x26, &[32]);
+        call(&mut code, 65, &[], false);
+        call(&mut code, 996, &[u32::MAX], true);
+        call(&mut code, 65, &[], false);
         call(&mut code, 269, &[], true);
         instruction(&mut code, 0x26, &[16]);
         instruction(&mut code, 0x25, &[0xdead_beef]);
@@ -239,6 +248,11 @@ fn movie_natives_play_present_finish_and_release_through_runtime_services() {
         let surface = software.tiles()[0].as_ref().unwrap();
         assert_eq!(surface.pixel(0, 0), Some(0xff00_0000));
         assert_ne!(surface.pixel(16, 16), Some(0xff00_0000));
+        runtime.update(1, 1).unwrap();
+        assert_eq!(word(&runtime, 28), 0x1234_5678);
+        assert_eq!(word(&runtime, 32), 1);
+        assert!(!runtime.drawing().enabled);
+        assert_eq!(runtime.compose_frame().unwrap().commands.len(), 2);
         let mut audio = vec![0.; 2 * 9000];
         runtime
             .object_mut(1)
@@ -248,11 +262,13 @@ fn movie_natives_play_present_finish_and_release_through_runtime_services() {
             .mix_stereo(48000, &mut audio)
             .unwrap();
         assert!(audio.iter().any(|&sample| sample.abs() > 0.01));
-        runtime.update(1, 1).unwrap();
+        runtime.update(2, 1).unwrap();
+        assert_eq!(runtime.compose_frame().unwrap().commands.len(), 4);
+        runtime.update(3, 1).unwrap();
         assert_eq!(word(&runtime, 16), 0);
         assert!(runtime.drawing().enabled);
         assert!(runtime.compose_frame().unwrap().commands.is_empty());
-        runtime.update(2, 1).unwrap();
+        runtime.update(4, 1).unwrap();
         assert_eq!(word(&runtime, 20), 1);
         assert_eq!(word(&runtime, 24), 0xdead_beef);
         assert!(runtime.drawing().enabled);
@@ -492,6 +508,10 @@ fn plane_movie_handles_play_transform_mix_and_release_independently() {
         stored(&mut code, 998, 0, &[]);
         instruction(&mut code, 0x26, &[40]);
         call(&mut code, 65, &[], false);
+        stored(&mut code, 996, 0, &[0]);
+        call(&mut code, 65, &[], false);
+        stored(&mut code, 996, 0, &[1]);
+        call(&mut code, 65, &[], false);
         stored(&mut code, 267, 0, &[]);
         instruction(&mut code, 0x26, &[24]);
         call(&mut code, 83, &[3], false);
@@ -567,13 +587,16 @@ fn plane_movie_handles_play_transform_mix_and_release_independently() {
         assert_eq!(drawn.tiles(), direct.tiles());
         assert_eq!(drawn.tiles()[0].as_ref().unwrap().pixel(0, 0), Some(0));
         assert_ne!(drawn.tiles()[0].as_ref().unwrap().pixel(8, 8), Some(0));
-        for (stage, volume) in [(0, 70), (1, 50), (2, 15)] {
+        for (stage, volume, commands) in
+            [(0, 70, 4), (1, 70, 2), (2, 70, 4), (3, 50, 2), (4, 15, 0)]
+        {
             if stage != 0 {
                 runtime.update(stage, 1).unwrap();
-                assert_eq!(
-                    runtime.compose_frame().unwrap().commands.len(),
-                    if stage == 1 { 2 } else { 0 }
-                );
+                let frame = runtime.compose_frame().unwrap();
+                assert_eq!(frame.commands.len(), commands);
+                if stage == 1 {
+                    assert_eq!(&frame.commands[0].vertices[0].position[..2], &[17., 4.]);
+                }
             }
             reference.set_volume(volume);
             let mut expected = [0.; 2048];

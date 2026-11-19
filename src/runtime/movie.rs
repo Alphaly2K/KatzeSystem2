@@ -12,6 +12,7 @@ pub(super) struct Movie {
     frame: Option<Arc<Surface>>,
     rectangle: Option<Rect>,
     exclusive: bool,
+    visible: bool,
     pub surface_size: [u32; 2],
     tick: u32,
     owner: Option<(u32, bool)>,
@@ -38,7 +39,7 @@ impl Movie {
             filter,
         };
         output.push_screen_quad(bounds, None, 0xff00_0000, None);
-        if let Some(frame) = &self.frame {
+        if let Some(frame) = self.frame.as_ref().filter(|_| self.visible) {
             output.push_screen_quad(
                 self.rectangle.unwrap_or_else(|| {
                     Rect::from_xywh(
@@ -72,9 +73,11 @@ impl Resources {
         for movie in self.plane_movies.values_mut() {
             if let Some(frame) = movie.player.take_video()? {
                 let frame = Arc::new(frame.surface);
-                self.compositor
-                    .drawables
-                    .set_image(movie.owner.unwrap().0, Some(frame.clone()));
+                if movie.visible {
+                    self.compositor
+                        .drawables
+                        .set_image(movie.owner.unwrap().0, Some(frame.clone()));
+                }
                 movie.frame = Some(frame);
             }
         }
@@ -144,7 +147,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
         let count = match index {
-            266 | 417 | 997 => 8,
+            266 | 417 | 996 | 997 => 8,
             788 => 20,
             _ => 4,
         };
@@ -237,6 +240,17 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                 ));
                 0
             }
+            996 => {
+                let visible = read::u32_at(arguments, 4)? != 0;
+                if visible != movie.visible {
+                    movie.visible = visible;
+                    if let Some((owner, _)) = movie.owner {
+                        let frame = if visible { movie.frame.clone() } else { None };
+                        self.resources.compositor.drawables.set_image(owner, frame);
+                    }
+                }
+                0
+            }
             997 => {
                 let normal = read::u32_at(arguments, 4)? != 0;
                 movie.exclusive = !normal;
@@ -302,6 +316,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                 frame: None,
                 rectangle: None,
                 exclusive: false,
+                visible: true,
                 surface_size: self.host.surface_size,
                 tick: self.host.system_time_ms,
                 owner: Some((owner, effect)),
@@ -353,6 +368,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                 frame: None,
                 rectangle: None,
                 exclusive: true,
+                visible: true,
                 surface_size: self.host.surface_size,
                 tick: self.host.system_time_ms,
                 owner: None,
