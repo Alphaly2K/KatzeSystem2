@@ -1,18 +1,3 @@
-use chrono::{Datelike, Timelike};
-
-pub(super) fn local_time() -> [u16; 7] {
-    let now = chrono::Local::now();
-    [
-        now.year() as u16,
-        now.month() as u16,
-        now.weekday().num_days_from_sunday() as u16,
-        now.day() as u16,
-        now.hour() as u16,
-        now.minute() as u16,
-        now.second() as u16,
-    ]
-}
-
 pub(super) fn day_of_week(year: i32, month: i32, day: i32) -> i32 {
     let (year, month) = if month > 2 {
         (year, month.wrapping_add(1))

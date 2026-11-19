@@ -1,8 +1,12 @@
 use katze_system2::{
     Result,
-    io::{FileSource, ReadSource, SourceReader},
+    io::{ReadSource, SourceReader},
 };
 use std::io::{Read, Seek, SeekFrom, Write};
+
+#[path = "../examples/support/file_source.rs"]
+mod file_source;
+use file_source::FileSource;
 
 struct Chunked(&'static [u8]);
 impl ReadSource for Chunked {

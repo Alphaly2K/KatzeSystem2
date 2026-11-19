@@ -1,8 +1,25 @@
 use super::{Host, Interpreter, NativeReturn, TaskClock, strings};
 use crate::{Error, Result};
 
+/// 宿主本地的民用日期与时间；星期从周日（0）开始。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LocalDateTime {
+    pub year: u16,
+    pub month: u16,
+    pub weekday: u16,
+    pub day: u16,
+    pub hour: u16,
+    pub minute: u16,
+    pub second: u16,
+}
+
 /// 普通脚本使用的同步平台服务。
 pub trait SystemServices {
+    /// 读取当地日期和时间。未提供该能力时返回 None。
+    fn local_date_time(&mut self) -> Option<LocalDateTime> {
+        None
+    }
+
     /// 按系统 open 操作提交请求；平台返回的启动结果不参与 VM 返回值。
     fn open(
         &mut self,
@@ -19,6 +36,33 @@ pub trait SystemServices {
     fn message_box(&mut self, _task_id: u32, _text: &[u16]) -> Result<()> {
         Err(Error::new(0, "系统对话框服务尚未接入"))
     }
+}
+
+pub(super) fn local_date_time(
+    services: Option<&mut dyn SystemServices>,
+    arguments: &[u8],
+    vm: &mut Interpreter,
+) -> Result<NativeReturn> {
+    let addresses = super::native::words(arguments, 7, vm.pc)?;
+    for &address in &addresses {
+        vm.read(address, 4)?;
+    }
+    let date = services
+        .and_then(SystemServices::local_date_time)
+        .ok_or_else(|| Error::new(vm.pc, "宿主未提供本地日期时间"))?;
+    let fields = [
+        date.year,
+        date.month,
+        date.weekday,
+        date.day,
+        date.hour,
+        date.minute,
+        date.second,
+    ];
+    for (address, value) in addresses.into_iter().zip(fields) {
+        vm.write(address, &u32::from(value).to_le_bytes())?;
+    }
+    Ok(NativeReturn::Continue)
 }
 
 pub(super) fn message_box(
@@ -304,6 +348,9 @@ impl<H: Host, S: SystemServices> Host for SystemHost<'_, H, S> {
     }
 
     fn call(&mut self, index: u32, arguments: &[u8], vm: &mut Interpreter) -> Result<NativeReturn> {
+        if index == 11 {
+            return local_date_time(Some(self.services), arguments, vm);
+        }
         if index == 445 {
             return message_box(Some(self.services), self.task_id, arguments, vm);
         }

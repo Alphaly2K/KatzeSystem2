@@ -160,7 +160,7 @@ XML 路径及字段名称区分大小写，类别标识查询忽略 ASCII 大小
 
 `ResourceServices::open(name, mode)` 返回可选的 `io::SharedSource`，名称及模式沿用 `read`，缺失与读取失败分别返回 `Ok(None)` 和诊断。默认实现持有 `read` 返回的字节；宿主可覆盖以提供独立文件或其他存储源，可变引用包装转发该实现。`CachedResources` 优先使用已预读的字节，未命中时调用内部服务的 `open`；已打开的源在缓存淘汰后继续有效。声音装载通过该入口取得源，解码仍同步执行。
 
-`io::ReadSource: Send + Sync` 提供 `len`、`is_empty`、`read_at(offset, output)` 及 `read_exact_at`。偏移不改变其他读取者的位置，允许短读，到达末尾返回零；完整读取遇到提前结束返回诊断，并保留已写入的前缀。源实现负责保证并发读取安全，读取期间内容须保持一致。`[u8]`、`Vec<u8>` 可直接作为源，`SharedSource` 为共享源句柄；`FileSource::open(path)` 提供普通文件源，在打开时拒绝目录，调用方须避免读取期间外部修改文件。
+`io::ReadSource: Send + Sync` 提供 `len`、`is_empty`、`read_at(offset, output)` 及 `read_exact_at`。偏移不改变其他读取者的位置，允许短读，到达末尾返回零；完整读取遇到提前结束返回诊断，并保留已写入的前缀。源实现负责保证并发读取安全，读取期间内容须保持一致。`[u8]`、`Vec<u8>` 可直接作为源，`SharedSource` 为共享源句柄。宿主负责打开文件或其他存储来源；启动示例提供本地文件的 `ReadSource` 实现。
 
 `KifEntrySource::new(source, offset, length, key)` 将共享归档源映射为独立条目。offset 是归档内起点，length 是条目长度；key 为既有目录长度种子生成的密钥 DWORD，未加密时传 None。创建检查完整范围，读取偏移相对于条目，不改变其他条目或读取者的位置。加密块对齐到条目起点，末尾不足八字节保留原值；单次加密 `read_at` 最多返回 32 KiB，`read_exact_at` 可读取更大范围。批量读取失败时按普通分块重新读取，保留成功解密的前缀。输出尾部保持不变，读取无需持有完整归档或条目字节。
 

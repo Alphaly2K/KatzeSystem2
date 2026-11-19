@@ -1,8 +1,16 @@
-use katze_system2::{Result, kcs::SystemServices};
+use crate::support::local_date_time;
+use katze_system2::{
+    Result,
+    kcs::{LocalDateTime, SystemServices},
+};
 
 pub struct Output;
 
 impl SystemServices for Output {
+    fn local_date_time(&mut self) -> Option<LocalDateTime> {
+        Some(local_date_time())
+    }
+
     fn message_box(&mut self, task_id: u32, text: &[u16]) -> Result<()> {
         if let Err(error) = sdl2::messagebox::show_simple_message_box(
             sdl2::messagebox::MessageBoxFlag::empty(),

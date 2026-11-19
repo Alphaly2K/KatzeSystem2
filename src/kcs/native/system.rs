@@ -13,6 +13,15 @@ pub(super) fn call(
     arguments: &[u8],
     vm: &mut Interpreter,
 ) -> Result<NativeReturn> {
+    if index == 11 {
+        return super::super::system_host::local_date_time(
+            host.system_services
+                .as_deref_mut()
+                .map(|services| services as _),
+            arguments,
+            vm,
+        );
+    }
     if index == 1074 {
         super::words(arguments, 0, vm.pc)?;
         if vm.ordinary_increment.is_none() {
@@ -128,7 +137,6 @@ pub(super) fn call(
         return Ok(NativeReturn::YieldVoid);
     }
     let count = match index {
-        11 => 7,
         1 | 6 | 9 | 10 | 71 | 75 | 209 | 210 | 212 | 213 | 393 | 658 | 1039 | 1040 => 1,
         8 | 149 | 211 | 392 | 659 | 1049 => 2,
         787 => 4,
@@ -137,18 +145,6 @@ pub(super) fn call(
     };
     let args = super::words(arguments, count, vm.pc)?;
     Ok(match index {
-        11 => {
-            for &address in &args {
-                vm.read(address, 4)?;
-            }
-            let time = host
-                .local_time
-                .unwrap_or_else(super::super::calendar::local_time);
-            for (&address, value) in args.iter().zip(time) {
-                vm.write(address, &u32::from(value).to_le_bytes())?;
-            }
-            NativeReturn::Continue
-        }
         787 => {
             for address in &args {
                 vm.read(*address, 4)?;

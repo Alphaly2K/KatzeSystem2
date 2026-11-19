@@ -41,7 +41,7 @@
 |version_check|0.9.5|MIT|[许可](licenses/version_check-0.9.5/LICENSE-MIT)|
 |android_system_properties|0.1.6|MIT|[许可](licenses/android_system_properties-0.1.6/LICENSE-MIT)|
 |autocfg|1.5.1|MIT|[许可](licenses/autocfg-1.5.1/LICENSE-MIT)|
-|chrono|0.4.42|MIT|[许可](licenses/chrono-0.4.42/LICENSE.txt)|
+|chrono（示例）|0.4.42|MIT|[许可](licenses/chrono-0.4.42/LICENSE.txt)|
 |iana-time-zone|0.1.65|MIT|[许可](licenses/iana-time-zone-0.1.65/LICENSE-MIT)|
 |iana-time-zone-haiku|0.1.2|MIT|[许可](licenses/iana-time-zone-haiku-0.1.2/LICENSE-MIT)|
 |num-traits|0.2.19|MIT|[许可](licenses/num-traits-0.2.19/LICENSE-MIT)|

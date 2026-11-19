@@ -1,8 +1,29 @@
 use katze_system2::{
     Result,
     expression::State,
-    kcs::{CoreHost, Host, Interpreter, NativeReturn, Program},
+    kcs::{
+        CoreHost, Host, Interpreter, LocalDateTime, NativeReturn, Program, SystemHost,
+        SystemServices,
+    },
 };
+use std::{cell::Cell, rc::Rc};
+
+struct Clock(Rc<Cell<u32>>);
+
+impl SystemServices for Clock {
+    fn local_date_time(&mut self) -> Option<LocalDateTime> {
+        self.0.set(self.0.get() + 1);
+        Some(LocalDateTime {
+            year: 2000,
+            month: 2,
+            weekday: 2,
+            day: 29,
+            hour: 23,
+            minute: 59,
+            second: 58,
+        })
+    }
+}
 
 #[test]
 fn local_time_preserves_field_order_external_addresses_and_aliases() -> Result<()> {
@@ -12,9 +33,19 @@ fn local_time_preserves_field_order_external_addresses_and_aliases() -> Result<(
     )?;
     let mut state = State::new(0);
     let mut host = CoreHost::new(&mut state);
-    host.local_time = Some([2000, 2, 2, 29, 23, 59, 58]);
     let addresses = [0u32, 0x8000_0000, 4, 8, 12, 16, 20];
     let args: Vec<_> = addresses.into_iter().flat_map(u32::to_le_bytes).collect();
+    let before = vm.read(0, 64)?.to_vec();
+    assert!(
+        host.call(11, &args, &mut vm)
+            .unwrap_err()
+            .message
+            .contains("宿主")
+    );
+    assert_eq!(vm.read(0, 64)?, before);
+    assert_eq!(vm.read(0x8000_0000, 4)?, [0x66; 4]);
+    let samples = Rc::new(Cell::new(0));
+    host.system_services = Some(Box::new(Clock(samples.clone())));
     assert_eq!(host.call(11, &args, &mut vm)?, NativeReturn::Continue);
     let words: Vec<_> = vm
         .read(0, 24)?
@@ -31,6 +62,14 @@ fn local_time_preserves_field_order_external_addresses_and_aliases() -> Result<(
     assert!(host.call(11, &invalid, &mut vm).is_err());
     assert_eq!(vm.read(0, 64)?, before);
     assert!(host.call(11, &args[..24], &mut vm).is_err());
+    assert_eq!(samples.get(), 2);
+
+    host.system_services = None;
+    let mut clock = Clock(samples.clone());
+    let mut wrapper = SystemHost::new(&mut host, &mut clock);
+    assert_eq!(wrapper.call(11, &args, &mut vm)?, NativeReturn::Continue);
+    assert_eq!(vm.read(0, 4)?, 2000u32.to_le_bytes());
+    assert_eq!(samples.get(), 3);
     Ok(())
 }
 

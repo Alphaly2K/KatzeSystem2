@@ -13,8 +13,8 @@ use katze_system2::{
     expression::State,
     graphics::{DrawingContext, GraphicsFactory, RenderTarget},
     input::{ButtonSource, DeviceBinding, DeviceKeys, InputFactory},
-    io::{FileSource, SharedSource},
-    kcs::{Program, ResourceServices},
+    io::SharedSource,
+    kcs::{LocalDateTime, Program, ResourceServices, SystemServices},
     memory::SharedMemory,
     resource::{ArchiveConfig, KifEntrySource, ResourceMode},
     runtime::{KcsFactory, ProgramLoader, RootObject, Runtime, fes::FesFactory, kind},
@@ -24,6 +24,8 @@ use std::{collections::BTreeMap, sync::Arc};
 
 mod configuration;
 use configuration::ConfigurationFiles;
+mod file_source;
+use file_source::FileSource;
 // The desktop example uses the picker; the offline probe only uses preselection.
 #[allow(dead_code)]
 pub mod image_import;
@@ -651,6 +653,28 @@ fn local_save_date(file_time: u64) -> Result<[u32; 6]> {
     Ok(result)
 }
 
+pub fn local_date_time() -> LocalDateTime {
+    use chrono::{Datelike, Timelike};
+    let now = chrono::Local::now();
+    LocalDateTime {
+        year: now.year() as u16,
+        month: now.month() as u16,
+        weekday: now.weekday().num_days_from_sunday() as u16,
+        day: now.day() as u16,
+        hour: now.hour() as u16,
+        minute: now.minute() as u16,
+        second: now.second() as u16,
+    }
+}
+
+struct ProbeSystem;
+
+impl SystemServices for ProbeSystem {
+    fn local_date_time(&mut self) -> Option<LocalDateTime> {
+        Some(local_date_time())
+    }
+}
+
 /// 游戏目录装载结果；`router` 在 `build_runtime` 时被移交资源服务。
 pub struct Game {
     pub root: String,
@@ -874,6 +898,7 @@ pub fn build_runtime(
         root: configuration_files.directory.to_string_lossy().into_owned(),
     });
     runtime.set_configuration_services(configuration_files);
+    runtime.set_system_services(ProbeSystem);
     let mut message_defaults = Default::default();
     settings.apply_message_defaults(&mut message_defaults);
     runtime.host_mut().message_defaults = Some(message_defaults);
