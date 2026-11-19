@@ -126,6 +126,8 @@ pub struct HostState {
     pub string_table_config: Option<crate::language::StringTableConfig>,
     pub string_tables: crate::language::StringTables,
     pub script_replacements: BTreeMap<Vec<u8>, Vec<u8>>,
+    /// 普通 192～195 使用的用户设置，与两个 XML 配置文件独立。
+    pub script_settings: super::ScriptSettings,
     pub save_services: Option<Box<dyn crate::save::SaveServices>>,
     /// 普通 445／629 使用的同步系统服务；未配置时对应入口返回诊断。
     pub system_services: Option<Box<dyn super::SystemServices>>,

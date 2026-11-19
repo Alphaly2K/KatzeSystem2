@@ -36,6 +36,19 @@
 
 `LanguageState::apply_user_xml(bytes)` 覆盖 `language/id/UI`、`main`、`sub`，缺失字段先保留当前编号，再按启动前缀表长度检查。越界的三类编号均回退到 `default_index`；副文字的全一关闭值保持，默认编号自身不再裁剪。前缀表、默认编号及平台刷新请求保持。`LanguageState::write_xml` 写出当前三项原始编号。按键的用户覆盖及写出使用 `DeviceKeys::apply_user_xml`／`write_xml`，范围见[输入绑定](input.md)。
 
+## 脚本用户设置
+
+普通 192～195 以格式展开后的 CP932 组名和设置名选择值，名称比较忽略大小写。两个名称都可为空。每项以状态一返回 DWORD。
+
+|编号|参数|结果|
+|--:|:--|:--|
+|192|组名、设置名的格式地址|值存在且可放入四字节查询缓冲区时返回一，其余返回零|
+|193|组名、设置名的格式地址、输出地址、容量|复制原始字节并返回字节数。输出地址未映射时只查询长度；容量不足时返回零并保留缓冲区|
+|194|组名、设置名的格式地址、DWORD|写入四字节小端值，成功返回一|
+|195|组名、设置名的格式地址、原始字符串地址|写入首个零之前的原始字节，成功返回一|
+
+运行时在 `HostState::script_settings` 中持有这些设置，供同一实例的任务共享。默认保存在内存，并可通过 `ScriptSettings::to_bytes`／`from_bytes` 交换快照。宿主实现 `ConfigurationServices::write_script_settings` 可在每次写入时保存快照；返回失败时保留先前的值。启动示例在配置目录下读写独立的 `script-settings.dat`，不访问系统注册表。快照上限为 64 MiB，畸形快照和越界 VM 写入返回诊断。
+
 ## 平台配置与完整文档
 
 `PlatformSettings` 保存窗口／全屏尺寸、窗口与纹理选项、声音设备选项、D3D／DEPEND 开关、目录、TTS、`CONFIG/type` 和 `KEY/enable_joypad`。尺寸为两个 `[u16; 2]`，初始均为 800×600；其余整数保留原始 DWORD。`tts_parameters` 按 speed、tone 保存 float 位模式，初始为 1 和 0。三项目录依次为 picture、export、imgimport；None 保留宿主继承语义并省略写出，Some 空向量写出空字段。目录至多 259 个 UTF-16 单元，TTS 标识至多 63 个单元。

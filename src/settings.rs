@@ -16,6 +16,11 @@ pub enum ConfigurationFile {
 pub trait ConfigurationServices {
     fn write(&mut self, task_id: u32, file: ConfigurationFile, bytes: &[u8])
     -> crate::Result<bool>;
+
+    /// Persist the snapshot used by script setting natives. The default keeps it in memory.
+    fn write_script_settings(&mut self, _task_id: u32, _bytes: &[u8]) -> crate::Result<bool> {
+        Ok(true)
+    }
 }
 
 /// 全局配置及普通脚本可查询的变量范围。

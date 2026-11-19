@@ -1,5 +1,6 @@
 use katze_system2::{
     Error, Result,
+    kcs::ScriptSettings,
     resource::{FolderPaths, XmlDocument},
     settings::{ConfigurationFile, ConfigurationServices},
 };
@@ -63,6 +64,23 @@ impl ConfigurationFiles {
         }
         Ok(Some(bytes))
     }
+
+    pub fn read_script_settings(&self) -> Result<ScriptSettings> {
+        use std::io::{ErrorKind, Read};
+        let path = self.directory.join("script-settings.dat");
+        let file = match std::fs::File::open(path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == ErrorKind::NotFound => {
+                return Ok(ScriptSettings::default());
+            }
+            Err(error) => return Err(Error::new(0, format!("无法打开脚本设置：{error}"))),
+        };
+        let mut bytes = Vec::new();
+        file.take(ScriptSettings::MAX_SNAPSHOT_BYTES as u64 + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|error| Error::new(0, format!("无法读取脚本设置：{error}")))?;
+        ScriptSettings::from_bytes(&bytes)
+    }
 }
 
 impl ConfigurationServices for ConfigurationFiles {
@@ -72,6 +90,28 @@ impl ConfigurationServices for ConfigurationFiles {
         };
         let _ = std::fs::create_dir_all(&self.directory);
         Ok(std::fs::write(path, bytes).is_ok())
+    }
+
+    fn write_script_settings(&mut self, _: u32, bytes: &[u8]) -> Result<bool> {
+        use std::io::Write;
+        if std::fs::create_dir_all(&self.directory).is_err() {
+            return Ok(false);
+        }
+        let temporary = self
+            .directory
+            .join(format!(".script-settings-{}.tmp", std::process::id()));
+        let Ok(mut file) = std::fs::File::create_new(&temporary) else {
+            return Ok(false);
+        };
+        let written = file.write_all(bytes).is_ok();
+        drop(file);
+        if written
+            && std::fs::rename(&temporary, self.directory.join("script-settings.dat")).is_ok()
+        {
+            return Ok(true);
+        }
+        let _ = std::fs::remove_file(temporary);
+        Ok(false)
     }
 }
 

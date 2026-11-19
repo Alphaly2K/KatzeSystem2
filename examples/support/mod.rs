@@ -801,6 +801,7 @@ pub fn build_runtime(
         startup.as_bytes(),
     )?);
     let configuration_files = ConfigurationFiles::new(&root, &startup_xml)?;
+    runtime.host_mut().script_settings = configuration_files.read_script_settings()?;
     runtime.host_mut().folder_paths = Some(configuration_files.folders.clone());
     let user_settings =
         configuration_files.read(katze_system2::settings::ConfigurationFile::Main)?;

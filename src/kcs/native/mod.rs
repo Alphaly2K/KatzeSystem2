@@ -43,6 +43,9 @@ pub(crate) fn call_native(
         registry::CoreHandler::Achievements => {
             super::achievements::call(host, index, arguments, vm)
         }
+        registry::CoreHandler::ScriptSettings => {
+            super::script_settings::call(host, index, arguments, vm)
+        }
         registry::CoreHandler::Matrix => matrix::call(host, index, arguments, vm),
         registry::CoreHandler::Data => super::data::call(host, index, arguments, vm),
         registry::CoreHandler::NamePairs => super::name_pairs::call(host, index, arguments, vm),
