@@ -863,7 +863,7 @@ pub fn build_runtime(
         target.prepare_tiles(&settings.texture_areas, settings.texture_16bit_row)?;
         target
     };
-    runtime.host_mut().surface_size = surface;
+    runtime.set_surface_size(surface);
     *runtime.drawing_mut() = DrawingContext {
         mode: 0,
         enabled: true,

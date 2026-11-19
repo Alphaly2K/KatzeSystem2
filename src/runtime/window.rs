@@ -1,6 +1,7 @@
-use super::{ObjectFactory, Runtime, route_command_mode};
+use super::{ClipboardRequest, ObjectFactory, Runtime, route_command_mode};
 use crate::{
     Result,
+    graphics::Rect,
     input::InputDelivery,
     kcs::{WindowAction, WindowRequest},
     task::{Command, CommandBuffers},
@@ -16,6 +17,24 @@ pub trait WindowServices {
 }
 
 impl<F: ObjectFactory> Runtime<F> {
+    /// Report the content rectangle in window client coordinates. With `None`,
+    /// queries use the logical surface size and an origin of zero.
+    pub fn set_window_content_rect(&mut self, rect: Option<Rect>) {
+        self.host.window_content_rect = rect;
+    }
+
+    /// Report the raw window mode for script queries. `None` reports no mode.
+    /// This value is independent of the saved fullscreen setting.
+    pub fn set_windowed_mode(&mut self, mode: Option<u32>) {
+        self.host.windowed_mode = mode;
+    }
+
+    /// Take pending clipboard writes in submission order, keeping the original
+    /// encoding. The host decides how to decode and deliver them to its system.
+    pub fn take_clipboard_requests(&mut self) -> Vec<ClipboardRequest> {
+        std::mem::take(&mut self.host.clipboard_requests)
+    }
+
     /// Process script window requests. Pass the input task used for menu close.
     /// Returns true when the host should stop the session. Close notifications
     /// do not require confirmation. System properties and menu rebuild requests

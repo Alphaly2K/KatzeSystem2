@@ -202,8 +202,8 @@ fn pointer_exit_query_keeps_position_modes_mapping_and_aliased_outputs() {
                     full_screen_full_pos: position,
                     ..Default::default()
                 });
-            runtime.host_mut().surface_size = [1600, 900];
-            runtime.host_mut().window_content_rect = if mode == 0 && enabled {
+            runtime.set_surface_size([1600, 900]);
+            runtime.set_window_content_rect(if mode == 0 && enabled {
                 Some(katze_system2::graphics::Rect {
                     left: -20,
                     top: 33,
@@ -212,7 +212,7 @@ fn pointer_exit_query_keeps_position_modes_mapping_and_aliased_outputs() {
                 })
             } else {
                 None
-            };
+            });
             runtime.drawing_mut().mode = mode;
             runtime.drawing_mut().enabled = enabled;
             *runtime.input_coordinates_mut() = CoordinateMap {

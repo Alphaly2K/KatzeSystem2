@@ -846,7 +846,7 @@ fn configuration_reads_share_host_settings_in_body_and_event_handlers() {
         settings.window[..4].copy_from_slice(&0x80123456u32.to_le_bytes());
         settings.fullscreen = 0x80000001;
         runtime.host_mut().system_settings = Some(settings);
-        runtime.host_mut().windowed_mode = Some(7);
+        runtime.set_windowed_mode(Some(7));
         runtime.host_mut().languages.message_index = 9;
         runtime.host_mut().languages.primary_index = 3;
         runtime.numbers_mut().shared[4] = 71;
@@ -877,7 +877,7 @@ fn configuration_reads_share_host_settings_in_body_and_event_handlers() {
             .as_mut()
             .unwrap()
             .fullscreen = 39;
-        runtime.host_mut().windowed_mode = Some(0);
+        runtime.set_windowed_mode(Some(0));
         let mut block = b"READ\0".to_vec();
         runtime
             .dispatch_command_with_buffers(

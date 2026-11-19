@@ -107,11 +107,9 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     window.window.subsystem().text_input().stop();
     let mut text_window = window_text::TextWindow::default();
     let mut quiz_windows = window_quiz::QuizWindows::default();
-    runtime.host_mut().windowed_mode = Some(1);
+    runtime.set_windowed_mode(Some(1));
     if runtime
-        .host()
-        .system_settings
-        .as_ref()
+        .system_settings()
         .is_some_and(|settings| settings.fullscreen != 0)
     {
         window
@@ -270,7 +268,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 (i64::from(position[1]) * i64::from(size.1) / 720) as i32,
             );
         }
-        clipboard.pump(runtime.host_mut(), clipboard_encoding);
+        clipboard.pump(runtime.take_clipboard_requests(), clipboard_encoding);
         audio.pump()?;
         if refresh_title {
             let next =

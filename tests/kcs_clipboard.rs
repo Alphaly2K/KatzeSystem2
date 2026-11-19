@@ -1,10 +1,9 @@
 use katze_system2::{
     Result,
     expression::State,
-    kcs::{
-        ClipboardRequest, ClipboardText, CoreHost, Host, Interpreter, NativeReturn, OrdinaryTask,
-        Program,
-    },
+    kcs::{CoreHost, Host, Interpreter, NativeReturn, Program},
+    memory::SharedMemory,
+    runtime::{ClipboardRequest, ClipboardText, GameRuntime, ProgramLoader, kind},
 };
 
 fn instruction(code: &mut Vec<u8>, opcode: u8, arguments: &[u32]) {
@@ -17,6 +16,13 @@ fn instruction(code: &mut Vec<u8>, opcode: u8, arguments: &[u32]) {
 
 #[test]
 fn clipboard_requests_preserve_format_encoding_and_stack_across_resumption() -> Result<()> {
+    struct Loader(Program);
+    impl ProgramLoader for Loader {
+        fn load(&mut self, _: &[u8]) -> Result<Option<Program>> {
+            Ok(Some(self.0.clone()))
+        }
+    }
+
     let mut code = Vec::new();
     instruction(&mut code, 0x25, &[0x1357_9bdf]);
     for (native, address) in [(10, 128), (1039, 0x8000_0000)] {
@@ -31,37 +37,32 @@ fn clipboard_requests_preserve_format_encoding_and_stack_across_resumption() -> 
     let external = "Aあ🐈B\\n%u[G32]\0".as_bytes().to_vec();
     let program = Program::from_code(&code, data.clone(), 64)?;
     for budget in [1, 100] {
-        let mut task = OrdinaryTask::new(program.clone(), external.clone())?;
-        task.task_id = 19;
-        let mut state = State::new(0);
-        let mut host = CoreHost::new(&mut state);
-        let mut done = false;
-        for _ in 0..32 {
-            done = task.update(0, 1, &mut host, budget)?;
-            if done {
-                break;
-            }
-        }
-        assert!(done);
+        let mut runtime = GameRuntime::with_programs(
+            Loader(program.clone()),
+            0,
+            SharedMemory::new(external.clone())?,
+        )?;
+        runtime.set_budget(budget, 1024);
+        let task = runtime.create(0, kind::ORDINARY, b"test", b"")?;
+        runtime.update(0, 1)?;
         assert_eq!(
-            host.clipboard_requests,
+            runtime.take_clipboard_requests(),
             [
                 ClipboardRequest {
-                    task_id: 19,
+                    task_id: task,
                     text: ClipboardText::Bytes(b"\x81\r\n123 % ".to_vec()),
                 },
                 ClipboardRequest {
-                    task_id: 19,
+                    task_id: task,
                     text: ClipboardText::Utf16(vec![65, 0x3042, 0xd83d, 66, 13, 10, 49, 50, 51]),
                 },
             ]
         );
-        assert_eq!(task.interpreter.read(0, 256)?, data);
-        assert_eq!(
-            task.interpreter.read(0x8000_0000, external.len())?,
-            external
-        );
-        assert_eq!(task.interpreter.stack_bytes(), 0x1357_9bdfu32.to_le_bytes());
+        assert!(runtime.take_clipboard_requests().is_empty());
+        let vm = runtime.object(task).unwrap().interpreter().unwrap();
+        assert_eq!(vm.read(0, 256)?, data);
+        assert_eq!(vm.read(0x8000_0000, external.len())?, external);
+        assert_eq!(vm.stack_bytes(), 0x1357_9bdfu32.to_le_bytes());
     }
     Ok(())
 }

@@ -55,6 +55,7 @@ mod state_records;
 mod system_tasks;
 mod transition;
 mod window;
+pub use crate::kcs::{ClipboardRequest, ClipboardText};
 pub use window::WindowServices;
 
 use resources::Resources;
@@ -293,6 +294,12 @@ impl<F: ObjectFactory> Runtime<F> {
         self.resources
             .compositor
             .set_frame_view(projection, parent, filter);
+    }
+
+    /// Set the logical surface size in pixels used by script and capture queries.
+    /// The host manages its presentation size and the runtime canvas separately.
+    pub fn set_surface_size(&mut self, size: [u32; 2]) {
+        self.host.surface_size = size;
     }
 
     /// 连接脚本离屏绘制和画面捕获后端；未配置时捕获继续使用软件绘制。

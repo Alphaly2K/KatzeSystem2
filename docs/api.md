@@ -97,7 +97,7 @@ FES SOUND 文件请求通过 `Objects::set_sound_task` 的绑定发送 180／182
 
 `PlatformSettings::apply_startup_xml(bytes, adjust_fullscreen)` 读取启动的 SCREEN、GENERAL、APP 等平台字段，回调按平台模式调整已截取低十六位的候选尺寸。
 
-FES `getconf screen` 查询 `SystemSettings::fullscreen`，`getconf iswindow` 查询平台同步的 `HostState::windowed_mode`，两者保留独立的原始 DWORD。当前窗口模式为 None 时返回诊断；窗口示例在成功创建窗口后设置为一。
+FES `getconf screen` 查询 `SystemSettings::fullscreen`，`getconf iswindow` 查询宿主经 `Runtime::set_windowed_mode` 提供的窗口模式，两者保留独立的原始 DWORD。当前窗口模式为 None 时返回诊断。
 
 普通 29～32 通过 `ResourceServices::open` 和 `io::FileServices::create` 连接顺序文件读写。`create(task_id, name)` 接受格式展开后的 CP932 名称，返回可选的 `Write` 端；普通创建失败返回 None，服务未提供时诊断。30／31 返回实际字节数，32 释放读取源或写入端；默认方法不改变已有追加服务的实现。完整模式、游标及失败契约见[文件读写](kcs.md#文件读写)。
 
@@ -407,9 +407,9 @@ FES `steam_achievement` 将首个参数按 FES 字符串变量和全局脚本替
 
 宿主在更新后调用 `Runtime::process_window_requests(input, window)`，通过 `WindowServices` 提供全屏、最小化和关闭确认。成功切换后运行库同步 `SystemSettings::fullscreen` 并触发配置变更通知；`windowed_mode` 是独立的窗口宿主标记。应用退出通知和已获确认的关闭返回 true，拒绝后继续。系统属性页及菜单重建留在队列中；宿主可用 `pending_window_requests` 查看，或在成功处理后通过 `take_window_requests` 取出剩余动作。动作出错后保留未尝试的请求，已尝试的动作不自动重放。
 
-普通 10／1039 接收格式字符串地址，以状态二将 `ClipboardRequest { task_id, text }` 追加到 `HostState::clipboard_requests`，保留 VM 返回栈。宿主按调用顺序消费请求并负责实际写入与失败处理。`ClipboardText::Bytes` 保留普通 10 的源字节，`Utf16` 保留普通 1039 的独立 UTF-16 单元；两项先将字面 `\n` 按字节替换为 CRLF。1039 沿用基线 UTF-8 逐字符转换，非 BMP 字符保留首个代理单元，输出最多 2,047 单元。窗口示例在收到首个请求时初始化 SDL 剪贴板服务，字节串按已配置脚本编码解码，UTF-16 的无效代理单元按替换字符显示，写入失败记录日志后继续。
+普通 10／1039 接收格式字符串地址，以状态二排入 `ClipboardRequest { task_id, text }`，保留 VM 返回栈。`Runtime::take_clipboard_requests` 按调用顺序取走请求，宿主负责解码、实际写入及失败处理。`ClipboardText::Bytes` 保留普通 10 的源字节，`Utf16` 保留普通 1039 的独立 UTF-16 单元；两项先将字面 `\n` 按字节替换为 CRLF。1039 沿用基线 UTF-8 逐字符转换，非 BMP 字符保留首个代理单元，输出最多 2,047 单元。
 
-普通 787 向四个地址依次写回窗口绘图区的 x、y、宽和高，保留返回槽；输出地址可重叠，后写覆盖先写。宿主通过 `HostState::window_content_rect` 提供客户区内的矩形，未提供时使用从零开始的 `surface_size`。
+普通 787 向四个地址依次写回窗口绘图区的 x、y、宽和高，保留返回槽；输出地址可重叠，后写覆盖先写。宿主通过 `Runtime::set_window_content_rect` 提供客户区内的矩形，未提供时使用从零开始的逻辑画面尺寸。`set_surface_size` 设置逻辑画面尺寸，不调整窗口呈现尺寸或重建画布。
 
 Runtime 的普通 740 向两个地址写回指针退出位置，不移动指针。`PlatformSettings::full_screen_full_pos` 为零时，先取窗口绘图区下边加启用绘图时的设备 Y 偏移；为一时取全屏配置高度，两者再经共享 `CoordinateMap` 换算。为二时直接使用窗口配置高度。其他值只清零 X，保留 Y。输出先写 X 零、再写 Y，随后逐轴读取并换算；同址或部分重叠输出沿用该顺序。两项输出及平台配置先检查，状态二不压值。
 

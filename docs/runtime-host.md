@@ -22,6 +22,8 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 
 窗口宿主在更新后调用 `process_window_requests(tasks.input, window)` 执行脚本提交的窗口请求。设备操作由 `WindowServices` 提供，运行库负责配置回写和任务通知。返回 true 表示应退出窗口循环；发生错误时可在后续调用继续处理尚未尝试的请求。
 
+`set_surface_size` 提供逻辑画面尺寸；窗口宿主可独立通过 `set_window_content_rect` 和 `set_windowed_mode` 提供客户区绘图矩形和当前窗口模式。`take_clipboard_requests` 取走按序提交的剪贴板写入请求，保留发起任务和原始编码，由宿主解码并写入剪贴板。
+
 宿主用 `Runtime::with_frame` 借用绘制命令和画布。`wants_sequence_capture` 为真时，宿主读回同一帧，再用 `capture_sequence_bgra` 同步提交从顶行开始的 BGRA 像素和以字节计的行距。运行库负责裁剪、编码 BMP 和编号，通过宿主文件服务写入。
 
 离屏宿主在更新后用 `mix_audio_stereo(tasks.sound, rate_hz, buffer)` 拉取 PCM；此调用可等待解码。设备宿主用 `connect_audio_output(tasks.sound)` 取得可移交给音频线程的 `Mixer`，由回调用 `Mixer::render(rate_hz, buffer)` 拉取 PCM，无须借用运行实例。两者均覆写调用方缓冲，格式为左右交错、幅度 `[-1, 1]` 的 `f32` 采样。每个声音任务只能连接一次，连接后不得再调用离屏混音；会话退出时由宿主停止回调并释放混音器。

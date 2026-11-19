@@ -1,4 +1,4 @@
-use katze_system2::kcs::{ClipboardText, HostState};
+use katze_system2::runtime::{ClipboardRequest, ClipboardText};
 
 #[derive(Default)]
 pub struct Output {
@@ -6,11 +6,14 @@ pub struct Output {
 }
 
 impl Output {
-    pub fn pump(&mut self, host: &mut HostState, encoding: &'static encoding_rs::Encoding) {
-        if host.clipboard_requests.is_empty() {
+    pub fn pump(
+        &mut self,
+        requests: Vec<ClipboardRequest>,
+        encoding: &'static encoding_rs::Encoding,
+    ) {
+        if requests.is_empty() {
             return;
         }
-        let requests = std::mem::take(&mut host.clipboard_requests);
         if self.video.is_none() {
             match sdl2::init().and_then(|context| context.video()) {
                 Ok(video) => self.video = Some(video),
