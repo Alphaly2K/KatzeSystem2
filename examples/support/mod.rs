@@ -9,13 +9,15 @@ use blowfish::{
 };
 use katze_system2::{
     Error, Result,
+    host::{
+        ConfigurationFile, FileServices, LocalDateTime, ProgramLoader, ResourceMode,
+        ResourceServices, SaveServices, SharedSource, SystemServices,
+    },
     input::{ButtonSource, DeviceBinding, DeviceKeys},
-    io::SharedSource,
-    kcs::{LocalDateTime, Program, ResourceServices, SystemServices},
+    kcs::Program,
     memory::SharedMemory,
-    resource::{ArchiveConfig, KifEntrySource, ResourceMode},
-    runtime::{GameRuntime, ProgramLoader},
-    save::SaveServices,
+    resource::{ArchiveConfig, KifEntrySource},
+    runtime::GameRuntime,
 };
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -530,7 +532,7 @@ pub struct Files {
     pub root: String,
 }
 
-impl katze_system2::io::FileServices for Files {
+impl FileServices for Files {
     fn create_utf16(&mut self, _: u32, name: &[u16]) -> Result<Option<Box<dyn std::io::Write>>> {
         let Ok(name) = String::from_utf16(name) else {
             return Ok(None);
@@ -787,12 +789,11 @@ pub fn build_runtime(
     if let Some(importer) = image_import::Import::from_startup(&root, &startup_xml)? {
         runtime.set_platform_job_services(importer);
     }
-    runtime.host_mut().archive_config = Some(router.config.clone());
+    runtime.set_archive_config(router.config.clone());
     let configuration_files = ConfigurationFiles::new(&root, &startup_xml)?;
-    runtime.host_mut().script_settings = configuration_files.read_script_settings()?;
-    runtime.host_mut().folder_paths = Some(configuration_files.folders.clone());
-    let user_settings =
-        configuration_files.read(katze_system2::settings::ConfigurationFile::Main)?;
+    runtime.set_script_settings(configuration_files.read_script_settings()?);
+    runtime.set_folder_paths(configuration_files.folders.clone());
+    let user_settings = configuration_files.read(ConfigurationFile::Main)?;
     let sound_name = String::from_utf16(&configuration_files.sound_name)?;
     let sound_definition = if sound_name.is_empty() {
         None
@@ -801,7 +802,7 @@ pub fn build_runtime(
         router.read(&name, ResourceMode::LooseFirst)?
     };
     let sound_user_settings = if sound_definition.is_some() {
-        configuration_files.read(katze_system2::settings::ConfigurationFile::Sound)?
+        configuration_files.read(ConfigurationFile::Sound)?
     } else {
         None
     };
@@ -821,7 +822,7 @@ pub fn build_runtime(
         runtime.startup_input_bindings().ok_or("缺少启动按键配置")?,
         user_settings.as_deref(),
     )?;
-    runtime.host_mut().platform_settings = Some(platform);
+    runtime.set_platform_settings(platform);
     runtime.set_game_resources(
         router,
         startup.as_bytes(),
@@ -829,15 +830,7 @@ pub fn build_runtime(
         sound_user_settings.as_deref(),
     )?;
     runtime.reload_language_tables(katze_system2::language::LanguageTarget::Interface)?;
-    if runtime.host().languages.primary_index as usize
-        >= runtime
-            .host()
-            .string_table_config
-            .as_ref()
-            .unwrap()
-            .prefixes
-            .len()
-    {
+    if !runtime.interface_language_available() {
         runtime.reload_language_tables(katze_system2::language::LanguageTarget::MainText)?;
     }
     runtime.set_fonts(load_fonts(&root));

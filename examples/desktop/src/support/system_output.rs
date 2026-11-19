@@ -1,7 +1,7 @@
 use crate::support::local_date_time;
 use katze_system2::{
     Result,
-    kcs::{LocalDateTime, SystemServices},
+    host::{LocalDateTime, SystemServices},
 };
 
 pub struct Output;

@@ -31,7 +31,8 @@ mod window_quiz;
 mod window_text;
 
 use katze_system2::{
-    graphics::{Rect, RenderTarget},
+    graphics::Rect,
+    host::RenderTarget,
     language::LanguageTarget,
     runtime::{FrameTime, GameTasks},
 };
@@ -105,7 +106,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let title_source = startup_xml
         .wide_text(b"APP/title")?
         .unwrap_or_else(|| "katze-system2".encode_utf16().collect());
-    let mut title = String::from_utf16_lossy(runtime.host().string_tables.resolve(&title_source));
+    let mut title = String::from_utf16_lossy(runtime.string_tables().resolve(&title_source));
     let mut window = window_output::Output::new(&title, [1280, 720])?;
     window.window.subsystem().text_input().stop();
     let mut text_window = window_text::TextWindow::default();
@@ -147,7 +148,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let mut render_time = std::time::Duration::ZERO;
     loop {
         let frame_started = std::time::Instant::now();
-        window.configure_close(&runtime.host().string_tables, &title);
+        window.configure_close(runtime.string_tables(), &title);
         shared.borrow_mut().begin_frame();
         let events = window.poll();
         let size = window.window.size();
@@ -194,18 +195,8 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             shared.set_mouse_focus(window.window.has_mouse_focus());
         }
         now = now.wrapping_add(1);
-        let refresh_title = runtime
-            .host()
-            .language_change_requests
-            .iter()
-            .any(|request| request.target == LanguageTarget::Interface)
-            && runtime
-                .host()
-                .string_table_config
-                .as_ref()
-                .is_some_and(|config| {
-                    (runtime.host().languages.primary_index as usize) < config.prefixes.len()
-                });
+        let refresh_title = runtime.has_pending_language_change(LanguageTarget::Interface)
+            && runtime.interface_language_available();
         let advancement = runtime.advance(FrameTime {
             tick: now,
             increment: 1,
@@ -242,7 +233,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         if let Some(importer) = &mut image_import {
             importer.sync(
                 &window.window,
-                runtime.host_mut().platform_settings.as_mut(),
+                runtime.platform_settings_mut(),
                 text_window.active(),
             );
             if importer.active() {
@@ -274,8 +265,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         clipboard.pump(runtime.take_clipboard_requests(), clipboard_encoding);
         audio.pump()?;
         if refresh_title {
-            let next =
-                String::from_utf16_lossy(runtime.host().string_tables.resolve(&title_source));
+            let next = String::from_utf16_lossy(runtime.string_tables().resolve(&title_source));
             if title != next {
                 window.window.set_title(&next)?;
                 title = next;

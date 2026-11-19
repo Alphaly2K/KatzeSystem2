@@ -32,6 +32,7 @@ pub use cst::CstContext;
 mod effect;
 mod graphics;
 pub use effect::{EffectPlayer, EffectServices};
+mod host;
 mod image_cursor;
 mod input;
 mod message;
@@ -307,15 +308,6 @@ impl<F: ObjectFactory> Runtime<F> {
         self.host.surface_size = size;
     }
 
-    /// 连接脚本离屏绘制和画面捕获后端；未配置时捕获继续使用软件绘制。
-    /// 后端捕获失败时保留前次完整目标。
-    pub fn set_graphics_backend(
-        &mut self,
-        backend: impl crate::graphics::GraphicsBackend + 'static,
-    ) {
-        self.resources.graphics_backend = Some(Box::new(backend));
-    }
-
     /// 以已配置的帧视图和当前画布合成绘制列表。
     pub fn compose_frame(&mut self) -> Result<crate::graphics::DrawList> {
         let mut frame = self.resources.compose_frame(None)?;
@@ -352,10 +344,27 @@ impl<F: ObjectFactory> Runtime<F> {
         self.resources.offscreen_frame.as_ref()
     }
 
-    /// 配置同步资源读取与类别名称补全；已有资源对象继续保留。
-    pub fn set_resources(&mut self, services: impl crate::kcs::ResourceServices + 'static) {
-        self.resources.services = Some(Box::new(crate::kcs::CachedResources::new(services)));
-        self.resources.animation_aliases = None;
+    /// The current translation tables for host UI strings.
+    pub fn string_tables(&self) -> &crate::language::StringTables {
+        &self.host.string_tables
+    }
+
+    /// Whether the selected interface language has a configured translation prefix.
+    pub fn interface_language_available(&self) -> bool {
+        self.host
+            .string_table_config
+            .as_ref()
+            .is_some_and(|config| {
+                (self.host.languages.primary_index as usize) < config.prefixes.len()
+            })
+    }
+
+    /// Whether the next advance has a queued refresh for the given language target.
+    pub fn has_pending_language_change(&self, target: crate::language::LanguageTarget) -> bool {
+        self.host
+            .language_change_requests
+            .iter()
+            .any(|request| request.target == target)
     }
 
     /// 处理平台语言请求的字符串表部分；请求队列和平台控件由宿主管理。
@@ -415,58 +424,6 @@ impl<F: ObjectFactory> Runtime<F> {
             self.host.system_settings_dirty = 1;
         }
         Ok(())
-    }
-
-    /// 配置普通 629 的同步系统打开服务。
-    pub fn set_system_services(&mut self, services: impl crate::kcs::SystemServices + 'static) {
-        self.host.system_services = Some(Box::new(services));
-    }
-
-    pub fn set_achievement_services(
-        &mut self,
-        services: impl crate::kcs::AchievementServices + 'static,
-    ) {
-        self.host.set_achievement_services(services);
-    }
-
-    pub fn set_file_services(&mut self, services: impl crate::io::FileServices + 'static) {
-        self.host.file_services = Some(Box::new(services));
-    }
-
-    pub fn set_export_services(&mut self, services: impl ExportServices + 'static) {
-        self.resources.exports = Some(Box::new(services));
-    }
-
-    pub fn set_platform_job_services(&mut self, services: impl PlatformJobServices + 'static) {
-        self.resources.platform_jobs = Some(Box::new(services));
-    }
-
-    pub fn set_effect_services(&mut self, services: impl EffectServices + 'static) {
-        self.resources.effects = Some(Box::new(services));
-    }
-
-    pub fn set_speech_synthesizer(
-        &mut self,
-        synthesizer: impl crate::audio::SpeechSynthesizer + 'static,
-    ) {
-        self.resources.speech = Some(Box::new(synthesizer));
-    }
-
-    pub fn set_configuration_services(
-        &mut self,
-        services: impl crate::settings::ConfigurationServices + 'static,
-    ) {
-        self.host.configuration_services = Some(Box::new(services));
-    }
-
-    /// 配置按任务存档目录读取 CSS 文件及查询修改时间的服务；已有容器继续保留。
-    pub fn set_save_services(&mut self, services: impl crate::save::SaveServices + 'static) {
-        self.host.save_services = Some(Box::new(services));
-    }
-
-    /// 配置消息对象使用的字体选择、度量与灰度字形服务。
-    pub fn set_fonts(&mut self, fonts: impl crate::message::FontServices + 'static) {
-        self.resources.fonts = Some(Box::new(fonts));
     }
 
     pub fn images(&self) -> &crate::graphics::Images {

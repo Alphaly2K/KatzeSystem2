@@ -1,0 +1,92 @@
+use super::{ObjectFactory, Runtime};
+use crate::{
+    host::{
+        AchievementServices, ConfigurationServices, EffectServices, ExportServices, FileServices,
+        FontServices, GraphicsBackend, PlatformJobServices, ResourceServices, SaveServices,
+        SpeechSynthesizer, SystemServices,
+    },
+    kcs::{CachedResources, ScriptSettings},
+    resource::{ArchiveConfig, FolderPaths},
+    settings::PlatformSettings,
+};
+
+impl<F: ObjectFactory> Runtime<F> {
+    /// Configure synchronous resource lookup and reads. Already loaded objects
+    /// remain available; future lookups use a new cache over this service.
+    pub fn set_resources(&mut self, services: impl ResourceServices + 'static) {
+        self.resources.services = Some(Box::new(CachedResources::new(services)));
+        self.resources.animation_aliases = None;
+    }
+
+    /// Set the archive categories and names reported to scripts.
+    pub fn set_archive_config(&mut self, config: ArchiveConfig) {
+        self.host.archive_config = Some(config);
+    }
+
+    /// Supply the path values used by script folder queries and expansion.
+    pub fn set_folder_paths(&mut self, paths: FolderPaths) {
+        self.host.folder_paths = Some(paths);
+    }
+
+    /// Initialize the script settings with the host's persisted values.
+    pub fn set_script_settings(&mut self, settings: ScriptSettings) {
+        self.host.script_settings = settings;
+    }
+
+    /// Apply the host's startup and user platform settings to the session.
+    pub fn set_platform_settings(&mut self, settings: PlatformSettings) {
+        self.host.platform_settings = Some(settings);
+    }
+
+    /// Access the effective platform settings for host UI integration.
+    pub fn platform_settings_mut(&mut self) -> Option<&mut PlatformSettings> {
+        self.host.platform_settings.as_mut()
+    }
+
+    /// Install the backend for script-initiated offscreen drawing and readback.
+    /// Without one the session uses software drawing for these operations.
+    pub fn set_graphics_backend(&mut self, backend: impl GraphicsBackend + 'static) {
+        self.resources.graphics_backend = Some(Box::new(backend));
+    }
+
+    pub fn set_system_services(&mut self, services: impl SystemServices + 'static) {
+        self.host.system_services = Some(Box::new(services));
+    }
+
+    pub fn set_achievement_services(&mut self, services: impl AchievementServices + 'static) {
+        self.host.set_achievement_services(services);
+    }
+
+    pub fn set_file_services(&mut self, services: impl FileServices + 'static) {
+        self.host.file_services = Some(Box::new(services));
+    }
+
+    pub fn set_export_services(&mut self, services: impl ExportServices + 'static) {
+        self.resources.exports = Some(Box::new(services));
+    }
+
+    pub fn set_platform_job_services(&mut self, services: impl PlatformJobServices + 'static) {
+        self.resources.platform_jobs = Some(Box::new(services));
+    }
+
+    pub fn set_effect_services(&mut self, services: impl EffectServices + 'static) {
+        self.resources.effects = Some(Box::new(services));
+    }
+
+    pub fn set_speech_synthesizer(&mut self, synthesizer: impl SpeechSynthesizer + 'static) {
+        self.resources.speech = Some(Box::new(synthesizer));
+    }
+
+    pub fn set_configuration_services(&mut self, services: impl ConfigurationServices + 'static) {
+        self.host.configuration_services = Some(Box::new(services));
+    }
+
+    /// Supply save reads, writes and timestamps. Loaded containers are retained.
+    pub fn set_save_services(&mut self, services: impl SaveServices + 'static) {
+        self.host.save_services = Some(Box::new(services));
+    }
+
+    pub fn set_fonts(&mut self, fonts: impl FontServices + 'static) {
+        self.resources.fonts = Some(Box::new(fonts));
+    }
+}

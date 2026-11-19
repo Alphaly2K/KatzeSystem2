@@ -1,4 +1,4 @@
-use katze_system2::graphics::RenderTarget;
+use katze_system2::host::{RenderTarget, WindowServices};
 use sdl2::{
     event::Event,
     messagebox::{ButtonData, ClickedButton, MessageBoxButtonFlag, MessageBoxFlag},
@@ -110,7 +110,7 @@ impl Output {
     }
 }
 
-impl katze_system2::runtime::WindowServices for Output {
+impl WindowServices for Output {
     fn toggle_fullscreen(&mut self) -> katze_system2::Result<bool> {
         Output::toggle_fullscreen(self).map_err(|message| katze_system2::Error::new(0, message))
     }

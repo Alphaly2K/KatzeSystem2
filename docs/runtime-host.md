@@ -10,7 +10,7 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 |网络与系统|按脚本协议分发请求并管理任务状态。类型 62 的旧版社交发帖接收者暂未接入。|执行网络或系统动作，实施策略，回交结果；处理窗口、剪贴板、输入法、插件及对话框。|
 |输入、字体和时钟|处理游戏输入和逻辑时钟，按字体数据完成字形度量与栅格化。|提供输入事件、运行时间和当地日期时间，发现字体并提供数据。|
 
-公开 Rust API 从运行实例和宿主能力出发。文档应覆盖实例创建与释放、推进与输入顺序、帧与 PCM 的所有权、请求取消，以及诊断和正常未命中的区别。入口使用明确的请求与结果类型，记录整数单位和坐标约定；任务树、原始命令编号、VM 缓冲区和分派表保留为实现细节或显式的底层工具。现有 Rust 调用方随迁移调整；等 Rust 契约稳定且有非 Rust 宿主接入时，再定义独立版本的 C ABI 和显式释放约定。
+嵌入时从 `katze_system2::runtime` 导入会话类型，从 `katze_system2::host` 导入服务契约及输入、呈现和 PCM 类型。任务树、原始命令编号、VM 缓冲区和分派表属于底层工具入口。现有服务类型的模块路径仍可使用。Rust 契约稳定且有非 Rust 宿主接入时，再定义独立版本的 C ABI 和显式释放约定。
 
 标准宿主用 `GameRuntime::with_programs(loader, shared_slots, external)` 创建根任务并配置共享存储。启动前可将启动文档、游戏默认值及用户设置的 XML 字节交给 `configure_startup`，依次应用引擎配置；无效文档保留原有状态。绑定输入、资源和需要的其他服务，调用 `configure_canvas([width, height])` 设置逻辑输出尺寸并按游戏配置创建画布，再调用 `start_game(entry)`。该方法消费准备好的实例，返回已启动的实例和 `GameTasks`，输入、声音和入口脚本按引擎顺序登记。缺失的入口名称返回诊断并释放本次实例。
 
@@ -21,6 +21,8 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 调用 `advance(FrameTime { tick, increment, system_time_ms })` 推进一轮。`tick` 为游戏逻辑时钟（通常每秒 60 个单位），`increment` 是本轮传给任务的逻辑增量，`system_time_ms` 为可回绕的系统毫秒计数。先处理上一轮语言请求，再推进媒体和任务；语言刷新失败时保留失败项及后续请求。成功返回 false 表示根任务已退出。宿主在更新后消费绘制和声音输出。需要自定义结构的调用方仍可用 `Runtime::new` 和 `update`。
 
 窗口宿主在更新后调用 `process_window_requests(tasks.input, window)` 执行脚本提交的窗口请求。设备操作由 `WindowServices` 提供，运行库负责配置回写和任务通知。返回 true 表示应退出窗口循环；发生错误时可在后续调用继续处理尚未尝试的请求。
+
+宿主通过 `set_archive_config`、`set_folder_paths`、`set_script_settings` 和 `set_platform_settings` 提供脚本可查的路径及初始配置。窗口宿主可在推进前用 `has_pending_language_change` 和 `interface_language_available` 判断本轮是否刷新界面语言，在推进后用 `string_tables` 获取界面译文。
 
 `set_surface_size` 提供逻辑画面尺寸；窗口宿主可独立通过 `set_window_content_rect` 和 `set_windowed_mode` 提供客户区绘图矩形和当前窗口模式。`take_clipboard_requests` 取走按序提交的剪贴板写入请求，保留发起任务和原始编码，由宿主解码并写入剪贴板。
 
@@ -36,7 +38,7 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 
 迁移按下列顺序进行：
 
-1. 继续收拢服务接入和输出的公开入口。文件通过 `ReadSource`、`ResourceServices`、`SaveServices`、`FileServices` 访问；当地时间通过 `SystemServices::local_date_time` 提供；字体发现和私有字体读取由宿主提供。
+1. 宿主服务统一从 `host` 导出，两份示例通过有类型的启动配置和语言查询接入。文件通过 `ReadSource`、`ResourceServices`、`SaveServices`、`FileServices` 访问；当地时间通过 `SystemServices::local_date_time` 提供；字体发现和私有字体读取由宿主提供。
 2. 合成器通过 `Runtime::with_frame` 借出绘制列表和画布，由宿主呈现；库内 `GraphicsBackend` 用于脚本离屏回读。Metal、窗口和音频设备均由示例宿主管理。
 3. 为已有系统路由明确请求、返回与取消的对应关系。同步查询保持同步；需要宿主等待的操作沿用任务推进和轮询。社交发帖协议随[兼容项](compatibility-gaps.md)延期。诊断信息通过公开入口交给宿主。编解码和计算路径的线程、时钟及工具链要求单独检查，在宿主确有需要时提供相应构建路径。
 4. `runprobe` 负责本地资源和隔离存档，消费绘制列表和内存 PCM。桌面窗口和设备输出使用独立的可选示例适配。用内存宿主回归验证公开 API，再用 `runprobe` 验证两款游戏的剧情、存档与媒体行为。

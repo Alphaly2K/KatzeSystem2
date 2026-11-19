@@ -7,10 +7,9 @@ mod support;
 use katze_system2::{
     Result,
     graphics::Rect,
-    input::{ButtonSource, DeviceKeys, InputDevice, KeySample, PointerSample, Region},
-    kcs::ResourceServices,
-    resource::ResourceMode,
-    runtime::{FrameTime, GameRuntime, GameTasks, WindowServices},
+    host::{InputDevice, KeySample, PointerSample, ResourceMode, ResourceServices, WindowServices},
+    input::{ButtonSource, DeviceKeys, Region},
+    runtime::{FrameTime, GameRuntime, GameTasks},
 };
 use std::{cell::Cell, collections::BTreeMap, ops::RangeInclusive, rc::Rc};
 use support::{Game, build_runtime, load_game};

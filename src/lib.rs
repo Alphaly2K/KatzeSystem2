@@ -1,7 +1,7 @@
 //! Embeddable runtime for CatSystem2 2.6.1.90.
 //!
-//! Start a session with [`runtime::GameRuntime`]. The host supplies resources,
-//! input and clocks, advances the session, and consumes its draw commands and PCM.
+//! Start a session with [`runtime::GameRuntime`]. Use [`host`] for the services
+//! and data exchanged with the application that advances the session.
 //! Format readers and the lower-level task and script APIs are available separately.
 
 pub mod anm;
@@ -16,6 +16,7 @@ mod handles;
 pub mod hg2;
 pub mod hg3;
 mod hg_pixels;
+pub mod host;
 pub mod input;
 pub mod io;
 mod jpeg;

@@ -1,6 +1,6 @@
 # 脚本解释库接口
 
-适用基线：CatSystem2 2.6.1.90。库名为 `katze_system2`，容器读取与执行可分别使用。
+适用基线：CatSystem2 2.6.1.90。库名为 `katze_system2`，容器读取与执行可分别使用。嵌入完整游戏时，使用 `runtime::GameRuntime` 与 `host` 模块，参见[运行库与宿主边界](runtime-host.md)。下文记录各子系统与脚本工具的接口。
 
 ## 当前范围
 

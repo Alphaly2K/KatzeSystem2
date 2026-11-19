@@ -1,8 +1,8 @@
 use katze_system2::{
     Error, Result,
+    host::{ConfigurationFile, ConfigurationServices},
     kcs::ScriptSettings,
     resource::{FolderPaths, XmlDocument},
-    settings::{ConfigurationFile, ConfigurationServices},
 };
 use std::path::{Path, PathBuf};
 

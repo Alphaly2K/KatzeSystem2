@@ -1,4 +1,4 @@
-use katze_system2::{Error, Result, audio::Mixer};
+use katze_system2::{Error, Result, host::Mixer};
 use sdl2::audio::{AudioCallback, AudioDevice, AudioSpecDesired};
 use std::sync::{
     Arc, Mutex,
