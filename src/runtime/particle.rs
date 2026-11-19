@@ -3,6 +3,15 @@ use crate::kcs::{Interpreter, NativeReturn, ParticleTask, format_string};
 use crate::task::CommandBuffers;
 use crate::{Error, Result, read};
 
+fn copy_load_name(field: &mut [u8], name: &[u8], pc: usize) -> Result<()> {
+    let name = name.split(|&byte| byte == 0).next().unwrap_or_default();
+    if name.len() >= field.len() {
+        return Err(Error::new(pc, "粒子装载名称超过缓冲区上限"));
+    }
+    field[..name.len()].copy_from_slice(name);
+    Ok(())
+}
+
 impl<F: ObjectFactory> ObjectHost<'_, F> {
     pub(super) fn load_particle_native(
         &mut self,
@@ -27,17 +36,22 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             } else {
                 services.resolve(category, &name)?
             };
-            let name = &name[..name
-                .iter()
-                .position(|&byte| byte == 0)
-                .unwrap_or(name.len())];
-            if name.len() >= 128 {
-                return Err(Error::new(vm.pc, "粒子资源名称超过缓冲区上限"));
-            }
-            record[at..at + name.len()].copy_from_slice(name);
+            copy_load_name(&mut record[at..at + 128], &name, vm.pc)?;
         }
-        record[0x104..0x10c].copy_from_slice(&arguments[12..20]);
-        record[0x10c..0x18c].copy_from_slice(&vm.read(read::u32_at(arguments, 20)?, 128)?);
+        let parameter_offset = if index == 669 {
+            record[0x104..0x108].copy_from_slice(&arguments[12..16]);
+            16
+        } else {
+            record[0x104..0x10c].copy_from_slice(&arguments[12..20]);
+            20
+        };
+        record[0x10c..0x18c]
+            .copy_from_slice(&vm.read(read::u32_at(arguments, parameter_offset)?, 128)?);
+        if index == 669 {
+            let name = format_string(vm, read::u32_at(arguments, 20)?, 0)?;
+            record[0x18c..0x190].copy_from_slice(&1u32.to_le_bytes());
+            copy_load_name(&mut record[0x190..], &name, vm.pc)?;
+        }
         self.command_target_with_buffers(
             read::u32_at(arguments, 0)?,
             320,

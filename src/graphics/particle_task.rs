@@ -587,6 +587,7 @@ pub struct Particle3DObject {
     context: Vec<u8>,
     task: Option<ParticleRunner>,
     image_size: [f32; 2],
+    camera_depth: f32,
     parameters: [u32; 32],
     opacity: u32,
     source: i32,
@@ -600,6 +601,7 @@ impl Particle3DObject {
             context: Vec::new(),
             task: None,
             image_size: [0.; 2],
+            camera_depth: 0.,
             parameters: [0; 32],
             opacity: 256,
             source: -1,
@@ -631,8 +633,9 @@ impl Particle3DObject {
         if mode > 1 {
             return Err(Error::new(0, "粒子装载模式无效"));
         }
-        if read::u32_at(record, 0x18c)? != 0 {
-            return Err(Error::new(0x18c, "粒子外部绘图模式尚未接入"));
+        let without_draw = read::u32_at(record, 0x18c)? != 0;
+        if mode == 1 && without_draw {
+            return Err(Error::new(0x18c, "粒子插件的无绘制模式尚未接入"));
         }
         self.clear(host)?;
         let count = read::u32_at(record, 0x104)? as usize;
@@ -674,7 +677,7 @@ impl Particle3DObject {
             {
                 return Err(Error::new(0, "静默标记需要一个主体及至多三个附加点"));
             }
-            let image = if name(0x84)?.is_empty() {
+            let image = if without_draw || name(0x84)?.is_empty() {
                 None
             } else {
                 services
@@ -688,23 +691,32 @@ impl Particle3DObject {
         self.parameters = std::array::from_fn(|i| {
             u32::from_le_bytes(record[0x10c + i * 4..0x110 + i * 4].try_into().unwrap())
         });
-        self.image_size = image
-            .as_ref()
-            .map_or([256.; 2], |frame| frame.info.size.map(|n| n as f32));
-        let texture = image.map(particle_texture).transpose()?;
         let depth = f32::from_bits(read::u32_at(record, 0x108)?);
-        let reference = (65000. - depth) - 1000.;
+        if !without_draw {
+            self.image_size = image
+                .as_ref()
+                .map_or([256.; 2], |frame| frame.info.size.map(|n| n as f32));
+            self.camera_depth = (65000. - depth) - 1000.;
+        }
         let mut particles = ParticleHost {
             active: false,
             surface_size: host.surface_size(),
             depth_offset: depth,
-            camera_depth: reference,
+            camera_depth: self.camera_depth,
             object_id: self.source,
             parameters: self.parameters,
             ..ParticleHost::default()
         };
         particles.reset_quads(count, self.image_size)?;
-        let mesh = ParticleMesh::new(&particles, texture, reference)?;
+        let mesh = if without_draw {
+            None
+        } else {
+            Some(ParticleMesh::new(
+                &particles,
+                image.map(particle_texture).transpose()?,
+                self.camera_depth,
+            )?)
+        };
         self.task = Some(match program {
             ParticleProgram::Script(program) => {
                 ParticleRunner::Script(Box::new(ParticleTask::new(program, particles)?))
@@ -722,11 +734,13 @@ impl Particle3DObject {
                     .load(name(4)?)?,
             },
         });
-        let drawings = host.drawables().unwrap();
-        drawings.update(self.id, |drawable| {
-            drawable.particle_mesh = Some(mesh);
-        });
-        drawings.set_base_point(self.id, [0., 0., depth]);
+        if let Some(mesh) = mesh {
+            let drawings = host.drawables().unwrap();
+            drawings.update(self.id, |drawable| {
+                drawable.particle_mesh = Some(mesh);
+            });
+            drawings.set_base_point(self.id, [0., 0., depth]);
+        }
         Ok(())
     }
 
@@ -745,9 +759,9 @@ impl Particle3DObject {
         if let Some(mesh) = &mut drawable.particle_mesh {
             mesh.update(particles)?;
             mesh.opacity = self.opacity;
+            drawable.display = u32::from(particles.active);
+            drawable.blend_mode = particles.render_mode;
         }
-        drawable.display = u32::from(particles.active);
-        drawable.blend_mode = particles.render_mode;
         Ok(())
     }
 }

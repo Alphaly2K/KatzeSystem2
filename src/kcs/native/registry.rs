@@ -269,7 +269,7 @@ pub(crate) fn runtime(index: u32) -> RuntimeHandler {
         1055..=1061 => RuntimeHandler::Emocon,
         696..=700 | 785 | 850 | 851 | 876 | 977 | 1034 => RuntimeHandler::Backlog,
         143 => RuntimeHandler::LoadProgram,
-        271 | 693 => RuntimeHandler::LoadParticle,
+        271 | 669 | 693 => RuntimeHandler::LoadParticle,
         265..=270 | 417 | 788 | 996..=998 => RuntimeHandler::Movie,
         196..=203 | 520..=532 | 853..=857 | 860 | 861 | 905 | 967..=973 => {
             RuntimeHandler::Transition

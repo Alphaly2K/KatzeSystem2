@@ -172,8 +172,11 @@ fn particle_runtime_loads_native_packets_resumes_and_shares_random_state() -> Re
         .flat_map(|budget| [0, 1, 2].map(|control| (budget, control)))
     {
         let mut code = Vec::new();
-        for id in [1, 2] {
-            native(&mut code, 271, &[id, 0, 8, 1, 5000f32.to_bits(), 32]);
+        for (id, index, arguments) in [
+            (1, 271, [1, 0, 8, 1, 5000f32.to_bits(), 32]),
+            (2, 669, [2, 0, 176, 1, 32, 168]),
+        ] {
+            native(&mut code, index, &arguments);
             ins(&mut code, 0x26, &[200 + id * 4]);
             native(&mut code, 272, &[id]);
         }
@@ -181,6 +184,8 @@ fn particle_runtime_loads_native_packets_resumes_and_shares_random_state() -> Re
         let mut data = vec![0; 256];
         data[..5].copy_from_slice(b"test\0");
         data[8..15].copy_from_slice(b"sprite\0");
+        data[168..176].copy_from_slice(b"context\0");
+        data[176..183].copy_from_slice(b"unused\0");
         for i in 0..32 {
             data[32 + i * 4..36 + i * 4]
                 .copy_from_slice(&(0xfed0_0000u32 + i as u32).to_le_bytes());
@@ -213,7 +218,9 @@ fn particle_runtime_loads_native_packets_resumes_and_shares_random_state() -> Re
                     .read(200 + id * 4, 4)?,
                 1u32.to_le_bytes()
             );
-            assert_eq!(runtime.drawables().get(id).unwrap().display(), 1);
+            let drawable = runtime.drawables().get(id).unwrap();
+            assert_eq!(drawable.display(), u32::from(id == 1));
+            assert_eq!(drawable.particle_mesh().is_some(), id == 1);
             assert_eq!(
                 runtime.object(id).unwrap().creation_context(),
                 Some(&b"context"[..])
@@ -241,6 +248,18 @@ fn particle_runtime_loads_native_packets_resumes_and_shares_random_state() -> Re
         assert_eq!(runtime.drawables().get(1).unwrap().display(), 0);
         runtime.dispatch_command(caller, command(321))?;
         assert_eq!(runtime.drawables().get(1).unwrap().display(), 1);
+        let detached = |code| Command {
+            target: 2,
+            ..command(code)
+        };
+        assert_eq!(runtime.dispatch_command(caller, detached(324))?, 1);
+        runtime.dispatch_command(caller, detached(322))?;
+        assert_eq!(runtime.dispatch_command(caller, detached(324))?, 0);
+        runtime.dispatch_command(caller, detached(321))?;
+        assert_eq!(runtime.dispatch_command(caller, detached(324))?, 1);
+        assert_eq!(runtime.drawables().get(2).unwrap().display(), 0);
+        runtime.dispatch_command(caller, detached(323))?;
+        assert!(runtime.object(2).unwrap().interpreter().is_none());
         let mut plugin = [0; 0x290];
         plugin[0] = 1;
         plugin[4..14].copy_from_slice(b"file/test\0");
