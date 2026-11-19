@@ -30,7 +30,7 @@ impl ScriptRandom {
 }
 
 #[derive(Clone, Debug)]
-struct Stream {
+pub(super) struct Stream {
     values: [u32; 624],
     index: usize,
 }
@@ -47,7 +47,16 @@ impl Stream {
         Self { values, index: 624 }
     }
 
-    fn next(&mut self) -> u32 {
+    pub(super) fn seeded_words(mut seed: u32) -> Self {
+        let values = std::array::from_fn(|_| {
+            let word = seed;
+            seed = seed.wrapping_mul(69069);
+            word
+        });
+        Self { values, index: 624 }
+    }
+
+    pub(super) fn next(&mut self) -> u32 {
         if self.index == 624 {
             for i in 0..624 {
                 let y = (self.values[i] & 0x8000_0000) | (self.values[(i + 1) % 624] & 0x7fff_ffff);

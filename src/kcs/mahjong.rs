@@ -2,6 +2,8 @@ use super::{HostState, Interpreter, NativeReturn, native};
 use crate::{Error, Result, read};
 use std::collections::BTreeMap;
 
+mod opening;
+
 #[derive(Default)]
 pub(super) struct Mahjong {
     handles: BTreeMap<u32, Vec<u32>>,
@@ -9,6 +11,7 @@ pub(super) struct Mahjong {
     seats: usize,
     points: [u32; 4],
     remaining: u32,
+    opening: opening::Opening,
 }
 
 #[derive(Default)]
@@ -87,7 +90,15 @@ impl Mahjong {
         self.seats = settings.seats;
         self.points[..self.seats].copy_from_slice(&settings.starting_points[..self.seats]);
         self.remaining = if self.seats == 2 { 61 } else { 122 };
+        self.opening.phase = 10003;
         Ok(())
+    }
+}
+
+impl HostState {
+    /// Sets the independent shuffle stream used by the Mahjong natives.
+    pub fn set_mahjong_seed(&mut self, seed: u32) {
+        self.mahjong.opening.seed(seed);
     }
 }
 
@@ -108,10 +119,15 @@ pub(super) fn call(
     }
     let handle = read::u32_at(arguments, 0)?;
     if handle == 0 {
-        return Ok(if index <= 472 { Continue } else { Value(0) });
+        return Ok(if matches!(index, 471 | 472 | 483) {
+            Continue
+        } else {
+            Value(0)
+        });
     }
     let count = match index {
         472 => 9,
+        477 | 479 | 483 => 3,
         480 | 495 => 2,
         _ => 1,
     };
@@ -130,7 +146,22 @@ pub(super) fn call(
             table.configure(&args, vm)?;
             Continue
         }
+        473 => Value(table.poll(handle, vm.pc)?),
         475 => Value(table.seats as u32),
+        476 => Value(table.opening.seat),
+        477 | 479 => {
+            let side = (args[1] & 3) as usize;
+            let tiles = if index == 477 {
+                table.opening.wall_side(side)
+            } else {
+                table.opening.hand(side)
+            };
+            if !tiles.is_empty() && vm.read(args[2], 1).is_ok() {
+                let bytes: Vec<_> = tiles.iter().copied().flat_map(u32::to_le_bytes).collect();
+                vm.write(args[2], &bytes)?;
+            }
+            Value(tiles.len() as u32)
+        }
         480 => Value(
             packet
                 .get(args[1].wrapping_add(1) as usize)
@@ -138,6 +169,12 @@ pub(super) fn call(
                 .unwrap_or(0),
         ),
         481 => Value((packet.len() as u32).wrapping_sub(1)),
+        483 => {
+            table
+                .opening
+                .roll(table.settings.first_dealer, args[1], args[2]);
+            Continue
+        }
         492 => Value(table.remaining),
         495 => Value(
             table.points[..table.seats]

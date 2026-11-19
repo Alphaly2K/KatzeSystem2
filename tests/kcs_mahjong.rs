@@ -64,3 +64,59 @@ fn mahjong_handles_keep_independent_packets_over_shared_rounds() -> Result<()> {
     assert_eq!(call(495, &[second, 1])?, Value(150));
     Ok(())
 }
+
+#[test]
+fn mahjong_deals_from_the_rolled_wall_and_preserves_the_dealers_extra_tile() -> Result<()> {
+    use NativeReturn::{Continue, Value};
+
+    let mut state = State::new(0);
+    let mut host = CoreHost::new(&mut state);
+    host.set_mahjong_seed(4357);
+    let expected_random = host.random.clone().next_integer();
+    let mut vm = Interpreter::new(Program::from_code(&[], vec![0; 256], 32)?, vec![0; 256])?;
+    let Value(handle) = host.call(470, &[], &mut vm)? else {
+        panic!("missing Mahjong handle")
+    };
+    vm.write(0x8000_0000, &words(&[25_000, 27_000, 29_000, 31_000]))?;
+    let mut call = |index, args: &[u32]| host.call(index, &words(args), &mut vm);
+    assert_eq!(
+        call(472, &[handle, 2, 1, 0, 1, 2, 3, 0, 0x8000_0000])?,
+        Continue
+    );
+    assert_eq!(call(483, &[handle, 1, 2])?, Continue);
+    assert_eq!(call(473, &[handle])?, Value(10003));
+    assert_eq!(call(483, &[handle, 7, 2])?, Continue);
+    assert_eq!(call(473, &[handle])?, Value(10004));
+    assert_eq!(call(483, &[handle, 1, 2])?, Continue);
+    for event in 20001..=20004 {
+        assert_eq!(call(473, &[handle])?, Value(event));
+    }
+    for (index, expected) in [
+        48, 539, 131072, 304, 538, 131073, 384, 537, 131074, 274, 536, 131075,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        assert_eq!(call(480, &[handle, index as u32])?, Value(expected));
+    }
+    for _ in 0..7 {
+        assert_eq!(call(473, &[handle])?, Value(20004));
+    }
+    assert_eq!(call(473, &[handle])?, Value(20005));
+    assert_eq!(call(473, &[handle])?, Value(20006));
+    assert_eq!(call(492, &[handle])?, Value(34));
+    assert_eq!(call(479, &[handle, 4, 0x8000_0040])?, Value(14));
+    assert_eq!(call(479, &[handle, 1, 0x9000_0000])?, Value(13));
+    let data = vm.read(0x8000_0040, 14 * 4)?;
+    let tiles: Vec<_> = data
+        .chunks_exact(4)
+        .map(|tile| u32::from_le_bytes(tile.try_into().unwrap()))
+        .collect();
+    assert!(
+        tiles
+            .windows(2)
+            .all(|pair| (pair[0] & 0x3ff) < (pair[1] & 0x3ff))
+    );
+    assert_eq!(host.random.next_integer(), expected_random);
+    Ok(())
+}
