@@ -7,9 +7,7 @@ pub(crate) struct RWipe {
     pub duration: u32,
     pub mode: u32,
     pub state: u32,
-    pub now: u32,
     start: u32,
-    deadline: u32,
     source: Arc<Surface>,
     mask: Option<Surface>,
 }
@@ -21,9 +19,7 @@ impl RWipe {
             duration: 0,
             mode: 0,
             state: 0,
-            now: 0,
             start: 0,
-            deadline: 0,
             source: Arc::new(source),
             mask: None,
         }
@@ -40,7 +36,6 @@ impl RWipe {
 
     pub fn restart(&mut self, now: u32) {
         self.start = now;
-        self.deadline = now.wrapping_add(self.duration);
     }
 
     pub fn set_state(&mut self, value: u32, now: u32) {
@@ -79,21 +74,25 @@ impl RWipe {
         Ok(())
     }
 
-    pub fn frame(&mut self) -> Result<[DrawCommand; 2]> {
+    pub fn update(&mut self, now: u32) -> Result<()> {
         if self.state != 0 {
-            let elapsed = self.now.wrapping_sub(self.start).min(self.deadline);
+            let elapsed = now.wrapping_sub(self.start);
             self.sample(elapsed, self.mode != 0)?;
+            if elapsed >= self.duration {
+                self.state = 0;
+            }
         }
+        Ok(())
+    }
+
+    pub fn frame(&self) -> [DrawCommand; 2] {
         let mut commands = super::mosaic::screen_commands(self.source.clone(), 255);
         for command in &mut commands {
             for vertex in &mut command.vertices {
                 vertex.position[2] = 0.5;
             }
         }
-        if self.now >= self.deadline {
-            self.state = 0;
-        }
-        Ok(commands)
+        commands
     }
 
     pub fn background(&self) -> [DrawCommand; 2] {

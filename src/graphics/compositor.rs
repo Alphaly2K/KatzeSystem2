@@ -144,13 +144,13 @@ impl Compositor {
             return Ok(frame);
         }
         if let Some(ScreenEffect::RWipe(id)) = self.screen_effect {
-            let effect = self.rwipes.get_mut(&id).unwrap();
+            let effect = self.rwipes.get(&id).unwrap();
             let far = effect.far;
             let mut frame = self
                 .drawables
                 .compose(&projection, parent, filter, Some([0., far]))?;
             frame.commands.splice(0..0, effect.background());
-            frame.commands.extend(effect.frame()?);
+            frame.commands.extend(effect.frame());
             frame.commands.extend(
                 self.drawables
                     .compose(&projection, parent, filter, Some([far, 1_000_000.]))?

@@ -504,14 +504,14 @@ fn render_wipe_uses_image_wrappers_and_keeps_foreground_and_stopped_pixels() {
         } else {
             assert_eq!(output.pixel(0, 0), Some(0xbf5e_7891));
         }
-        execute(&mut rt, &[(531, &[id, 0])]);
+        execute_at(&mut rt, &[(531, &[id, 0])], 4);
         rt.update(6, 1).unwrap();
         assert_eq!(render(&mut rt), output);
-        execute(&mut rt, &[(531, &[id, 3])]);
+        execute_at(&mut rt, &[(531, &[id, 3])], 6);
         rt.update(14, 1).unwrap();
-        render(&mut rt);
         assert_eq!(state(&mut rt, id), 0);
-        execute(&mut rt, &[(858, &[1]), (859, &[0, 0, 10f32.to_bits()])]);
+        assert_eq!(render(&mut rt).pixel(0, 0), Some(0xffab_cdef));
+        execute_at(&mut rt, &[(858, &[1]), (859, &[0, 0, 10f32.to_bits()])], 14);
         assert_eq!(
             rt.compositor().auxiliary_targets()[0].pixel(0, 0),
             Some(0xffab_cdef)
@@ -659,7 +659,6 @@ fn fes_screen_transitions_hold_old_pixels_and_release_the_all_objects_wait() {
         }
         for now in 2..=16 {
             advance(&mut rt, &mut scene, now);
-            render(&mut rt);
             if now == 4 && available {
                 assert_ne!(state(&mut rt, task.unwrap()), 0);
                 assert_eq!(scene.exit_code(), None);

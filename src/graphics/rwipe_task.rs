@@ -70,7 +70,7 @@ impl TaskObject for RWipeObject {
     }
     fn update_body(&mut self, host: &mut dyn Host, _: u32, _: usize) -> Result<bool> {
         if let Some(effect) = compositor(host)?.rwipes.get_mut(&self.id) {
-            effect.now = self.base.clock().elapsed();
+            effect.update(self.base.clock().elapsed())?;
         }
         Ok(true)
     }
