@@ -127,17 +127,21 @@ impl SystemSettings {
         else {
             return Ok(100);
         };
-        let slot = match crate::audio::SoundGroups::legacy_id(&group.label) {
-            0 => 0,
-            1 => 1,
-            2 | 3 => 2,
-            _ => return Ok(100),
-        };
-        Ok(if word(&self.sound, 0x15ec + slot * 4) != 0 {
+        Ok(self.legacy_group_volume(&group.label))
+    }
+
+    pub(crate) fn legacy_group_muted(&self, label: &[u8]) -> bool {
+        word(&self.sound, 0x15e8) != 0
+            || legacy_volume_slot(label)
+                .is_some_and(|slot| word(&self.sound, 0x15ec + slot * 4) != 0)
+    }
+
+    pub(crate) fn legacy_group_volume(&self, label: &[u8]) -> u32 {
+        if self.legacy_group_muted(label) {
             0
         } else {
-            word(&self.sound, slot * 4)
-        })
+            legacy_volume_slot(label).map_or(100, |slot| word(&self.sound, slot * 4))
+        }
     }
 
     pub(crate) fn voice_file_play_enabled(&self, name: &[u8]) -> Result<u32> {
@@ -152,6 +156,15 @@ impl SystemSettings {
         Ok(self
             .voice_file_index(name)?
             .map_or(0, |index| word(&self.sound, 20 + index * 116 + offset)))
+    }
+}
+
+fn legacy_volume_slot(label: &[u8]) -> Option<usize> {
+    match crate::audio::SoundGroups::legacy_id(label) {
+        0 => Some(0),
+        1 => Some(1),
+        2 | 3 => Some(2),
+        _ => None,
     }
 }
 

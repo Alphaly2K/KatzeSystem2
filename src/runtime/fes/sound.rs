@@ -344,25 +344,40 @@ impl<F: ObjectFactory> Store<'_, F> {
         sound: &crate::fes::SoundState,
         system_voice: bool,
     ) -> Result<bool> {
-        if self.host.sound_config_enabled == 0 {
-            return Err(Error::new(0, "FES SOUND 旧声音配置的播放动作尚未接入"));
-        }
-        let config = self
-            .host
-            .sound_config
-            .as_ref()
-            .ok_or_else(|| Error::new(0, "运行时未提供新声音分类配置"))?;
-        let policy = if system_voice {
-            config.file_system_voice(&sound.file)?
+        let policy = if self.host.sound_config_enabled == 0 {
+            self.fes_legacy_sound_settings()?
+                .voice_file_play_enabled(&sound.file)? as i32
         } else {
-            config.file_play_enabled(&sound.file)?
+            let config = self
+                .host
+                .sound_config
+                .as_ref()
+                .ok_or_else(|| Error::new(0, "运行时未提供新声音分类配置"))?;
+            if system_voice {
+                config.file_system_voice(&sound.file)?
+            } else {
+                config.file_play_enabled(&sound.file)?
+            }
         };
         Ok(policy | sound.play_parameters[2] != 0)
     }
 
     fn fes_sound_volume(&self, sound: &crate::fes::SoundState) -> Result<i32> {
         if self.host.sound_config_enabled == 0 {
-            return Err(Error::new(0, "FES SOUND 旧声音配置的播放属性更新尚未接入"));
+            let settings = self.fes_legacy_sound_settings()?;
+            if sound.object_type != 0 {
+                return Ok(if settings.legacy_group_muted(&sound.group) {
+                    0
+                } else {
+                    sound.volume
+                });
+            }
+            let volume = if sound.group.is_empty() {
+                settings.legacy_file_volume(&sound.file, self.host.sound_groups.as_ref())?
+            } else {
+                settings.legacy_group_volume(&sound.group)
+            };
+            return Ok((volume as i32).wrapping_mul(sound.volume) / 100);
         }
         let config = self
             .host
@@ -385,6 +400,13 @@ impl<F: ObjectFactory> Store<'_, F> {
             }
         }
         Ok(volume.wrapping_mul(sound.volume) / 100)
+    }
+
+    fn fes_legacy_sound_settings(&self) -> Result<&crate::settings::SystemSettings> {
+        self.host
+            .system_settings
+            .as_ref()
+            .ok_or_else(|| Error::new(0, "运行时未提供旧声音配置"))
     }
 
     fn fes_sound_task(&mut self, owner: u32, objects: &mut Objects) -> Result<u32> {

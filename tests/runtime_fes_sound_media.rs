@@ -357,6 +357,121 @@ fn play_policy_stops_the_prior_channel_before_properties_and_runs_the_own_handle
 }
 
 #[test]
+fn legacy_sound_uses_voice_switch_and_type_specific_group_volume() {
+    use katze_system2::{
+        audio::{SoundGroup, SoundGroups},
+        fes::Program,
+        runtime::fes::Scene,
+        settings::SystemSettings,
+    };
+
+    for (file, group, object_type, count, force, mute, playing, sent_volume, commands) in [
+        ("tone", "", 0, 0, 0, 0, true, 61, &[187, 190, 183][..]),
+        (
+            "missing",
+            "",
+            0,
+            0,
+            0,
+            0,
+            true,
+            131,
+            &[186, 185, 187, 190, 185, 218],
+        ),
+        ("missing", "", 0, 3, 0, 0, false, 131, &[187, 190, 185, 218]),
+        ("missing", "BgM", 0, 0, 37, 0, false, 61, &[187, 190, 183]),
+        ("tone", "Se", 0, 0, 0, 0, false, 85, &[187, 190, 183]),
+        ("tone", "BgM", 1, 0, 0, 0, false, 131, &[187, 190, 183]),
+        (
+            "tone",
+            "SySvOiCe",
+            -1,
+            0,
+            0,
+            0x15f4,
+            false,
+            0,
+            &[187, 190, 183],
+        ),
+        (
+            "tone",
+            "unknown",
+            0,
+            0,
+            0,
+            0x15e8,
+            false,
+            0,
+            &[187, 190, 183],
+        ),
+    ] {
+        let (mut runtime, _, _, trace) = setup();
+        trace.borrow_mut().playing = u32::from(playing);
+        runtime.numbers_mut().shared.resize(1, 0);
+        let mut settings = SystemSettings::default();
+        settings.apply_startup_xml(br#"<?xml version="1.0" encoding="UTF-8"?><document><VOICE><v00><head>tone</head><group>6</group><mastervol>29</mastervol></v00></VOICE></document>"#).unwrap();
+        settings.sound[..4].copy_from_slice(&47u32.to_le_bytes());
+        settings.sound[4..8].copy_from_slice(&65u32.to_le_bytes());
+        settings.sound[8..12].copy_from_slice(&37u32.to_le_bytes());
+        if mute != 0 {
+            settings.sound[mute..mute + 4].copy_from_slice(&u32::MAX.to_le_bytes());
+        }
+        runtime.host_mut().system_settings = Some(settings);
+        runtime.host_mut().sound_groups = Some(SoundGroups {
+            entries: vec![SoundGroup {
+                key: 0,
+                id: 6,
+                label: b"bgm".to_vec(),
+                range: [0, 7],
+            }],
+        });
+        let source = format!(
+            "#DEFINE\nSOUND sound\n#OBJECT CHANNEL STYPE\nsound 5 1\n#START\nsound play {count} 1 {force}\nwait 99\n#sound.PLAY\n$0+=1\n"
+        );
+        let mut scene = Scene::new(
+            Program::from_text(source.as_bytes()).unwrap(),
+            runtime.host().handle_allocator(),
+        )
+        .unwrap();
+        assert!(scene.prepare(runtime.numbers_mut(), 4096).unwrap());
+        let objects = scene.objects_mut().unwrap();
+        objects.set_sound_task(1);
+        let id = objects.lookup("sound", 0).unwrap();
+        let ObjectState::Sound(sound) = &mut objects.get_mut(id).unwrap().state else {
+            unreachable!()
+        };
+        sound.file = file.as_bytes().to_vec();
+        sound.group = group.as_bytes().to_vec();
+        sound.object_type = object_type;
+        sound.volume = 131;
+        sound.pan = -43;
+
+        assert!(runtime.update_fes_scene(0, &mut scene, 10).unwrap());
+        assert_eq!(
+            runtime.numbers().shared[0],
+            i32::from(commands.contains(&183))
+        );
+        let expected: Vec<_> = commands
+            .iter()
+            .map(|&code| {
+                let value = match code {
+                    187 => sent_volume,
+                    190 => (-43i32) as u32,
+                    183 => count,
+                    _ => 0,
+                };
+                Event::Command(code, [5, value, 0], vec![])
+            })
+            .collect();
+        assert_eq!(
+            trace.borrow().events,
+            expected,
+            "{file} {group} {object_type} {count} {force} {mute}"
+        );
+    }
+}
+
+#[test]
 fn play_handler_retry_preserves_completed_playback_and_script_instructions() {
     use katze_system2::{fes::Program, runtime::fes::Scene};
     for budget in [1, 4096] {
