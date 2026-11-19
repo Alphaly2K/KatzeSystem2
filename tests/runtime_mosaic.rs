@@ -126,8 +126,13 @@ fn native_mosaic_captures_both_scenes_preserves_foreground_and_releases_its_regi
         assert_eq!(output.pixel(0, 0), Some(0xffab_cdef));
         assert_eq!(output.pixel(2, 2), Some(0xff55_7733));
         rt.update(8, 1).unwrap();
-        rt.compose_frame().unwrap();
         assert_eq!(state(&mut rt, id), 0);
+        let mut output = RenderTarget::new([8, 6]).unwrap();
+        rt.compose_frame()
+            .unwrap()
+            .render_into(&mut output, rt.drawing().target.as_ref())
+            .unwrap();
+        assert_eq!(output.pixel(0, 0), Some(0xffab_cdef));
         rt.drawables_mut().set_color(100, 0xff33_4466, u32::MAX);
         rt.destroy(id).unwrap();
         let mut output = RenderTarget::new([8, 6]).unwrap();
@@ -219,7 +224,6 @@ fn fading_mosaic_captures_during_creation_then_blends_over_the_live_scene() {
         if duration < 2 {
             assert_eq!(state(&mut rt, id), 3);
             rt.update(duration, 1).unwrap();
-            rt.compose_frame().unwrap();
             assert_eq!(state(&mut rt, id), 0);
             rt.destroy(id).unwrap();
             continue;
@@ -245,13 +249,15 @@ fn fading_mosaic_captures_during_creation_then_blends_over_the_live_scene() {
         assert_eq!(output.pixel(0, 0), Some(0xd037_4c61));
         assert_eq!(state(&mut rt, id), 3);
         rt.update(8, 1).unwrap();
-        let mut output = RenderTarget::new([8, 6]).unwrap();
-        rt.compose_frame()
-            .unwrap()
-            .render_into(&mut output, rt.drawing().target.as_ref())
-            .unwrap();
-        assert_eq!(output.pixel(0, 0), Some(0xffab_cdef));
         assert_eq!(state(&mut rt, id), 0);
+        for _ in 0..2 {
+            let mut output = RenderTarget::new([8, 6]).unwrap();
+            rt.compose_frame()
+                .unwrap()
+                .render_into(&mut output, rt.drawing().target.as_ref())
+                .unwrap();
+            assert_eq!(output.pixel(0, 0), Some(0xffab_cdef));
+        }
         rt.destroy(id).unwrap();
     }
 }
@@ -296,8 +302,8 @@ fn shatter_uses_the_captured_scene_keeps_foreground_and_releases_its_target() {
         .unwrap();
     assert_eq!(output.pixel(0, 0), Some(0xffabcdef));
     rt.update(8, 1).unwrap();
-    let frame = rt.compose_frame().unwrap();
     assert_eq!(state(&mut rt, id), 0);
+    let frame = rt.compose_frame().unwrap();
     let mut output = RenderTarget::new([8, 6]).unwrap();
     frame
         .render_into(&mut output, rt.drawing().target.as_ref())

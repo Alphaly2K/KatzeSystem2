@@ -39,9 +39,8 @@ pub(crate) struct Mosaic {
     pub block: i32,
     pub algorithm: u32,
     pub state: u32,
-    pub now: u32,
-    pub start: u32,
-    pub deadline: u32,
+    start: u32,
+    finished: bool,
     levels: Vec<Level>,
     frames: [Option<Arc<Surface>>; 2],
     last_time: Option<u32>,
@@ -50,6 +49,7 @@ pub(crate) struct Mosaic {
 
 impl Mosaic {
     pub fn capture(&mut self, index: usize, surface: Surface) -> Result<()> {
+        self.finished = false;
         let image = Arc::new(surface);
         self.frames[index] = Some(image.clone());
         let mut levels = self.levels(image, index, self.duration >> 1)?;
@@ -83,6 +83,7 @@ impl Mosaic {
     }
 
     pub fn prepare_fade(&mut self) -> Result<()> {
+        self.finished = false;
         let image = self.frames[0].as_ref().unwrap().clone();
         self.levels = self.levels(image, 0, self.duration)?;
         self.sample(0)?;
@@ -128,17 +129,19 @@ impl Mosaic {
         Ok(levels)
     }
 
-    pub fn set_state(&mut self, state: u32, now: u32) {
+    pub fn set_state(&mut self, state: u32, now: u32) -> Result<()> {
         self.state = state;
+        self.finished = false;
+        self.last_time = None;
         if state != 0 {
             self.restart(now);
+            self.sample(0)?;
         }
-        self.last_time = None;
+        Ok(())
     }
 
     pub fn restart(&mut self, now: u32) {
         self.start = now;
-        self.deadline = now.wrapping_add(self.duration);
     }
 
     fn sample(&mut self, elapsed: u32) -> Result<usize> {
@@ -198,21 +201,27 @@ impl Mosaic {
         Ok(level.source)
     }
 
-    pub fn frame(&mut self) -> Result<Option<(Arc<Surface>, u8)>> {
-        let selected = if self.state != 0 {
-            let elapsed = self.now.wrapping_sub(self.start).min(self.deadline);
-            self.sample(elapsed)?
-        } else {
-            0
-        };
-        let opacity = if self.state == 0 { 255 } else { self.opacity };
-        let frame = self.frames[selected]
-            .as_ref()
-            .map(|frame| (frame.clone(), opacity));
-        if self.now >= self.deadline {
-            self.state = 0;
+    pub fn update(&mut self, now: u32) -> Result<()> {
+        if self.state != 0 {
+            let elapsed = now.wrapping_sub(self.start);
+            self.sample(elapsed)?;
+            if elapsed >= self.duration {
+                self.state = 0;
+                self.finished = true;
+            }
         }
-        Ok(frame)
+        Ok(())
+    }
+
+    pub fn frame(&self) -> Option<(Arc<Surface>, u8)> {
+        let (selected, opacity) = if self.state != 0 || self.finished {
+            (self.last_source, self.opacity)
+        } else {
+            (0, 255)
+        };
+        self.frames[selected]
+            .as_ref()
+            .map(|frame| (frame.clone(), opacity))
     }
 }
 
@@ -299,7 +308,7 @@ mod tests {
             };
             effect.capture(0, source(0)).unwrap();
             effect.capture(1, source(1)).unwrap();
-            effect.set_state(1, 0);
+            effect.set_state(1, 0).unwrap();
             for (frame, at, pixel) in [
                 (0, [0, 0], expected[0]),
                 (1, [1, 0], expected[1]),
@@ -319,8 +328,8 @@ mod tests {
             let last = effect.frames[1].clone();
             assert_eq!(effect.sample(100).unwrap(), 1);
             assert_eq!(effect.frames[1], last);
-            effect.set_state(1, 100);
-            assert_eq!(effect.sample(100).unwrap(), 0);
+            effect.set_state(1, 100).unwrap();
+            assert_eq!(effect.last_source, 0);
         }
     }
 
@@ -341,7 +350,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             [0, 1, 2, 3, 4, 5, 6, 2, 8, 9]
         );
-        effect.set_state(1, 0);
+        effect.set_state(1, 0).unwrap();
         effect.sample(0).unwrap();
         assert_eq!(effect.sample(6).unwrap(), 1);
         assert_eq!(
@@ -358,7 +367,7 @@ mod tests {
             effect.block = 5;
             effect.algorithm = algorithm;
             effect.prepare_fade().unwrap();
-            effect.set_state(1, 0);
+            effect.set_state(1, 0).unwrap();
             for (elapsed, alpha) in [255, 255, 192, 192, 128, 128, 0, 0, 0]
                 .into_iter()
                 .enumerate()

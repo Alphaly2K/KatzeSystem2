@@ -111,7 +111,7 @@ impl TaskObject for MosaicObject {
 
     fn update_body(&mut self, host: &mut dyn Host, _: u32, _: usize) -> Result<bool> {
         if let Some(effect) = compositor(host)?.mosaics.entries.get_mut(&self.id) {
-            effect.now = self.base.clock().elapsed();
+            effect.update(self.base.clock().elapsed())?;
         }
         Ok(true)
     }
@@ -198,7 +198,7 @@ impl TaskObject for MosaicObject {
                     .entries
                     .entry(self.id)
                     .or_insert_with(Mosaic::default)
-                    .set_state(command.data[1], now);
+                    .set_state(command.data[1], now)?;
             }
             525..=529 if (command.code >= 528) == (self.kind == MosaicKind::Fade) => {}
             3 => {

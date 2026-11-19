@@ -174,7 +174,7 @@ impl Compositor {
             return Ok(frame);
         }
         if let Some(ScreenEffect::Shatter(id)) = self.screen_effect {
-            let effect = self.shatters.entries.get_mut(&id).unwrap();
+            let effect = self.shatters.entries.get(&id).unwrap();
             let far = effect.far;
             let mut frame = self
                 .drawables
@@ -224,9 +224,9 @@ impl Compositor {
         let Some(ScreenEffect::Mosaic(id)) = self.screen_effect else {
             return self.drawables.compose(&projection, parent, filter, range);
         };
-        let effect = self.mosaics.entries.get_mut(&id).unwrap();
+        let effect = self.mosaics.entries.get(&id).unwrap();
         let far = effect.far;
-        let image = effect.frame()?;
+        let image = effect.frame();
         let mut frame = self
             .drawables
             .compose(&projection, parent, filter, Some([0., far]))?;

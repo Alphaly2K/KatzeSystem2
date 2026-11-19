@@ -16,9 +16,7 @@ pub(crate) struct Shatter {
     pub far: f32,
     pub duration: u32,
     pub state: u32,
-    pub now: u32,
-    pub start: u32,
-    pub deadline: u32,
+    start: u32,
     previous: u32,
     pub mesh: Option<ShatterMesh>,
     pub source: Option<Arc<Surface>>,
@@ -30,9 +28,7 @@ impl Default for Shatter {
             far: 1_000_000.,
             duration: 0,
             state: 0,
-            now: 0,
             start: 0,
-            deadline: 0,
             previous: 0,
             mesh: None,
             source: None,
@@ -167,23 +163,22 @@ impl Shatter {
 
     pub fn restart(&mut self, now: u32) {
         self.start = now;
-        self.deadline = now.wrapping_add(self.duration);
+        self.previous = 0;
     }
 
     pub fn set_state(&mut self, value: u32, now: u32) {
         self.state = value;
         if value != 0 {
             self.restart(now);
-            self.previous = 0;
         }
     }
 
-    pub fn frame(&mut self) -> Vec<DrawCommand> {
-        let (Some(mesh), Some(source)) = (&mut self.mesh, &self.source) else {
-            return Vec::new();
-        };
-        if self.state != 0 {
-            let elapsed = self.now.min(self.deadline).wrapping_sub(self.start);
+    pub fn update(&mut self, now: u32) {
+        if self.state == 0 {
+            return;
+        }
+        let elapsed = now.wrapping_sub(self.start).min(self.duration);
+        if let Some(mesh) = &mut self.mesh {
             let delta = elapsed.wrapping_sub(self.previous) as f32;
             let color = ((255 - (elapsed.wrapping_mul(255) / self.duration.max(1)).min(255)) << 24)
                 | 0xffffff;
@@ -211,8 +206,16 @@ impl Shatter {
             }
             self.previous = elapsed;
         }
-        let commands = mesh
-            .fragments
+        if elapsed >= self.duration {
+            self.state = 0;
+        }
+    }
+
+    pub fn frame(&self) -> Vec<DrawCommand> {
+        let (Some(mesh), Some(source)) = (&self.mesh, &self.source) else {
+            return Vec::new();
+        };
+        mesh.fragments
             .iter()
             .map(|fragment| DrawCommand {
                 vertices: fragment
@@ -227,11 +230,7 @@ impl Shatter {
                 clip: None,
                 blend_mode: 0,
             })
-            .collect();
-        if self.now >= self.deadline {
-            self.state = 0;
-        }
-        commands
+            .collect()
     }
 }
 
@@ -291,15 +290,16 @@ mod tests {
             ..Default::default()
         };
         effect.set_state(7, 0);
-        effect.now = 2;
+        effect.update(2);
         let frame = effect.frame();
         assert!(frame.iter().flat_map(|c| c.vertices).any(|v| v.rhw != 1.));
         assert_eq!(effect.frame(), frame);
         effect.set_state(0, 2);
-        effect.now = 6;
+        effect.update(6);
         assert_eq!(effect.frame(), frame);
         effect.set_state(3, 6);
-        effect.now = 14;
+        effect.update(14);
+        assert_eq!(effect.state, 0);
         assert!(
             effect
                 .frame()
@@ -307,7 +307,6 @@ mod tests {
                 .flat_map(|c| c.vertices)
                 .all(|v| v.color >> 24 == 0)
         );
-        assert_eq!(effect.state, 0);
         assert!(ShatterMesh::new([u32::MAX; 2], [1; 2], 0., 0., || 0.).is_err());
     }
 }
