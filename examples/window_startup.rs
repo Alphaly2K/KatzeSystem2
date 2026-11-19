@@ -47,6 +47,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .ok_or("用法：window_startup <游戏目录>")?;
     let mut game = load_game(&root)?;
     let clipboard_encoding = game.router.script_encoding;
+    let diagnostics = support::diagnostics::Output::from_env(clipboard_encoding);
     let mut clipboard = clipboard_output::Output::default();
     let startup = game.startup.clone();
     let programs = std::mem::take(&mut game.programs);
@@ -60,6 +61,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         },
         [1280, 720],
     )?;
+    diagnostics.connect(&mut runtime);
     runtime.set_system_services(system_output::Output);
     if let Some(path) = std::env::var_os("KATZE_EXPORT_ROOT") {
         runtime.set_export_services(export_output::Directory::new(path.into())?);
@@ -203,11 +205,13 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 .is_some_and(|config| {
                     (runtime.host().languages.primary_index as usize) < config.prefixes.len()
                 });
-        if let Err(error) = runtime.advance(FrameTime {
+        let advancement = runtime.advance(FrameTime {
             tick: now,
             increment: 1,
             system_time_ms: started.elapsed().as_millis() as u32,
-        }) {
+        });
+        diagnostics.drain(&mut runtime);
+        if let Err(error) = advancement {
             eprintln!("pc {}：{}", error.offset, error.message);
             for id in 0..128 {
                 if let Some(vm) = runtime.object(id).and_then(|object| object.interpreter()) {
@@ -219,9 +223,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             }
             break;
         }
-        if std::env::var_os("KATZE_TRACE_TIMING").is_some()
-            && frame_started.elapsed().as_millis() >= 20
-        {
+        if diagnostics.timing && frame_started.elapsed().as_millis() >= 20 {
             eprintln!(
                 "[slow-update] frame={now} ms={:.2}",
                 frame_started.elapsed().as_secs_f64() * 1000.0

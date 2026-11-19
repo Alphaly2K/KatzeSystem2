@@ -450,6 +450,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             .map(|instruction| instruction.offset)
     );
 
+    let diagnostics = support::diagnostics::Output::from_env(game.router.script_encoding);
     let (mut runtime, keys) = build_runtime(
         Game {
             root: game.root,
@@ -460,6 +461,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         },
         [1280, 720],
     )?;
+    diagnostics.connect(&mut runtime);
     let mut replay = StoryReplay::from_env();
     runtime.set_input_device(ScriptedDevice::new(keys, replay.as_ref()))?;
     let (
@@ -515,16 +517,17 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         }
     };
     let mut now = 0;
-    let timing = std::env::var_os("KATZE_TRACE_TIMING").is_some();
     for frame in 0..frames {
         now += if replay.is_some() { 3 } else { 1 };
         let system_time_ms = (u64::from(now) * 1000 / 60) as u32;
-        let started = timing.then(std::time::Instant::now);
-        if let Err(error) = runtime.advance(FrameTime {
+        let started = diagnostics.timing.then(std::time::Instant::now);
+        let advancement = runtime.advance(FrameTime {
             tick: now,
             increment: 1,
             system_time_ms,
-        }) {
+        });
+        diagnostics.drain(&mut runtime);
+        if let Err(error) = advancement {
             println!("第 {frame} 帧 pc {}：{}", error.offset, error.message);
             for id in task_ids(&runtime) {
                 if let Some(vm) = runtime.object(id).and_then(|object| object.interpreter()) {

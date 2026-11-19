@@ -75,8 +75,10 @@ fn debug_output_uses_expanded_first_parameter_once_in_each_execution_context() {
         let deadline = scene.deadline();
         system(&mut runtime, &mut scene, "_FES_SLEEP_");
         assert!(event(&mut runtime, &mut scene));
+        let messages = runtime.take_script_messages();
+        assert!(messages.utf16.is_empty());
         assert_eq!(
-            runtime.host().debug_messages,
+            messages.bytes,
             [
                 b"dbgstr = text %s \x82\xa0".to_vec(),
                 b"debug = -1".to_vec(),

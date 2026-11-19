@@ -1,4 +1,4 @@
-use super::{ObjectFactory, ObjectHost};
+use super::{NativeInvocation, NativeTraceEvent, ObjectFactory, ObjectHost};
 use crate::kcs::{
     Interpreter, NativeReturn, RuntimeHandler, call_native, canonical_native,
     runtime_native_handler,
@@ -12,27 +12,29 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         arguments: &[u8],
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
-        struct Timer(u32, u32, Option<std::time::Instant>);
-        impl Drop for Timer {
-            fn drop(&mut self) {
-                if let Some(started) = self.2 {
-                    let elapsed = started.elapsed();
-                    if elapsed.as_millis() >= 20 {
-                        eprintln!(
-                            "[slow-native] task={} native={} ms={:.2}",
-                            self.0,
-                            self.1,
-                            elapsed.as_secs_f64() * 1000.0
-                        );
-                    }
-                }
-            }
-        }
-        let _timer = Timer(
-            self.host.task_id,
-            index,
-            std::env::var_os("KATZE_TRACE_TIMING").map(|_| std::time::Instant::now()),
-        );
+        let Some(trace) = self.resources.native_trace.clone() else {
+            return self.dispatch_native(index, arguments, vm);
+        };
+        let invocation = NativeInvocation {
+            task_id: self.host.task_id,
+            id: index,
+            offset: vm.pc,
+        };
+        trace(NativeTraceEvent::Enter(invocation));
+        let result = self.dispatch_native(index, arguments, vm);
+        trace(NativeTraceEvent::Exit {
+            invocation,
+            failed: result.is_err(),
+        });
+        result
+    }
+
+    fn dispatch_native(
+        &mut self,
+        index: u32,
+        arguments: &[u8],
+        vm: &mut Interpreter,
+    ) -> Result<NativeReturn> {
         let index = canonical_native(index);
         self.resources.images.set_cache_limit(
             (self

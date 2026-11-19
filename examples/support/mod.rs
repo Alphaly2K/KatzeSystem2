@@ -22,6 +22,7 @@ use std::{collections::BTreeMap, sync::Arc};
 
 mod configuration;
 use configuration::ConfigurationFiles;
+pub mod diagnostics;
 mod file_source;
 use file_source::FileSource;
 mod font_sources;

@@ -19,6 +19,8 @@ mod bmb;
 mod cst;
 mod debug_window;
 pub use debug_window::{QuizDebugInput, QuizDebugSession};
+mod diagnostics;
+pub use diagnostics::{NativeInvocation, NativeTraceEvent, ScriptMessages};
 mod emocon;
 mod export;
 pub use export::{ExportDestination, ExportServices};

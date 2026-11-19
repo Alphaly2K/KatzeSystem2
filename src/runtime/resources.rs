@@ -5,6 +5,7 @@ use crate::{Error, Result};
 #[derive(Default)]
 pub(super) struct Resources {
     pub services: Option<Box<dyn ResourceServices>>,
+    pub native_trace: Option<std::rc::Rc<dyn Fn(super::NativeTraceEvent)>>,
     pub animation_aliases: Option<super::image_animation::AnimationAliases>,
     pub exports: Option<Box<dyn super::ExportServices>>,
     pub bmb_buffer: std::rc::Rc<std::cell::RefCell<Vec<u8>>>,
