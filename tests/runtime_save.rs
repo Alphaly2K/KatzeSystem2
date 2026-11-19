@@ -67,6 +67,80 @@ fn store(code: &mut Vec<u8>, address: u32) {
     ins(code, 0x26, &[address]);
 }
 
+#[test]
+fn css_date_checks_signature_and_writes_only_the_five_date_fields() -> Result<()> {
+    struct Slot {
+        bytes: Option<&'static [u8]>,
+        date: Option<[u32; 6]>,
+        requests: Rc<RefCell<Vec<&'static str>>>,
+    }
+    impl SaveServices for Slot {
+        fn read(&mut self, task: u32, name: &[u8]) -> Result<Option<Vec<u8>>> {
+            assert_eq!((task, name), (17, b"nested\\slot-7.css".as_slice()));
+            self.requests.borrow_mut().push("read");
+            Ok(self.bytes.map(<[u8]>::to_vec))
+        }
+
+        fn modified_date(&mut self, task: u32, name: &[u8]) -> Result<Option<[u32; 6]>> {
+            assert_eq!((task, name), (17, b"nested\\slot-7.css".as_slice()));
+            self.requests.borrow_mut().push("date");
+            Ok(self.date)
+        }
+    }
+
+    let mut data = vec![0x5a; 128];
+    let name = b"nested\\slot-%d[G16].css\0";
+    data[16..20].copy_from_slice(&7u32.to_le_bytes());
+    data[32..32 + name.len()].copy_from_slice(name);
+    let stamp = [2024, 2, 29, 23, 58, 57];
+    let mut state = State::new(0);
+    let mut host = CoreHost::new(&mut state);
+    host.task_id = 17;
+    for (bytes, date, expected_calls, result) in [
+        (None, Some(stamp), &["read"][..], 0),
+        (Some(b"CSS".as_slice()), Some(stamp), &["read"][..], 0),
+        (Some(b"CSS\0".as_slice()), None, &["read", "date"][..], 0),
+        (
+            Some(b"CSS\0".as_slice()),
+            Some(stamp),
+            &["read", "date"][..],
+            1,
+        ),
+    ] {
+        let requests = Rc::new(RefCell::new(Vec::new()));
+        host.save_services = Some(Box::new(Slot {
+            bytes,
+            date,
+            requests: requests.clone(),
+        }));
+        let arguments: Vec<_> = [0x8000_0020u32, 96, 100, 104, 0x8000_0064, 0x8000_0064]
+            .into_iter()
+            .flat_map(u32::to_le_bytes)
+            .collect();
+        let program = Program::from_code(&[], data.clone(), 32)?;
+        let mut vm = Interpreter::new(program, data.clone())?;
+        assert_eq!(
+            host.call(255, &arguments, &mut vm)?,
+            NativeReturn::Value(result)
+        );
+        assert_eq!(&*requests.borrow(), expected_calls);
+        if result == 1 {
+            let expected: Vec<_> = stamp[..3]
+                .iter()
+                .copied()
+                .flat_map(u32::to_le_bytes)
+                .collect();
+            assert_eq!(vm.read(96, 12)?, expected);
+            assert_eq!(&*vm.read(0x8000_0064, 8)?, b"\x3a\0\0\0ZZZZ");
+        } else {
+            assert_eq!(&*vm.read(96, 12)?, &[0x5a; 12]);
+            assert_eq!(&*vm.read(0x8000_0064, 8)?, &[0x5a; 8]);
+        }
+        assert_eq!(&*vm.read(108, 4)?, b"ZZZZ");
+    }
+    Ok(())
+}
+
 struct Programs;
 impl ProgramLoader for Programs {
     fn load(&mut self, name: &[u8]) -> Result<Option<Program>> {

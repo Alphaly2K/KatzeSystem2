@@ -9,6 +9,7 @@ pub(super) fn call(
     vm: &mut Interpreter,
 ) -> Result<NativeReturn> {
     let count = match index {
+        255 => 6,
         244 | 254 | 835 => 4,
         245 | 469 | 1031 => 2,
         242 | 836 => 3,
@@ -22,6 +23,26 @@ pub(super) fn call(
     let null = first == 0 && matches!(index, 244 | 245 | 252 | 254 | 469 | 835 | 836 | 1031);
     if arguments.len() != count * 4 && !(null && arguments.len() == 4) {
         return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+    }
+    if index == 255 {
+        let name = strings::format(vm, first, 0)?;
+        let services = host
+            .save_services
+            .as_mut()
+            .ok_or_else(|| Error::new(vm.pc, "宿主未配置存档日期查询服务"))?;
+        if !services
+            .read(host.task_id, &name)?
+            .is_some_and(|bytes| bytes.starts_with(b"CSS\0"))
+        {
+            return Ok(NativeReturn::Value(0));
+        }
+        let Some(date) = services.modified_date(host.task_id, &name)? else {
+            return Ok(NativeReturn::Value(0));
+        };
+        for (offset, field) in (4..24).step_by(4).zip(date) {
+            vm.write(read::u32_at(arguments, offset)?, &field.to_le_bytes())?;
+        }
+        return Ok(NativeReturn::Value(1));
     }
     if index == 990 {
         let name = strings::format(vm, first, 0)?;
