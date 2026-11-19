@@ -29,6 +29,7 @@ pub(super) struct Resources {
     pub motion_programs: std::collections::BTreeMap<String, crate::kcs::Program>,
     pub backlogs: std::collections::BTreeMap<u32, crate::backlog::Backlog>,
     pub cst_contexts: std::collections::BTreeMap<u32, super::CstContext>,
+    pub legacy_cst: std::collections::BTreeMap<u32, super::CstContext>,
     pub emocon: std::collections::BTreeMap<u32, super::emocon::EmoconState>,
     pub movie: Option<super::movie::Movie>,
     pub plane_movies: std::collections::BTreeMap<u32, super::movie::Movie>,

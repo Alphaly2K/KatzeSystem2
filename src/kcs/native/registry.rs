@@ -270,7 +270,8 @@ pub(crate) fn runtime(index: u32) -> RuntimeHandler {
         791..=794 => RuntimeHandler::DatabaseTable,
         742..=778 => RuntimeHandler::Quiz,
         779..=784 | 829..=832 => RuntimeHandler::QuizOptions,
-        323..=338
+        219..=227
+        | 323..=338
         | 608
         | 385
         | 386
@@ -282,6 +283,7 @@ pub(crate) fn runtime(index: u32) -> RuntimeHandler {
         | 982
         | 991..=994
         | 1033
+        | 1035
         | 1037
         | 1038
         | 1064 => RuntimeHandler::Cst,

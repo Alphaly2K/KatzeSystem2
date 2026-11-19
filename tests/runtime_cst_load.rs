@@ -172,6 +172,43 @@ fn reader_metadata_keeps_reserved_fields_after_load_and_skips_null_outputs() {
 }
 
 #[test]
+fn legacy_scene_queries_keep_previous_output_on_miss_and_use_captured_languages() {
+    let mut code = vec![];
+    call(&mut code, 220, &[], Some(0));
+    call(&mut code, 219, &[], None);
+    call(&mut code, 221, &[0, 0], Some(4));
+    call(&mut code, 65, &[], None);
+    call(&mut code, 220, &[64], Some(8));
+    call(&mut code, 221, &[u32::MAX, u32::MAX], Some(12));
+    call(&mut code, 221, &[0, u32::MAX], Some(16));
+    call(&mut code, 222, &[200, u32::MAX, u32::MAX], Some(20));
+    call(&mut code, 222, &[200, 2, 0], Some(24));
+    call(&mut code, 1035, &[0x8000_0020, 0, 2, 80], Some(28));
+    call(&mut code, 1035, &[u32::MAX, 0, 0, u32::MAX], Some(32));
+    code.push(0x3b);
+    let (mut game, task, _, requests) = runtime(&code, 1);
+    game.update(0, 1).unwrap();
+    assert!(requests.borrow().is_empty());
+    game.host_mut().languages.prefixes.clear();
+    game.host_mut().unicode_text = 1;
+    game.update(1, 1).unwrap();
+    let vm = game.object(task).unwrap().interpreter().unwrap();
+    let values: Vec<_> = vm
+        .read(0, 36)
+        .unwrap()
+        .chunks_exact(4)
+        .map(|bytes| u32::from_le_bytes(bytes.try_into().unwrap()))
+        .collect();
+    assert_eq!(values, [0, u32::MAX, 1, 2, 4, 4, 4, 5, 0]);
+    assert_eq!(vm.read(200, 6).unwrap(), b"\x96\xbc\x91\x4f\0Z".as_slice());
+    assert_eq!(vm.read(0x8000_0020, 6).unwrap(), b"J-two\0".as_slice());
+    assert_eq!(
+        requests.borrow().as_slice(),
+        [b"mapped/scene.cst".as_slice(), b"mapped/scene.cstl"]
+    );
+}
+
+#[test]
 fn localized_scene_and_name_table_use_resource_encoding_for_unicode_outputs() {
     struct TranslatedSources(Vec<u8>);
     impl ResourceServices for TranslatedSources {

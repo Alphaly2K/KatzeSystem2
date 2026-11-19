@@ -2661,6 +2661,7 @@ impl<F: ObjectFactory> Lifecycle for TaskLifecycle<'_, F> {
         self.resources.raw.release_owner(id);
         self.resources.compositor.drawables.remove(id);
         self.resources.emocon.remove(&id);
+        self.resources.legacy_cst.remove(&id);
         self.numbers.release_local(id);
         self.objects.remove(&id);
         Ok(())

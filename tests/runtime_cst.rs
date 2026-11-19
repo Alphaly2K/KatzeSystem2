@@ -29,6 +29,87 @@ fn call(code: &mut Vec<u8>, index: u32, args: &[(u8, u32)]) {
 }
 
 #[test]
+fn legacy_cst_registrations_are_owned_by_each_task_until_reset_or_release() {
+    let mut code = vec![];
+    call(&mut code, 227, &[(3, 64)]);
+    instruction(&mut code, 0x26, &[(3, 0)]);
+    call(&mut code, 65, &[]);
+    instruction(&mut code, 0x25, &[(3, 0x1234_5678)]);
+    call(&mut code, 219, &[]);
+    for (index, name, flag, value) in [
+        (223, 64, 0x13, 4),
+        (223, 80, 3, 5),
+        (224, 64, 3, 6),
+        (224, 96, 3, 0),
+    ] {
+        call(&mut code, index, &[(3, name), (flag, value)]);
+        instruction(&mut code, 0x26, &[(3, 12)]);
+    }
+    call(&mut code, 226, &[(3, u32::MAX)]);
+    call(&mut code, 227, &[(3, 80)]);
+    instruction(&mut code, 0x26, &[(3, 16)]);
+    call(&mut code, 227, &[(3, 112)]);
+    instruction(&mut code, 0x26, &[(3, 20)]);
+    call(&mut code, 225, &[]);
+    call(&mut code, 227, &[(3, 64)]);
+    instruction(&mut code, 0x26, &[(3, 24)]);
+    call(&mut code, 223, &[(3, 64), (3, 19)]);
+    instruction(&mut code, 0x26, &[(3, 28)]);
+    instruction(&mut code, 0x26, &[(3, 32)]);
+    call(&mut code, 65, &[]);
+    call(&mut code, 219, &[]);
+    call(&mut code, 227, &[(3, 64)]);
+    instruction(&mut code, 0x26, &[(3, 36)]);
+    code.push(0x3b);
+    let mut data = vec![0; 128];
+    data[64..74].copy_from_slice(b"scene.CST\0");
+    data[80..90].copy_from_slice(b"SCENE.cst\0");
+    data[112..118].copy_from_slice(b"scene\0");
+    let program = Program::from_code(&code, data, 64).unwrap();
+    let mut runtime = Runtime::new(
+        0,
+        kind::ROOT,
+        Box::new(BaseObject::new()),
+        State::new(0),
+        KcsFactory::new(Loader(program)),
+    );
+    let a = runtime.create(0, kind::ORDINARY, b"a", b"").unwrap();
+    let b = runtime.create(0, kind::ORDINARY, b"b", b"").unwrap();
+    for (task, value) in [(a, 7u32), (b, u32::MAX)] {
+        runtime
+            .object_mut(task)
+            .unwrap()
+            .interpreter_mut()
+            .unwrap()
+            .write(4, &value.to_le_bytes())
+            .unwrap();
+    }
+    let word = |game: &Runtime<KcsFactory<Loader>>, task, addr| {
+        let vm = game.object(task).unwrap().interpreter().unwrap();
+        u32::from_le_bytes(vm.read(addr, 4).unwrap().try_into().unwrap())
+    };
+    runtime.update(0, 1).unwrap();
+    runtime.update(1, 1).unwrap();
+    for (task, value) in [(a, 7), (b, u32::MAX)] {
+        assert_eq!(word(&runtime, task, 0), 0);
+        assert_eq!(word(&runtime, task, 12), 1);
+        assert_eq!(word(&runtime, task, 16), value);
+        assert_eq!(word(&runtime, task, 20), 0);
+        assert_eq!(word(&runtime, task, 24), 0);
+        assert_eq!(word(&runtime, task, 28), 1);
+        assert_eq!(word(&runtime, task, 32), 0x1234_5678);
+    }
+    runtime.destroy(a).unwrap();
+    runtime.update(2, 1).unwrap();
+    assert_eq!(word(&runtime, b, 36), 0);
+    let replacement = runtime.create(0, kind::ORDINARY, b"c", b"").unwrap();
+    assert_eq!(replacement, a);
+    runtime.update(3, 1).unwrap();
+    assert_eq!(word(&runtime, replacement, 0), 0);
+    assert!(runtime.cst_handles().is_empty());
+}
+
+#[test]
 fn contexts_capture_languages_and_keep_shared_handles_until_explicit_release() {
     let mut code = vec![];
     instruction(&mut code, 0x25, &[(3, 0x1234_5678)]);

@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 mod data;
 mod details;
+mod legacy;
 mod save;
 mod snapshot;
 
@@ -235,6 +236,46 @@ impl CstContext {
     pub fn history(&self) -> impl ExactSizeIterator<Item = (&[u8], u32)> {
         self.history.iter().map(|entry| (entry.name(), entry.value))
     }
+
+    fn registered_value(&self, name: &[u8]) -> u32 {
+        self.registration_index(name)
+            .filter(|&index| !self.registrations[index].name().is_empty())
+            .map_or(0, |index| self.registrations[index].value)
+    }
+
+    fn register(&mut self, name: Vec<u8>, value: u32, history: bool, pc: usize) -> Result<u32> {
+        if name.is_empty() {
+            return Ok(if history { u32::MAX } else { 1 });
+        }
+        if name.len() >= 32 {
+            return Err(Error::new(pc, "CST 登记名称超过缓冲区上限"));
+        }
+        let (entries, existing) = if history {
+            let existing = self
+                .history
+                .len()
+                .checked_sub(1)
+                .filter(|&index| self.history[index].name().eq_ignore_ascii_case(&name));
+            (&mut self.history, existing)
+        } else {
+            let existing = self.registration_index(&name);
+            (&mut self.registrations, existing)
+        };
+        if let Some(index) = existing {
+            entries[index].value = entries[index].value.max(value);
+        } else {
+            if entries.len() == read::MAX_ITEMS {
+                return Err(Error::new(pc, "CST 登记数量超过上限"));
+            }
+            entries.push(Entry {
+                name,
+                value,
+                details: Vec::new(),
+                saved_data: Vec::new(),
+            });
+        }
+        Ok(if history { entries.len() as u32 - 1 } else { 1 })
+    }
 }
 
 impl<F: ObjectFactory> ObjectHost<'_, F> {
@@ -244,6 +285,9 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         arguments: &[u8],
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
+        if matches!(index, 219..=227 | 1035) {
+            return self.legacy_cst_native(index, arguments, vm);
+        }
         if matches!(index, 978 | 979 | 981) {
             return self.cst_data_native(index, arguments, vm);
         }
@@ -488,55 +532,18 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     .filter(|&i| name[i] == b'.')
                     .unwrap_or(name.len());
                 name.truncate(end);
-                if index != 332 && name.len() >= 32 {
-                    return Err(Error::new(vm.pc, "CST 登记名称超过缓冲区上限"));
-                }
                 if index == 332 {
-                    let value = context
-                        .registration_index(&name)
-                        .filter(|&index| !context.registrations[index].name().is_empty())
-                        .map_or(0, |index| context.registrations[index].value);
-                    return Ok(NativeReturn::Value(value));
+                    return Ok(NativeReturn::Value(context.registered_value(&name)));
                 }
                 if name.is_empty() {
                     return Ok(NativeReturn::Value(if index == 328 { 1 } else { u32::MAX }));
                 }
-                let value = read::u32_at(arguments, 8)?;
-                let registered = if index == 328 {
-                    context.registration_index(&name)
-                } else {
-                    None
-                };
-                let entries = if index == 328 {
-                    &mut context.registrations
-                } else {
-                    &mut context.history
-                };
-                let existing = if index == 328 {
-                    registered.map(|index| &mut entries[index])
-                } else {
-                    entries
-                        .last_mut()
-                        .filter(|entry| entry.name().eq_ignore_ascii_case(&name))
-                };
-                if let Some(entry) = existing {
-                    entry.value = entry.value.max(value);
-                } else {
-                    if entries.len() == read::MAX_ITEMS {
-                        return Err(Error::new(vm.pc, "CST 登记数量超过上限"));
-                    }
-                    entries.push(Entry {
-                        name,
-                        value,
-                        details: Vec::new(),
-                        saved_data: Vec::new(),
-                    });
-                }
-                Ok(NativeReturn::Value(if index == 328 {
-                    1
-                } else {
-                    entries.len() as u32 - 1
-                }))
+                Ok(NativeReturn::Value(context.register(
+                    name,
+                    read::u32_at(arguments, 8)?,
+                    index == 329,
+                    vm.pc,
+                )?))
             }
             _ => unreachable!(),
         }
