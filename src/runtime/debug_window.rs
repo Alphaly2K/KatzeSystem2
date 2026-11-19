@@ -176,6 +176,14 @@ impl<F: ObjectFactory> Runtime<F> {
             .flatten()
     }
 
+    /// 枚举当前要求宿主显示的会话，忽略已隐藏或标记删除的任务。
+    pub fn visible_quiz_debug_sessions(&self) -> impl Iterator<Item = (u32, &QuizDebugSession)> {
+        self.objects.keys().copied().filter_map(|id| {
+            let session = self.quiz_debug_session(id)?;
+            session.visible.then_some((id, session))
+        })
+    }
+
     /// 提交面板输入。会话不可用或控件被禁用时返回 false。
     pub fn quiz_debug_input(&mut self, id: u32, input: QuizDebugInput) -> Result<bool> {
         let Some(object) = self.objects.get_mut(&id) else {

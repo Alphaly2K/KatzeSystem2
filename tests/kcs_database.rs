@@ -630,6 +630,7 @@ fn quiz_debug_session_rebuilds_the_scripts_question_index_and_advances_on_reques
     assert_eq!(session.packs, [b"A", b"B"]);
     assert_eq!(session.pack, Some(0));
     assert!(!session.visible && session.questions.is_empty());
+    assert_eq!(runtime.visible_quiz_debug_sessions().count(), 0);
     assert!(!runtime.quiz_debug_input(debug, QuizDebugInput::SelectPack(1))?);
     runtime.dispatch_command(
         0,
@@ -641,6 +642,13 @@ fn quiz_debug_session_rebuilds_the_scripts_question_index_and_advances_on_reques
         },
     )?;
     assert!(runtime.quiz_debug_session(debug).unwrap().visible);
+    assert_eq!(
+        runtime
+            .visible_quiz_debug_sessions()
+            .map(|(id, _)| id)
+            .collect::<Vec<_>>(),
+        [debug]
+    );
     runtime.quiz_debug_input(debug, QuizDebugInput::Enable(true))?;
     runtime.quiz_debug_input(debug, QuizDebugInput::SelectPack(1))?;
     assert_eq!(runtime.quiz_debug_session(debug).unwrap().questions, [8]);
@@ -659,6 +667,7 @@ fn quiz_debug_session_rebuilds_the_scripts_question_index_and_advances_on_reques
         assert!(runtime.quiz_debug_input(debug, input)?);
     }
     assert!(!runtime.quiz_debug_session(debug).unwrap().visible);
+    assert_eq!(runtime.visible_quiz_debug_sessions().count(), 0);
 
     let reader = runtime.create(0, kind::ORDINARY, b"query", b"")?;
     runtime
@@ -671,8 +680,19 @@ fn quiz_debug_session_rebuilds_the_scripts_question_index_and_advances_on_reques
     let vm = runtime.object(reader).unwrap().interpreter().unwrap();
     assert_eq!(vm.stack_bytes(), words(&[1, 1, 1, 2, 0, 5, 2, 1, u32::MAX]));
     assert_eq!(runtime.quiz_debug_session(debug).unwrap().question, Some(0));
+    runtime.dispatch_command(
+        0,
+        Command {
+            target: debug,
+            sender: 0,
+            code: 519,
+            data: [0, 1, 0],
+        },
+    )?;
+    assert_eq!(runtime.visible_quiz_debug_sessions().count(), 1);
     runtime.destroy(debug)?;
     assert!(runtime.quiz_debug_session(debug).is_none());
+    assert_eq!(runtime.visible_quiz_debug_sessions().count(), 0);
     assert!(!runtime.quiz_debug_input(debug, QuizDebugInput::Close)?);
     Ok(())
 }

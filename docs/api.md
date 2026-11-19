@@ -138,7 +138,7 @@ FES `setconf` 更新有效主界面／主文字选择，并在本轮通知处理
 
 ### 问答调试会话
 
-`Runtime::quiz_debug_session(task_id)` 借用已启动的类型 53 会话。宿主读取可见状态、题库名称、题号、选中索引及复选状态，并用 `Runtime::quiz_debug_input(task_id, QuizDebugInput)` 提交控件动作。会话未启动、已删除或控件未启用时返回 `false`；可用控件收到越界索引时返回错误。启用和选择题库会更新脚本共用的题目索引。面板呈现由宿主负责；脚本命令见[问答调试任务](kcs.md#问答调试任务)。
+`Runtime::quiz_debug_session(task_id)` 借用已启动的类型 53 会话；`Runtime::visible_quiz_debug_sessions()` 枚举应显示的会话及任务编号。宿主读取题库名称、题号、选中索引及复选状态，并用 `Runtime::quiz_debug_input(task_id, QuizDebugInput)` 提交控件动作。会话未启动、已删除或相应控件未启用时返回 `false`；可用控件收到越界索引时返回错误。启用和选择题库会更新脚本共用的题目索引。SDL 启动示例为每个可见会话提供独立面板；脚本命令见[问答调试任务](kcs.md#问答调试任务)。
 
 `save::SaveServices::modified_time(task_id, name)` 接收相对存档名称的 CP932 字节，返回可选的 Windows FILETIME 计数；默认实现返回未接入诊断。FES `newsave destination first last` 用该接口选择最新槽号，预算续跑和服务错误保留已求值参数、已完成文件及当前选择，结果在扫描完成后写入共享变量。空范围不调用服务，目的编号越界仍查询全部文件。文件名、时间比较及范围约束见[槽号时间查询](save.md#fes-槽号时间查询)。
 

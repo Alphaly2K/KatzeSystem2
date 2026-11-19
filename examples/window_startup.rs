@@ -26,6 +26,8 @@ mod window_import;
 mod window_input;
 #[path = "support/window_output.rs"]
 mod window_output;
+#[path = "support/window_quiz.rs"]
+mod window_quiz;
 #[path = "support/window_text.rs"]
 mod window_text;
 
@@ -111,6 +113,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let mut window = window_output::Output::new(&title, [1280, 720])?;
     window.window.subsystem().text_input().stop();
     let mut text_window = window_text::TextWindow::default();
+    let mut quiz_windows = window_quiz::QuizWindows::default();
     runtime.host_mut().windowed_mode = Some(1);
     if runtime
         .host()
@@ -157,6 +160,9 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         let editing = text_window.active() || importing;
         let mut close = false;
         for event in events {
+            if quiz_windows.event(&event, &mut runtime)? {
+                continue;
+            }
             if importing {
                 image_import.as_mut().unwrap().event(&event);
             } else if editing {
@@ -299,6 +305,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         if let Some(importer) = &mut image_import {
             importer.draw()?;
         }
+        quiz_windows.sync(&window.window, &runtime, clipboard_encoding)?;
         let frame_limit = std::time::Duration::from_secs_f64(1.0 / 60.0);
         if let Some(remaining) = frame_limit.checked_sub(frame_started.elapsed()) {
             std::thread::sleep(remaining);
