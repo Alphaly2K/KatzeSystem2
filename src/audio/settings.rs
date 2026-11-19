@@ -10,27 +10,33 @@ impl SoundConfig {
     /// None 保留定义初值；已提供的空文档仍应用用户字段的缺省规则。
     pub fn from_xml_with_user_settings(definition: &[u8], user: Option<&[u8]>) -> Result<Self> {
         let mut config = Self::from_xml(definition)?;
-        let Some(user) = user else { return Ok(config) };
+        if let Some(user) = user {
+            config.apply_user_settings_xml(user)?;
+        }
+        Ok(config)
+    }
+
+    pub(crate) fn apply_user_settings_xml(&mut self, user: &[u8]) -> Result<()> {
         let xml = XmlDocument::parse(user)?;
-        let system_voice = config.master_system_voice.unwrap_or(-1);
+        let system_voice = self.master_system_voice.unwrap_or(-1);
         for (field, name) in [
-            (&mut config.master_volume, "volume"),
-            (&mut config.master_play_enabled, "play"),
-            (&mut config.master_system_voice, "sysplay"),
-            (&mut config.master_voice_volume, "voicevol"),
-            (&mut config.master_skip_volume, "skipvol"),
+            (&mut self.master_volume, "volume"),
+            (&mut self.master_play_enabled, "play"),
+            (&mut self.master_system_voice, "sysplay"),
+            (&mut self.master_voice_volume, "voicevol"),
+            (&mut self.master_skip_volume, "skipvol"),
         ] {
             *field = Some(xml.integer(
                 format!("MASTER/{name}").as_bytes(),
                 field.unwrap_or(-1) as u32,
             )? as i32);
         }
-        config.master_mute = xml.integer(b"MASTER/mute", system_voice as u32)? as i32;
-        config.master_voice_mute = xml.integer(b"MASTER/voicemute", system_voice as u32)? as i32;
-        for part in &mut config.parts {
+        self.master_mute = xml.integer(b"MASTER/mute", system_voice as u32)? as i32;
+        self.master_voice_mute = xml.integer(b"MASTER/voicemute", system_voice as u32)? as i32;
+        for part in &mut self.parts {
             apply_part(part, &xml, b"PART")?;
         }
-        Ok(config)
+        Ok(())
     }
 
     /// 将当前主声音设置及分类设置写入用户文档，不写入分类定义和声音组范围。

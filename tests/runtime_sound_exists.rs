@@ -3,8 +3,9 @@ use katze_system2::{
     expression::State,
     io::{ReadSource, SharedSource},
     kcs::{CoreHost, Host, Interpreter, NativeReturn, Program, ResourceHost, ResourceServices},
+    memory::SharedMemory,
     resource::ResourceMode,
-    runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, kind},
+    runtime::{BaseObject, GameRuntime, KcsFactory, ProgramLoader, Runtime, kind},
 };
 use std::{
     cell::RefCell,
@@ -34,10 +35,11 @@ impl ReadSource for Source {
 struct Files {
     requests: Rc<RefCell<Vec<Vec<u8>>>>,
     dropped: Arc<AtomicUsize>,
+    archive: Option<&'static [u8]>,
 }
 impl ResourceServices for Files {
     fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
-        assert_eq!(category, b"sound");
+        assert_eq!(category, self.archive.unwrap_or(b"sound"));
         Ok([b"audio/".as_slice(), name, b".ogg"].concat())
     }
     fn read(&mut self, _: &[u8], _: ResourceMode) -> Result<Option<Vec<u8>>> {
@@ -49,6 +51,75 @@ impl ResourceServices for Files {
         Ok((name != b"audio/missing.ogg")
             .then(|| Arc::new(Source(self.dropped.clone())) as SharedSource))
     }
+}
+
+#[test]
+fn game_resources_route_sound_names_before_opening_sources() -> Result<()> {
+    let mut code = Vec::new();
+    for (name, output) in [(32, 0), (64, 4), (80, 8)] {
+        instruction(&mut code, 0x25, &[u32::MAX]);
+        instruction(&mut code, 0x25, &[name]);
+        instruction(&mut code, 0x2b, &[284, 8]);
+        instruction(&mut code, 0x26, &[output]);
+    }
+    instruction(&mut code, 0x3b, &[]);
+    let mut data = vec![0; 96];
+    for (at, name) in [
+        (32, b"ToNe3\0".as_slice()),
+        (64, b"empty.ogg\0"),
+        (80, b"unmatched.ogg\0"),
+    ] {
+        data[at..at + name.len()].copy_from_slice(name);
+    }
+    let program = Program::from_code(&code, data, 64)?;
+    let startup = br#"<?xml version="1.0" encoding="UTF-8"?><document/>"#;
+    let definition = br#"<?xml version="1.0" encoding="UTF-8"?><document>
+        <MASTER><volume>80</volume></MASTER>
+        <PART><tone><head>tone</head><int>voice</int></tone>
+        <empty><head>empty</head></empty></PART>
+        </document>"#;
+    let settings = br#"<?xml version="1.0" encoding="UTF-8"?><document>
+        <MASTER><volume>50</volume></MASTER>
+        <PART><tone><head>other</head><int>other</int></tone></PART>
+        </document>"#;
+    for definition in [None, Some(definition.as_slice())] {
+        let files = Files {
+            archive: Some(b"voice"),
+            ..Files::default()
+        };
+        let requests = files.requests.clone();
+        let mut rt =
+            GameRuntime::with_programs(Loader(program.clone()), 0, SharedMemory::default())?;
+        rt.set_game_resources(files, startup, definition, Some(settings))?;
+        assert!(
+            rt.set_game_resources(Files::default(), b"<", None, None)
+                .is_err()
+        );
+        let task = rt.create(0, kind::ORDINARY, b"main", b"")?;
+        rt.update(1, 1)?;
+        let vm = rt.object(task).unwrap().interpreter().unwrap();
+        assert_eq!(vm.read(0, 12)?.as_ref(), &[1, 0, 0, 0].repeat(3));
+        assert_eq!(
+            *requests.borrow(),
+            [
+                if definition.is_some() {
+                    b"audio/ToNe3.ogg".as_slice()
+                } else {
+                    b"ToNe3."
+                },
+                b"empty.ogg",
+                b"unmatched.ogg",
+            ]
+        );
+        assert_eq!(
+            rt.host()
+                .sound_config
+                .as_ref()
+                .and_then(|config| config.master_volume),
+            definition.map(|_| 50)
+        );
+    }
+    Ok(())
 }
 
 struct Loader(Program);

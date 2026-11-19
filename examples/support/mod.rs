@@ -357,7 +357,6 @@ pub fn read_source(source: SharedSource) -> Result<Vec<u8>> {
 pub struct Router {
     pub root: String,
     pub config: ArchiveConfig,
-    pub sound_config: Option<katze_system2::audio::SoundConfig>,
     pub archives: BTreeMap<String, Archive>,
     pub patches: Vec<Archive>,
     pub script_encoding: &'static encoding_rs::Encoding,
@@ -409,16 +408,6 @@ impl Router {
         }
         Ok(None)
     }
-
-    /// 新声音配置：文件名先按分类树的 `<head>` 前缀找节点，再取其 `<int>` 归档类别。
-    fn sound_archive(&self, name: &[u8]) -> Option<Vec<u8>> {
-        let part = self.sound_config.as_ref()?.file_part(name).ok().flatten()?;
-        if part.archive.is_empty() {
-            None
-        } else {
-            Some(part.archive.clone())
-        }
-    }
 }
 
 impl ResourceServices for Router {
@@ -429,15 +418,7 @@ impl ResourceServices for Router {
         self.config.resolve_file(category, name)
     }
     fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
-        let value = if category == b"sound" {
-            match self.sound_archive(name) {
-                Some(archive) => self.config.resolve(&archive, name),
-                // 未命中分类节点时名称原样传递，读取结果按缺失资源处理。
-                None => katze_system2::resource::Category::default().resolve(name),
-            }
-        } else {
-            self.config.resolve(category, name)
-        };
+        let value = self.config.resolve(category, name);
         if std::env::var_os("KATZE_PROBE_TRACE").is_some() {
             eprintln!(
                 "解析 类别={:?} 名称={:?} -> {:?}",
@@ -694,7 +675,6 @@ pub fn load_game(root: &str) -> std::result::Result<Game, Box<dyn std::error::Er
     let mut router = Router {
         root: root.to_string(),
         config: config.clone(),
-        sound_config: None,
         archives: BTreeMap::new(),
         patches: Vec::new(),
         script_encoding,
@@ -805,32 +785,23 @@ pub fn build_runtime(
         runtime.set_platform_job_services(importer);
     }
     runtime.host_mut().archive_config = Some(router.config.clone());
-    runtime.host_mut().sound_groups = Some(katze_system2::audio::SoundGroups::from_startup_xml(
-        startup.as_bytes(),
-    )?);
     let configuration_files = ConfigurationFiles::new(&root, &startup_xml)?;
     runtime.host_mut().script_settings = configuration_files.read_script_settings()?;
     runtime.host_mut().folder_paths = Some(configuration_files.folders.clone());
     let user_settings =
         configuration_files.read(katze_system2::settings::ConfigurationFile::Main)?;
     let sound_name = String::from_utf16(&configuration_files.sound_name)?;
-    if !sound_name.is_empty() {
+    let sound_definition = if sound_name.is_empty() {
+        None
+    } else {
         let name = router.resolve(b"config", sound_name.as_bytes())?;
-        if let Some(bytes) = router.read(&name, ResourceMode::LooseFirst)? {
-            let user =
-                configuration_files.read(katze_system2::settings::ConfigurationFile::Sound)?;
-            router.sound_config = Some(
-                katze_system2::audio::SoundConfig::from_xml_with_user_settings(
-                    &bytes,
-                    user.as_deref(),
-                )?,
-            );
-            runtime.host_mut().sound_config = router.sound_config.clone();
-            runtime.host_mut().sound_groups =
-                Some(katze_system2::audio::SoundGroups::from_xml(&bytes)?);
-            runtime.host_mut().sound_config_enabled = 1;
-        }
-    }
+        router.read(&name, ResourceMode::LooseFirst)?
+    };
+    let sound_user_settings = if sound_definition.is_some() {
+        configuration_files.read(katze_system2::settings::ConfigurationFile::Sound)?
+    } else {
+        None
+    };
     let mut platform = katze_system2::settings::PlatformSettings::default();
     platform.apply_startup_xml(startup.as_bytes(), |candidate| candidate)?;
     let defaults = router.resolve(b"config", b"gamedef")?;
@@ -847,7 +818,12 @@ pub fn build_runtime(
     }
     runtime.host_mut().configuration_keys = Some(keys);
     runtime.host_mut().platform_settings = Some(platform);
-    runtime.set_resources(router);
+    runtime.set_game_resources(
+        router,
+        startup.as_bytes(),
+        sound_definition.as_deref(),
+        sound_user_settings.as_deref(),
+    )?;
     runtime.reload_language_tables(katze_system2::language::LanguageTarget::Interface)?;
     if runtime.host().languages.primary_index as usize
         >= runtime

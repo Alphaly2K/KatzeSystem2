@@ -186,6 +186,13 @@ impl ResourceCache {
 pub struct CachedResources<S> {
     pub inner: S,
     cache: ResourceCache,
+    sound_names: Option<SoundNames>,
+}
+
+#[derive(Clone)]
+struct SoundNames {
+    // Routing uses the definition; user sound settings only change playback properties.
+    definition: Option<crate::audio::SoundConfig>,
 }
 
 impl<S> std::ops::Deref for CachedResources<S> {
@@ -204,11 +211,23 @@ impl<S> std::ops::DerefMut for CachedResources<S> {
 impl<S: ResourceServices> CachedResources<S> {
     pub fn new(inner: S) -> Self {
         let cache = inner.resource_cache().unwrap_or_default();
-        Self { inner, cache }
+        Self::with_cache(inner, cache)
     }
 
     pub fn with_cache(inner: S, cache: ResourceCache) -> Self {
-        Self { inner, cache }
+        Self {
+            inner,
+            cache,
+            sound_names: None,
+        }
+    }
+
+    pub(crate) fn with_sound_names(
+        mut self,
+        definition: Option<crate::audio::SoundConfig>,
+    ) -> Self {
+        self.sound_names = Some(SoundNames { definition });
+        self
     }
 }
 
@@ -217,6 +236,20 @@ impl<S: ResourceServices> ResourceServices for CachedResources<S> {
         self.inner.script_encoding()
     }
     fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+        if category == b"sound" {
+            if let Some(sound) = &self.sound_names {
+                let archive = sound
+                    .definition
+                    .as_ref()
+                    .and_then(|config| config.file_part(name).ok().flatten())
+                    .map(|part| part.archive.as_slice())
+                    .filter(|archive| !archive.is_empty());
+                return match archive {
+                    Some(archive) => self.inner.resolve(archive, name),
+                    None => crate::resource::Category::default().resolve(name),
+                };
+            }
+        }
         self.inner.resolve(category, name)
     }
 

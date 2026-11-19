@@ -1,11 +1,11 @@
 use super::{KcsFactory, ObjectFactory, ProgramLoader, RootObject, Runtime, TaskObject, fes, kind};
 use crate::{
     Error, Result,
-    audio::{Mixer, SoundFactory, SoundState},
+    audio::{Mixer, SoundConfig, SoundFactory, SoundGroups, SoundState},
     expression::State,
     graphics::GraphicsFactory,
     input::InputFactory,
-    kcs::Program,
+    kcs::{CachedResources, Program, ResourceServices},
     language::{LanguageState, StringTableConfig},
     memory::SharedMemory,
     resource::XmlDocument,
@@ -134,6 +134,41 @@ impl<L: ProgramLoader> GameRuntime<L> {
     /// The effective engine settings, if startup settings have been applied.
     pub fn system_settings(&self) -> Option<&SystemSettings> {
         self.host.system_settings.as_ref()
+    }
+
+    /// Bind the game's resource service and sound configuration before startup.
+    /// The service resolves archive categories and opens resources. The runtime
+    /// selects the category for each sound name using the supplied definition.
+    /// With no definition, it uses startup sound groups and uncategorized names.
+    /// Invalid XML leaves both the active configuration and resource service unchanged.
+    pub fn set_game_resources(
+        &mut self,
+        services: impl ResourceServices + 'static,
+        startup: &[u8],
+        sound_definition: Option<&[u8]>,
+        sound_user_settings: Option<&[u8]>,
+    ) -> Result<()> {
+        if self.tree.next_id() != INPUT_TASK {
+            return Err(Error::new(0, "游戏资源必须在创建游戏任务前绑定"));
+        }
+        let (definition, sound, groups) = if let Some(bytes) = sound_definition {
+            let definition = SoundConfig::from_xml(bytes)?;
+            let mut sound = definition.clone();
+            if let Some(user) = sound_user_settings {
+                sound.apply_user_settings_xml(user)?;
+            }
+            (Some(definition), Some(sound), SoundGroups::from_xml(bytes)?)
+        } else {
+            (None, None, SoundGroups::from_startup_xml(startup)?)
+        };
+        self.resources.services = Some(Box::new(
+            CachedResources::new(services).with_sound_names(definition),
+        ));
+        self.resources.animation_aliases = None;
+        self.host.sound_config_enabled = u32::from(sound.is_some());
+        self.host.sound_config = sound;
+        self.host.sound_groups = Some(groups);
+        Ok(())
     }
 
     /// Register input, sound and the named entry program in engine order.
