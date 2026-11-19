@@ -3,8 +3,8 @@ use katze_system2::{
     expression::State,
     fes,
     graphics::{
-        GraphicsFactory, ImageList, ImageListProperties, Images, Projection, RenderTarget, Surface,
-        TextureFilter, Transform,
+        GraphicsFactory, ImageList, ImageListProperties, ImageListTransform, Images, Projection,
+        RenderTarget, Surface, TextureFilter, Transform,
     },
     kcs::Program,
     runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, fes::Objects, kind},
@@ -83,6 +83,7 @@ fn list_redraw_clips_relative_to_the_source_and_keeps_separate_wrapper_lifetimes
     let properties = ImageListProperties {
         position: [0.75, 2.75],
         base_point: [1.5, 1.5],
+        transform: None,
         opacity: 128,
         visible: true,
     };
@@ -179,6 +180,64 @@ fn list_redraw_clips_relative_to_the_source_and_keeps_separate_wrapper_lifetimes
     images.release_owner(3);
     assert!(images.get(owned.image()).is_err());
     assert!(images.get(opaque).is_err());
+}
+
+#[test]
+fn affine_list_matches_reference_pixels_and_clears_previous_bounds() -> Result<()> {
+    let mut images = Images::default();
+    let source = images.create(1, [3, 2])?;
+    for (pixel, value) in images
+        .get_mut(source)?
+        .pixels_mut()
+        .chunks_exact_mut(4)
+        .zip([4, 5, 6, 1, 2, 3])
+    {
+        pixel.copy_from_slice(&[value, 0, 0, 255]);
+    }
+    let mut list = ImageList::new(2, [16, 12], &mut images)?;
+    let points = |images: &Images, list: &ImageList| -> Result<Vec<_>> {
+        let frame = images.get(list.image())?.surface();
+        Ok((0..12)
+            .flat_map(|y| (0..16).map(move |x| (x, y, frame.pixel(x, 11 - y).unwrap() as u8)))
+            .filter(|&(_, _, blue)| blue != 0)
+            .collect())
+    };
+    for (base_point, rotation, scale, expected) in [
+        ([0., 0.], 0., [1., 1.], &[(7, 6, 2), (8, 6, 3)][..]),
+        ([0., 0.], 0., [2., 0.5], &[]),
+        ([0., 0.], 0., [-1., 1.], &[(4, 6, 3), (5, 6, 4), (6, 6, 3)]),
+        (
+            [0., 0.],
+            std::f32::consts::FRAC_PI_2,
+            [1., 1.],
+            &[(7, 3, 3), (7, 4, 3), (7, 5, 2)],
+        ),
+        (
+            [0.5, 1.75],
+            0.45,
+            [1.3, 0.7],
+            &[(7, 5, 2), (8, 5, 4), (9, 5, 5)],
+        ),
+        ([0., 0.], 0., [0., 1.], &[(6, 6, 2), (7, 6, 2)]),
+    ] {
+        list.set(
+            0,
+            source,
+            ImageListProperties {
+                position: [6.75, 5.5],
+                base_point,
+                transform: Some(ImageListTransform { rotation, scale }),
+                ..Default::default()
+            },
+            &mut images,
+        )?;
+        list.update(&mut images)?;
+        assert_eq!(points(&images, &list)?, expected, "{rotation} {scale:?}");
+    }
+    list.remove(0, &mut images)?;
+    list.update(&mut images)?;
+    assert!(points(&images, &list)?.is_empty());
+    Ok(())
 }
 
 #[test]

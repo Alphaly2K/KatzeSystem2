@@ -1187,6 +1187,39 @@ impl Images {
         result
     }
 
+    pub(crate) fn draw_transformed_list_entry(
+        &mut self,
+        target: u32,
+        source: (u32, Option<ResourceGeometry>),
+        properties: super::ImageListProperties,
+        transform: super::ImageListTransform,
+        opacity: u32,
+        clip: Rect,
+    ) -> Result<()> {
+        let geometry = source.1;
+        let source_data = self.entry_mut(source.0)?.data;
+        let target_data = self.entry_mut(target)?.data;
+        self.pixel_image(source_data)?;
+        self.pixel_image(target_data)?;
+        if source_data == target_data {
+            return Err(Error::new(0, "图像列表自有图像不能同时用作绘制来源"));
+        }
+        let image = self.data.remove(&source_data).unwrap();
+        let source = &image.image;
+        let geometry = geometry.unwrap_or_else(|| ResourceGeometry::from_image(source));
+        let affine = super::image_list::affine::Affine::new(
+            transform,
+            properties.position,
+            properties.base_point,
+            geometry.offset,
+            source.info.size,
+        );
+        let target = &mut self.data.get_mut(&target_data).unwrap().image;
+        affine.draw(&mut target.surface, &source.surface, clip, opacity);
+        self.data.insert(source_data, image);
+        Ok(())
+    }
+
     pub(crate) fn list_bounds(
         &self,
         source: u32,

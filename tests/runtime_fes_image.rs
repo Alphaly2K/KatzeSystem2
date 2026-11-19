@@ -1509,10 +1509,11 @@ fn image_coordinate_mode_keeps_the_anchored_pixel_then_uses_local_position() {
     assert_eq!(image(&objects, sprite).position, [5., 5.]);
     runtime.update_fes_object(0, &mut objects, sprite).unwrap();
     send(&mut runtime, list, 298, 0, 0);
+    let transformed = 0xfe11_3355;
     assert_rectangle(
         runtime.drawing().target.as_ref().unwrap(),
         Rect::from_xywh(3, 3, 1, 1),
-        color,
+        transformed,
     );
 
     initialize(
@@ -1528,7 +1529,7 @@ fn image_coordinate_mode_keeps_the_anchored_pixel_then_uses_local_position() {
     assert_rectangle(
         runtime.drawing().target.as_ref().unwrap(),
         Rect::from_xywh(4, 2, 1, 1),
-        color,
+        transformed,
     );
 }
 

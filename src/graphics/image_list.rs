@@ -7,16 +7,20 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
+pub(super) mod affine;
 mod animation;
 mod shared;
+use affine::Affine;
+pub use affine::ImageListTransform;
 pub(super) use shared::SharedEntries;
 use shared::insert_frames;
 
-/// 图像列表的无变换来源属性；位置和基点分别截断为整数。
+/// 图像列表来源属性；无变换时位置和基点分别截断为整数。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ImageListProperties {
     pub position: [f32; 2],
     pub base_point: [f32; 2],
+    pub transform: Option<ImageListTransform>,
     pub opacity: u32,
     pub visible: bool,
 }
@@ -26,6 +30,7 @@ impl Default for ImageListProperties {
         Self {
             position: [0.; 2],
             base_point: [0.; 2],
+            transform: None,
             opacity: 255,
             visible: true,
         }
@@ -98,6 +103,22 @@ impl Entry {
     fn bounds(&self, images: &Images, base: [f32; 2]) -> Result<Rect> {
         if self.image == 0 {
             return Ok(Rect::default());
+        }
+        if let Some(transform) = self.properties.transform {
+            let image = images.get(self.image)?;
+            if !image.is_rgb() && image.alpha_mask() == 0 {
+                let geometry = self
+                    .resource_geometry
+                    .unwrap_or_else(|| ResourceGeometry::from_image(image));
+                return Ok(Affine::new(
+                    transform,
+                    self.properties.position,
+                    base,
+                    geometry.offset,
+                    geometry.size,
+                )
+                .dirty_bounds());
+            }
         }
         self.resource_geometry.map_or_else(
             || images.list_bounds(self.image, self.properties.position, base),
@@ -172,7 +193,7 @@ fn list_frame_image(frame: DecodedFrame, offset: usize, length: &mut usize) -> R
     Image::from_frame(frame)
 }
 
-/// 持有自有图像及独立来源包装的无变换图像列表。
+/// 持有自有图像及独立来源包装的图像列表。
 /// 所有包装登记到 owner；调用方应在该任务释放前使用或显式释放本列表。
 pub struct ImageList {
     owner: Option<u32>,
@@ -835,6 +856,9 @@ impl ImageList {
         let updates = regions
             .iter()
             .filter_map(|&region| clip.map_or(Some(region), |clip| region.intersect(clip)));
+        let extent = updates
+            .clone()
+            .fold(None, |bounds, rect| Some(union(bounds, rect)));
         for region in updates.clone() {
             images.get_mut(self.image)?.fill_rect_from_bottom(region, 0);
         }
@@ -843,8 +867,28 @@ impl ImageList {
         for (_, entry) in entries {
             let entry = entry.read();
             let display = entry.display();
-            let p = entry.properties;
             if entry.image != 0 && display.visible != 0 && display.blend != 0 {
+                if let Some(transform) = entry.properties.transform {
+                    let Some(affine_clip) = extent.and_then(|extent| extent.intersect(entry.clip))
+                    else {
+                        continue;
+                    };
+                    let image = images.get(entry.image)?;
+                    if !image.is_rgb() && image.alpha_mask() == 0 {
+                        images.draw_transformed_list_entry(
+                            self.image,
+                            (entry.image, entry.resource_geometry),
+                            entry.properties,
+                            transform,
+                            display.blend as u32,
+                            affine_clip,
+                        )?;
+                        continue;
+                    }
+                    if !transform.is_identity() {
+                        return Err(Error::new(0, "图像列表尚不支持该来源的非单位变换"));
+                    }
+                }
                 for clip in updates.clone() {
                     let Some(clip) = clip.intersect(entry.clip) else {
                         continue;
@@ -853,7 +897,7 @@ impl ImageList {
                         self.image,
                         (entry.image, entry.resource_geometry),
                         entry.properties.position,
-                        p.base_point,
+                        entry.properties.base_point,
                         display.blend as u32,
                         clip,
                     )?;

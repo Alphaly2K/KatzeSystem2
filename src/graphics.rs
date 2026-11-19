@@ -6,7 +6,7 @@ pub use image::{Image, ImageReference, Images};
 mod image_filter;
 pub use image_filter::ImageFilter;
 mod image_list;
-pub use image_list::{ImageList, ImageListProperties};
+pub use image_list::{ImageList, ImageListProperties, ImageListTransform};
 mod image_list_task;
 pub use image_list_task::ImageListObject;
 mod target;
