@@ -960,7 +960,7 @@ fn standard_startup_rejects_incomplete_host_setup_before_calling_services() -> R
 #[test]
 fn public_session_uses_host_resources_and_delivers_frame_and_pcm() -> Result<()> {
     use katze_system2::{
-        host::{ResourceMode, ResourceServices},
+        host::{ResourceMode, ResourceServices, ScriptLocation, ScriptPosition},
         session::{FrameOutcome, FrameTime, GameRuntime},
     };
 
@@ -1008,7 +1008,12 @@ fn public_session_uses_host_resources_and_delivers_frame_and_pcm() -> Result<()>
     let device = Rc::new(RefCell::new(DeviceState::new([12, 34])));
     game.set_input_device(Device(device))?;
     game.configure_canvas(logical_size)?;
+    assert!(game.script_positions().next().is_none());
     let mut game = game.start_game(b"main")?;
+    assert!(game.script_positions().eq([ScriptPosition {
+        task_id: 3,
+        location: ScriptLocation::Kcs { byte_offset: 0 },
+    }]));
     assert_eq!(
         game.advance(FrameTime {
             tick: 1,

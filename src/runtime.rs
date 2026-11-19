@@ -22,7 +22,8 @@ pub use debug_window::{QuizDebugInput, QuizDebugSession};
 mod diagnostics;
 pub(crate) use diagnostics::trace_detail;
 pub use diagnostics::{
-    DiagnosticTrace, NativeInvocation, NativeTraceEvent, ScriptMessages, TraceCategory,
+    DiagnosticTrace, NativeInvocation, NativeTraceEvent, ScriptLocation, ScriptMessages,
+    ScriptPosition, TraceCategory,
 };
 mod emocon;
 mod export;

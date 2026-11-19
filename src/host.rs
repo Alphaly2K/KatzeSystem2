@@ -26,7 +26,8 @@ pub use crate::resource::{
 };
 pub use crate::runtime::{
     DiagnosticTrace, NativeInvocation, NativeTraceEvent, ProgramLoader, QuizDebugInput,
-    QuizDebugSession, ScriptMessages, SequenceCapture, TraceCategory,
+    QuizDebugSession, ScriptLocation, ScriptMessages, ScriptPosition, SequenceCapture,
+    TraceCategory,
 };
 pub use crate::save::SaveServices;
 pub use crate::settings::{

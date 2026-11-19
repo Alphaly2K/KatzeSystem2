@@ -296,6 +296,12 @@ impl GameRuntime {
         self.0.set_diagnostic_trace(trace);
     }
 
+    /// Inspect registered scripts, including after a failed `advance`.
+    /// These positions describe current execution; the error identifies the failure.
+    pub fn script_positions(&self) -> impl Iterator<Item = ScriptPosition> + '_ {
+        self.0.script_positions()
+    }
+
     pub fn take_script_messages(&mut self) -> ScriptMessages {
         self.0.take_script_messages()
     }

@@ -60,6 +60,27 @@ pub struct ScriptMessages {
     pub utf16: Vec<Vec<u16>>,
 }
 
+/// Current execution location for a loaded script task.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ScriptPosition {
+    pub task_id: u32,
+    pub location: ScriptLocation,
+}
+
+/// KCS positions are byte offsets. FES positions are indices in the program
+/// and its current block.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScriptLocation {
+    Kcs {
+        byte_offset: usize,
+    },
+    Fes {
+        block: usize,
+        instruction: usize,
+        pending: bool,
+    },
+}
+
 /// A native call made by a runtime task.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NativeInvocation {
@@ -80,6 +101,31 @@ pub enum NativeTraceEvent {
 }
 
 impl<F: ObjectFactory> Runtime<F> {
+    /// Inspect registered script tasks without advancing or modifying them.
+    /// After a failure a task's current position may differ from the error offset.
+    pub fn script_positions(&self) -> impl Iterator<Item = ScriptPosition> + '_ {
+        let root = self.tree.root_id();
+        self.tree
+            .descendants(root)
+            .into_iter()
+            .flat_map(move |tasks| std::iter::once(root).chain(tasks))
+            .filter_map(|task_id| {
+                let object = self.object(task_id)?;
+                let location = if let Some(vm) = object.interpreter() {
+                    ScriptLocation::Kcs { byte_offset: vm.pc }
+                } else {
+                    let (pending, block, instruction) =
+                        object.fes_scene()?.interpreter().pending_pc();
+                    ScriptLocation::Fes {
+                        block,
+                        instruction,
+                        pending,
+                    }
+                };
+                Some(ScriptPosition { task_id, location })
+            })
+    }
+
     /// Set optional diagnostic output for this runtime. Pass `None` to disable it.
     pub fn set_diagnostic_trace(&mut self, trace: Option<DiagnosticTrace>) {
         self.resources.diagnostic_trace = trace;

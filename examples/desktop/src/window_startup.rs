@@ -31,7 +31,7 @@ mod window_quiz;
 mod window_text;
 
 use katze_system2::{
-    host::{Rect, RenderTarget},
+    host::{Rect, RenderTarget, ScriptLocation},
     session::{FrameOutcome, FrameTime},
 };
 use sdl2::event::{Event, WindowEvent};
@@ -191,17 +191,22 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             }) => interface_language_refreshed,
             Ok(FrameOutcome::Exited) => break,
             Err(error) => {
-                eprintln!("pc {}：{}", error.offset, error.message);
-                let runtime = runtime.into_task_runtime();
-                for id in 0..128 {
-                    if let Some(vm) = runtime.object(id).and_then(|object| object.interpreter()) {
-                        eprintln!("  任务 {id} pc {}", vm.pc);
-                    }
-                    if let Some(scene) = runtime.object(id).and_then(|object| object.fes_scene()) {
-                        eprintln!("  FES {id}: {:?}", scene.interpreter().pending_pc());
+                for script in runtime.script_positions() {
+                    let id = script.task_id;
+                    match script.location {
+                        ScriptLocation::Kcs { byte_offset } => {
+                            eprintln!("  任务 {id} pc {byte_offset}");
+                        }
+                        ScriptLocation::Fes {
+                            block,
+                            instruction,
+                            pending,
+                        } => {
+                            eprintln!("  FES {id}: ({pending}, {block}, {instruction})");
+                        }
                     }
                 }
-                break;
+                return Err(error.into());
             }
         };
         if diagnostics.timing && frame_started.elapsed().as_millis() >= 20 {
