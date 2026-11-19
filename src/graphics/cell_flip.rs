@@ -5,7 +5,6 @@ use std::{f32::consts, sync::Arc};
 pub(crate) struct CellFlip {
     pub depth: f32,
     pub state: u32,
-    now: u32,
     duration: u32,
     start: u32,
     deadline: u32,
@@ -32,7 +31,6 @@ impl CellFlip {
         Self {
             depth: 1_000_000.,
             state: 0,
-            now: 0,
             duration: 0,
             start: 0,
             deadline: 0,
@@ -138,7 +136,6 @@ impl CellFlip {
     }
 
     pub fn update(&mut self, now: u32) {
-        self.now = now;
         if self.state == 0 {
             return;
         }
@@ -200,6 +197,9 @@ impl CellFlip {
                 cell.current[1 - face][i].color = 0;
             }
         }
+        if now >= self.deadline {
+            self.state = 0;
+        }
     }
 
     pub fn clear(&self) -> [DrawCommand; 2] {
@@ -210,7 +210,7 @@ impl CellFlip {
         screen(self.source[0].size(), self.color, 0.)
     }
 
-    pub fn frame(&mut self) -> Vec<DrawCommand> {
+    pub fn frame(&self) -> Vec<DrawCommand> {
         let mut commands = Vec::with_capacity(self.cells.len() * 4);
         for face in 0..2 {
             for cell in &self.cells {
@@ -228,9 +228,6 @@ impl CellFlip {
                     });
                 }
             }
-        }
-        if self.now >= self.deadline {
-            self.state = 0;
         }
         commands
     }
@@ -319,9 +316,8 @@ mod tests {
         assert!(reset.iter().flat_map(|c| c.vertices).all(|v| v.rhw == 1.));
         effect.set_state(3, 4);
         effect.update(12);
-        assert_eq!(effect.state, 3);
-        let final_frame = effect.frame();
         assert_eq!(effect.state, 0);
+        let final_frame = effect.frame();
         effect.update(20);
         assert_eq!(effect.frame(), final_frame);
     }

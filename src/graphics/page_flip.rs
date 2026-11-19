@@ -6,7 +6,6 @@ pub(crate) struct PageFlip {
     pub depth: f32,
     pub duration: u32,
     pub state: u32,
-    pub now: u32,
     start: u32,
     deadline: u32,
     source: Arc<Surface>,
@@ -60,7 +59,6 @@ impl PageFlip {
             depth: 1_000_000.,
             duration: 0,
             state: 0,
-            now: 0,
             start: 0,
             deadline: 0,
             source,
@@ -156,7 +154,6 @@ impl PageFlip {
     }
 
     pub fn update(&mut self, now: u32) {
-        self.now = now;
         if self.state == 0 {
             return;
         }
@@ -192,11 +189,13 @@ impl PageFlip {
                 color: u32::MAX,
             };
         }
+        if now >= self.deadline {
+            self.state = 0;
+        }
     }
 
-    pub fn frame(&mut self) -> Vec<DrawCommand> {
-        let commands = self
-            .vertices
+    pub fn frame(&self) -> Vec<DrawCommand> {
+        self.vertices
             .chunks_exact(3)
             .map(|vertices| DrawCommand {
                 vertices: std::array::from_fn(|i| vertices[i].current),
@@ -209,11 +208,7 @@ impl PageFlip {
                 clip: None,
                 blend_mode: 0,
             })
-            .collect();
-        if self.now >= self.deadline {
-            self.state = 0;
-        }
-        commands
+            .collect()
     }
 }
 
@@ -266,9 +261,8 @@ mod tests {
         }
         effect.set_state(3, 6);
         effect.update(14);
-        assert_eq!(effect.state, 3);
-        let finished = effect.frame();
         assert_eq!(effect.state, 0);
+        let finished = effect.frame();
         effect.update(20);
         assert_eq!(effect.frame(), finished);
     }

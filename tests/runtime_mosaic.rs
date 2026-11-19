@@ -380,8 +380,6 @@ fn page_flip_captures_refreshes_and_releases_the_scene_with_foreground_preserved
     assert_eq!(render(&mut rt), curled);
     execute_at(&mut rt, &[(968, &[id, 3])], 6);
     rt.update(14, 1).unwrap();
-    assert_eq!(state(&mut rt, id), 3);
-    render(&mut rt);
     assert_eq!(state(&mut rt, id), 0);
     rt.destroy(id).unwrap();
     assert!(rt.compositor().auxiliary_targets().is_empty());
@@ -441,9 +439,8 @@ fn cell_flip_uses_both_captures_keeps_foreground_and_releases_the_targets() {
     assert_eq!(flipped.pixel(0, 0), Some(0xff778899));
     assert_eq!(flipped.pixel(2, 2), Some(0xff557733));
     rt.update(8, 1).unwrap();
-    assert_eq!(state(&mut rt, id), 7);
-    let finished = render(&mut rt);
     assert_eq!(state(&mut rt, id), 0);
+    let finished = render(&mut rt);
     assert_eq!(finished.pixel(0, 0), Some(0xffabcdef));
     execute_at(&mut rt, &[(859, &[1, 0, 10f32.to_bits()])], 8);
     assert_eq!(render(&mut rt).pixel(0, 0), Some(0xff224466));

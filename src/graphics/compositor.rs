@@ -191,7 +191,7 @@ impl Compositor {
             return Ok(frame);
         }
         if let Some(ScreenEffect::PageFlip(id)) = self.screen_effect {
-            let effect = self.page_flips.get_mut(&id).unwrap();
+            let effect = self.page_flips.get(&id).unwrap();
             let depth = effect.depth;
             let mut frame =
                 self.drawables
@@ -206,7 +206,7 @@ impl Compositor {
             return Ok(frame);
         }
         if let Some(ScreenEffect::CellFlip(id)) = self.screen_effect {
-            let effect = self.cell_flips.get_mut(&id).unwrap();
+            let effect = self.cell_flips.get(&id).unwrap();
             let depth = effect.depth;
             let mut frame =
                 self.drawables
