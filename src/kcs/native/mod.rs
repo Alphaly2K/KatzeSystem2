@@ -41,6 +41,7 @@ pub(crate) fn call_native(
         registry::CoreHandler::QuestTable => {
             super::database::quest::call(host, index, arguments, vm)
         }
+        registry::CoreHandler::Mahjong => super::mahjong::call(host, index, arguments, vm),
         registry::CoreHandler::System => system::call(state, host, task_tree, index, arguments, vm),
         registry::CoreHandler::Window => window::call(host, index, arguments, vm),
         registry::CoreHandler::Achievements => {

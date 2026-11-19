@@ -9,6 +9,7 @@ pub(super) enum CoreHandler {
     File,
     Database,
     QuestTable,
+    Mahjong,
     System,
     Window,
     Achievements,
@@ -94,6 +95,7 @@ pub(super) fn core(index: u32) -> CoreHandler {
         }
         869..=873 | 878 => CoreHandler::Database,
         796..=828 => CoreHandler::QuestTable,
+        470..=472 | 475 | 480 | 481 | 492 | 495 => CoreHandler::Mahjong,
         238
         | 242
         | 244..=248

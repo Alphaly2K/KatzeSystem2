@@ -12,6 +12,7 @@ mod debug;
 mod files;
 mod gallery_table;
 mod host;
+mod mahjong;
 mod map_data;
 mod matrix;
 mod memory;

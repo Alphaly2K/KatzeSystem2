@@ -153,6 +153,7 @@ pub struct HostState {
     pub(super) containers: BTreeMap<u32, crate::save::DataContainer>,
     pub(super) databases: BTreeMap<u32, super::Database>,
     pub(super) quest_tables: BTreeMap<u32, super::database::quest::QuestTable>,
+    pub(super) mahjong: super::mahjong::Mahjong,
     pub(super) raw_buffers: BTreeMap<u32, Vec<u8>>,
     handles: HandleAllocator,
 }
