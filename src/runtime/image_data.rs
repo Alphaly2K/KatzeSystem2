@@ -33,6 +33,16 @@ impl Resources {
         if index == 118 {
             return Ok(NativeReturn::Value(self.images.duplicate(owner, args[0])?));
         }
+        if index == 648 {
+            let bytes = self.raw.image_data(args[0])?;
+            let handle = if bytes.starts_with(b"HG-2") || bytes.starts_with(b"HG-3") {
+                let image = Image::from_window(bytes, [args[1], args[2]])?;
+                self.images.insert(owner, image, None)?
+            } else {
+                self.images.create_empty(owner)?
+            };
+            return Ok(NativeReturn::Value(handle));
+        }
         if index == 537 {
             if args[0] == 0 || args[1] == 0 {
                 return Ok(NativeReturn::Value(0));

@@ -257,6 +257,63 @@ impl ResourceServices for Files {
 }
 
 #[test]
+fn window_native_owns_a_composite_independent_of_its_source() {
+    struct WindowFiles;
+    impl ResourceServices for WindowFiles {
+        fn resolve(&mut self, _: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+            Ok(name.to_vec())
+        }
+
+        fn read(&mut self, name: &[u8], _: ResourceMode) -> Result<Option<Vec<u8>>> {
+            Ok(match name {
+                b"hg3" => Some(pixel_blob([0x11, 0x22, 0x33, 0xff])),
+                b"hg2" => Some(katze_system2::hg2::encode_frame(
+                    [1, 1],
+                    &[0x44, 0x55, 0x66, 0xff],
+                )?),
+                b"other" => Some(b"unsupported".to_vec()),
+                _ => None,
+            })
+        }
+    }
+
+    let mut code = Vec::new();
+    for (i, address) in [64, 72, 80].into_iter().enumerate() {
+        call(&mut code, 365, &[address]);
+        ins(&mut code, 0x26, &[0]);
+        handle_call(&mut code, 648, &[4, 3]);
+        ins(&mut code, 0x26, &[4 + i as u32 * 4]);
+        handle_call(&mut code, 366, &[]);
+    }
+    ins(&mut code, 0x3b, &[]);
+    let mut rt = runtime(&code, 1);
+    rt.set_resources(WindowFiles);
+    let task = rt.create(0, kind::ORDINARY, b"window", b"").unwrap();
+    let script = rt.object_mut(task).unwrap().interpreter_mut().unwrap();
+    for (address, name) in [(64, b"hg3\0".as_slice()), (72, b"hg2\0"), (80, b"other\0")] {
+        script.write(address, name).unwrap();
+    }
+    rt.update(0, 1).unwrap();
+    let script = vm(&rt, task);
+    let [hg3, hg2, empty] = [4, 8, 12].map(|address| word(script, address));
+    assert!(script.stack_bytes().is_empty());
+    assert!(rt.image_data(word(script, 0)).is_err());
+    for (handle, x, y, pixel) in [(hg3, 1, 0, 0xff33_2211), (hg2, 0, 2, 0xff66_5544)] {
+        let image = rt.images().get(handle).unwrap();
+        assert_eq!(image.info().size, [4, 3]);
+        assert_eq!(image.info().bit_depth, 32);
+        assert_eq!(image.surface().pixel(x, y), Some(pixel));
+        assert_eq!(image.surface().pixel(2, 1), Some(0));
+    }
+    assert_ne!(empty, 0);
+    assert_eq!(rt.images().pixel_handle(empty).unwrap(), 0);
+    rt.destroy(task).unwrap();
+    for handle in [hg3, hg2, empty] {
+        assert!(rt.images().pixel_handle(handle).is_err());
+    }
+}
+
+#[test]
 fn combined_bitmap_uses_frame_zero_and_survives_its_loading_task() {
     struct BitmapFiles;
     impl ResourceServices for BitmapFiles {

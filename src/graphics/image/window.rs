@@ -1,16 +1,27 @@
 use super::{Image, ImageData, Images, Rect};
-use crate::{Error, Result, hg3};
+use crate::{Error, Result, hg2, hg3};
 
 impl Image {
-    /// 将 HG-3 的 0～8 帧拼接为指定尺寸的窗口图像，缺失帧跳过。
+    /// 将 HG-2 或 HG-3 的 0～8 帧拼接为指定尺寸的窗口图像，缺失帧跳过。
     pub fn from_window(bytes: &[u8], size: [u32; 2]) -> Result<Self> {
         let mut image = Self::new(size)?;
-        let directory = hg3::FrameDirectory::parse(bytes)?;
+        let directory = if bytes.starts_with(b"HG-2") {
+            None
+        } else {
+            Some(hg3::FrameDirectory::parse(bytes)?)
+        };
         for id in 0..9 {
-            let Some(frame) = directory.frame(id) else {
+            let frame = match &directory {
+                Some(directory) => directory
+                    .frame(id)
+                    .map(|frame| frame.decode(bytes))
+                    .transpose()?,
+                None => hg2::decode_frame_id(bytes, id as u32)?,
+            };
+            let Some(frame) = frame else {
                 continue;
             };
-            let mut part = Self::from_frame(frame.decode(bytes)?)?;
+            let mut part = Self::from_frame(frame)?;
             part.use_pixel_canvas();
             let [width, height] = part.info().size;
             let [w, h] = size;
