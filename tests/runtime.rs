@@ -385,6 +385,44 @@ fn synchronous_messages_reach_a_waiting_task_and_report_activity() {
 }
 
 #[test]
+fn synchronous_message_to_root_does_not_resume_its_waiting_children() {
+    let mut sender = Asm::default();
+    sender
+        .ins(0x2b, &[65, 0])
+        .ins(0x25, &[0])
+        .ins(0x25, &[2])
+        .ins(0x25, &[100])
+        .ins(0x25, &[200])
+        .ins(0x2b, &[69, 16])
+        .ins(0x26, &[8])
+        .ins(0x2b, &[65, 0]);
+    let mut source = Source::new();
+    let mut sender_data = data();
+    sender_data[8..12].fill(0xff);
+    source.add(b"sender", sender.build(), sender_data);
+    source.add(b"child", waiting_child(), data());
+    let mut runtime = Runtime::new(
+        0,
+        kind::ROOT,
+        Box::new(RootObject::new(0, 0)),
+        katze_system2::expression::State::new(0),
+        KcsFactory::new(source),
+    );
+    let sender = runtime.create(0, kind::ORDINARY, b"sender", b"").unwrap();
+    let child = runtime.create(0, kind::ORDINARY, b"child", b"").unwrap();
+    assert!(runtime.update(10, 0).unwrap());
+    assert!(runtime.update(20, 0).unwrap());
+    assert_eq!(
+        words(runtime.object(sender).unwrap().interpreter().unwrap(), 8, 1),
+        [0]
+    );
+    assert_eq!(
+        words(runtime.object(child).unwrap().interpreter().unwrap(), 36, 2),
+        [0, 0]
+    );
+}
+
+#[test]
 fn queued_messages_are_consumed_by_the_next_task_update() {
     let mut runtime = loop_runtime(70, None);
     assert!(runtime.update(10, 0).unwrap());

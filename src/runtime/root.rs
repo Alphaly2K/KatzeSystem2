@@ -79,12 +79,13 @@ impl TaskObject for RootObject {
     }
     fn dispatch_message(
         &mut self,
-        message: &mut [u32; 4],
-        output: &mut u32,
-        host: &mut dyn Host,
-        budget: usize,
+        _message: &mut [u32; 4],
+        _output: &mut u32,
+        _host: &mut dyn Host,
+        _budget: usize,
     ) -> Result<bool> {
-        self.base.dispatch_message(message, output, host, budget)
+        // The root consumes command 173 without writing its result slot.
+        Ok(true)
     }
     fn request_delete(&mut self, host: &mut dyn Host, budget: usize) -> Result<bool> {
         self.base.request_delete(host, budget)
