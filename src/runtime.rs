@@ -426,6 +426,13 @@ impl<F: ObjectFactory> Runtime<F> {
         self.resources.effects = Some(Box::new(services));
     }
 
+    pub fn set_speech_synthesizer(
+        &mut self,
+        synthesizer: impl crate::audio::SpeechSynthesizer + 'static,
+    ) {
+        self.resources.speech = Some(Box::new(synthesizer));
+    }
+
     pub fn set_configuration_services(
         &mut self,
         services: impl crate::settings::ConfigurationServices + 'static,
@@ -2443,6 +2450,13 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
             Some(services) => Some(services.as_mut()),
             None => None,
         }
+    }
+
+    fn speech_synthesizer(&mut self) -> Option<&mut dyn crate::audio::SpeechSynthesizer> {
+        self.resources
+            .speech
+            .as_mut()
+            .map(|service| service.as_mut() as _)
     }
 
     fn movie_enabled(&self) -> bool {

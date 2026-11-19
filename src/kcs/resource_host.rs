@@ -453,6 +453,10 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
         self.inner.jtalk_enabled()
     }
 
+    fn speech_synthesizer(&mut self) -> Option<&mut dyn crate::audio::SpeechSynthesizer> {
+        self.inner.speech_synthesizer()
+    }
+
     fn sound_group_id(&self, name: &[u8]) -> Result<u32> {
         self.inner.sound_group_id(name)
     }

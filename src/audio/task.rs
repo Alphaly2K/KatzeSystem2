@@ -139,27 +139,44 @@ impl TaskObject for SoundObject {
                 return Ok(CommandOutcome::finished(false));
             }
             225..=227 => {
-                if host.jtalk_enabled() != 0 {
-                    return Err(Error::new(0, "宿主未提供语音合成"));
+                if host.jtalk_enabled() == 0 {
+                    if command.code == 225 {
+                        return Err(Error::new(0, "语音合成关闭时直接装载未定义返回值"));
+                    }
+                    *output = u32::MAX;
+                } else {
+                    let synth = host
+                        .speech_synthesizer()
+                        .ok_or_else(|| Error::new(0, "宿主未提供语音合成"))?;
+                    let bytes = buffers
+                        .data1
+                        .as_deref()
+                        .ok_or_else(|| Error::new(0, "语音合成缺少文字记录"))?;
+                    *output = self.audio.load_speech(bytes, command.code, synth)?;
+                    if command.code == 225 {
+                        self.audio
+                            .load_speech_tags(bytes, host.resource_services())?;
+                    }
                 }
-                if command.code == 225 {
-                    return Err(Error::new(0, "语音合成关闭时直接装载未定义返回值"));
-                }
-                *output = u32::MAX;
                 return Ok(CommandOutcome::finished(false));
             }
             228 => {
-                if let (Some(configure), Some(first), Some(second)) = (
-                    self.speech_configuration.as_mut(),
-                    buffers.data0.as_deref(),
-                    buffers.data1.as_deref(),
-                ) {
-                    let first = read::zstr(first, 0)?;
-                    let second = read::zstr(second, 0)?;
-                    if first.len() >= 256 || second.len() >= 256 {
-                        return Err(Error::new(0, "语音合成配置超过后端缓冲区容量"));
+                if let (Some(first), Some(second)) =
+                    (buffers.data0.as_deref(), buffers.data1.as_deref())
+                {
+                    let synth = host.speech_synthesizer();
+                    if self.speech_configuration.is_some() || synth.is_some() {
+                        let first = read::zstr(first, 0)?;
+                        let second = read::zstr(second, 0)?;
+                        if first.len() >= 256 || second.len() >= 256 {
+                            return Err(Error::new(0, "语音合成配置超过后端缓冲区容量"));
+                        }
+                        if let Some(configure) = self.speech_configuration.as_mut() {
+                            configure(first, second)?;
+                        } else if let Some(synth) = synth {
+                            synth.configure(first, second)?;
+                        }
                     }
-                    configure(first, second)?;
                 }
                 return Ok(CommandOutcome::finished(false));
             }

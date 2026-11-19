@@ -1,6 +1,6 @@
 use katze_system2::{
     Error, Result,
-    audio::{SoundFactory, SoundGroup, SoundGroups},
+    audio::{Pcm, SoundFactory, SoundGroup, SoundGroups, SpeechSynthesizer},
     expression::State,
     kcs::{Program, ResourceServices},
     memory::SharedMemory,
@@ -320,6 +320,89 @@ fn speech_load_reports_disabled_groups_and_missing_synthesizer_distinctly() {
         let error = rt.update(0, 0).unwrap_err();
         assert!(error.message.contains(expected), "{error}");
     }
+}
+
+#[test]
+fn native_speech_uses_host_pcm_for_direct_and_grouped_playback() -> Result<()> {
+    use std::{cell::RefCell, rc::Rc};
+
+    #[derive(Default)]
+    struct Calls {
+        configuration: Vec<(Vec<u8>, Vec<u8>)>,
+        utterances: Vec<Vec<u8>>,
+    }
+    struct Synth(Rc<RefCell<Calls>>);
+    impl SpeechSynthesizer for Synth {
+        fn configure(&mut self, first: &[u8], second: &[u8]) -> Result<()> {
+            self.0
+                .borrow_mut()
+                .configuration
+                .push((first.to_vec(), second.to_vec()));
+            Ok(())
+        }
+
+        fn synthesize(&mut self, text: &[u8]) -> Result<Option<Pcm>> {
+            self.0.borrow_mut().utterances.push(text.to_vec());
+            if text.is_empty() {
+                Ok(None)
+            } else {
+                Pcm::new(48_000, 1, vec![9600; 128]).map(Some)
+            }
+        }
+    }
+
+    let mut rt = setup(vec![
+        (1075, vec![64, 90]),
+        (1072, vec![5, 0, 64, 0, 1]),
+        (1071, vec![65536, 0, 0x8000_0040, 1]),
+        (1073, vec![0, 0, 64, 0, 0, 2]),
+        (1071, vec![65537, 0, 90, 1]),
+        (1070, vec![6, 0, 90]),
+        (1071, vec![99, 0, 64, 1]),
+        (161, vec![5, 100]),
+        (157, vec![5, 1]),
+    ]);
+    rt.host_mut().system_settings = Some(katze_system2::settings::SystemSettings {
+        jtalk_enabled: 1,
+        ..Default::default()
+    });
+    let calls = Rc::new(RefCell::new(Calls::default()));
+    rt.set_speech_synthesizer(Synth(calls.clone()));
+    rt.object_mut(2)
+        .unwrap()
+        .interpreter_mut()
+        .unwrap()
+        .write(0x8000_0040, b"\x82\xa0:%u[G8]\0")?;
+    rt.set_budget(1, 4096);
+    rt.update(0, 0)?;
+    let vm = rt.object(2).unwrap().interpreter().unwrap();
+    assert!(vm.stack_bytes().is_empty());
+    assert_eq!(vm.read(0, 4).unwrap(), 0xdeadbeefu32.to_le_bytes());
+    for (slot, value) in [1, 4, 9, u32::MAX, 0, u32::MAX].into_iter().enumerate() {
+        assert_eq!(vm.read(260 + 4 * slot as u32, 4)?, value.to_le_bytes());
+    }
+    let calls = calls.borrow();
+    assert_eq!(calls.configuration, [(b"tone_17.ogg".to_vec(), Vec::new())]);
+    assert_eq!(
+        calls.utterances,
+        [
+            b"tone_17.ogg".to_vec(),
+            b"\x82\xa0:17".to_vec(),
+            b"tone_17.ogg".to_vec(),
+            Vec::new(),
+            Vec::new()
+        ]
+    );
+    let sound = rt.object_mut(1).unwrap().audio_state_mut().unwrap();
+    assert_eq!(sound.channel(5)?.load_options(), 16);
+    assert_eq!(sound.channel(9)?.load_options(), 33);
+    assert!(sound.channel(6)?.pcm().is_none());
+    assert!(sound.channel(10)?.pcm().is_none());
+    let mut mixed = vec![0.; 1024 * 2];
+    sound.mix_stereo(48_000, &mut mixed)?;
+    assert!(mixed[..16 * 48 * 2].iter().all(|&sample| sample == 0.));
+    assert!(mixed[16 * 48 * 2..].iter().any(|&sample| sample != 0.));
+    Ok(())
 }
 
 #[test]

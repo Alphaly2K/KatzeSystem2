@@ -10,6 +10,7 @@ pub(super) struct Resources {
     pub bmb_buffer: std::rc::Rc<std::cell::RefCell<Vec<u8>>>,
     pub platform_jobs: Option<Box<dyn super::PlatformJobServices>>,
     pub effects: Option<Box<dyn super::EffectServices>>,
+    pub speech: Option<Box<dyn crate::audio::SpeechSynthesizer>>,
     pub fonts: Option<Box<dyn crate::message::FontServices>>,
     pub images: Images,
     pub compositor: Compositor,

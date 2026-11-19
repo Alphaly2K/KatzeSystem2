@@ -131,39 +131,52 @@ fn load_metadata(
     file: &[u8],
     tags: &mut std::collections::BTreeMap<Vec<u8>, u32>,
 ) -> Result<()> {
-    tags.clear();
-    let basename = file
-        .rsplit(|byte| matches!(byte, b'/' | b'\\'))
-        .next()
-        .unwrap();
-    let stem = without_extension(basename);
-    for (category, extension) in [
-        (b"tag".as_slice(), None),
-        (b"sound".as_slice(), Some(b"plv".as_slice())),
-        (b"sound".as_slice(), Some(b"lpb".as_slice())),
-        (b"sound".as_slice(), Some(b"lv".as_slice())),
-    ] {
-        let mut name = services.resolve(category, stem)?;
+    let stem = metadata_stem(file);
+    load_tags(services, stem, tags)?;
+    for extension in [b"plv".as_slice(), b"lpb", b"lv"] {
+        let mut name = services.resolve(b"sound", stem)?;
         name.truncate(
             name.iter()
                 .position(|&byte| byte == 0)
                 .unwrap_or(name.len()),
         );
-        if let Some(extension) = extension {
-            name.truncate(without_extension(&name).len());
-            name.push(b'.');
-            name.extend(extension);
-        }
+        name.truncate(without_extension(&name).len());
+        name.push(b'.');
+        name.extend(extension);
         if name.len() >= 1024 {
             return Err(Error::new(0, "声音附加资源名称超过缓冲区容量"));
         }
-        if let Some(bytes) = services.read(&name, ResourceMode::LooseFirst)? {
-            if category == b"tag" {
-                *tags = super::tags::parse(&bytes)?;
-            } else if !bytes.is_empty() {
-                return Err(Error::new(0, "声音附加资源内容尚未接入"));
-            }
+        if services
+            .read(&name, ResourceMode::LooseFirst)?
+            .is_some_and(|bytes| !bytes.is_empty())
+        {
+            return Err(Error::new(0, "声音附加资源内容尚未接入"));
         }
+    }
+    Ok(())
+}
+
+pub(super) fn metadata_stem(file: &[u8]) -> &[u8] {
+    without_extension(
+        file.rsplit(|byte| matches!(byte, b'/' | b'\\'))
+            .next()
+            .unwrap(),
+    )
+}
+
+pub(super) fn load_tags(
+    services: &mut dyn ResourceServices,
+    stem: &[u8],
+    tags: &mut std::collections::BTreeMap<Vec<u8>, u32>,
+) -> Result<()> {
+    tags.clear();
+    let name = services.resolve(b"tag", stem)?;
+    let name = name.split(|&byte| byte == 0).next().unwrap();
+    if name.len() >= 1024 {
+        return Err(Error::new(0, "声音附加资源名称超过缓冲区容量"));
+    }
+    if let Some(bytes) = services.read(name, ResourceMode::LooseFirst)? {
+        *tags = super::tags::parse(&bytes)?;
     }
     Ok(())
 }
