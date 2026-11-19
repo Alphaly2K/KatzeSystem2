@@ -812,6 +812,74 @@ fn quest_field_queries_preserve_bytes_and_expand_character_parameters() -> Resul
     Ok(())
 }
 
+#[test]
+fn quest_allocation_respects_eligibility_priority_and_counter_write_order() -> Result<()> {
+    let columns = [
+        "TBL", "TYPE", "LV_MIN", "LV_MAX", "PLACE", "COND", "PRI", "KEY",
+    ];
+    let rows: [[i32; 8]; 4] = [
+        [4, 2, 0, 2, 10, 0, -1, -1],
+        [6, 2, 0, 2, 10, 0, 1, -1],
+        [8, 3, 0, 2, 10, 0, 1, -1],
+        [10, 3, 0, 2, 10, 0, 9, 4],
+    ];
+    let mut plain = (columns.len() as u32).to_le_bytes().to_vec();
+    for name in columns {
+        let mut column = [0; 24];
+        column[..name.len()].copy_from_slice(name.as_bytes());
+        column[20..].copy_from_slice(&4u32.to_le_bytes());
+        plain.extend(column);
+    }
+    plain.extend((rows.len() as u32).to_le_bytes());
+    plain.extend(32u32.to_le_bytes());
+    for word in rows.iter().rev().flatten() {
+        plain.extend(word.to_le_bytes());
+    }
+
+    let mut state = State::new(0);
+    let mut core = CoreHost::new(&mut state);
+    let mut files = Files(Some(pack(&plain)));
+    let mut host = ResourceHost::new(&mut core, &mut files);
+    let mut vm = Interpreter::new(Program::from_code(&[], data(), 64)?, vec![0xa5; 16])?;
+    let handle = value(call(&mut host, &mut vm, 795, &[32]));
+    let out = 0x8000_0000;
+    call(&mut host, &mut vm, 807, &[handle, 19, 1]);
+    call(&mut host, &mut vm, 811, &[handle, 19, 30]);
+    call(&mut host, &mut vm, 812, &[handle, 19, 40]);
+    call(
+        &mut host,
+        &mut vm,
+        814,
+        &[handle, 19, 0, 4, 8, out, out, 0x9000_0000],
+    );
+    assert_eq!(
+        vm.read(0, 12)?.as_ref(),
+        &[1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]
+    );
+    assert_eq!(
+        vm.read(out, 8)?.as_ref(),
+        &[40, 0, 0, 0, 0xa5, 0xa5, 0xa5, 0xa5]
+    );
+
+    for (complete, expected) in [(false, 6), (true, 10)] {
+        if complete {
+            call(&mut host, &mut vm, 797, &[handle, 2]);
+            call(&mut host, &mut vm, 801, &[handle, 4]);
+        }
+        call(&mut host, &mut vm, 815, &[handle]);
+        call(&mut host, &mut vm, 816, &[handle, 0, 3]);
+        assert_eq!(
+            value(call(&mut host, &mut vm, 818, &[handle, 10])),
+            expected
+        );
+        assert_eq!(
+            value(call(&mut host, &mut vm, 817, &[handle, 10, 1])),
+            u32::MAX
+        );
+    }
+    Ok(())
+}
+
 fn quiz_table(prefix: u8) -> Vec<u8> {
     pack_quiz(
         prefix,

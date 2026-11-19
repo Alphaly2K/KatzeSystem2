@@ -3,6 +3,7 @@ use crate::kcs::{HostState, Interpreter, NativeReturn, ResourceServices, native,
 use crate::{Error, Result, read, resource::ResourceMode};
 use std::collections::BTreeMap;
 
+mod assignment;
 mod fields;
 mod save;
 
@@ -178,11 +179,12 @@ pub(in crate::kcs) fn call(
     use NativeReturn::{Continue, Value};
 
     let count = match index {
-        796 | 798 | 800 | 821 | 822 | 827 | 828 => 1,
+        796 | 798 | 800 | 815 | 821 | 822 | 827 | 828 => 1,
         797 | 799 | 801 | 808 | 809 | 813 | 818 | 819 | 823 | 826 => 2,
-        804 | 805 | 807 | 810..=812 | 817 | 824 => 3,
+        804 | 805 | 807 | 810..=812 | 816 | 817 | 824 => 3,
         803 | 806 | 820 | 825 => 4,
         802 => 5,
+        814 => 8,
         _ => unreachable!(),
     };
     let handle = read::u32_at(arguments, 0)?;
@@ -288,6 +290,29 @@ pub(in crate::kcs) fn call(
                     }
                 }
             }
+            Continue
+        }
+        814 => {
+            if let Some(slot) = table.counters.get(args[1] as usize) {
+                for (&address, &value) in args[2..].iter().zip(slot) {
+                    if vm.read(address, 1).is_ok() {
+                        vm.write(address, &value.to_le_bytes())?;
+                    }
+                }
+            }
+            Continue
+        }
+        815 => {
+            table.refresh_availability()?;
+            Continue
+        }
+        816 => {
+            // The wrapper copies this input even though allocation does not consult it.
+            if (args[2] as i32) > 0 {
+                let len = (args[2] as usize).saturating_mul(4);
+                vm.read(args[1], len)?;
+            }
+            table.assign_places()?;
             Continue
         }
         817..=819 => Value(table.find_assignment(index, &args)?),
