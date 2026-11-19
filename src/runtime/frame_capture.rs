@@ -15,7 +15,47 @@ impl<F: ObjectFactory> Runtime<F> {
         if !self.wants_sequence_capture() {
             return Ok(false);
         }
-        let Some(bytes) = Image::encode_frame_bmp(frame, self.resources.capture_rectangle)? else {
+        self.write_sequence_frame(frame.size(), |x, y| frame.pixel(x, y))
+    }
+
+    /// Submit one frame of host readback pixels without creating a render target.
+    /// Pixels are top-down BGRA, with `row_stride` bytes between row starts.
+    /// Alpha and row padding are ignored. A malformed buffer is rejected before
+    /// the capture index advances. Disabled capture and empty frames return false.
+    pub fn capture_sequence_bgra(
+        &mut self,
+        size: [u32; 2],
+        row_stride: usize,
+        pixels: &[u8],
+    ) -> Result<bool> {
+        if !self.wants_sequence_capture() || size.contains(&0) {
+            return Ok(false);
+        }
+        if size.iter().any(|&axis| axis > i32::MAX as u32) {
+            return Err(Error::new(0, "截图像素尺寸超出坐标范围"));
+        }
+        let row_bytes = (size[0] as usize)
+            .checked_mul(4)
+            .filter(|&bytes| bytes <= row_stride)
+            .ok_or_else(|| Error::new(0, "截图像素行距不足"))?;
+        (size[1] as usize - 1)
+            .checked_mul(row_stride)
+            .and_then(|offset| offset.checked_add(row_bytes))
+            .filter(|&length| length <= pixels.len())
+            .ok_or_else(|| Error::new(0, "截图像素缓冲区长度不足"))?;
+        self.write_sequence_frame(size, |x, y| {
+            let at = y as usize * row_stride + x as usize * 4;
+            Some(u32::from_le_bytes(pixels[at..at + 4].try_into().unwrap()))
+        })
+    }
+
+    fn write_sequence_frame(
+        &mut self,
+        size: [u32; 2],
+        pixel: impl Fn(u32, u32) -> Option<u32>,
+    ) -> Result<bool> {
+        let Some(bytes) = Image::encode_frame_bmp(size, self.resources.capture_rectangle, pixel)?
+        else {
             return Ok(false);
         };
         let index = self.host.frame_capture_index;

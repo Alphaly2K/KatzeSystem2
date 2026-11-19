@@ -40,14 +40,15 @@ impl ExportFormat {
 
 impl Image {
     pub(crate) fn encode_frame_bmp(
-        frame: &crate::graphics::RenderTarget,
+        size: [u32; 2],
         rectangle: Option<crate::graphics::Rect>,
+        pixel: impl Fn(u32, u32) -> Option<u32>,
     ) -> Result<Option<Vec<u8>>> {
-        if frame.size().contains(&0) {
+        if size.contains(&0) {
             return Ok(None);
         }
         let rectangle = rectangle.unwrap_or_else(|| {
-            crate::graphics::Rect::from_xywh(0, 0, frame.size()[0] as i32, frame.size()[1] as i32)
+            crate::graphics::Rect::from_xywh(0, 0, size[0] as i32, size[1] as i32)
         });
         let extent = [
             rectangle.right.wrapping_sub(rectangle.left),
@@ -67,11 +68,10 @@ impl Image {
                     rectangle.left.wrapping_add(x as i32),
                     rectangle.top.wrapping_add(y as i32),
                 ];
-                let in_bounds = (0..frame.size()[0] as i32).contains(&source[0])
-                    && (0..frame.size()[1] as i32).contains(&source[1]);
+                let in_bounds = (0..size[0] as i32).contains(&source[0])
+                    && (0..size[1] as i32).contains(&source[1]);
                 let color = if in_bounds {
-                    frame
-                        .pixel(source[0] as u32, source[1] as u32)
+                    pixel(source[0] as u32, source[1] as u32)
                         .ok_or_else(|| Error::new(0, "连续截图读取缺失的渲染面块"))?
                 } else {
                     0
