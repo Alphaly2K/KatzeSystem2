@@ -7,7 +7,7 @@ use katze_system2::{
     kcs::{Host, Interpreter, OrdinaryTask, Program, TaskClock, WindowAction, WindowRequest},
     runtime::{
         BaseObject, KcsFactory, ObjectFactory, OrdinaryObject, ProgramLoader, RootObject, Runtime,
-        TaskObject, kind,
+        TaskObject, WindowServices, kind,
     },
     task::{Command, CommandBuffers, CommandOutcome, Control},
 };
@@ -447,6 +447,19 @@ fn frame_configuration_changes_queue_messages_after_task_updates() {
 
 #[test]
 fn window_notification_is_deferred_and_one_tick_applies_to_the_calling_task() {
+    struct InertWindow;
+    impl WindowServices for InertWindow {
+        fn toggle_fullscreen(&mut self) -> Result<bool> {
+            unreachable!()
+        }
+        fn minimize(&mut self) -> Result<()> {
+            unreachable!()
+        }
+        fn confirm_close(&mut self) -> bool {
+            unreachable!()
+        }
+    }
+
     for budget in [1, 4096] {
         for paused in [0, -1] {
             let mut source = Source::new();
@@ -486,8 +499,12 @@ fn window_notification_is_deferred_and_one_tick_applies_to_the_calling_task() {
                 [0xdead_beef]
             );
 
-            runtime.host_mut().window_requests.clear();
-            runtime.notify_window_tasks().unwrap();
+            assert!(
+                !runtime
+                    .process_window_requests(0, &mut InertWindow)
+                    .unwrap()
+            );
+            assert!(runtime.pending_window_requests().is_empty());
             for id in tasks {
                 let object = runtime.object(id).unwrap();
                 assert_eq!(object.queued_messages().unwrap(), &[[0, 0xffff0013, 0, 0]]);

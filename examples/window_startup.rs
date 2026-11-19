@@ -18,8 +18,6 @@ mod metal_output;
 mod support;
 #[path = "support/system_output.rs"]
 mod system_output;
-#[path = "support/window_actions.rs"]
-mod window_actions;
 #[path = "support/window_import.rs"]
 mod window_import;
 #[path = "support/window_input.rs"]
@@ -231,7 +229,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 frame_started.elapsed().as_secs_f64() * 1000.0
             );
         }
-        if window_actions::pump(&mut runtime, input, &mut window)? {
+        if runtime.process_window_requests(input, &mut window)? {
             break;
         }
         if !image_import
@@ -257,10 +255,10 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                     .is_some_and(window_import::WindowImport::active)
                 || shared.borrow().cursor(runtime.uses_image_cursor()),
         );
-        if !runtime.host().window_requests.is_empty() && !window_pending_noted {
+        if !runtime.pending_window_requests().is_empty() && !window_pending_noted {
             eprintln!(
                 "窗口动作尚未接入：{:?}",
-                runtime.host().window_requests[0].action
+                runtime.pending_window_requests()[0].action
             );
             window_pending_noted = true;
         }

@@ -110,7 +110,7 @@ impl Output {
     }
 }
 
-impl super::window_actions::Services for Output {
+impl katze_system2::runtime::WindowServices for Output {
     fn toggle_fullscreen(&mut self) -> katze_system2::Result<bool> {
         Output::toggle_fullscreen(self).map_err(|message| katze_system2::Error::new(0, message))
     }

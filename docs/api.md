@@ -403,9 +403,9 @@ FES `steam_achievement` 将首个参数按 FES 字符串变量和全局脚本替
 
 普通 628 接收一个 DWORD，立即覆盖 `HostState::debug_mode`，并向 `window_requests` 追加 `WindowAction::RebuildMenu`；465 随后查询同一字段。重建菜单时读取最新值，零选择普通菜单，非零选择完整菜单，多次请求不保存旧模式快照。457 无参数，追加 `OpenSystemProperties`；845／846／847 无参数，分别追加 `ToggleFullscreen`／`Minimize`／`CloseFromMenu`。每项 `WindowRequest` 保留发送任务编号，以状态二继续，不压值或等待平台响应。菜单退出先向输入任务发送 159 空闲重置命令，再执行标准关闭流程。
 
-普通 1054 无参数，依同一协议追加 `WindowAction::NotifyTasks`。窗口示例消费该请求时调用 `Runtime::notify_window_tasks`，从根向任务树广播发送者为零的命令 21。普通任务将对应通知入队，由后续更新消费。离屏宿主可显式消费请求。
+普通 1054 无参数，依同一协议追加 `WindowAction::NotifyTasks`。`Runtime::process_window_requests` 消费该请求时，从根向任务树广播发送者为零的命令 21。普通任务将对应通知入队，由后续更新消费。
 
-窗口示例使用 SDL2 消费全屏、最小化和菜单退出请求，启动时应用已保存的全屏选择。切换使用桌面全屏，成功后同步 `SystemSettings::fullscreen` 并触发配置变更通知；`windowed_mode` 保留独立窗口宿主标记。普通 9 的应用退出通知直接结束，标准关闭及菜单退出显示确认对话框，拒绝后继续运行。提示和标题从当前字符串表取得。示例保留待宿主处理的系统属性页及菜单重建请求。窗口输入按 SDL 事件采集，短点击保留当帧脉冲，按住状态持续同步；丢失焦点时清空键鼠，按键别名合并到同一虚拟键码，指针位置按窗口尺寸换算到逻辑画布。键盘输入全部交给游戏；最小化时继续驱动任务和音频，暂停画面提交。
+宿主在更新后调用 `Runtime::process_window_requests(input, window)`，通过 `WindowServices` 提供全屏、最小化和关闭确认。成功切换后运行库同步 `SystemSettings::fullscreen` 并触发配置变更通知；`windowed_mode` 是独立的窗口宿主标记。应用退出通知和已获确认的关闭返回 true，拒绝后继续。系统属性页及菜单重建留在队列中；宿主可用 `pending_window_requests` 查看，或在成功处理后通过 `take_window_requests` 取出剩余动作。动作出错后保留未尝试的请求，已尝试的动作不自动重放。
 
 普通 10／1039 接收格式字符串地址，以状态二将 `ClipboardRequest { task_id, text }` 追加到 `HostState::clipboard_requests`，保留 VM 返回栈。宿主按调用顺序消费请求并负责实际写入与失败处理。`ClipboardText::Bytes` 保留普通 10 的源字节，`Utf16` 保留普通 1039 的独立 UTF-16 单元；两项先将字面 `\n` 按字节替换为 CRLF。1039 沿用基线 UTF-8 逐字符转换，非 BMP 字符保留首个代理单元，输出最多 2,047 单元。窗口示例在收到首个请求时初始化 SDL 剪贴板服务，字节串按已配置脚本编码解码，UTF-16 的无效代理单元按替换字符显示，写入失败记录日志后继续。
 

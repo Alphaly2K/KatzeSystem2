@@ -1,5 +1,3 @@
-#[path = "../examples/support/window_actions.rs"]
-mod window_actions;
 #[allow(dead_code)]
 #[path = "../examples/support/window_input.rs"]
 mod window_input;
@@ -9,7 +7,7 @@ use katze_system2::{
     expression::State,
     input::{DeviceBinding, DeviceKeys, InputDevice, InputFactory},
     kcs::{Program, WindowAction, WindowCloseRequest, WindowRequest},
-    runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, kind},
+    runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, WindowServices, kind},
     settings::SystemSettings,
 };
 use sdl2::{
@@ -190,7 +188,7 @@ struct Window {
     fullscreen: bool,
     fail: bool,
 }
-impl window_actions::Services for Window {
+impl WindowServices for Window {
     fn toggle_fullscreen(&mut self) -> Result<bool> {
         self.events.push("fullscreen");
         if self.fail {
@@ -239,15 +237,14 @@ fn window_actions_apply_state_after_success_reset_input_before_close_and_keep_pe
     ]
     .map(|action| WindowRequest { task_id: 0, action })
     .to_vec();
-    assert!(!window_actions::pump(&mut rt, input, &mut window)?);
+    assert!(!rt.process_window_requests(input, &mut window)?);
     assert_eq!(window.events, ["fullscreen", "minimize", "confirm"]);
     assert_eq!(rt.host().windowed_mode, Some(1));
     assert_eq!(rt.host().system_settings_dirty, 1);
     assert_eq!(rt.host().system_settings.as_ref().unwrap().fullscreen, 1);
     assert_eq!(rt.input_state(input).unwrap().pointer().idle_count, 0);
     assert_eq!(
-        rt.host()
-            .window_requests
+        rt.pending_window_requests()
             .iter()
             .map(|request| request.action)
             .collect::<Vec<_>>(),
@@ -260,12 +257,25 @@ fn window_actions_apply_state_after_success_reset_input_before_close_and_keep_pe
         task_id: 0,
         action: WindowAction::ToggleFullscreen,
     });
+    rt.host_mut().window_requests.push(WindowRequest {
+        task_id: 0,
+        action: WindowAction::Minimize,
+    });
     window.fail = true;
     rt.host_mut().system_settings_dirty = 0;
-    assert!(window_actions::pump(&mut rt, input, &mut window).is_err());
+    assert!(rt.process_window_requests(input, &mut window).is_err());
     assert_eq!(rt.host().windowed_mode, Some(1));
     assert_eq!(rt.host().system_settings_dirty, 0);
     assert_eq!(rt.host().system_settings.as_ref().unwrap().fullscreen, 1);
+    assert_eq!(
+        rt.pending_window_requests().last().unwrap().action,
+        WindowAction::Minimize
+    );
+    let before = window.events.len();
+    assert!(!rt.process_window_requests(input, &mut window)?);
+    assert_eq!(window.events[before..], ["minimize"]);
+    assert_eq!(rt.take_window_requests().len(), 2);
+    assert!(rt.pending_window_requests().is_empty());
     rt.host_mut()
         .window_close_requests
         .push(WindowCloseRequest {
@@ -273,7 +283,7 @@ fn window_actions_apply_state_after_success_reset_input_before_close_and_keep_pe
             notify: false,
         });
     let before = window.events.len();
-    assert!(window_actions::pump(&mut rt, input, &mut window)?);
+    assert!(rt.process_window_requests(input, &mut window)?);
     assert_eq!(window.events.len(), before + 1);
     rt.host_mut()
         .window_close_requests
@@ -282,7 +292,7 @@ fn window_actions_apply_state_after_success_reset_input_before_close_and_keep_pe
             notify: true,
         });
     let before = window.events.len();
-    assert!(window_actions::pump(&mut rt, input, &mut window)?);
+    assert!(rt.process_window_requests(input, &mut window)?);
     assert_eq!(window.events.len(), before);
     Ok(())
 }
