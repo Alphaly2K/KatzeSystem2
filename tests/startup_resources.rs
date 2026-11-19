@@ -161,6 +161,90 @@ fn startup_and_dynamic_script_loads_use_the_higher_priority_patch() {
 }
 
 #[test]
+fn archive_list_mounts_each_member_in_order_with_its_own_loose_directory() {
+    use ResourceMode::{Archive, ArchiveFirst, File, LooseFirst};
+
+    let root =
+        Directory(std::env::temp_dir().join(format!("katze-startup-lists-{}", std::process::id())));
+    std::fs::create_dir(&root.0).unwrap();
+    std::fs::create_dir(root.0.join("config")).unwrap();
+    std::fs::create_dir_all(root.0.join("loose/first")).unwrap();
+    std::fs::create_dir(root.0.join("loose/second")).unwrap();
+    std::fs::write(
+        root.0.join("config/startup.xml"),
+        br#"<?xml version="1.0" encoding="UTF-8"?><document>
+        <SCRIPT><start>kcs.int/main.kcs</start></SCRIPT>
+        <INT><int00><name>image</name><int>pack.lst</int><ext>dat</ext><dir>unrelated</dir></int00></INT>
+        </document>"#,
+    ).unwrap();
+    std::fs::write(
+        root.0.join("pack.lst"),
+        b"loose\\first/first.int\r\nloose\\second/missing.int\n/last.int\0ignore",
+    )
+    .unwrap();
+    for (path, bytes) in [
+        ("loose/first/common.dat", b"loose".as_slice()),
+        ("loose/first/interleaved.dat", b"first loose"),
+        ("loose/second/loose-only.dat", b"second loose"),
+        ("loose/first/patched.dat", b"old"),
+        ("direct.dat", b"direct"),
+    ] {
+        std::fs::write(root.0.join(path), bytes).unwrap();
+    }
+    for (path, entries) in [
+        ("first.int", vec![("common.dat", b"first".to_vec())]),
+        (
+            "last.int",
+            vec![
+                ("common.dat", b"last".to_vec()),
+                ("interleaved.dat", b"last".to_vec()),
+                ("suffix.dat", b"last".to_vec()),
+            ],
+        ),
+        ("update01.int", vec![("patched.dat", b"patch".to_vec())]),
+    ] {
+        std::fs::write(root.0.join(path), archive(&entries)).unwrap();
+    }
+    let mut router = support::load_game(root.0.to_str().unwrap()).unwrap().router;
+    assert_eq!(
+        router.resolve(b"image", b"common").unwrap(),
+        b"pack.lst/common.dat"
+    );
+    for (mode, name, expected) in [
+        (LooseFirst, "PACK.LST/common.dat", Some(b"loose".as_slice())),
+        (ArchiveFirst, "pack.lst/common.dat", Some(b"first")),
+        (Archive, "pack.lst/common.dat", Some(b"first")),
+        (
+            ArchiveFirst,
+            "pack.lst/interleaved.dat",
+            Some(b"first loose"),
+        ),
+        (Archive, "pack.lst/interleaved.dat", Some(b"last")),
+        (LooseFirst, "pack.lst/loose-only.dat", Some(b"second loose")),
+        (Archive, "pack.lst/loose-only.dat", None),
+        (Archive, "pack.lst/suffix.dat", Some(b"last")),
+        (File, "pack.lst/common.dat", None),
+        (File, "direct.dat", Some(b"direct")),
+        (File, "pack.lst/patched.dat", Some(b"patch")),
+        (Archive, "pack.lst/patched.dat", Some(b"patch")),
+        (LooseFirst, "pack.lst/patched.dat", Some(b"patch")),
+        (ArchiveFirst, "pack.lst/patched.dat", Some(b"patch")),
+    ] {
+        let units: Vec<_> = name.encode_utf16().collect();
+        let source = router.open_utf16(&units, mode).unwrap();
+        assert_eq!(
+            source
+                .map(support::read_source)
+                .transpose()
+                .unwrap()
+                .as_deref(),
+            expected,
+            "{mode:?} {name}"
+        );
+    }
+}
+
+#[test]
 fn encrypted_archive_lookup_preserves_all_name_shifts_and_lossy_unicode_matching() {
     let root = Directory(
         std::env::temp_dir().join(format!("katze-startup-encrypted-{}", std::process::id())),

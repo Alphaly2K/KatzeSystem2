@@ -19,6 +19,7 @@ use katze_system2::{
 };
 use std::{collections::BTreeMap, sync::Arc};
 
+mod archive_list;
 mod configuration;
 use configuration::ConfigurationFiles;
 pub mod diagnostics;
@@ -361,6 +362,7 @@ pub struct Router {
     pub root: String,
     pub config: ArchiveConfig,
     pub archives: BTreeMap<String, Archive>,
+    archive_lists: BTreeMap<String, Vec<archive_list::Member>>,
     pub patches: Vec<Archive>,
     pub script_encoding: &'static encoding_rs::Encoding,
 }
@@ -381,35 +383,66 @@ impl Router {
             return Ok(open_file(std::path::Path::new(&self.root).join(name)));
         }
         let (prefix, inner) = name.split_once('/').unwrap_or(("", name));
+        if archive_list::is_list(prefix) {
+            if let Some(members) = self.archive_lists.get(&prefix.to_ascii_lowercase()) {
+                for member in members {
+                    if let Some(source) = self.open_pair(
+                        &member.archive,
+                        &member.directory,
+                        inner,
+                        mode,
+                        !member.directory.is_empty(),
+                    )? {
+                        return Ok(Some(source));
+                    }
+                }
+            }
+            return Ok(None);
+        }
         for entry in &self.config.entries {
             let entry_prefix = String::from_utf8_lossy(&entry.category.prefix);
             let unqualified = mode == ResourceMode::LooseFirst && prefix.is_empty();
             if !unqualified && !entry_prefix.eq_ignore_ascii_case(prefix) {
                 continue;
             }
-            let archive = self.archives.get_mut(entry_prefix.as_ref());
-            let loose = || {
-                let directory = String::from_utf8_lossy(&entry.directory).replace('\\', "/");
-                let path = std::path::Path::new(&self.root).join(directory).join(inner);
-                open_file(path)
-            };
-            if mode == ResourceMode::LooseFirst {
-                if let Some(bytes) = loose() {
-                    return Ok(Some(bytes));
-                }
-            }
-            if let Some(archive) = archive {
-                if let Some(bytes) = archive.open_source(inner)? {
-                    return Ok(Some(bytes));
-                }
-            }
-            if mode == ResourceMode::ArchiveFirst && !entry.directory.is_empty() {
-                if let Some(bytes) = loose() {
-                    return Ok(Some(bytes));
-                }
+            let directory = String::from_utf8_lossy(&entry.directory).replace('\\', "/");
+            if let Some(source) = self.open_pair(
+                &entry_prefix,
+                &directory,
+                inner,
+                mode,
+                mode == ResourceMode::LooseFirst || !directory.is_empty(),
+            )? {
+                return Ok(Some(source));
             }
         }
         Ok(None)
+    }
+
+    fn open_pair(
+        &self,
+        archive: &str,
+        directory: &str,
+        name: &str,
+        mode: ResourceMode,
+        loose_enabled: bool,
+    ) -> Result<Option<SharedSource>> {
+        let loose = || open_file(std::path::Path::new(&self.root).join(directory).join(name));
+        if mode == ResourceMode::LooseFirst && loose_enabled {
+            if let Some(source) = loose() {
+                return Ok(Some(source));
+            }
+        }
+        if let Some(archive) = self.archives.get(archive) {
+            if let Some(source) = archive.open_source(name)? {
+                return Ok(Some(source));
+            }
+        }
+        Ok(if mode == ResourceMode::ArchiveFirst && loose_enabled {
+            loose()
+        } else {
+            None
+        })
     }
 }
 
@@ -662,6 +695,7 @@ pub fn load_game(root: &str) -> std::result::Result<Game, Box<dyn std::error::Er
         root: root.to_string(),
         config: config.clone(),
         archives: BTreeMap::new(),
+        archive_lists: BTreeMap::new(),
         patches: Vec::new(),
         script_encoding,
     };
@@ -686,6 +720,34 @@ pub fn load_game(root: &str) -> std::result::Result<Game, Box<dyn std::error::Er
         let prefix = String::from_utf8_lossy(&entry.category.prefix).into_owned();
         let path = format!("{root}/{prefix}");
         if prefix.is_empty() || !std::path::Path::new(&path).exists() {
+            continue;
+        }
+        if archive_list::is_list(&prefix) {
+            match archive_list::load(path.as_ref()) {
+                Ok(members) => {
+                    for member in &members {
+                        if router.archives.contains_key(&member.archive) {
+                            continue;
+                        }
+                        let path = format!("{root}/{}", member.archive);
+                        if std::path::Path::new(&path).is_file() {
+                            match Archive::open(&path) {
+                                Ok(archive) => {
+                                    router.archives.insert(member.archive.clone(), archive);
+                                }
+                                Err(error) => eprintln!("跳过 {}：{error}", member.archive),
+                            }
+                        }
+                    }
+                    router
+                        .archive_lists
+                        .insert(prefix.to_ascii_lowercase(), members);
+                }
+                Err(error) => eprintln!("跳过 {prefix}：{error}"),
+            }
+            continue;
+        }
+        if router.archives.contains_key(&prefix) {
             continue;
         }
         match Archive::open(&path) {
