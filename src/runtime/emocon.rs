@@ -1,5 +1,6 @@
 use super::{ObjectFactory, ObjectHost};
-use crate::kcs::{Interpreter, NativeReturn, ResourceServices, format_string};
+use crate::host::ResourceServices;
+use crate::kcs::{Interpreter, NativeReturn, format_string};
 use crate::resource::{ResourceMode, XmlDocument};
 use crate::{Error, Result, read, text};
 

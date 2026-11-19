@@ -1,20 +1,7 @@
 use super::{HostState, Interpreter, NativeReturn, strings, utf8};
 use crate::{Error, Result, read};
 
-/// 复制请求的文本；不包含结尾零，UTF-16 保留独立代理单元。
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ClipboardText {
-    /// 普通 10 的原始字节，由宿主按源编码解码。
-    Bytes(Vec<u8>),
-    Utf16(Vec<u16>),
-}
-
-/// 普通 10／1039 提交的剪贴板写入请求；宿主负责实际写入和失败处理。
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ClipboardRequest {
-    pub task_id: u32,
-    pub text: ClipboardText,
-}
+use crate::host::{ClipboardRequest, ClipboardText};
 
 pub(super) fn call(
     host: &mut HostState,

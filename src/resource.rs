@@ -1,5 +1,6 @@
 use crate::{Error, Result, read};
 
+mod cache;
 mod config;
 mod directory;
 mod folder;
@@ -7,6 +8,7 @@ mod kif;
 mod kif_source;
 mod router;
 mod xml;
+pub use cache::{CachedResources, ResourceCache};
 pub use config::{ArchiveConfig, ArchiveEntry};
 pub use directory::{ArchiveDirectory, DirectoryEntry};
 pub use folder::FolderPaths;
@@ -71,7 +73,7 @@ impl Category {
     }
 }
 
-fn terminated(bytes: &[u8]) -> &[u8] {
+pub(crate) fn terminated(bytes: &[u8]) -> &[u8] {
     &bytes[..bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len())]
 }
 

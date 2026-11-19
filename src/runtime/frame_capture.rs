@@ -1,5 +1,5 @@
 use super::{ObjectFactory, Runtime};
-use crate::graphics::{DrawList, Image, Rect, RenderTarget};
+use crate::graphics::{DrawList, FrameCanvas, Image, Rect, RenderTarget};
 use crate::kcs::HostState;
 use crate::{Error, Result};
 
@@ -16,7 +16,7 @@ impl<F: ObjectFactory> Runtime<F> {
     /// requested, return the presented pixels through the supplied capture token.
     pub fn present_frame<T>(
         &mut self,
-        present: impl FnOnce(&DrawList, &mut RenderTarget, Option<SequenceCapture<'_>>) -> Result<T>,
+        present: impl FnOnce(&DrawList, &mut FrameCanvas<'_>, Option<SequenceCapture<'_>>) -> Result<T>,
     ) -> Result<T> {
         let frame = self.compose_frame()?;
         let capture = self.wants_sequence_capture().then_some(SequenceCapture {
@@ -30,13 +30,13 @@ impl<F: ObjectFactory> Runtime<F> {
             .target
             .as_mut()
             .ok_or_else(|| Error::new(0, "运行时未配置画布纹理输入"))?;
-        present(&frame, canvas, capture)
+        present(&frame, &mut FrameCanvas::new(canvas), capture)
     }
 
     /// Access the draw list and canvas without submitting a presentation capture.
     pub fn with_frame<T>(
         &mut self,
-        render: impl FnOnce(&DrawList, &mut RenderTarget) -> Result<T>,
+        render: impl FnOnce(&DrawList, &mut FrameCanvas<'_>) -> Result<T>,
     ) -> Result<T> {
         self.present_frame(|frame, canvas, _| render(frame, canvas))
     }

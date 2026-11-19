@@ -1,13 +1,36 @@
 use super::{DrawList, RenderTarget};
 use crate::Result;
 
+/// Read-only canvas textures with an explicit upload acknowledgement. A host
+/// cache shared by presentation and script readback can consume the dirty flags.
+pub struct FrameCanvas<'a>(&'a mut RenderTarget);
+
+impl<'a> FrameCanvas<'a> {
+    pub fn new(target: &'a mut RenderTarget) -> Self {
+        Self(target)
+    }
+
+    /// Clear dirty flags after uploading all changed tiles to the shared cache.
+    pub fn acknowledge_upload(&mut self) {
+        self.0.clear_dirty();
+    }
+}
+
+impl std::ops::Deref for FrameCanvas<'_> {
+    type Target = RenderTarget;
+
+    fn deref(&self) -> &RenderTarget {
+        self.0
+    }
+}
+
 /// 离屏执行合成器生成的绘制列表，供脚本回读完整像素。
 pub trait GraphicsBackend {
     /// 返回清零后绘制的完整帧；画布是只读纹理来源，可消费其更新标记。
     fn render(
         &mut self,
         frame: &DrawList,
-        canvas: &mut RenderTarget,
+        canvas: &mut FrameCanvas<'_>,
         size: [u32; 2],
     ) -> Result<RenderTarget>;
 }
@@ -20,7 +43,7 @@ impl GraphicsBackend for SoftwareBackend {
     fn render(
         &mut self,
         frame: &DrawList,
-        canvas: &mut RenderTarget,
+        canvas: &mut FrameCanvas<'_>,
         size: [u32; 2],
     ) -> Result<RenderTarget> {
         let mut output = RenderTarget::new(size)?;

@@ -1,5 +1,5 @@
 use super::{Pcm, SoundState, Source, playback::Playback};
-use crate::kcs::ResourceServices;
+use crate::host::ResourceServices;
 use crate::{Error, Result, read};
 
 /// Supplies speech as PCM in the source sample format used by the mixer.

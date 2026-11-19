@@ -18,6 +18,8 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 
 普通 KCS 的入口和后续装载使用已绑定的 `ResourceServices`。运行库按 `kcs` 类别补全名称，以 `ArchiveFirst` 模式读取字节并解析；补丁与归档顺序由资源服务决定。工具可用 `GameRuntime::into_task_runtime` 接续同一个实例，也可直接使用 `runtime::TaskRuntime::with_programs` 提供预解析程序，或用 `TaskRuntime::with_resource_programs` 绑定现有外部存储。`TaskRuntime::start_game_with_tasks(entry)` 可另外取得用于诊断的任务编号。
 
+宿主通过 `ResourceServices` 提供资源，使用 `FileServices`、`SaveServices` 和 `ConfigurationServices` 分别接入脚本文件、存档和配置持久化。资源服务返回完整字节或可独立读取的 `SharedSource`；宿主可用 `CachedResources` 为自定义装载流程复用预读缓存。这些类型可统一从 `host` 导入。
+
 标准会话在推进前必须通过 `set_input_device` 绑定 `InputDevice`。离屏宿主可提供只返回空闲状态的内存设备。`startup_input_bindings` 返回已经应用用户覆盖的八十个逻辑键槽，宿主可以用它构造 `DeviceKeys`。配置保存优先读取设备当前的绑定；设备未提供绑定时使用启动配置。
 
 `GameRuntime::set_game_resources` 接受资源服务与声音配置文档。运行库按声音定义选定归档类别，应用用户覆盖以控制播放；宿主按该类别补全名称并提供读取源。没有新版声音定义时，使用启动文档里的旧版文件映射和声音组。自定义声音路由的宿主可以用 `set_resources`，由其资源服务直接处理 `sound` 类别。
@@ -32,7 +34,9 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 
 窗口宿主可通过 `set_window_content_rect` 和 `set_windowed_mode` 提供客户区绘图矩形和当前窗口模式。`take_clipboard_requests` 取走按序提交的剪贴板写入请求，保留发起任务和原始编码，由宿主解码并写入剪贴板。
 
-宿主用 `GameRuntime::present_frame` 借用当前绘制列表和画布。需要连续截图时，回调同时收到一个 `SequenceCapture`。呈现提交后可通过它交回软件渲染目标，或交回从顶行开始的 BGRA 像素与以字节计的行距。每次请求只能提交一次；没有提交呈现时丢弃请求即可。运行库负责裁剪、编码 BMP 和编号，通过宿主文件服务写入。只需查看或离屏绘制时可用 `with_frame`。
+宿主用 `GameRuntime::present_frame` 借用当前绘制列表和 `FrameCanvas`。画布提供只读纹理和变更标记。呈现和脚本回读共用一个纹理缓存时，由宿主上传所有变更面块后调用 `acknowledge_upload`；有独立缓存的多个消费者应各自跟踪更新。宿主可通过 `set_graphics_backend` 为脚本的同步离屏回读提供同类后端；未提供时使用库内软件后端。
+
+需要连续截图时，回调同时收到一个 `SequenceCapture`。呈现提交后可通过它交回软件渲染目标，或交回从顶行开始的 BGRA 像素及以字节计的行距。每次请求只能提交一次；跳过呈现时可丢弃请求。运行库负责裁剪、编码 BMP 和编号，通过宿主文件服务写入。只需查看或离屏绘制时可用 `with_frame`。
 
 离屏宿主在更新后用 `mix_audio_stereo(rate_hz, buffer)` 拉取 PCM；此调用可等待解码。设备宿主用 `connect_audio_output()` 取得可移交给音频线程的 `Mixer`，由回调用 `Mixer::render(rate_hz, buffer)` 拉取 PCM，无须借用运行实例。两者均覆写调用方缓冲，格式为左右交错、幅度 `[-1, 1]` 的 `f32` 采样。游戏声音只能连接一次，连接后不得再调用离屏混音；会话退出时由宿主停止回调并释放混音器。
 

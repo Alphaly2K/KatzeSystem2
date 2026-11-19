@@ -3,8 +3,8 @@ use crate::{
     Result,
     graphics::Rect,
     host::WindowServices,
+    host::{WindowAction, WindowRequest},
     input::InputDelivery,
-    kcs::{WindowAction, WindowRequest},
     task::{Command, CommandBuffers},
 };
 

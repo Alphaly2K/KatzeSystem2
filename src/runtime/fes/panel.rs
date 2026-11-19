@@ -4,7 +4,7 @@ use crate::{
     fes::PanelContent,
     graphics::{Image, Rect, Surface},
     hg3::FrameDirectory,
-    kcs::ResourceServices,
+    host::ResourceServices,
     message::{FontRequest, GlyphEffects, GlyphPaint, TextEncoding},
     resource::ResourceMode,
     runtime::{ObjectFactory, Store},

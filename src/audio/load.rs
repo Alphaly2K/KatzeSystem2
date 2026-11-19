@@ -1,5 +1,5 @@
 use super::{SoundState, Source, playback::Playback};
-use crate::kcs::ResourceServices;
+use crate::host::ResourceServices;
 use crate::resource::ResourceMode;
 use crate::{Error, Result, read};
 

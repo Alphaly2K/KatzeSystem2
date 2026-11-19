@@ -272,7 +272,7 @@ fn check_capacity(text: &[u8], capacity: usize) -> Result<()> {
 fn has_voice(
     prefix: &[u8],
     command: &[u8],
-    services: &mut dyn crate::kcs::ResourceServices,
+    services: &mut dyn crate::host::ResourceServices,
 ) -> Result<bool> {
     let mut words = command
         .split(|&b| b == b' ')

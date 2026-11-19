@@ -1,6 +1,6 @@
 use super::{ObjectState, Objects};
 use crate::fes::ImageReference;
-use crate::kcs::ResourceServices;
+use crate::host::ResourceServices;
 use crate::runtime::{ObjectFactory, Runtime, Store, create_object, kind, route_with_buffers};
 use crate::task::{Command, CommandBuffers};
 use crate::{Error, Result};

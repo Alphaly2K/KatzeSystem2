@@ -1,4 +1,5 @@
 use super::{Host, Interpreter, MemoryCopyMode, NativeReturn, ScriptRandom, TaskClock};
+use crate::host::{MenuItemRequest, WindowCloseRequest, WindowRequest};
 use crate::task::TaskTree;
 use crate::{Error, HandleAllocator, Result, expression};
 use std::collections::BTreeMap;
@@ -23,43 +24,6 @@ pub(crate) fn hierarchy_query(
             .ok_or_else(|| Error::new(pc, "KCS 当前任务没有父任务"))?
     };
     Ok(NativeReturn::Value(id))
-}
-
-/// 交给窗口宿主的异步菜单项状态请求。
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct MenuItemRequest {
-    pub task_id: u32,
-    pub command_id: u32,
-    /// 非零启用，零禁用；保留原始 DWORD。
-    pub value: u32,
-}
-
-/// 普通 9 提交的窗口关闭请求；由平台宿主消费。
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct WindowCloseRequest {
-    pub task_id: u32,
-    /// 零参数使用应用退出通知，非零参数使用标准关闭消息。
-    pub notify: bool,
-}
-
-/// 普通窗口入口提交的异步动作，由窗口宿主依序消费。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum WindowAction {
-    OpenSystemProperties,
-    /// 重建时读取 `HostState::debug_mode` 的最新值。
-    RebuildMenu,
-    ToggleFullscreen,
-    Minimize,
-    /// 先向输入任务发送空闲重置命令，再执行标准窗口关闭流程。
-    CloseFromMenu,
-    /// 由窗口接收后向任务树广播命令 21。
-    NotifyTasks,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct WindowRequest {
-    pub task_id: u32,
-    pub action: WindowAction,
 }
 
 /// 普通任务表的持久宿主状态；数值区由 `CoreHost::state` 单独提供，

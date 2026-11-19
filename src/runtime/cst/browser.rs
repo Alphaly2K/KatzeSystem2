@@ -1,5 +1,6 @@
 use super::{CstContext, ObjectFactory, ObjectHost};
-use crate::kcs::{Interpreter, NativeReturn, ResourceServices, format_string};
+use crate::host::ResourceServices;
+use crate::kcs::{Interpreter, NativeReturn, format_string};
 use crate::{Error, Result, read};
 
 type Services = Option<Box<dyn ResourceServices>>;

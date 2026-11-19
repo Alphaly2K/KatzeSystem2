@@ -1,5 +1,8 @@
-use crate::graphics::{Compositor, GraphicsBackend, Images, Rect, RenderTarget, SoftwareBackend};
-use crate::kcs::{Interpreter, NativeReturn, ResourceServices, ResourceState, format_string};
+use crate::graphics::{
+    Compositor, FrameCanvas, GraphicsBackend, Images, Rect, RenderTarget, SoftwareBackend,
+};
+use crate::host::ResourceServices;
+use crate::kcs::{Interpreter, NativeReturn, ResourceState, format_string};
 use crate::{Error, Result};
 
 #[derive(Default)]
@@ -126,11 +129,11 @@ impl Resources {
             return Ok(None);
         }
         let frame = self.compose_frame(Some(range))?;
-        let canvas = self.compositor.drawing.target.as_mut().unwrap();
+        let mut canvas = FrameCanvas::new(self.compositor.drawing.target.as_mut().unwrap());
         if let Some(backend) = self.graphics_backend.as_deref_mut() {
-            backend.render(&frame, canvas, size).map(Some)
+            backend.render(&frame, &mut canvas, size).map(Some)
         } else {
-            SoftwareBackend.render(&frame, canvas, size).map(Some)
+            SoftwareBackend.render(&frame, &mut canvas, size).map(Some)
         }
     }
 

@@ -88,7 +88,7 @@ impl CstContext {
     pub(super) fn load(
         &mut self,
         name: &[u8],
-        services: &mut dyn crate::kcs::ResourceServices,
+        services: &mut dyn crate::host::ResourceServices,
     ) -> Result<bool> {
         use crate::resource::ResourceMode;
         let Some(data) = services

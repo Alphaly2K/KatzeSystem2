@@ -1,7 +1,7 @@
 use katze_system2::graphics::{
-    Compositor, DrawCommand, DrawList, Drawable, Drawables, FrameTexture, GraphicsBackend,
-    ProjectedVertex, Projection, Rect, RenderTarget, SoftwareBackend, Surface, TextureFilter,
-    TextureSource, Vertex,
+    Compositor, DrawCommand, DrawList, Drawable, Drawables, FrameCanvas, FrameTexture,
+    GraphicsBackend, ProjectedVertex, Projection, Rect, RenderTarget, SoftwareBackend, Surface,
+    TextureFilter, TextureSource, Vertex,
 };
 use std::sync::Arc;
 
@@ -148,7 +148,9 @@ fn draw_commands_apply_all_blend_factors_after_texture_modulation() {
                 commands: vec![background, foreground],
                 filter: TextureFilter::Point,
             };
-            let output = backend.render(&frame, &mut canvas, [8, 8]).unwrap();
+            let output = backend
+                .render(&frame, &mut FrameCanvas::new(&mut canvas), [8, 8])
+                .unwrap();
             assert_eq!(
                 output.pixel(3, 2),
                 Some(expected[mode as usize][usize::from(textured)])
@@ -157,7 +159,9 @@ fn draw_commands_apply_all_blend_factors_after_texture_modulation() {
             for vertex in &mut frame.commands[1].vertices {
                 vertex.color &= 0xffffff;
             }
-            let output = backend.render(&frame, &mut canvas, [8, 8]).unwrap();
+            let output = backend
+                .render(&frame, &mut FrameCanvas::new(&mut canvas), [8, 8])
+                .unwrap();
             assert_eq!(output.pixel(3, 2), Some(0xff607080));
         }
     }
@@ -202,7 +206,9 @@ fn image_commands_hold_their_pixels_and_mix_with_canvas_textures() {
     drop(frame);
     Arc::make_mut(&mut image).clear(0xff00ff00);
     let mut backend = SoftwareBackend;
-    let output = backend.render(&copy, &mut canvas, [8, 8]).unwrap();
+    let output = backend
+        .render(&copy, &mut FrameCanvas::new(&mut canvas), [8, 8])
+        .unwrap();
     for y in 0..8 {
         for x in 0..8 {
             assert_eq!(
@@ -212,7 +218,9 @@ fn image_commands_hold_their_pixels_and_mix_with_canvas_textures() {
         }
     }
     copy.commands[0].texture.as_mut().unwrap().source = TextureSource::Image(image);
-    let changed = backend.render(&copy, &mut canvas, [8, 8]).unwrap();
+    let changed = backend
+        .render(&copy, &mut FrameCanvas::new(&mut canvas), [8, 8])
+        .unwrap();
     assert_eq!(changed.pixel(1, 1), Some(0xff00ff00));
     assert_eq!(changed.pixel(6, 1), Some(0xff0000ff));
 }
@@ -245,7 +253,9 @@ fn depth_clipping_keeps_visible_color_and_texture_interpolation() {
                 }],
                 filter,
             };
-            let reference = backend.render(&frame, &mut canvas, [8, 8]).unwrap();
+            let reference = backend
+                .render(&frame, &mut FrameCanvas::new(&mut canvas), [8, 8])
+                .unwrap();
             for (depth, visible) in [
                 ([-0.25; 3], 0),
                 ([1.25; 3], 0),
@@ -262,7 +272,9 @@ fn depth_clipping_keeps_visible_color_and_texture_interpolation() {
                         [1., 0.5, 2.][index]
                     };
                 }
-                let output = backend.render(&frame, &mut canvas, [8, 8]).unwrap();
+                let output = backend
+                    .render(&frame, &mut FrameCanvas::new(&mut canvas), [8, 8])
+                    .unwrap();
                 for y in 0..8 {
                     for x in 0..8 {
                         let inside = match visible {
@@ -287,7 +299,9 @@ fn depth_clipping_keeps_visible_color_and_texture_interpolation() {
                 vertex.position = [4., 4., 0.5];
                 vertex.rhw = [-1., 0., f32::NAN][index];
             }
-            let empty = backend.render(&frame, &mut canvas, [8, 8]).unwrap();
+            let empty = backend
+                .render(&frame, &mut FrameCanvas::new(&mut canvas), [8, 8])
+                .unwrap();
             assert_eq!(empty.pixel(4, 4), Some(0));
         }
     }
@@ -387,7 +401,9 @@ fn command_addressing_wraps_each_axis_and_filters_across_texture_seams() {
                 }],
                 filter,
             };
-            let output = SoftwareBackend.render(&frame, &mut canvas, [8, 8]).unwrap();
+            let output = SoftwareBackend
+                .render(&frame, &mut FrameCanvas::new(&mut canvas), [8, 8])
+                .unwrap();
             assert_eq!(output.pixel(3, 2), Some(expected));
         }
     }
@@ -411,7 +427,9 @@ fn command_addressing_wraps_each_axis_and_filters_across_texture_seams() {
             }],
             filter: TextureFilter::Linear,
         };
-        let output = SoftwareBackend.render(&frame, &mut canvas, [8, 8]).unwrap();
+        let output = SoftwareBackend
+            .render(&frame, &mut FrameCanvas::new(&mut canvas), [8, 8])
+            .unwrap();
         assert_eq!(output.pixel(3, 2), Some(expected));
     }
     // 横跨整个纹理周期时，先插值 UV 再寻址，保留三角形内部的滚动方向。
@@ -429,7 +447,9 @@ fn command_addressing_wraps_each_axis_and_filters_across_texture_seams() {
         }],
         filter: TextureFilter::Point,
     };
-    let output = SoftwareBackend.render(&frame, &mut canvas, [8, 8]).unwrap();
+    let output = SoftwareBackend
+        .render(&frame, &mut FrameCanvas::new(&mut canvas), [8, 8])
+        .unwrap();
     assert_eq!(output.pixel(0, 0), Some(0xffff0000));
     assert_eq!(output.pixel(3, 0), Some(0xff00ff00));
     assert_eq!(output.pixel(7, 0), Some(0xffff0000));
@@ -616,20 +636,26 @@ fn camera_crossing_triangles_keep_the_visible_exterior_and_zero_rhw_fallback() {
                 }],
                 filter: TextureFilter::Point,
             };
-            let reference = SoftwareBackend.render(&frame, &mut canvas, [8, 6]).unwrap();
+            let reference = SoftwareBackend
+                .render(&frame, &mut FrameCanvas::new(&mut canvas), [8, 6])
+                .unwrap();
             for zero in [vec![0, 1, 2], vec![0], vec![1], vec![2]] {
                 frame.commands[0].vertices = vertices;
                 for i in zero {
                     frame.commands[0].vertices[i].rhw = -0.;
                 }
                 assert_eq!(
-                    SoftwareBackend.render(&frame, &mut canvas, [8, 6]).unwrap(),
+                    SoftwareBackend
+                        .render(&frame, &mut FrameCanvas::new(&mut canvas), [8, 6])
+                        .unwrap(),
                     reference
                 );
             }
             frame.commands[0].vertices = vertices;
             frame.commands[0].vertices[0].rhw = -1.;
-            let output = SoftwareBackend.render(&frame, &mut canvas, [8, 6]).unwrap();
+            let output = SoftwareBackend
+                .render(&frame, &mut FrameCanvas::new(&mut canvas), [8, 6])
+                .unwrap();
             let mut tiled = RenderTarget::from_tiles(
                 [4, 3],
                 [2, 2],
@@ -665,7 +691,9 @@ fn camera_crossing_triangles_keep_the_visible_exterior_and_zero_rhw_fallback() {
             for vertex in &mut frame.commands[0].vertices {
                 vertex.rhw = -1.;
             }
-            let output = SoftwareBackend.render(&frame, &mut canvas, [8, 6]).unwrap();
+            let output = SoftwareBackend
+                .render(&frame, &mut FrameCanvas::new(&mut canvas), [8, 6])
+                .unwrap();
             assert!(
                 output.tiles()[0]
                     .as_ref()
@@ -681,7 +709,9 @@ fn camera_crossing_triangles_keep_the_visible_exterior_and_zero_rhw_fallback() {
             if reverse {
                 frame.commands[0].vertices.swap(1, 2);
             }
-            let output = SoftwareBackend.render(&frame, &mut canvas, [8, 6]).unwrap();
+            let output = SoftwareBackend
+                .render(&frame, &mut FrameCanvas::new(&mut canvas), [8, 6])
+                .unwrap();
             for y in 0..6 {
                 for x in 0..8 {
                     assert_eq!(output.pixel(x, y).unwrap() != 0, x == 2);
@@ -733,7 +763,7 @@ fn drawable_submission_interpolates_colors_without_a_texture() {
     let composited = SoftwareBackend
         .render(
             &frame,
-            compositor.drawing_mut().target.as_mut().unwrap(),
+            &mut FrameCanvas::new(compositor.drawing_mut().target.as_mut().unwrap()),
             [4, 4],
         )
         .unwrap();

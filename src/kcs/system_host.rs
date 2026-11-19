@@ -1,42 +1,6 @@
 use super::{Host, Interpreter, NativeReturn, TaskClock, strings};
+use crate::host::SystemServices;
 use crate::{Error, Result};
-
-/// 宿主本地的民用日期与时间；星期从周日（0）开始。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct LocalDateTime {
-    pub year: u16,
-    pub month: u16,
-    pub weekday: u16,
-    pub day: u16,
-    pub hour: u16,
-    pub minute: u16,
-    pub second: u16,
-}
-
-/// 普通脚本使用的同步平台服务。
-pub trait SystemServices {
-    /// 读取当地日期和时间。未提供该能力时返回 None。
-    fn local_date_time(&mut self) -> Option<LocalDateTime> {
-        None
-    }
-
-    /// 按系统 open 操作提交请求；平台返回的启动结果不参与 VM 返回值。
-    fn open(
-        &mut self,
-        _task_id: u32,
-        _target: &[u8],
-        _parameters: &[u8],
-        _directory: &[u8],
-    ) -> Result<()> {
-        Err(Error::new(0, "系统打开服务尚未接入"))
-    }
-
-    /// 显示标题为 system error 的单按钮对话框，关闭后返回；文字不含末尾零。
-    /// 平台显示失败也正常结束；Err 用于宿主集成诊断。
-    fn message_box(&mut self, _task_id: u32, _text: &[u16]) -> Result<()> {
-        Err(Error::new(0, "系统对话框服务尚未接入"))
-    }
-}
 
 pub(super) fn local_date_time(
     services: Option<&mut dyn SystemServices>,

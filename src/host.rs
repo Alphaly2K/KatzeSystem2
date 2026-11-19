@@ -6,23 +6,24 @@
 mod effect;
 mod export;
 mod platform;
+mod resources;
 
 pub use crate::audio::{Mixer, SpeechSynthesizer};
 pub use crate::graphics::{
-    DrawCommand, DrawList, FrameTexture, GraphicsBackend, ProjectedVertex, Rect, RenderTarget,
-    SoftwareBackend, Surface, TextureAddress, TextureFilter, TextureSource,
+    DrawCommand, DrawList, FrameCanvas, FrameTexture, FrameTriangle, GraphicsBackend,
+    ProjectedVertex, Rect, RenderTarget, SoftwareBackend, Surface, TextureAddress, TextureFilter,
+    TextureSource,
 };
 pub use crate::input::{
     ButtonSource, DeviceBinding, DeviceKeys, InputDevice, KeySample, PointerSample,
 };
 pub use crate::io::{FileServices, ReadSnapshot, ReadSource, SharedSource};
-pub use crate::kcs::{
-    AchievementServices, ClipboardRequest, ClipboardText, LocalDateTime, ResourceServices,
-    ScriptSettings, SystemServices, WindowAction, WindowRequest,
-};
+pub use crate::kcs::ScriptSettings;
 pub use crate::language::StringTables;
 pub use crate::message::{FontRequest, FontServices};
-pub use crate::resource::{ArchiveConfig, FolderPaths, ResourceMode};
+pub use crate::resource::{
+    ArchiveConfig, CachedResources, FolderPaths, ResourceCache, ResourceMode,
+};
 pub use crate::runtime::{
     DiagnosticTrace, NativeInvocation, NativeTraceEvent, ProgramLoader, QuizDebugInput,
     QuizDebugSession, ScriptMessages, SequenceCapture, TraceCategory,
@@ -33,4 +34,9 @@ pub use crate::settings::{
 };
 pub use effect::{EffectPlayer, EffectServices};
 pub use export::{ExportDestination, ExportServices};
-pub use platform::{PlatformJob, PlatformJobRequest, PlatformJobServices, WindowServices};
+pub use platform::{
+    AchievementServices, ClipboardRequest, ClipboardText, LocalDateTime, MenuItemRequest,
+    PlatformJob, PlatformJobRequest, PlatformJobServices, SystemServices, WindowAction,
+    WindowCloseRequest, WindowRequest, WindowServices,
+};
+pub use resources::ResourceServices;

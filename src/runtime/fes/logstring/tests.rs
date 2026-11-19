@@ -21,7 +21,7 @@ impl FontServices for Fonts {
     }
 }
 struct Images(std::rc::Rc<std::cell::Cell<usize>>);
-impl crate::kcs::ResourceServices for Images {
+impl crate::host::ResourceServices for Images {
     fn resolve(&mut self, _: &[u8], name: &[u8]) -> Result<Vec<u8>> {
         Ok(name.to_vec())
     }
@@ -178,7 +178,7 @@ fn logs_render_retained_rows_scroll_query_sources_and_release_all_tasks() {
     }
 }
 struct Scenes;
-impl crate::kcs::ResourceServices for Scenes {
+impl crate::host::ResourceServices for Scenes {
     fn resolve(&mut self, _: &[u8], name: &[u8]) -> Result<Vec<u8>> {
         Ok(name.to_vec())
     }

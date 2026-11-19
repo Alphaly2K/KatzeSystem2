@@ -1858,7 +1858,7 @@ mod tests {
     fn text_subcommands_select_context_by_encoding_before_capturing_plane_motion() {
         use std::io::Write;
         struct MotionFile(Vec<u8>);
-        impl crate::kcs::ResourceServices for MotionFile {
+        impl crate::host::ResourceServices for MotionFile {
             fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
                 assert_eq!(category, b"mot");
                 Ok(name.to_vec())

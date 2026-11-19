@@ -3,9 +3,9 @@
 use ::metal::*;
 use katze_system2::{
     Error, Result,
-    graphics::{
-        DrawList, FrameTexture, FrameTriangle, GraphicsBackend, Rect, RenderTarget, Surface,
-        TextureAddress, TextureFilter, TextureSource,
+    host::{
+        DrawList, FrameCanvas, FrameTexture, FrameTriangle, GraphicsBackend, Rect, RenderTarget,
+        Surface, TextureAddress, TextureFilter, TextureSource,
     },
 };
 use std::{collections::BTreeMap, sync::Arc};
@@ -159,7 +159,7 @@ impl Renderer {
         &mut self,
         layer: &MetalLayerRef,
         triangles: &[FrameTriangle],
-        canvas: &mut RenderTarget,
+        canvas: &mut FrameCanvas<'_>,
         size: [u32; 2],
         filter: TextureFilter,
     ) -> Result<bool> {
@@ -184,7 +184,7 @@ impl Renderer {
     pub fn render_offscreen(
         &mut self,
         triangles: &[FrameTriangle],
-        canvas: &mut RenderTarget,
+        canvas: &mut FrameCanvas<'_>,
         size: [u32; 2],
         filter: TextureFilter,
     ) -> Result<Surface> {
@@ -219,7 +219,7 @@ impl Renderer {
     fn prepare(
         &mut self,
         triangles: &[FrameTriangle],
-        canvas: &mut RenderTarget,
+        canvas: &mut FrameCanvas<'_>,
         size: [u32; 2],
         filter: TextureFilter,
     ) -> Result<()> {
@@ -373,7 +373,7 @@ impl Renderer {
             images.insert(pointer, image);
         }
         self.images = images;
-        canvas.clear_dirty();
+        canvas.acknowledge_upload();
         Ok(())
     }
 
@@ -480,7 +480,7 @@ impl GraphicsBackend for Renderer {
     fn render(
         &mut self,
         frame: &DrawList,
-        canvas: &mut RenderTarget,
+        canvas: &mut FrameCanvas<'_>,
         size: [u32; 2],
     ) -> Result<RenderTarget> {
         let surface = ::metal::objc::rc::autoreleasepool(|| {

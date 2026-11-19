@@ -2,8 +2,8 @@ use katze_system2::{
     Result,
     expression::State,
     graphics::{
-        DrawList, Drawable, GraphicsBackend, Projection, RenderTarget, SoftwareBackend,
-        TextureFilter, Transform,
+        DrawList, Drawable, FrameCanvas, GraphicsBackend, Projection, RenderTarget,
+        SoftwareBackend, TextureFilter, Transform,
     },
     kcs::Program,
     runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, kind},
@@ -218,7 +218,7 @@ fn host_frame_and_script_capture_use_distinct_depth_selections() {
         fn render(
             &mut self,
             frame: &DrawList,
-            canvas: &mut RenderTarget,
+            canvas: &mut FrameCanvas<'_>,
             size: [u32; 2],
         ) -> Result<RenderTarget> {
             self.0.borrow_mut().push((frame.clone(), size));

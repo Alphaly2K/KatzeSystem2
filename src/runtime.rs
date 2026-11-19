@@ -62,10 +62,9 @@ mod system_tasks;
 mod transition;
 mod window;
 pub use crate::host::{
-    EffectPlayer, EffectServices, ExportDestination, ExportServices, PlatformJob,
-    PlatformJobRequest, PlatformJobServices, WindowServices,
+    ClipboardRequest, ClipboardText, EffectPlayer, EffectServices, ExportDestination,
+    ExportServices, PlatformJob, PlatformJobRequest, PlatformJobServices, WindowServices,
 };
-pub use crate::kcs::{ClipboardRequest, ClipboardText};
 
 use resources::Resources;
 
@@ -2304,7 +2303,7 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         Ok(count <= 2 && self.resources.compositor.auxiliary_targets.len() >= count as usize)
     }
 
-    fn resource_services(&mut self) -> Option<&mut dyn crate::kcs::ResourceServices> {
+    fn resource_services(&mut self) -> Option<&mut dyn crate::host::ResourceServices> {
         match &mut self.resources.services {
             Some(services) => Some(services.as_mut()),
             None => None,

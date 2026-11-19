@@ -185,7 +185,7 @@ impl GameRuntime {
     /// capture token is supplied, submit readback after successful presentation.
     pub fn present_frame<T>(
         &mut self,
-        present: impl FnOnce(&DrawList, &mut RenderTarget, Option<SequenceCapture<'_>>) -> Result<T>,
+        present: impl FnOnce(&DrawList, &mut FrameCanvas<'_>, Option<SequenceCapture<'_>>) -> Result<T>,
     ) -> Result<T> {
         self.0.present_frame(present)
     }
@@ -193,7 +193,7 @@ impl GameRuntime {
     /// Borrow the current draw list and canvas without a screenshot callback.
     pub fn with_frame<T>(
         &mut self,
-        render: impl FnOnce(&DrawList, &mut RenderTarget) -> Result<T>,
+        render: impl FnOnce(&DrawList, &mut FrameCanvas<'_>) -> Result<T>,
     ) -> Result<T> {
         self.0.with_frame(render)
     }

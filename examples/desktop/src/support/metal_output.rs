@@ -1,6 +1,6 @@
 use katze_system2::{
     Error, Result,
-    host::{DrawList, GraphicsBackend, RenderTarget},
+    host::{DrawList, FrameCanvas, GraphicsBackend, RenderTarget},
     session::GameRuntime,
 };
 use metal::{MetalLayer, MetalLayerRef, foreign_types::ForeignTypeRef, objc::rc::autoreleasepool};
@@ -84,7 +84,7 @@ impl GraphicsBackend for CaptureBackend {
     fn render(
         &mut self,
         frame: &DrawList,
-        canvas: &mut RenderTarget,
+        canvas: &mut FrameCanvas<'_>,
         size: [u32; 2],
     ) -> Result<RenderTarget> {
         self.0.borrow_mut().render(frame, canvas, size)
