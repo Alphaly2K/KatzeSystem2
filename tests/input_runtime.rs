@@ -914,6 +914,50 @@ impl DeviceState {
 struct Device(Rc<RefCell<DeviceState>>);
 
 #[test]
+fn standard_startup_rejects_incomplete_host_setup_before_calling_services() -> Result<()> {
+    use katze_system2::{
+        host::{ResourceMode, ResourceServices},
+        session::GameRuntime,
+    };
+
+    struct Entry;
+    impl ResourceServices for Entry {
+        fn resolve(&mut self, _: &[u8], _: &[u8]) -> Result<Vec<u8>> {
+            panic!("incomplete startup must not resolve the entry script")
+        }
+
+        fn read(&mut self, _: &[u8], _: ResourceMode) -> Result<Option<Vec<u8>>> {
+            panic!("incomplete startup must not read the entry script")
+        }
+    }
+
+    for (key, message) in [
+        ("resources", "游戏启动需要绑定资源服务"),
+        ("input", "游戏启动需要绑定输入设备"),
+        ("canvas", "游戏启动需要配置画布"),
+    ] {
+        let device = Rc::new(RefCell::new(DeviceState::new([12, 34])));
+        let mut game = GameRuntime::prepare(0, 0)?;
+        if key != "resources" {
+            game.set_resources(Entry);
+        }
+        if key != "input" {
+            game.set_input_device(Device(device.clone()))?;
+        }
+        if key != "canvas" {
+            game.configure_canvas([64, 48])?;
+        } else {
+            assert!(game.configure_canvas([64, 0]).is_err());
+        }
+        let preview = game.validate_startup().unwrap_err();
+        assert_eq!(preview.message, message);
+        assert_eq!(game.start_game(b"main").err(), Some(preview));
+        assert_eq!(device.borrow().pointer_calls, 0);
+    }
+    Ok(())
+}
+
+#[test]
 fn public_session_uses_host_resources_and_delivers_frame_and_pcm() -> Result<()> {
     use katze_system2::{
         host::{ResourceMode, ResourceServices},

@@ -533,6 +533,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .is_some()
         .then(AudioStats::default);
     runtime.set_input_device(ScriptedDevice::new(keys, replay.as_ref(), surface))?;
+    runtime.validate_startup()?;
     let (
         mut runtime,
         GameTasks {

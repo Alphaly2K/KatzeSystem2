@@ -75,6 +75,9 @@ impl GameRuntime {
     /// in pixels. Call after applying startup settings. The configured texture
     /// grid, when present, determines the size of the script canvas.
     pub fn configure_canvas(&mut self, size: [u32; 2]) -> Result<()> {
+        if size.contains(&0) {
+            return Err(Error::new(0, "逻辑画面尺寸必须非零"));
+        }
         if size.iter().any(|&axis| axis > i32::MAX as u32) {
             return Err(Error::new(0, "逻辑画面尺寸超过坐标范围"));
         }
@@ -186,9 +189,16 @@ impl GameRuntime {
         self.0.string_tables()
     }
 
-    /// Start the named entry script. Failure drops the prepared session and any
-    /// tasks it created during startup. No frame is advanced by this call.
+    /// Check that resources, input and the canvas are ready. This does not
+    /// call host services or attempt to load the entry script.
+    pub fn validate_startup(&self) -> Result<()> {
+        self.0.validate_session_startup()
+    }
+
+    /// Check the startup requirements and create the tasks for the named entry
+    /// script. Failure drops the prepared session. No frame is advanced.
     pub fn start_game(self, entry: &[u8]) -> Result<Self> {
+        self.validate_startup()?;
         self.0.start_game(entry).map(Self)
     }
 

@@ -84,6 +84,19 @@ impl TaskRuntime {
         game.resources.resource_programs = true;
         Ok(game)
     }
+
+    pub(crate) fn validate_session_startup(&self) -> Result<()> {
+        if self.resources.services.is_none() {
+            return Err(Error::new(0, "游戏启动需要绑定资源服务"));
+        }
+        if self.resources.input_device.is_none() {
+            return Err(Error::new(0, "游戏启动需要绑定输入设备"));
+        }
+        if self.drawing().target.is_none() {
+            return Err(Error::new(0, "游戏启动需要配置画布"));
+        }
+        Ok(())
+    }
 }
 
 impl<L: ProgramLoader> TaskRuntime<L> {
