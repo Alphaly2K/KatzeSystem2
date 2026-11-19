@@ -119,7 +119,7 @@ pub(super) fn call(
     }
     let handle = read::u32_at(arguments, 0)?;
     if handle == 0 {
-        return Ok(if matches!(index, 471 | 472 | 474 | 483) {
+        return Ok(if matches!(index, 471 | 472 | 474 | 483 | 488) {
             Continue
         } else {
             Value(0)
@@ -128,7 +128,7 @@ pub(super) fn call(
     let count = match index {
         472 => 9,
         477..=479 | 483 => 3,
-        474 | 480 | 495 => 2,
+        474 | 480 | 488 | 495 => 2,
         _ => 1,
     };
     let args = native::words(arguments, count, vm.pc)?;
@@ -177,6 +177,10 @@ pub(super) fn call(
             table
                 .opening
                 .roll(table.settings.first_dealer, args[1], args[2]);
+            Continue
+        }
+        488 => {
+            table.opening.select_chi(args[1]);
             Continue
         }
         492 => Value(table.remaining),

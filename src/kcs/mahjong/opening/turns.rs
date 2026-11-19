@@ -2,6 +2,7 @@ use super::{Opening, SIDE_SIZE, TAKEN};
 use crate::{Error, Result};
 
 const REVEALED: u32 = 0x10000;
+const CLAIMED: u32 = 4;
 
 impl Opening {
     pub(in crate::kcs::mahjong) fn discards(&self, seat: usize) -> &[u32] {
@@ -23,11 +24,22 @@ impl Opening {
         }
     }
 
+    pub(in crate::kcs::mahjong) fn select_chi(&mut self, index: u32) {
+        if self.phase != 20045 {
+            return;
+        }
+        let Some(&choice) = self.chi_choices.get(index as usize) else {
+            return;
+        };
+        self.selected_chi = Some(choice);
+        self.phase = 20040;
+    }
+
     pub(super) fn poll_turn(
         &mut self,
         packet: &mut Vec<u32>,
         points: [u32; 4],
-        remaining: u32,
+        remaining: &mut u32,
         seats: usize,
         pc: usize,
     ) -> Result<u32> {
@@ -43,7 +55,11 @@ impl Opening {
                 hand.retain(|tile| tile & TAKEN == 0);
                 hand.sort_by_key(|tile| tile & 0x3ff);
                 packet.push(self.seat);
-                20021
+                if self.selected_chi.take().is_some() {
+                    20042
+                } else {
+                    20021
+                }
             }
             20009 => 20010,
             20010 => {
@@ -71,27 +87,117 @@ impl Opening {
             }
             20019 => 20020,
             20020 => {
-                let can_declare_ready =
-                    (points[seat] as i32) >= 1000 && remaining as usize >= seats;
-                if self.needs_special_action(seat, remaining != 0, can_declare_ready) {
+                let can_declare_ready = self.meld_count[seat] == 0
+                    && (points[seat] as i32) >= 1000
+                    && *remaining as usize >= seats;
+                if self.needs_special_action(seat, *remaining != 0, can_declare_ready) {
                     return Err(Error::new(pc, "麻将出牌前的特殊选项尚未接入"));
                 }
                 event = 20042;
                 packet[0] = event;
                 20043
             }
+            20021 | 20045 => {
+                let next = (seat + 1) % seats;
+                if self.phase == 20021 {
+                    let discard = *self.discards[seat].last().unwrap();
+                    if self.has_other_claim(seat, seats, *remaining, tile_kind(discard)) {
+                        return Err(Error::new(pc, "麻将碰、杠及和牌响应尚未接入"));
+                    }
+                    if next == 0 && *remaining != 0 {
+                        self.chi_choices = chi_choices(&self.hands[next], discard);
+                    }
+                    if !self.chi_choices.is_empty() {
+                        if self.meld_count[next] != 0 {
+                            return Err(Error::new(pc, "麻将多组副露的吃牌尚未接入"));
+                        }
+                        packet.push(0x40000);
+                        packet.extend(
+                            self.chi_choices
+                                .iter()
+                                .map(|&[i, j]| (0x40 | j as u32) << 12 | (i as u32) << 8),
+                        );
+                        self.phase = 20045;
+                        return Ok(event);
+                    }
+                }
+                if *remaining == 0 {
+                    return Err(Error::new(pc, "麻将牌山耗尽结算尚未接入"));
+                }
+                self.chi_choices.clear();
+                self.seat = next as u32;
+                event = 20046;
+                packet[0] = event;
+                20013
+            }
+            20013 => {
+                packet.push(self.seat);
+                20014
+            }
+            20014 => {
+                let ordinal = self.next_wall_ordinal();
+                self.draw(ordinal, packet);
+                *remaining -= 1;
+                20019
+            }
+            20040 => {
+                packet.push(((seat + 1) % seats) as u32);
+                20041
+            }
+            20041 => {
+                self.apply_chi(seats, packet);
+                20007
+            }
+            20042 => 20043,
             20043 => 20043,
             _ => return Err(Error::new(pc, format!("麻将牌局事件 {event} 尚未接入"))),
         };
         Ok(event)
     }
 
+    fn has_other_claim(&self, seat: usize, seats: usize, remaining: u32, discard: usize) -> bool {
+        (0..seats).filter(|&other| other != seat).any(|other| {
+            let mut counts = [0; 34];
+            for &tile in &self.hands[other] {
+                counts[tile_kind(tile)] += 1;
+            }
+            counts[discard] += 1;
+            complete(&counts) || remaining != 0 && counts[discard] >= 3
+        })
+    }
+
+    fn apply_chi(&mut self, seats: usize, packet: &mut Vec<u32>) {
+        let previous = self.seat as usize;
+        let next = (previous + 1) % seats;
+        let [i, j] = self.selected_chi.unwrap();
+        let discards = &mut self.discards[previous];
+        let discard_index = discards.len() - 1;
+        let discard = &mut discards[discard_index];
+        let hand = &mut self.hands[next];
+        let mut moves = [
+            (*discard, REVEALED | (self.seat << 8) | discard_index as u32),
+            (hand[i], 0x2_0000 | ((next as u32) << 8) | i as u32),
+            (hand[j], 0x2_0000 | ((next as u32) << 8) | j as u32),
+        ];
+        if seats == 2 {
+            moves.swap(0, 1);
+        }
+        for (slot, (tile, source)) in moves.into_iter().enumerate() {
+            packet.extend([tile, source, 0x3_0000 | ((next as u32) << 8) | slot as u32]);
+        }
+        *discard |= CLAIMED;
+        hand[i] |= TAKEN;
+        hand[j] |= TAKEN;
+        self.seat = next as u32;
+        self.meld_count[next] += 1;
+        self.chi_choices.clear();
+    }
+
     fn needs_special_action(&self, seat: usize, can_quad: bool, can_declare_ready: bool) -> bool {
         let hand = &self.hands[seat];
         let mut counts = [0; 34];
         for &tile in hand {
-            let kind = (tile >> 4 & 15) + (tile >> 8 & 3) * 9;
-            counts[kind as usize] += 1;
+            counts[tile_kind(tile)] += 1;
         }
         if can_quad && counts.contains(&4) || complete(&counts) {
             return true;
@@ -117,6 +223,38 @@ impl Opening {
         }
         false
     }
+}
+
+fn chi_choices(hand: &[u32], discard: u32) -> Vec<[usize; 2]> {
+    let mut choices = Vec::new();
+    let mut seen = Vec::new();
+    let discard = tile_kind(discard);
+    if discard >= 27 {
+        return choices;
+    }
+    for (i, &first) in hand.iter().enumerate() {
+        for (j, &second) in hand.iter().enumerate().skip(i + 1) {
+            let mut kinds = [tile_kind(first), tile_kind(second), discard];
+            kinds.sort_unstable();
+            if kinds[0] / 9 != discard / 9
+                || kinds[2] / 9 != discard / 9
+                || kinds[1] != kinds[0] + 1
+                || kinds[2] != kinds[1] + 1
+            {
+                continue;
+            }
+            let key = [first & 0x13f0, second & 0x13f0];
+            if !seen.contains(&key) {
+                seen.push(key);
+                choices.push([i, j]);
+            }
+        }
+    }
+    choices
+}
+
+fn tile_kind(tile: u32) -> usize {
+    ((tile >> 4 & 15) + (tile >> 8 & 3) * 9) as usize
 }
 
 // Distinguish hands that may need a special action from ordinary discards. Scoring is separate.

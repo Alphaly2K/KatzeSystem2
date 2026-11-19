@@ -17,6 +17,9 @@ pub(super) struct Opening {
     hands: [Vec<u32>; 4],
     discards: [Vec<u32>; 4],
     discard_index: usize,
+    chi_choices: Vec<[usize; 2]>,
+    selected_chi: Option<[usize; 2]>,
+    meld_count: [u32; 4],
     random: Stream,
 }
 
@@ -32,6 +35,9 @@ impl Default for Opening {
             hands: std::array::from_fn(|_| Vec::new()),
             discards: std::array::from_fn(|_| Vec::new()),
             discard_index: 0,
+            chi_choices: Vec::new(),
+            selected_chi: None,
+            meld_count: [0; 4],
             random: Stream::seeded_words(4357),
         }
     }
@@ -69,6 +75,9 @@ impl Opening {
         self.wall_ready = true;
         self.hands.iter_mut().for_each(Vec::clear);
         self.discards.iter_mut().for_each(Vec::clear);
+        self.chi_choices.clear();
+        self.selected_chi = None;
+        self.meld_count = [0; 4];
     }
 
     pub(super) fn roll(&mut self, dealer: u32, first: u32, second: u32) {
@@ -173,8 +182,7 @@ impl Opening {
 
     fn deal(&mut self, seats: usize, dealer: u32, packet: &mut Vec<u32>) -> bool {
         let seat = self.seat as usize;
-        let hand_len = self.hands[seat].len();
-        let count = if hand_len < 12 {
+        let count = if self.hands[seat].len() < 12 {
             4
         } else if self.seat == dealer {
             2
@@ -186,27 +194,34 @@ impl Opening {
             let ordinal = if (draw | count) == 3 {
                 (self.next_draw + seats - 1) % WALL_SIZE
             } else {
-                while self.wall[self.draw_order[self.next_draw]] & TAKEN != 0 {
-                    self.next_draw = (self.next_draw + 1) % WALL_SIZE;
-                }
-                let ordinal = self.next_draw;
-                self.next_draw = (self.next_draw + 1) % WALL_SIZE;
-                ordinal
+                self.next_wall_ordinal()
             };
-            let location = self.draw_order[ordinal];
-            let tile = self.wall[location];
-            self.wall[location] |= TAKEN;
-            let side = location / SIDE_SIZE;
-            let column = location % SIDE_SIZE;
-            packet.extend([
-                tile,
-                ((side << 8) | column) as u32,
-                0x2_0000 | (self.seat << 8) | (hand_len + draw) as u32,
-            ]);
-            self.hands[seat].push(tile);
+            self.draw(ordinal, packet);
         }
         self.seat = ((seat + 1) % seats) as u32;
         count < 4 && self.seat == dealer
+    }
+
+    fn next_wall_ordinal(&mut self) -> usize {
+        while self.wall[self.draw_order[self.next_draw]] & TAKEN != 0 {
+            self.next_draw = (self.next_draw + 1) % WALL_SIZE;
+        }
+        let ordinal = self.next_draw;
+        self.next_draw = (self.next_draw + 1) % WALL_SIZE;
+        ordinal
+    }
+
+    fn draw(&mut self, ordinal: usize, packet: &mut Vec<u32>) {
+        let location = self.draw_order[ordinal];
+        let tile = self.wall[location];
+        self.wall[location] |= TAKEN;
+        let hand = &mut self.hands[self.seat as usize];
+        packet.extend([
+            tile,
+            (((location / SIDE_SIZE) << 8) | (location % SIDE_SIZE)) as u32,
+            0x2_0000 | (self.seat << 8) | hand.len() as u32,
+        ]);
+        hand.push(tile);
     }
 }
 
@@ -265,8 +280,13 @@ impl Mahjong {
                 opening.phase = 20009;
             }
             _ => {
-                phase =
-                    opening.poll_turn(&mut packet, self.points, self.remaining, self.seats, pc)?;
+                phase = opening.poll_turn(
+                    &mut packet,
+                    self.points,
+                    &mut self.remaining,
+                    self.seats,
+                    pc,
+                )?;
             }
         }
         *self.handles.get_mut(&handle).unwrap() = packet;

@@ -95,7 +95,7 @@ pub(super) fn core(index: u32) -> CoreHandler {
         }
         869..=873 | 878 => CoreHandler::Database,
         796..=828 => CoreHandler::QuestTable,
-        470..=481 | 483 | 492 | 495 => CoreHandler::Mahjong,
+        470..=481 | 483 | 488 | 492 | 495 => CoreHandler::Mahjong,
         238
         | 242
         | 244..=248
