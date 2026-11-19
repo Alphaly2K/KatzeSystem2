@@ -463,7 +463,10 @@ impl TextWindow {
 
     pub fn draw(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(dialog) = &mut self.dialog {
-            dialog.draw(self.fonts.get_or_insert_with(|| Fonts::new(".")))?;
+            dialog.draw(
+                self.fonts
+                    .get_or_insert_with(|| crate::support::load_fonts(".")),
+            )?;
         }
         Ok(())
     }
@@ -478,7 +481,7 @@ impl FilePathDialog {
     pub fn new(parent: &Window, initial: &str) -> Result<Self, Box<dyn std::error::Error>> {
         Ok(Self {
             dialog: Dialog::new(parent, initial.into(), "Import Image", 4096)?,
-            fonts: Fonts::new("."),
+            fonts: crate::support::load_fonts("."),
         })
     }
 

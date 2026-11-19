@@ -295,25 +295,20 @@ Unicode 的 `word_wrap` 按半角空格确定单词边界，空间不足时回�
 
 ### 字体服务
 
-`Runtime::set_fonts(message::Fonts::new(resource_root))` 使用 Rust 字体选择、度量和灰度栅格化，不要求窗口或图形设备。`new` 通过 fontdb 的统一接口按需发现系统字体；`without_system_fonts(resource_root)` 只使用显式资源，适合确定性运行和无系统字体的宿主。
+`message::Fonts::new()` 创建空字体目录，使用 Rust 完成字体选择、度量和灰度栅格化。宿主登记字体来源后，使用 `Runtime::set_fonts(fonts)` 安装。桌面示例使用 fontdb 发现系统字体；其他宿主可以只登记随应用提供的字体。
 
-`add_resource` 按 CP932 文件名读取字体，反斜杠转换为平台分隔符，相对名称基于 `resource_root`；文件不存在或格式不受支持时返回 false。`add_data(bytes)` 登记字体或集合的全部成员并返回数量；失败保留已有字体。资源仅此服务可见，同一运行时的任务共享它们，释放服务时结束持有。轮廓在实际选中时才装载，系统目录发现只读取元数据。
+`add_data(bytes)` 登记私有字体或集合的全部成员并返回数量。`add_fallback_source(open)` 登记宿主回退字体，登记时读取元数据，选中时再次打开以装载轮廓；每次打开须提供相同内容。登记失败保留已有字体。`set_resource_loader` 接收原始 CP932 名称，返回可读源或 None；`add_resource` 在来源缺失或格式不受支持时返回 false。桌面示例自行解析名称与目录。登记资源仅在同一字体服务内可见。
 
 选择优先使用私有资源，再查询系统字体；支持族名、完整名称、PostScript 名及字体中的 Unicode／CP932 本地化名称，比较不区分大小写。同名资源优先匹配字重和斜体样式，同等样式按装载次序选择。字重恰为 700 时请求粗体；没有对应成员时以灰度扩张和逐行倾斜合成粗体／斜体。空名称按常用无衬线族和字符集选择默认字体，缺字时从同一目录选择覆盖该字符的字体；全部字体均无映射时使用默认字体的缺字符号。命名字体要求名称可用且覆盖所需字符，垂直字体返回诊断。后端零及已知 Windows 字符集的低八位可用，字符已经解码为 Unicode，不再交给平台文字 API 转码。
 
 字号零返回零字宽和空遮罩；其他字号使用整数度量及前述定宽规则，字形为顶端起始的 0～64 覆盖。回退字体同时提供字宽和轮廓，行基线沿用原默认字体。轮廓、阴影及覆盖加倍仍由消息层处理。相同字体字节和请求使用同一 Rust 栅格化路径；系统字体集合、默认字体选择与 GDI hinting 的差异仍会影响画面。
 
-`enumerate` 先提供服务内资源，再按发现的来源文件排序提供系统字体，保留重复族名；零 `variable_pitch` 按字体定宽标记筛选，名称最多 63 个 UTF-16 单元。DEFAULT（1）和 MAX 接受全部字体；其他 Windows 字符集按 OS/2 表声明的代码页筛选，支持 ANSI、Symbol、日文、韩文、简繁中文及常用欧洲、中东和泰文代码页。未知字符集或缺少有效代码页声明的字体不匹配具体字符集。
+`enumerate` 先提供私有字体，再按登记顺序提供宿主回退字体，保留重复族名；零 `variable_pitch` 按字体定宽标记筛选，名称最多 63 个 UTF-16 单元。DEFAULT（1）和 MAX 接受全部字体；其他 Windows 字符集按 OS/2 表声明的代码页筛选，支持 ANSI、Symbol、日文、韩文、简繁中文及常用欧洲、中东和泰文代码页。未知字符集或缺少有效代码页声明的字体不匹配具体字符集。
 
-自动默认及缺字回退排除 `head.flags` 标记为 Last Resort 的范围占位字体，显式命名访问保留。默认字体回退检查位于 `tools/check-font-fallback.rs`，可在提供中日文字体的桌面系统显式运行。它验证两条编码路径、两种字符集、常规／粗体／斜体、零及四档非零字号，共 960 组字宽与栅格化结果；中日文字形须区别于缺字符号，不同简体字须有独立字形。该检查依赖系统字体，不加入常规测试发现范围。常规回归关闭系统发现，仅使用项目合成字体覆盖集合、名称、样式、字符集、回退基线及缺字约束。
+自动默认及缺字回退排除 `head.flags` 标记为 Last Resort 的范围占位字体，显式命名访问保留。默认字体回退示例可在提供中日文字体的桌面系统显式运行。它验证两条编码路径、两种字符集、常规／粗体／斜体、零及四档非零字号，共 960 组字宽与栅格化结果；中日文字形须区别于缺字符号，不同简体字须有独立字形。该检查依赖系统字体，不由常规测试执行。常规回归使用项目合成字体覆盖集合、名称、样式、字符集、回退基线及缺字约束。
 
 ```sh
-cargo build --locked --release
-rustc --edition=2024 -O --crate-name check_font_fallback \
-  tools/check-font-fallback.rs \
-  --extern katze_system2=target/release/libkatze_system2.rlib \
-  -L dependency=target/release/deps -o target/check-font-fallback
-target/check-font-fallback
+cargo run --locked --release --example check_font_fallback
 ```
 
 `HostState::message_time_scale` 提供生成消息时间的全局比例，初值 None；与任务时钟和外层帧增量分别保存。启动示例从 `GAME/strframe_frame` 读取该比例，缺失时取零；任务时钟每轮推进一个 1/60 秒逻辑帧，系统毫秒时钟独立提供。独立宿主提供 `Host::fonts`、`message_time_scale`、`message_plane_display` 和 `submit_message`。后者按顶部起算的源矩形直接复制 BGRA，目标位置已包含配置偏移和矩形起点；保留 Alpha 及透明 RGB。运行时使用 `DrawingContext::copy_surface` 提交到分块画布，并沿已有平面进入最终帧。

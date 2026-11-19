@@ -1,45 +1,40 @@
-//! 字体发现、选择、度量与灰度栅格化。
+//! 从宿主提供的字体数据选择、度量并生成灰度字形。
 
 use super::{Font, FontRequest, FontServices, GlyphMask};
-use crate::{Error, Result, read};
-use std::{
-    collections::BTreeSet,
-    io::Read,
-    path::{Path, PathBuf},
-    sync::Arc,
+use crate::{
+    Error, Result,
+    io::{ReadSource, SharedSource},
+    read,
 };
+use std::sync::Arc;
 
 mod catalog;
 use catalog::{Face, Source, charset_bit};
 
-/// 私有字体优先于系统同名字体；字体轮廓仅在选中后装载。
+type ResourceLoader = dyn FnMut(&[u8]) -> Result<Option<SharedSource>> + Send + Sync;
+
+/// 私有字体优先于同名的宿主回退字体；字体轮廓仅在选中后装载。
 /// 空名称选择默认字体并允许缺字回退，显式名称保持指定字体。
+#[derive(Default)]
 pub struct Fonts {
-    root: PathBuf,
     faces: Vec<Face>,
     local_count: usize,
-    system_pending: bool,
+    resource_loader: Option<Box<ResourceLoader>>,
     selections: Vec<(FontRequest, usize)>,
 }
 
 impl Fonts {
-    /// 按需发现系统字体；构造时不扫描目录或装载字体轮廓。
-    pub fn new(resource_root: impl Into<PathBuf>) -> Self {
-        Self {
-            system_pending: true,
-            ..Self::without_system_fonts(resource_root)
-        }
+    /// 建立空字体目录。宿主可显式注册字体及回退来源。
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    /// 仅使用显式注册字体，适用于确定性运行及没有系统字体的宿主。
-    pub fn without_system_fonts(resource_root: impl Into<PathBuf>) -> Self {
-        Self {
-            root: resource_root.into(),
-            faces: Vec::new(),
-            local_count: 0,
-            system_pending: false,
-            selections: Vec::new(),
-        }
+    /// 为脚本私有字体注册提供读取源。回调接收原始 CP932 名称；None 表示资源缺失。
+    pub fn set_resource_loader(
+        &mut self,
+        loader: impl FnMut(&[u8]) -> Result<Option<SharedSource>> + Send + Sync + 'static,
+    ) {
+        self.resource_loader = Some(Box::new(loader));
     }
 
     /// 原子登记字体或集合的全部成员，仅此服务可见；失败保留已有字体。
@@ -49,53 +44,30 @@ impl Fonts {
         }
         let data: Arc<[u8]> = bytes.into();
         let faces = catalog::parse(&data, Source::Data(data.clone()))?;
+        let count = self.insert_faces(self.local_count, faces)?;
+        self.local_count += count;
+        Ok(count)
+    }
+
+    /// 登记一个回退字体或集合。打开一次提取元数据，选中时重新打开以装载轮廓。
+    /// 每次打开须返回相同的字体数据。多个来源按注册顺序参与选择与枚举。
+    pub fn add_fallback_source(
+        &mut self,
+        open: impl Fn() -> Result<SharedSource> + Send + Sync + 'static,
+    ) -> Result<usize> {
+        let bytes = read_font(open()?.as_ref())?;
+        let faces = catalog::parse(&bytes, Source::Deferred(Arc::new(open)))?;
+        self.insert_faces(self.faces.len(), faces)
+    }
+
+    fn insert_faces(&mut self, at: usize, faces: Vec<Face>) -> Result<usize> {
         if self.faces.len().saturating_add(faces.len()) > read::MAX_ITEMS {
             return Err(Error::new(0, "字体数量超过存储上限"));
         }
         let count = faces.len();
-        self.faces.splice(self.local_count..self.local_count, faces);
-        self.local_count += count;
+        self.faces.splice(at..at, faces);
         self.selections.clear();
         Ok(count)
-    }
-
-    /// 提前发现系统字体；可在进入帧循环前调用，后续选择复用同一目录。
-    pub fn discover_system(&mut self) {
-        if !std::mem::take(&mut self.system_pending) {
-            return;
-        }
-        let timing = std::env::var_os("KATZE_TRACE_TIMING").map(|_| std::time::Instant::now());
-        let mut database = fontdb::Database::new();
-        database.load_system_fonts();
-        let files: BTreeSet<_> = database
-            .faces()
-            .filter_map(|face| {
-                if let fontdb::Source::File(path) = &face.source {
-                    Some(path.clone())
-                } else {
-                    None
-                }
-            })
-            .collect();
-        for path in files {
-            let Ok(bytes) = read_file(&path) else {
-                continue;
-            };
-            let Ok(faces) = catalog::parse(&bytes, Source::File(path)) else {
-                continue;
-            };
-            if self.faces.len().saturating_add(faces.len()) > read::MAX_ITEMS {
-                break;
-            }
-            self.faces.extend(faces);
-        }
-        if let Some(started) = timing {
-            eprintln!(
-                "[font-discovery] faces={} ms={:.2}",
-                self.faces.len(),
-                started.elapsed().as_secs_f64() * 1000.
-            );
-        }
     }
 
     fn select(&mut self, request: &FontRequest, size: u32) -> Result<usize> {
@@ -108,7 +80,6 @@ impl Fonts {
             .to_lowercase();
         let mut index = self.named_face(&name, request, self.local_count);
         if index.is_none() || name.is_empty() {
-            self.discover_system();
             index = if name.is_empty() {
                 self.default_face(request)
             } else {
@@ -200,18 +171,12 @@ impl Fonts {
     fn font(&mut self, index: usize) -> Result<&Font> {
         let face = &mut self.faces[index];
         if face.font.is_none() {
-            let timing = std::env::var_os("KATZE_TRACE_TIMING").map(|_| std::time::Instant::now());
-            let bytes = match &face.source {
-                Source::Data(bytes) => bytes.clone(),
-                Source::File(path) => read_file(path)?.into(),
-            };
-            face.font = Some(Font::from_bytes(&bytes, face.index)?);
-            if let Some(started) = timing {
-                eprintln!(
-                    "[font-load] index={index} ms={:.2}",
-                    started.elapsed().as_secs_f64() * 1000.
-                );
-            }
+            face.font = Some(match &face.source {
+                Source::Data(bytes) => Font::from_bytes(bytes, face.index)?,
+                Source::Deferred(open) => {
+                    Font::from_bytes(&read_font(open()?.as_ref())?, face.index)?
+                }
+            });
         }
         Ok(face.font.as_ref().unwrap())
     }
@@ -219,22 +184,17 @@ impl Fonts {
 
 impl FontServices for Fonts {
     fn add_resource(&mut self, name: &[u8]) -> Result<bool> {
-        let (name, _, invalid) = encoding_rs::SHIFT_JIS.decode(name);
-        if invalid || name.contains('\0') {
-            return Err(Error::new(0, "字体资源名称不是有效 CP932 路径"));
-        }
-        let path = self.root.join(name.replace('\\', "/"));
-        let file = match std::fs::File::open(&path) {
-            Ok(file) => file,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-            Err(_) => return Err(Error::new(0, "字体资源读取失败")),
+        let loader = self
+            .resource_loader
+            .as_mut()
+            .ok_or_else(|| Error::new(0, "字体服务未提供字体资源注册"))?;
+        let Some(source) = loader(name)? else {
+            return Ok(false);
         };
-        let bytes = read_bytes(file)?;
-        Ok(self.add_data(&bytes).is_ok())
+        Ok(self.add_data(&read_font(source.as_ref())?).is_ok())
     }
 
     fn enumerate(&mut self, character_set: u32, variable_pitch: u32) -> Result<Vec<Vec<u16>>> {
-        self.discover_system();
         Ok(self
             .faces
             .iter()
@@ -327,19 +287,13 @@ fn terminated(name: &[u16]) -> &[u16] {
     &name[..name.iter().position(|&c| c == 0).unwrap_or(name.len())]
 }
 
-fn read_file(path: &Path) -> Result<Vec<u8>> {
-    let file = std::fs::File::open(path).map_err(|_| Error::new(0, "字体资源读取失败"))?;
-    read_bytes(file)
-}
-
-fn read_bytes(file: std::fs::File) -> Result<Vec<u8>> {
-    let mut bytes = Vec::new();
-    file.take(read::MAX_BYTES as u64 + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|_| Error::new(0, "字体资源读取失败"))?;
-    if bytes.len() > read::MAX_BYTES {
+fn read_font(source: &dyn ReadSource) -> Result<Vec<u8>> {
+    let length = source.len()?;
+    if length > read::MAX_BYTES as u64 {
         return Err(Error::new(0, "字体数据超过存储上限"));
     }
+    let mut bytes = vec![0; length as usize];
+    source.read_exact_at(0, &mut bytes)?;
     Ok(bytes)
 }
 

@@ -1,11 +1,11 @@
 use super::{Font, FontRequest};
-use crate::{Error, Result, read};
-use std::{path::PathBuf, sync::Arc};
+use crate::{Error, Result, io::SharedSource, read};
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub(super) enum Source {
     Data(Arc<[u8]>),
-    File(PathBuf),
+    Deferred(Arc<dyn Fn() -> Result<SharedSource> + Send + Sync>),
 }
 
 pub(super) struct Face {

@@ -1,4 +1,11 @@
-use katze_system2::message::{FontRequest, FontServices, Fonts, TextEncoding};
+use katze_system2::{
+    io::SharedSource,
+    message::{FontRequest, FontServices, Fonts, TextEncoding},
+};
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
 
 fn request() -> FontRequest {
     FontRequest {
@@ -14,7 +21,7 @@ fn request() -> FontRequest {
 
 #[test]
 fn private_font_keeps_selection_measurement_and_rasterization_consistent() {
-    let mut fonts = Fonts::without_system_fonts("");
+    let mut fonts = Fonts::new();
     let request = request();
     assert_eq!(
         fonts
@@ -107,6 +114,53 @@ fn font_file(tables: std::collections::BTreeMap<[u8; 4], Vec<u8>>) -> Vec<u8> {
     bytes
 }
 
+#[test]
+fn host_sources_load_outlines_only_when_used_and_private_fonts_replace_cached_fallback() {
+    let mut fallback = tables();
+    fallback.get_mut(b"hmtx").unwrap()[8..10].copy_from_slice(&500u16.to_be_bytes());
+    let fallback: SharedSource = Arc::new(font_file(fallback));
+    let opens = Arc::new(AtomicUsize::new(0));
+    let mut fonts = Fonts::new();
+    let counted = opens.clone();
+    assert_eq!(
+        fonts
+            .add_fallback_source(move || {
+                counted.fetch_add(1, Ordering::Relaxed);
+                Ok(fallback.clone())
+            })
+            .unwrap(),
+        1
+    );
+    let request = request();
+    assert_eq!(
+        fonts.enumerate(1, 1).unwrap(),
+        std::slice::from_ref(&request.name)
+    );
+    assert_eq!(opens.load(Ordering::Relaxed), 1);
+    assert_eq!(fonts.measure(&request, 'A', 20).unwrap(), 10);
+    assert_eq!(fonts.rasterize(&request, 'A', 20).unwrap().advance(), 10);
+    assert_eq!(opens.load(Ordering::Relaxed), 2);
+
+    let cp932_name = b"\x82\xa0.ttf";
+    assert!(fonts.add_resource(cp932_name).is_err());
+    fonts.set_resource_loader(move |name| {
+        Ok(match name {
+            b"bad.ttf" => Some(Arc::new(b"invalid".to_vec())),
+            name if name == cp932_name => Some(Arc::new(
+                include_bytes!("fixtures/synthetic-triangle.ttf").to_vec(),
+            )),
+            _ => None,
+        })
+    });
+    assert!(!fonts.add_resource(b"missing.ttf").unwrap());
+    assert!(!fonts.add_resource(b"bad.ttf").unwrap());
+    assert_eq!(fonts.enumerate(1, 1).unwrap().len(), 1);
+    assert!(fonts.add_resource(cp932_name).unwrap());
+    assert_eq!(fonts.enumerate(1, 1).unwrap().len(), 2);
+    assert_eq!(fonts.measure(&request, 'A', 20).unwrap(), 20);
+    assert_eq!(opens.load(Ordering::Relaxed), 2);
+}
+
 fn collection(fonts: &[Vec<u8>]) -> Vec<u8> {
     let mut bytes = b"ttcf\0\x01\0\0".to_vec();
     bytes.extend((fonts.len() as u32).to_be_bytes());
@@ -150,7 +204,7 @@ fn collection_names_charset_enumeration_and_default_cascade_share_the_same_faces
     os2[78..82].copy_from_slice(&(1u32 << 17).to_be_bytes());
     fallback.insert(*b"OS/2", os2);
     let bytes = collection(&[original, font_file(fallback)]);
-    let mut fonts = Fonts::without_system_fonts("");
+    let mut fonts = Fonts::new();
     let mut request = request();
     request.name.clear();
     request.glyph_parameter = 128;
@@ -200,7 +254,7 @@ fn collection_names_charset_enumeration_and_default_cascade_share_the_same_faces
 
 #[test]
 fn missing_styles_are_synthesized_consistently_and_real_bold_faces_take_precedence() {
-    let mut fonts = Fonts::without_system_fonts("");
+    let mut fonts = Fonts::new();
     fonts
         .add_data(include_bytes!("fixtures/synthetic-triangle.ttf"))
         .unwrap();
@@ -254,7 +308,7 @@ fn automatic_cascade_skips_last_resort_ranges_before_real_character_coverage() {
         font_file(primary),
         font_file(tables()),
     ]);
-    let mut fonts = Fonts::without_system_fonts("");
+    let mut fonts = Fonts::new();
     fonts.add_data(&bytes).unwrap();
     let mut request = request();
     request.name.clear();

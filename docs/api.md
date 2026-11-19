@@ -37,9 +37,9 @@
 
 消息标记 `\$text;` 将引擎整数前缀结果的低 16 位作为 Unicode 字符。`Atom.encoding` 与 `LayoutEntry.encoding` 保存记录的编码选择，构造记录时须提供此字段；消息任务按记录更新 `FontRequest.encoding`，自定义字形使用同一选择。其他字形回调继续接收已解码字符。空文本、结束分号及 UTF-16 代理区间约束见[消息标记](message.md)。
 
-`Fonts` 通过 fontdb 统一发现系统字体，空字体名选择默认字体并提供缺字回退，选择结果同时用于度量和栅格化，基线保留原默认字体度量；所有字体均无映射时使用缺字符号。命名字体要求显式可用且覆盖所需字符。`without_system_fonts` 仅使用显式登记字体。平台差异及不参与默认测试发现的系统字体检查工具见[字体服务](message.md#字体服务)。
+`Fonts::new()` 创建空字体目录，由宿主登记私有字体、回退来源和脚本字体资源读取回调。空字体名选择默认字体并提供缺字回退，选择结果同时用于度量和栅格化，基线保留原默认字体度量；所有字体均无映射时使用缺字符号。命名字体要求显式可用且覆盖所需字符。注册方式及桌面字体检查见[字体服务](message.md#字体服务)。
 
-`message::Font::from_bytes(bytes, collection_index)` 提供显式字体的整数度量与六十四级灰度遮罩，不查询系统字体或自动处理缺字回退。`GlyphMask::colorize` 使用消息颜色及基线覆盖表生成 BGRA 像素。`Page::paint_foreground(&mut surface, origin, glyph)` 将已显示的正文／注音前景混合到目标，调用者负责重绘背景。`GlyphEffects` 提供轮廓与偏移阴影，`GlyphMask::paint` 合成单个字形，`Page::paint` 将字形效果连接到已显示的正文与注音；保留阴影独立颜色顺序和小字号偏移规则。通过 `Runtime::set_fonts(message::Fonts::new(resource_root))` 可接入私有字体装载、系统字体选择、度量和栅格化，`add_data(bytes)` 另接受显式字体或集合。`FontRequest::character_advance` 提供两种编码共用的定宽规则。支持范围及平台差异见[字体服务](message.md#字体服务)，通用字形接口见[字形与前景绘制](message.md#显式字体与前景绘制)及[字形效果](message.md#轮廓偏移阴影与字形合成)。
+`message::Font::from_bytes(bytes, collection_index)` 提供显式字体的整数度量与六十四级灰度遮罩，不查询系统字体或自动处理缺字回退。`GlyphMask::colorize` 使用消息颜色及基线覆盖表生成 BGRA 像素。`Page::paint_foreground(&mut surface, origin, glyph)` 将已显示的正文／注音前景混合到目标，调用者负责重绘背景。`GlyphEffects` 提供轮廓与偏移阴影，`GlyphMask::paint` 合成单个字形，`Page::paint` 将字形效果连接到已显示的正文与注音；保留阴影独立颜色顺序和小字号偏移规则。`Runtime::set_fonts` 接受已配置的 `Fonts` 或宿主的 `FontServices` 实现。`FontRequest::character_advance` 提供两种编码共用的定宽规则。支持范围及平台差异见[字体服务](message.md#字体服务)，通用字形接口见[字形与前景绘制](message.md#显式字体与前景绘制)及[字形效果](message.md#轮廓偏移阴影与字形合成)。
 
 `message::Reveal` 提供水平渐显的过渡表、原始时间换算、整面颜色同步和逐字形 Alpha 更新，来源保存完整像素，目标持续保留显示状态。`Layout::reveal_starts` 生成跨行起点，`RevealGlyph` 组合起点、消息面位置和局部绘制范围；接口约束见[水平渐显核心](message.md#水平渐显核心)。持久页面推进见下文的 `Display`，脚本完成等待继续接入消息对象。
 

@@ -1,7 +1,12 @@
-use katze_system2::message::{FontRequest, FontServices, Fonts, TextEncoding};
+#[path = "support/file_source.rs"]
+mod file_source;
+#[path = "support/font_sources.rs"]
+mod font_sources;
+
+use katze_system2::message::{FontRequest, FontServices, TextEncoding};
 
 fn main() -> katze_system2::Result<()> {
-    let mut fonts = Fonts::new("");
+    let mut fonts = font_sources::load_fonts(".");
     let mut count = 0;
     for glyph_parameter in [0, 128] {
         for encoding in [TextEncoding::Cp932, TextEncoding::Unicode] {

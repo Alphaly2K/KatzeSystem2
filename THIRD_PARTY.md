@@ -21,7 +21,7 @@
 |simd-adler32|0.3.10|MIT|[许可](licenses/simd-adler32-0.3.10/LICENSE.md)|
 |roxmltree|0.20.0|MIT|[许可](licenses/roxmltree-0.20.0/LICENSE-MIT)|
 |fontdue|0.9.3|MIT|[许可](licenses/fontdue-0.9.3/LICENSE-MIT)|
-|fontdb|0.23.0|MIT|[许可](licenses/fontdb-0.23.0/LICENSE)|
+|fontdb（示例）|0.23.0|MIT|[许可](licenses/fontdb-0.23.0/LICENSE)|
 |fontconfig-parser|0.5.8|MIT|[许可](licenses/fontconfig-parser-0.5.8/LICENSE)|
 |ttf-parser|0.21.1|MIT|[许可](licenses/ttf-parser-0.21.1/LICENSE-MIT)|
 |ttf-parser|0.25.1|MIT|[许可](licenses/ttf-parser-0.25.1/LICENSE-MIT)|

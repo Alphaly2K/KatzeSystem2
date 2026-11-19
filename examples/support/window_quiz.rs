@@ -405,7 +405,8 @@ impl QuizWindows {
             panel.draw(
                 session,
                 encoding,
-                self.fonts.get_or_insert_with(|| Fonts::new(".")),
+                self.fonts
+                    .get_or_insert_with(|| crate::support::load_fonts(".")),
             )?;
         }
         Ok(())

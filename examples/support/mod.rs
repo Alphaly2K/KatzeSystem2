@@ -26,6 +26,8 @@ mod configuration;
 use configuration::ConfigurationFiles;
 mod file_source;
 use file_source::FileSource;
+mod font_sources;
+pub use font_sources::load_fonts;
 // The desktop example uses the picker; the offline probe only uses preselection.
 #[allow(dead_code)]
 pub mod image_import;
@@ -890,9 +892,7 @@ pub fn build_runtime(
     {
         runtime.reload_language_tables(katze_system2::language::LanguageTarget::MainText)?;
     }
-    let mut fonts = katze_system2::message::Fonts::new(&root);
-    fonts.discover_system();
-    runtime.set_fonts(fonts);
+    runtime.set_fonts(load_fonts(&root));
     runtime.set_file_services(Files { root });
     runtime.set_save_services(Saves {
         root: configuration_files.directory.to_string_lossy().into_owned(),
