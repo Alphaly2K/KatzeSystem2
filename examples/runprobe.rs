@@ -36,6 +36,37 @@ impl WindowServices for ProbeWindow {
     }
 }
 
+#[derive(Default)]
+struct AudioStats {
+    frames: u64,
+    nonzero_frames: u64,
+    peak: f32,
+    first: Option<u32>,
+    last: Option<u32>,
+}
+
+impl AudioStats {
+    fn add(&mut self, round: u32, pcm: &[f32]) {
+        for frame in pcm.chunks_exact(2) {
+            let peak = frame[0].abs().max(frame[1].abs());
+            self.peak = self.peak.max(peak);
+            self.frames += 1;
+            if peak != 0.0 {
+                self.nonzero_frames += 1;
+                self.first.get_or_insert(round);
+                self.last = Some(round);
+            }
+        }
+    }
+
+    fn report(&self) {
+        println!(
+            "PCM rate=48000 frames={} nonzero_frames={} peak={} first_round={:?} last_round={:?}",
+            self.frames, self.nonzero_frames, self.peak, self.first, self.last,
+        );
+    }
+}
+
 struct StoryReplay {
     automatic: RangeInclusive<u32>,
     advance_key: Option<RangeInclusive<u32>>,
@@ -498,6 +529,9 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         runtime.set_native_trace(trace);
     }
     let mut replay = StoryReplay::from_env(surface);
+    let mut audio_stats = std::env::var_os("KATZE_PROBE_AUDIO_STATS")
+        .is_some()
+        .then(AudioStats::default);
     runtime.set_input_device(ScriptedDevice::new(keys, replay.as_ref(), surface))?;
     let (
         mut runtime,
@@ -559,8 +593,9 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         }
     };
     let mut now = 0;
+    let ticks = if replay.is_some() { 3 } else { 1 };
     for frame in 0..frames {
-        now += if replay.is_some() { 3 } else { 1 };
+        now += ticks;
         let system_time_ms = (u64::from(now) * 1000 / 60) as u32;
         let started = diagnostics.timing.then(std::time::Instant::now);
         let advancement = runtime.advance(FrameTime {
@@ -621,10 +656,15 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 );
             }
         }
-        if let Some(replay) = &mut replay {
-            if runtime.object(sound).is_some() {
-                runtime.mix_audio_stereo(48_000, &mut [0.; 4800])?;
+        if (replay.is_some() || audio_stats.is_some()) && runtime.object(sound).is_some() {
+            let mut buffer = [0.; 4800];
+            let pcm = &mut buffer[..(ticks as usize * 800 * 2)];
+            runtime.mix_audio_stereo(48_000, pcm)?;
+            if let Some(stats) = &mut audio_stats {
+                stats.add(frame, pcm);
             }
+        }
+        if let Some(replay) = &mut replay {
             if let Some(state) = runtime.input_state(input) {
                 replay.update(frame, state.regions().records());
             }
@@ -900,6 +940,9 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
+    }
+    if let Some(stats) = &audio_stats {
+        stats.report();
     }
     if let Some(path) = std::env::var_os("KATZE_PROBE_SHOT") {
         if let Ok(spec) = std::env::var("KATZE_PROBE_HIDE") {
