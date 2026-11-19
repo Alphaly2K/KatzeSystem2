@@ -494,7 +494,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             sound,
             entry: task,
         },
-    ) = runtime.start_game(b"main")?;
+    ) = runtime.start_game_with_tasks(b"main")?;
     let mut window = ProbeWindow {
         fullscreen: runtime
             .system_settings()
@@ -594,7 +594,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             break;
         }
         if matches!(advancement, Ok(FrameOutcome::Exited))
-            || runtime.process_window_requests(input, &mut window)?
+            || runtime.process_window_requests(&mut window)?
         {
             break;
         }
@@ -609,7 +609,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         }
         if let Some(replay) = &mut replay {
             if runtime.object(sound).is_some() {
-                runtime.mix_audio_stereo(sound, 48_000, &mut [0.; 4800])?;
+                runtime.mix_audio_stereo(48_000, &mut [0.; 4800])?;
             }
             if let Some(state) = runtime.input_state(input) {
                 replay.update(frame, state.regions().records());

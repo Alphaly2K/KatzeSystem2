@@ -4,10 +4,9 @@ mod window_input;
 
 use katze_system2::{
     Error, Result,
-    expression::State,
-    input::{DeviceBinding, DeviceKeys, InputDevice, InputFactory},
+    input::{DeviceBinding, DeviceKeys, InputDevice},
     kcs::{Program, WindowAction, WindowCloseRequest, WindowRequest},
-    runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, WindowServices, kind},
+    runtime::{GameRuntime, ProgramLoader, WindowServices},
     settings::SystemSettings,
 };
 use sdl2::{
@@ -179,7 +178,7 @@ fn keyboard_aliases_remain_held_and_focus_loss_clears_pending_input() -> Result<
 struct Loader;
 impl ProgramLoader for Loader {
     fn load(&mut self, _: &[u8]) -> Result<Option<Program>> {
-        Ok(None)
+        Ok(Some(Program::from_code(&[0x3b], vec![], 0)?))
     }
 }
 struct Window {
@@ -209,16 +208,9 @@ impl WindowServices for Window {
 #[test]
 fn window_actions_apply_state_after_success_reset_input_before_close_and_keep_pending_requests()
 -> Result<()> {
-    let mut rt = Runtime::new(
-        0,
-        kind::ROOT,
-        Box::new(BaseObject::new()),
-        State::new(0),
-        InputFactory {
-            fallback: KcsFactory::new(Loader),
-        },
-    );
-    let input = rt.create(0, kind::INPUT, b"input", b"")?;
+    let (mut rt, tasks) = GameRuntime::with_programs(Loader, 0, Default::default())?
+        .start_game_with_tasks(b"main")?;
+    let input = tasks.input;
     rt.host_mut().system_settings = Some(SystemSettings::default());
     rt.host_mut().windowed_mode = Some(1);
     rt.input_state_mut(input).unwrap().pointer_mut().idle_count = 42;
@@ -237,7 +229,7 @@ fn window_actions_apply_state_after_success_reset_input_before_close_and_keep_pe
     ]
     .map(|action| WindowRequest { task_id: 0, action })
     .to_vec();
-    assert!(!rt.process_window_requests(input, &mut window)?);
+    assert!(!rt.process_window_requests(&mut window)?);
     assert_eq!(window.events, ["fullscreen", "minimize", "confirm"]);
     assert_eq!(rt.host().windowed_mode, Some(1));
     assert_eq!(rt.host().system_settings_dirty, 1);
@@ -263,7 +255,7 @@ fn window_actions_apply_state_after_success_reset_input_before_close_and_keep_pe
     });
     window.fail = true;
     rt.host_mut().system_settings_dirty = 0;
-    assert!(rt.process_window_requests(input, &mut window).is_err());
+    assert!(rt.process_window_requests(&mut window).is_err());
     assert_eq!(rt.host().windowed_mode, Some(1));
     assert_eq!(rt.host().system_settings_dirty, 0);
     assert_eq!(rt.host().system_settings.as_ref().unwrap().fullscreen, 1);
@@ -272,7 +264,7 @@ fn window_actions_apply_state_after_success_reset_input_before_close_and_keep_pe
         WindowAction::Minimize
     );
     let before = window.events.len();
-    assert!(!rt.process_window_requests(input, &mut window)?);
+    assert!(!rt.process_window_requests(&mut window)?);
     assert_eq!(window.events[before..], ["minimize"]);
     assert_eq!(rt.take_window_requests().len(), 2);
     assert!(rt.pending_window_requests().is_empty());
@@ -283,7 +275,7 @@ fn window_actions_apply_state_after_success_reset_input_before_close_and_keep_pe
             notify: false,
         });
     let before = window.events.len();
-    assert!(rt.process_window_requests(input, &mut window)?);
+    assert!(rt.process_window_requests(&mut window)?);
     assert_eq!(window.events.len(), before + 1);
     rt.host_mut()
         .window_close_requests
@@ -292,7 +284,7 @@ fn window_actions_apply_state_after_success_reset_input_before_close_and_keep_pe
             notify: true,
         });
     let before = window.events.len();
-    assert!(rt.process_window_requests(input, &mut window)?);
+    assert!(rt.process_window_requests(&mut window)?);
     assert_eq!(window.events.len(), before);
     Ok(())
 }

@@ -33,7 +33,7 @@ mod window_text;
 use katze_system2::{
     graphics::Rect,
     host::RenderTarget,
-    runtime::{FrameOutcome, FrameTime, GameTasks},
+    runtime::{FrameOutcome, FrameTime},
 };
 use sdl2::event::{Event, WindowEvent};
 use std::cell::RefCell;
@@ -70,17 +70,8 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let shared = Rc::new(RefCell::new(Shared::default()));
     runtime.set_input_device(WindowDevice::new(keys, shared.clone()))?;
     runtime.input_coordinates_mut().logical_size = [1280, 720];
-    let (
-        mut runtime,
-        GameTasks {
-            input,
-            sound,
-            entry: task,
-        },
-    ) = runtime.start_game(b"main")?;
-    let mut audio = audio_output::Output::new(runtime.connect_audio_output(sound)?)?;
-    println!("输入 {input} 声音 {sound}");
-    println!("主任务 {task}");
+    let mut runtime = runtime.start_game(b"main")?;
+    let mut audio = audio_output::Output::new(runtime.connect_audio_output()?)?;
 
     let startup_xml = katze_system2::resource::XmlDocument::parse(startup.as_bytes())?;
     let mut image_import = if std::env::var_os("KATZE_IMPORT_FILE").is_none() {
@@ -163,7 +154,9 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             if importing {
                 image_import.as_mut().unwrap().event(&event);
             } else if editing {
-                text_window.event(&event, runtime.input_state_mut(input))?;
+                text_window.event(&event, |request, text| {
+                    runtime.complete_text_entry(request, text)
+                })?;
             }
             if !editing
                 || matches!(
@@ -224,14 +217,14 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 frame_started.elapsed().as_secs_f64() * 1000.0
             );
         }
-        if runtime.process_window_requests(input, &mut window)? {
+        if runtime.process_window_requests(&mut window)? {
             break;
         }
         if !image_import
             .as_ref()
             .is_some_and(window_import::WindowImport::active)
         {
-            text_window.sync(&window.window, runtime.input_state(input))?;
+            text_window.sync(&window.window, runtime.text_entry_request())?;
         }
         if let Some(importer) = &mut image_import {
             importer.sync(

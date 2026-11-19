@@ -403,9 +403,9 @@ FES `steam_achievement` 将首个参数按 FES 字符串变量和全局脚本替
 
 普通 628 接收一个 DWORD，立即覆盖 `HostState::debug_mode`，并向 `window_requests` 追加 `WindowAction::RebuildMenu`；465 随后查询同一字段。重建菜单时读取最新值，零选择普通菜单，非零选择完整菜单，多次请求不保存旧模式快照。457 无参数，追加 `OpenSystemProperties`；845／846／847 无参数，分别追加 `ToggleFullscreen`／`Minimize`／`CloseFromMenu`。每项 `WindowRequest` 保留发送任务编号，以状态二继续，不压值或等待平台响应。菜单退出先向输入任务发送 159 空闲重置命令，再执行标准关闭流程。
 
-普通 1054 无参数，依同一协议追加 `WindowAction::NotifyTasks`。`Runtime::process_window_requests` 消费该请求时，从根向任务树广播发送者为零的命令 21。普通任务将对应通知入队，由后续更新消费。
+普通 1054 无参数，依同一协议追加 `WindowAction::NotifyTasks`。宿主消费该请求时，从根向任务树广播发送者为零的命令 21。普通任务将对应通知入队，由后续更新消费。
 
-宿主在更新后调用 `Runtime::process_window_requests(input, window)`，通过 `WindowServices` 提供全屏、最小化和关闭确认。成功切换后运行库同步 `SystemSettings::fullscreen` 并触发配置变更通知；`windowed_mode` 是独立的窗口宿主标记。应用退出通知和已获确认的关闭返回 true，拒绝后继续。系统属性页及菜单重建留在队列中；宿主可用 `pending_window_requests` 查看，或在成功处理后通过 `take_window_requests` 取出剩余动作。动作出错后保留未尝试的请求，已尝试的动作不自动重放。
+宿主在更新后调用 `GameRuntime::process_window_requests(window)`，通过 `WindowServices` 提供全屏、最小化和关闭确认；自定义任务树可改用 `Runtime::process_window_requests_with_input(input, window)` 指定关闭时需要重置的输入任务。成功切换后运行库同步 `SystemSettings::fullscreen` 并触发配置变更通知；`windowed_mode` 是独立的窗口宿主标记。应用退出通知和已获确认的关闭返回 true，拒绝后继续。系统属性页及菜单重建留在队列中；宿主可用 `pending_window_requests` 查看，或在成功处理后通过 `take_window_requests` 取出剩余动作。动作出错后保留未尝试的请求，已尝试的动作不自动重放。
 
 普通 10／1039 接收格式字符串地址，以状态二排入 `ClipboardRequest { task_id, text }`，保留 VM 返回栈。`Runtime::take_clipboard_requests` 按调用顺序取走请求，宿主负责解码、实际写入及失败处理。`ClipboardText::Bytes` 保留普通 10 的源字节，`Utf16` 保留普通 1039 的独立 UTF-16 单元；两项先将字面 `\n` 按字节替换为 CRLF。1039 沿用基线 UTF-8 逐字符转换，非 BMP 字符保留首个代理单元，输出最多 2,047 单元。
 

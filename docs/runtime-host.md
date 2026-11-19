@@ -12,7 +12,7 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 
 嵌入时从 `katze_system2::runtime` 导入会话类型，从 `katze_system2::host` 导入服务契约及输入、呈现和 PCM 类型。任务树、原始命令编号、VM 缓冲区和分派表属于底层工具入口。现有服务类型的模块路径仍可使用。Rust 契约稳定且有非 Rust 宿主接入时，再定义独立版本的 C ABI 和显式释放约定。
 
-标准宿主用 `GameRuntime::with_programs(loader, shared_slots, external)` 创建根任务并配置共享存储。启动前可将启动文档、游戏默认值及用户设置的 XML 字节交给 `configure_startup`，依次应用引擎配置；无效文档保留原有状态。绑定输入、资源和需要的其他服务，调用 `configure_canvas([width, height])` 设置逻辑输出尺寸并按游戏配置创建画布，再调用 `start_game(entry)`。该方法消费准备好的实例，返回已启动的实例和 `GameTasks`，输入、声音和入口脚本按引擎顺序登记。缺失的入口名称返回诊断并释放本次实例。
+标准宿主用 `GameRuntime::with_programs(loader, shared_slots, external)` 创建根任务并配置共享存储。启动前可将启动文档、游戏默认值及用户设置的 XML 字节交给 `configure_startup`，依次应用引擎配置；无效文档保留原有状态。绑定输入、资源和需要的其他服务，调用 `configure_canvas([width, height])` 设置逻辑输出尺寸并按游戏配置创建画布，再调用 `start_game(entry)`。该方法消费准备好的实例，返回已启动的实例。缺失的入口名称返回诊断并释放本次实例。脚本工具可通过 `start_game_with_tasks(entry)` 另外取得用于诊断的 `GameTasks`。
 
 标准会话在推进前必须通过 `set_input_device` 绑定 `InputDevice`。离屏宿主可提供只返回空闲状态的内存设备。`startup_input_bindings` 返回已经应用用户覆盖的八十个逻辑键槽，宿主可以用它构造 `DeviceKeys`。配置保存优先读取设备当前的绑定；设备未提供绑定时使用启动配置。
 
@@ -22,7 +22,7 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 
 `FrameOutcome::Running { interface_language_refreshed }` 表示本轮成功。标志为真时，窗口宿主可以通过 `string_tables` 更新界面译文，再消费绘制和声音输出。`FrameOutcome::Exited` 表示根任务已退出，应结束会话循环；再次调用 `advance` 仍返回 `Exited`。需要自定义结构的调用方仍可用 `Runtime::new` 和 `update`。
 
-窗口宿主在更新后调用 `process_window_requests(tasks.input, window)` 执行脚本提交的窗口请求。设备操作由 `WindowServices` 提供，运行库负责配置回写和任务通知。返回 true 表示应退出窗口循环；发生错误时可在后续调用继续处理尚未尝试的请求。
+窗口宿主在更新后调用 `process_window_requests(window)` 执行脚本提交的窗口请求。设备操作由 `WindowServices` 提供，运行库负责配置回写和任务通知。返回 true 表示应退出窗口循环；发生错误时可在后续调用继续处理尚未尝试的请求。文本对话框通过 `text_entry_request` 取得初始文字及请求句柄，使用同一个句柄调用 `complete_text_entry` 确认或取消。以 `Arc::ptr_eq` 区分请求；同样的初始文字可以属于不同请求。过期请求返回 false。
 
 宿主通过 `set_archive_config`、`set_folder_paths`、`set_script_settings` 和 `set_platform_settings` 提供脚本可查的路径及初始配置。启动配置和资源服务就绪后调用 `load_startup_language_tables` 装入初始译文；没有可用的界面语言前缀时，仅装入游戏表。
 
@@ -30,7 +30,7 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 
 宿主用 `Runtime::with_frame` 借用绘制命令和画布。`wants_sequence_capture` 为真时，宿主读回同一帧，再用 `capture_sequence_bgra` 同步提交从顶行开始的 BGRA 像素和以字节计的行距。运行库负责裁剪、编码 BMP 和编号，通过宿主文件服务写入。
 
-离屏宿主在更新后用 `mix_audio_stereo(tasks.sound, rate_hz, buffer)` 拉取 PCM；此调用可等待解码。设备宿主用 `connect_audio_output(tasks.sound)` 取得可移交给音频线程的 `Mixer`，由回调用 `Mixer::render(rate_hz, buffer)` 拉取 PCM，无须借用运行实例。两者均覆写调用方缓冲，格式为左右交错、幅度 `[-1, 1]` 的 `f32` 采样。每个声音任务只能连接一次，连接后不得再调用离屏混音；会话退出时由宿主停止回调并释放混音器。
+离屏宿主在更新后用 `mix_audio_stereo(rate_hz, buffer)` 拉取 PCM；此调用可等待解码。设备宿主用 `connect_audio_output()` 取得可移交给音频线程的 `Mixer`，由回调用 `Mixer::render(rate_hz, buffer)` 拉取 PCM，无须借用运行实例。两者均覆写调用方缓冲，格式为左右交错、幅度 `[-1, 1]` 的 `f32` 采样。游戏声音只能连接一次，连接后不得再调用离屏混音；会话退出时由宿主停止回调并释放混音器。
 
 宿主在更新后可用 `take_script_messages` 取走调试文字。即使更新返回错误，已生成的消息仍可取出。`set_native_trace` 注册当前运行实例的可选回调，运行时分派 native 时发送开始和结束事件，带任务号、原始调用编号、VM 字节偏移及失败标记。调用可嵌套，计时和输出由宿主决定。两个示例使用 `KATZE_TRACE_SCRIPT` 显示脚本消息，使用 `KATZE_TRACE_TIMING` 记录慢调用。
 

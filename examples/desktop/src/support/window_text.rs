@@ -1,6 +1,5 @@
 use katze_system2::{
     graphics::{Rect, Surface},
-    input::InputState,
     message::{FontRequest, FontServices, Fonts, TextEncoding},
 };
 use sdl2::{
@@ -427,14 +426,12 @@ impl TextWindow {
     pub fn event(
         &mut self,
         event: &Event,
-        input: Option<&mut InputState>,
+        complete: impl FnOnce(&Arc<str>, Option<&str>) -> katze_system2::Result<bool>,
     ) -> katze_system2::Result<()> {
         if let Some(dialog) = &mut self.dialog {
             if let Some(action) = dialog.event(event) {
-                if let Some(input) = input {
-                    let text = (action == Action::Confirm).then_some(dialog.edit.text.as_str());
-                    input.complete_text_entry(&dialog.request, text)?;
-                }
+                let text = (action == Action::Confirm).then_some(dialog.edit.text.as_str());
+                complete(&dialog.request, text)?;
                 self.dialog = None;
             }
         }
@@ -444,9 +441,8 @@ impl TextWindow {
     pub fn sync(
         &mut self,
         parent: &Window,
-        input: Option<&InputState>,
+        request: Option<Arc<str>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let request = input.and_then(InputState::text_entry_request);
         if request.as_ref().is_some_and(|request| {
             self.dialog
                 .as_ref()

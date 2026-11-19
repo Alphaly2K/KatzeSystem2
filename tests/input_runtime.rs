@@ -308,7 +308,7 @@ struct Factory {
 
 #[test]
 fn ordinary_text_entry_tracks_pending_accepted_and_cancelled_requests() -> Result<()> {
-    use katze_system2::runtime::{KcsFactory, ProgramLoader, RootObject};
+    use katze_system2::runtime::{GameRuntime, ProgramLoader};
 
     struct Source(Vec<u8>);
     impl ProgramLoader for Source {
@@ -358,38 +358,28 @@ fn ordinary_text_entry_tracks_pending_accepted_and_cancelled_requests() -> Resul
     emit(&mut code, 0x3b, &[]);
 
     for budget in [1, 4096] {
-        let mut rt = Runtime::new(
-            0,
-            kind::ROOT,
-            Box::new(RootObject::new(1, 0)),
-            expression::State::new(0),
-            InputFactory {
-                fallback: KcsFactory::new(Source(code.clone())),
-            },
-        );
+        let mut rt = GameRuntime::with_programs(Source(code.clone()), 0, Default::default())?;
         rt.set_budget(budget, 1 << 20);
-        let input = rt.create(0, kind::INPUT, b"input", b"")?;
-        let caller = rt.create(0, kind::ORDINARY, b"caller", b"")?;
         rt.set_input_device(Device(Rc::new(RefCell::new(DeviceState::new([0, 0])))))?;
+        let (mut rt, tasks) = rt.start_game_with_tasks(b"caller")?;
+        let caller = tasks.entry;
         rt.update(0, 0)?;
-        let first = rt.input_state(input).unwrap().text_entry_request().unwrap();
+        let first = rt.text_entry_request().unwrap();
         assert_eq!(&*first, "seed");
 
         rt.send_message(0, caller, [0; 4])?;
-        let state = rt.input_state_mut(input).unwrap();
-        let second = state.text_entry_request().unwrap();
+        let second = rt.text_entry_request().unwrap();
         assert_eq!(&*second, "B");
-        assert!(!state.complete_text_entry(&first, Some("late"))?);
-        assert!(state.complete_text_entry(&second, Some("あ"))?);
-        assert!(!state.complete_text_entry(&second, None)?);
+        assert!(!rt.complete_text_entry(&first, Some("late"))?);
+        assert!(rt.complete_text_entry(&second, Some("あ"))?);
+        assert!(!rt.complete_text_entry(&second, None)?);
 
         rt.send_message(0, caller, [0; 4])?;
-        let state = rt.input_state_mut(input).unwrap();
-        let third = state.text_entry_request().unwrap();
+        let third = rt.text_entry_request().unwrap();
         assert_eq!(&*third, "B");
-        assert!(!state.complete_text_entry(&second, Some("late"))?);
-        assert!(state.complete_text_entry(&third, None)?);
-        assert!(state.text_entry_request().is_none());
+        assert!(!rt.complete_text_entry(&second, Some("late"))?);
+        assert!(rt.complete_text_entry(&third, None)?);
+        assert!(rt.text_entry_request().is_none());
 
         rt.send_message(0, caller, [0; 4])?;
         let vm = rt.object(caller).unwrap().interpreter().unwrap();
@@ -975,13 +965,18 @@ fn game_runtime_boots_the_standard_tasks_and_supplies_the_first_frame_clock() ->
     assert!(runtime.configure_canvas([u32::MAX, 48]).is_err());
     let device = Rc::new(RefCell::new(DeviceState::new([12, 34])));
     runtime.set_input_device(Device(device.clone()))?;
-    let (mut runtime, tasks) = runtime.start_game(b"main")?;
+    let (mut runtime, tasks) = runtime.start_game_with_tasks(b"main")?;
     assert!(runtime.configure_startup(startup, None, None).is_err());
     assert_eq!(device.borrow().pointer_calls, 1);
     let mut pcm = [1.0; 4];
-    runtime.mix_audio_stereo(tasks.sound, 48_000, &mut pcm)?;
+    runtime.mix_audio_stereo(48_000, &mut pcm)?;
     assert_eq!(pcm, [0.0; 4]);
-    assert!(runtime.connect_audio_output(tasks.entry).is_err());
+    assert!(runtime.connect_task_audio_output(tasks.entry).is_err());
+    let mut mixer = runtime.connect_audio_output()?;
+    pcm.fill(1.0);
+    mixer.render(48_000, &mut pcm)?;
+    assert_eq!(pcm, [0.0; 4]);
+    assert!(runtime.mix_audio_stereo(48_000, &mut pcm).is_err());
     for (command, task) in [(34, tasks.input), (35, tasks.sound)] {
         assert_eq!(
             runtime.dispatch_command(

@@ -40,7 +40,7 @@ impl<F: ObjectFactory> Runtime<F> {
     /// do not require confirmation. System properties and menu rebuild requests
     /// stay queued for the host. On error, later requests remain queued; the
     /// failing request is consumed because its effects may already have started.
-    pub fn process_window_requests(
+    pub fn process_window_requests_with_input(
         &mut self,
         input: u32,
         window: &mut dyn WindowServices,

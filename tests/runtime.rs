@@ -501,7 +501,7 @@ fn window_notification_is_deferred_and_one_tick_applies_to_the_calling_task() {
 
             assert!(
                 !runtime
-                    .process_window_requests(0, &mut InertWindow)
+                    .process_window_requests_with_input(0, &mut InertWindow)
                     .unwrap()
             );
             assert!(runtime.pending_window_requests().is_empty());

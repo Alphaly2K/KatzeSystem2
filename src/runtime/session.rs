@@ -1,4 +1,7 @@
-use super::{KcsFactory, ObjectFactory, ProgramLoader, RootObject, Runtime, TaskObject, fes, kind};
+use super::{
+    KcsFactory, ObjectFactory, ProgramLoader, RootObject, Runtime, TaskObject, WindowServices, fes,
+    kind,
+};
 use crate::{
     Error, Result,
     audio::{Mixer, SoundConfig, SoundFactory, SoundGroups, SoundState},
@@ -11,6 +14,7 @@ use crate::{
     resource::XmlDocument,
     settings::SystemSettings,
 };
+use std::sync::Arc;
 
 type FactoryChain<L> = SoundFactory<
     fes::FesFactory<GraphicsFactory<crate::message::MessageFactory<InputFactory<KcsFactory<L>>>>>,
@@ -235,7 +239,12 @@ impl<L: ProgramLoader> GameRuntime<L> {
     /// Register input, sound and the named entry program in engine order.
     /// This consumes the prepared runtime. On error it drops any partially created tasks.
     /// Successful startup leaves the entry program ready for its first update.
-    pub fn start_game(mut self, entry: &[u8]) -> Result<(Self, GameTasks)> {
+    pub fn start_game(self, entry: &[u8]) -> Result<Self> {
+        self.start_game_with_tasks(entry).map(|(game, _)| game)
+    }
+
+    /// Start the game and return the task IDs for diagnostics and script tools.
+    pub fn start_game_with_tasks(mut self, entry: &[u8]) -> Result<(Self, GameTasks)> {
         if self.tree.root_id() != ROOT_TASK
             || self.tree.next_id() != INPUT_TASK
             || self
@@ -256,6 +265,39 @@ impl<L: ProgramLoader> GameRuntime<L> {
                 entry,
             },
         ))
+    }
+
+    /// Transfer PCM consumption to a host mixer. Call after starting the game.
+    pub fn connect_audio_output(&mut self) -> Result<Mixer> {
+        self.connect_task_audio_output(SOUND_TASK)
+    }
+
+    /// Fill a buffer with interleaved stereo `f32` PCM using the game mixer.
+    /// See [`Runtime::mix_task_audio_stereo`] for buffer and timing requirements.
+    pub fn mix_audio_stereo(&mut self, sample_rate: u32, output: &mut [f32]) -> Result<()> {
+        self.mix_task_audio_stereo(SOUND_TASK, sample_rate, output)
+    }
+
+    /// Process pending window requests. Returns true when the host should exit.
+    pub fn process_window_requests(&mut self, window: &mut dyn WindowServices) -> Result<bool> {
+        self.process_window_requests_with_input(INPUT_TASK, window)
+    }
+
+    /// Get a pending text entry request and its initial text, if any. Keep the
+    /// returned handle until submission or cancellation and compare requests by
+    /// identity with [`Arc::ptr_eq`]. The original dialog limits edits to
+    /// 16 UTF-16 units.
+    pub fn text_entry_request(&self) -> Option<Arc<str>> {
+        self.input_state(INPUT_TASK)?.text_entry_request()
+    }
+
+    /// Submit text for this request, or pass `None` to cancel. Returns false
+    /// if the input task has exited or the request is no longer current.
+    pub fn complete_text_entry(&mut self, request: &Arc<str>, text: Option<&str>) -> Result<bool> {
+        match self.input_state_mut(INPUT_TASK) {
+            Some(input) => input.complete_text_entry(request, text),
+            None => Ok(false),
+        }
     }
 }
 
@@ -281,10 +323,10 @@ impl<F: ObjectFactory> Runtime<F> {
         })
     }
 
-    /// Transfer PCM consumption to a mixer owned by the host. For a standard game,
-    /// pass [`GameTasks::sound`]. The mixer can be moved to the host's audio thread.
+    /// Transfer the specified sound task's PCM consumption to a host mixer.
+    /// The mixer can be moved to the host's audio thread.
     /// A sound task can only be connected once, even if the mixer has been dropped.
-    pub fn connect_audio_output(&mut self, task: u32) -> Result<Mixer> {
+    pub fn connect_task_audio_output(&mut self, task: u32) -> Result<Mixer> {
         self.sound_output_state(task)?.connect_output()
     }
 
@@ -293,7 +335,7 @@ impl<F: ObjectFactory> Runtime<F> {
     /// be nonzero; the buffer must contain an even number of samples.
     /// This may wait for decoded data. Returns an error for a missing sound task
     /// or one already connected to a mixer.
-    pub fn mix_audio_stereo(
+    pub fn mix_task_audio_stereo(
         &mut self,
         task: u32,
         sample_rate: u32,
