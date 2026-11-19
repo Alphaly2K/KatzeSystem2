@@ -119,7 +119,7 @@ pub(super) fn call(
     }
     let handle = read::u32_at(arguments, 0)?;
     if handle == 0 {
-        return Ok(if matches!(index, 471 | 472 | 483) {
+        return Ok(if matches!(index, 471 | 472 | 474 | 483) {
             Continue
         } else {
             Value(0)
@@ -127,8 +127,8 @@ pub(super) fn call(
     }
     let count = match index {
         472 => 9,
-        477 | 479 | 483 => 3,
-        480 | 495 => 2,
+        477..=479 | 483 => 3,
+        474 | 480 | 495 => 2,
         _ => 1,
     };
     let args = native::words(arguments, count, vm.pc)?;
@@ -147,14 +147,18 @@ pub(super) fn call(
             Continue
         }
         473 => Value(table.poll(handle, vm.pc)?),
+        474 => {
+            table.opening.select_discard(args[1] as i32);
+            Continue
+        }
         475 => Value(table.seats as u32),
         476 => Value(table.opening.seat),
-        477 | 479 => {
+        477..=479 => {
             let side = (args[1] & 3) as usize;
-            let tiles = if index == 477 {
-                table.opening.wall_side(side)
-            } else {
-                table.opening.hand(side)
+            let tiles = match index {
+                477 => table.opening.wall_side(side),
+                478 => table.opening.discards(side),
+                _ => table.opening.hand(side),
             };
             if !tiles.is_empty() && vm.read(args[2], 1).is_ok() {
                 let bytes: Vec<_> = tiles.iter().copied().flat_map(u32::to_le_bytes).collect();

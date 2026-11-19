@@ -120,3 +120,52 @@ fn mahjong_deals_from_the_rolled_wall_and_preserves_the_dealers_extra_tile() -> 
     assert_eq!(host.random.next_integer(), expected_random);
     Ok(())
 }
+
+#[test]
+fn mahjong_discard_remains_marked_until_the_hand_is_reordered() -> Result<()> {
+    use NativeReturn::{Continue, Value};
+
+    let mut state = State::new(0);
+    let mut host = CoreHost::new(&mut state);
+    let mut vm = Interpreter::new(Program::from_code(&[], vec![0; 256], 32)?, vec![0; 256])?;
+    vm.write(0x8000_0000, &words(&[25_000; 4]))?;
+    let mut call = |index, args: &[u32]| host.call(index, &words(args), &mut vm);
+    let Value(handle) = call(470, &[])? else {
+        panic!("missing Mahjong handle")
+    };
+    assert_eq!(
+        call(472, &[handle, 2, 1, 0, 1, 1, 1, 0, 0x8000_0000])?,
+        Continue
+    );
+    assert_eq!(call(473, &[handle])?, Value(10003));
+    assert_eq!(call(483, &[handle, 1, 4])?, Continue);
+    let mut event = 0;
+    for _ in 0..24 {
+        let Value(value) = call(473, &[handle])? else {
+            panic!("missing Mahjong event")
+        };
+        event = value;
+        if event == 20043 {
+            break;
+        }
+    }
+    assert_eq!(event, 20043);
+    assert_eq!(call(474, &[handle, 14])?, Continue);
+    assert_eq!(call(473, &[handle])?, Value(20043));
+    assert_eq!(call(474, &[handle, 0])?, Continue);
+    assert_eq!(call(473, &[handle])?, Value(20017));
+    assert_eq!(call(473, &[handle])?, Value(20018));
+    assert_eq!(call(480, &[handle, 0])?, Value(1));
+    assert_eq!(call(478, &[handle, 0, 128])?, Value(1));
+    assert_eq!(call(479, &[handle, 0, 144])?, Value(14));
+    assert_eq!(vm.read(128, 4)?.as_ref(), words(&[0x1_0001]));
+    assert_eq!(vm.read(144, 4)?.as_ref(), words(&[0x8000_0001]));
+
+    let mut call = |index, args: &[u32]| host.call(index, &words(args), &mut vm);
+    assert_eq!(call(473, &[handle])?, Value(20007));
+    assert_eq!(call(473, &[handle])?, Value(20008));
+    assert_eq!(call(479, &[handle, 0, 144])?, Value(13));
+    assert_eq!(call(478, &[handle, 0, 128])?, Value(1));
+    assert_eq!(vm.read(144, 4)?.as_ref(), words(&[3]));
+    Ok(())
+}

@@ -1,6 +1,8 @@
 use super::Mahjong;
 use crate::{Error, Result, kcs::random::Stream};
 
+mod turns;
+
 const WALL_SIZE: usize = 136;
 const SIDE_SIZE: usize = WALL_SIZE / 4;
 const TAKEN: u32 = 0x8000_0000;
@@ -13,6 +15,8 @@ pub(super) struct Opening {
     draw_order: [usize; WALL_SIZE],
     next_draw: usize,
     hands: [Vec<u32>; 4],
+    discards: [Vec<u32>; 4],
+    discard_index: usize,
     random: Stream,
 }
 
@@ -26,6 +30,8 @@ impl Default for Opening {
             draw_order: [0; WALL_SIZE],
             next_draw: 0,
             hands: std::array::from_fn(|_| Vec::new()),
+            discards: std::array::from_fn(|_| Vec::new()),
+            discard_index: 0,
             random: Stream::seeded_words(4357),
         }
     }
@@ -62,6 +68,7 @@ impl Opening {
         }
         self.wall_ready = true;
         self.hands.iter_mut().for_each(Vec::clear);
+        self.discards.iter_mut().for_each(Vec::clear);
     }
 
     pub(super) fn roll(&mut self, dealer: u32, first: u32, second: u32) {
@@ -206,7 +213,7 @@ impl Opening {
 impl Mahjong {
     pub(super) fn poll(&mut self, handle: u32, pc: usize) -> Result<u32> {
         let opening = &mut self.opening;
-        let phase = opening.phase;
+        let mut phase = opening.phase;
         let dealer = self.settings.first_dealer;
         let mut packet = vec![phase];
         match phase {
@@ -257,7 +264,10 @@ impl Mahjong {
                 }
                 opening.phase = 20009;
             }
-            _ => return Err(Error::new(pc, format!("麻将牌局事件 {phase} 尚未接入"))),
+            _ => {
+                phase =
+                    opening.poll_turn(&mut packet, self.points, self.remaining, self.seats, pc)?;
+            }
         }
         *self.handles.get_mut(&handle).unwrap() = packet;
         Ok(phase)
