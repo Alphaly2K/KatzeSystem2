@@ -15,6 +15,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 mod audio;
 mod backlog;
+mod bmb;
 mod cst;
 mod debug_window;
 pub use debug_window::{QuizDebugInput, QuizDebugSession};

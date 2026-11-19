@@ -92,13 +92,13 @@ impl TaskObject for Receiver {
         host: &mut dyn Host,
         budget: usize,
     ) -> Result<CommandOutcome> {
-        if matches!(command.code, 36 | 453 | 454 | 516 | 517 | 583..=588) {
+        if matches!(command.code, 36 | 453 | 454 | 516 | 517 | 567..=571 | 583..=588) {
             let name = |bytes: &[u8]| bytes[..bytes.iter().position(|&b| b == 0).unwrap()].to_vec();
             self.events.borrow_mut().push(Event {
                 command: *command,
                 first: if matches!(command.code, 453 | 583) {
                     buffers.data1.as_deref().unwrap().to_vec()
-                } else if matches!(command.code, 36 | 516 | 584..=586 | 588) {
+                } else if matches!(command.code, 36 | 516 | 567 | 568 | 584..=586 | 588) {
                     name(buffers.data1.as_deref().unwrap())
                 } else {
                     Vec::new()
@@ -106,7 +106,11 @@ impl TaskObject for Receiver {
                 second: buffers.data0.as_deref().map(name),
             });
             if let Some(text) = buffers.data1.as_deref_mut() {
-                text[0] = b'Z';
+                if command.code == 568 {
+                    text[..9].copy_from_slice(b"readback\0");
+                } else if command.code != 567 {
+                    text[0] = b'Z';
+                }
             }
             if let Some(text) = buffers.data0.as_deref_mut() {
                 text[0] = b'Z';
@@ -163,6 +167,9 @@ impl katze_system2::kcs::ResourceServices for Resources {
         self.0
             .borrow_mut()
             .push(Resolution(category.to_vec(), name.to_vec()));
+        if category == b"bmb" && name == b"missing" {
+            return Err(Error::new(0, "synthetic resolution miss"));
+        }
         let mut result = category.to_vec();
         result.push(b'/');
         result.extend(name);
@@ -295,6 +302,69 @@ fn export_natives_route_ordered_paths_and_keep_status_results_without_files() ->
                 assert_eq!(resolutions, expected);
             }
         }
+    }
+    Ok(())
+}
+
+#[test]
+fn bmb_wrappers_route_raw_values_and_reuse_the_name_buffer() -> Result<()> {
+    let mut data = vec![0; 128];
+    data[32..44].copy_from_slice(b"\x82\xa0%u[G16]\0xx");
+    data[16..20].copy_from_slice(&7u32.to_le_bytes());
+    data[64..72].copy_from_slice(b"missing\0");
+    let mut code = Vec::new();
+    instruction(&mut code, 0x25, &[0x1357_9bdf]);
+    for (index, args) in [
+        (983, &[0][..]),
+        (985, &[0]),
+        (984, &[7]),
+        (983, &[7, 0x8000_0020]),
+        (984, &[7]),
+        (985, &[7, u32::MAX]),
+        (986, &[7]),
+        (987, &[7]),
+        (984, &[7]),
+        (983, &[7, 64]),
+        (984, &[7]),
+    ] {
+        for &arg in args {
+            instruction(&mut code, 0x25, &[arg]);
+        }
+        instruction(&mut code, 0x2b, &[index, args.len() as u32 * 4]);
+    }
+    code.push(0x3b);
+    let (events, resolutions) = run(&code, &data, 1, 0)?;
+    assert_eq!(
+        resolutions,
+        [
+            Resolution(b"bmb".to_vec(), b"\x82\xa07".to_vec()),
+            Resolution(b"bmb".to_vec(), b"missing".to_vec())
+        ]
+    );
+    let expected = [
+        (568, 0, b"".as_slice()),
+        (567, 0, b"bmb/\x82\xa07"),
+        (568, 0, b"bmb/\x82\xa07"),
+        (569, u32::MAX, b""),
+        (570, 0, b""),
+        (571, 0, b""),
+        (568, 0, b"readback"),
+        (567, 0, b""),
+        (568, 0, b""),
+    ];
+    assert_eq!(events.len(), expected.len());
+    for (event, (code, value, name)) in events.iter().zip(expected) {
+        assert_eq!(
+            event.command,
+            Command {
+                target: 7,
+                sender: 8,
+                code,
+                data: [0, value, 0]
+            }
+        );
+        assert_eq!(event.first, name);
+        assert!(event.second.is_none());
     }
     Ok(())
 }

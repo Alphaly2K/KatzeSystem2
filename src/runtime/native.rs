@@ -78,6 +78,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             }
             RuntimeHandler::DebugWindow => self.debug_window_native(index, arguments, vm),
             RuntimeHandler::Export => self.export_native(index, arguments, vm),
+            RuntimeHandler::Bmb => self.bmb_native(index, arguments, vm),
             RuntimeHandler::SystemTask => self.system_task_native(index, arguments, vm),
             RuntimeHandler::PlatformJob => self.platform_job_native(index, arguments, vm),
             RuntimeHandler::Effect => self.effect_native(index, arguments, vm),

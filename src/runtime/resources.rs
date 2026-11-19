@@ -7,6 +7,7 @@ pub(super) struct Resources {
     pub services: Option<Box<dyn ResourceServices>>,
     pub animation_aliases: Option<super::image_animation::AnimationAliases>,
     pub exports: Option<Box<dyn super::ExportServices>>,
+    pub bmb_buffer: std::rc::Rc<std::cell::RefCell<Vec<u8>>>,
     pub platform_jobs: Option<Box<dyn super::PlatformJobServices>>,
     pub effects: Option<Box<dyn super::EffectServices>>,
     pub fonts: Option<Box<dyn crate::message::FontServices>>,
