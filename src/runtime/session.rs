@@ -6,7 +6,10 @@ use crate::{
     graphics::GraphicsFactory,
     input::InputFactory,
     kcs::Program,
+    language::{LanguageState, StringTableConfig},
     memory::SharedMemory,
+    resource::XmlDocument,
+    settings::SystemSettings,
 };
 
 type FactoryChain<L> = SoundFactory<
@@ -85,6 +88,52 @@ impl<L: ProgramLoader> GameRuntime<L> {
                 },
             }),
         ))
+    }
+
+    /// Apply the engine settings before starting the game. Optional game defaults
+    /// and user settings override the startup document in that order. The caller
+    /// supplies document bytes and separately binds resources and devices.
+    /// Invalid input leaves the current settings unchanged.
+    pub fn configure_startup(
+        &mut self,
+        startup: &[u8],
+        game_defaults: Option<&[u8]>,
+        user_settings: Option<&[u8]>,
+    ) -> Result<()> {
+        if self.tree.next_id() != INPUT_TASK {
+            return Err(Error::new(0, "启动配置必须在创建游戏任务前应用"));
+        }
+        let mut settings = SystemSettings::default();
+        settings.apply_startup_xml(startup)?;
+        if let Some(bytes) = game_defaults {
+            settings.apply_game_xml(bytes)?;
+        }
+        let mut languages = LanguageState::from_xml(startup)?;
+        if let Some(bytes) = user_settings {
+            settings.apply_xml(bytes)?;
+            languages.apply_user_xml(bytes)?;
+        }
+        settings.refresh_sound_volumes();
+
+        let xml = XmlDocument::parse(startup)?;
+        let unicode_text = xml.integer(b"APP/utfmode", 0)?;
+        let message_time_scale = xml.integer(b"GAME/strframe_frame", 0)?;
+        let string_table_config = StringTableConfig::from_xml(startup)?;
+        let mut message_defaults = Default::default();
+        settings.apply_message_defaults(&mut message_defaults);
+
+        self.host.languages = languages;
+        self.host.string_table_config = Some(string_table_config);
+        self.host.unicode_text = unicode_text;
+        self.host.message_time_scale = Some(message_time_scale);
+        self.host.message_defaults = Some(message_defaults);
+        self.host.system_settings = Some(settings);
+        Ok(())
+    }
+
+    /// The effective engine settings, if startup settings have been applied.
+    pub fn system_settings(&self) -> Option<&SystemSettings> {
+        self.host.system_settings.as_ref()
     }
 
     /// Register input, sound and the named entry program in engine order.

@@ -951,9 +951,30 @@ fn game_runtime_boots_the_standard_tasks_and_supplies_the_first_frame_clock() ->
         4,
         external,
     )?;
+    let options = |value| {
+        format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><document><GAME><autoselect>{value}</autoselect></GAME></document>"
+        )
+    };
+    let startup = options(1);
+    let defaults = options(2);
+    let user = options(3);
+    let startup = startup.as_bytes();
+    let defaults = Some(defaults.as_bytes());
+    runtime.configure_startup(startup, defaults, None)?;
+    assert_eq!(runtime.system_settings().unwrap().auto_select, 2);
+    runtime.configure_startup(startup, defaults, Some(user.as_bytes()))?;
+    assert_eq!(runtime.system_settings().unwrap().auto_select, 3);
+    assert!(
+        runtime
+            .configure_startup(startup, None, Some(b"<"))
+            .is_err()
+    );
+    assert_eq!(runtime.system_settings().unwrap().auto_select, 3);
     let device = Rc::new(RefCell::new(DeviceState::new([12, 34])));
     runtime.set_input_device(Device(device.clone()))?;
     let (mut runtime, tasks) = runtime.start_game(b"main")?;
+    assert!(runtime.configure_startup(startup, None, None).is_err());
     assert_eq!(device.borrow().pointer_calls, 1);
     let mut pcm = [1.0; 4];
     runtime.mix_audio_stereo(tasks.sound, 48_000, &mut pcm)?;

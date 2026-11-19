@@ -831,30 +831,22 @@ pub fn build_runtime(
             runtime.host_mut().sound_config_enabled = 1;
         }
     }
-    let mut settings = katze_system2::settings::SystemSettings::default();
-    settings.apply_startup_xml(startup.as_bytes())?;
     let mut platform = katze_system2::settings::PlatformSettings::default();
     platform.apply_startup_xml(startup.as_bytes(), |candidate| candidate)?;
     let defaults = router.resolve(b"config", b"gamedef")?;
-    if let Some(bytes) = router.read(&defaults, ResourceMode::ArchiveFirst)? {
-        settings.apply_game_xml(&bytes)?;
-    }
-    runtime.host_mut().languages =
-        katze_system2::language::LanguageState::from_xml(startup.as_bytes())?;
+    let defaults = router.read(&defaults, ResourceMode::ArchiveFirst)?;
+    runtime.configure_startup(
+        startup.as_bytes(),
+        defaults.as_deref(),
+        user_settings.as_deref(),
+    )?;
     let mut keys = input_keys(startup.as_bytes())?;
     if let Some(bytes) = &user_settings {
         platform.apply_user_xml(bytes, |_| false)?;
-        settings.apply_xml(bytes)?;
-        runtime.host_mut().languages.apply_user_xml(bytes)?;
         keys.apply_user_xml(bytes)?;
     }
-    settings.refresh_sound_volumes();
     runtime.host_mut().configuration_keys = Some(keys);
     runtime.host_mut().platform_settings = Some(platform);
-    runtime.host_mut().string_table_config = Some(
-        katze_system2::language::StringTableConfig::from_xml(startup.as_bytes())?,
-    );
-    runtime.host_mut().unicode_text = startup_xml.integer(b"APP/utfmode", 0)?;
     runtime.set_resources(router);
     runtime.reload_language_tables(katze_system2::language::LanguageTarget::Interface)?;
     if runtime.host().languages.primary_index as usize
@@ -875,10 +867,7 @@ pub fn build_runtime(
     });
     runtime.set_configuration_services(configuration_files);
     runtime.set_system_services(ProbeSystem);
-    let mut message_defaults = Default::default();
-    settings.apply_message_defaults(&mut message_defaults);
-    runtime.host_mut().message_defaults = Some(message_defaults);
-    runtime.host_mut().message_time_scale = Some(startup_xml.integer(b"GAME/strframe_frame", 0)?);
+    let settings = runtime.system_settings().ok_or("缺少启动配置")?;
     let target = if settings.texture_grid.contains(&0) {
         RenderTarget::new(surface)?
     } else {
@@ -894,7 +883,6 @@ pub fn build_runtime(
         target.prepare_tiles(&settings.texture_areas, settings.texture_16bit_row)?;
         target
     };
-    runtime.host_mut().system_settings = Some(settings);
     runtime.host_mut().surface_size = surface;
     *runtime.drawing_mut() = DrawingContext {
         mode: 0,

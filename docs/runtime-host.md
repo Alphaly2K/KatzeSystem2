@@ -12,7 +12,7 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 
 公开 Rust API 从运行实例和宿主能力出发。文档应覆盖实例创建与释放、推进与输入顺序、帧与 PCM 的所有权、请求取消，以及诊断和正常未命中的区别。入口使用明确的请求与结果类型，记录整数单位和坐标约定；任务树、原始命令编号、VM 缓冲区和分派表保留为实现细节或显式的底层工具。现有 Rust 调用方随迁移调整；等 Rust 契约稳定且有非 Rust 宿主接入时，再定义独立版本的 C ABI 和显式释放约定。
 
-标准宿主用 `GameRuntime::with_programs(loader, shared_slots, external)` 创建根任务并配置共享存储。绑定输入、资源和需要的其他服务，设置画布及帧视图，再调用 `start_game(entry)`。该方法消费准备好的实例，返回已启动的实例和 `GameTasks`，输入、声音和入口脚本按引擎顺序登记。缺失的入口名称返回诊断并释放本次实例。
+标准宿主用 `GameRuntime::with_programs(loader, shared_slots, external)` 创建根任务并配置共享存储。启动前可将启动文档、游戏默认值及用户设置的 XML 字节交给 `configure_startup`，依次应用引擎配置；无效文档保留原有状态。绑定输入、资源和需要的其他服务，设置画布及帧视图，再调用 `start_game(entry)`。该方法消费准备好的实例，返回已启动的实例和 `GameTasks`，输入、声音和入口脚本按引擎顺序登记。缺失的入口名称返回诊断并释放本次实例。
 
 调用 `advance(FrameTime { tick, increment, system_time_ms })` 推进一轮。`tick` 为游戏逻辑时钟（通常每秒 60 个单位），`increment` 是本轮传给任务的逻辑增量，`system_time_ms` 为可回绕的系统毫秒计数。先处理上一轮语言请求，再推进媒体和任务；语言刷新失败时保留失败项及后续请求。成功返回 false 表示根任务已退出。宿主在更新后消费绘制和声音输出。需要自定义结构的调用方仍可用 `Runtime::new` 和 `update`。
 
