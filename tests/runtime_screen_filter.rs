@@ -295,17 +295,22 @@ fn render_draw_fades_the_auxiliary_capture_below_the_upper_band() {
         rectangle(&mut runtime, 100, [0., 0.], [8., 6.], 5., 0xff0000ff);
         for now in [0, 2, 4] {
             runtime.update(now, 1).unwrap();
-            let image = pixels(&mut runtime);
-            assert_eq!(image.pixel(1, 1), Some(0xffff0000));
-            assert_eq!(image.pixel(0, 0), Some(0xffffff00));
             assert_eq!(state(&mut runtime, effect), 0x8000_0001);
+            if now == 0 {
+                // Multiple consumers can draw the first frame; the next two updates skip drawing.
+                for _ in 0..4 {
+                    let image = pixels(&mut runtime);
+                    assert_eq!(image.pixel(1, 1), Some(0xffff0000));
+                    assert_eq!(image.pixel(0, 0), Some(0xffffff00));
+                }
+            }
         }
 
         runtime.update(8, 1).unwrap();
         assert_eq!(pixels(&mut runtime).pixel(1, 1), Some(0xbf80007f));
         runtime.update(12, 1).unwrap();
-        assert_eq!(pixels(&mut runtime).pixel(1, 1), Some(0xff0000ff));
         assert_eq!(state(&mut runtime, effect), 0);
+        assert_eq!(pixels(&mut runtime).pixel(1, 1), Some(0xff0000ff));
         runtime.destroy(effect).unwrap();
         assert!(runtime.compositor().auxiliary_targets().is_empty());
 

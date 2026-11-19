@@ -14,7 +14,7 @@ pub(crate) struct RenderDraw {
     now: u32,
     start: u32,
     deadline: u32,
-    frames: i32,
+    startup_frames: u8,
     opacity: u8,
     flagged: bool,
 }
@@ -30,7 +30,7 @@ impl RenderDraw {
             now: 0,
             start: 0,
             deadline: 0,
-            frames: 0,
+            startup_frames: 0,
             opacity: 255,
             flagged: false,
         }
@@ -47,8 +47,7 @@ impl RenderDraw {
         self.far = f32::from_bits(read::u32_at(bytes, 4)?);
         self.duration = read::u32_at(bytes, 8)?;
         if self.active != 0 {
-            self.restart_clock();
-            self.frames = 0;
+            self.restart_fade();
         }
         self.duration = self.duration.max(1);
         Ok(())
@@ -57,9 +56,14 @@ impl RenderDraw {
     fn set_active(&mut self, active: u32) {
         self.active = active;
         if active != 0 {
-            self.restart_clock();
-            self.frames = 0;
+            self.restart_fade();
         }
+    }
+
+    fn restart_fade(&mut self) {
+        self.restart_clock();
+        self.startup_frames = 3;
+        self.opacity = 255;
     }
 
     pub(super) fn background(&self) -> [DrawCommand; 2] {
@@ -73,19 +77,24 @@ impl RenderDraw {
         commands
     }
 
-    pub(super) fn frame(&mut self) -> [DrawCommand; 2] {
-        // 原回调在前三次提交时重新写起止时刻，之后才按任务时钟淡出。
-        if self.frames <= 2 {
+    fn advance(&mut self, now: u32) {
+        self.now = now;
+        if self.active == 0 {
+            return;
+        }
+        // 前三轮重新写起止时刻；脚本等待不能依赖宿主是否取帧。
+        if self.startup_frames != 0 {
+            self.startup_frames -= 1;
             self.restart_clock();
         }
-        if self.active != 0 {
-            let elapsed = self.now.wrapping_sub(self.start).min(self.deadline);
-            self.opacity = 255 - (elapsed.wrapping_mul(255) / self.duration.max(1)).min(255) as u8;
-        }
-        self.frames = self.frames.wrapping_add(1);
+        let elapsed = self.now.wrapping_sub(self.start).min(self.deadline);
+        self.opacity = 255 - (elapsed.wrapping_mul(255) / self.duration.max(1)).min(255) as u8;
         if self.now >= self.deadline {
             self.active = 0;
         }
+    }
+
+    pub(super) fn frame(&self) -> [DrawCommand; 2] {
         let mut commands = screen_commands(self.source.clone(), self.opacity);
         for command in &mut commands {
             for vertex in &mut command.vertices {
@@ -155,8 +164,9 @@ impl TaskObject for RenderDrawObject {
     }
 
     fn update_body(&mut self, host: &mut dyn Host, _: u32, _: usize) -> Result<bool> {
+        let now = self.clock().elapsed();
         if let Some(effect) = compositor(host)?.render_draws.get_mut(&self.id) {
-            effect.now = self.clock().elapsed();
+            effect.advance(now);
         }
         Ok(true)
     }

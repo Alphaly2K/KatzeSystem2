@@ -159,7 +159,7 @@ impl Compositor {
             return Ok(frame);
         }
         if let Some(ScreenEffect::Draw(id)) = self.screen_effect {
-            let effect = self.render_draws.get_mut(&id).unwrap();
+            let effect = self.render_draws.get(&id).unwrap();
             let far = effect.far;
             let mut frame = self
                 .drawables
