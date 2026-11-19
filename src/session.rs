@@ -37,16 +37,29 @@ impl GameRuntime {
         TaskRuntime::prepare(shared_slots, external_bytes).map(Self)
     }
 
-    /// Apply startup settings, then optional game defaults and user overrides.
+    /// Apply engine settings and platform preferences from the supplied XML.
+    /// Returns the game's logical size in pixels, before user window overrides.
+    /// The host chooses actual display modes and may replace the platform settings.
     /// Invalid input leaves the current settings unchanged.
     pub fn configure_startup(
         &mut self,
         startup: &[u8],
         game_defaults: Option<&[u8]>,
         user_settings: Option<&[u8]>,
-    ) -> Result<()> {
+    ) -> Result<[u32; 2]> {
+        let mut platform = PlatformSettings::default();
+        platform.apply_startup_xml(startup, |candidate| candidate)?;
+        let logical_size = platform.window_size.map(u32::from);
+        if logical_size.contains(&0) {
+            return Err(Error::new(0, "启动配置的逻辑尺寸必须非零"));
+        }
+        if let Some(bytes) = user_settings {
+            platform.apply_user_xml(bytes, |_| false)?;
+        }
         self.0
-            .configure_startup(startup, game_defaults, user_settings)
+            .configure_startup(startup, game_defaults, user_settings)?;
+        self.set_platform_settings(platform);
+        Ok(logical_size)
     }
 
     /// Effective startup key bindings, including any user overrides.
@@ -104,6 +117,10 @@ impl GameRuntime {
 
     pub fn set_platform_settings(&mut self, settings: PlatformSettings) {
         self.0.set_platform_settings(settings);
+    }
+
+    pub fn platform_settings(&self) -> Option<&PlatformSettings> {
+        self.0.platform_settings()
     }
 
     pub fn platform_settings_mut(&mut self) -> Option<&mut PlatformSettings> {

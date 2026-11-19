@@ -844,27 +844,17 @@ pub fn build_runtime(
     } else {
         None
     };
-    let mut platform = katze_system2::settings::PlatformSettings::default();
-    platform.apply_startup_xml(startup.as_bytes(), |candidate| candidate)?;
-    let surface = platform.window_size.map(u32::from);
-    if surface.contains(&0) {
-        return Err("启动配置的逻辑尺寸必须非零".into());
-    }
     let defaults = router.resolve(b"config", b"gamedef")?;
     let defaults = router.read(&defaults, ResourceMode::ArchiveFirst)?;
-    runtime.configure_startup(
+    let surface = runtime.configure_startup(
         startup.as_bytes(),
         defaults.as_deref(),
         user_settings.as_deref(),
     )?;
-    if let Some(bytes) = &user_settings {
-        platform.apply_user_xml(bytes, |_| false)?;
-    }
     let keys = input_keys(
         runtime.startup_input_bindings().ok_or("缺少启动按键配置")?,
         user_settings.as_deref(),
     )?;
-    runtime.set_platform_settings(platform);
     runtime.set_game_resources(
         router,
         startup.as_bytes(),

@@ -940,10 +940,30 @@ fn public_session_uses_host_resources_and_delivers_frame_and_pcm() -> Result<()>
     }
 
     let mut game = GameRuntime::prepare(0, 0)?;
+    let startup = br#"<?xml version="1.0" encoding="UTF-8"?><document><SCREEN><width>64</width><height>48</height></SCREEN><GAME><autoselect>1</autoselect></GAME></document>"#;
+    let user = br#"<?xml version="1.0" encoding="UTF-8"?><document><WINDOW><width>256</width><height>192</height><full_width>160</full_width></WINDOW><SOUND><stereo>0</stereo></SOUND></document>"#;
+    let logical_size = game.configure_startup(startup, None, Some(user))?;
+    assert_eq!(logical_size, [64, 48]);
+    let platform = game.platform_settings().unwrap().clone();
+    assert_eq!(platform.window_size, [256, 192]);
+    assert_eq!(platform.fullscreen_size, [64, 48]);
+    assert_eq!(platform.sound_stereo, 0);
+
+    let invalid = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><document><GAME><autoselect>2</autoselect></GAME><TTS><id>{}</id></TTS></document>",
+        "a".repeat(64)
+    );
+    assert!(
+        game.configure_startup(startup, None, Some(invalid.as_bytes()))
+            .is_err()
+    );
+    assert_eq!(game.platform_settings(), Some(&platform));
+    assert_eq!(game.system_settings().unwrap().auto_select, 1);
+
     game.set_resources(Entry);
     let device = Rc::new(RefCell::new(DeviceState::new([12, 34])));
     game.set_input_device(Device(device))?;
-    game.configure_canvas([64, 48])?;
+    game.configure_canvas(logical_size)?;
     let mut game = game.start_game(b"main")?;
     assert_eq!(
         game.advance(FrameTime {

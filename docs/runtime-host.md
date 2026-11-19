@@ -12,9 +12,9 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 
 嵌入时从 `katze_system2::session` 导入 `GameRuntime`、`FrameTime` 和 `FrameOutcome`，从 `katze_system2::host` 导入服务契约及输入、绘制命令、纹理、PCM 和诊断类型。`GameRuntime` 是具体的会话类型。任务树、原始命令编号、VM 缓冲区和分派表在底层 `runtime` 接口中供诊断和工具使用。Rust 契约稳定且有非 Rust 宿主接入时，再定义独立版本的 C ABI 和显式释放约定。
 
-标准宿主用 `GameRuntime::prepare(shared_slots, external_bytes)` 创建根任务和清零后的脚本存储。前者按 32 位值计数，后者按字节计数。启动前可将启动文档、游戏默认值及用户设置的 XML 字节交给 `configure_startup`，依次应用引擎配置；无效文档保留原有状态。绑定输入、资源和需要的其他服务，调用 `configure_canvas([width, height])` 设置逻辑输出尺寸并按游戏配置创建画布，再把启动配置中的脚本名称交给 `start_game(entry)`。该方法消费准备好的实例，返回已启动的实例。入口缺失或解析失败会返回诊断并释放本次实例。
+标准宿主用 `GameRuntime::prepare(shared_slots, external_bytes)` 创建根任务和清零后的脚本存储。前者按 32 位值计数，后者按字节计数。启动前可将启动文档、游戏默认值及用户设置的 XML 字节交给 `configure_startup`，由它应用引擎与平台配置并返回游戏逻辑尺寸；配置无效时保留原有状态。绑定输入、资源和需要的其他服务，调用 `configure_canvas` 设置逻辑输出尺寸并按游戏配置创建画布，再把启动配置中的脚本名称交给 `start_game(entry)`。该方法消费准备好的实例，返回已启动的实例。入口缺失或解析失败会返回诊断并释放本次实例。
 
-`configure_canvas` 同时设置呈现和输入使用的逻辑尺寸。两个示例取启动配置的 `SCREEN/width` 与 `SCREEN/height`。桌面宿主按实际窗口尺寸换算鼠标坐标；离屏宿主的显式回放点击使用逻辑坐标，截图保持逻辑尺寸。
+逻辑尺寸取启动文档的 `SCREEN/width` 和 `SCREEN/height`，用户保存的 `WINDOW` 尺寸仅写入平台配置。运行库保留启动文档的全屏候选尺寸，由宿主根据设备能力决定实际模式；宿主可查询 `platform_settings`，并更新需要由脚本读取的平台字段。`configure_canvas` 同时设置呈现和输入使用的逻辑尺寸。桌面宿主按实际窗口尺寸换算鼠标坐标；离屏宿主的显式回放点击使用逻辑坐标，截图保持逻辑尺寸。
 
 普通 KCS 的入口和后续装载使用已绑定的 `ResourceServices`。运行库按 `kcs` 类别补全名称，以 `ArchiveFirst` 模式读取字节并解析；补丁与归档顺序由资源服务决定。工具可用 `GameRuntime::into_task_runtime` 接续同一个实例，也可直接使用 `runtime::TaskRuntime::with_programs` 提供预解析程序，或用 `TaskRuntime::with_resource_programs` 绑定现有外部存储。`TaskRuntime::start_game_with_tasks(entry)` 可另外取得用于诊断的任务编号。
 

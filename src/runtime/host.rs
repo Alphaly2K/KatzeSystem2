@@ -38,6 +38,10 @@ impl<F: ObjectFactory> Runtime<F> {
         self.host.platform_settings = Some(settings);
     }
 
+    pub fn platform_settings(&self) -> Option<&PlatformSettings> {
+        self.host.platform_settings.as_ref()
+    }
+
     /// Access the effective platform settings for host UI integration.
     pub fn platform_settings_mut(&mut self) -> Option<&mut PlatformSettings> {
         self.host.platform_settings.as_mut()
