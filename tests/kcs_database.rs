@@ -727,6 +727,91 @@ fn quest_progress_round_trips_through_raw_memory_and_resets_distinct_fields() ->
     Ok(())
 }
 
+#[test]
+fn quest_field_queries_preserve_bytes_and_expand_character_parameters() -> Result<()> {
+    let fields: [(&[u8], &[u8], usize); 7] = [
+        (b"TBL", &3u32.to_le_bytes(), 4),
+        (b"TYPE", &0x8765_4321u32.to_le_bytes(), 4),
+        (b"FILE", b"\x82\xa0", 64),
+        (b"QZTBL1", b"first", 32),
+        (b"PT00", b"ba\0\0", 4),
+        (b"CHAR", b"[3,19,3,-2]", 64),
+        (b"CPARAM", b"[-1,77][4,0x10][]", 64),
+    ];
+    let mut plain = (fields.len() as u32).to_le_bytes().to_vec();
+    let mut stride = 0;
+    for (name, _, size) in fields {
+        let mut column = [0; 24];
+        column[..name.len()].copy_from_slice(name);
+        column[20..].copy_from_slice(&(size as u32).to_le_bytes());
+        plain.extend(column);
+        stride += size as u32;
+    }
+    plain.extend(1u32.to_le_bytes());
+    plain.extend(stride.to_le_bytes());
+    for (_, value, size) in fields {
+        plain.extend(value);
+        plain.resize(plain.len() + size - value.len(), 0);
+    }
+
+    let mut state = State::new(0);
+    let mut core = CoreHost::new(&mut state);
+    let mut files = Files(Some(pack(&plain)));
+    let mut host = ResourceHost::new(&mut core, &mut files);
+    let mut vm = Interpreter::new(Program::from_code(&[], data(), 64)?, vec![0xa5; 16])?;
+    let handle = value(call(&mut host, &mut vm, 795, &[32]));
+    let out = 0x8000_0000;
+    assert_eq!(value(call(&mut host, &mut vm, 804, &[handle, 3, out])), 1);
+    assert_eq!(vm.read(out, 4)?.as_ref(), b"\x82\xa0\0\xa5");
+    assert_eq!(
+        value(call(&mut host, &mut vm, 806, &[handle, 3, 3, out])),
+        1
+    );
+    assert_eq!(vm.read(out, 4)?.as_ref(), b"ba\0\xa5");
+    assert_eq!(
+        value(call(&mut host, &mut vm, 806, &[handle, 3, 4, out])),
+        0
+    );
+    assert_eq!(vm.read(out, 4)?.as_ref(), b"ba\0\xa5");
+    assert_eq!(
+        value(call(&mut host, &mut vm, 820, &[handle, 3, 0, out])),
+        1
+    );
+    assert_eq!(vm.read(out, 4)?.as_ref(), 0x8765_4321u32.to_le_bytes());
+    for (group, slot, expected) in [
+        (0, 0, (-2i32) as u32),
+        (0, 2, 19),
+        (0, 3, u32::MAX),
+        (1, 1, 16),
+        (2, 0, u32::MAX),
+    ] {
+        assert_eq!(
+            value(call(&mut host, &mut vm, 825, &[handle, 3, group, slot])),
+            expected
+        );
+    }
+
+    for slot in [1, 3, 19] {
+        call(&mut host, &mut vm, 807, &[handle, slot, 0]);
+    }
+    call(&mut host, &mut vm, 810, &[handle, 3, u32::MAX]);
+    let size = value(call(&mut host, &mut vm, 823, &[handle, 0]));
+    let address = value(call(&mut host, &mut vm, 833, &[size]));
+    for (after_clear, expected) in [(false, [1u32, 2, 2]), (true, [1, 0, 0])] {
+        if after_clear {
+            call(&mut host, &mut vm, 809, &[handle, 3]);
+        }
+        call(&mut host, &mut vm, 823, &[handle, address]);
+        for (slot, expected) in [1, 3, 19].into_iter().zip(expected) {
+            assert_eq!(
+                host.inner.raw_buffer(address + 60 + slot * 28 + 8, 4)?,
+                &expected.to_le_bytes()
+            );
+        }
+    }
+    Ok(())
+}
+
 fn quiz_table(prefix: u8) -> Vec<u8> {
     pack_quiz(
         prefix,

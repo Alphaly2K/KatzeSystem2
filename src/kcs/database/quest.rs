@@ -3,6 +3,7 @@ use crate::kcs::{HostState, Interpreter, NativeReturn, ResourceServices, native,
 use crate::{Error, Result, read, resource::ResourceMode};
 use std::collections::BTreeMap;
 
+mod fields;
 mod save;
 
 const UNASSIGNED: u32 = 0x8000_0000;
@@ -31,6 +32,7 @@ impl Default for Progress {
 
 struct Record {
     row: usize,
+    characters: fields::Characters,
     progress: Progress,
 }
 
@@ -50,10 +52,13 @@ impl QuestTable {
         let mut rows = BTreeMap::new();
         for row in 0..table.len() {
             let id = cell_word(&table, row, b"TBL")? as i32;
-            rows.entry(id).or_insert(Record {
-                row,
-                progress: Progress::default(),
-            });
+            if let std::collections::btree_map::Entry::Vacant(entry) = rows.entry(id) {
+                entry.insert(Record {
+                    row,
+                    characters: fields::Characters::parse(&table, row)?,
+                    progress: Progress::default(),
+                });
+            }
         }
         Ok(Some(Self {
             table,
@@ -67,8 +72,7 @@ impl QuestTable {
     fn position(&self, id: i32, mut ordinal: u32) -> Result<u32> {
         if let Some(record) = self.rows.get(&id) {
             for slot in 0..COUNTERS as u8 {
-                let name = [b'P', b'T', b'0' + slot / 10, b'0' + slot % 10];
-                if cell_word(&self.table, record.row, &name)? != 0 {
+                if fields::point(&self.table, record.row, slot)? != 0 {
                     if ordinal == 0 {
                         return Ok(u32::from(slot));
                     }
@@ -175,9 +179,9 @@ pub(in crate::kcs) fn call(
 
     let count = match index {
         796 | 798 | 800 | 821 | 822 | 827 | 828 => 1,
-        797 | 799 | 801 | 808 | 813 | 818 | 819 | 823 | 826 => 2,
-        805 | 807 | 811 | 812 | 817 | 824 => 3,
-        803 => 4,
+        797 | 799 | 801 | 808 | 809 | 813 | 818 | 819 | 823 | 826 => 2,
+        804 | 805 | 807 | 810..=812 | 817 | 824 => 3,
+        803 | 806 | 820 | 825 => 4,
         802 => 5,
         _ => unreachable!(),
     };
@@ -187,7 +191,7 @@ pub(in crate::kcs) fn call(
             return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
         }
         return Ok(match index {
-            798 | 800 | 823 | 824 | 826 => Value(0),
+            798 | 800 | 804 | 806 | 820 | 823..=826 => Value(0),
             805 | 817..=819 => Value(u32::MAX),
             _ => Continue,
         });
@@ -241,6 +245,7 @@ pub(in crate::kcs) fn call(
             table.count_progress(&args, vm)?;
             Continue
         }
+        804 | 806 | 820 => Value(table.read_field(index, &args, vm)?),
         805 => Value(table.position(args[1] as i32, args[2])?),
         807 | 811..=813 => {
             if let Some(slot) = table.counters.get_mut(args[1] as usize) {
@@ -268,6 +273,20 @@ pub(in crate::kcs) fn call(
                 }
             } else if let Some(slot) = table.counters.get_mut(args[1] as usize) {
                 slot[1] = 0;
+            }
+            Continue
+        }
+        809 | 810 => {
+            if let Some(record) = table.rows.get(&(args[1] as i32)) {
+                for &id in &record.characters.ids {
+                    if let Some(slot) = table.counters.get_mut(id as usize) {
+                        slot[1] = if index == 809 {
+                            0
+                        } else {
+                            (slot[1] as i32).wrapping_sub(args[2] as i32).max(0) as u32
+                        };
+                    }
+                }
             }
             Continue
         }
@@ -308,6 +327,14 @@ pub(in crate::kcs) fn call(
             host.quest_tables.get_mut(&handle).unwrap().restore(saved);
             Value(1)
         }
+        825 => Value(
+            table
+                .rows
+                .get(&(args[1] as i32))
+                .and_then(|record| record.characters.parameters.get(args[2] as usize))
+                .and_then(|group| group.get(args[3] as usize))
+                .map_or(u32::MAX, |&value| value as u32),
+        ),
         826 => Value(
             table
                 .rows

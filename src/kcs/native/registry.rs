@@ -93,9 +93,7 @@ pub(super) fn core(index: u32) -> CoreHandler {
             CoreHandler::Storage
         }
         869..=873 | 878 => CoreHandler::Database,
-        796..=803 | 805 | 807 | 808 | 811..=813 | 817..=819 | 821..=824 | 826..=828 => {
-            CoreHandler::QuestTable
-        }
+        796..=813 | 817..=828 => CoreHandler::QuestTable,
         238
         | 242
         | 244..=248
