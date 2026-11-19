@@ -1,4 +1,8 @@
-//! CatSystem2 2.6.1.90 的脚本与图形核心。
+//! Embeddable runtime for CatSystem2 2.6.1.90.
+//!
+//! Start a session with [`runtime::GameRuntime`]. The host supplies resources,
+//! input and clocks, advances the session, and consumes its draw commands and PCM.
+//! Format readers and the lower-level task and script APIs are available separately.
 
 pub mod anm;
 pub mod audio;

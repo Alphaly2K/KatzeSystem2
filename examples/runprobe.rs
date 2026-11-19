@@ -577,8 +577,8 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             }
         }
         if let Some(replay) = &mut replay {
-            if let Some(state) = runtime.sound_mut(sound) {
-                state.mix_stereo(48_000, &mut [0.; 4800])?;
+            if runtime.object(sound).is_some() {
+                runtime.mix_audio_stereo(sound, 48_000, &mut [0.; 4800])?;
             }
             if let Some(state) = runtime.input_state(input) {
                 replay.update(frame, state.regions().records());

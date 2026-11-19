@@ -1,7 +1,4 @@
-use katze_system2::{
-    Error, Result,
-    audio::{Mixer, SoundState},
-};
+use katze_system2::{Error, Result, audio::Mixer};
 use sdl2::audio::{AudioCallback, AudioDevice, AudioSpecDesired};
 use std::sync::{
     Arc, Mutex,
@@ -51,10 +48,9 @@ pub struct Output {
 }
 
 impl Output {
-    pub fn new(sound: &mut SoundState) -> Result<Self> {
+    pub fn new(mixer: Mixer) -> Result<Self> {
         let context = sdl2::init().map_err(|message| Error::new(0, message))?;
         let audio = context.audio().map_err(|message| Error::new(0, message))?;
-        let mixer = sound.connect_output()?;
         let progress = Arc::new(Progress::default());
         let callback_progress = progress.clone();
         let device = audio

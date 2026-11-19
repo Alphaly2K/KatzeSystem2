@@ -82,7 +82,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             entry: task,
         },
     ) = runtime.start_game(b"main")?;
-    let mut audio = audio_output::Output::new(runtime.sound_mut(sound).ok_or("缺少声音状态")?)?;
+    let mut audio = audio_output::Output::new(runtime.connect_audio_output(sound)?)?;
     println!("输入 {input} 声音 {sound}");
     println!("主任务 {task}");
 

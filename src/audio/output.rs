@@ -200,7 +200,9 @@ impl SoundState {
 }
 
 impl Mixer {
-    /// 消费已提交的控制，覆写交错的立体声采样，并发布新的播放进度。
+    /// Apply pending controls, write interleaved left/right `f32` PCM in `[-1, 1]`,
+    /// and report playback progress to the runtime. The rate is in Hz and the
+    /// output must contain an even number of samples. Does not wait for decoded data.
     pub fn render(&mut self, sample_rate: u32, output: &mut [f32]) -> Result<()> {
         for update in self.receiver.try_iter() {
             let Update::Channel {

@@ -1,7 +1,7 @@
 use super::{KcsFactory, ObjectFactory, ProgramLoader, RootObject, Runtime, TaskObject, fes, kind};
 use crate::{
     Error, Result,
-    audio::{SoundFactory, SoundState},
+    audio::{Mixer, SoundFactory, SoundState},
     expression::State,
     graphics::GraphicsFactory,
     input::InputFactory,
@@ -132,8 +132,31 @@ impl<F: ObjectFactory> Runtime<F> {
         self.update(time.tick, time.increment)
     }
 
-    /// Access a task's sound state to consume PCM or connect a separate mixer.
-    pub fn sound_mut(&mut self, task: u32) -> Option<&mut SoundState> {
-        self.object_mut(task)?.audio_state_mut()
+    /// Transfer PCM consumption to a mixer owned by the host. For a standard game,
+    /// pass [`GameTasks::sound`]. The mixer can be moved to the host's audio thread.
+    /// A sound task can only be connected once, even if the mixer has been dropped.
+    pub fn connect_audio_output(&mut self, task: u32) -> Result<Mixer> {
+        self.sound_output_state(task)?.connect_output()
+    }
+
+    /// Overwrite the buffer with interleaved left/right `f32` PCM in `[-1, 1]` and
+    /// advance playback by the supplied frames. The sample rate is in Hz and must
+    /// be nonzero; the buffer must contain an even number of samples.
+    /// This may wait for decoded data. Returns an error for a missing sound task
+    /// or one already connected to a mixer.
+    pub fn mix_audio_stereo(
+        &mut self,
+        task: u32,
+        sample_rate: u32,
+        output: &mut [f32],
+    ) -> Result<()> {
+        self.sound_output_state(task)?
+            .mix_stereo(sample_rate, output)
+    }
+
+    fn sound_output_state(&mut self, task: u32) -> Result<&mut SoundState> {
+        self.object_mut(task)
+            .and_then(|object| object.audio_state_mut())
+            .ok_or_else(|| Error::new(0, format!("任务 {task} 没有声音状态")))
     }
 }

@@ -199,15 +199,7 @@ fn dynamic_groups_keep_first_parameters_and_removal_preserves_playback_progress(
             load_group(&mut runtime, 7, 0, b"audio/tone.ogg").unwrap(),
             5
         );
-        let mut mixer = connected.then(|| {
-            runtime
-                .object_mut(1)
-                .unwrap()
-                .audio_state_mut()
-                .unwrap()
-                .connect_output()
-                .unwrap()
-        });
+        let mut mixer = connected.then(|| runtime.connect_audio_output(1).unwrap());
         let mut start = command(183, 5);
         start.data[1] = 2;
         runtime.dispatch_command(0, start).unwrap();
@@ -218,15 +210,11 @@ fn dynamic_groups_keep_first_parameters_and_removal_preserves_playback_progress(
         assert!(audio(&runtime).channel(5).unwrap().is_playing());
         let mut output = vec![0.0; (1379 * 2 + 4) * 2];
         if let Some(mixer) = &mut mixer {
+            assert!(runtime.connect_audio_output(1).is_err());
+            assert!(runtime.mix_audio_stereo(1, 44_100, &mut output).is_err());
             mixer.render(44_100, &mut output).unwrap();
         } else {
-            runtime
-                .object_mut(1)
-                .unwrap()
-                .audio_state_mut()
-                .unwrap()
-                .mix_stereo(44_100, &mut output)
-                .unwrap();
+            runtime.mix_audio_stereo(1, 44_100, &mut output).unwrap();
         }
         assert_eq!(runtime.dispatch_command(0, command(202, 5)).unwrap(), 2);
         assert_eq!(

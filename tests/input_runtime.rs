@@ -955,7 +955,10 @@ fn game_runtime_boots_the_standard_tasks_and_supplies_the_first_frame_clock() ->
     runtime.set_input_device(Device(device.clone()))?;
     let (mut runtime, tasks) = runtime.start_game(b"main")?;
     assert_eq!(device.borrow().pointer_calls, 1);
-    assert!(runtime.sound_mut(tasks.sound).is_some());
+    let mut pcm = [1.0; 4];
+    runtime.mix_audio_stereo(tasks.sound, 48_000, &mut pcm)?;
+    assert_eq!(pcm, [0.0; 4]);
+    assert!(runtime.connect_audio_output(tasks.entry).is_err());
     for (command, task) in [(34, tasks.input), (35, tasks.sound)] {
         assert_eq!(
             runtime.dispatch_command(
