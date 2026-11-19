@@ -14,6 +14,8 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 
 标准宿主用 `GameRuntime::with_programs(loader, shared_slots, external)` 创建根任务并配置共享存储。启动前可将启动文档、游戏默认值及用户设置的 XML 字节交给 `configure_startup`，依次应用引擎配置；无效文档保留原有状态。绑定输入、资源和需要的其他服务，设置画布及帧视图，再调用 `start_game(entry)`。该方法消费准备好的实例，返回已启动的实例和 `GameTasks`，输入、声音和入口脚本按引擎顺序登记。缺失的入口名称返回诊断并释放本次实例。
 
+`startup_input_bindings` 返回已经应用用户覆盖的八十个逻辑键槽。宿主可以用它构造 `DeviceKeys`，并经 `set_input_device` 绑定设备。配置保存优先读取设备当前的绑定；设备未提供绑定时使用启动配置。
+
 `GameRuntime::set_game_resources` 接受资源服务与声音配置文档。运行库应用声音定义和用户覆盖，再按文件前缀选定归档类别；宿主按该类别补全名称并提供读取源。没有定义时使用启动文档里的声音组。自定义声音路由的宿主可以用底层 `Runtime::set_resources`，由其资源服务直接处理 `sound` 类别。
 
 调用 `advance(FrameTime { tick, increment, system_time_ms })` 推进一轮。`tick` 为游戏逻辑时钟（通常每秒 60 个单位），`increment` 是本轮传给任务的逻辑增量，`system_time_ms` 为可回绕的系统毫秒计数。先处理上一轮语言请求，再推进媒体和任务；语言刷新失败时保留失败项及后续请求。成功返回 false 表示根任务已退出。宿主在更新后消费绘制和声音输出。需要自定义结构的调用方仍可用 `Runtime::new` 和 `update`。

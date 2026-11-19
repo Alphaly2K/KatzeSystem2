@@ -450,7 +450,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             .map(|instruction| instruction.offset)
     );
 
-    let mut runtime = build_runtime(
+    let (mut runtime, keys) = build_runtime(
         Game {
             root: game.root,
             router: game.router,
@@ -460,11 +460,6 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         },
         [1280, 720],
     )?;
-    let keys = runtime
-        .host_mut()
-        .configuration_keys
-        .take()
-        .ok_or("缺少启动按键配置")?;
     let mut replay = StoryReplay::from_env();
     runtime.set_input_device(ScriptedDevice::new(keys, replay.as_ref()))?;
     let (

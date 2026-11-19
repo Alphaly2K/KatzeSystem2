@@ -52,7 +52,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let mut clipboard = clipboard_output::Output::default();
     let startup = game.startup.clone();
     let programs = std::mem::take(&mut game.programs);
-    let mut runtime = build_runtime(
+    let (mut runtime, keys) = build_runtime(
         support::Game {
             root: game.root,
             router: game.router,
@@ -67,11 +67,6 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         runtime.set_export_services(export_output::Directory::new(path.into())?);
     }
     let shared = Rc::new(RefCell::new(Shared::default()));
-    let keys = runtime
-        .host_mut()
-        .configuration_keys
-        .take()
-        .ok_or("缺少启动按键配置")?;
     runtime.set_input_device(WindowDevice::new(keys, shared.clone()))?;
     runtime.input_coordinates_mut().logical_size = [1280, 720];
     let (

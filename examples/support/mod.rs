@@ -32,15 +32,18 @@ pub mod image_import;
 
 const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
-pub fn input_keys(config: &[u8]) -> Result<DeviceKeys> {
-    let mut keys = DeviceKeys::from_xml(config)?;
-    if keys.bindings().iter().all(|binding| binding.enabled == 0) {
+fn input_keys(bindings: &[DeviceBinding; 80], user_settings: Option<&[u8]>) -> Result<DeviceKeys> {
+    let mut keys = DeviceKeys::new(*bindings);
+    if bindings.iter().all(|binding| binding.enabled == 0) {
         let mut binding = DeviceBinding {
             enabled: 1,
             ..Default::default()
         };
         binding.codes[ButtonSource::Mouse as usize][0] = 1;
         keys.set_binding(0, binding)?;
+        if let Some(user) = user_settings {
+            keys.apply_user_xml(user)?;
+        }
     }
     Ok(keys)
 }
@@ -763,11 +766,11 @@ fn patch_number(name: &str) -> Option<u32> {
     number.parse().ok()
 }
 
-/// 以探针同一配置链创建运行时；输入设备由调用方随后绑定。
+/// 准备示例运行时及调用方创建输入设备所需的绑定。
 pub fn build_runtime(
     game: Game,
     surface: [u32; 2],
-) -> std::result::Result<GameRuntime<Programs>, Box<dyn std::error::Error>> {
+) -> std::result::Result<(GameRuntime<Programs>, DeviceKeys), Box<dyn std::error::Error>> {
     let Game {
         root,
         mut router,
@@ -811,12 +814,13 @@ pub fn build_runtime(
         defaults.as_deref(),
         user_settings.as_deref(),
     )?;
-    let mut keys = input_keys(startup.as_bytes())?;
     if let Some(bytes) = &user_settings {
         platform.apply_user_xml(bytes, |_| false)?;
-        keys.apply_user_xml(bytes)?;
     }
-    runtime.host_mut().configuration_keys = Some(keys);
+    let keys = input_keys(
+        runtime.startup_input_bindings().ok_or("缺少启动按键配置")?,
+        user_settings.as_deref(),
+    )?;
     runtime.host_mut().platform_settings = Some(platform);
     runtime.set_game_resources(
         router,
@@ -876,5 +880,5 @@ pub fn build_runtime(
         ],
         katze_system2::graphics::TextureFilter::Point,
     );
-    Ok(runtime)
+    Ok((runtime, keys))
 }

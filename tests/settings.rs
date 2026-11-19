@@ -967,6 +967,8 @@ impl katze_system2::input::InputDevice for ConfigurationDevice {
 fn runtime_configuration_save_reads_current_device_bindings_and_preserves_the_vm_stack() {
     use katze_system2::{
         input::{DeviceBinding, DeviceKeys},
+        memory::SharedMemory,
+        runtime::GameRuntime,
         settings::PlatformSettings,
     };
     struct SaveSource;
@@ -988,27 +990,31 @@ fn runtime_configuration_save_reads_current_device_bindings_and_preserves_the_vm
             Ok(Some(Program::from_code(&code, vec![0; 16], 16)?))
         }
     }
+    let startup = br#"<?xml version="1.0" encoding="UTF-8"?><document><KEYCUSTOMIZE>
+        <key00><name>advance</name><keyboard1>32</keyboard1></key00>
+        </KEYCUSTOMIZE></document>"#;
+    let saved = br#"<?xml version="1.0" encoding="UTF-8"?><document>
+        <KEY><kb1_00>13</kb1_00></KEY></document>"#;
     for budget in [1, 4096] {
-        let mut runtime = Runtime::new(
-            0,
-            kind::BASE,
-            Box::new(BaseObject::new()),
-            State::new(0),
-            KcsFactory::new(SaveSource),
-        );
+        let mut runtime =
+            GameRuntime::with_programs(SaveSource, 0, SharedMemory::default()).unwrap();
         runtime.set_budget(budget, 1 << 20);
-        runtime.host_mut().system_settings = Some(SystemSettings::default());
+        runtime
+            .configure_startup(startup, None, Some(saved))
+            .unwrap();
+        assert_eq!(runtime.startup_input_bindings().unwrap()[0].codes[0][0], 13);
         runtime.host_mut().platform_settings = Some(PlatformSettings::default());
-        runtime.host_mut().configuration_keys = Some(DeviceKeys::default());
         let writes = ConfigurationWrites::default();
         runtime.set_configuration_services(ConfigurationSink(writes.clone()));
-        for code in [65, 66] {
-            let mut bindings = [DeviceBinding::default(); 80];
-            bindings[0].enabled = 1;
-            bindings[0].codes[0][0] = code;
-            runtime
-                .set_input_device(ConfigurationDevice(DeviceKeys::new(bindings)))
-                .unwrap();
+        for (device, code) in [(false, 13u8), (true, 65), (true, 66)] {
+            if device {
+                let mut bindings = [DeviceBinding::default(); 80];
+                bindings[0].enabled = 1;
+                bindings[0].codes[0][0] = code;
+                runtime
+                    .set_input_device(ConfigurationDevice(DeviceKeys::new(bindings)))
+                    .unwrap();
+            }
             let task = runtime.create(0, kind::ORDINARY, b"save", b"").unwrap();
             runtime.update(0, 0).unwrap();
             assert_eq!(
@@ -1032,6 +1038,6 @@ fn runtime_configuration_save_reads_current_device_bindings_and_preserves_the_vm
                 u32::from(code)
             );
         }
-        assert_eq!(writes.borrow().len(), 2);
+        assert_eq!(writes.borrow().len(), 3);
     }
 }

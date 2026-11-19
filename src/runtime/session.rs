@@ -4,7 +4,7 @@ use crate::{
     audio::{Mixer, SoundConfig, SoundFactory, SoundGroups, SoundState},
     expression::State,
     graphics::GraphicsFactory,
-    input::InputFactory,
+    input::{DeviceBinding, DeviceKeys, InputFactory},
     kcs::{CachedResources, Program, ResourceServices},
     language::{LanguageState, StringTableConfig},
     memory::SharedMemory,
@@ -90,9 +90,10 @@ impl<L: ProgramLoader> GameRuntime<L> {
         ))
     }
 
-    /// Apply the engine settings before starting the game. Optional game defaults
-    /// and user settings override the startup document in that order. The caller
-    /// supplies document bytes and separately binds resources and devices.
+    /// Apply engine settings and input bindings before starting the game. Optional
+    /// game defaults override engine settings; user settings override both engine
+    /// settings and input bindings. The caller supplies the document bytes and
+    /// separately binds resources and devices.
     /// Invalid input leaves the current settings unchanged.
     pub fn configure_startup(
         &mut self,
@@ -109,9 +110,11 @@ impl<L: ProgramLoader> GameRuntime<L> {
             settings.apply_game_xml(bytes)?;
         }
         let mut languages = LanguageState::from_xml(startup)?;
+        let mut keys = DeviceKeys::from_xml(startup)?;
         if let Some(bytes) = user_settings {
             settings.apply_xml(bytes)?;
             languages.apply_user_xml(bytes)?;
+            keys.apply_user_xml(bytes)?;
         }
         settings.refresh_sound_volumes();
 
@@ -128,7 +131,18 @@ impl<L: ProgramLoader> GameRuntime<L> {
         self.host.message_time_scale = Some(message_time_scale);
         self.host.message_defaults = Some(message_defaults);
         self.host.system_settings = Some(settings);
+        self.host.configuration_keys = Some(keys);
         Ok(())
+    }
+
+    /// Startup bindings with user overrides applied. Pass these to the input
+    /// device when constructing it. Saving prefers the attached device's current
+    /// bindings when available and otherwise uses these bindings.
+    pub fn startup_input_bindings(&self) -> Option<&[DeviceBinding; 80]> {
+        self.host
+            .configuration_keys
+            .as_ref()
+            .map(DeviceKeys::bindings)
     }
 
     /// The effective engine settings, if startup settings have been applied.
