@@ -1,5 +1,5 @@
 #[allow(dead_code)]
-#[path = "../examples/support/window_input.rs"]
+#[path = "../src/support/window_input.rs"]
 mod window_input;
 
 use katze_system2::{

@@ -1,0 +1,26 @@
+[package]
+name = "katze-desktop"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.87"
+license = "LGPL-2.1-only"
+publish = false
+
+[[bin]]
+name = "window_startup"
+path = "src/window_startup.rs"
+
+[[bin]]
+name = "metal_check"
+path = "src/metal_check.rs"
+
+[dependencies]
+katze-system2 = { path = "../.." }
+blowfish = "0.9.1"
+encoding_rs = "0.8.35"
+chrono = { version = "=0.4.42", default-features = false, features = ["clock"] }
+fontdb = { version = "=0.23.0", default-features = false, features = ["fs", "fontconfig"] }
+sdl2 = { version = "=0.38.0", default-features = false, features = ["bundled", "static-link"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+metal = "=0.28.0"

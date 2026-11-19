@@ -1,4 +1,4 @@
-//! 显式硬件核对：cargo run --release --example metal_check。
+//! 显式硬件核对：cargo run --release -p katze-desktop --bin metal_check。
 //! 需要 macOS Metal 设备；合成纹理与软件帧对照，不纳入默认测试发现。
 
 #[cfg(target_os = "macos")]

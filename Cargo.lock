@@ -364,6 +364,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "katze-desktop"
+version = "0.1.0"
+dependencies = [
+ "blowfish",
+ "chrono",
+ "encoding_rs",
+ "fontdb",
+ "katze-system2",
+ "metal",
+ "sdl2",
+]
+
+[[package]]
 name = "katze-script"
 version = "0.1.0"
 dependencies = [
@@ -385,10 +398,8 @@ dependencies = [
  "jpeg-decoder",
  "jpeg-encoder",
  "lewton",
- "metal",
  "png",
  "roxmltree",
- "sdl2",
  "ttf-parser 0.25.1",
 ]
 

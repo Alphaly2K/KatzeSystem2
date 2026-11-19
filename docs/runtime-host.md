@@ -14,7 +14,7 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 
 标准宿主用 `GameRuntime::with_programs(loader, shared_slots, external)` 创建根任务并配置共享存储。启动前可将启动文档、游戏默认值及用户设置的 XML 字节交给 `configure_startup`，依次应用引擎配置；无效文档保留原有状态。绑定输入、资源和需要的其他服务，设置画布及帧视图，再调用 `start_game(entry)`。该方法消费准备好的实例，返回已启动的实例和 `GameTasks`，输入、声音和入口脚本按引擎顺序登记。缺失的入口名称返回诊断并释放本次实例。
 
-`startup_input_bindings` 返回已经应用用户覆盖的八十个逻辑键槽。宿主可以用它构造 `DeviceKeys`，并经 `set_input_device` 绑定设备。配置保存优先读取设备当前的绑定；设备未提供绑定时使用启动配置。
+标准会话在推进前必须通过 `set_input_device` 绑定 `InputDevice`。离屏宿主可提供只返回空闲状态的内存设备。`startup_input_bindings` 返回已经应用用户覆盖的八十个逻辑键槽，宿主可以用它构造 `DeviceKeys`。配置保存优先读取设备当前的绑定；设备未提供绑定时使用启动配置。
 
 `GameRuntime::set_game_resources` 接受资源服务与声音配置文档。运行库应用声音定义和用户覆盖，再按文件前缀选定归档类别；宿主按该类别补全名称并提供读取源。没有定义时使用启动文档里的声音组。自定义声音路由的宿主可以用底层 `Runtime::set_resources`，由其资源服务直接处理 `sound` 类别。
 
@@ -32,7 +32,7 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 
 `set_diagnostic_trace` 为当前实例启用指定类别的诊断，例如输入、任务消息及 FES。回调在推进过程中同步收到类别和借用的格式化参数；如需保留请在回调中转成自有字符串。诊断文字可随版本变化，按编号统计 native 调用应使用结构化的 `set_native_trace`。传入 `None` 关闭探针。
 
-默认工作区包 `katze-system2` 发布为库；脚本检查工具是单独的仓库内包，用 `cargo run -p katze-script -- ...` 执行。离屏宿主入口是 `cargo run --release --example runprobe -- "$GAME_DIR"`。
+默认工作区包 `katze-system2` 发布为库。离屏宿主入口是 `cargo run --release --example runprobe -- "$GAME_DIR"`。脚本检查工具和桌面宿主是单独的仓库内包，分别通过 `cargo run -p katze-script -- ...` 和 `cargo run -p katze-desktop --bin window_startup -- "$GAME_DIR"` 执行。桌面输入的合成验证用 `cargo test -p katze-desktop --test window_host`。
 
 迁移按下列顺序进行：
 
@@ -41,4 +41,4 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 3. 为已有系统路由明确请求、返回与取消的对应关系。同步查询保持同步；需要宿主等待的操作沿用任务推进和轮询。社交发帖协议随[兼容项](compatibility-gaps.md)延期。诊断信息通过公开入口交给宿主。编解码和计算路径的线程、时钟及工具链要求单独检查，在宿主确有需要时提供相应构建路径。
 4. `runprobe` 负责本地资源和隔离存档，消费绘制列表和内存 PCM。桌面窗口和设备输出使用独立的可选示例适配。用内存宿主回归验证公开 API，再用 `runprobe` 验证两款游戏的剧情、存档与媒体行为。
 
-发布检查应覆盖不构建示例的独立库、无设备依赖的正常依赖树、内存宿主用例及原有的离屏流程。Metal、SDL、系统字体发现和当地时间依赖仅由示例宿主构建。
+发布检查覆盖独立库构建、正常及构建依赖树、内存宿主用例和原有离屏流程。SDL 和 Metal 仅由桌面宿主构建。`runprobe` 仍使用系统字体发现及当地时间服务；这两项是运行库的开发依赖，不会进入外部宿主的依赖树。

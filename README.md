@@ -16,6 +16,8 @@ cargo run --locked -p katze-script -- native-calls ordinary scripts/
 
 `native-calls` 按指定宿主表批量统计 KCS 调用编号、参数字节数和调用点数量。
 
+桌面宿主单独构建：`cargo run --locked --release -p katze-desktop --bin window_startup -- "$GAME_DIR"`。
+
 [嵌入运行库](docs/runtime-host.md) · [脚本参考](docs/README.md) · [接口使用与实现范围](docs/api.md) · [阶段进展](GOAL.md) · [依赖许可证](THIRD_PARTY.md)
 
 项目采用 [LGPL-2.1](LICENSE)。

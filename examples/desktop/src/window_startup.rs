@@ -1,6 +1,6 @@
 //! 以本机游戏目录打开桌面窗口，按帧驱动启动链并把键鼠输入桥接给输入任务。
 //!
-//! 用法：`cargo run --release --example window_startup -- <游戏目录>`。
+//! 用法：`cargo run --release -p katze-desktop --bin window_startup -- <游戏目录>`。
 //! macOS 默认使用 Metal；KATZE_WINDOW_RENDERER=software 选择软件绘制。
 //! KATZE_EXPORT_ROOT 可指定接收游戏导出文件的现有目录。
 //! KATZE_IMPORT_FILE 可预选游戏图片导入任务使用的文件。
@@ -15,6 +15,7 @@ mod export_output;
 #[cfg(target_os = "macos")]
 #[path = "support/metal_output.rs"]
 mod metal_output;
+#[path = "../../support/mod.rs"]
 mod support;
 #[path = "support/system_output.rs"]
 mod system_output;
