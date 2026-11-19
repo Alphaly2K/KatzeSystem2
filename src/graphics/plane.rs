@@ -338,12 +338,15 @@ impl PlaneObject {
         let input = self.input_task(host)?;
         if self.input_configured {
             let (rect, _) = self.input_geometry(host)?;
-            if std::env::var_os("KATZE_TRACE_NATIVE").is_some() {
-                eprintln!(
-                    "[plane-input-refresh] id={} rect={:?} size={:?} offset={:?}",
-                    self.id, rect, self.size, self.offset
-                );
-            }
+            crate::runtime::trace_detail!(
+                host.diagnostic_trace(),
+                NativeDetail,
+                "[plane-input-refresh] id={} rect={:?} size={:?} offset={:?}",
+                self.id,
+                rect,
+                self.size,
+                self.offset
+            );
             let mut buffer = [0; 16];
             write_words(Some(&mut buffer), &rect.map(|value| value as u32))?;
             self.send_command(
@@ -390,12 +393,15 @@ impl PlaneObject {
                 },
                 host,
             )?;
-            if std::env::var_os("KATZE_TRACE_NATIVE").is_some() {
-                eprintln!(
-                    "[plane-input] id={} rect={:?} size={:?} offset={:?}",
-                    self.id, rect, self.size, self.offset
-                );
-            }
+            crate::runtime::trace_detail!(
+                host.diagnostic_trace(),
+                NativeDetail,
+                "[plane-input] id={} rect={:?} size={:?} offset={:?}",
+                self.id,
+                rect,
+                self.size,
+                self.offset
+            );
             self.event_target = command.sender;
             self.event_response = 1;
         }
@@ -667,12 +673,16 @@ impl TaskObject for PlaneObject {
                     self.offset = [0.0; 2];
                     self.size =
                         std::array::from_fn(|i| arithmetic(2, bounds[1][i], bounds[0][i]).abs());
-                    if std::env::var_os("KATZE_TRACE_NATIVE").is_some() {
-                        eprintln!(
-                            "[plane41] id={} code={} flags={} bounds={:?} size={:?}",
-                            id, command.code, self.creation_flags, bounds, self.size
-                        );
-                    }
+                    crate::runtime::trace_detail!(
+                        host.diagnostic_trace(),
+                        NativeDetail,
+                        "[plane41] id={} code={} flags={} bounds={:?} size={:?}",
+                        id,
+                        command.code,
+                        self.creation_flags,
+                        bounds,
+                        self.size
+                    );
                     self.shape_kind = match command.code {
                         41 => 1,
                         42 => 2,

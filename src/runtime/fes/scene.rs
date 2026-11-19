@@ -1,7 +1,7 @@
 use super::{ObjectState, Objects};
 use crate::{
     Error, HandleAllocator, Result, Step, fes,
-    runtime::{ObjectFactory, Runtime, Store},
+    runtime::{ObjectFactory, Runtime, Store, TraceCategory, trace_detail},
 };
 use std::collections::{BTreeMap, VecDeque};
 
@@ -1090,19 +1090,15 @@ impl<F: ObjectFactory> Store<'_, F> {
         event: u32,
         host_boundary: bool,
     ) -> Result<Option<bool>> {
-        if std::env::var_os("KATZE_TRACE_FES").is_some() {
-            eprintln!(
-                "[fes-event] owner={} target={:?} event={} boundary={}",
-                owner,
-                target.map(|t| format!(
-                    "{}[{}]",
-                    String::from_utf8_lossy(t.name.as_bytes()),
-                    t.bank
-                )),
-                event,
-                host_boundary
-            );
-        }
+        trace_detail!(
+            self.resources.diagnostic_trace.as_ref(),
+            Fes,
+            "[fes-event] owner={} target={:?} event={} boundary={}",
+            owner,
+            target.map(|t| format!("{}[{}]", String::from_utf8_lossy(t.name.as_bytes()), t.bank)),
+            event,
+            host_boundary
+        );
         if event > 21 {
             return Err(Error::new(0, "FES 输入事件编号无效"));
         }
@@ -1187,15 +1183,23 @@ impl<F: ObjectFactory> Store<'_, F> {
 
     pub(super) fn run_fes_handler(&mut self, owner: u32, scene: &mut Scene) -> Result<bool> {
         for _ in 0..self.budget.max(1) {
-            if std::env::var_os("KATZE_TRACE_FES").is_some() {
+            if let Some(trace) = self
+                .resources
+                .diagnostic_trace
+                .as_ref()
+                .filter(|trace| trace.enabled(TraceCategory::Fes))
+            {
                 let (pending, block, pc) = scene.interpreter.pending_pc();
-                eprintln!(
-                    "[fes-run] owner={} pending={} block={} name={} pc={}",
-                    scene.owner.unwrap_or(u32::MAX),
-                    pending,
-                    block,
-                    scene.interpreter.current_block_name().unwrap_or("?"),
-                    pc
+                trace.write(
+                    TraceCategory::Fes,
+                    format_args!(
+                        "[fes-run] owner={} pending={} block={} name={} pc={}",
+                        scene.owner.unwrap_or(u32::MAX),
+                        pending,
+                        block,
+                        scene.interpreter.current_block_name().unwrap_or("?"),
+                        pc
+                    ),
                 );
             }
             match scene.interpreter.run(self.numbers, 1)? {
@@ -1668,16 +1672,24 @@ impl<F: ObjectFactory> Store<'_, F> {
                 }
                 continue;
             }
-            if std::env::var_os("KATZE_TRACE_FES_STEP").is_some() {
+            if let Some(trace) = self
+                .resources
+                .diagnostic_trace
+                .as_ref()
+                .filter(|trace| trace.enabled(TraceCategory::FesStep))
+            {
                 let (pending, block, pc) = scene.interpreter.pending_pc();
-                eprintln!(
-                    "[fes-step] id={} pending={} block={} name={} pc={} deadline={:?}",
-                    owner,
-                    pending,
-                    block,
-                    scene.interpreter.current_block_name().unwrap_or("?"),
-                    pc,
-                    scene.deadline
+                trace.write(
+                    TraceCategory::FesStep,
+                    format_args!(
+                        "[fes-step] id={} pending={} block={} name={} pc={} deadline={:?}",
+                        owner,
+                        pending,
+                        block,
+                        scene.interpreter.current_block_name().unwrap_or("?"),
+                        pc,
+                        scene.deadline
+                    ),
                 );
             }
             match scene.interpreter.run(self.numbers, 1)? {

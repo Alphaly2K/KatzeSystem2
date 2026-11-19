@@ -20,7 +20,10 @@ mod cst;
 mod debug_window;
 pub use debug_window::{QuizDebugInput, QuizDebugSession};
 mod diagnostics;
-pub use diagnostics::{NativeInvocation, NativeTraceEvent, ScriptMessages};
+pub(crate) use diagnostics::trace_detail;
+pub use diagnostics::{
+    DiagnosticTrace, NativeInvocation, NativeTraceEvent, ScriptMessages, TraceCategory,
+};
 mod emocon;
 mod export;
 pub use export::{ExportDestination, ExportServices};
@@ -1799,14 +1802,14 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
     }
 
     fn message_target(&mut self, target: u32, message: &mut [u32; 4]) -> Result<u32> {
-        if std::env::var_os("KATZE_TRACE_MSG").is_some() {
-            eprintln!(
-                "[msg] sender={} target={} data={:?}",
-                self.host.task_id,
-                target,
-                [message[1], message[2], message[3]]
-            );
-        }
+        trace_detail!(
+            self.resources.diagnostic_trace.as_ref(),
+            Message,
+            "[msg] sender={} target={} data={:?}",
+            self.host.task_id,
+            target,
+            &message[1..]
+        );
         if !self.require_reachable(target) {
             return Err(Error::new(0, "任务消息目标不存在"));
         }
@@ -2130,6 +2133,10 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
 }
 
 impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
+    fn diagnostic_trace(&self) -> Option<&DiagnosticTrace> {
+        self.resources.diagnostic_trace.as_ref()
+    }
+
     fn register_file_source(&mut self, source: crate::io::SharedSource) -> Result<u32> {
         self.host.register_file_source(source)
     }

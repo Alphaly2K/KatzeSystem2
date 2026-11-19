@@ -184,12 +184,6 @@ impl Events {
             let region_id = region.id();
             let command = packet(sender, region_id, event);
             let outcome = route(self, regions, command)?;
-            if std::env::var_os("KATZE_TRACE_INPUT").is_some() {
-                eprintln!(
-                    "[input-repeat] region={} key={} mask={:08x} point={:?} outcome={:?}",
-                    region_id, event.key, event.mask, event.point, outcome
-                );
-            }
             return Ok(outcome == Some(0));
         }
         if event.pressed != 0 {
@@ -216,12 +210,6 @@ impl Events {
             let region_id = region.id();
             let command = packet(sender, region_id, event);
             let outcome = route(self, regions, command)?;
-            if std::env::var_os("KATZE_TRACE_INPUT").is_some() {
-                eprintln!(
-                    "[input-key] region={} key={} mask={:08x} point={:?} pressed={} outcome={:?}",
-                    region_id, event.key, event.mask, event.point, event.pressed, outcome
-                );
-            }
             if outcome == Some(0) {
                 self.captures[key] = if event.pressed != 0 {
                     regions.current(index, instance)?.1.id()

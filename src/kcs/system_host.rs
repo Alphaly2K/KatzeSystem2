@@ -105,6 +105,10 @@ impl<'a, H: Host, S: SystemServices> SystemHost<'a, H, S> {
 }
 
 impl<H: Host, S: SystemServices> Host for SystemHost<'_, H, S> {
+    fn diagnostic_trace(&self) -> Option<&crate::runtime::DiagnosticTrace> {
+        self.inner.diagnostic_trace()
+    }
+
     fn register_file_source(&mut self, source: crate::io::SharedSource) -> Result<u32> {
         self.inner.register_file_source(source)
     }

@@ -65,9 +65,12 @@ impl TaskObject for InputObject {
         _increment: u32,
         _budget: usize,
     ) -> Result<bool> {
-        if std::env::var_os("KATZE_TRACE_INPUT").is_some() {
-            eprintln!("[input-body] id={}", self.id);
-        }
+        crate::runtime::trace_detail!(
+            host.diagnostic_trace(),
+            Input,
+            "[input-body] id={}",
+            self.id
+        );
         self.state.update_device(self.id, host)?;
         Ok(true)
     }

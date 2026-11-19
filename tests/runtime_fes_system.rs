@@ -2,8 +2,12 @@ use katze_system2::{
     Error, Result,
     expression::State,
     fes::Program,
-    runtime::{BaseObject, ObjectFactory, Runtime, TaskObject, fes::Scene, kind},
+    runtime::{
+        BaseObject, DiagnosticTrace, ObjectFactory, Runtime, TaskObject, TraceCategory, fes::Scene,
+        kind,
+    },
 };
+use std::{cell::RefCell, rc::Rc};
 
 struct NoTasks;
 impl ObjectFactory for NoTasks {
@@ -58,6 +62,41 @@ fn event(runtime: &mut Runtime<NoTasks>, scene: &mut Scene) -> bool {
         }
     }
     panic!("合成对象事件没有完成");
+}
+
+#[test]
+fn detailed_probes_are_balanced_with_each_runtime_and_filter_categories() {
+    let source = "#DEFINE\nBASE button\n#START\nwait 77\n#button.PUSH_L\ndbgstr pushed\n";
+    let (mut traced, mut scene) = setup(source, 1);
+    let (mut quiet, mut quiet_scene) = setup(source, 1);
+    let captured = Rc::new(RefCell::new(Vec::new()));
+    let writer = captured.clone();
+    traced.set_diagnostic_trace(Some(DiagnosticTrace::new(
+        &[TraceCategory::Fes],
+        move |category, text| {
+            writer.borrow_mut().push((category, text.to_string()));
+        },
+    )));
+    update(&mut traced, &mut scene, 100);
+    assert!(event(&mut traced, &mut scene));
+    let count = captured.borrow().len();
+    assert!(
+        captured
+            .borrow()
+            .iter()
+            .any(|(_, text)| text.starts_with("[fes-event]"))
+    );
+    assert!(
+        captured
+            .borrow()
+            .iter()
+            .all(|(category, _)| *category == TraceCategory::Fes)
+    );
+    update(&mut quiet, &mut quiet_scene, 100);
+    assert!(event(&mut quiet, &mut quiet_scene));
+    traced.set_diagnostic_trace(None);
+    assert!(event(&mut traced, &mut scene));
+    assert_eq!(captured.borrow().len(), count);
 }
 
 #[test]

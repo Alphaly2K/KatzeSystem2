@@ -184,11 +184,11 @@ impl<F: ObjectFactory> Store<'_, F> {
                     .raw
                     .release_owned_image(owner, object.raw_image)?;
                 object.raw_image = raw;
-                if std::env::var_os("KATZE_TRACE_NATIVE").is_some() {
-                    eprintln!(
-                        "[img-raw] object={object_name} handle={handle} name={loaded_name:?} raw={raw}"
-                    );
-                }
+                crate::runtime::trace_detail!(
+                    self.resources.diagnostic_trace.as_ref(),
+                    NativeDetail,
+                    "[img-raw] object={object_name} handle={handle} name={loaded_name:?} raw={raw}"
+                );
                 if raw != 0
                     && matches!(object.state, ObjectState::Button(_))
                     && object.state.image().unwrap().size.contains(&-1)

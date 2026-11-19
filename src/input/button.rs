@@ -132,12 +132,15 @@ impl ButtonObject {
             code,
             data,
         };
-        if std::env::var_os("KATZE_TRACE_INPUT").is_some() {
-            eprintln!(
-                "[button-notify] button={} target={} code={} data={:?}",
-                self.id, self.target, code, data
-            );
-        }
+        crate::runtime::trace_detail!(
+            host.diagnostic_trace(),
+            Input,
+            "[button-notify] button={} target={} code={} data={:?}",
+            self.id,
+            self.target,
+            code,
+            data
+        );
         host.dispatch_button_event(self, command, buffers, &mut 0)?;
         Ok(())
     }
@@ -439,12 +442,14 @@ impl TaskObject for ButtonObject {
                 self.parameter = values[5];
                 self.response = 1;
                 self.rectangle = rect;
-                if std::env::var_os("KATZE_TRACE_NATIVE").is_some() {
-                    eprintln!(
-                        "[button-input] id={} rect={:?} full={}",
-                        self.id, rect, self.full_screen
-                    );
-                }
+                crate::runtime::trace_detail!(
+                    host.diagnostic_trace(),
+                    NativeDetail,
+                    "[button-input] id={} rect={:?} full={}",
+                    self.id,
+                    rect,
+                    self.full_screen
+                );
                 *output = 1;
             }
             91 => {

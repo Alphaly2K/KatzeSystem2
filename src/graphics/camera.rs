@@ -163,12 +163,19 @@ impl TaskObject for Camera2DObject {
             } else {
                 None
             };
+            let trace = host.diagnostic_trace().cloned();
             let drawings = host
                 .drawables()
                 .ok_or_else(|| Error::new(0, "宿主未提供绘图对象服务"))?;
             if let Some(camera) = self.camera.and_then(|id| drawings.camera_mut(id)) {
-                if std::env::var_os("KATZE_TRACE_NATIVE").is_some() && command.code == 51 {
-                    eprintln!("[camera] id={:?} offset={:?}", self.camera, vector);
+                if command.code == 51 {
+                    crate::runtime::trace_detail!(
+                        trace.as_ref(),
+                        NativeDetail,
+                        "[camera] id={:?} offset={:?}",
+                        self.camera,
+                        vector
+                    );
                 }
                 match command.code {
                     51 => camera.offset = vector.unwrap(),

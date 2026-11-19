@@ -278,6 +278,11 @@ pub struct TaskEffects {
 }
 
 pub trait Host {
+    /// Optional probe output for objects executing through this host.
+    fn diagnostic_trace(&self) -> Option<&crate::runtime::DiagnosticTrace> {
+        None
+    }
+
     /// 登记从资源服务打开的独立文件游标，由普通 30 读取、32 释放。
     fn register_file_source(&mut self, _source: crate::io::SharedSource) -> Result<u32> {
         Err(Error::new(0, "宿主未提供文件句柄存储"))
@@ -636,6 +641,10 @@ pub trait Host {
 }
 
 impl<T: Host + ?Sized> Host for &mut T {
+    fn diagnostic_trace(&self) -> Option<&crate::runtime::DiagnosticTrace> {
+        (**self).diagnostic_trace()
+    }
+
     fn register_file_source(&mut self, source: crate::io::SharedSource) -> Result<u32> {
         (**self).register_file_source(source)
     }

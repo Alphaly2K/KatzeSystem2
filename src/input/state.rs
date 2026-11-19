@@ -297,13 +297,23 @@ impl InputState {
         let result =
             self.events
                 .dispatch_key_with_state(id, regions, event, |events, regions, command| {
-                    callback.route(
+                    let outcome = callback.route(
                         host,
                         events,
                         regions,
                         command,
                         &mut CommandBuffers::default(),
-                    )
+                    )?;
+                    if event.kind == KeyEventKind::Repeat {
+                        crate::runtime::trace_detail!(host.diagnostic_trace(), Input,
+                            "[input-repeat] region={} key={} mask={:08x} point={:?} outcome={:?}",
+                            command.target, event.key, event.mask, event.point, outcome);
+                    } else {
+                        crate::runtime::trace_detail!(host.diagnostic_trace(), Input,
+                            "[input-key] region={} key={} mask={:08x} point={:?} pressed={} outcome={:?}",
+                            command.target, event.key, event.mask, event.point, event.pressed, outcome);
+                    }
+                    Ok(outcome)
                 });
         self.commands.raw_state = self.events.raw_state();
         result

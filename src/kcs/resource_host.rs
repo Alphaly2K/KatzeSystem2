@@ -355,6 +355,10 @@ impl ResourceState {
 }
 
 impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
+    fn diagnostic_trace(&self) -> Option<&crate::runtime::DiagnosticTrace> {
+        self.inner.diagnostic_trace()
+    }
+
     fn register_file_source(&mut self, source: crate::io::SharedSource) -> Result<u32> {
         self.inner.register_file_source(source)
     }
