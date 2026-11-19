@@ -22,6 +22,7 @@ impl Output {
                 ("KATZE_TRACE_FES", TraceCategory::Fes),
                 ("KATZE_TRACE_FES_BODY", TraceCategory::FesBody),
                 ("KATZE_TRACE_FES_STEP", TraceCategory::FesStep),
+                ("KATZE_TRACE_MOVIE", TraceCategory::Movie),
             ]
             .into_iter()
             .filter_map(|(name, category)| std::env::var_os(name).map(|_| category))

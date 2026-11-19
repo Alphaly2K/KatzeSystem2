@@ -177,9 +177,15 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     .as_mut()
                     .filter(|movie| movie.handle == handle)
                     .ok_or_else(|| Error::new(vm.pc, "电影句柄不存在"))?;
-                movie.player.stop()?;
+                let was_playing = movie.player.stop()?;
                 self.set_movie_audio(None)?;
                 self.resources.movie = None;
+                super::trace_detail!(
+                    self.resources.diagnostic_trace.as_ref(),
+                    Movie,
+                    "[movie] time_ms={} handle={handle} event=release was_playing={was_playing}",
+                    self.host.system_time_ms
+                );
             }
             self.resources.compositor.drawing.enabled = true;
             let input = self.command_target(0, 34, [0; 3])?;
@@ -200,17 +206,37 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         .ok_or_else(|| Error::new(vm.pc, "电影句柄不存在"))?;
         let result = match index {
             266 => {
-                let result = movie.player.play(read::u32_at(arguments, 4)?)?;
+                let count = read::u32_at(arguments, 4)?;
+                let result = movie.player.play(count)?;
                 if result {
                     movie.frame = None;
                     movie.tick = self.host.system_time_ms;
                     if let Some((owner, _)) = movie.owner {
                         self.resources.compositor.drawables.set_image(owner, None);
                     }
+                    if !layer {
+                        super::trace_detail!(
+                            self.resources.diagnostic_trace.as_ref(),
+                            Movie,
+                            "[movie] time_ms={} handle={handle} event=play count={count}",
+                            self.host.system_time_ms
+                        );
+                    }
                 }
                 u32::from(result)
             }
-            267 => u32::from(movie.player.stop()?),
+            267 => {
+                let was_playing = movie.player.stop()?;
+                if !layer {
+                    super::trace_detail!(
+                        self.resources.diagnostic_trace.as_ref(),
+                        Movie,
+                        "[movie] time_ms={} handle={handle} event=stop was_playing={was_playing}",
+                        self.host.system_time_ms
+                    );
+                }
+                u32::from(was_playing)
+            }
             269 => u32::from(movie.player.is_playing()?),
             // 电影沿宿主窗口呈现，现有活动窗口即为影片的前台目标。
             270 => 0,
@@ -379,6 +405,12 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             Ok(Some(movie)) => {
                 let handle = movie.handle;
                 self.resources.movie = Some(movie);
+                super::trace_detail!(
+                    self.resources.diagnostic_trace.as_ref(),
+                    Movie,
+                    "[movie] time_ms={} handle={handle} event=load",
+                    self.host.system_time_ms
+                );
                 Ok(NativeReturn::Value(handle))
             }
             result => {

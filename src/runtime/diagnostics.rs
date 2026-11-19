@@ -10,6 +10,7 @@ pub enum TraceCategory {
     Fes,
     FesBody,
     FesStep,
+    Movie,
 }
 
 type TraceWriter = dyn Fn(TraceCategory, Arguments<'_>);
