@@ -92,13 +92,13 @@ impl TaskObject for Receiver {
         host: &mut dyn Host,
         budget: usize,
     ) -> Result<CommandOutcome> {
-        if matches!(command.code, 453 | 454 | 516 | 517 | 583..=588) {
+        if matches!(command.code, 36 | 453 | 454 | 516 | 517 | 583..=588) {
             let name = |bytes: &[u8]| bytes[..bytes.iter().position(|&b| b == 0).unwrap()].to_vec();
             self.events.borrow_mut().push(Event {
                 command: *command,
                 first: if matches!(command.code, 453 | 583) {
                     buffers.data1.as_deref().unwrap().to_vec()
-                } else if matches!(command.code, 516 | 584..=586 | 588) {
+                } else if matches!(command.code, 36 | 516 | 584..=586 | 588) {
                     name(buffers.data1.as_deref().unwrap())
                 } else {
                     Vec::new()
@@ -589,11 +589,14 @@ fn system_task_natives_route_wide_records_text_and_full_query_results() -> Resul
                     }
                 }
             }
+            instruction(&mut code, 0x25, &[external | 512]);
+            instruction(&mut code, 0x2b, &[208, 4]);
+            instruction(&mut code, 0x26, &[4]);
             code.push(0x3b);
             for budget in [1, 4096] {
                 for reply in [0, 1, 0xabcdef01] {
                     let (events, resolutions) = run(&code, &data, budget, reply)?;
-                    let expected: Vec<_> = [7, 0]
+                    let mut expected: Vec<_> = [7, 0]
                         .into_iter()
                         .flat_map(|target| {
                             [453, 585, 588, 454, 587]
@@ -615,6 +618,16 @@ fn system_task_natives_route_wide_records_text_and_full_query_results() -> Resul
                                 .collect::<Vec<_>>()
                         })
                         .collect();
+                    expected.push(Event {
+                        command: Command {
+                            sender: 8,
+                            target: 0,
+                            code: 36,
+                            data: [0; 3],
+                        },
+                        first: b"body".to_vec(),
+                        second: None,
+                    });
                     assert_eq!(events, expected);
                     assert_eq!(
                         resolutions,

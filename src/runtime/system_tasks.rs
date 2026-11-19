@@ -13,7 +13,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         let count = match index {
             600 => 12,
             1018 => 16,
-            601 | 1022 => 4,
+            208 | 601 | 1022 => 4,
             1019 | 1020 | 1023 => 8,
             1021 if arguments.len() == 4 => 4,
             1021 => 8,
@@ -22,7 +22,30 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         if arguments.len() != count {
             return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
         }
-        let target = read::u32_at(arguments, 0)?;
+        let first = read::u32_at(arguments, 0)?;
+        if index == 208 {
+            let mut text = format_string(vm, first, 0)?;
+            text.truncate(
+                text.iter()
+                    .position(|&byte| byte == 0)
+                    .unwrap_or(text.len()),
+            );
+            if text.len() >= 260 {
+                return Err(Error::new(vm.pc, "根任务文字超过缓冲区容量"));
+            }
+            text.push(0);
+            self.command_target_with_buffers(
+                0,
+                36,
+                [vm.program().control.rotate_left(16), 0, 0],
+                &mut CommandBuffers {
+                    data1: Some(&mut text),
+                    ..Default::default()
+                },
+            )?;
+            return Ok(NativeReturn::Value(0));
+        }
+        let target = first;
         if index == 1018 {
             let mut record = [0; 2048];
             for (offset, field) in [0, 512].into_iter().enumerate() {
