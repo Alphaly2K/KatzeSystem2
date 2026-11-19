@@ -315,6 +315,7 @@ impl<F: ObjectFactory> Store<'_, F> {
         let cache = objects.preloaded_images.clone();
         let object = objects.get(handle).unwrap();
         let file = object.state.image_source().is_some();
+        let simple_image = matches!(object.state, ObjectState::Image(_));
         let window = matches!(object.state, ObjectState::ImageWindow(_));
         let captured = matches!(objects.get(handle).unwrap().state, ObjectState::DifImage(_));
         let state = objects.get_mut(handle).unwrap().state.image_mut().unwrap();
@@ -364,9 +365,14 @@ impl<F: ObjectFactory> Store<'_, F> {
                     self.fes_command(owner, Some(list), 287, [slot, 0, 0], None)?;
                 }
             } else if (file && !window) || slot != u32::MAX {
-                let position = objects.image_position(handle);
+                let local = simple_image && state.coordinate_mode != 0;
+                let position = if local {
+                    state.position
+                } else {
+                    objects.image_position(handle)
+                };
                 let position: [f32; 2] = std::array::from_fn(|i| {
-                    if file {
+                    if file && !local {
                         (plane_offset[i] as f32 + state.base_point[i]) + position[i]
                     } else {
                         position[i] + plane_offset[i] as f32
@@ -390,7 +396,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                     state.scale[1].to_bits(),
                     state.blend as u32,
                     state.display as u32,
-                    0,
+                    state.coordinate_mode as u32,
                     if pixels == 0 && !captured { wrapper } else { 0 },
                 ]
                 .map(u32::to_le_bytes)
@@ -453,6 +459,26 @@ impl<F: ObjectFactory> Store<'_, F> {
 }
 
 impl Objects {
+    pub(super) fn set_image_coordinate_mode(&mut self, handle: u32, mode: i32) -> Result<()> {
+        let state = &self.get(handle).unwrap().state;
+        let Some(image) = state.image() else {
+            return Ok(());
+        };
+        let position = (mode != 0).then(|| {
+            let world = self.button_position(handle).map(integer_position);
+            std::array::from_fn(|axis| {
+                world[axis].wrapping_add(integer_position(image.base_point[axis])) as f32
+            })
+        });
+        let image = self.get_mut(handle).unwrap().state.image_mut().unwrap();
+        image.coordinate_mode = mode;
+        if let Some(position) = position.filter(|position| *position != image.position) {
+            image.position = position;
+            self.invalidate(handle)?;
+        }
+        Ok(())
+    }
+
     pub(super) fn image_position(&self, handle: u32) -> [f32; 2] {
         let mut chain = Vec::new();
         let mut next = Some(handle);

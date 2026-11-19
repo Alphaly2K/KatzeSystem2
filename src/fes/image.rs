@@ -54,6 +54,7 @@ pub struct CImageState {
     pub display: i32,
     pub mask: i32,
     pub button_type: i32,
+    pub coordinate_mode: i32,
     pub filter: crate::graphics::ImageFilter,
     /// 待 DIFIMAGE 更新阶段消费；直接修改模式时也应设置此标记。
     pub filter_pending: bool,
@@ -83,6 +84,7 @@ impl Default for CImageState {
             display: 0,
             mask: 0,
             button_type: 0,
+            coordinate_mode: 0,
             filter: crate::graphics::ImageFilter::None,
             filter_pending: false,
             position_resource: None,

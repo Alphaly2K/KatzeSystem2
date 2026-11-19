@@ -1448,6 +1448,91 @@ fn language_changes_reload_image_pixels_without_losing_requested_names_or_empty_
 }
 
 #[test]
+fn image_coordinate_mode_keeps_the_anchored_pixel_then_uses_local_position() {
+    let (mut runtime, mut objects, list) = setup();
+    let color = 0xff12_3456;
+    runtime.set_resources(PixelFiles {
+        files: [(b"texture".to_vec(), pixel_file(color))].into(),
+        reads: Rc::default(),
+    });
+    let parent = define(&mut objects, "CIMAGE", "parent");
+    let sprite = define(&mut objects, "IMAGE", "sprite");
+    initialize(
+        &mut objects,
+        "parent",
+        ObjectAttributes {
+            position: [Some(1), Some(0), None],
+            ..Default::default()
+        },
+    );
+    initialize(
+        &mut objects,
+        "sprite",
+        ObjectAttributes {
+            parent: Some(ObjectReference {
+                name: "parent".into(),
+                bank: 0,
+            }),
+            position: [Some(1), Some(1), None],
+            file: Some(b"texture".to_vec()),
+            image_number: Some(7),
+            priority: Some(5),
+            display: Some(1),
+            ..Default::default()
+        },
+    );
+    for id in [parent, sprite] {
+        runtime.update_fes_object(0, &mut objects, id).unwrap();
+    }
+    send(&mut runtime, list, 298, 0, 0);
+    assert_eq!(
+        runtime.drawing().target.as_ref().unwrap().pixel(3, 3),
+        Some(color)
+    );
+
+    let mut interpreter =
+        fes::Interpreter::new(fes::Program::from_text(b"#START\nexit 0\n").unwrap()).unwrap();
+    objects.publish_bindings(&mut interpreter);
+    assert!(
+        objects
+            .dispatch_object_command(
+                &mut interpreter,
+                &fes::Line {
+                    offset: 0,
+                    bytes: b"sprite coordmode -3".to_vec()
+                },
+                runtime.numbers_mut(),
+            )
+            .unwrap()
+    );
+    assert_eq!(image(&objects, sprite).coordinate_mode, -3);
+    assert_eq!(image(&objects, sprite).position, [5., 5.]);
+    runtime.update_fes_object(0, &mut objects, sprite).unwrap();
+    send(&mut runtime, list, 298, 0, 0);
+    assert_rectangle(
+        runtime.drawing().target.as_ref().unwrap(),
+        Rect::from_xywh(3, 3, 1, 1),
+        color,
+    );
+
+    initialize(
+        &mut objects,
+        "sprite",
+        ObjectAttributes {
+            position: [Some(6), Some(4), None],
+            ..Default::default()
+        },
+    );
+    runtime.update_fes_object(0, &mut objects, sprite).unwrap();
+    send(&mut runtime, list, 298, 0, 0);
+    assert_rectangle(
+        runtime.drawing().target.as_ref().unwrap(),
+        Rect::from_xywh(4, 2, 1, 1),
+        color,
+    );
+}
+
+#[test]
 fn image_reload_preserves_wrapper_and_old_shares_while_updating_the_final_frame() {
     let (mut runtime, mut objects, list) = setup();
     let reads = Rc::new(RefCell::new(Vec::new()));

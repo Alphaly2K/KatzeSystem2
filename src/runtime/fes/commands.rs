@@ -5,6 +5,7 @@ enum Command {
     Display(i32),
     Size([i32; 2]),
     KeyPosition(i32, [i32; 2]),
+    CoordinateMode(i32),
     SetId(i32),
     GetId(i32),
     Enable(i32),
@@ -36,6 +37,7 @@ impl Objects {
             b"disp"
                 | b"size"
                 | b"keypos"
+                | b"coordmode"
                 | b"setid"
                 | b"getid"
                 | b"enable"
@@ -151,6 +153,7 @@ impl Objects {
             )),
             b"size" => Command::Size([number(2, 0)?, number(3, 0)?]),
             b"keypos" => Command::KeyPosition(number(2, 0)?, [number(3, 0)?, number(4, 0)?]),
+            b"coordmode" => Command::CoordinateMode(number(2, 0)?),
             b"setid" => Command::SetId(number(2, 0)?),
             b"lock" => Command::Lock(number(2, 0)?),
             b"getid" => Command::GetId(number(2, 0)?),
@@ -201,6 +204,10 @@ impl Objects {
                 }
                 break;
             };
+            if let Command::CoordinateMode(mode) = command {
+                self.set_image_coordinate_mode(handle, mode)?;
+                continue;
+            }
             let source = match &command {
                 Command::Attach(Some(reference)) => self
                     .lookup(&reference.name, reference.bank)
@@ -256,6 +263,7 @@ impl Objects {
                         image.set_key_position(*mode, *position);
                     }
                 }
+                Command::CoordinateMode(_) => unreachable!(),
                 Command::SetId(value) => {
                     if let Some(image) = object.state.image_source_mut() {
                         image.apply(

@@ -291,7 +291,10 @@ impl TaskObject for ImageListObject {
                 if let Some(list) = &mut self.list {
                     let data = words::<15>(buffers.data1.as_deref())?;
                     if data[..4].iter().any(|&value| value != 0) {
-                        if data[13] != 0 {
+                        if data[13] != 0
+                            && (f32::from_bits(data[8]) != 0.0
+                                || data[9..11] != [1.0f32.to_bits(); 2])
+                        {
                             return Err(Error::new(0, "图像列表变换来源尚未接入"));
                         }
                         let properties = ImageListProperties {
