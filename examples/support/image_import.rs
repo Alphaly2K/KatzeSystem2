@@ -4,9 +4,12 @@ use katze_system2::{
     runtime::{PlatformJob, PlatformJobRequest, PlatformJobServices},
 };
 use std::{
+    cell::{Cell, RefCell},
+    collections::VecDeque,
     fs::{self, File},
     io::{self, Read, Write},
     path::{Path, PathBuf},
+    rc::{Rc, Weak},
     sync::{
         Arc,
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -14,10 +17,61 @@ use std::{
     thread::{self, JoinHandle},
 };
 
-pub(super) struct Import {
-    source: PathBuf,
+pub struct Import {
+    source: Source,
     directory: PathBuf,
-    overwrite: bool,
+}
+
+enum Source {
+    File(PathBuf, bool),
+    Picker(ImportPicker),
+}
+
+#[derive(Clone, Default)]
+pub struct ImportPicker(Rc<RefCell<PickerState>>);
+
+#[derive(Default)]
+struct PickerState {
+    requests: VecDeque<ImportRequest>,
+    last_directory: Option<PathBuf>,
+}
+
+pub struct ImportRequest(Weak<Cell<Selection>>);
+
+enum Selection {
+    Waiting,
+    Cancelled,
+    File(PathBuf, bool),
+}
+
+impl ImportRequest {
+    pub fn active(&self) -> bool {
+        self.0.strong_count() != 0
+    }
+
+    pub fn complete(self, file: Option<(PathBuf, bool)>) {
+        if let Some(selection) = self.0.upgrade() {
+            selection.set(file.map_or(Selection::Cancelled, |(path, overwrite)| {
+                Selection::File(path, overwrite)
+            }));
+        }
+    }
+}
+
+impl ImportPicker {
+    pub fn next_request(&self) -> Option<ImportRequest> {
+        let mut state = self.0.borrow_mut();
+        while let Some(request) = state.requests.pop_front() {
+            if request.active() {
+                return Some(request);
+            }
+        }
+        None
+    }
+
+    pub fn take_last_directory(&self) -> Option<PathBuf> {
+        self.0.borrow_mut().last_directory.take()
+    }
 }
 
 impl Import {
@@ -25,21 +79,34 @@ impl Import {
         let Some(source) = std::env::var_os("KATZE_IMPORT_FILE") else {
             return Ok(None);
         };
-        let directory = if let Some(path) = std::env::var_os("KATZE_IMPORT_ROOT") {
-            PathBuf::from(path)
-        } else {
-            let path = startup
-                .wide_text(b"CURSOR/default")?
-                .filter(|path| !path.is_empty())
-                .ok_or_else(|| Error::new(0, "图片导入缺少 CURSOR/default 或 KATZE_IMPORT_ROOT"))?;
-            Path::new(root).join(super::configuration::native_path(&path)?)
-        };
+        let directory = import_directory(root, startup)?
+            .ok_or_else(|| Error::new(0, "图片导入缺少 CURSOR/default 或 KATZE_IMPORT_ROOT"))?;
         Ok(Some(Self {
-            source: source.into(),
+            source: Source::File(
+                source.into(),
+                std::env::var_os("KATZE_IMPORT_OVERWRITE").is_some_and(|value| value == "1"),
+            ),
             directory,
-            overwrite: std::env::var_os("KATZE_IMPORT_OVERWRITE").is_some_and(|value| value == "1"),
         }))
     }
+
+    pub fn interactive(directory: PathBuf, picker: ImportPicker) -> Self {
+        Self {
+            source: Source::Picker(picker),
+            directory,
+        }
+    }
+}
+
+pub fn import_directory(root: &str, startup: &XmlDocument) -> Result<Option<PathBuf>> {
+    if let Some(path) = std::env::var_os("KATZE_IMPORT_ROOT") {
+        return Ok(Some(PathBuf::from(path)));
+    }
+    startup
+        .wide_text(b"CURSOR/default")?
+        .filter(|path| !path.is_empty())
+        .map(|path| super::configuration::native_path(&path).map(|path| Path::new(root).join(path)))
+        .transpose()
 }
 
 impl PlatformJobServices for Import {
@@ -51,9 +118,77 @@ impl PlatformJobServices for Import {
         if request != PlatformJobRequest::ImageImport {
             return Ok(None);
         }
-        let source = self.source.clone();
-        let directory = self.directory.clone();
-        let overwrite = self.overwrite;
+        let job: Box<dyn PlatformJob> = match &self.source {
+            Source::File(path, overwrite) => Box::new(Job::start(
+                task,
+                path.clone(),
+                self.directory.clone(),
+                *overwrite,
+            )?),
+            Source::Picker(picker) => {
+                let selection = Rc::new(Cell::new(Selection::Waiting));
+                picker
+                    .0
+                    .borrow_mut()
+                    .requests
+                    .push_back(ImportRequest(Rc::downgrade(&selection)));
+                Box::new(PickJob {
+                    task,
+                    directory: self.directory.clone(),
+                    selection,
+                    picker: picker.clone(),
+                    copying: None,
+                })
+            }
+        };
+        Ok(Some(job))
+    }
+}
+
+struct PickJob {
+    task: u32,
+    directory: PathBuf,
+    picker: ImportPicker,
+    selection: Rc<Cell<Selection>>,
+    copying: Option<(Job, PathBuf)>,
+}
+
+impl PlatformJob for PickJob {
+    fn poll(&mut self) -> Option<u32> {
+        if let Some((job, source_directory)) = &mut self.copying {
+            let result = job.poll()?;
+            if result != 0 {
+                self.picker.0.borrow_mut().last_directory = Some(std::mem::take(source_directory));
+            }
+            return Some(result);
+        }
+        match self.selection.replace(Selection::Waiting) {
+            Selection::Waiting => None,
+            Selection::Cancelled => Some(0),
+            Selection::File(source, overwrite) => {
+                let source_directory = source.parent().unwrap_or(Path::new("")).to_owned();
+                match Job::start(self.task, source, self.directory.clone(), overwrite) {
+                    Ok(job) => {
+                        self.copying = Some((job, source_directory));
+                        None
+                    }
+                    Err(error) => {
+                        eprintln!("{error}");
+                        Some(0)
+                    }
+                }
+            }
+        }
+    }
+}
+
+struct Job {
+    cancel: Arc<AtomicBool>,
+    worker: Option<JoinHandle<bool>>,
+}
+
+impl Job {
+    fn start(task: u32, source: PathBuf, directory: PathBuf, overwrite: bool) -> Result<Self> {
         let cancel = Arc::new(AtomicBool::new(false));
         let worker_cancel = cancel.clone();
         let worker = thread::Builder::new()
@@ -67,16 +202,11 @@ impl PlatformJobServices for Import {
                 },
             )
             .map_err(|error| Error::new(0, format!("图片导入工作线程启动失败：{error}")))?;
-        Ok(Some(Box::new(Job {
+        Ok(Self {
             cancel,
             worker: Some(worker),
-        })))
+        })
     }
-}
-
-struct Job {
-    cancel: Arc<AtomicBool>,
-    worker: Option<JoinHandle<bool>>,
 }
 
 impl PlatformJob for Job {
@@ -97,16 +227,19 @@ impl Drop for Job {
     }
 }
 
-fn copy(source: &Path, directory: &Path, overwrite: bool, cancel: &AtomicBool) -> io::Result<bool> {
-    let accepted = source
+pub fn is_image_path(source: &Path) -> bool {
+    source
         .extension()
         .and_then(|ext| ext.to_str())
         .is_some_and(|ext| {
             ["bmp", "png", "jpg"]
                 .iter()
                 .any(|kind| ext.eq_ignore_ascii_case(kind))
-        });
-    if !accepted {
+        })
+}
+
+fn copy(source: &Path, directory: &Path, overwrite: bool, cancel: &AtomicBool) -> io::Result<bool> {
+    if !is_image_path(source) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "导入支持 BMP、PNG 和 JPG",
@@ -224,11 +357,8 @@ mod tests {
                 programs: Default::default(),
             }),
         );
-        runtime.set_platform_job_services(Import {
-            source,
-            directory: directory.clone(),
-            overwrite: true,
-        });
+        let picker = ImportPicker::default();
+        runtime.set_platform_job_services(Import::interactive(directory.clone(), picker.clone()));
         let task = runtime.create(0, kind::IMAGE_IMPORT, b"", b"").unwrap();
         let command = |code| Command {
             target: task,
@@ -237,14 +367,51 @@ mod tests {
             data: [0; 3],
         };
         runtime.dispatch_command(0, command(576)).unwrap();
+        assert_eq!(runtime.dispatch_command(0, command(577)).unwrap(), 0);
+        picker
+            .next_request()
+            .unwrap()
+            .complete(Some((source, true)));
+        assert!(picker.take_last_directory().is_none());
         let start = std::time::Instant::now();
         while runtime.dispatch_command(0, command(577)).unwrap() == 0 {
             assert!(start.elapsed() < std::time::Duration::from_secs(5));
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
         assert_eq!(fs::read(&target)?, b"replacement bytes");
+        assert_eq!(
+            picker.take_last_directory().as_deref(),
+            Some(root.0.as_path())
+        );
         assert!(!copy(&target, &directory, true, &cancel)?);
         assert_eq!(fs::read_dir(&directory)?.count(), 1);
+
+        let cancelled = runtime.create(0, kind::IMAGE_IMPORT, b"", b"").unwrap();
+        let cancelled_command = |code| Command {
+            target: cancelled,
+            ..command(code)
+        };
+        runtime.dispatch_command(0, cancelled_command(576)).unwrap();
+        picker.next_request().unwrap().complete(None);
+        assert_eq!(
+            runtime.dispatch_command(0, cancelled_command(577)).unwrap(),
+            1
+        );
+        assert!(picker.take_last_directory().is_none());
+
+        let deleted = runtime.create(0, kind::IMAGE_IMPORT, b"", b"").unwrap();
+        runtime
+            .dispatch_command(
+                0,
+                Command {
+                    target: deleted,
+                    ..command(576)
+                },
+            )
+            .unwrap();
+        runtime.destroy(deleted).unwrap();
+        assert!(picker.next_request().is_none());
+        assert_eq!(fs::read(&target)?, b"replacement bytes");
         Ok(())
     }
 }

@@ -20,6 +20,8 @@ mod support;
 mod system_output;
 #[path = "support/window_actions.rs"]
 mod window_actions;
+#[path = "support/window_import.rs"]
+mod window_import;
 #[path = "support/window_input.rs"]
 mod window_input;
 #[path = "support/window_output.rs"]
@@ -35,6 +37,7 @@ use katze_system2::{
 use sdl2::event::{Event, WindowEvent};
 use std::cell::RefCell;
 use std::rc::Rc;
+use support::image_import::{Import, ImportPicker, import_directory};
 use support::{advance_frame, build_runtime, load_game};
 use window_input::{Shared, WindowDevice};
 
@@ -81,7 +84,27 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let task = runtime.create(0, kind::ORDINARY, b"main", b"")?;
     println!("主任务 {task}");
 
-    let title_source = katze_system2::resource::XmlDocument::parse(startup.as_bytes())?
+    let startup_xml = katze_system2::resource::XmlDocument::parse(startup.as_bytes())?;
+    let mut image_import = if std::env::var_os("KATZE_IMPORT_FILE").is_none() {
+        match import_directory(&root, &startup_xml) {
+            Ok(Some(directory)) => {
+                let picker = ImportPicker::default();
+                runtime.set_platform_job_services(Import::interactive(
+                    directory.clone(),
+                    picker.clone(),
+                ));
+                Some(window_import::WindowImport::new(directory, picker))
+            }
+            Ok(None) => None,
+            Err(error) => {
+                eprintln!("图片导入目录：{error}");
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let title_source = startup_xml
         .wide_text(b"APP/title")?
         .unwrap_or_else(|| "katze-system2".encode_utf16().collect());
     let mut title = String::from_utf16_lossy(runtime.host().string_tables.resolve(&title_source));
@@ -128,10 +151,15 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         shared.borrow_mut().begin_frame();
         let events = window.poll();
         let size = window.window.size();
-        let editing = text_window.active();
+        let importing = image_import
+            .as_ref()
+            .is_some_and(window_import::WindowImport::active);
+        let editing = text_window.active() || importing;
         let mut close = false;
         for event in events {
-            if editing {
+            if importing {
+                image_import.as_mut().unwrap().event(&event);
+            } else if editing {
                 text_window.event(&event, runtime.input_state_mut(input))?;
             }
             if !editing
@@ -198,9 +226,28 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         if window_actions::pump(&mut runtime, input, &mut window)? {
             break;
         }
-        text_window.sync(&window.window, runtime.input_state(input))?;
+        if !image_import
+            .as_ref()
+            .is_some_and(window_import::WindowImport::active)
+        {
+            text_window.sync(&window.window, runtime.input_state(input))?;
+        }
+        if let Some(importer) = &mut image_import {
+            importer.sync(
+                &window.window,
+                runtime.host_mut().platform_settings.as_mut(),
+                text_window.active(),
+            );
+            if importer.active() {
+                shared.borrow_mut().set_foreground(false);
+            }
+        }
         window.context.mouse().show_cursor(
-            text_window.active() || shared.borrow().cursor(runtime.uses_image_cursor()),
+            text_window.active()
+                || image_import
+                    .as_ref()
+                    .is_some_and(window_import::WindowImport::active)
+                || shared.borrow().cursor(runtime.uses_image_cursor()),
         );
         if !runtime.host().window_requests.is_empty() && !window_pending_noted {
             eprintln!(
@@ -249,6 +296,9 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             }
         }
         text_window.draw()?;
+        if let Some(importer) = &mut image_import {
+            importer.draw()?;
+        }
         let frame_limit = std::time::Duration::from_secs_f64(1.0 / 60.0);
         if let Some(remaining) = frame_limit.checked_sub(frame_started.elapsed()) {
             std::thread::sleep(remaining);

@@ -24,7 +24,9 @@ use std::{collections::BTreeMap, sync::Arc};
 
 mod configuration;
 use configuration::ConfigurationFiles;
-mod image_import;
+// The desktop example uses the picker; the offline probe only uses preselection.
+#[allow(dead_code)]
+pub mod image_import;
 
 const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 

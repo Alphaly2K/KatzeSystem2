@@ -40,15 +40,17 @@ struct Edit {
     caret: usize,
     anchor: usize,
     marked: String,
+    max_units: usize,
 }
 
 impl Edit {
-    fn new(initial: &str) -> Self {
+    fn new(initial: &str, max_units: usize) -> Self {
         Self {
             text: initial.to_owned(),
             caret: initial.len(),
             anchor: 0,
             marked: String::new(),
+            max_units,
         }
     }
 
@@ -82,7 +84,7 @@ impl Edit {
         let range = self.selection();
         let retained = self.text[..range.start].encode_utf16().count()
             + self.text[range.end..].encode_utf16().count();
-        let mut room = MAX_UNITS.saturating_sub(retained);
+        let mut room = self.max_units.saturating_sub(retained);
         let insert: String = text
             .chars()
             .filter(|c| !c.is_control())
@@ -125,12 +127,17 @@ struct Dialog {
 }
 
 impl Dialog {
-    fn new(parent: &Window, request: Arc<str>) -> Result<Self, Box<dyn std::error::Error>> {
+    fn new(
+        parent: &Window,
+        request: Arc<str>,
+        title: &str,
+        max_units: usize,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let (x, y) = parent.position();
         let (w, h) = parent.size();
         let canvas = parent
             .subsystem()
-            .window("Text Input", SIZE[0], SIZE[1])
+            .window(title, SIZE[0], SIZE[1])
             .position(
                 x + (w as i32 - SIZE[0] as i32) / 2,
                 y + (h as i32 - SIZE[1] as i32) / 2,
@@ -139,7 +146,7 @@ impl Dialog {
             .into_canvas()
             .software()
             .build()?;
-        let edit = Edit::new(&request);
+        let edit = Edit::new(&request, max_units);
         let mut dialog = Self {
             canvas,
             parent: parent.id(),
@@ -449,7 +456,7 @@ impl TextWindow {
         }
         self.dialog = None;
         if let Some(request) = request {
-            self.dialog = Some(Dialog::new(parent, request)?);
+            self.dialog = Some(Dialog::new(parent, request, "Text Input", MAX_UNITS)?);
         }
         Ok(())
     }
@@ -462,6 +469,44 @@ impl TextWindow {
     }
 }
 
+pub struct FilePathDialog {
+    dialog: Dialog,
+    fonts: Fonts,
+}
+
+impl FilePathDialog {
+    pub fn new(parent: &Window, initial: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        Ok(Self {
+            dialog: Dialog::new(parent, initial.into(), "Import Image", 4096)?,
+            fonts: Fonts::new("."),
+        })
+    }
+
+    pub fn window(&self) -> &Window {
+        self.dialog.canvas.window()
+    }
+
+    pub fn event(&mut self, event: &Event) -> Option<Option<std::path::PathBuf>> {
+        if let Event::DropFile {
+            window_id,
+            filename,
+            ..
+        } = event
+        {
+            if *window_id == self.window().id() || *window_id == self.dialog.parent {
+                return Some(Some(filename.into()));
+            }
+        }
+        self.dialog.event(event).map(|action| {
+            (action == Action::Confirm).then(|| std::path::PathBuf::from(&self.dialog.edit.text))
+        })
+    }
+
+    pub fn draw(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        self.dialog.draw(&mut self.fonts)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Edit, MAX_UNITS};
@@ -469,7 +514,7 @@ mod tests {
     #[test]
     fn editing_replaces_selection_and_never_splits_a_utf16_pair() {
         let initial = "a".repeat(MAX_UNITS + 1);
-        let mut edit = Edit::new(&initial);
+        let mut edit = Edit::new(&initial, MAX_UNITS);
         assert_eq!(edit.text, initial);
         edit.insert("abcdefghijklmn\u{1f600}z");
         assert_eq!(edit.text, "abcdefghijklmn\u{1f600}");
