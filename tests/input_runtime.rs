@@ -971,6 +971,8 @@ fn game_runtime_boots_the_standard_tasks_and_supplies_the_first_frame_clock() ->
             .is_err()
     );
     assert_eq!(runtime.system_settings().unwrap().auto_select, 3);
+    runtime.configure_canvas([64, 48])?;
+    assert!(runtime.configure_canvas([u32::MAX, 48]).is_err());
     let device = Rc::new(RefCell::new(DeviceState::new([12, 34])));
     runtime.set_input_device(Device(device.clone()))?;
     let (mut runtime, tasks) = runtime.start_game(b"main")?;
@@ -1010,6 +1012,10 @@ fn game_runtime_boots_the_standard_tasks_and_supplies_the_first_frame_clock() ->
     assert_eq!(device.borrow().pointer_calls, 1);
     runtime.host_mut().language_change_requests.clear();
     assert!(runtime.advance(time)?);
+    runtime.with_frame(|_, canvas| {
+        assert_eq!(canvas.size(), [64, 48]);
+        Ok(())
+    })?;
     let vm = runtime.object(tasks.entry).unwrap().interpreter().unwrap();
     assert_eq!(vm.read(0, 4)?.as_ref(), 42_000u32.to_le_bytes());
     assert_eq!(vm.read(0x8000_0000, 4)?.as_ref(), [0x55; 4]);

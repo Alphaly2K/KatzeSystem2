@@ -3,7 +3,7 @@ use crate::{
     Error, Result,
     audio::{Mixer, SoundConfig, SoundFactory, SoundGroups, SoundState},
     expression::State,
-    graphics::GraphicsFactory,
+    graphics::{DrawingContext, GraphicsFactory, Projection, RenderTarget, TextureFilter},
     input::{DeviceBinding, DeviceKeys, InputFactory},
     kcs::{CachedResources, Program, ResourceServices},
     language::{LanguageState, StringTableConfig},
@@ -148,6 +148,41 @@ impl<L: ProgramLoader> GameRuntime<L> {
     /// The effective engine settings, if startup settings have been applied.
     pub fn system_settings(&self) -> Option<&SystemSettings> {
         self.host.system_settings.as_ref()
+    }
+
+    /// Prepare the standard canvas and frame view for a logical surface size in pixels.
+    /// Call after applying startup settings. A configured tile grid determines the
+    /// canvas size; without a grid the canvas uses the logical surface size.
+    /// This replaces the existing canvas on success and preserves it on error.
+    pub fn configure_canvas(&mut self, surface_size: [u32; 2]) -> Result<()> {
+        let target = match self.system_settings() {
+            Some(settings) if !settings.texture_grid.contains(&0) => {
+                let [columns, rows] = settings.texture_grid;
+                let count = (columns as usize)
+                    .checked_mul(rows as usize)
+                    .filter(|&count| count <= crate::read::MAX_ITEMS)
+                    .ok_or_else(|| Error::new(0, "画布面块数量超过上限"))?;
+                let mut target = RenderTarget::from_tiles(
+                    settings.texture_size,
+                    settings.texture_grid,
+                    vec![None; count],
+                )?;
+                target.prepare_tiles(&settings.texture_areas, settings.texture_16bit_row)?;
+                target
+            }
+            _ => RenderTarget::new(surface_size)?,
+        };
+        self.set_surface_size(surface_size);
+        *self.drawing_mut() = DrawingContext {
+            mode: 0,
+            enabled: true,
+            active: true,
+            target: Some(target),
+        };
+        let projection = Projection::default();
+        let parent = projection.matrix;
+        self.set_frame_view(projection, parent, TextureFilter::Point);
+        Ok(())
     }
 
     /// Bind the game's resource service and sound configuration before startup.

@@ -12,7 +12,7 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 
 公开 Rust API 从运行实例和宿主能力出发。文档应覆盖实例创建与释放、推进与输入顺序、帧与 PCM 的所有权、请求取消，以及诊断和正常未命中的区别。入口使用明确的请求与结果类型，记录整数单位和坐标约定；任务树、原始命令编号、VM 缓冲区和分派表保留为实现细节或显式的底层工具。现有 Rust 调用方随迁移调整；等 Rust 契约稳定且有非 Rust 宿主接入时，再定义独立版本的 C ABI 和显式释放约定。
 
-标准宿主用 `GameRuntime::with_programs(loader, shared_slots, external)` 创建根任务并配置共享存储。启动前可将启动文档、游戏默认值及用户设置的 XML 字节交给 `configure_startup`，依次应用引擎配置；无效文档保留原有状态。绑定输入、资源和需要的其他服务，设置画布及帧视图，再调用 `start_game(entry)`。该方法消费准备好的实例，返回已启动的实例和 `GameTasks`，输入、声音和入口脚本按引擎顺序登记。缺失的入口名称返回诊断并释放本次实例。
+标准宿主用 `GameRuntime::with_programs(loader, shared_slots, external)` 创建根任务并配置共享存储。启动前可将启动文档、游戏默认值及用户设置的 XML 字节交给 `configure_startup`，依次应用引擎配置；无效文档保留原有状态。绑定输入、资源和需要的其他服务，调用 `configure_canvas([width, height])` 设置逻辑输出尺寸并按游戏配置创建画布，再调用 `start_game(entry)`。该方法消费准备好的实例，返回已启动的实例和 `GameTasks`，输入、声音和入口脚本按引擎顺序登记。缺失的入口名称返回诊断并释放本次实例。
 
 标准会话在推进前必须通过 `set_input_device` 绑定 `InputDevice`。离屏宿主可提供只返回空闲状态的内存设备。`startup_input_bindings` 返回已经应用用户覆盖的八十个逻辑键槽，宿主可以用它构造 `DeviceKeys`。配置保存优先读取设备当前的绑定；设备未提供绑定时使用启动配置。
 

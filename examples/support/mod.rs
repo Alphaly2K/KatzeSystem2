@@ -9,7 +9,6 @@ use blowfish::{
 };
 use katze_system2::{
     Error, Result,
-    graphics::{DrawingContext, RenderTarget},
     input::{ButtonSource, DeviceBinding, DeviceKeys},
     io::SharedSource,
     kcs::{LocalDateTime, Program, ResourceServices, SystemServices},
@@ -848,38 +847,6 @@ pub fn build_runtime(
     });
     runtime.set_configuration_services(configuration_files);
     runtime.set_system_services(ProbeSystem);
-    let settings = runtime.system_settings().ok_or("缺少启动配置")?;
-    let target = if settings.texture_grid.contains(&0) {
-        RenderTarget::new(surface)?
-    } else {
-        let count = u64::from(settings.texture_grid[0]) * u64::from(settings.texture_grid[1]);
-        if count > 1_000_000 {
-            return Err("画布面块数量超过上限".into());
-        }
-        let mut target = RenderTarget::from_tiles(
-            settings.texture_size,
-            settings.texture_grid,
-            vec![None; count as usize],
-        )?;
-        target.prepare_tiles(&settings.texture_areas, settings.texture_16bit_row)?;
-        target
-    };
-    runtime.set_surface_size(surface);
-    *runtime.drawing_mut() = DrawingContext {
-        mode: 0,
-        enabled: true,
-        active: true,
-        target: Some(target),
-    };
-    runtime.set_frame_view(
-        Default::default(),
-        [
-            1., 0., 0., 0., //
-            0., 1., 0., 0., //
-            0., 0., 1., 0., //
-            0., 0., 0., 1.,
-        ],
-        katze_system2::graphics::TextureFilter::Point,
-    );
+    runtime.configure_canvas(surface)?;
     Ok((runtime, keys))
 }
