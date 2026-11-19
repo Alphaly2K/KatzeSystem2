@@ -115,7 +115,7 @@ impl ConfigurationServices for ConfigurationFiles {
     }
 }
 
-fn native_path(value: &[u16]) -> Result<PathBuf> {
+pub(super) fn native_path(value: &[u16]) -> Result<PathBuf> {
     let value = String::from_utf16(value).map_err(|_| Error::new(0, "配置目录包含无效 UTF-16"))?;
     #[cfg(not(target_os = "windows"))]
     if value.as_bytes().get(1) == Some(&b':') {

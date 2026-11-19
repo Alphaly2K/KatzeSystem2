@@ -24,6 +24,7 @@ use std::{collections::BTreeMap, sync::Arc};
 
 mod configuration;
 use configuration::ConfigurationFiles;
+mod image_import;
 
 const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
@@ -796,6 +797,9 @@ pub fn build_runtime(
         },
     );
     let startup_xml = katze_system2::resource::XmlDocument::parse(startup.as_bytes())?;
+    if let Some(importer) = image_import::Import::from_startup(&root, &startup_xml)? {
+        runtime.set_platform_job_services(importer);
+    }
     runtime.host_mut().archive_config = Some(router.config.clone());
     runtime.host_mut().sound_groups = Some(katze_system2::audio::SoundGroups::from_startup_xml(
         startup.as_bytes(),

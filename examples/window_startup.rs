@@ -3,6 +3,7 @@
 //! 用法：`cargo run --release --example window_startup -- <游戏目录>`。
 //! macOS 默认使用 Metal；KATZE_WINDOW_RENDERER=software 选择软件绘制。
 //! KATZE_EXPORT_ROOT 可指定接收游戏导出文件的现有目录。
+//! KATZE_IMPORT_FILE 可预选游戏图片导入任务使用的文件。
 //! 关闭窗口执行退出确认，键盘输入交给游戏。
 
 #[path = "support/audio_output.rs"]
