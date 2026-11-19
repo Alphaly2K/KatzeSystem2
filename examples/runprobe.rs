@@ -12,12 +12,12 @@ use katze_system2::{
     resource::ResourceMode,
     runtime::{FrameTime, GameRuntime, GameTasks},
 };
-use std::{cell::Cell, collections::BTreeMap, rc::Rc};
+use std::{cell::Cell, collections::BTreeMap, ops::RangeInclusive, rc::Rc};
 use support::{Game, build_runtime, load_game};
 
 struct StoryReplay {
-    automatic_from: u32,
-    advance_key_from: Option<u32>,
+    automatic: RangeInclusive<u32>,
+    advance_key: Option<RangeInclusive<u32>>,
     pointer: Rc<Cell<[i32; 2]>>,
     plan: Vec<usize>,
     previous: Vec<(u32, Rect)>,
@@ -27,12 +27,14 @@ struct StoryReplay {
 
 impl StoryReplay {
     fn from_env() -> Option<Self> {
-        let automatic_from = std::env::var("KATZE_PROBE_AUTO_FROM").ok()?.parse().ok()?;
+        let round = |name| std::env::var(name).ok()?.parse::<u32>().ok();
+        let automatic =
+            round("KATZE_PROBE_AUTO_FROM")?..=round("KATZE_PROBE_AUTO_UNTIL").unwrap_or(u32::MAX);
+        let advance_key = round("KATZE_PROBE_CTRL_FROM")
+            .map(|start| start..=round("KATZE_PROBE_CTRL_UNTIL").unwrap_or(u32::MAX));
         Some(Self {
-            automatic_from,
-            advance_key_from: std::env::var("KATZE_PROBE_CTRL_FROM")
-                .ok()
-                .and_then(|round| round.parse().ok()),
+            automatic,
+            advance_key,
             pointer: Rc::new(Cell::new([900, 400])),
             plan: std::env::var("KATZE_PROBE_CHOICE_PLAN")
                 .unwrap_or_default()
@@ -46,7 +48,7 @@ impl StoryReplay {
     }
 
     fn update(&mut self, frame: u32, regions: &[Region]) {
-        if frame < self.automatic_from || !frame.is_multiple_of(4) {
+        if !self.automatic.contains(&frame) || !frame.is_multiple_of(4) {
             return;
         }
         let mut choices: Vec<_> = regions
@@ -95,8 +97,8 @@ struct ScriptedDevice {
     polls: u32,
     clicks: Vec<(u32, [i32; 2])>,
     keys: DeviceKeys,
-    automatic_from: Option<u32>,
-    advance_key_from: Option<u32>,
+    automatic: Option<RangeInclusive<u32>>,
+    advance_key: Option<RangeInclusive<u32>>,
     replay_pointer: Option<Rc<Cell<[i32; 2]>>>,
 }
 
@@ -125,8 +127,8 @@ impl ScriptedDevice {
             polls: 0,
             clicks,
             keys,
-            automatic_from: replay.map(|replay| replay.automatic_from),
-            advance_key_from: replay.and_then(|replay| replay.advance_key_from),
+            automatic: replay.map(|replay| replay.automatic.clone()),
+            advance_key: replay.and_then(|replay| replay.advance_key.clone()),
             replay_pointer: replay.map(|replay| replay.pointer.clone()),
         }
     }
@@ -138,17 +140,20 @@ impl InputDevice for ScriptedDevice {
     }
     fn poll(&mut self) -> Result<()> {
         self.polls = self.polls.wrapping_add(1);
-        let pressed = self
-            .clicks
-            .iter()
-            .any(|&(round, _)| self.polls.wrapping_sub(round) < 2)
-            || self
-                .automatic_from
-                .is_some_and(|round| self.polls >= round && self.polls.is_multiple_of(4));
+        let pressed =
+            self.clicks
+                .iter()
+                .any(|&(round, _)| self.polls.wrapping_sub(round) < 2)
+                || self.automatic.as_ref().is_some_and(|range| {
+                    range.contains(&self.polls) && self.polls.is_multiple_of(4)
+                });
         self.keys.button(ButtonSource::Mouse, 1, u32::from(pressed));
-        if let Some(round) = self.advance_key_from {
-            self.keys
-                .button(ButtonSource::Keyboard, 0x11, u32::from(self.polls >= round));
+        if let Some(range) = &self.advance_key {
+            self.keys.button(
+                ButtonSource::Keyboard,
+                0x11,
+                u32::from(range.contains(&self.polls)),
+            );
         }
         if std::env::var_os("KATZE_TRACE_INPUT").is_some() && self.polls < 320 {
             eprintln!("[input-poll] polls={}", self.polls);

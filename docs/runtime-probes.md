@@ -3975,7 +3975,7 @@ JPEG 在交换字段为零时原地交换第一、第三字节，设置字段一
 
 串行缩放和并行缩放各以独立存档完成 36,000 次更新，输入区域、12 次选项日志、剧情检查点及最终画面一致，无运行诊断。对应旧峰值的第 32,208／32,554 次更新分别从 196.41／194.88 降至 174.86／173.15 毫秒。两帧各两次串行缩放合计约 51 毫秒；并行版的单次缩放均低于 20 毫秒的记录阈值，整段达到该阈值的 730 从九次减至零次。并行版仍有 321 次 710 和 18 次 568 达到阈值。
 
-`runprobe` 支持同类离屏回放。设置 `KATZE_PROBE_AUTO_FROM` 开启每四轮一次的自动点击，`KATZE_PROBE_CTRL_FROM` 指定开始保持 Ctrl 的轮次；`KATZE_PROBE_CHOICE_PLAN` 为逗号分隔的零起始剧情选项，省略时选首项。显式点击由 `KATZE_PROBE_CLICKS` 指定，回放按三逻辑帧一步，音频在内存中消费。以下参数使用独立存档目录和游戏目录，通过 `KATZE_TRACE_TIMING` 记录耗时达到 20 毫秒的更新及 native 调用：
+`runprobe` 支持同类离屏回放。设置 `KATZE_PROBE_AUTO_FROM` 开启每四轮一次的自动点击，`KATZE_PROBE_CTRL_FROM` 指定开始保持 Ctrl 的轮次。`KATZE_PROBE_AUTO_UNTIL` 和 `KATZE_PROBE_CTRL_UNTIL` 可分别指定最后一轮，便于从自动推进切换到显式点击。`KATZE_PROBE_CHOICE_PLAN` 为逗号分隔的零起始剧情选项，省略时选首项。显式点击由 `KATZE_PROBE_CLICKS` 指定，回放按三逻辑帧一步，音频在内存中消费。以下参数使用独立存档目录和游戏目录，通过 `KATZE_TRACE_TIMING` 记录耗时达到 20 毫秒的更新及 native 调用：
 
 ```sh
 KATZE_TRACE_TIMING=1 KATZE_SCRIPT_ENCODING=gbk \
@@ -4549,7 +4549,7 @@ Cargo 从运行库发布包完成重建，库包不包含脚本检查命令。�
 
 ## 独立发布包与桌面宿主
 
-从干净的源代码快照构建 Cargo 发布包。在另一个 Cargo 项目中依赖解包后的库，用内存输入设备启动合成脚本，推进一帧、借用画布并拉取静音 PCM。仅使用 Rust 1.98.1 和本机 C 编译器；最低支持版本 Rust 1.87 待单独复验。
+从干净的源代码快照构建 Cargo 发布包。在另一个 Cargo 项目中依赖解包后的库，用内存输入设备启动合成脚本，推进一帧、借用画布并拉取静音 PCM。打包和运行使用 Rust 1.98.1；另用 Rust 1.87.0 在 macOS ARM64 执行 `cargo check --locked --offline --lib --no-default-features` 和 `cargo check --locked --offline --example runprobe`，均通过。
 
 SDL2 和 Metal 已移至桌面宿主包。运行库的正常、构建和开发依赖树无这两项；`runprobe` 的离屏发布构建通过。桌面目标通过编译，三项输入和窗口请求合成回归通过，未启动窗口或音频设备。
 
