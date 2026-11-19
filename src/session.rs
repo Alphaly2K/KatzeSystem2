@@ -71,8 +71,8 @@ impl GameRuntime {
     }
 
     /// Bind resources and optional sound definitions before starting the game.
-    /// With no sound definition, the session uses the legacy sound groups in
-    /// the startup document. Invalid XML leaves the bindings unchanged.
+    /// With no sound definition, the session uses the legacy voice definitions
+    /// and sound groups in the startup document. Invalid XML leaves the bindings unchanged.
     pub fn set_game_resources(
         &mut self,
         services: impl ResourceServices + 'static,

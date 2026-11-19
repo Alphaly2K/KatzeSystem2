@@ -16,7 +16,7 @@ impl SystemSettings {
         Ok(())
     }
 
-    pub(super) fn apply_voice_definitions(&mut self, xml: &XmlDocument) -> Result<()> {
+    pub(crate) fn apply_voice_definitions(&mut self, xml: &XmlDocument) -> Result<()> {
         for index in 0..48 {
             let base = 20 + index * 116;
             for (field, offset, capacity) in [("voice", 4, 32), ("head", 40, 40), ("int", 84, 32)] {

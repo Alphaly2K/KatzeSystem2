@@ -1,6 +1,9 @@
 use super::{Interpreter, NativeReturn, ResourceServices, format_string};
-use crate::resource::ResourceMode;
 use crate::{Error, Result, read, text};
+use crate::{
+    resource::{ResourceMode, XmlDocument},
+    settings::SystemSettings,
+};
 use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 /// 可由资源服务及程序装载器共享的预读队列和原始字节缓存。
@@ -190,9 +193,9 @@ pub struct CachedResources<S> {
 }
 
 #[derive(Clone)]
-struct SoundNames {
-    // Routing uses the definition; user sound settings only change playback properties.
-    definition: Option<crate::audio::SoundConfig>,
+enum SoundNames {
+    Modern(crate::audio::SoundConfig),
+    Legacy(Box<SystemSettings>),
 }
 
 impl<S> std::ops::Deref for CachedResources<S> {
@@ -225,9 +228,17 @@ impl<S: ResourceServices> CachedResources<S> {
     pub(crate) fn with_sound_names(
         mut self,
         definition: Option<crate::audio::SoundConfig>,
-    ) -> Self {
-        self.sound_names = Some(SoundNames { definition });
-        self
+        startup: &[u8],
+    ) -> Result<Self> {
+        self.sound_names = Some(match definition {
+            Some(definition) => SoundNames::Modern(definition),
+            None => {
+                let mut legacy = Box::<SystemSettings>::default();
+                legacy.apply_voice_definitions(&XmlDocument::parse(startup)?)?;
+                SoundNames::Legacy(legacy)
+            }
+        });
+        Ok(self)
     }
 }
 
@@ -238,13 +249,15 @@ impl<S: ResourceServices> ResourceServices for CachedResources<S> {
     fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
         if category == b"sound" {
             if let Some(sound) = &self.sound_names {
-                let archive = sound
-                    .definition
-                    .as_ref()
-                    .and_then(|config| config.file_part(name).ok().flatten())
-                    .map(|part| part.archive.as_slice())
-                    .filter(|archive| !archive.is_empty());
-                return match archive {
+                let archive = match sound {
+                    SoundNames::Modern(config) => config
+                        .file_part(name)
+                        .ok()
+                        .flatten()
+                        .map(|part| part.archive.as_slice()),
+                    SoundNames::Legacy(settings) => settings.voice_file_archive(name)?,
+                };
+                return match archive.filter(|archive| !archive.is_empty()) {
                     Some(archive) => self.inner.resolve(archive, name),
                     None => crate::resource::Category::default().resolve(name),
                 };

@@ -101,6 +101,32 @@ fn legacy_system_voice_natives_and_fes_share_flags_and_randomness() {
 }
 
 #[test]
+fn legacy_sessions_report_missing_modern_sound_ids() -> Result<()> {
+    let mut code = Vec::new();
+    for (index, output) in [(1000, 0), (1001, 4)] {
+        ins(&mut code, 0x25, &[8]);
+        ins(&mut code, 0x2b, &[index, 4]);
+        ins(&mut code, 0x26, &[output]);
+    }
+    ins(&mut code, 0x3b, &[]);
+    let mut data = vec![0; 8];
+    data.extend_from_slice(b"tone\0");
+    let task = OrdinaryTask::new(Program::from_code(&code, data, 64)?, vec![])?;
+    let mut rt = Runtime::new(
+        0,
+        kind::ORDINARY,
+        Box::new(OrdinaryObject::new(task)),
+        State::new(0),
+        Reject,
+    );
+    rt.host_mut().system_settings = Some(SystemSettings::default());
+    rt.update(1, 1)?;
+    let vm = rt.object(0).unwrap().interpreter().unwrap();
+    assert_eq!(vm.read(0, 8)?.as_ref(), [0, 0, 0, 0, 255, 255, 255, 255]);
+    Ok(())
+}
+
+#[test]
 fn native_configuration_queries_keep_three_lookup_modes_and_stack_results_across_budgets() {
     let config = SoundConfig {
         master_volume: Some(47),

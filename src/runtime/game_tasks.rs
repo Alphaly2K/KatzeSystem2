@@ -210,7 +210,7 @@ impl<L: ProgramLoader> TaskRuntime<L> {
     /// Bind the game's resource service and sound configuration before startup.
     /// The service resolves archive categories and opens resources. The runtime
     /// selects the category for each sound name using the supplied definition.
-    /// With no definition, it uses startup sound groups and uncategorized names.
+    /// With no definition, it uses the startup voice definitions and sound groups.
     /// Invalid XML leaves both the active configuration and resource service unchanged.
     pub fn set_game_resources(
         &mut self,
@@ -233,7 +233,7 @@ impl<L: ProgramLoader> TaskRuntime<L> {
             (None, None, SoundGroups::from_startup_xml(startup)?)
         };
         self.resources.services = Some(Box::new(
-            CachedResources::new(services).with_sound_names(definition),
+            CachedResources::new(services).with_sound_names(definition, startup)?,
         ));
         self.resources.animation_aliases = None;
         self.host.sound_config_enabled = u32::from(sound.is_some());

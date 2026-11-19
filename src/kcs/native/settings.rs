@@ -140,6 +140,19 @@ pub(super) fn call(
         } else {
             Vec::new()
         };
+        if matches!(index, 1000 | 1001) {
+            let part = match &host.sound_config {
+                Some(config) => config.file_part(&name)?,
+                None if host.sound_config_enabled == 0 => None,
+                None => return Err(Error::new(vm.pc, "宿主未提供新声音分类配置")),
+            };
+            let value = if index == 1000 {
+                part.map_or(0, |part| part.same_id)
+            } else {
+                part.map_or(-1, |part| part.id)
+            };
+            return Ok(NativeReturn::Value(value as u32));
+        }
         let config = host
             .sound_config
             .as_ref()
@@ -157,8 +170,6 @@ pub(super) fn call(
             942 => config.master_mute(),
             964 => config.effective_file_volume(&name)?,
             995 => config.effective_file_voice_volume(&name)?,
-            1000 => config.file_part(&name)?.map_or(0, |part| part.same_id),
-            1001 => config.file_part(&name)?.map_or(-1, |part| part.id),
             _ => {
                 let mode = (index - 943) / 7;
                 let field = (index - 943) % 7;

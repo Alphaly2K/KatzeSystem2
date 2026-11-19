@@ -20,7 +20,7 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 
 标准会话在推进前必须通过 `set_input_device` 绑定 `InputDevice`。离屏宿主可提供只返回空闲状态的内存设备。`startup_input_bindings` 返回已经应用用户覆盖的八十个逻辑键槽，宿主可以用它构造 `DeviceKeys`。配置保存优先读取设备当前的绑定；设备未提供绑定时使用启动配置。
 
-`GameRuntime::set_game_resources` 接受资源服务与声音配置文档。运行库应用声音定义和用户覆盖，再按文件前缀选定归档类别；宿主按该类别补全名称并提供读取源。没有定义时使用启动文档里的声音组。自定义声音路由的宿主可以用 `set_resources`，由其资源服务直接处理 `sound` 类别。
+`GameRuntime::set_game_resources` 接受资源服务与声音配置文档。运行库按声音定义选定归档类别，应用用户覆盖以控制播放；宿主按该类别补全名称并提供读取源。没有新版声音定义时，使用启动文档里的旧版文件映射和声音组。自定义声音路由的宿主可以用 `set_resources`，由其资源服务直接处理 `sound` 类别。
 
 调用 `advance(FrameTime { tick, increment, system_time_ms })` 推进一轮。`tick` 为游戏逻辑时钟（通常每秒 60 个单位），`increment` 是本轮传给任务的逻辑增量，`system_time_ms` 为可回绕的系统毫秒计数。先处理上一轮语言请求，再推进媒体和任务。语言刷新失败时保留失败项及后续请求，已成功应用的界面刷新在下一次成功推进时报告。
 

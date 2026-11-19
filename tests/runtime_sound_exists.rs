@@ -72,7 +72,9 @@ fn game_resources_route_sound_names_before_opening_sources() -> Result<()> {
         data[at..at + name.len()].copy_from_slice(name);
     }
     let program = Program::from_code(&code, data, 64)?;
-    let startup = br#"<?xml version="1.0" encoding="UTF-8"?><document/>"#;
+    let startup = br#"<?xml version="1.0" encoding="UTF-8"?><document>
+        <VOICE><v00><head>tone</head><int>LeGaCy</int></v00></VOICE>
+        </document>"#;
     let definition = br#"<?xml version="1.0" encoding="UTF-8"?><document>
         <MASTER><volume>80</volume></MASTER>
         <PART><tone><head>tone</head><int>voice</int></tone>
@@ -84,7 +86,11 @@ fn game_resources_route_sound_names_before_opening_sources() -> Result<()> {
         </document>"#;
     for definition in [None, Some(definition.as_slice())] {
         let files = Files {
-            archive: Some(b"voice"),
+            archive: Some(if definition.is_some() {
+                b"voice"
+            } else {
+                b"legacy"
+            }),
             ..Files::default()
         };
         let requests = files.requests.clone();
@@ -102,13 +108,9 @@ fn game_resources_route_sound_names_before_opening_sources() -> Result<()> {
         assert_eq!(
             *requests.borrow(),
             [
-                if definition.is_some() {
-                    b"audio/ToNe3.ogg".as_slice()
-                } else {
-                    b"ToNe3."
-                },
+                b"audio/ToNe3.ogg".as_slice(),
                 b"empty.ogg",
-                b"unmatched.ogg",
+                b"unmatched.ogg"
             ]
         );
         assert_eq!(
