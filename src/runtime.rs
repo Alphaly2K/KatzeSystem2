@@ -42,6 +42,7 @@ mod native;
 mod particle;
 mod text_window;
 pub use motion::MotionSnapshot;
+mod frame;
 mod frame_capture;
 pub use frame_capture::SequenceCapture;
 mod game_tasks;
@@ -448,67 +449,6 @@ impl<F: ObjectFactory> Runtime<F> {
     pub fn set_budget(&mut self, budget: usize, limit: usize) {
         self.budget = budget.max(1);
         self.limit = limit;
-    }
-
-    /// 完成一轮树更新后广播配置变更并清除标记。
-    /// 通知失败后先续完原轮次，不重复推进时钟和主体。
-    pub fn update(&mut self, now: u32, increment: u32) -> Result<bool> {
-        self.resources.images.set_cache_limit(
-            (self
-                .host
-                .platform_settings
-                .as_ref()
-                .map_or(32, |s| s.etc_imgcache) as usize)
-                .saturating_mul(1 << 20),
-        );
-        self.resources.advance_movies(self.host.system_time_ms)?;
-        if self.configuration_notification.is_some() {
-            return self.finish_configuration_notification();
-        }
-        let mut lifecycle = TaskLifecycle {
-            numbers: &mut self.numbers,
-            host: &mut self.host,
-            resources: &mut self.resources,
-            objects: &mut self.objects,
-            running: &mut self.running,
-            factory: &mut self.factory,
-            budget: self.budget,
-            limit: self.limit,
-        };
-        let active = self.tree.update(now, increment, &mut lifecycle)?;
-        if active && self.host.system_settings_dirty != 0 {
-            self.configuration_notification = Some(BTreeSet::new());
-            return self.finish_configuration_notification();
-        }
-        Ok(active)
-    }
-
-    fn finish_configuration_notification(&mut self) -> Result<bool> {
-        let mut pending = self.configuration_notification.take().unwrap();
-        let root = self.tree.root_id();
-        if self.tree.node(root).is_none() {
-            return Ok(false);
-        }
-        let result = route_command_mode(
-            self.store(),
-            root,
-            Command {
-                target: root,
-                sender: 0,
-                code: 19,
-                data: [0; 3],
-            },
-            &mut CommandBuffers::default(),
-            &mut 0,
-            crate::input::InputDelivery::Broadcast,
-            Some(&mut pending),
-        );
-        if let Err(error) = result {
-            self.configuration_notification = Some(pending);
-            return Err(error);
-        }
-        self.host.system_settings_dirty = 0;
-        Ok(true)
     }
 
     /// 同步销毁子树；根任务关闭后树不再接受更新。

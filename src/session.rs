@@ -4,6 +4,9 @@
 use crate::{Error, Result, host::*, runtime::TaskRuntime};
 use std::sync::Arc;
 
+mod error;
+pub use error::{AdvanceError, StartupError};
+
 /// Clock values supplied by the host for a single update.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FrameTime {
@@ -191,21 +194,24 @@ impl GameRuntime {
 
     /// Check that resources, input and the canvas are ready. This does not
     /// call host services or attempt to load the entry script.
-    pub fn validate_startup(&self) -> Result<()> {
+    pub fn validate_startup(&self) -> std::result::Result<(), StartupError> {
         self.0.validate_session_startup()
     }
 
     /// Check the startup requirements and create the tasks for the named entry
     /// script. Failure drops the prepared session. No frame is advanced.
-    pub fn start_game(self, entry: &[u8]) -> Result<Self> {
+    pub fn start_game(self, entry: &[u8]) -> std::result::Result<Self, StartupError> {
         self.validate_startup()?;
-        self.0.start_game(entry).map(Self)
+        self.0
+            .start_game(entry)
+            .map(Self)
+            .map_err(StartupError::StartTasks)
     }
 
     /// Advance one frame, applying pending language changes first. On a
     /// language error, the failed request and remaining requests can be retried.
-    pub fn advance(&mut self, time: FrameTime) -> Result<FrameOutcome> {
-        self.0.advance(time)
+    pub fn advance(&mut self, time: FrameTime) -> std::result::Result<FrameOutcome, AdvanceError> {
+        self.0.advance_frame(time)
     }
 
     /// Borrow the current draw list and canvas for host presentation. If a

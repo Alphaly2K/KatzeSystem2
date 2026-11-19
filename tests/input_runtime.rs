@@ -921,7 +921,7 @@ struct Device(Rc<RefCell<DeviceState>>);
 fn standard_startup_rejects_incomplete_host_setup_before_calling_services() -> Result<()> {
     use katze_system2::{
         host::{ResourceMode, ResourceServices},
-        session::GameRuntime,
+        session::{GameRuntime, StartupError},
     };
 
     struct Entry;
@@ -935,34 +935,138 @@ fn standard_startup_rejects_incomplete_host_setup_before_calling_services() -> R
         }
     }
 
-    for (key, message) in [
-        ("resources", "游戏启动需要绑定资源服务"),
-        ("input", "游戏启动需要绑定输入设备"),
-        ("canvas", "游戏启动需要配置画布"),
+    for missing in [
+        StartupError::MissingResources,
+        StartupError::MissingInput,
+        StartupError::MissingCanvas,
     ] {
         let device = Rc::new(RefCell::new(DeviceState::new([12, 34])));
         let mut game = GameRuntime::prepare(0, 0)?;
-        if key != "resources" {
+        if missing != StartupError::MissingResources {
             game.set_resources(Entry);
         }
-        if key != "input" {
+        if missing != StartupError::MissingInput {
             game.set_input_device(Device(device.clone()))?;
         }
-        if key != "canvas" {
+        if missing != StartupError::MissingCanvas {
             game.configure_canvas([64, 48])?;
         } else {
             assert!(game.configure_canvas([64, 0]).is_err());
         }
         let preview = game.validate_startup().unwrap_err();
-        assert_eq!(preview.message, message);
+        assert_eq!(preview, missing);
         assert_eq!(game.start_game(b"main").err(), Some(preview));
         assert_eq!(device.borrow().pointer_calls, 0);
     }
     Ok(())
 }
 
+fn packed_kcs(code: &[u8]) -> Vec<u8> {
+    use std::io::Write;
+
+    let mut program = b"KCS\0".to_vec();
+    let len = code.len() as u32;
+    for word in [2, 0, 52, len, 52 + len, 0, 0, 0, 64, 52 + len, 0, len] {
+        program.extend(word.to_le_bytes());
+    }
+    let mut encoder = flate2::write::ZlibEncoder::new(program, flate2::Compression::fast());
+    encoder.write_all(code).unwrap();
+    encoder.finish().unwrap()
+}
+
 #[test]
-fn public_session_uses_host_resources_and_delivers_frame_and_pcm() -> Result<()> {
+fn public_session_reports_startup_and_update_failures_by_stage() -> Result<()> {
+    use katze_system2::{
+        host::{ResourceMode, ResourceServices},
+        session::{AdvanceError, FrameTime, GameRuntime, StartupError},
+    };
+
+    struct Files {
+        entry: Result<Vec<u8>>,
+        language_reads: usize,
+    }
+
+    impl ResourceServices for Files {
+        fn resolve(&mut self, _: &[u8], _: &[u8]) -> Result<Vec<u8>> {
+            Ok(b"main.kcs".to_vec())
+        }
+
+        fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
+            match (name, mode) {
+                (b"main.kcs", ResourceMode::ArchiveFirst) => self.entry.clone().map(Some),
+                (b"options.txt", ResourceMode::File) => {
+                    self.language_reads += 1;
+                    if self.language_reads == 1 {
+                        Err(Error::new(14, "temporary translation read failure"))
+                    } else {
+                        Ok(Some(Vec::new()))
+                    }
+                }
+                _ => panic!("unexpected resource: {name:?}, {mode:?}"),
+            }
+        }
+    }
+
+    let prepare = |entry| -> Result<_> {
+        let device = Rc::new(RefCell::new(DeviceState::new([0; 2])));
+        let mut game = GameRuntime::prepare(0, 0)?;
+        let startup = br#"<?xml version="1.0" encoding="UTF-8"?><document><SCREEN><width>64</width><height>48</height></SCREEN><language><OPTTABLE>options.txt</OPTTABLE></language></document>"#;
+        let size = game.configure_startup(startup, None, None)?;
+        game.configure_canvas(size)?;
+        game.set_input_device(Device(device.clone()))?;
+        game.set_resources(Files {
+            entry,
+            language_reads: 0,
+        });
+        Ok((game, device))
+    };
+    let entry_error = Error::new(17, "entry read failed");
+    let (broken, _) = prepare(Err(entry_error.clone()))?;
+    assert_eq!(
+        broken.start_game(b"main").err(),
+        Some(StartupError::StartTasks(entry_error))
+    );
+
+    let mut code = Vec::new();
+    for (op, args) in [
+        (0x25, &[1u32][..]),
+        (0x25, &[1][..]),
+        (0x2b, &[1053, 8][..]),
+    ] {
+        code.push(op);
+        for arg in args {
+            code.push(3);
+            code.extend(arg.to_le_bytes());
+        }
+    }
+    code.push(0x3b);
+    let (game, device) = prepare(Ok(packed_kcs(&code)))?;
+    let mut game = game.start_game(b"main").unwrap();
+    let time = |tick| FrameTime {
+        tick,
+        increment: 1,
+        system_time_ms: tick,
+    };
+    game.advance(time(1)).unwrap();
+    let before = device.borrow().pointer_calls;
+    device.borrow_mut().fail_pointer = Some(before + 1);
+    let translation_error = Error::new(14, "temporary translation read failure");
+    assert_eq!(
+        game.advance(time(2)),
+        Err(AdvanceError::LanguageRefresh(translation_error))
+    );
+    assert_eq!(device.borrow().pointer_calls, before);
+    assert_eq!(
+        game.advance(time(2)),
+        Err(AdvanceError::TaskUpdate(Error::new(0, "合成设备查询失败")))
+    );
+    assert_eq!(device.borrow().pointer_calls, before + 1);
+    Ok(())
+}
+
+#[test]
+fn public_session_uses_host_resources_and_delivers_frame_and_pcm()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
     use katze_system2::{
         host::{ResourceMode, ResourceServices, ScriptLocation, ScriptPosition},
         session::{FrameOutcome, FrameTime, GameRuntime},
@@ -978,12 +1082,7 @@ fn public_session_uses_host_resources_and_delivers_frame_and_pcm() -> Result<()>
         fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
             assert_eq!(name, b"main.kcs");
             assert_eq!(mode, ResourceMode::ArchiveFirst);
-            let mut program = b"KCS\0".to_vec();
-            for word in [2u32, 0, 52, 0, 52, 0, 0, 0, 64, 52, 0, 0] {
-                program.extend(word.to_le_bytes());
-            }
-            let encoder = flate2::write::ZlibEncoder::new(program, flate2::Compression::fast());
-            Ok(Some(encoder.finish().unwrap()))
+            Ok(Some(packed_kcs(&[])))
         }
     }
 

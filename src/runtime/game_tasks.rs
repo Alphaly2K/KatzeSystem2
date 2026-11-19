@@ -11,7 +11,7 @@ use crate::{
     language::{LanguageState, StringTableConfig},
     memory::SharedMemory,
     resource::XmlDocument,
-    session::{FrameOutcome, FrameTime},
+    session::StartupError,
     settings::SystemSettings,
 };
 use std::sync::Arc;
@@ -85,15 +85,15 @@ impl TaskRuntime {
         Ok(game)
     }
 
-    pub(crate) fn validate_session_startup(&self) -> Result<()> {
+    pub(crate) fn validate_session_startup(&self) -> std::result::Result<(), StartupError> {
         if self.resources.services.is_none() {
-            return Err(Error::new(0, "游戏启动需要绑定资源服务"));
+            return Err(StartupError::MissingResources);
         }
         if self.resources.input_device.is_none() {
-            return Err(Error::new(0, "游戏启动需要绑定输入设备"));
+            return Err(StartupError::MissingInput);
         }
         if self.drawing().target.is_none() {
-            return Err(Error::new(0, "游戏启动需要配置画布"));
+            return Err(StartupError::MissingCanvas);
         }
         Ok(())
     }
@@ -322,27 +322,6 @@ impl<L: ProgramLoader> TaskRuntime<L> {
 }
 
 impl<F: ObjectFactory> Runtime<F> {
-    /// Advance one host frame. Apply pending language changes before advancing the task tree.
-    /// On a language error the failed request and remaining requests are retained for retry.
-    /// Completed interface refreshes are still reported after a failed advance.
-    /// After the root has exited, subsequent calls return [`FrameOutcome::Exited`].
-    pub fn advance(&mut self, time: FrameTime) -> Result<FrameOutcome> {
-        if self.tree.node(self.tree.root_id()).is_none() {
-            return Ok(FrameOutcome::Exited);
-        }
-        self.apply_pending_language_changes()?;
-        self.host.system_time_ms = time.system_time_ms;
-        let active = self.update(time.tick, time.increment)?;
-        let interface_language_refreshed = std::mem::take(&mut self.interface_language_refreshed);
-        Ok(if active {
-            FrameOutcome::Running {
-                interface_language_refreshed,
-            }
-        } else {
-            FrameOutcome::Exited
-        })
-    }
-
     /// Transfer the specified sound task's PCM consumption to a host mixer.
     /// The mixer can be moved to the host's audio thread.
     /// A sound task can only be connected once, even if the mixer has been dropped.
