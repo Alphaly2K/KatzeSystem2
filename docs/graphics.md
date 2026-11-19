@@ -936,7 +936,9 @@ FES 所持原始数据在下次替换、`remove_fes_object` 或所属任务实�
 
 ## 绘图投影
 
-`Projection` 接收绘图中心 `center`、摄像深度 `camera_depth`、最终平移 `translation` 和矩阵 `matrix`，以及已选择坐标组的 `coordinate_offset`／`coordinate_scale`／`coordinate_matrix`。默认中心、深度、偏移和平移为零，比例为一，矩阵为单位矩阵；实际配置由调用者提供，当前尚未从根对象自动装载。
+`Projection` 接收绘图中心 `center`、摄像深度 `camera_depth`、最终平移 `translation` 和矩阵 `matrix`，以及已选择坐标组的 `coordinate_offset`／`coordinate_scale`／`coordinate_matrix`。默认中心、深度、偏移和平移为零，比例为一，矩阵为单位矩阵；初始配置由调用者提供。
+
+普通 12 接受四字节浮点位模式并替换当前绘图上下文的投影深度，状态二，保留返回槽。同一运行时的任务共享该值。后续绘制列表、脚本画面捕获及显式软件绘制沿用脚本设置的深度；重新配置帧视图仍保留该值。该操作需要启用模式零的绘图上下文，无需立即绘制。
 
 `project_triangle(vertices, base_depth, origin, perspective)` 接收对象／父级变换后的三个顶点、对象基点 Z、已选择的投影原点及开关，返回 `ProjectedVertex { position, rhw, color }`。颜色原样保留，不自动裁剪，不隐式执行 W 除法。
 

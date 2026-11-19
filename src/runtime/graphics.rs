@@ -14,6 +14,18 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         if matches!(index, 398 | 399) {
             return self.echo_native(index, arguments, vm);
         }
+        if index == 12 {
+            if arguments.len() != 4 {
+                return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+            }
+            let compositor = &mut self.resources.compositor;
+            let drawing = compositor.drawing();
+            if drawing.mode != 0 || !drawing.enabled {
+                return Err(Error::new(vm.pc, "投影深度需要启用模式零的绘图上下文"));
+            }
+            compositor.set_camera_depth(f32::from_bits(read::u32_at(arguments, 0)?));
+            return Ok(NativeReturn::Continue);
+        }
         if index == 394 {
             if arguments.len() != 8 {
                 return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));

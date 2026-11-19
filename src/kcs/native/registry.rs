@@ -316,7 +316,8 @@ pub(crate) fn runtime(index: u32) -> RuntimeHandler {
             RuntimeHandler::Fes
         }
         149 => RuntimeHandler::PointerPosition,
-        113
+        12
+        | 113
         | 78
         | 79
         | 80

@@ -18,6 +18,7 @@ pub struct Compositor {
     pub(crate) drawing: DrawingContext,
     pub(crate) drawables: Drawables,
     pub(crate) frame_view: Option<(Projection, [f32; 16], TextureFilter)>,
+    camera_depth: Option<f32>,
     pub(crate) auxiliary_targets: Vec<RenderTarget>,
     pub(crate) mosaics: super::mosaic::Mosaics,
     pub(crate) shatters: super::shatter::Shatters,
@@ -86,6 +87,17 @@ impl Compositor {
         self.frame_view = Some((projection, parent, filter));
     }
 
+    pub(crate) fn set_camera_depth(&mut self, depth: f32) {
+        self.camera_depth = Some(depth);
+    }
+
+    fn project_view(&self, mut projection: Projection) -> Projection {
+        if let Some(depth) = self.camera_depth {
+            projection.camera_depth = depth;
+        }
+        projection
+    }
+
     /// 合成全帧或指定深度区间；调用前须配置帧视图。
     pub fn compose(&mut self, range: Option<[f32; 2]>) -> Result<DrawList> {
         let (projection, parent, filter) = self
@@ -102,6 +114,7 @@ impl Compositor {
         filter: TextureFilter,
         range: Option<[f32; 2]>,
     ) -> Result<DrawList> {
+        let projection = self.project_view(projection);
         if range.is_some() {
             return self.drawables.compose(&projection, parent, filter, range);
         }
@@ -249,7 +262,8 @@ impl Compositor {
 
     /// 使用当前绘图上下文提交非纹理三角形，保留上下文显示门控。
     pub fn render_triangles(&mut self, projection: &Projection, parent: [f32; 16]) -> Result<bool> {
+        let projection = self.project_view(projection.clone());
         self.drawing
-            .render_triangles(&mut self.drawables, projection, parent)
+            .render_triangles(&mut self.drawables, &projection, parent)
     }
 }

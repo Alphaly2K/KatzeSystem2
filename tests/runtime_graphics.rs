@@ -858,6 +858,13 @@ impl ProgramLoader for Programs {
         }
         let mut code = vec![];
         ins(&mut code, 0x25, &[0xdeadbeef]);
+        if matches!(name, b"projection" | b"reset-projection") {
+            let depth = if name == b"projection" { 45_000f32 } else { 0. };
+            call(&mut code, 12, &[depth.to_bits()]);
+            ins(&mut code, 0x26, &[0]);
+            ins(&mut code, 0x3b, &[]);
+            return Ok(Some(Program::from_code(&code, vec![0; 16], 128)?));
+        }
         if name == b"inherit" {
             for (target, offset) in [(2, [2f32, 3., 4.]), (3, [1f32, 2., 5.])] {
                 call(
@@ -927,6 +934,67 @@ impl ProgramLoader for Programs {
         ins(&mut code, 0x3b, &[]);
         Ok(Some(Program::from_code(&code, vec![0; 16], 128)?))
     }
+}
+
+#[test]
+fn native_camera_depth_is_shared_across_tasks_and_frame_paths() {
+    use katze_system2::graphics::{Projection, RenderTarget, TextureFilter, Transform};
+
+    let mut runtime = Runtime::new(
+        0,
+        kind::ROOT,
+        Box::new(BaseObject::new()),
+        State::new(0),
+        KcsFactory::new(Programs),
+    );
+    let caller = runtime
+        .create(0, kind::ORDINARY, b"projection", b"")
+        .unwrap();
+    runtime.drawing_mut().enabled = true;
+    runtime.update(1, 1).unwrap();
+    let vm = runtime.object(caller).unwrap().interpreter().unwrap();
+    assert_eq!(vm.read(0, 4).unwrap(), 0xdeadbeefu32.to_le_bytes());
+
+    let drawing = runtime.drawing_mut();
+    drawing.active = true;
+    drawing.target = Some(RenderTarget::new([48, 48]).unwrap());
+    runtime
+        .drawables_mut()
+        .insert(
+            10,
+            Drawable::rectangle([0., 0., 30_000.], [6., 6.], u32::MAX),
+        )
+        .unwrap();
+    runtime.drawables_mut().set_base_point(10, [0.; 3]);
+    runtime.drawables_mut().set_display(10, 1);
+    runtime.drawables_mut().set_position(10, [8., 8., 0.]);
+    let parent = *Transform::default().matrix();
+    let filter = TextureFilter::Point;
+    let view = Projection {
+        camera_depth: 50_000.,
+        ..Projection::default()
+    };
+    runtime.set_frame_view(view.clone(), parent, filter);
+    let composed = runtime.compose_frame().unwrap();
+    let mut expected = RenderTarget::new([48, 48]).unwrap();
+    assert!(composed.render_into(&mut expected, None).unwrap());
+    assert_eq!(expected.pixel(30, 30), Some(u32::MAX));
+
+    let mut output = RenderTarget::new([48, 48]).unwrap();
+    assert!(
+        runtime
+            .render_frame(&mut output, &view, parent, filter)
+            .unwrap()
+    );
+    assert!(runtime.render_triangles(&view, parent).unwrap());
+    assert_eq!(output, expected);
+    assert_eq!(runtime.drawing().target.as_ref().unwrap(), &expected);
+
+    runtime
+        .create(0, kind::ORDINARY, b"reset-projection", b"")
+        .unwrap();
+    runtime.update(1, 2).unwrap();
+    assert!(runtime.compose_frame().unwrap().commands.is_empty());
 }
 
 #[test]
