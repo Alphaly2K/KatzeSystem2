@@ -26,7 +26,7 @@ type Records = Rc<RefCell<Vec<Record>>>;
 #[test]
 fn ordinary_image_cursor_tracks_hotspot_visibility_and_replacement() -> Result<()> {
     use katze_system2::{
-        graphics::{Projection, RenderTarget, TextureFilter, Transform},
+        graphics::{Projection, RenderTarget, SoftwareBackend, TextureFilter, Transform},
         kcs::ResourceServices,
         resource::ResourceMode,
         runtime::{KcsFactory, ProgramLoader, RootObject},
@@ -110,7 +110,11 @@ fn ordinary_image_cursor_tracks_hotspot_visibility_and_replacement() -> Result<(
     assert_eq!(output.pixel(5, 4), Some(0));
     assert_eq!(output.pixel(5, 6), Some(0));
     let mut composed = RenderTarget::new([16, 12])?;
-    assert!(rt.with_frame(|draw, canvas| draw.render_into(&mut composed, Some(canvas)))?);
+    assert!(rt.with_frame(|draw, canvas| SoftwareBackend::render_into(
+        draw,
+        canvas,
+        &mut composed
+    ))?);
     assert_eq!(output, composed);
 
     device.borrow_mut().cursor = 0;

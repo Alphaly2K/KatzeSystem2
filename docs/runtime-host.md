@@ -18,7 +18,7 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 
 普通 KCS 的入口和后续装载使用已绑定的 `ResourceServices`。运行库按 `kcs` 类别补全名称，以 `ArchiveFirst` 模式读取字节并解析；补丁与归档顺序由资源服务决定。工具可用 `GameRuntime::into_task_runtime` 接续同一个实例，也可直接使用 `runtime::TaskRuntime::with_programs` 提供预解析程序，或用 `TaskRuntime::with_resource_programs` 绑定现有外部存储。`TaskRuntime::start_game_with_tasks(entry)` 可另外取得用于诊断的任务编号。
 
-宿主通过 `ResourceServices` 提供资源，使用 `FileServices`、`SaveServices` 和 `ConfigurationServices` 分别接入脚本文件、存档和配置持久化。资源服务返回完整字节或可独立读取的 `SharedSource`；宿主可用 `CachedResources` 为自定义装载流程复用预读缓存。这些类型可统一从 `host` 导入。
+宿主通过 `ResourceServices` 提供资源，使用 `FileServices`、`SaveServices` 和 `ConfigurationServices` 分别接入脚本文件、存档和配置持久化。资源服务返回完整字节或可独立读取的 `SharedSource`；宿主可用 `CachedResources` 为自定义装载流程复用预读缓存。这些契约统一从 `host` 导入；旧的 `io`、`save` 和 `settings` 导入路径仍可用。
 
 标准会话在启动前必须通过 `set_input_device` 绑定 `InputDevice`。离屏宿主可提供只返回空闲状态的内存设备。`startup_input_bindings` 返回已经应用用户覆盖的八十个逻辑键槽，宿主可以用它构造 `DeviceKeys`。配置保存优先读取设备当前的绑定；设备未提供绑定时使用启动配置。
 
@@ -34,7 +34,9 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 
 窗口宿主可通过 `set_window_content_rect` 和 `set_windowed_mode` 提供客户区绘图矩形和当前窗口模式。`take_clipboard_requests` 取走按序提交的剪贴板写入请求，保留发起任务和原始编码，由宿主解码并写入剪贴板。
 
-宿主用 `GameRuntime::present_frame` 借用当前绘制列表和 `FrameCanvas`。画布提供只读纹理和变更标记。呈现和脚本回读共用一个纹理缓存时，由宿主上传所有变更面块后调用 `acknowledge_upload`；有独立缓存的多个消费者应各自跟踪更新。宿主可通过 `set_graphics_backend` 为脚本的同步离屏回读提供同类后端；未提供时使用库内软件后端。
+宿主用 `GameRuntime::present_frame` 借用当前绘制列表和 `FrameCanvas`。通过 `texture` 解析命令中的纹理，通过 `tiles` 和 `dirty_tiles` 更新画布缓存。呈现和脚本回读共用一个纹理缓存时，由宿主上传所有变更面块后调用 `acknowledge_upload`；有独立缓存的多个消费者应各自跟踪更新。
+
+`set_graphics_backend` 设置脚本同步离屏回读使用的后端。`GraphicsBackend::render` 在透明背景上执行命令，返回与请求尺寸一致、从顶行开始紧密排列的 BGRA8 `Surface`。旧实现若返回单块 `RenderTarget`，可直接返回该块的像素面。未设置时使用库内的软件后端；软件宿主若复用已有目标，可用 `SoftwareBackend::render_into`。
 
 全屏转场的活动状态随 `advance` 更新。宿主可跳过或重复取帧，脚本无需等待呈现便能收到转场完成状态。
 
@@ -48,6 +50,6 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 
 `set_diagnostic_trace` 为当前实例启用指定类别的诊断，例如输入、任务消息及 FES。回调在推进过程中同步收到类别和借用的格式化参数；如需保留请在回调中转成自有字符串。诊断文字可随版本变化，按编号统计 native 调用应使用结构化的 `set_native_trace`。传入 `None` 关闭探针。示例可设置 `KATZE_TRACE_MOVIE` 查看独占电影句柄的装载、播放、停止及释放；时间字段使用宿主传入的 `system_time_ms`。
 
-默认工作区包 `katze-system2` 发布为库。离屏宿主入口是 `cargo run --release --example runprobe -- "$GAME_DIR"`。脚本检查工具和桌面宿主是单独的仓库内包，分别通过 `cargo run -p katze-script -- ...` 和 `cargo run -p katze-desktop --bin window_startup -- "$GAME_DIR"` 执行。桌面输入的合成验证用 `cargo test -p katze-desktop --test window_host`。
+默认工作区包 `katze-system2` 发布为库。离屏宿主入口是 `cargo run --release --example runprobe -- "$GAME_DIR"`。普通运行直接使用 `GameRuntime`，可用 `KATZE_PROBE_SHOT` 输出终帧、用 `KATZE_PROBE_AUDIO_STATS=1` 统计内存 PCM。自动选项回放和 VM 检查通过同一示例的任务接口执行。脚本检查工具和桌面宿主是单独的仓库内包，分别通过 `cargo run -p katze-script -- ...` 和 `cargo run -p katze-desktop --bin window_startup -- "$GAME_DIR"` 执行。桌面输入的合成验证用 `cargo test -p katze-desktop --test window_host`。
 
 库依赖树不含 SDL、Metal、系统字体发现或当地时间库。当前电影解码构建使用 C 编译器，流式音频解码使用工作线程；在不提供这些能力的目标上须单独评估。`ReadSource::read_at` 可能在解码线程调用，宿主须提供可共享的独立读取源。

@@ -1,3 +1,4 @@
+use super::SharedSource;
 use crate::{
     Error, Result,
     resource::{ResourceCache, ResourceMode},
@@ -45,18 +46,14 @@ pub trait ResourceServices {
     fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>>;
 
     /// 打开可独立交给解码线程的读取源；默认持有普通读取返回的字节。
-    fn open(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<crate::io::SharedSource>> {
+    fn open(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<SharedSource>> {
         Ok(self
             .read(name, mode)?
-            .map(|bytes| std::sync::Arc::new(bytes) as crate::io::SharedSource))
+            .map(|bytes| std::sync::Arc::new(bytes) as SharedSource))
     }
 
     /// 打开宽字符资源名称，默认转为 CP932，由宿主提供其他字符的支持。
-    fn open_utf16(
-        &mut self,
-        name: &[u16],
-        mode: ResourceMode,
-    ) -> Result<Option<crate::io::SharedSource>> {
+    fn open_utf16(&mut self, name: &[u16], mode: ResourceMode) -> Result<Option<SharedSource>> {
         self.open(&encode_resource_name(name)?, mode)
     }
 
@@ -105,14 +102,10 @@ impl<S: ResourceServices + ?Sized> ResourceServices for &mut S {
     fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
         (**self).read(name, mode)
     }
-    fn open(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<crate::io::SharedSource>> {
+    fn open(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<SharedSource>> {
         (**self).open(name, mode)
     }
-    fn open_utf16(
-        &mut self,
-        name: &[u16],
-        mode: ResourceMode,
-    ) -> Result<Option<crate::io::SharedSource>> {
+    fn open_utf16(&mut self, name: &[u16], mode: ResourceMode) -> Result<Option<SharedSource>> {
         (**self).open_utf16(name, mode)
     }
     fn read_utf16(&mut self, name: &[u16], mode: ResourceMode) -> Result<Option<Vec<u8>>> {

@@ -7,8 +7,8 @@ mod support;
 use katze_system2::{
     Result,
     host::{
-        ButtonSource, DeviceKeys, InputDevice, KeySample, PointerSample, Rect, ResourceMode,
-        ResourceServices, WindowServices,
+        ButtonSource, DeviceKeys, GraphicsBackend, InputDevice, KeySample, PointerSample, Rect,
+        ResourceMode, ResourceServices, SoftwareBackend, WindowServices,
     },
     input::Region,
     runtime::{GameTasks, TaskRuntime},
@@ -291,7 +291,75 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let frames: u32 = std::env::args()
         .nth(2)
         .map_or(Ok(600), |value| value.parse())?;
-    let mut game = load_game(&root)?;
+    let game = load_game(&root)?;
+    let inspect = std::env::vars_os().any(|(key, value)| {
+        let key = key.to_string_lossy();
+        match key.as_ref() {
+            "KATZE_PROBE_CLICKS" | "KATZE_PROBE_AUDIO_STATS" => false,
+            "KATZE_PROBE_SHOT" => value.to_string_lossy().ends_with("@canvas"),
+            _ => key.starts_with("KATZE_PROBE_"),
+        }
+    });
+    if inspect {
+        inspect_runtime(game, frames)
+    } else {
+        run_session(game, frames)
+    }
+}
+
+fn run_session(
+    game: support::Game,
+    frames: u32,
+) -> std::result::Result<(), Box<dyn std::error::Error>> {
+    let diagnostics = support::diagnostics::Output::from_env(game.router.script_encoding);
+    let entry = game.start.clone();
+    let (mut session, keys, size) = build_runtime(game)?;
+    session.set_input_device(ScriptedDevice::new(keys, None, size))?;
+    session.set_diagnostic_trace(diagnostics.trace());
+    if let Some(trace) = diagnostics.native_trace() {
+        session.set_native_trace(trace);
+    }
+    let mut session = session.start_game(entry.as_bytes())?;
+    let mut window = ProbeWindow {
+        fullscreen: session
+            .system_settings()
+            .is_some_and(|settings| settings.fullscreen != 0),
+    };
+    let mut audio = std::env::var_os("KATZE_PROBE_AUDIO_STATS")
+        .is_some()
+        .then(AudioStats::default);
+    for round in 0..frames {
+        let tick = round + 1;
+        let outcome = session.advance(FrameTime {
+            tick,
+            increment: 1,
+            system_time_ms: (u64::from(tick) * 1000 / 60) as u32,
+        });
+        diagnostics.report(session.take_script_messages());
+        if outcome? == FrameOutcome::Exited || session.process_window_requests(&mut window)? {
+            break;
+        }
+        if let Some(stats) = &mut audio {
+            let mut pcm = [0.; 1600];
+            session.mix_audio_stereo(48_000, &mut pcm)?;
+            stats.add(round, &pcm);
+        }
+    }
+    if let Some(stats) = audio {
+        stats.report();
+    }
+    if let Some(path) = std::env::var_os("KATZE_PROBE_SHOT") {
+        let surface =
+            session.with_frame(|draw, canvas| SoftwareBackend.render(draw, canvas, size))?;
+        write_shot(&path, size, |x, y| surface.pixel(x, y))?;
+    }
+    Ok(())
+}
+
+fn inspect_runtime(
+    mut game: support::Game,
+    frames: u32,
+) -> std::result::Result<(), Box<dyn std::error::Error>> {
     let programs = support::inspect_programs(&mut game.router)?;
     if let Some(name) = std::env::var_os("KATZE_PROBE_LIST") {
         let name = name.to_string_lossy().into_owned();
@@ -955,7 +1023,8 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             }
         }
         let mut output = katze_system2::graphics::RenderTarget::new(surface)?;
-        runtime.with_frame(|draw, canvas| draw.render_into(&mut output, Some(canvas)))?;
+        runtime
+            .with_frame(|draw, canvas| SoftwareBackend::render_into(draw, canvas, &mut output))?;
         // `KATZE_PROBE_SHOT` 以 "@canvas" 结尾时转储蓄布而非合成帧。
         let path_str = path.to_string_lossy().into_owned();
         let target = if path_str.ends_with("@canvas") {
@@ -963,32 +1032,37 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         } else {
             &output
         };
-        let [width, height] = target.size();
-        let mut pixels = Vec::with_capacity((width * height * 3) as usize);
-        let mut colors = BTreeMap::new();
-        for y in 0..height {
-            for x in 0..width {
-                let value = target.pixel(x, y).unwrap_or(0);
-                *colors.entry(value).or_insert(0usize) += 1;
-                pixels.extend([
-                    ((value >> 16) & 0xff) as u8,
-                    ((value >> 8) & 0xff) as u8,
-                    (value & 0xff) as u8,
-                ]);
-            }
-        }
-        let mut file = std::fs::File::create(&path)?;
-        use std::io::Write;
-        write!(file, "P6\n{width} {height}\n255\n")?;
-        file.write_all(&pixels)?;
-        let mut top: Vec<_> = colors.into_iter().collect();
-        top.sort_by_key(|entry| std::cmp::Reverse(entry.1));
-        println!(
-            "画面 {width}x{height} 颜色 {} 主色 {:?}",
-            top.len(),
-            &top[..top.len().min(5)]
-        );
+        write_shot(&path, target.size(), |x, y| target.pixel(x, y))?;
     }
+    Ok(())
+}
+
+fn write_shot(
+    path: &std::ffi::OsStr,
+    [width, height]: [u32; 2],
+    pixel: impl Fn(u32, u32) -> Option<u32>,
+) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut pixels = Vec::with_capacity((width * height * 3) as usize);
+    let mut colors = BTreeMap::new();
+    for y in 0..height {
+        for x in 0..width {
+            let value = pixel(x, y).unwrap_or(0);
+            *colors.entry(value).or_insert(0usize) += 1;
+            let [b, g, r, _] = value.to_le_bytes();
+            pixels.extend([r, g, b]);
+        }
+    }
+    let mut file = std::fs::File::create(path)?;
+    write!(file, "P6\n{width} {height}\n255\n")?;
+    file.write_all(&pixels)?;
+    let mut top: Vec<_> = colors.into_iter().collect();
+    top.sort_by_key(|entry| std::cmp::Reverse(entry.1));
+    println!(
+        "画面 {width}x{height} 颜色 {} 主色 {:?}",
+        top.len(),
+        &top[..top.len().min(5)]
+    );
     Ok(())
 }
 

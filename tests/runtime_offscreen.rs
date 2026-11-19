@@ -220,7 +220,7 @@ fn host_frame_and_script_capture_use_distinct_depth_selections() {
             frame: &DrawList,
             canvas: &mut FrameCanvas<'_>,
             size: [u32; 2],
-        ) -> Result<RenderTarget> {
+        ) -> Result<katze_system2::host::Surface> {
             self.0.borrow_mut().push((frame.clone(), size));
             SoftwareBackend.render(frame, canvas, size)
         }

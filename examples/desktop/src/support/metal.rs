@@ -4,8 +4,8 @@ use ::metal::*;
 use katze_system2::{
     Error, Result,
     host::{
-        DrawList, FrameCanvas, FrameTexture, FrameTriangle, GraphicsBackend, Rect, RenderTarget,
-        Surface, TextureAddress, TextureFilter, TextureSource,
+        DrawList, FrameCanvas, FrameTexture, FrameTriangle, GraphicsBackend, Rect, Surface,
+        TextureAddress, TextureFilter, TextureSource,
     },
 };
 use std::{collections::BTreeMap, sync::Arc};
@@ -229,7 +229,7 @@ impl Renderer {
             let textured = triangle
                 .texture
                 .as_ref()
-                .is_some_and(|t| t.source.surface(canvas).is_some());
+                .is_some_and(|t| canvas.texture(&t.source).is_some());
             let interpolate = !triangle.is_culled()
                 && (textured
                     || triangle
@@ -382,7 +382,7 @@ impl Renderer {
         command: &CommandBufferRef,
         target: &TextureRef,
         triangles: &[FrameTriangle],
-        canvas: &RenderTarget,
+        canvas: &FrameCanvas<'_>,
         filter: TextureFilter,
     ) {
         let descriptor = RenderPassDescriptor::new();
@@ -405,7 +405,7 @@ impl Renderer {
             let source = triangle
                 .texture
                 .as_ref()
-                .and_then(|t| t.source.surface(canvas));
+                .and_then(|t| canvas.texture(&t.source));
             let Some(clip) = triangle.clip.unwrap_or(bounds).intersect(bounds) else {
                 continue;
             };
@@ -482,11 +482,10 @@ impl GraphicsBackend for Renderer {
         frame: &DrawList,
         canvas: &mut FrameCanvas<'_>,
         size: [u32; 2],
-    ) -> Result<RenderTarget> {
-        let surface = ::metal::objc::rc::autoreleasepool(|| {
+    ) -> Result<Surface> {
+        ::metal::objc::rc::autoreleasepool(|| {
             self.render_offscreen(&frame.commands, canvas, size, frame.filter)
-        })?;
-        RenderTarget::from_tiles(size, [1, 1], vec![Some(surface)])
+        })
     }
 }
 

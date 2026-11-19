@@ -130,11 +130,15 @@ impl Resources {
         }
         let frame = self.compose_frame(Some(range))?;
         let mut canvas = FrameCanvas::new(self.compositor.drawing.target.as_mut().unwrap());
-        if let Some(backend) = self.graphics_backend.as_deref_mut() {
-            backend.render(&frame, &mut canvas, size).map(Some)
+        let rendered = if let Some(backend) = self.graphics_backend.as_deref_mut() {
+            backend.render(&frame, &mut canvas, size)?
         } else {
-            SoftwareBackend.render(&frame, &mut canvas, size).map(Some)
+            SoftwareBackend.render(&frame, &mut canvas, size)?
+        };
+        if rendered.size() != size {
+            return Err(Error::new(0, "宿主回读尺寸与请求不符"));
         }
+        RenderTarget::from_tiles(size, [1, 1], vec![Some(rendered)]).map(Some)
     }
 
     pub fn capture_image(

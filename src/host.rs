@@ -7,6 +7,7 @@ mod effect;
 mod export;
 mod platform;
 mod resources;
+mod storage;
 
 pub use crate::audio::{Mixer, SpeechSynthesizer};
 pub use crate::graphics::{
@@ -17,7 +18,6 @@ pub use crate::graphics::{
 pub use crate::input::{
     ButtonSource, DeviceBinding, DeviceKeys, InputDevice, KeySample, PointerSample,
 };
-pub use crate::io::{FileServices, ReadSnapshot, ReadSource, SharedSource};
 pub use crate::kcs::ScriptSettings;
 pub use crate::language::StringTables;
 pub use crate::message::{FontRequest, FontServices};
@@ -29,10 +29,7 @@ pub use crate::runtime::{
     QuizDebugSession, ScriptLocation, ScriptMessages, ScriptPosition, SequenceCapture,
     TraceCategory,
 };
-pub use crate::save::SaveServices;
-pub use crate::settings::{
-    ConfigurationFile, ConfigurationServices, PlatformSettings, SystemSettings,
-};
+pub use crate::settings::{PlatformSettings, SystemSettings};
 pub use effect::{EffectPlayer, EffectServices};
 pub use export::{ExportDestination, ExportServices};
 pub use platform::{
@@ -41,3 +38,7 @@ pub use platform::{
     WindowCloseRequest, WindowRequest, WindowServices,
 };
 pub use resources::ResourceServices;
+pub use storage::{
+    ConfigurationFile, ConfigurationServices, FileServices, ReadSnapshot, ReadSource, SaveServices,
+    SharedSource,
+};

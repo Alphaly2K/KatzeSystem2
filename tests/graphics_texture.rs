@@ -694,14 +694,7 @@ fn camera_crossing_triangles_keep_the_visible_exterior_and_zero_rhw_fallback() {
             let output = SoftwareBackend
                 .render(&frame, &mut FrameCanvas::new(&mut canvas), [8, 6])
                 .unwrap();
-            assert!(
-                output.tiles()[0]
-                    .as_ref()
-                    .unwrap()
-                    .pixels()
-                    .iter()
-                    .all(|&v| v == 0)
-            );
+            assert!(output.pixels().iter().all(|&v| v == 0));
             for (i, vertex) in frame.commands[0].vertices.iter_mut().enumerate() {
                 vertex.position = [[4., 3., 0.2], [2.5, -1., 0.7], [2.5, 6.5, 0.7]][i];
                 vertex.rhw = if i == 0 { -1. / 65536. } else { 1. };

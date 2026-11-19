@@ -1,5 +1,6 @@
 //! CSS 文件与带编号的数据记录；文件位置和读写由外层存档服务提供。
 
+pub use crate::host::SaveServices;
 use crate::{Error, Result, read};
 use std::io::Write;
 
@@ -7,44 +8,6 @@ const BLOCK: usize = 0x80000;
 
 mod tree;
 pub use tree::{StateNode, StateTree};
-
-/// 按任务的存档目录读写 CSS 文件及查询文件修改时间，名称使用 CP932 字节。
-/// `None` 表示文件不存在或无法打开；未接入所需服务时返回诊断。
-pub trait SaveServices {
-    fn read(&mut self, task_id: u32, name: &[u8]) -> Result<Option<Vec<u8>>>;
-
-    /// 写入完整 CSS 文件，覆盖已有内容；无法打开或完成写入时返回 false，短写后删除文件。
-    fn write(&mut self, _task_id: u32, _name: &[u8], _bytes: &[u8]) -> Result<bool> {
-        Err(Error::new(0, "存档写入服务尚未接入"))
-    }
-
-    /// 覆盖 CSS 文件并尝试保留已有文件的修改时间；文件不存在时正常创建。
-    /// 无法打开或完成写入时返回 false，短写后删除不完整文件；恢复时间失败不改变写入结果。
-    fn write_preserving_time(
-        &mut self,
-        _task_id: u32,
-        _name: &[u8],
-        _bytes: &[u8],
-    ) -> Result<bool> {
-        Err(Error::new(0, "存档保留时间写入服务尚未接入"))
-    }
-
-    /// 删除同一目录下的文件；文件不存在或删除失败时返回 false。
-    fn remove(&mut self, _task_id: u32, _name: &[u8]) -> Result<bool> {
-        Err(Error::new(0, "存档删除服务尚未接入"))
-    }
-
-    /// 查询同一目录下文件的最后修改时间，使用自 1601-01-01 UTC 起的 100 ns 计数。
-    /// None 表示文件无法打开；未接入元数据查询时返回诊断。
-    fn modified_time(&mut self, _task_id: u32, _name: &[u8]) -> Result<Option<u64>> {
-        Err(Error::new(0, "存档修改时间查询服务尚未接入"))
-    }
-
-    /// 查询文件修改时间的本地年、月、日、时、分、秒；None 表示无法查询。
-    fn modified_date(&mut self, _task_id: u32, _name: &[u8]) -> Result<Option<[u32; 6]>> {
-        Err(Error::new(0, "存档本地日期查询服务尚未接入"))
-    }
-}
 
 /// 连续的编号／长度／正文记录，保留重复编号、声明用量和逻辑容量。
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -1,4 +1,4 @@
-use super::{DrawList, RenderTarget};
+use super::{DrawList, RenderTarget, Surface, TextureSource};
 use crate::Result;
 
 /// Read-only canvas textures with an explicit upload acknowledgement. A host
@@ -10,34 +10,57 @@ impl<'a> FrameCanvas<'a> {
         Self(target)
     }
 
+    /// Logical canvas size in pixels, including unallocated tiles.
+    pub fn size(&self) -> [u32; 2] {
+        self.0.size()
+    }
+
+    /// Texture slots in canvas order. `None` denotes an unallocated tile.
+    pub fn tiles(&self) -> &[Option<Surface>] {
+        self.0.tiles()
+    }
+
+    /// Upload flags indexed in the same order as `tiles`.
+    pub fn dirty_tiles(&self) -> &[bool] {
+        self.0.dirty_tiles()
+    }
+
+    /// Resolve a draw command's texture, including standalone images.
+    pub fn texture<'b>(&'b self, source: &'b TextureSource) -> Option<&'b Surface> {
+        source.surface(self.0)
+    }
+
     /// Clear dirty flags after uploading all changed tiles to the shared cache.
     pub fn acknowledge_upload(&mut self) {
         self.0.clear_dirty();
     }
 }
 
-impl std::ops::Deref for FrameCanvas<'_> {
-    type Target = RenderTarget;
-
-    fn deref(&self) -> &RenderTarget {
-        self.0
-    }
-}
-
-/// 离屏执行合成器生成的绘制列表，供脚本回读完整像素。
+/// Host renderer for synchronous, script-initiated readback.
 pub trait GraphicsBackend {
-    /// 返回清零后绘制的完整帧；画布是只读纹理来源，可消费其更新标记。
+    /// Draw onto a transparent target and return top-down BGRA pixels at `size`.
     fn render(
         &mut self,
         frame: &DrawList,
         canvas: &mut FrameCanvas<'_>,
         size: [u32; 2],
-    ) -> Result<RenderTarget>;
+    ) -> Result<Surface>;
 }
 
 /// 不访问窗口或设备的软件图形后端。
 #[derive(Default)]
 pub struct SoftwareBackend;
+
+impl SoftwareBackend {
+    /// Draw over an existing software target without clearing it.
+    pub fn render_into(
+        frame: &DrawList,
+        canvas: &FrameCanvas<'_>,
+        output: &mut RenderTarget,
+    ) -> Result<bool> {
+        frame.render_into(output, Some(canvas.0))
+    }
+}
 
 impl GraphicsBackend for SoftwareBackend {
     fn render(
@@ -45,7 +68,7 @@ impl GraphicsBackend for SoftwareBackend {
         frame: &DrawList,
         canvas: &mut FrameCanvas<'_>,
         size: [u32; 2],
-    ) -> Result<RenderTarget> {
+    ) -> Result<Surface> {
         let mut output = RenderTarget::new(size)?;
         let pixels = size[0] as usize * size[1] as usize;
         let jobs = (pixels / (192 * 1024)).clamp(1, 4);
@@ -56,11 +79,11 @@ impl GraphicsBackend for SoftwareBackend {
                 1
             };
         if workers == 1 {
-            frame.render_into(&mut output, Some(canvas))?;
+            Self::render_into(frame, canvas, &mut output)?;
         } else {
-            render_in_bands(frame, canvas, &mut output, workers)?;
+            render_in_bands(frame, canvas.0, &mut output, workers)?;
         }
-        Ok(output)
+        Ok(output.into_single_surface())
     }
 }
 

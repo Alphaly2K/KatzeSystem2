@@ -208,11 +208,9 @@ fn check() -> Result<(), Box<dyn std::error::Error>> {
                 commands: triangles.clone(),
                 filter,
             };
-            let reference =
+            let expected =
                 SoftwareBackend.render(&frame, &mut FrameCanvas::new(&mut canvas), [32, 24])?;
-            let expected = reference.tiles()[0].as_ref().unwrap();
-            let output = renderer.render(&frame, &mut FrameCanvas::new(&mut canvas), [32, 24])?;
-            let actual = output.tiles()[0].as_ref().unwrap();
+            let actual = renderer.render(&frame, &mut FrameCanvas::new(&mut canvas), [32, 24])?;
             for (index, (&actual, &expected)) in
                 actual.pixels().iter().zip(expected.pixels()).enumerate()
             {
@@ -255,11 +253,9 @@ fn check() -> Result<(), Box<dyn std::error::Error>> {
             commands: commands.to_vec(),
             filter,
         };
-        let reference =
+        let expected =
             SoftwareBackend.render(&frame, &mut FrameCanvas::new(&mut canvas), [8, 6])?;
-        let output = renderer.render(&frame, &mut FrameCanvas::new(&mut canvas), [8, 6])?;
-        let expected = reference.tiles()[0].as_ref().unwrap();
-        let actual = output.tiles()[0].as_ref().unwrap();
+        let actual = renderer.render(&frame, &mut FrameCanvas::new(&mut canvas), [8, 6])?;
         assert_eq!(
             actual.pixels(),
             expected.pixels(),

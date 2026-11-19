@@ -20,6 +20,11 @@ impl RenderTarget {
         Self::from_tiles(size, [1, 1], vec![Some(Surface::new(size)?)])
     }
 
+    pub(super) fn into_single_surface(mut self) -> Surface {
+        debug_assert_eq!(self.grid, [1, 1]);
+        self.tiles.pop().flatten().unwrap()
+    }
+
     /// 每块尺寸必须一致；None 对应尚未提供表面的槽位，像素操作跳过该槽。
     pub fn from_tiles(
         tile_size: [u32; 2],

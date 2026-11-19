@@ -1,83 +1,8 @@
-//! 随机读取源与脚本文件写入服务；目录及资源路由由宿主提供。
+//! Stream adapters for host-provided sources.
 
+pub use crate::host::{FileServices, ReadSnapshot, ReadSource, SharedSource};
 use crate::{Error, Result};
-use std::{
-    io::{Read, Seek, SeekFrom},
-    sync::Arc,
-};
-
-pub type SharedSource = Arc<dyn ReadSource>;
-
-/// 同一不可变资源快照中的条目身份。重挂载或替换内容时必须使用新世代。
-#[derive(Clone)]
-pub struct ReadSnapshot {
-    generation: Arc<()>,
-    entry: usize,
-}
-
-impl ReadSnapshot {
-    pub fn new(generation: Arc<()>, entry: usize) -> Self {
-        Self { generation, entry }
-    }
-}
-
-impl PartialEq for ReadSnapshot {
-    fn eq(&self, other: &Self) -> bool {
-        self.entry == other.entry && Arc::ptr_eq(&self.generation, &other.generation)
-    }
-}
-
-impl Eq for ReadSnapshot {}
-
-/// 脚本文件写入；名称为 CP932 字节，目录策略独立于资源与存档路由。
-pub trait FileServices {
-    /// 创建或截断宽字符名称指向的文件；默认桥接 CP932 创建服务。
-    fn create_utf16(
-        &mut self,
-        task_id: u32,
-        name: &[u16],
-    ) -> Result<Option<Box<dyn std::io::Write>>> {
-        let name = &name[..name
-            .iter()
-            .position(|&unit| unit == 0)
-            .unwrap_or(name.len())];
-        let name =
-            String::from_utf16(name).map_err(|_| Error::new(0, "文件名称包含无效 UTF-16"))?;
-        let name = crate::text::cp932_encoded(&name)
-            .map_err(|_| Error::new(0, "文件输出服务需要宽字符名称支持"))?;
-        self.create(task_id, &name)
-    }
-
-    /// 创建或截断文件并打开顺序写入端；普通打开失败返回 None。
-    fn create(&mut self, _task_id: u32, _name: &[u8]) -> Result<Option<Box<dyn std::io::Write>>> {
-        Err(Error::new(0, "宿主未提供文件创建服务"))
-    }
-
-    /// 在文件末尾依次尝试写入正文及 CRLF，缺失文件可创建。
-    /// 普通打开／写入失败仍正常结束；服务不可用或协议错误返回诊断。
-    fn append_line(&mut self, task_id: u32, name: &[u8], text: &[u8]) -> Result<()>;
-}
-
-/// 读取不改变共享游标；多个读取者可独立访问同一来源。
-pub trait ReadSource: Send + Sync {
-    fn len(&self) -> Result<u64>;
-
-    /// 仅在内容由宿主管理为不可变快照时提供；其他来源每次都从当前内容读取。
-    fn snapshot(&self) -> Option<ReadSnapshot> {
-        None
-    }
-
-    fn is_empty(&self) -> Result<bool> {
-        Ok(self.len()? == 0)
-    }
-
-    /// 允许短读；到达末尾时返回零，返回量不得超过输出缓冲区。
-    fn read_at(&self, offset: u64, output: &mut [u8]) -> Result<usize>;
-
-    fn read_exact_at(&self, offset: u64, output: &mut [u8]) -> Result<()> {
-        read_exact_from(self, offset, output)
-    }
-}
+use std::io::{Read, Seek, SeekFrom};
 
 pub(crate) fn read_exact_from<S: ReadSource + ?Sized>(
     source: &S,

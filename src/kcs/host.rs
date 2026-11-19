@@ -81,7 +81,7 @@ pub struct HostState {
     pub windowed_mode: Option<u32>,
     /// 独立宿主的按键配置；运行时优先读取输入设备的当前配置。
     pub configuration_keys: Option<crate::input::DeviceKeys>,
-    pub configuration_services: Option<Box<dyn crate::settings::ConfigurationServices>>,
+    pub configuration_services: Option<Box<dyn crate::host::ConfigurationServices>>,
     /// 全局配置变更标记；宿主处理配置变更通知后清除。
     pub system_settings_dirty: u32,
     pub languages: crate::language::LanguageState,
@@ -91,7 +91,7 @@ pub struct HostState {
     pub script_replacements: BTreeMap<Vec<u8>, Vec<u8>>,
     /// 普通 192～195 使用的用户设置，与两个 XML 配置文件独立。
     pub script_settings: super::ScriptSettings,
-    pub save_services: Option<Box<dyn crate::save::SaveServices>>,
+    pub save_services: Option<Box<dyn crate::host::SaveServices>>,
     /// 普通 445／629 使用的同步系统服务；未配置时对应入口返回诊断。
     pub system_services: Option<Box<dyn super::SystemServices>>,
     /// None 对应未绑定成就服务；通过 `set_achievement_services` 替换已使用的服务。
@@ -99,7 +99,7 @@ pub struct HostState {
     pub(super) achievement_initialization_attempted: bool,
     /// 引擎的调试配信状态，供 FES `steam_isbroadcast` 查询。
     pub steam_broadcast_override: u32,
-    pub file_services: Option<Box<dyn crate::io::FileServices>>,
+    pub file_services: Option<Box<dyn crate::host::FileServices>>,
     pub(super) files: BTreeMap<u32, super::files::OpenedFile>,
     /// 外层输入宿主提供的当前逻辑画布坐标；保留画布外的值。
     pub pointer_position: [i32; 2],

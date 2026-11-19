@@ -31,7 +31,7 @@ mod window_quiz;
 mod window_text;
 
 use katze_system2::{
-    host::{Rect, RenderTarget, ScriptLocation},
+    host::{Rect, RenderTarget, ScriptLocation, SoftwareBackend},
     session::{FrameOutcome, FrameTime},
 };
 use sdl2::event::{Event, WindowEvent};
@@ -275,7 +275,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             if let Some(output) = &mut output {
                 runtime.present_frame(|draw, canvas, capture| {
                     output.clear_rect(Rect::from_xywh(0, 0, surface[0] as i32, surface[1] as i32));
-                    draw.render_into(output, Some(canvas))?;
+                    SoftwareBackend::render_into(draw, canvas, output)?;
                     window
                         .present(output)
                         .map_err(|error| katze_system2::Error::new(0, error))?;

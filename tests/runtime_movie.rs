@@ -240,8 +240,8 @@ fn movie_natives_play_present_finish_and_release_through_runtime_services() {
         let composed = runtime
             .with_frame(|draw, canvas| SoftwareBackend.render(draw, canvas, [32; 2]))
             .unwrap();
-        assert_eq!(software.tiles(), composed.tiles());
         let surface = software.tiles()[0].as_ref().unwrap();
+        assert_eq!(surface, &composed);
         assert_eq!(surface.pixel(0, 0), Some(0xff00_0000));
         assert_ne!(surface.pixel(16, 16), Some(0xff00_0000));
         runtime.update(1, 1).unwrap();
