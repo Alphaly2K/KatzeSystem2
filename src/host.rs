@@ -15,7 +15,7 @@ pub use crate::message::{FontRequest, FontServices};
 pub use crate::resource::ResourceMode;
 pub use crate::runtime::{
     EffectPlayer, EffectServices, ExportDestination, ExportServices, PlatformJob,
-    PlatformJobRequest, PlatformJobServices, ProgramLoader, WindowServices,
+    PlatformJobRequest, PlatformJobServices, ProgramLoader, SequenceCapture, WindowServices,
 };
 pub use crate::save::SaveServices;
 pub use crate::settings::{ConfigurationFile, ConfigurationServices};

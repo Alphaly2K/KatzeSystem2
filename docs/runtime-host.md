@@ -30,7 +30,7 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 
 `set_surface_size` 提供逻辑画面尺寸；窗口宿主可独立通过 `set_window_content_rect` 和 `set_windowed_mode` 提供客户区绘图矩形和当前窗口模式。`take_clipboard_requests` 取走按序提交的剪贴板写入请求，保留发起任务和原始编码，由宿主解码并写入剪贴板。
 
-宿主用 `Runtime::with_frame` 借用绘制命令和画布。`wants_sequence_capture` 为真时，宿主读回同一帧，再用 `capture_sequence_bgra` 同步提交从顶行开始的 BGRA 像素和以字节计的行距。运行库负责裁剪、编码 BMP 和编号，通过宿主文件服务写入。
+宿主用 `Runtime::present_frame` 借用当前绘制列表和画布。需要连续截图时，回调同时收到一个 `SequenceCapture`。呈现提交后可通过它交回软件渲染目标，或交回从顶行开始的 BGRA 像素与以字节计的行距。每次请求只能提交一次；没有提交呈现时丢弃请求即可。运行库负责裁剪、编码 BMP 和编号，通过宿主文件服务写入。只需查看或离屏绘制时可用 `with_frame`。
 
 离屏宿主在更新后用 `mix_audio_stereo(rate_hz, buffer)` 拉取 PCM；此调用可等待解码。设备宿主用 `connect_audio_output()` 取得可移交给音频线程的 `Mixer`，由回调用 `Mixer::render(rate_hz, buffer)` 拉取 PCM，无须借用运行实例。两者均覆写调用方缓冲，格式为左右交错、幅度 `[-1, 1]` 的 `f32` 采样。游戏声音只能连接一次，连接后不得再调用离屏混音；会话退出时由宿主停止回调并释放混音器。
 
@@ -43,7 +43,7 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 迁移按下列顺序进行：
 
 1. 宿主服务统一从 `host` 导出，两份示例通过有类型的启动配置和语言查询接入。文件通过 `ReadSource`、`ResourceServices`、`SaveServices`、`FileServices` 访问；当地时间通过 `SystemServices::local_date_time` 提供；字体发现和私有字体读取由宿主提供。
-2. 合成器通过 `Runtime::with_frame` 借出绘制列表和画布，由宿主呈现；库内 `GraphicsBackend` 用于脚本离屏回读。Metal、窗口和音频设备均由示例宿主管理。
+2. 合成器通过 `Runtime::present_frame` 借出绘制列表和画布，由宿主呈现和提供连续截图读回；库内 `GraphicsBackend` 用于脚本离屏回读。Metal、窗口和音频设备均由示例宿主管理。
 3. 为已有系统路由明确请求、返回与取消的对应关系。同步查询保持同步；需要宿主等待的操作沿用任务推进和轮询。社交发帖协议随[兼容项](compatibility-gaps.md)延期。诊断信息通过公开入口交给宿主。编解码和计算路径的线程、时钟及工具链要求单独检查，在宿主确有需要时提供相应构建路径。
 4. `runprobe` 负责本地资源和隔离存档，消费绘制列表和内存 PCM。桌面窗口和设备输出使用独立的可选示例适配。用内存宿主回归验证公开 API，再用 `runprobe` 验证两款游戏的剧情、存档与媒体行为。
 

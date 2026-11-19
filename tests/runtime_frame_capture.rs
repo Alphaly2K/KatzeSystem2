@@ -260,16 +260,31 @@ fn sequence_capture_request_tells_the_host_when_to_read_back() -> Result<()> {
         rt.drawing_mut().mode = mode;
         rt.drawing_mut().enabled = drawing;
         assert_eq!(rt.wants_sequence_capture(), expected);
+        rt.present_frame(|_, canvas, capture| {
+            assert_eq!(canvas.size(), [3, 2]);
+            assert_eq!(capture.is_some(), expected);
+            Ok(())
+        })?;
         if !expected {
             assert!(!rt.capture_sequence_bgra([3, 2], 0, &[])?);
         }
     }
+    assert!(
+        rt.present_frame::<()>(|_, _, capture| {
+            assert!(capture.is_some());
+            Err(Error::new(0, "synthetic presentation failure"))
+        })
+        .is_err()
+    );
     let frame = frame();
     let pixels = frame.tiles()[0].as_ref().unwrap().pixels();
     let mut padded = pixels[..12].to_vec();
     padded.extend([0xac; 4]);
     padded.extend(&pixels[12..]);
-    assert!(rt.capture_sequence_bgra([3, 2], 11, pixels).is_err());
+    assert!(
+        rt.present_frame(|_, _, capture| capture.unwrap().write_bgra([3, 2], 11, pixels))
+            .is_err()
+    );
     assert!(rt.capture_sequence_bgra([3, 2], 16, &padded[..27]).is_err());
     assert!(
         rt.capture_sequence_bgra([3, 2], usize::MAX, &padded)
@@ -278,8 +293,8 @@ fn sequence_capture_request_tells_the_host_when_to_read_back() -> Result<()> {
     assert_eq!(rt.host().frame_capture_index, 9);
     assert!(out.borrow().bytes.is_empty());
     rt.set_frame_capture_rectangle(Some(katze_system2::graphics::Rect::from_xywh(-1, 0, 3, 2)));
-    assert!(rt.capture_sequence_frame(&frame)?);
-    assert!(rt.capture_sequence_bgra([3, 2], 16, &padded)?);
+    assert!(rt.present_frame(|_, _, capture| capture.unwrap().write_render_target(&frame))?);
+    assert!(rt.present_frame(|_, _, capture| capture.unwrap().write_bgra([3, 2], 16, &padded))?);
     assert_eq!(rt.host().frame_capture_index, 11);
     let out = out.borrow();
     assert_eq!(out.bytes.len(), 2);

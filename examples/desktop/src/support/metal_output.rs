@@ -58,24 +58,20 @@ impl Output {
         runtime: &mut Runtime<F>,
         size: [u32; 2],
     ) -> Result<()> {
-        let capture = runtime.wants_sequence_capture();
-        let snapshot = runtime.with_frame(|frame, canvas| {
+        runtime.present_frame(|frame, canvas, capture| {
             let mut renderer = self.renderer.borrow_mut();
             autoreleasepool(|| {
-                renderer.present(&self.layer, &frame.commands, canvas, size, frame.filter)?;
-                if capture {
-                    renderer
-                        .render_offscreen(&frame.commands, canvas, size, frame.filter)
-                        .map(Some)
-                } else {
-                    Ok(None)
+                if !renderer.present(&self.layer, &frame.commands, canvas, size, frame.filter)? {
+                    return Ok(());
                 }
+                if let Some(capture) = capture {
+                    let snapshot =
+                        renderer.render_offscreen(&frame.commands, canvas, size, frame.filter)?;
+                    capture.write_bgra(snapshot.size(), snapshot.stride(), snapshot.pixels())?;
+                }
+                Ok(())
             })
-        })?;
-        if let Some(snapshot) = snapshot {
-            runtime.capture_sequence_bgra(snapshot.size(), snapshot.stride(), snapshot.pixels())?;
-        }
-        Ok(())
+        })
     }
 }
 

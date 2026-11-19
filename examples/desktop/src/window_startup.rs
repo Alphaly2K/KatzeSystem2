@@ -266,14 +266,19 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 output.present(&mut runtime, [1280, 720])?;
             }
             if let Some(output) = &mut output {
-                output.clear_rect(Rect::from_xywh(0, 0, 1280, 720));
-                runtime.with_frame(|draw, canvas| draw.render_into(output, Some(canvas)))?;
+                runtime.present_frame(|draw, canvas, capture| {
+                    output.clear_rect(Rect::from_xywh(0, 0, 1280, 720));
+                    draw.render_into(output, Some(canvas))?;
+                    window
+                        .present(output)
+                        .map_err(|error| katze_system2::Error::new(0, error))?;
+                    if let Some(capture) = capture {
+                        capture.write_render_target(output)?;
+                    }
+                    Ok(())
+                })?;
             }
             render_time += render_started.elapsed();
-            if let Some(output) = &output {
-                window.present(output)?;
-                runtime.capture_sequence_frame(output)?;
-            }
         }
         text_window.draw()?;
         if let Some(importer) = &mut image_import {

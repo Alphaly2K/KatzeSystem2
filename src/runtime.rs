@@ -44,6 +44,7 @@ mod particle;
 mod text_window;
 pub use motion::MotionSnapshot;
 mod frame_capture;
+pub use frame_capture::SequenceCapture;
 mod image_animation;
 mod image_data;
 mod image_export;
@@ -319,23 +320,6 @@ impl<F: ObjectFactory> Runtime<F> {
             self.resources.append_image_cursor(&mut frame)?;
         }
         Ok(frame)
-    }
-
-    /// Provide the complete draw list and its canvas to the host for synchronous rendering.
-    /// The host can consume canvas dirty flags after uploading its textures.
-    pub fn with_frame<T>(
-        &mut self,
-        render: impl FnOnce(&crate::graphics::DrawList, &mut crate::graphics::RenderTarget) -> Result<T>,
-    ) -> Result<T> {
-        let frame = self.compose_frame()?;
-        let canvas = self
-            .resources
-            .compositor
-            .drawing
-            .target
-            .as_mut()
-            .ok_or_else(|| Error::new(0, "运行时未配置画布纹理输入"))?;
-        render(&frame, canvas)
     }
 
     /// 设置内部捕获所读取的画面区域；None 使用 surface_size 定义的整幅画面。
