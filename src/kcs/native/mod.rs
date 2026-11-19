@@ -38,6 +38,9 @@ pub(crate) fn call_native(
         registry::CoreHandler::Storage => storage::call(state, host, index, arguments, vm),
         registry::CoreHandler::File => super::files::call(host, index, arguments, vm),
         registry::CoreHandler::Database => database::call(host, index, arguments, vm),
+        registry::CoreHandler::QuestTable => {
+            super::database::quest::call(host, index, arguments, vm)
+        }
         registry::CoreHandler::System => system::call(state, host, task_tree, index, arguments, vm),
         registry::CoreHandler::Window => window::call(host, index, arguments, vm),
         registry::CoreHandler::Achievements => {

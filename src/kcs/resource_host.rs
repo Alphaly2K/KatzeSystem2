@@ -168,7 +168,6 @@ pub(crate) struct ResourceState {
     pub(super) name_tables: BTreeMap<u32, super::name_table::NameTable>,
     pub(super) section_tables: BTreeMap<u32, super::section_table::SectionTable>,
     pub(super) database_tables: BTreeMap<u32, super::database::table::Table>,
-    pub(super) quest_tables: BTreeMap<u32, super::database::quest::QuestTable>,
     pub(super) quiz_banks: BTreeMap<u32, super::quiz::QuizBank>,
     pub(super) quiz_options: BTreeMap<u32, super::quiz::options::OptionTables>,
     handles: HandleAllocator,
@@ -368,6 +367,9 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
     }
     fn create_database(&mut self, database: crate::kcs::Database) -> Result<u32> {
         self.inner.create_database(database)
+    }
+    fn create_quest_table(&mut self, bytes: &[u8]) -> Result<u32> {
+        self.inner.create_quest_table(bytes)
     }
     fn set_task_shared_numbers(&mut self, available: bool) {
         self.inner.set_task_shared_numbers(available);
@@ -620,10 +622,12 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
                 .state
                 .database_table_call(index, arguments, vm, Some(&mut self.services));
         }
-        if matches!(index, 795..=800 | 805) {
-            return self
-                .state
-                .quest_table_call(index, arguments, vm, Some(&mut self.services));
+        if index == 795 {
+            let handle = match super::load_quest_table(arguments, vm, Some(&mut self.services))? {
+                Some(bytes) => self.inner.create_quest_table(&bytes)?,
+                None => 0,
+            };
+            return Ok(NativeReturn::Value(handle));
         }
         if matches!(
             super::native::runtime_native_handler(index),

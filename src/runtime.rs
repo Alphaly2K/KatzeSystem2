@@ -2156,6 +2156,9 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
     fn create_database(&mut self, database: crate::kcs::Database) -> Result<u32> {
         self.host.create_database(database)
     }
+    fn create_quest_table(&mut self, bytes: &[u8]) -> Result<u32> {
+        self.host.create_quest_table(bytes)
+    }
     fn set_task_shared_numbers(&mut self, available: bool) {
         if let Some(task) = self.running.get_mut(&self.host.task_id) {
             task.shared_numbers = Some(available);

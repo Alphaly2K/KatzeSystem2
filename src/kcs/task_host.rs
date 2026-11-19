@@ -74,6 +74,9 @@ impl<H: Host, S: TaskServices> Host for TaskHost<'_, H, S> {
     fn create_database(&mut self, database: crate::kcs::Database) -> Result<u32> {
         self.inner.create_database(database)
     }
+    fn create_quest_table(&mut self, bytes: &[u8]) -> Result<u32> {
+        self.inner.create_quest_table(bytes)
+    }
 
     fn set_task_shared_numbers(&mut self, available: bool) {
         self.inner.set_task_shared_numbers(available);

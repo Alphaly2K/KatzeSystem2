@@ -47,6 +47,7 @@ pub use achievements::AchievementServices;
 pub use clipboard::{ClipboardRequest, ClipboardText};
 pub(crate) use configuration::save_configuration;
 pub(crate) use database::load as load_database;
+pub(crate) use database::quest::load as load_quest_table;
 pub use database::{Database, DatabaseRecord};
 pub(crate) use files::open_native as open_file_native;
 pub(crate) use host::hierarchy_query;
@@ -301,6 +302,10 @@ pub trait Host {
     /// 登记已经完成资源读取的词条数据库，返回独立句柄。
     fn create_database(&mut self, _database: Database) -> Result<u32> {
         Err(Error::new(0, "宿主未提供数据库存储"))
+    }
+    /// 装载任务记录表；无效签名或解压失败返回零。
+    fn create_quest_table(&mut self, _bytes: &[u8]) -> Result<u32> {
+        Err(Error::new(0, "宿主未提供任务记录表存储"))
     }
     fn load_kcs_program(&mut self, _name: &[u8]) -> Result<Option<Program>> {
         Err(Error::new(0, "宿主未提供 KCS 程序装载"))
@@ -642,6 +647,9 @@ impl<T: Host + ?Sized> Host for &mut T {
     }
     fn create_database(&mut self, database: Database) -> Result<u32> {
         (**self).create_database(database)
+    }
+    fn create_quest_table(&mut self, bytes: &[u8]) -> Result<u32> {
+        (**self).create_quest_table(bytes)
     }
     fn set_task_shared_numbers(&mut self, available: bool) {
         (**self).set_task_shared_numbers(available);

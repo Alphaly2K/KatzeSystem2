@@ -8,6 +8,7 @@ pub(super) enum CoreHandler {
     Storage,
     File,
     Database,
+    QuestTable,
     System,
     Window,
     Achievements,
@@ -92,6 +93,9 @@ pub(super) fn core(index: u32) -> CoreHandler {
             CoreHandler::Storage
         }
         869..=873 | 878 => CoreHandler::Database,
+        796..=803 | 805 | 807 | 808 | 811..=813 | 817..=819 | 821..=824 | 826..=828 => {
+            CoreHandler::QuestTable
+        }
         238
         | 242
         | 244..=248
@@ -282,7 +286,7 @@ pub(crate) fn runtime(index: u32) -> RuntimeHandler {
         633..=640 => RuntimeHandler::NameTable,
         683..=685 => RuntimeHandler::SectionTable,
         791..=794 => RuntimeHandler::DatabaseTable,
-        795..=800 | 805 => RuntimeHandler::QuestTable,
+        795 => RuntimeHandler::QuestTable,
         742..=778 => RuntimeHandler::Quiz,
         779..=784 | 829..=832 => RuntimeHandler::QuizOptions,
         219..=235

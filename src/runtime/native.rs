@@ -117,15 +117,21 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     .as_mut()
                     .map(|services| services.as_mut() as _),
             ),
-            RuntimeHandler::QuestTable => self.resources.raw.quest_table_call(
-                index,
-                arguments,
-                vm,
-                self.resources
-                    .services
-                    .as_mut()
-                    .map(|services| services.as_mut() as _),
-            ),
+            RuntimeHandler::QuestTable => {
+                let bytes = crate::kcs::load_quest_table(
+                    arguments,
+                    vm,
+                    self.resources
+                        .services
+                        .as_mut()
+                        .map(|services| services.as_mut() as _),
+                )?;
+                let handle = match bytes {
+                    Some(bytes) => self.host.create_quest_table(&bytes)?,
+                    None => 0,
+                };
+                Ok(NativeReturn::Value(handle))
+            }
             RuntimeHandler::Quiz => self.resources.raw.quiz_call(
                 index,
                 arguments,

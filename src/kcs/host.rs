@@ -150,6 +150,7 @@ pub struct HostState {
     pub(super) record_queues: BTreeMap<u32, super::record_queue::RecordQueue>,
     pub(super) containers: BTreeMap<u32, crate::save::DataContainer>,
     pub(super) databases: BTreeMap<u32, super::Database>,
+    pub(super) quest_tables: BTreeMap<u32, super::database::quest::QuestTable>,
     pub(super) raw_buffers: BTreeMap<u32, Vec<u8>>,
     handles: HandleAllocator,
 }
@@ -314,6 +315,9 @@ impl Host for CoreHost<'_> {
     }
     fn create_database(&mut self, database: super::Database) -> Result<u32> {
         self.host.create_database(database)
+    }
+    fn create_quest_table(&mut self, bytes: &[u8]) -> Result<u32> {
+        self.host.create_quest_table(bytes)
     }
     fn message_defaults(&self) -> Result<&crate::message::MessageDefaults> {
         self.host

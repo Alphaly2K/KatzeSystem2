@@ -606,6 +606,127 @@ fn quest_table_preserves_first_rows_sparse_positions_and_raw_state() -> Result<(
     Ok(())
 }
 
+#[test]
+fn quest_progress_round_trips_through_raw_memory_and_resets_distinct_fields() -> Result<()> {
+    let words = |values: &[u32]| {
+        values
+            .iter()
+            .flat_map(|value| value.to_le_bytes())
+            .collect::<Vec<_>>()
+    };
+    let mut plain = words(&[2]);
+    for name in [b"TBL".as_slice(), b"TYPE"] {
+        let mut column = [0; 24];
+        column[..name.len()].copy_from_slice(name);
+        column[20..].copy_from_slice(&4u32.to_le_bytes());
+        plain.extend(column);
+    }
+    plain.extend(words(&[3, 8, 9, 4, u32::MAX, 1, 3, 3]));
+
+    let mut state = State::new(0);
+    let mut core = CoreHost::new(&mut state);
+    let mut files = Files(Some(pack(&plain)));
+    let mut host = ResourceHost::new(&mut core, &mut files);
+    let mut vm = Interpreter::new(Program::from_code(&[], data(), 64)?, vec![0; 16])?;
+    let handle = value(call(&mut host, &mut vm, 795, &[32]));
+    let invoke = |host: &mut ResourceHost<'_, CoreHost<'_>, Files>,
+                  vm: &mut Interpreter,
+                  index,
+                  args: &[u32]| {
+        let args: Vec<_> = std::iter::once(handle)
+            .chain(args.iter().copied())
+            .collect();
+        call(host, vm, index, &args)
+    };
+    invoke(&mut host, &mut vm, 797, &[7]);
+    invoke(&mut host, &mut vm, 799, &[91]);
+    for id in [9, 9, u32::MAX] {
+        invoke(&mut host, &mut vm, 801, &[id]);
+    }
+    invoke(&mut host, &mut vm, 802, &[144, 144, u32::MAX, 9]);
+    invoke(&mut host, &mut vm, 803, &[9, 148, 0x8000_0000]);
+    let size = value(invoke(&mut host, &mut vm, 823, &[0]));
+    assert_eq!(size, 672);
+    assert_eq!(vm.read(144, 8)?.as_ref(), words(&[4, 1]));
+    assert_eq!(vm.read(0x8000_0000, 4)?.as_ref(), words(&[1]));
+    let raw = value(call(&mut host, &mut vm, 833, &[size + 8]));
+    host.inner
+        .raw_buffer_mut(raw, size as usize + 8)?
+        .fill(0xa5);
+    let buffer = raw + 4;
+    for (index, args) in [
+        (807, &[19, 1][..]),
+        (807, &[19, 0]),
+        (811, &[19, u32::MAX]),
+        (812, &[19, 5]),
+        (813, &[19]),
+        (823, &[buffer]),
+    ] {
+        invoke(&mut host, &mut vm, index, args);
+    }
+    assert_eq!(host.inner.raw_buffer(raw, 4)?, &[0xa5; 4]);
+    assert_eq!(host.inner.raw_buffer(buffer + size, 4)?, &[0xa5; 4]);
+    assert_eq!(
+        host.inner.raw_buffer(buffer, 36)?,
+        words(&[36, 72, 3, 108, 560, 20, 668, 4, 4])
+    );
+    assert_eq!(
+        host.inner.raw_buffer(buffer + 36, 24)?,
+        words(&[u32::MAX, 0, 0x8000_0000, 7, 1, 0])
+    );
+    assert_eq!(
+        host.inner.raw_buffer(buffer + 640, 32)?,
+        words(&[19, 2, 2, 1, 0, 5, 1, 2])
+    );
+    host.inner
+        .raw_buffer_mut(buffer + 36, 4)?
+        .copy_from_slice(&99u32.to_le_bytes());
+    host.inner
+        .raw_buffer_mut(buffer + 60, 24)?
+        .copy_from_slice(&words(&[3, 8, 107, 12, 14, 33]));
+    assert_eq!(
+        value(call(&mut host, &mut vm, 824, &[handle, buffer, size - 5])),
+        0
+    );
+    assert_eq!(value(call(&mut host, &mut vm, 826, &[handle, 3])), 0);
+    assert_eq!(
+        value(call(&mut host, &mut vm, 824, &[handle, buffer, size - 4])),
+        1
+    );
+    assert_eq!(value(call(&mut host, &mut vm, 819, &[handle, 7])), 3);
+    call(&mut host, &mut vm, 827, &[handle]);
+    call(&mut host, &mut vm, 822, &[handle]);
+    assert_eq!(value(call(&mut host, &mut vm, 800, &[handle])), 91);
+    assert_eq!(
+        value(call(&mut host, &mut vm, 817, &[handle, 107, 0])),
+        u32::MAX
+    );
+    assert_eq!(value(call(&mut host, &mut vm, 826, &[handle, 3])), 34);
+    call(&mut host, &mut vm, 821, &[handle]);
+    assert_eq!(value(call(&mut host, &mut vm, 798, &[handle])), 1);
+    assert_eq!(value(call(&mut host, &mut vm, 800, &[handle])), 0);
+    call(&mut host, &mut vm, 823, &[handle, buffer]);
+    assert_eq!(
+        host.inner.raw_buffer(buffer + 36, 48)?,
+        words(&[
+            u32::MAX,
+            0,
+            0x8000_0000,
+            0,
+            1,
+            0,
+            3,
+            0,
+            0x8000_0000,
+            0,
+            14,
+            34,
+        ])
+    );
+    assert_eq!(host.inner.raw_buffer(buffer + 644, 28)?, &[0; 28]);
+    Ok(())
+}
+
 fn quiz_table(prefix: u8) -> Vec<u8> {
     pack_quiz(
         prefix,
