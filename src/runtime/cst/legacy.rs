@@ -1,6 +1,7 @@
 use super::CstContext;
 use crate::kcs::{Interpreter, NativeReturn, format_string};
 use crate::runtime::{ObjectFactory, ObjectHost};
+use crate::task::CommandBuffers;
 use crate::{Error, Result, read};
 
 impl<F: ObjectFactory> ObjectHost<'_, F> {
@@ -17,9 +18,14 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                 .insert(owner, CstContext::new(&self.host.languages.prefixes));
             return Ok(NativeReturn::Continue);
         }
+        if matches!(index, 233 | 234) {
+            return self.legacy_cst_transfer(index, arguments, vm, owner);
+        }
         let Some(context) = self.resources.legacy_cst.get_mut(&owner) else {
             return if matches!(index, 225 | 226) {
                 Err(Error::new(vm.pc, "任务尚未初始化 CST 登记表"))
+            } else if index == 235 {
+                Err(Error::new(vm.pc, "任务尚未初始化 CST 读取器"))
             } else {
                 Ok(NativeReturn::Value(0))
             };
@@ -33,7 +39,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             return Ok(NativeReturn::Continue);
         }
         let length = match index {
-            220 | 227 => 4,
+            220 | 227 | 235 => 4,
             221 | 223 | 224 => 8,
             222 => 12,
             1035 => 16,
@@ -117,8 +123,66 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     1
                 }
             }
+            235 => {
+                vm.write(arg(0)?, &[0])?;
+                0
+            }
             _ => unreachable!(),
         };
         Ok(NativeReturn::Value(value))
+    }
+
+    fn legacy_cst_transfer(
+        &mut self,
+        index: u32,
+        arguments: &[u8],
+        vm: &mut Interpreter,
+        owner: u32,
+    ) -> Result<NativeReturn> {
+        let initialized = self.resources.legacy_cst.contains_key(&owner);
+        if index == 233 && !initialized {
+            return Ok(NativeReturn::Continue);
+        }
+        if arguments.len() != if index == 233 { 16 } else { 4 } {
+            return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+        }
+        let target = read::u32_at(arguments, 0)?;
+        let mut reader = [0; 4];
+        let mut history = [0; 4];
+        self.command_target_with_buffers(
+            target,
+            176,
+            [1, 1, 0],
+            &mut CommandBuffers {
+                data0: Some(&mut reader),
+                data1: Some(&mut history),
+                ..Default::default()
+            },
+        )?;
+        let source = (history != [0; 4])
+            .then(|| self.resources.legacy_cst.get(&target))
+            .flatten();
+        if index == 233 {
+            let selected = read::u32_at(arguments, 4)?;
+            let position = read::u32_at(arguments, 8)?;
+            let address = read::u32_at(arguments, 12)?;
+            let input = vm.read_string(address)?;
+            let entry =
+                source.and_then(|source| source.history.get(source.history_index(selected)));
+            let output =
+                super::details::expand_history_strings(entry, position, &input, true, vm.pc)?;
+            drop(input);
+            vm.write(address, &output)?;
+            return Ok(NativeReturn::Continue);
+        }
+        let Some(source) = source.filter(|_| initialized) else {
+            return Ok(NativeReturn::Value(0));
+        };
+        let registrations = source.encode_records(false, true)?;
+        let history = source.encode_records(true, true)?;
+        let target = self.resources.legacy_cst.get_mut(&owner).unwrap();
+        target.decode_records(false, &registrations)?;
+        target.decode_records(true, &history)?;
+        Ok(NativeReturn::Value(1))
     }
 }

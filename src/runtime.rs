@@ -1010,6 +1010,33 @@ fn run_nested<F: ObjectFactory>(
         budget,
         limit,
     } = store;
+    if let Execution::Command {
+        kind: kind::ORDINARY,
+        command: Command { code: 176, .. },
+        buffers,
+        propagate,
+        ..
+    } = &mut execution
+    {
+        let deleted = running.get(&target).is_some_and(|task| task.deleted)
+            || objects
+                .get(&target)
+                .is_some_and(|object| object.control().deletion_requested != 0);
+        if !deleted {
+            let available = u32::from(resources.legacy_cst.contains_key(&target)).to_le_bytes();
+            for destination in [&mut buffers.data0, &mut buffers.data1]
+                .into_iter()
+                .flatten()
+            {
+                destination
+                    .get_mut(..4)
+                    .ok_or_else(|| Error::new(0, "CST 上下文查询缓冲区不足"))?
+                    .copy_from_slice(&available);
+            }
+        }
+        **propagate = false;
+        return Ok(());
+    }
     if let (
         Some(task),
         Execution::Command {

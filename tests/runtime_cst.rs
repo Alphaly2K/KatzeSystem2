@@ -613,3 +613,88 @@ fn cst_history_strings_use_global_position_fallback_and_preserve_raw_marker_punc
         assert_eq!(vm.stack_bytes(), 0xdeadbeefu32.to_le_bytes());
     }
 }
+
+#[test]
+fn legacy_cst_uses_target_history_and_copies_tables_independently() -> Result<()> {
+    struct Programs;
+    impl ProgramLoader for Programs {
+        fn load(&mut self, role: &[u8]) -> Result<Option<Program>> {
+            let mut code = vec![];
+            let mut data = vec![0; 352];
+            for (address, bytes) in [
+                (96, b"entry.cst".as_slice()),
+                (128, b"direct"),
+                (144, b"x$str3/$str8/$str4"),
+                (176, b"x$str3/$str8/$str4"),
+                (208, b"x$str3/$str8/$str4"),
+            ] {
+                data[address..address + bytes.len()].copy_from_slice(bytes);
+            }
+            let mut emit = |index, args: &[u32], result: Option<u32>| {
+                let args: Vec<_> = args.iter().map(|&n| (3, n)).collect();
+                call(&mut code, index, &args);
+                if let Some(slot) = result {
+                    instruction(&mut code, 0x26, &[(3, slot)]);
+                }
+            };
+            if role == b"source" {
+                emit(219, &[], None);
+                emit(223, &[96, 19], Some(0));
+                emit(224, &[96, 23], Some(4));
+                emit(229, &[0, 7, 4, 128], Some(8));
+                emit(231, &[0, 7, 144], None);
+                emit(65, &[], None);
+                emit(225, &[], None);
+                emit(226, &[], None);
+            } else {
+                emit(234, &[1], Some(0));
+                emit(219, &[], None);
+                emit(228, &[0, 256, 288], Some(4));
+                emit(233, &[1, 0, 7, 176], None);
+                emit(234, &[1], Some(8));
+                emit(65, &[], None);
+                emit(227, &[96], Some(12));
+                emit(228, &[u32::MAX, 272, 292], Some(16));
+                emit(230, &[0, 7, 4, 304], Some(20));
+                emit(232, &[0, 7, 208], None);
+                emit(235, &[320], Some(24));
+            }
+            code.push(0x3b);
+            Ok(Some(Program::from_code(&code, data, 96)?))
+        }
+    }
+
+    for budget in [1, 4096] {
+        let mut numbers = State::new(0);
+        numbers.strings.insert(3, b"global".to_vec());
+        let mut runtime = Runtime::new(
+            0,
+            kind::ROOT,
+            Box::new(BaseObject::new()),
+            numbers,
+            KcsFactory::new(Programs),
+        );
+        runtime.set_budget(budget, 1 << 20);
+        let source = runtime.create(0, kind::ORDINARY, b"source", b"")?;
+        assert_eq!(source, 1);
+        let target = runtime.create(0, kind::ORDINARY, b"target", b"")?;
+        runtime.update(0, 1)?;
+        runtime.update(1, 1)?;
+        let vm = runtime.object(target).unwrap().interpreter().unwrap();
+        let values: Vec<_> = vm
+            .read(0, 28)?
+            .chunks_exact(4)
+            .map(|bytes| u32::from_le_bytes(bytes.try_into().unwrap()))
+            .collect();
+        assert_eq!(values, [0, u32::MAX, 1, 19, 0, 1, 0]);
+        assert_eq!(vm.read(176, 22)?, b"xglobal/$str8/direct\0\0".as_slice());
+        assert_eq!(vm.read(208, 17)?, b"xglobal//direct\0\0".as_slice());
+        assert_eq!(vm.read(256, 1)?, [0]);
+        assert_eq!(vm.read(272, 10)?, b"entry.cst\0".as_slice());
+        assert_eq!(vm.read(288, 4)?, u32::MAX.to_le_bytes());
+        assert_eq!(vm.read(292, 4)?, 23u32.to_le_bytes());
+        assert_eq!(vm.read(304, 7)?, b"direct\0".as_slice());
+        assert_eq!(vm.read(320, 1)?, [0]);
+    }
+    Ok(())
+}

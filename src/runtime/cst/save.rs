@@ -4,7 +4,7 @@ use crate::runtime::{ObjectFactory, ObjectHost};
 use crate::{Error, Result, read};
 
 impl CstContext {
-    fn encode_records(&self, history: bool, include_data: bool) -> Result<Vec<u8>> {
+    pub(super) fn encode_records(&self, history: bool, include_data: bool) -> Result<Vec<u8>> {
         let entries = if history {
             &self.history
         } else {
@@ -44,7 +44,7 @@ impl CstContext {
         Ok(bytes)
     }
 
-    fn decode_records(&mut self, history: bool, bytes: &[u8]) -> Result<()> {
+    pub(super) fn decode_records(&mut self, history: bool, bytes: &[u8]) -> Result<()> {
         if bytes.len() > read::MAX_BYTES {
             return Err(Error::new(0, "CST 登记存档超过读取上限"));
         }

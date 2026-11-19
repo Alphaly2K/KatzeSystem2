@@ -1,4 +1,4 @@
-use super::Entry;
+use super::{CstContext, Entry};
 use crate::kcs::{Interpreter, NativeReturn};
 use crate::runtime::{ObjectFactory, ObjectHost};
 use crate::{Error, Result, read, text};
@@ -63,46 +63,62 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         arguments: &[u8],
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
-        let handle = read::u32_at(arguments, 0)?;
-        let size = if matches!(index, 334 | 335) { 20 } else { 16 };
-        if arguments.len() != size && !(handle == 0 && arguments.len() == 4) {
-            return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
-        }
-        if handle == 0 {
-            return Ok(if matches!(index, 336 | 337) {
+        let legacy = index < 333;
+        let index = if legacy { index + 105 } else { index };
+        let empty = || {
+            Ok(if matches!(index, 336 | 337) {
                 NativeReturn::Continue
             } else {
                 NativeReturn::Value(0)
-            });
+            })
+        };
+        let (context, arguments) = if legacy {
+            let Some(context) = self.resources.legacy_cst.get_mut(&self.host.task_id) else {
+                return empty();
+            };
+            (context, arguments)
+        } else {
+            let handle = read::u32_at(arguments, 0)?;
+            if handle == 0 {
+                let size = if matches!(index, 334 | 335) { 20 } else { 16 };
+                if arguments.len() != 4 && arguments.len() != size {
+                    return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+                }
+                return empty();
+            }
+            let context = self
+                .resources
+                .cst_contexts
+                .get_mut(&handle)
+                .ok_or_else(|| Error::new(vm.pc, "CST 上下文句柄无效"))?;
+            (context, &arguments[4..])
+        };
+        let size = if matches!(index, 334 | 335) { 16 } else { 12 };
+        if arguments.len() != size {
+            return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
         }
-        let context = self
-            .resources
-            .cst_contexts
-            .get_mut(&handle)
-            .ok_or_else(|| Error::new(vm.pc, "CST 上下文句柄无效"))?;
-        let requested = read::u32_at(arguments, 4)? as usize;
-        let selected = requested.min(context.history.len().saturating_sub(1));
+        let selected = context.history_index(read::u32_at(arguments, 0)?);
         if index == 333 {
             let entry = context.history.get(selected);
             let (name, value) =
                 entry.map_or((&b""[..], u32::MAX), |entry| (entry.name(), entry.value));
             let mut name = name.to_vec();
             name.push(0);
-            vm.write(read::u32_at(arguments, 8)?, &name)?;
-            vm.write(read::u32_at(arguments, 12)?, &value.to_le_bytes())?;
+            vm.write(read::u32_at(arguments, 4)?, &name)?;
+            vm.write(read::u32_at(arguments, 8)?, &value.to_le_bytes())?;
             return Ok(NativeReturn::Value(
                 entry.map_or(u32::MAX, |_| selected as u32),
             ));
         }
-        let position = read::u32_at(arguments, 8)?;
+        let position = read::u32_at(arguments, 4)?;
         if matches!(index, 334 | 335) {
-            let address = read::u32_at(arguments, 16)?;
-            let id = read::u32_at(arguments, 12)?;
+            let address = read::u32_at(arguments, 12)?;
+            let id = read::u32_at(arguments, 8)?;
             if index == 334 {
-                let value = vm.read_string(address)?;
                 let Some(entry) = context.history.get_mut(selected) else {
                     return Ok(NativeReturn::Value(0));
                 };
+                let value = vm.read_string(address)?;
                 entry.set_string(position, id, &value)?;
                 return Ok(NativeReturn::Value(1));
             }
@@ -120,44 +136,81 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             vm.write(address, &bytes)?;
             return Ok(NativeReturn::Value(u32::from(found)));
         }
-        let address = read::u32_at(arguments, 12)?;
-        let input = vm.read_string(address)?.to_vec();
-        let mut offset = 0;
-        let mut output = Vec::new();
-        while offset < input.len() {
-            let marker = input[offset..]
-                .strip_prefix(b"$str")
-                .and_then(text::integer_prefix);
-            if let Some((length, id)) = marker {
-                if index == 336 {
+        let address = read::u32_at(arguments, 8)?;
+        if index == 337 {
+            let output = expand_history_strings(
+                context.history.get(selected),
+                position,
+                &vm.read_string(address)?,
+                false,
+                vm.pc,
+            )?;
+            vm.write(address, &output)?;
+        } else {
+            let input = vm.read_string(address)?;
+            let mut offset = 0;
+            while offset < input.len() {
+                let marker = input[offset..]
+                    .strip_prefix(b"$str")
+                    .and_then(text::integer_prefix);
+                if let Some((length, id)) = marker {
                     if let (Some(entry), Some(value)) = (
                         context.history.get_mut(selected),
                         self.numbers.strings.get(&id),
                     ) {
                         entry.set_string(position, id, value)?;
+                        offset += 4 + length;
+                        continue;
                     }
-                } else if let Some(entry) = context.history.get(selected) {
-                    if let Some(value) = entry.string(position, id)? {
-                        output.extend(value);
-                    }
-                }
-                offset += 4 + length;
-            } else {
-                if index == 337 {
-                    output.push(input[offset]);
                 }
                 offset += 1;
             }
-            if output.len() > read::MAX_BYTES - 2 {
-                return Err(Error::new(vm.pc, "CST 字符串替换超过读取上限"));
-            }
-        }
-        if index == 337 {
-            output.extend([0, 0]);
-            vm.write(address, &output)?;
         }
         Ok(NativeReturn::Continue)
     }
+}
+
+impl CstContext {
+    pub(super) fn history_index(&self, requested: u32) -> usize {
+        (requested as usize).min(self.history.len().saturating_sub(1))
+    }
+}
+
+pub(super) fn expand_history_strings(
+    entry: Option<&Entry>,
+    position: u32,
+    input: &[u8],
+    preserve_missing: bool,
+    pc: usize,
+) -> Result<Vec<u8>> {
+    let mut offset = 0;
+    let mut output = Vec::new();
+    while offset < input.len() {
+        let marker = input[offset..]
+            .strip_prefix(b"$str")
+            .and_then(text::integer_prefix);
+        if let Some((length, id)) = marker {
+            let end = offset + 4 + length;
+            if let Some(value) = entry
+                .map(|entry| entry.string(position, id))
+                .transpose()?
+                .flatten()
+            {
+                output.extend(value);
+            } else if preserve_missing {
+                output.extend_from_slice(&input[offset..end]);
+            }
+            offset = end;
+        } else {
+            output.push(input[offset]);
+            offset += 1;
+        }
+        if output.len() > read::MAX_BYTES - 2 {
+            return Err(Error::new(pc, "CST 字符串替换超过读取上限"));
+        }
+    }
+    output.extend([0, 0]);
+    Ok(output)
 }
 
 fn terminated(bytes: &[u8]) -> &[u8] {

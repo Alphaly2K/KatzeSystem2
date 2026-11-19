@@ -285,7 +285,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         arguments: &[u8],
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
-        if matches!(index, 219..=227 | 1035) {
+        if matches!(index, 219..=227 | 233..=235 | 1035) {
             return self.legacy_cst_native(index, arguments, vm);
         }
         if matches!(index, 978 | 979 | 981) {
@@ -294,7 +294,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         if matches!(index, 991 | 992 | 994) {
             return self.cst_snapshot_native(index, arguments, vm);
         }
-        if matches!(index, 333..=337) {
+        if matches!(index, 228..=232 | 333..=337) {
             return self.cst_detail_native(index, arguments, vm);
         }
         if matches!(index, 385 | 386) {
