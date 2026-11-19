@@ -1,6 +1,6 @@
 //! Embeddable runtime for CatSystem2 2.6.1.90.
 //!
-//! Start a session with [`runtime::GameRuntime`]. Use [`host`] for the services
+//! Start a session with [`session::GameRuntime`]. Use [`host`] for the services
 //! and data exchanged with the application that advances the session.
 //! Format readers and the lower-level task and script APIs are available separately.
 
@@ -29,6 +29,7 @@ mod read;
 pub mod resource;
 pub mod runtime;
 pub mod save;
+pub mod session;
 pub mod settings;
 pub mod task;
 mod text;

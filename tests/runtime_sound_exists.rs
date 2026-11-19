@@ -5,7 +5,7 @@ use katze_system2::{
     kcs::{CoreHost, Host, Interpreter, NativeReturn, Program, ResourceHost, ResourceServices},
     memory::SharedMemory,
     resource::ResourceMode,
-    runtime::{BaseObject, GameRuntime, KcsFactory, ProgramLoader, Runtime, kind},
+    runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, TaskRuntime, kind},
 };
 use std::{
     cell::RefCell,
@@ -89,7 +89,7 @@ fn game_resources_route_sound_names_before_opening_sources() -> Result<()> {
         };
         let requests = files.requests.clone();
         let mut rt =
-            GameRuntime::with_programs(Loader(program.clone()), 0, SharedMemory::default())?;
+            TaskRuntime::with_programs(Loader(program.clone()), 0, SharedMemory::default())?;
         rt.set_game_resources(files, startup, definition, Some(settings))?;
         assert!(
             rt.set_game_resources(Files::default(), b"<", None, None)

@@ -1,7 +1,8 @@
 use katze_system2::{
     graphics::{Rect, Surface},
+    host::{QuizDebugInput, QuizDebugSession},
     message::{FontRequest, FontServices, Fonts, TextEncoding},
-    runtime::{ObjectFactory, QuizDebugInput, QuizDebugSession, Runtime},
+    session::GameRuntime,
 };
 use sdl2::{
     event::{Event, WindowEvent},
@@ -360,10 +361,10 @@ pub struct QuizWindows {
 }
 
 impl QuizWindows {
-    pub fn event<F: ObjectFactory>(
+    pub fn event(
         &mut self,
         event: &Event,
-        runtime: &mut Runtime<F>,
+        runtime: &mut GameRuntime,
     ) -> katze_system2::Result<bool> {
         let Some(window) = event.get_window_id() else {
             return Ok(false);
@@ -386,10 +387,10 @@ impl QuizWindows {
         Ok(true)
     }
 
-    pub fn sync<F: ObjectFactory>(
+    pub fn sync(
         &mut self,
         parent: &Window,
-        runtime: &Runtime<F>,
+        runtime: &GameRuntime,
         encoding: &'static encoding_rs::Encoding,
     ) -> Result<(), Box<dyn std::error::Error>> {
         self.panels.retain(|&id, _| {

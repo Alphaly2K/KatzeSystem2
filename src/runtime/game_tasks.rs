@@ -1,17 +1,16 @@
-use super::{
-    KcsFactory, ObjectFactory, ProgramLoader, RootObject, Runtime, TaskObject, WindowServices, fes,
-    kind,
-};
+use super::{KcsFactory, ObjectFactory, ProgramLoader, RootObject, Runtime, TaskObject, fes, kind};
 use crate::{
     Error, Result,
     audio::{Mixer, SoundConfig, SoundFactory, SoundGroups, SoundState},
     expression::State,
     graphics::{DrawingContext, GraphicsFactory, Projection, RenderTarget, TextureFilter},
+    host::WindowServices,
     input::{DeviceBinding, DeviceKeys, InputFactory},
     kcs::{CachedResources, Program, ResourceServices},
     language::{LanguageState, StringTableConfig},
     memory::SharedMemory,
     resource::XmlDocument,
+    session::{FrameOutcome, FrameTime},
     settings::SystemSettings,
 };
 use std::sync::Arc;
@@ -41,9 +40,9 @@ impl<L: ProgramLoader> ObjectFactory for GameFactory<L> {
     }
 }
 
-/// Runtime with the standard game objects. The default reads compiled scripts
-/// through the same resource service as the other game assets.
-pub type GameRuntime<L = ResourcePrograms> = Runtime<GameFactory<L>>;
+/// Task-level runtime with the standard game objects, for script tooling and diagnostics.
+/// To embed a game, use [`crate::session::GameRuntime`].
+pub type TaskRuntime<L = ResourcePrograms> = Runtime<GameFactory<L>>;
 
 /// Loader marker for a session that obtains ordinary KCS through its resources.
 pub struct ResourcePrograms(());
@@ -62,34 +61,11 @@ pub struct GameTasks {
     pub entry: u32,
 }
 
-/// Clock values supplied by the host for a single update.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct FrameTime {
-    /// Absolute game clock in logical ticks (normally 60 per second).
-    pub tick: u32,
-    /// Logical increment forwarded to tasks for this update.
-    pub increment: u32,
-    /// Wrapping millisecond clock for system queries and movies.
-    pub system_time_ms: u32,
-}
-
-/// The outcome of advancing a session by one frame.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum FrameOutcome {
-    Running {
-        /// Interface strings were refreshed since the previous successful advance.
-        /// The host can now read the current tables to update its UI.
-        interface_language_refreshed: bool,
-    },
-    /// The root task has exited. The host should stop advancing and presenting.
-    Exited,
-}
-
 const ROOT_TASK: u32 = 0;
 const INPUT_TASK: u32 = 1;
 const SOUND_TASK: u32 = 2;
 
-impl GameRuntime {
+impl TaskRuntime {
     /// Prepare a resource-backed session with zeroed script storage.
     /// `shared_slots` counts 32-bit values; `external_bytes` counts bytes.
     /// Both storage areas are limited to 64 MiB each.
@@ -109,7 +85,7 @@ impl GameRuntime {
     }
 }
 
-impl<L: ProgramLoader> GameRuntime<L> {
+impl<L: ProgramLoader> TaskRuntime<L> {
     /// Create the root and standard factory without opening any devices or resources.
     /// Attach host services and configure the canvas before calling [`Self::start_game`].
     pub fn with_programs(programs: L, shared_slots: usize, external: SharedMemory) -> Result<Self> {

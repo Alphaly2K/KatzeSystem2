@@ -4,7 +4,7 @@ mod support;
 
 use katze_system2::{
     host::{ResourceMode, ResourceServices},
-    runtime::GameRuntime,
+    runtime::TaskRuntime,
     task::{Command, CommandBuffers},
 };
 use std::path::PathBuf;
@@ -116,7 +116,7 @@ fn startup_and_dynamic_script_loads_use_the_higher_priority_patch() {
             .unwrap(),
         Some(Vec::new())
     );
-    let mut runtime = GameRuntime::prepare(0, 0).unwrap();
+    let mut runtime = TaskRuntime::prepare(0, 0).unwrap();
     runtime.set_resources(game.router);
     let (mut runtime, tasks) = runtime
         .start_game_with_tasks(game.start.as_bytes())

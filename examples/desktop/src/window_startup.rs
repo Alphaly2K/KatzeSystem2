@@ -32,7 +32,7 @@ mod window_text;
 
 use katze_system2::{
     host::{Rect, RenderTarget},
-    runtime::{FrameOutcome, FrameTime},
+    session::{FrameOutcome, FrameTime},
 };
 use sdl2::event::{Event, WindowEvent};
 use std::cell::RefCell;
@@ -52,7 +52,10 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let startup = game.startup.clone();
     let entry = game.start.clone();
     let (mut runtime, keys, surface) = build_runtime(game)?;
-    diagnostics.connect(&mut runtime);
+    runtime.set_diagnostic_trace(diagnostics.trace());
+    if let Some(trace) = diagnostics.native_trace() {
+        runtime.set_native_trace(trace);
+    }
     runtime.set_system_services(system_output::Output);
     if let Some(path) = std::env::var_os("KATZE_EXPORT_ROOT") {
         runtime.set_export_services(export_output::Directory::new(path.into())?);
@@ -181,7 +184,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             increment: 1,
             system_time_ms: started.elapsed().as_millis() as u32,
         });
-        diagnostics.drain(&mut runtime);
+        diagnostics.report(runtime.take_script_messages());
         let refresh_title = match advancement {
             Ok(FrameOutcome::Running {
                 interface_language_refreshed,
@@ -189,6 +192,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             Ok(FrameOutcome::Exited) => break,
             Err(error) => {
                 eprintln!("pc {}：{}", error.offset, error.message);
+                let runtime = runtime.into_task_runtime();
                 for id in 0..128 {
                     if let Some(vm) = runtime.object(id).and_then(|object| object.interpreter()) {
                         eprintln!("  任务 {id} pc {}", vm.pc);

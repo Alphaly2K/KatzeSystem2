@@ -11,7 +11,8 @@ use katze_system2::{
         ResourceServices, WindowServices,
     },
     input::Region,
-    runtime::{FrameOutcome, FrameTime, GameRuntime, GameTasks},
+    runtime::{GameTasks, TaskRuntime},
+    session::{FrameOutcome, FrameTime},
 };
 use std::{cell::Cell, collections::BTreeMap, ops::RangeInclusive, rc::Rc};
 use support::{build_runtime, load_game};
@@ -492,7 +493,10 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let diagnostics = support::diagnostics::Output::from_env(game.router.script_encoding);
     let entry = game.start.clone();
     let (mut runtime, keys, surface) = build_runtime(game)?;
-    diagnostics.connect(&mut runtime);
+    runtime.set_diagnostic_trace(diagnostics.trace());
+    if let Some(trace) = diagnostics.native_trace() {
+        runtime.set_native_trace(trace);
+    }
     let mut replay = StoryReplay::from_env(surface);
     runtime.set_input_device(ScriptedDevice::new(keys, replay.as_ref(), surface))?;
     let (
@@ -502,7 +506,9 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             sound,
             entry: task,
         },
-    ) = runtime.start_game_with_tasks(entry.as_bytes())?;
+    ) = runtime
+        .into_task_runtime()
+        .start_game_with_tasks(entry.as_bytes())?;
     let mut window = ProbeWindow {
         fullscreen: runtime
             .system_settings()
@@ -562,7 +568,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             increment: 1,
             system_time_ms,
         });
-        diagnostics.drain(&mut runtime);
+        diagnostics.report(runtime.take_script_messages());
         if let Err(error) = advancement {
             println!("第 {frame} 帧 pc {}：{}", error.offset, error.message);
             for id in task_ids(&runtime) {
@@ -942,7 +948,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn task_ids(runtime: &GameRuntime) -> Vec<u32> {
+fn task_ids(runtime: &TaskRuntime) -> Vec<u32> {
     let root = runtime.tree().root_id();
     std::iter::once(root)
         .chain(runtime.tree().descendants(root).unwrap())

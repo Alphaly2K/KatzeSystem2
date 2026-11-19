@@ -1,7 +1,7 @@
 use katze_system2::{
     Error, Result,
     host::{DrawList, GraphicsBackend, RenderTarget},
-    runtime::{ObjectFactory, Runtime},
+    session::GameRuntime,
 };
 use metal::{MetalLayer, MetalLayerRef, foreign_types::ForeignTypeRef, objc::rc::autoreleasepool};
 use std::{cell::RefCell, rc::Rc};
@@ -53,11 +53,7 @@ impl Output {
         CaptureBackend(self.renderer.clone())
     }
 
-    pub fn present<F: ObjectFactory>(
-        &self,
-        runtime: &mut Runtime<F>,
-        size: [u32; 2],
-    ) -> Result<()> {
+    pub fn present(&self, runtime: &mut GameRuntime, size: [u32; 2]) -> Result<()> {
         runtime.present_frame(|frame, canvas, capture| {
             let mut renderer = self.renderer.borrow_mut();
             autoreleasepool(|| {

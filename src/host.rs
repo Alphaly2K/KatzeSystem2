@@ -1,7 +1,7 @@
 //! Interfaces between a game session and its host application.
 //!
 //! The host provides storage, input and platform services, and handles device
-//! presentation. See [`crate::runtime::GameRuntime`] for the session lifecycle.
+//! presentation. See [`crate::session::GameRuntime`] for the session lifecycle.
 
 mod effect;
 mod export;
@@ -18,15 +18,19 @@ pub use crate::input::{
 pub use crate::io::{FileServices, ReadSnapshot, ReadSource, SharedSource};
 pub use crate::kcs::{
     AchievementServices, ClipboardRequest, ClipboardText, LocalDateTime, ResourceServices,
-    SystemServices, WindowAction, WindowRequest,
+    ScriptSettings, SystemServices, WindowAction, WindowRequest,
 };
+pub use crate::language::StringTables;
 pub use crate::message::{FontRequest, FontServices};
-pub use crate::resource::ResourceMode;
+pub use crate::resource::{ArchiveConfig, FolderPaths, ResourceMode};
 pub use crate::runtime::{
-    DiagnosticTrace, ProgramLoader, ScriptMessages, SequenceCapture, TraceCategory,
+    DiagnosticTrace, NativeInvocation, NativeTraceEvent, ProgramLoader, QuizDebugInput,
+    QuizDebugSession, ScriptMessages, SequenceCapture, TraceCategory,
 };
 pub use crate::save::SaveServices;
-pub use crate::settings::{ConfigurationFile, ConfigurationServices};
+pub use crate::settings::{
+    ConfigurationFile, ConfigurationServices, PlatformSettings, SystemSettings,
+};
 pub use effect::{EffectPlayer, EffectServices};
 pub use export::{ExportDestination, ExportServices};
 pub use platform::{PlatformJob, PlatformJobRequest, PlatformJobServices, WindowServices};

@@ -308,7 +308,7 @@ struct Factory {
 
 #[test]
 fn ordinary_text_entry_tracks_pending_accepted_and_cancelled_requests() -> Result<()> {
-    use katze_system2::runtime::{GameRuntime, ProgramLoader};
+    use katze_system2::runtime::{ProgramLoader, TaskRuntime};
 
     struct Source(Vec<u8>);
     impl ProgramLoader for Source {
@@ -358,7 +358,7 @@ fn ordinary_text_entry_tracks_pending_accepted_and_cancelled_requests() -> Resul
     emit(&mut code, 0x3b, &[]);
 
     for budget in [1, 4096] {
-        let mut rt = GameRuntime::with_programs(Source(code.clone()), 0, Default::default())?;
+        let mut rt = TaskRuntime::with_programs(Source(code.clone()), 0, Default::default())?;
         rt.set_budget(budget, 1 << 20);
         rt.set_input_device(Device(Rc::new(RefCell::new(DeviceState::new([0, 0])))))?;
         let (mut rt, tasks) = rt.start_game_with_tasks(b"caller")?;
@@ -914,11 +914,64 @@ impl DeviceState {
 struct Device(Rc<RefCell<DeviceState>>);
 
 #[test]
+fn public_session_uses_host_resources_and_delivers_frame_and_pcm() -> Result<()> {
+    use katze_system2::{
+        host::{ResourceMode, ResourceServices},
+        session::{FrameOutcome, FrameTime, GameRuntime},
+    };
+
+    struct Entry;
+    impl ResourceServices for Entry {
+        fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+            assert_eq!((category, name), (b"kcs".as_slice(), b"main".as_slice()));
+            Ok(b"main.kcs".to_vec())
+        }
+
+        fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
+            assert_eq!(name, b"main.kcs");
+            assert_eq!(mode, ResourceMode::ArchiveFirst);
+            let mut program = b"KCS\0".to_vec();
+            for word in [2u32, 0, 52, 0, 52, 0, 0, 0, 64, 52, 0, 0] {
+                program.extend(word.to_le_bytes());
+            }
+            let encoder = flate2::write::ZlibEncoder::new(program, flate2::Compression::fast());
+            Ok(Some(encoder.finish().unwrap()))
+        }
+    }
+
+    let mut game = GameRuntime::prepare(0, 0)?;
+    game.set_resources(Entry);
+    let device = Rc::new(RefCell::new(DeviceState::new([12, 34])));
+    game.set_input_device(Device(device))?;
+    game.configure_canvas([64, 48])?;
+    let mut game = game.start_game(b"main")?;
+    assert_eq!(
+        game.advance(FrameTime {
+            tick: 1,
+            increment: 1,
+            system_time_ms: 16
+        })?,
+        FrameOutcome::Running {
+            interface_language_refreshed: false
+        },
+    );
+    assert_eq!(game.with_frame(|_, canvas| Ok(canvas.size()))?, [64, 48]);
+    let mut pcm = [1.0; 4];
+    game.mix_audio_stereo(48_000, &mut pcm)?;
+    assert_eq!(pcm, [0.0; 4]);
+    assert_eq!(
+        game.into_task_runtime().input_coordinates().logical_size,
+        [64, 48]
+    );
+    Ok(())
+}
+
+#[test]
 fn game_runtime_boots_the_standard_tasks_and_supplies_the_first_frame_clock() -> Result<()> {
     use katze_system2::{
         language::{LanguageChangeRequest, LanguageTarget},
         memory::SharedMemory,
-        runtime::{FrameOutcome, FrameTime, GameRuntime, ProgramLoader},
+        runtime::{FrameOutcome, FrameTime, ProgramLoader, TaskRuntime},
     };
 
     struct Entry(Program);
@@ -936,7 +989,7 @@ fn game_runtime_boots_the_standard_tasks_and_supplies_the_first_frame_clock() ->
     code.extend(0u32.to_le_bytes());
     code.push(0x3b);
     let external = SharedMemory::new(vec![0x55; 4])?;
-    let mut runtime = GameRuntime::with_programs(
+    let mut runtime = TaskRuntime::with_programs(
         Entry(Program::from_code(&code, vec![0; 4], 8)?),
         4,
         external,

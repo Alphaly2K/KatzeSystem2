@@ -1,6 +1,4 @@
-use katze_system2::runtime::{
-    DiagnosticTrace, NativeTraceEvent, ObjectFactory, Runtime, TraceCategory,
-};
+use katze_system2::host::{DiagnosticTrace, NativeTraceEvent, ScriptMessages, TraceCategory};
 use std::{cell::RefCell, time::Instant};
 
 pub struct Output {
@@ -31,15 +29,18 @@ impl Output {
         }
     }
 
-    pub fn connect<F: ObjectFactory>(&self, runtime: &mut Runtime<F>) {
-        if !self.probes.is_empty() {
-            runtime.set_diagnostic_trace(Some(DiagnosticTrace::new(&self.probes, |_, message| {
+    pub fn trace(&self) -> Option<DiagnosticTrace> {
+        (!self.probes.is_empty()).then(|| {
+            DiagnosticTrace::new(&self.probes, |_, message| {
                 eprintln!("{message}");
-            })));
-        }
-        if self.timing {
+            })
+        })
+    }
+
+    pub fn native_trace(&self) -> Option<impl Fn(NativeTraceEvent) + 'static> {
+        self.timing.then(|| {
             let calls = RefCell::new(Vec::new());
-            runtime.set_native_trace(move |event| match event {
+            move |event| match event {
                 NativeTraceEvent::Enter(_) => calls.borrow_mut().push(Instant::now()),
                 NativeTraceEvent::Exit { invocation, .. } => {
                     let elapsed = calls.borrow_mut().pop().unwrap().elapsed();
@@ -52,12 +53,11 @@ impl Output {
                         );
                     }
                 }
-            });
-        }
+            }
+        })
     }
 
-    pub fn drain<F: ObjectFactory>(&self, runtime: &mut Runtime<F>) {
-        let messages = runtime.take_script_messages();
+    pub fn report(&self, messages: ScriptMessages) {
         if self.scripts {
             for bytes in messages.bytes {
                 eprintln!("[script] {}", self.encoding.decode(&bytes).0);

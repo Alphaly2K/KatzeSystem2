@@ -6,7 +6,7 @@ use katze_system2::{
     Error, Result,
     input::{DeviceBinding, DeviceKeys, InputDevice},
     kcs::{Program, WindowAction, WindowCloseRequest, WindowRequest},
-    runtime::{GameRuntime, ProgramLoader, WindowServices},
+    runtime::{ProgramLoader, TaskRuntime, WindowServices},
     settings::SystemSettings,
 };
 use sdl2::{
@@ -208,7 +208,7 @@ impl WindowServices for Window {
 #[test]
 fn window_actions_apply_state_after_success_reset_input_before_close_and_keep_pending_requests()
 -> Result<()> {
-    let (mut rt, tasks) = GameRuntime::with_programs(Loader, 0, Default::default())?
+    let (mut rt, tasks) = TaskRuntime::with_programs(Loader, 0, Default::default())?
         .start_game_with_tasks(b"main")?;
     let input = tasks.input;
     rt.host_mut().system_settings = Some(SystemSettings::default());

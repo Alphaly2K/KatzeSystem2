@@ -968,7 +968,7 @@ fn runtime_configuration_save_reads_current_device_bindings_and_preserves_the_vm
     use katze_system2::{
         input::{DeviceBinding, DeviceKeys},
         memory::SharedMemory,
-        runtime::GameRuntime,
+        runtime::TaskRuntime,
         settings::PlatformSettings,
     };
     struct SaveSource;
@@ -997,7 +997,7 @@ fn runtime_configuration_save_reads_current_device_bindings_and_preserves_the_vm
         <KEY><kb1_00>13</kb1_00></KEY></document>"#;
     for budget in [1, 4096] {
         let mut runtime =
-            GameRuntime::with_programs(SaveSource, 0, SharedMemory::default()).unwrap();
+            TaskRuntime::with_programs(SaveSource, 0, SharedMemory::default()).unwrap();
         runtime.set_budget(budget, 1 << 20);
         runtime
             .configure_startup(startup, None, Some(saved))

@@ -10,17 +10,17 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 |网络与系统|按脚本协议分发请求并管理任务状态。类型 62 的旧版社交发帖接收者暂未接入。|执行网络或系统动作，实施策略，回交结果；处理窗口、剪贴板、输入法、插件及对话框。|
 |输入、字体和时钟|处理游戏输入和逻辑时钟，按字体数据完成字形度量与栅格化。|提供输入事件、运行时间和当地日期时间，发现字体并提供数据。|
 
-嵌入时从 `katze_system2::runtime` 导入 `GameRuntime`、`FrameTime` 和 `FrameOutcome`，从 `katze_system2::host` 导入服务契约及输入、绘制命令、纹理、PCM 和诊断类型。任务树、原始命令编号、VM 缓冲区和分派表属于底层工具入口。已有服务类型的模块路径仍可使用。Rust 契约稳定且有非 Rust 宿主接入时，再定义独立版本的 C ABI 和显式释放约定。
+嵌入时从 `katze_system2::session` 导入 `GameRuntime`、`FrameTime` 和 `FrameOutcome`，从 `katze_system2::host` 导入服务契约及输入、绘制命令、纹理、PCM 和诊断类型。`GameRuntime` 是具体的会话类型。任务树、原始命令编号、VM 缓冲区和分派表在底层 `runtime` 接口中供诊断和工具使用。Rust 契约稳定且有非 Rust 宿主接入时，再定义独立版本的 C ABI 和显式释放约定。
 
 标准宿主用 `GameRuntime::prepare(shared_slots, external_bytes)` 创建根任务和清零后的脚本存储。前者按 32 位值计数，后者按字节计数。启动前可将启动文档、游戏默认值及用户设置的 XML 字节交给 `configure_startup`，依次应用引擎配置；无效文档保留原有状态。绑定输入、资源和需要的其他服务，调用 `configure_canvas([width, height])` 设置逻辑输出尺寸并按游戏配置创建画布，再把启动配置中的脚本名称交给 `start_game(entry)`。该方法消费准备好的实例，返回已启动的实例。入口缺失或解析失败会返回诊断并释放本次实例。
 
-两个示例用启动配置的 `SCREEN/width` 与 `SCREEN/height` 作为逻辑尺寸。桌面宿主按实际窗口尺寸换算鼠标坐标；离屏宿主的显式回放点击使用逻辑坐标，截图保持逻辑尺寸。
+`configure_canvas` 同时设置呈现和输入使用的逻辑尺寸。两个示例取启动配置的 `SCREEN/width` 与 `SCREEN/height`。桌面宿主按实际窗口尺寸换算鼠标坐标；离屏宿主的显式回放点击使用逻辑坐标，截图保持逻辑尺寸。
 
-普通 KCS 的入口和后续装载使用已绑定的 `ResourceServices`。运行库按 `kcs` 类别补全名称，以 `ArchiveFirst` 模式读取字节并解析；补丁与归档顺序由资源服务决定。需要提供预解析程序或绑定现有外部存储的调用方可分别使用 `GameRuntime::with_programs` 或 `GameRuntime::with_resource_programs`。脚本工具可通过 `start_game_with_tasks(entry)` 另外取得用于诊断的 `GameTasks`。
+普通 KCS 的入口和后续装载使用已绑定的 `ResourceServices`。运行库按 `kcs` 类别补全名称，以 `ArchiveFirst` 模式读取字节并解析；补丁与归档顺序由资源服务决定。工具可用 `GameRuntime::into_task_runtime` 接续同一个实例，也可直接使用 `runtime::TaskRuntime::with_programs` 提供预解析程序，或用 `TaskRuntime::with_resource_programs` 绑定现有外部存储。`TaskRuntime::start_game_with_tasks(entry)` 可另外取得用于诊断的任务编号。
 
 标准会话在推进前必须通过 `set_input_device` 绑定 `InputDevice`。离屏宿主可提供只返回空闲状态的内存设备。`startup_input_bindings` 返回已经应用用户覆盖的八十个逻辑键槽，宿主可以用它构造 `DeviceKeys`。配置保存优先读取设备当前的绑定；设备未提供绑定时使用启动配置。
 
-`GameRuntime::set_game_resources` 接受资源服务与声音配置文档。运行库应用声音定义和用户覆盖，再按文件前缀选定归档类别；宿主按该类别补全名称并提供读取源。没有定义时使用启动文档里的声音组。自定义声音路由的宿主可以用底层 `Runtime::set_resources`，由其资源服务直接处理 `sound` 类别。
+`GameRuntime::set_game_resources` 接受资源服务与声音配置文档。运行库应用声音定义和用户覆盖，再按文件前缀选定归档类别；宿主按该类别补全名称并提供读取源。没有定义时使用启动文档里的声音组。自定义声音路由的宿主可以用 `set_resources`，由其资源服务直接处理 `sound` 类别。
 
 调用 `advance(FrameTime { tick, increment, system_time_ms })` 推进一轮。`tick` 为游戏逻辑时钟（通常每秒 60 个单位），`increment` 是本轮传给任务的逻辑增量，`system_time_ms` 为可回绕的系统毫秒计数。先处理上一轮语言请求，再推进媒体和任务。语言刷新失败时保留失败项及后续请求，已成功应用的界面刷新在下一次成功推进时报告。
 
@@ -30,9 +30,9 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 
 宿主通过 `set_archive_config`、`set_folder_paths`、`set_script_settings` 和 `set_platform_settings` 提供脚本可查的路径及初始配置。启动配置和资源服务就绪后调用 `load_startup_language_tables` 装入初始译文；没有可用的界面语言前缀时，仅装入游戏表。
 
-`set_surface_size` 提供逻辑画面尺寸；窗口宿主可独立通过 `set_window_content_rect` 和 `set_windowed_mode` 提供客户区绘图矩形和当前窗口模式。`take_clipboard_requests` 取走按序提交的剪贴板写入请求，保留发起任务和原始编码，由宿主解码并写入剪贴板。
+窗口宿主可通过 `set_window_content_rect` 和 `set_windowed_mode` 提供客户区绘图矩形和当前窗口模式。`take_clipboard_requests` 取走按序提交的剪贴板写入请求，保留发起任务和原始编码，由宿主解码并写入剪贴板。
 
-宿主用 `Runtime::present_frame` 借用当前绘制列表和画布。需要连续截图时，回调同时收到一个 `SequenceCapture`。呈现提交后可通过它交回软件渲染目标，或交回从顶行开始的 BGRA 像素与以字节计的行距。每次请求只能提交一次；没有提交呈现时丢弃请求即可。运行库负责裁剪、编码 BMP 和编号，通过宿主文件服务写入。只需查看或离屏绘制时可用 `with_frame`。
+宿主用 `GameRuntime::present_frame` 借用当前绘制列表和画布。需要连续截图时，回调同时收到一个 `SequenceCapture`。呈现提交后可通过它交回软件渲染目标，或交回从顶行开始的 BGRA 像素与以字节计的行距。每次请求只能提交一次；没有提交呈现时丢弃请求即可。运行库负责裁剪、编码 BMP 和编号，通过宿主文件服务写入。只需查看或离屏绘制时可用 `with_frame`。
 
 离屏宿主在更新后用 `mix_audio_stereo(rate_hz, buffer)` 拉取 PCM；此调用可等待解码。设备宿主用 `connect_audio_output()` 取得可移交给音频线程的 `Mixer`，由回调用 `Mixer::render(rate_hz, buffer)` 拉取 PCM，无须借用运行实例。两者均覆写调用方缓冲，格式为左右交错、幅度 `[-1, 1]` 的 `f32` 采样。游戏声音只能连接一次，连接后不得再调用离屏混音；会话退出时由宿主停止回调并释放混音器。
 
@@ -42,11 +42,4 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 
 默认工作区包 `katze-system2` 发布为库。离屏宿主入口是 `cargo run --release --example runprobe -- "$GAME_DIR"`。脚本检查工具和桌面宿主是单独的仓库内包，分别通过 `cargo run -p katze-script -- ...` 和 `cargo run -p katze-desktop --bin window_startup -- "$GAME_DIR"` 执行。桌面输入的合成验证用 `cargo test -p katze-desktop --test window_host`。
 
-迁移按下列顺序进行：
-
-1. 宿主服务统一从 `host` 导出，两份示例通过有类型的启动配置和语言查询接入。文件通过 `ReadSource`、`ResourceServices`、`SaveServices`、`FileServices` 访问；当地时间通过 `SystemServices::local_date_time` 提供；字体发现和私有字体读取由宿主提供。
-2. 合成器通过 `Runtime::present_frame` 借出绘制列表和画布，由宿主呈现和提供连续截图读回；库内 `GraphicsBackend` 用于脚本离屏回读。Metal、窗口和音频设备均由示例宿主管理。
-3. 为已有系统路由明确请求、返回与取消的对应关系。同步查询保持同步；需要宿主等待的操作沿用任务推进和轮询。社交发帖协议随[兼容项](compatibility-gaps.md)延期。诊断信息通过公开入口交给宿主。编解码和计算路径的线程、时钟及工具链要求单独检查，在宿主确有需要时提供相应构建路径。
-4. `runprobe` 负责本地资源和隔离存档，消费绘制列表和内存 PCM。桌面窗口和设备输出使用独立的可选示例适配。用内存宿主回归验证公开 API，再用 `runprobe` 验证两款游戏的剧情、存档与媒体行为。
-
-发布检查覆盖独立库构建、正常及构建依赖树、内存宿主用例和原有离屏流程。SDL 和 Metal 仅由桌面宿主构建。`runprobe` 仍使用系统字体发现及当地时间服务；这两项是运行库的开发依赖，不会进入外部宿主的依赖树。
+库依赖树不含 SDL、Metal、系统字体发现或当地时间库。当前电影解码构建使用 C 编译器，流式音频解码使用工作线程；在不提供这些能力的目标上须单独评估。`ReadSource::read_at` 可能在解码线程调用，宿主须提供可共享的独立读取源。

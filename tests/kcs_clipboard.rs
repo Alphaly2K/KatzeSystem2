@@ -3,7 +3,7 @@ use katze_system2::{
     expression::State,
     kcs::{CoreHost, Host, Interpreter, NativeReturn, Program},
     memory::SharedMemory,
-    runtime::{ClipboardRequest, ClipboardText, GameRuntime, ProgramLoader, kind},
+    runtime::{ClipboardRequest, ClipboardText, ProgramLoader, TaskRuntime, kind},
 };
 
 fn instruction(code: &mut Vec<u8>, opcode: u8, arguments: &[u32]) {
@@ -37,7 +37,7 @@ fn clipboard_requests_preserve_format_encoding_and_stack_across_resumption() -> 
     let external = "Aあ🐈B\\n%u[G32]\0".as_bytes().to_vec();
     let program = Program::from_code(&code, data.clone(), 64)?;
     for budget in [1, 100] {
-        let mut runtime = GameRuntime::with_programs(
+        let mut runtime = TaskRuntime::with_programs(
             Loader(program.clone()),
             0,
             SharedMemory::new(external.clone())?,

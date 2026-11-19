@@ -15,7 +15,7 @@ use katze_system2::{
     },
     kcs::Program,
     resource::{ArchiveConfig, KifEntrySource, XmlDocument},
-    runtime::GameRuntime,
+    session::GameRuntime,
 };
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -880,6 +880,5 @@ pub fn build_runtime(
     runtime.set_configuration_services(configuration_files);
     runtime.set_system_services(ProbeSystem);
     runtime.configure_canvas(surface)?;
-    runtime.input_coordinates_mut().logical_size = surface.map(|value| value as i32);
     Ok((runtime, keys, surface))
 }

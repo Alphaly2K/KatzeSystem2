@@ -3,7 +3,7 @@ use katze_system2::{
     expression::State,
     kcs::{CoreHost, Host, Interpreter, NativeReturn, Program},
     memory::SharedMemory,
-    runtime::{GameRuntime, NativeInvocation, NativeTraceEvent, ProgramLoader, kind},
+    runtime::{NativeInvocation, NativeTraceEvent, ProgramLoader, TaskRuntime, kind},
 };
 use std::{cell::RefCell, rc::Rc};
 
@@ -42,7 +42,7 @@ fn debug_natives_keep_encoding_newline_and_stack_across_budget_resumption() -> R
     data[128..128 + text.len()].copy_from_slice(text);
     let program = Program::from_code(&code, data.clone(), 64)?;
     for budget in [1, 100] {
-        let mut runtime = GameRuntime::with_programs(
+        let mut runtime = TaskRuntime::with_programs(
             Loader(program.clone()),
             0,
             SharedMemory::new(vec![0x66; 16])?,
