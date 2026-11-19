@@ -812,11 +812,10 @@ fn patch_number(name: &str) -> Option<u32> {
     number.parse().ok()
 }
 
-/// 准备示例运行时及调用方创建输入设备所需的绑定。
+/// 准备示例运行时、输入绑定和启动配置指定的逻辑尺寸。
 pub fn build_runtime(
     game: Game,
-    surface: [u32; 2],
-) -> std::result::Result<(GameRuntime, DeviceKeys), Box<dyn std::error::Error>> {
+) -> std::result::Result<(GameRuntime, DeviceKeys, [u32; 2]), Box<dyn std::error::Error>> {
     let Game {
         root,
         mut router,
@@ -847,6 +846,10 @@ pub fn build_runtime(
     };
     let mut platform = katze_system2::settings::PlatformSettings::default();
     platform.apply_startup_xml(startup.as_bytes(), |candidate| candidate)?;
+    let surface = platform.window_size.map(u32::from);
+    if surface.contains(&0) {
+        return Err("启动配置的逻辑尺寸必须非零".into());
+    }
     let defaults = router.resolve(b"config", b"gamedef")?;
     let defaults = router.read(&defaults, ResourceMode::ArchiveFirst)?;
     runtime.configure_startup(
@@ -877,5 +880,6 @@ pub fn build_runtime(
     runtime.set_configuration_services(configuration_files);
     runtime.set_system_services(ProbeSystem);
     runtime.configure_canvas(surface)?;
-    Ok((runtime, keys))
+    runtime.input_coordinates_mut().logical_size = surface.map(|value| value as i32);
+    Ok((runtime, keys, surface))
 }

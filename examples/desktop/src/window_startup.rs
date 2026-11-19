@@ -51,7 +51,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let mut clipboard = clipboard_output::Output::default();
     let startup = game.startup.clone();
     let entry = game.start.clone();
-    let (mut runtime, keys) = build_runtime(game, [1280, 720])?;
+    let (mut runtime, keys, surface) = build_runtime(game)?;
     diagnostics.connect(&mut runtime);
     runtime.set_system_services(system_output::Output);
     if let Some(path) = std::env::var_os("KATZE_EXPORT_ROOT") {
@@ -59,7 +59,6 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     }
     let shared = Rc::new(RefCell::new(Shared::default()));
     runtime.set_input_device(WindowDevice::new(keys, shared.clone()))?;
-    runtime.input_coordinates_mut().logical_size = [1280, 720];
     let mut runtime = runtime.start_game(entry.as_bytes())?;
     let mut audio = audio_output::Output::new(runtime.connect_audio_output()?)?;
 
@@ -87,7 +86,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .wide_text(b"APP/title")?
         .unwrap_or_else(|| "katze-system2".encode_utf16().collect());
     let mut title = String::from_utf16_lossy(runtime.string_tables().resolve(&title_source));
-    let mut window = window_output::Output::new(&title, [1280, 720])?;
+    let mut window = window_output::Output::new(&title, surface)?;
     window.window.subsystem().text_input().stop();
     let mut text_window = window_text::TextWindow::default();
     let mut quiz_windows = window_quiz::QuizWindows::default();
@@ -115,7 +114,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let mut output = if accelerated {
         None
     } else {
-        Some(RenderTarget::new([1280, 720])?)
+        Some(RenderTarget::new(surface)?)
     };
     let mut window_pending_noted = false;
     let limit = std::env::var("KATZE_WINDOW_FRAMES")
@@ -162,7 +161,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                     &event,
                     window.window.id(),
                     [size.0, size.1],
-                    [1280, 720],
+                    surface,
                 );
             }
         }
@@ -173,7 +172,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             let mut shared = shared.borrow_mut();
             shared.set_foreground(!editing && window.window.has_input_focus());
             let mouse = window.events.mouse_state();
-            shared.sample_pointer([mouse.x(), mouse.y()], [size.0, size.1], [1280, 720]);
+            shared.sample_pointer([mouse.x(), mouse.y()], [size.0, size.1], surface);
             shared.set_mouse_focus(window.window.has_mouse_focus());
         }
         now = now.wrapping_add(1);
@@ -244,8 +243,8 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             let size = window.window.size();
             window.context.mouse().warp_mouse_in_window(
                 &window.window,
-                (i64::from(position[0]) * i64::from(size.0) / 1280) as i32,
-                (i64::from(position[1]) * i64::from(size.1) / 720) as i32,
+                (i64::from(position[0]) * i64::from(size.0) / i64::from(surface[0])) as i32,
+                (i64::from(position[1]) * i64::from(size.1) / i64::from(surface[1])) as i32,
             );
         }
         clipboard.pump(runtime.take_clipboard_requests(), clipboard_encoding);
@@ -262,11 +261,11 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         if !window.window.is_minimized() {
             #[cfg(target_os = "macos")]
             if let Some(output) = &metal_output {
-                output.present(&mut runtime, [1280, 720])?;
+                output.present(&mut runtime, surface)?;
             }
             if let Some(output) = &mut output {
                 runtime.present_frame(|draw, canvas, capture| {
-                    output.clear_rect(Rect::from_xywh(0, 0, 1280, 720));
+                    output.clear_rect(Rect::from_xywh(0, 0, surface[0] as i32, surface[1] as i32));
                     draw.render_into(output, Some(canvas))?;
                     window
                         .present(output)

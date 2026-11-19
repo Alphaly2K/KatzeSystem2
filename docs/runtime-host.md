@@ -14,6 +14,8 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 
 标准宿主用 `GameRuntime::prepare(shared_slots, external_bytes)` 创建根任务和清零后的脚本存储。前者按 32 位值计数，后者按字节计数。启动前可将启动文档、游戏默认值及用户设置的 XML 字节交给 `configure_startup`，依次应用引擎配置；无效文档保留原有状态。绑定输入、资源和需要的其他服务，调用 `configure_canvas([width, height])` 设置逻辑输出尺寸并按游戏配置创建画布，再把启动配置中的脚本名称交给 `start_game(entry)`。该方法消费准备好的实例，返回已启动的实例。入口缺失或解析失败会返回诊断并释放本次实例。
 
+两个示例用启动配置的 `SCREEN/width` 与 `SCREEN/height` 作为逻辑尺寸。桌面宿主按实际窗口尺寸换算鼠标坐标；离屏宿主的显式回放点击使用逻辑坐标，截图保持逻辑尺寸。
+
 普通 KCS 的入口和后续装载使用已绑定的 `ResourceServices`。运行库按 `kcs` 类别补全名称，以 `ArchiveFirst` 模式读取字节并解析；补丁与归档顺序由资源服务决定。需要提供预解析程序或绑定现有外部存储的调用方可分别使用 `GameRuntime::with_programs` 或 `GameRuntime::with_resource_programs`。脚本工具可通过 `start_game_with_tasks(entry)` 另外取得用于诊断的 `GameTasks`。
 
 标准会话在推进前必须通过 `set_input_device` 绑定 `InputDevice`。离屏宿主可提供只返回空闲状态的内存设备。`startup_input_bindings` 返回已经应用用户覆盖的八十个逻辑键槽，宿主可以用它构造 `DeviceKeys`。配置保存优先读取设备当前的绑定；设备未提供绑定时使用启动配置。

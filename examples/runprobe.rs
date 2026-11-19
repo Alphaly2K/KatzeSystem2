@@ -39,6 +39,7 @@ struct StoryReplay {
     automatic: RangeInclusive<u32>,
     advance_key: Option<RangeInclusive<u32>>,
     pointer: Rc<Cell<[i32; 2]>>,
+    surface: [u32; 2],
     plan: Vec<usize>,
     previous: Vec<(u32, Rect)>,
     option: usize,
@@ -46,7 +47,7 @@ struct StoryReplay {
 }
 
 impl StoryReplay {
-    fn from_env() -> Option<Self> {
+    fn from_env(surface: [u32; 2]) -> Option<Self> {
         let round = |name| std::env::var(name).ok()?.parse::<u32>().ok();
         let automatic =
             round("KATZE_PROBE_AUTO_FROM")?..=round("KATZE_PROBE_AUTO_UNTIL").unwrap_or(u32::MAX);
@@ -55,7 +56,8 @@ impl StoryReplay {
         Some(Self {
             automatic,
             advance_key,
-            pointer: Rc::new(Cell::new([900, 400])),
+            pointer: Rc::new(Cell::new(replay_scale(surface, [900, 400]))),
+            surface,
             plan: std::env::var("KATZE_PROBE_CHOICE_PLAN")
                 .unwrap_or_default()
                 .split(',')
@@ -71,21 +73,25 @@ impl StoryReplay {
         if !self.automatic.contains(&frame) || !frame.is_multiple_of(4) {
             return;
         }
+        let [minimum_width, minimum_height] = replay_scale(self.surface, [120, 15]);
+        let [_, upper] = replay_scale(self.surface, [0, 60]);
+        let [_, lower] = replay_scale(self.surface, [0, 600]);
         let mut choices: Vec<_> = regions
             .iter()
             .filter(|r| r.enabled() != 0 && r.selection_enabled() != 0)
             .map(|r| (r.id(), r.bounds()))
             .filter(|(_, r)| {
                 r.left >= 0
-                    && r.right <= 1280
-                    && r.top >= 60
-                    && r.bottom < 600
-                    && r.right >= r.left.saturating_add(120)
-                    && r.bottom - r.top >= 15
+                    && r.right <= self.surface[0] as i32
+                    && r.top >= upper
+                    && r.bottom < lower
+                    && r.right >= r.left.saturating_add(minimum_width)
+                    && r.bottom - r.top >= minimum_height
             })
             .collect();
         choices.sort_by_key(|(_, r)| (r.top, r.left));
-        let story_choice = |r: Rect| r.right - r.left > 900;
+        let [story_width, _] = replay_scale(self.surface, [900, 0]);
+        let story_choice = |r: Rect| r.right - r.left > story_width;
         if choices.len() > 1 && choices != self.previous {
             self.option = 0;
             if choices.iter().all(|(_, r)| story_choice(*r)) {
@@ -106,16 +112,23 @@ impl StoryReplay {
         let target = choices
             .get(self.option.min(choices.len().saturating_sub(1)))
             .filter(|(_, r)| choices.len() > 1 || story_choice(*r));
-        self.pointer.set(target.map_or([900, 400], |(_, r)| {
-            [(r.left + r.right) / 2, (r.top + r.bottom) / 2]
-        }));
+        self.pointer.set(
+            target.map_or(replay_scale(self.surface, [900, 400]), |(_, r)| {
+                [(r.left + r.right) / 2, (r.top + r.bottom) / 2]
+            }),
+        );
     }
+}
+
+fn replay_scale(surface: [u32; 2], [x, y]: [i32; 2]) -> [i32; 2] {
+    [x * surface[0] as i32 / 1280, y * surface[1] as i32 / 720]
 }
 
 /// 按轮次产生点击的设备；`KATZE_PROBE_CLICKS` 为逗号分隔的 `轮次@x:y` 项。
 struct ScriptedDevice {
     polls: u32,
     clicks: Vec<(u32, [i32; 2])>,
+    center: [i32; 2],
     keys: DeviceKeys,
     automatic: Option<RangeInclusive<u32>>,
     advance_key: Option<RangeInclusive<u32>>,
@@ -123,21 +136,21 @@ struct ScriptedDevice {
 }
 
 impl ScriptedDevice {
-    fn new(keys: DeviceKeys, replay: Option<&StoryReplay>) -> Self {
+    fn new(keys: DeviceKeys, replay: Option<&StoryReplay>, surface: [u32; 2]) -> Self {
+        let center = surface.map(|value| (value / 2) as i32);
         let mut clicks: Vec<(u32, [i32; 2])> = std::env::var("KATZE_PROBE_CLICKS").map_or_else(
             |_| Vec::new(),
             |value| {
                 value
                     .split(',')
                     .filter_map(|item| {
-                        let (round, position) = item
-                            .split_once('@')
-                            .map_or((item, "640:360"), |(round, at)| (round, at));
-                        let (x, y) = position.split_once(':')?;
-                        Some((
-                            round.trim().parse().ok()?,
-                            [x.trim().parse().ok()?, y.trim().parse().ok()?],
-                        ))
+                        let (round, point) = if let Some((round, at)) = item.split_once('@') {
+                            let (x, y) = at.split_once(':')?;
+                            (round, [x.trim().parse().ok()?, y.trim().parse().ok()?])
+                        } else {
+                            (item, center)
+                        };
+                        Some((round.trim().parse().ok()?, point))
                     })
                     .collect()
             },
@@ -146,6 +159,7 @@ impl ScriptedDevice {
         Self {
             polls: 0,
             clicks,
+            center,
             keys,
             automatic: replay.map(|replay| replay.automatic.clone()),
             advance_key: replay.and_then(|replay| replay.advance_key.clone()),
@@ -191,7 +205,7 @@ impl InputDevice for ScriptedDevice {
                 || {
                     self.replay_pointer
                         .as_ref()
-                        .map_or([640, 360], |pointer| pointer.get())
+                        .map_or(self.center, |pointer| pointer.get())
                 },
                 |(_, position)| *position,
             ),
@@ -477,10 +491,10 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
     let diagnostics = support::diagnostics::Output::from_env(game.router.script_encoding);
     let entry = game.start.clone();
-    let (mut runtime, keys) = build_runtime(game, [1280, 720])?;
+    let (mut runtime, keys, surface) = build_runtime(game)?;
     diagnostics.connect(&mut runtime);
-    let mut replay = StoryReplay::from_env();
-    runtime.set_input_device(ScriptedDevice::new(keys, replay.as_ref()))?;
+    let mut replay = StoryReplay::from_env(surface);
+    runtime.set_input_device(ScriptedDevice::new(keys, replay.as_ref(), surface))?;
     let (
         mut runtime,
         GameTasks {
@@ -890,7 +904,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 runtime.drawables_mut().set_display(id, 0);
             }
         }
-        let mut output = katze_system2::graphics::RenderTarget::new([1280, 720])?;
+        let mut output = katze_system2::graphics::RenderTarget::new(surface)?;
         runtime.with_frame(|draw, canvas| draw.render_into(&mut output, Some(canvas)))?;
         // `KATZE_PROBE_SHOT` 以 "@canvas" 结尾时转储蓄布而非合成帧。
         let path_str = path.to_string_lossy().into_owned();
