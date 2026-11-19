@@ -147,19 +147,8 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
         }
         let target = read::u32_at(arguments, 0)?;
-        let mut reader = [0; 4];
-        let mut history = [0; 4];
-        self.command_target_with_buffers(
-            target,
-            176,
-            [1, 1, 0],
-            &mut CommandBuffers {
-                data0: Some(&mut reader),
-                data1: Some(&mut history),
-                ..Default::default()
-            },
-        )?;
-        let source = (history != [0; 4])
+        let [_, tables] = self.query_legacy_cst(target)?;
+        let source = tables
             .then(|| self.resources.legacy_cst.get(&target))
             .flatten();
         if index == 233 {
@@ -184,5 +173,21 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         target.decode_records(false, &registrations)?;
         target.decode_records(true, &history)?;
         Ok(NativeReturn::Value(1))
+    }
+
+    pub(super) fn query_legacy_cst(&mut self, target: u32) -> Result<[bool; 2]> {
+        let mut reader = [0; 4];
+        let mut tables = [0; 4];
+        self.command_target_with_buffers(
+            target,
+            176,
+            [1, 1, 0],
+            &mut CommandBuffers {
+                data0: Some(&mut reader),
+                data1: Some(&mut tables),
+                ..Default::default()
+            },
+        )?;
+        Ok([reader != [0; 4], tables != [0; 4]])
     }
 }

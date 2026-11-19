@@ -297,7 +297,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         if matches!(index, 228..=232 | 333..=337) {
             return self.cst_detail_native(index, arguments, vm);
         }
-        if matches!(index, 385 | 386) {
+        if matches!(index, 239 | 249 | 385 | 386) {
             return self.cst_record_native(index, arguments, vm);
         }
         if index == 323 {

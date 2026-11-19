@@ -698,3 +698,94 @@ fn legacy_cst_uses_target_history_and_copies_tables_independently() -> Result<()
     }
     Ok(())
 }
+
+#[test]
+fn legacy_css_restores_only_the_selected_table_in_the_target_task() -> Result<()> {
+    struct Programs;
+    impl ProgramLoader for Programs {
+        fn load(&mut self, role: &[u8]) -> Result<Option<Program>> {
+            let mut code = vec![];
+            let mut data = vec![0; 320];
+            data[64..74].copy_from_slice(b"entry.cst\0");
+            data[96..103].copy_from_slice(b"Saved\0\0");
+            data[128..132].copy_from_slice(&31u32.to_le_bytes());
+            data[132..136].copy_from_slice(&1u32.to_le_bytes());
+            data[136..140].copy_from_slice(&3u32.to_le_bytes());
+            data[140..144].copy_from_slice(&120u32.to_le_bytes());
+            data[144..148].copy_from_slice(&7u32.to_le_bytes());
+            data[148..152].copy_from_slice(&3u32.to_le_bytes());
+            data[152..158].copy_from_slice(b"short\0");
+            data[216..219].copy_from_slice(b"raw");
+            let mut emit = |index, args: &[(u8, u32)], result: Option<u32>| {
+                call(&mut code, index, args);
+                if let Some(address) = result {
+                    instruction(&mut code, 0x26, &[(3, address)]);
+                }
+            };
+            emit(219, &[], None);
+            if role == b"target" {
+                emit(223, &[(3, 64), (3, 19)], Some(0));
+                emit(224, &[(3, 64), (3, 23)], Some(4));
+            } else {
+                emit(238, &[(3, 17)], Some(0));
+                emit(239, &[(3, 0)], Some(4));
+                emit(249, &[(3, 0)], Some(8));
+                emit(
+                    239,
+                    &[(3, u32::MAX), (3, 7), (3, 99), (3, 1), (3, 1)],
+                    Some(12),
+                );
+                emit(249, &[(0x13, 0), (3, 99), (3, 1), (3, 1)], Some(16));
+                for (address, length) in [(92, 127), (220, 4)] {
+                    emit(
+                        244,
+                        &[(0x13, 0), (3, 7), (3, length), (3, address)],
+                        Some(20),
+                    );
+                }
+                emit(249, &[(0x13, 0), (3, 7), (3, 1), (3, 7)], Some(24));
+                for (record, selector, data, output) in
+                    [(8, 0, 1, 28), (9, 1, 0, 32), (10, 1, 1, 36)]
+                {
+                    emit(
+                        239,
+                        &[(0x13, 0), (3, record), (3, 1), (3, selector), (3, data)],
+                        Some(output),
+                    );
+                }
+                emit(227, &[(3, 64)], Some(40));
+            }
+            code.push(0x3b);
+            Ok(Some(Program::from_code(&code, data, 64)?))
+        }
+    }
+
+    let mut runtime = Runtime::new(
+        0,
+        kind::ROOT,
+        Box::new(BaseObject::new()),
+        State::new(0),
+        KcsFactory::new(Programs),
+    );
+    let target = runtime.create(0, kind::ORDINARY, b"target", b"")?;
+    assert_eq!(target, 1);
+    let caller = runtime.create(0, kind::ORDINARY, b"caller", b"")?;
+    runtime.update(0, 1)?;
+    let vm = runtime.object(caller).unwrap().interpreter().unwrap();
+    let values: Vec<_> = vm
+        .read(0, 44)?
+        .chunks_exact(4)
+        .map(|bytes| u32::from_le_bytes(bytes.try_into().unwrap()))
+        .collect();
+    assert_eq!(&values[1..], &[0, 0, 0, 0, 1, 1, 1, 1, 1, 0]);
+    let css = runtime.host().data_container(values[0])?;
+    let registration = css.record(8)?.unwrap();
+    assert_eq!(&registration[4..14], b"entry.cst\0");
+    assert_eq!(&registration[36..40], &19u32.to_le_bytes());
+    let first = css.record(7)?.unwrap();
+    assert_eq!(css.record(10)?, Some(first));
+    let mut without_data = first[..124].to_vec();
+    without_data[44..52].fill(0);
+    assert_eq!(css.record(9)?, Some(without_data.as_slice()));
+    Ok(())
+}

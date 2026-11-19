@@ -114,23 +114,36 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         arguments: &[u8],
         vm: &Interpreter,
     ) -> Result<NativeReturn> {
-        let length = if index == 385 { 20 } else { 16 };
-        if arguments.len() != length {
+        let append = matches!(index, 239 | 385);
+        let legacy = matches!(index, 239 | 249);
+        let container = read::u32_at(arguments, 0)?;
+        let length = if append { 20 } else { 16 };
+        if arguments.len() != length && !(legacy && container == 0 && arguments.len() == 4) {
             return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
         }
-        let word = |i: usize| read::u32_at(arguments, i * 4);
-        let container = word(0)?;
-        let context = word(2)?;
-        if container == 0 || context == 0 {
+        if container == 0 {
             return Ok(NativeReturn::Value(0));
         }
+        let word = |i: usize| read::u32_at(arguments, i * 4);
+        let context = word(2)?;
+        let available = if legacy {
+            self.query_legacy_cst(context)? == [true, true]
+        } else {
+            context != 0
+        };
+        if !available {
+            return Ok(NativeReturn::Value(0));
+        }
+        let contexts = if legacy {
+            &mut self.resources.legacy_cst
+        } else {
+            &mut self.resources.cst_contexts
+        };
         let record = word(1)?;
         let history = word(3)? != 0;
-        if index == 385 {
+        if append {
             self.host.data_container(container)?;
-            let data = self
-                .resources
-                .cst_contexts
+            let data = contexts
                 .get(&context)
                 .ok_or_else(|| Error::new(vm.pc, "CST 上下文句柄无效"))?
                 .encode_records(history, word(4)? != 0)?;
@@ -141,8 +154,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             let Some(data) = self.host.data_container(container)?.record(record)? else {
                 return Ok(NativeReturn::Value(0));
             };
-            self.resources
-                .cst_contexts
+            contexts
                 .get_mut(&context)
                 .ok_or_else(|| Error::new(vm.pc, "CST 上下文句柄无效"))?
                 .decode_records(history, data)?;
