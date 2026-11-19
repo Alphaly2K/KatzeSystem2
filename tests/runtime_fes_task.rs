@@ -3387,6 +3387,31 @@ fn focus_notifications_wait_for_the_body_and_lock_commands_end_local_handlers() 
 }
 
 #[test]
+fn fes_return_to_title_posts_one_window_notification_and_yields() {
+    use katze_system2::kcs::{WindowAction, WindowRequest};
+
+    let source = b"#START\n$0 = 1\nrettitle\n$0 = 2\nwait 1000\n";
+    for budget in [1, 4096] {
+        let Setup { mut runtime, .. } = setup(budget, source);
+        let fes = runtime.create(0, kind::FES, b"configuration", b"").unwrap();
+        send(&mut runtime, fes, 337, 0, 0);
+        file(&mut runtime, fes, b"complete.fes").unwrap();
+        send(&mut runtime, fes, 339, 0, 0);
+        assert_eq!(runtime.numbers().shared[0], 1);
+        assert_eq!(
+            runtime.take_window_requests(),
+            [WindowRequest {
+                task_id: fes,
+                action: WindowAction::NotifyTasks,
+            }]
+        );
+        runtime.update(100, 1).unwrap();
+        assert_eq!(runtime.numbers().shared[0], 2);
+        assert!(runtime.pending_window_requests().is_empty());
+    }
+}
+
+#[test]
 fn fes_send_allows_synchronous_parameter_access_and_a_block_callback() {
     for budget in [1, 4096] {
         let source = b"#DEFINE\nCIMAGE item\n#OBJECT SIZE COLOR\nitem 1,1 0xff112233\n#START\nsend 7 8 9\n$0=$0+1\nexit 37\nwait 1000\n#REPLY\n$1=\\7\n";

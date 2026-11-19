@@ -1,4 +1,5 @@
 use super::{Notification, Scene};
+use crate::kcs::{WindowAction, WindowRequest};
 use crate::runtime::{
     FesSceneLoan, ObjectFactory, Store, create_object, create_unloaded_ordinary, kind,
     route_command,
@@ -22,6 +23,7 @@ pub(super) enum ScriptRequest {
         message: [u32; 3],
         parent: bool,
     },
+    ReturnToTitle,
     SetBackground {
         source: Option<BackgroundSource>,
         image: u32,
@@ -155,6 +157,10 @@ impl Scene {
                 } else {
                     ScriptDisposition::Flush
                 }))
+            }
+            Some(b"rettitle") => {
+                self.notify(Notification::Script(ScriptRequest::ReturnToTitle))?;
+                Ok(Some(ScriptDisposition::NextTick))
             }
             _ => Ok(None),
         }
@@ -303,6 +309,16 @@ impl<F: ObjectFactory> Store<'_, F> {
                     },
                     &mut 0,
                 )?;
+                Ok(true)
+            }
+            ScriptRequest::ReturnToTitle => {
+                if self.host.window_requests.len() >= crate::read::MAX_ITEMS {
+                    return Err(Error::new(0, "FES 窗口请求数量超过上限"));
+                }
+                self.host.window_requests.push(WindowRequest {
+                    task_id: owner,
+                    action: WindowAction::NotifyTasks,
+                });
                 Ok(true)
             }
             ScriptRequest::SetBackground {

@@ -10,10 +10,29 @@ use katze_system2::{
     input::{ButtonSource, DeviceKeys, InputDevice, KeySample, PointerSample, Region},
     kcs::ResourceServices,
     resource::ResourceMode,
-    runtime::{FrameTime, GameRuntime, GameTasks},
+    runtime::{FrameTime, GameRuntime, GameTasks, WindowServices},
 };
 use std::{cell::Cell, collections::BTreeMap, ops::RangeInclusive, rc::Rc};
 use support::{Game, build_runtime, load_game};
+
+struct ProbeWindow {
+    fullscreen: bool,
+}
+
+impl WindowServices for ProbeWindow {
+    fn toggle_fullscreen(&mut self) -> Result<bool> {
+        self.fullscreen = !self.fullscreen;
+        Ok(self.fullscreen)
+    }
+
+    fn minimize(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    fn confirm_close(&mut self) -> bool {
+        true
+    }
+}
 
 struct StoryReplay {
     automatic: RangeInclusive<u32>,
@@ -477,6 +496,11 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             entry: task,
         },
     ) = runtime.start_game(b"main")?;
+    let mut window = ProbeWindow {
+        fullscreen: runtime
+            .system_settings()
+            .is_some_and(|settings| settings.fullscreen != 0),
+    };
     println!("输入 {input} 声音 {sound}");
     println!("主任务 {task}");
     let dump = |vm: &katze_system2::kcs::Interpreter| {
@@ -568,6 +592,11 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             if replay.is_some() {
                 return Err(error.into());
             }
+            break;
+        }
+        if matches!(advancement, Ok(false))
+            || runtime.process_window_requests(input, &mut window)?
+        {
             break;
         }
         if let Some(started) = started {
