@@ -115,8 +115,7 @@ pub(super) fn core(index: u32) -> CoreHandler {
         1
         | 4
         | 5
-        | 6
-        | 8
+        | 6..=8
         | 9
         | 10
         | 11

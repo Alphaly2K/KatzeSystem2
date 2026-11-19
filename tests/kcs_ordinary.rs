@@ -250,22 +250,24 @@ fn shared_host_receives_each_task_id_and_keeps_system_milliseconds_independent()
         (1030, 20),
         (565, 24),
         (566, 28),
+        (7, 32),
     ] {
         ins(&mut code, 0x2b, &[(3, native), (3, 0)]);
         ins(&mut code, 0x26, &[(3, target)]);
     }
     code.push(0x3b);
-    let program = Program::from_code(&code, vec![0; 32], 64).unwrap();
+    let program = Program::from_code(&code, vec![0; 36], 64).unwrap();
     let mut state = State::new(8);
     let mut host = CoreHost::new(&mut state);
-    for (task_id, origin, now, system_time_ms, elapsed) in [
-        (0xdead_beef, 10, 100, u32::MAX, 90),
-        (0x8000_0000, u32::MAX, 5, 0, 6),
+    for (task_id, origin, now, system_time_ms, elapsed, input_method) in [
+        (0xdead_beef, 10, 100, u32::MAX, 90, 0),
+        (0x8000_0000, u32::MAX, 5, 0, 6, 0x8000_0100),
     ] {
         let mut task = OrdinaryTask::new(program.clone(), vec![]).unwrap();
         task.task_id = task_id;
         task.clock.origin = origin;
         host.system_time_ms = system_time_ms;
+        host.input_method_context = input_method;
         let debug_mode = system_time_ms ^ 0x1234_5678;
         host.debug_mode = debug_mode;
         host.sound_config_enabled = task_id;
@@ -283,6 +285,10 @@ fn shared_host_receives_each_task_id_and_keeps_system_milliseconds_independent()
             (task_id ^ debug_mode).to_le_bytes()
         );
         assert_eq!(task.interpreter.read(28, 4).unwrap(), now.to_le_bytes());
+        assert_eq!(
+            task.interpreter.read(32, 4).unwrap(),
+            input_method.to_le_bytes()
+        );
         assert_eq!(task.interpreter.stack_bytes(), 0x1357_9bdfu32.to_le_bytes());
         assert_eq!(task.running, 0);
     }

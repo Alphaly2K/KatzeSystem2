@@ -80,6 +80,8 @@ pub struct HostState {
     pub task_origin: u32,
     pub task_id: u32,
     pub system_time_ms: u32,
+    /// Opaque input method context for native 7; zero when absent.
+    pub input_method_context: u32,
     /// 普通 11 的本地年、月、星期、日、时、分、秒；星期零为周日。
     /// None 使用当前系统本地时间。
     pub local_time: Option<[u16; 7]>,

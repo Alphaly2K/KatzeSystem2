@@ -112,6 +112,9 @@ pub(super) fn call(
     if index == 4 {
         return Ok(NativeReturn::Value(host.system_time_ms));
     }
+    if index == 7 {
+        return Ok(NativeReturn::Value(host.input_method_context));
+    }
     if index == 68 {
         return Ok(NativeReturn::Value(host.task_id));
     }
