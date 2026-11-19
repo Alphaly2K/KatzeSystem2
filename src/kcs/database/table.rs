@@ -13,6 +13,14 @@ pub(in crate::kcs) struct Table {
 
 impl Table {
     pub(in crate::kcs) fn parse(bytes: &[u8]) -> Result<Option<Self>> {
+        Self::parse_columns(bytes, <[u8]>::to_vec)
+    }
+
+    pub(super) fn parse_case_insensitive(bytes: &[u8]) -> Result<Option<Self>> {
+        Self::parse_columns(bytes, <[u8]>::to_ascii_uppercase)
+    }
+
+    fn parse_columns(bytes: &[u8], column_name: impl Fn(&[u8]) -> Vec<u8>) -> Result<Option<Self>> {
         if !bytes.starts_with(b"KCDB") {
             return Ok(None);
         }
@@ -31,7 +39,7 @@ impl Table {
         for column in definitions.chunks_exact(24) {
             let size = read::sized(read::u32_at(column, 20)?, 20)?;
             columns
-                .entry(text(&column[..16]).to_vec())
+                .entry(column_name(text(&column[..16])))
                 .or_insert((offset, size));
             offset = offset
                 .checked_add(size)

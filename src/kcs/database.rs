@@ -2,6 +2,7 @@ use super::{Interpreter, ResourceServices, strings};
 use crate::{Error, Result, read, resource::ResourceMode};
 use std::collections::BTreeMap;
 
+pub(super) mod quest;
 pub(super) mod table;
 
 pub(super) const SAVED_ENTRY_SIZE: usize = 268;

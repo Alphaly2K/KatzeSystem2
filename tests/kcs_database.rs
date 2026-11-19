@@ -502,6 +502,110 @@ fn runtime_reads_a_raw_kcdb_handle_across_native_calls() {
     assert_eq!(vm.stack_bytes(), 7u32.to_le_bytes());
 }
 
+#[test]
+fn quest_table_preserves_first_rows_sparse_positions_and_raw_state() -> Result<()> {
+    let words = |values: &[u32]| {
+        values
+            .iter()
+            .flat_map(|value| value.to_le_bytes())
+            .collect::<Vec<_>>()
+    };
+    let mut plain = 4u32.to_le_bytes().to_vec();
+    for name in [b"tbl".as_slice(), b"PT00", b"pt03", b"PT19"] {
+        let mut column = [0; 24];
+        column[..name.len()].copy_from_slice(name);
+        column[20..].copy_from_slice(&4u32.to_le_bytes());
+        plain.extend(column);
+    }
+    plain.extend(words(&[3, 16]));
+    for row in [[9, 0, 3, 5], [9, 1, 0, 0], [u32::MAX, 1, 0, 0]] {
+        plain.extend(words(&row));
+    }
+
+    let instruction = |code: &mut Vec<u8>, op, args: &[u32]| {
+        code.push(op);
+        for value in args {
+            code.push(3);
+            code.extend(value.to_le_bytes());
+        }
+    };
+    let mut code = Vec::new();
+    instruction(&mut code, 0x25, &[32]);
+    instruction(&mut code, 0x2b, &[795, 4]);
+    instruction(&mut code, 0x26, &[0]);
+    for (native, args) in [
+        (798, &[][..]),
+        (800, &[]),
+        (797, &[0x8765_4321]),
+        (799, &[u32::MAX]),
+        (798, &[]),
+        (800, &[]),
+        (805, &[9, 0]),
+        (805, &[9, 1]),
+        (805, &[9, 2]),
+        (805, &[u32::MAX, 0]),
+        (805, &[2, 0]),
+        (796, &[]),
+    ] {
+        code.extend([0x25, 0x13, 0, 0, 0, 0]);
+        for &arg in args {
+            instruction(&mut code, 0x25, &[arg]);
+        }
+        instruction(&mut code, 0x2b, &[native, (args.len() as u32 + 1) * 4]);
+    }
+    for native in [797, 798, 799, 800, 805] {
+        instruction(&mut code, 0x25, &[0]);
+        instruction(&mut code, 0x2b, &[native, 4]);
+    }
+    code.push(0x3b);
+    let program = Program::from_code(&code, data(), 64)?;
+    let mut runtime = Runtime::new(
+        0,
+        kind::ROOT,
+        Box::new(BaseObject::new()),
+        State::new(0),
+        KcsFactory::new(Loader(program)),
+    );
+    runtime.set_resources(Files(Some(pack(&plain))));
+    runtime.set_budget(1, 1024);
+    let id = runtime.create(0, kind::ORDINARY, b"", b"")?;
+    runtime.update(0, 1)?;
+    let vm = runtime.object(id).unwrap().interpreter().unwrap();
+    assert_eq!(
+        vm.stack_bytes(),
+        words(&[
+            0,
+            0,
+            0x8765_4321,
+            u32::MAX,
+            3,
+            19,
+            u32::MAX,
+            0,
+            u32::MAX,
+            0,
+            0,
+            u32::MAX,
+        ])
+    );
+    let handle = u32::from_le_bytes(vm.read(0, 4)?.as_ref().try_into().unwrap());
+    assert_ne!(handle, 0);
+    let mut code = Vec::new();
+    instruction(&mut code, 0x25, &[handle]);
+    instruction(&mut code, 0x2b, &[798, 4]);
+    code.push(0x3b);
+    runtime.factory_mut().programs.0 = Program::from_code(&code, data(), 64)?;
+    runtime.create(0, kind::ORDINARY, b"", b"")?;
+    assert!(
+        runtime
+            .update(1, 1)
+            .unwrap_err()
+            .message
+            .contains("句柄无效")
+    );
+    Ok(())
+}
+
 fn quiz_table(prefix: u8) -> Vec<u8> {
     pack_quiz(
         prefix,

@@ -117,6 +117,15 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
                     .as_mut()
                     .map(|services| services.as_mut() as _),
             ),
+            RuntimeHandler::QuestTable => self.resources.raw.quest_table_call(
+                index,
+                arguments,
+                vm,
+                self.resources
+                    .services
+                    .as_mut()
+                    .map(|services| services.as_mut() as _),
+            ),
             RuntimeHandler::Quiz => self.resources.raw.quiz_call(
                 index,
                 arguments,

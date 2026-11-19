@@ -168,6 +168,7 @@ pub(crate) struct ResourceState {
     pub(super) name_tables: BTreeMap<u32, super::name_table::NameTable>,
     pub(super) section_tables: BTreeMap<u32, super::section_table::SectionTable>,
     pub(super) database_tables: BTreeMap<u32, super::database::table::Table>,
+    pub(super) quest_tables: BTreeMap<u32, super::database::quest::QuestTable>,
     pub(super) quiz_banks: BTreeMap<u32, super::quiz::QuizBank>,
     pub(super) quiz_options: BTreeMap<u32, super::quiz::options::OptionTables>,
     handles: HandleAllocator,
@@ -618,6 +619,11 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
             return self
                 .state
                 .database_table_call(index, arguments, vm, Some(&mut self.services));
+        }
+        if matches!(index, 795..=800 | 805) {
+            return self
+                .state
+                .quest_table_call(index, arguments, vm, Some(&mut self.services));
         }
         if matches!(
             super::native::runtime_native_handler(index),
