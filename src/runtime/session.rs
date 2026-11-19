@@ -90,8 +90,18 @@ const INPUT_TASK: u32 = 1;
 const SOUND_TASK: u32 = 2;
 
 impl GameRuntime {
+    /// Prepare a resource-backed session with zeroed script storage.
+    /// `shared_slots` counts 32-bit values; `external_bytes` counts bytes.
+    /// Both storage areas are limited to 64 MiB each.
+    pub fn prepare(shared_slots: usize, external_bytes: usize) -> Result<Self> {
+        if external_bytes > crate::read::MAX_BYTES {
+            return Err(Error::new(0, "共享存储超过上限"));
+        }
+        Self::with_resource_programs(shared_slots, SharedMemory::new(vec![0; external_bytes])?)
+    }
+
     /// Prepare a game that reads and parses KCS through its resource service.
-    /// Install that service before starting the game.
+    /// Use this constructor to supply existing shared external storage.
     pub fn with_resource_programs(shared_slots: usize, external: SharedMemory) -> Result<Self> {
         let mut game = Self::with_programs(ResourcePrograms(()), shared_slots, external)?;
         game.resources.resource_programs = true;

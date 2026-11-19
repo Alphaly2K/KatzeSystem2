@@ -510,15 +510,15 @@ pub trait Host {
         Err(Error::new(0, "宿主未提供问答调试题库"))
     }
 
-    fn export_services(&mut self) -> Option<&mut dyn crate::runtime::ExportServices> {
+    fn export_services(&mut self) -> Option<&mut dyn crate::host::ExportServices> {
         None
     }
 
-    fn platform_job_services(&mut self) -> Option<&mut dyn crate::runtime::PlatformJobServices> {
+    fn platform_job_services(&mut self) -> Option<&mut dyn crate::host::PlatformJobServices> {
         None
     }
 
-    fn effect_services(&mut self) -> Option<&mut dyn crate::runtime::EffectServices> {
+    fn effect_services(&mut self) -> Option<&mut dyn crate::host::EffectServices> {
         None
     }
 
@@ -846,15 +846,15 @@ impl<T: Host + ?Sized> Host for &mut T {
         (**self).quiz_debug_packs(handle)
     }
 
-    fn export_services(&mut self) -> Option<&mut dyn crate::runtime::ExportServices> {
+    fn export_services(&mut self) -> Option<&mut dyn crate::host::ExportServices> {
         (**self).export_services()
     }
 
-    fn platform_job_services(&mut self) -> Option<&mut dyn crate::runtime::PlatformJobServices> {
+    fn platform_job_services(&mut self) -> Option<&mut dyn crate::host::PlatformJobServices> {
         (**self).platform_job_services()
     }
 
-    fn effect_services(&mut self) -> Option<&mut dyn crate::runtime::EffectServices> {
+    fn effect_services(&mut self) -> Option<&mut dyn crate::host::EffectServices> {
         (**self).effect_services()
     }
 

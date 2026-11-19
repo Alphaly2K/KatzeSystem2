@@ -31,8 +31,7 @@ mod window_quiz;
 mod window_text;
 
 use katze_system2::{
-    graphics::Rect,
-    host::RenderTarget,
+    host::{Rect, RenderTarget},
     runtime::{FrameOutcome, FrameTime},
 };
 use sdl2::event::{Event, WindowEvent};

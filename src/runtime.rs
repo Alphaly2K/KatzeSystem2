@@ -26,12 +26,10 @@ pub use diagnostics::{
 };
 mod emocon;
 mod export;
-pub use export::{ExportDestination, ExportServices};
 pub mod fes;
 pub use cst::CstContext;
 mod effect;
 mod graphics;
-pub use effect::{EffectPlayer, EffectServices};
 mod host;
 mod image_cursor;
 mod input;
@@ -53,7 +51,6 @@ mod image_resources;
 mod object;
 mod ordinary;
 mod platform_job;
-pub use platform_job::{PlatformJob, PlatformJobRequest, PlatformJobServices};
 mod resources;
 mod root;
 mod save;
@@ -63,8 +60,11 @@ mod state_records;
 mod system_tasks;
 mod transition;
 mod window;
+pub use crate::host::{
+    EffectPlayer, EffectServices, ExportDestination, ExportServices, PlatformJob,
+    PlatformJobRequest, PlatformJobServices, WindowServices,
+};
 pub use crate::kcs::{ClipboardRequest, ClipboardText};
-pub use window::WindowServices;
 
 use resources::Resources;
 

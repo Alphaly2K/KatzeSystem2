@@ -554,7 +554,7 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
         self.state.quiz_debug_packs(handle)
     }
 
-    fn export_services(&mut self) -> Option<&mut dyn crate::runtime::ExportServices> {
+    fn export_services(&mut self) -> Option<&mut dyn crate::host::ExportServices> {
         self.inner.export_services()
     }
 

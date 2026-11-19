@@ -2,19 +2,11 @@ use super::{ClipboardRequest, ObjectFactory, Runtime, route_command_mode};
 use crate::{
     Result,
     graphics::Rect,
+    host::WindowServices,
     input::InputDelivery,
     kcs::{WindowAction, WindowRequest},
     task::{Command, CommandBuffers},
 };
-
-/// Window operations supplied by the host after a runtime update.
-pub trait WindowServices {
-    /// Toggle fullscreen and report the resulting mode (true for fullscreen).
-    fn toggle_fullscreen(&mut self) -> Result<bool>;
-    fn minimize(&mut self) -> Result<()>;
-    /// Return true to accept the requested close.
-    fn confirm_close(&mut self) -> bool;
-}
 
 impl<F: ObjectFactory> Runtime<F> {
     /// Report the content rectangle in window client coordinates. With `None`,

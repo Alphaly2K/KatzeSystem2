@@ -1,34 +1,11 @@
 use super::{BaseObject, ObjectFactory, ObjectHost, TaskObject, kind};
+use crate::host::{PlatformJob, PlatformJobRequest};
 use crate::kcs::{Host, Interpreter, NativeReturn, format_string};
 use crate::task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock};
 use crate::{Error, Result, read};
 
 const NOT_STARTED: u32 = (-2i32) as u32;
 const NO_PLUGIN: u32 = (-3i32) as u32;
-
-/// Requests for platform work that runs independently of the script VM.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum PlatformJobRequest<'a> {
-    /// The formatted request bytes, without a terminating zero.
-    Plugin(&'a [u8]),
-    /// Select and register an image in the host's import directory.
-    ImageImport,
-}
-
-pub trait PlatformJob {
-    /// Return None while pending, or the completed result (used by the plugin query).
-    fn poll(&mut self) -> Option<u32>;
-}
-
-pub trait PlatformJobServices {
-    /// None represents an unavailable plugin or an import that did not start.
-    /// The returned job owns its work and must handle cancellation when dropped.
-    fn start(
-        &mut self,
-        task_id: u32,
-        request: PlatformJobRequest<'_>,
-    ) -> Result<Option<Box<dyn PlatformJob>>>;
-}
 
 pub(super) struct PlatformJobObject {
     base: BaseObject,

@@ -1,4 +1,5 @@
 use super::{BaseObject, ObjectFactory, ObjectHost, TaskObject};
+use crate::host::ExportDestination;
 use crate::io::SharedSource;
 use crate::kcs::{Host, Interpreter, NativeReturn, format_string};
 use crate::resource::ResourceMode;
@@ -11,20 +12,6 @@ use std::sync::{
 use std::thread::{self, JoinHandle};
 
 mod bundle;
-
-/// 接收解包后的目录及文件。路径为相对于所选目录的名称组件。
-pub trait ExportDestination: Send {
-    fn create_directory(&mut self, path: &[String]) -> Result<()>;
-    fn write_file(&mut self, path: &[String], bytes: &[u8]) -> Result<()>;
-}
-
-/// 由宿主选择输出目录，并接收后台导出的结果。
-pub trait ExportServices {
-    /// `None` 表示取消。任务在运行时线程请求一次，返回的接收者可移至工作线程。
-    fn select_destination(&mut self, task_id: u32) -> Result<Option<Box<dyn ExportDestination>>>;
-
-    fn finished(&mut self, _task_id: u32, _result: Result<()>) {}
-}
 
 pub(super) struct ExportObject {
     base: BaseObject,

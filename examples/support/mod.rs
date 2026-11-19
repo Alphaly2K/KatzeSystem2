@@ -10,12 +10,10 @@ use blowfish::{
 use katze_system2::{
     Error, Result,
     host::{
-        ConfigurationFile, FileServices, LocalDateTime, ResourceMode, ResourceServices,
-        SaveServices, SharedSource, SystemServices,
+        ButtonSource, ConfigurationFile, DeviceBinding, DeviceKeys, FileServices, LocalDateTime,
+        ResourceMode, ResourceServices, SaveServices, SharedSource, SystemServices,
     },
-    input::{ButtonSource, DeviceBinding, DeviceKeys},
     kcs::Program,
-    memory::SharedMemory,
     resource::{ArchiveConfig, KifEntrySource, XmlDocument},
     runtime::GameRuntime,
 };
@@ -763,8 +761,7 @@ pub fn build_runtime(
         startup,
         ..
     } = game;
-    let mut runtime =
-        GameRuntime::with_resource_programs(1 << 20, SharedMemory::new(vec![0; 16 << 20])?)?;
+    let mut runtime = GameRuntime::prepare(1 << 20, 16 << 20)?;
     let startup_xml = XmlDocument::parse(startup.as_bytes())?;
     if let Some(importer) = image_import::Import::from_startup(&root, &startup_xml)? {
         runtime.set_platform_job_services(importer);

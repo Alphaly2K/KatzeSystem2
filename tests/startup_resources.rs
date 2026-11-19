@@ -116,7 +116,7 @@ fn startup_and_dynamic_script_loads_use_the_higher_priority_patch() {
             .unwrap(),
         Some(Vec::new())
     );
-    let mut runtime = GameRuntime::with_resource_programs(0, Default::default()).unwrap();
+    let mut runtime = GameRuntime::prepare(0, 0).unwrap();
     runtime.set_resources(game.router);
     let (mut runtime, tasks) = runtime
         .start_game_with_tasks(game.start.as_bytes())

@@ -267,7 +267,7 @@ impl<H: Host, S: TaskServices> Host for TaskHost<'_, H, S> {
         self.inner.resource_services()
     }
 
-    fn export_services(&mut self) -> Option<&mut dyn crate::runtime::ExportServices> {
+    fn export_services(&mut self) -> Option<&mut dyn crate::host::ExportServices> {
         self.inner.export_services()
     }
 
