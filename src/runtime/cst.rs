@@ -4,6 +4,7 @@ use crate::{Error, Result, read};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
+pub(super) mod browser;
 mod data;
 mod details;
 mod legacy;
@@ -285,6 +286,9 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         arguments: &[u8],
         vm: &mut Interpreter,
     ) -> Result<NativeReturn> {
+        if matches!(index, 379..=384 | 1032) {
+            return self.cst_browser_native(index, arguments, vm);
+        }
         if matches!(index, 219..=227 | 233..=235 | 1035) {
             return self.legacy_cst_native(index, arguments, vm);
         }

@@ -8,28 +8,41 @@ use katze_system2::{
 use std::{cell::RefCell, collections::BTreeMap, io::Write, rc::Rc};
 
 fn script(compressed: bool) -> Vec<u8> {
-    let records = [
-        (0x21, "名前"),
-        (0x20, "本文一"),
-        (0x20, "本文二"),
-        (2, ""),
-        (0x20, "next"),
-        (2, ""),
-    ];
+    scene(
+        &[
+            &[(0x21, "名前"), (0x20, "本文一"), (0x20, "本文二"), (2, "")],
+            &[(0x20, "next"), (2, "")],
+        ],
+        compressed,
+    )
+}
+
+fn scene(groups: &[&[(u8, &str)]], compressed: bool) -> Vec<u8> {
     let mut text = vec![];
     let mut offsets = vec![];
-    for (kind, value) in records {
-        offsets.push(text.len() as u32);
-        text.extend([1, kind]);
-        text.extend(encoding_rs::SHIFT_JIS.encode(value).0.as_ref());
-        text.push(0);
+    let mut ranges = vec![];
+    for group in groups {
+        ranges.extend([group.len() as u32, offsets.len() as u32]);
+        for &(kind, value) in *group {
+            offsets.push(text.len() as u32);
+            text.extend([1, kind]);
+            text.extend(encoding_rs::SHIFT_JIS.encode(value).0.as_ref());
+            text.push(0);
+        }
     }
-    let strings = 16 + offsets.len() as u32 * 4;
-    let mut body: Vec<u8> = [strings + text.len() as u32, 2, 16, strings, 4, 0, 2, 4]
-        .into_iter()
-        .flat_map(u32::to_le_bytes)
-        .collect();
-    body.extend(offsets.into_iter().flat_map(u32::to_le_bytes));
+    let indices = ranges.len() as u32 * 4;
+    let strings = indices + offsets.len() as u32 * 4;
+    let mut body: Vec<u8> = [
+        strings + text.len() as u32,
+        groups.len() as u32,
+        indices,
+        strings,
+    ]
+    .into_iter()
+    .chain(ranges)
+    .chain(offsets)
+    .flat_map(u32::to_le_bytes)
+    .collect();
     body.extend(text);
     let size = body.len() as u32;
     if compressed {
@@ -135,6 +148,147 @@ fn runtime(code: &[u8], budget: usize) -> (Runtime<KcsFactory<Loader>>, u32, Fil
     rt.set_resources(Sources(files.clone(), requests.clone()));
     let task = rt.create(0, kind::ORDINARY, b"cst", b"").unwrap();
     (rt, task, files, requests)
+}
+
+#[test]
+fn history_browser_scrolls_across_scenes_and_preserves_ordered_outputs() -> Result<()> {
+    struct Scenes;
+    impl ResourceServices for Scenes {
+        fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+            assert_eq!(category, b"scene");
+            Ok([name, b".cst"].concat())
+        }
+        fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
+            assert_eq!(mode, ResourceMode::LooseFirst);
+            Ok(match name {
+                b"one.cst" => Some(scene(
+                    &[
+                        &[(0x20, "a0")],
+                        &[(0x30, "only")],
+                        &[(0x21, "speaker")],
+                        &[(0x20, "a3")],
+                    ],
+                    false,
+                )),
+                b"two.cst" => Some(scene(
+                    &[
+                        &[
+                            (0x21, "Bob"),
+                            (0x20, "b0"),
+                            (0x30, "c0"),
+                            (0x20, "b1"),
+                            (0x30, "c1"),
+                        ],
+                        &[(0x30, "only")],
+                        &[(0x20, "b2")],
+                        &[(0x20, "b3")],
+                    ],
+                    false,
+                )),
+                b"two.cstl" => Some(localization("translated")),
+                _ => None,
+            })
+        }
+    }
+    let mut code = vec![];
+    call(&mut code, 323, &[], Some(0));
+    call(&mut code, 325, &[1, 208], Some(4));
+    call(&mut code, 65, &[], None);
+    call(&mut code, 379, &[1, 2], Some(8));
+    call(&mut code, 384, &[2, 0, 384, 388], Some(12));
+    call(&mut code, 380, &[2], None);
+    call(&mut code, 329, &[1, 192, 3], None);
+    call(&mut code, 329, &[1, 208, 3], None);
+    call(&mut code, 379, &[1, 1], Some(16));
+    call(&mut code, 384, &[3, 0, 256, 260], Some(20));
+    call(&mut code, 381, &[3, 1], Some(24));
+    call(&mut code, 380, &[3], None);
+    call(&mut code, 379, &[1, 3], Some(28));
+    let browser = 4;
+    for (i, (native, args)) in [
+        (1032, [browser, 0, 272, 0x8000_0000, 80].as_slice()),
+        (382, &[browser, 0, 288, 288]),
+        (383, &[browser, 0, 304, 1]),
+        (383, &[browser, 0, 320, 2]),
+        (383, &[browser, 0, u32::MAX, 0]),
+        (382, &[browser, 3, 336, 0x8000_0040]),
+        (381, &[browser, 0]),
+        (384, &[browser, 0, 264, 268]),
+        (381, &[browser, 0]),
+        (381, &[browser, 0]),
+        (381, &[browser, 0]),
+        (384, &[browser, 0, 392, 396]),
+        (381, &[browser, 7]),
+        (381, &[browser, 1]),
+        (381, &[browser, 1]),
+        (381, &[browser, 1]),
+        (384, &[browser, 2, 400, 400]),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        call(
+            &mut code,
+            native,
+            args,
+            Some(32 + i as u32 * 4 + if i >= 8 { 64 } else { 0 }),
+        );
+    }
+    call(&mut code, 65, &[], None);
+    call(&mut code, 331, &[1], None);
+    call(&mut code, 329, &[1, 224, 3], None);
+    call(&mut code, 382, &[browser, 0, 352, 368], Some(184));
+    call(&mut code, 324, &[1], None);
+    call(&mut code, 384, &[browser, 0, 404, 408], Some(188));
+    call(&mut code, 380, &[browser], None);
+    code.push(0x3b);
+
+    let (mut runtime, task, _, _) = runtime(&code, 4096);
+    runtime.set_resources(Scenes);
+    let vm = runtime.object_mut(task).unwrap().interpreter_mut().unwrap();
+    for (at, value) in [
+        (192, b"one\0".as_slice()),
+        (208, b"two\0"),
+        (224, b"missing\0"),
+    ] {
+        vm.write(at, value)?;
+    }
+    runtime.update(0, 1)?;
+    runtime.cst_context_mut(1).unwrap().set_position(2, 0);
+    runtime.update(1, 1)?;
+    let ctx = runtime.cst_context(1).unwrap();
+    assert_eq!(ctx.position(), [2, 0]);
+    assert_eq!(ctx.script().unwrap().inputs().len(), 4);
+    assert_eq!(ctx.bound_languages().collect::<Vec<_>>(), [b"jp"]);
+    fn words(vm: &katze_system2::kcs::Interpreter, at: u32, n: usize) -> Vec<u32> {
+        vm.read(at, n * 4)
+            .unwrap()
+            .chunks_exact(4)
+            .map(|word| u32::from_le_bytes(word.try_into().unwrap()))
+            .collect()
+    }
+    let vm = runtime.object(task).unwrap().interpreter().unwrap();
+    assert_eq!(
+        words(vm, 0, 16),
+        [1, 1, 2, 0, 3, 1, 0, 4, 1, 1, 1, 0, 1, 0, 1, 1]
+    );
+    assert_eq!(words(vm, 128, 9), [1, 1, 0, 1, 1, 1, 1, 0, 1]);
+    assert_eq!(words(vm, 256, 4), [1, 2, 0, 3]);
+    assert_eq!(words(vm, 384, 5), [0x5a5a5a5a, 0x5a5a5a5a, 0, 0, 3]);
+    assert_eq!(&*vm.read(272, 6)?, b"b0b1\0Z");
+    assert_eq!(&*vm.read(0x8000_0000, 4)?, b"Bob\0");
+    assert_eq!(&*vm.read(288, 8)?, b"Bobb0b1\0");
+    assert_eq!(&*vm.read(304, 4)?, b"c1\0Z");
+    assert_eq!(&*vm.read(320, 2)?, b"\0Z");
+    assert_eq!(&*vm.read(336, 4)?, b"ZZZZ");
+
+    runtime.update(2, 1)?;
+    let vm = runtime.object(task).unwrap().interpreter().unwrap();
+    assert_eq!(words(vm, 184, 2), [0, 1]);
+    assert_eq!(words(vm, 404, 2), [0, 0]);
+    assert_eq!(&*vm.read(352, 4)?, b"ZZZZ");
+    assert_eq!(&*vm.read(368, 4)?, b"ZZZZ");
+    Ok(())
 }
 
 #[test]
