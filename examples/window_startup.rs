@@ -34,13 +34,13 @@ mod window_text;
 use katze_system2::{
     graphics::{Projection, RenderTarget, TextureFilter, Transform},
     language::LanguageTarget,
-    runtime::kind,
+    runtime::{FrameTime, GameTasks},
 };
 use sdl2::event::{Event, WindowEvent};
 use std::cell::RefCell;
 use std::rc::Rc;
 use support::image_import::{Import, ImportPicker, import_directory};
-use support::{advance_frame, build_runtime, load_game};
+use support::{build_runtime, load_game};
 use window_input::{Shared, WindowDevice};
 
 fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
@@ -74,16 +74,16 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .ok_or("缺少启动按键配置")?;
     runtime.set_input_device(WindowDevice::new(keys, shared.clone()))?;
     runtime.input_coordinates_mut().logical_size = [1280, 720];
-    let input = runtime.create(0, kind::INPUT, b"input", b"")?;
-    let sound = runtime.create(0, kind::SOUND, b"sound", b"")?;
-    let mut audio = audio_output::Output::new(
-        runtime
-            .object_mut(sound)
-            .and_then(|object| object.audio_state_mut())
-            .ok_or("缺少声音状态")?,
-    )?;
+    let (
+        mut runtime,
+        GameTasks {
+            input,
+            sound,
+            entry: task,
+        },
+    ) = runtime.start_game(b"main")?;
+    let mut audio = audio_output::Output::new(runtime.sound_mut(sound).ok_or("缺少声音状态")?)?;
     println!("输入 {input} 声音 {sound}");
-    let task = runtime.create(0, kind::ORDINARY, b"main", b"")?;
     println!("主任务 {task}");
 
     let startup_xml = katze_system2::resource::XmlDocument::parse(startup.as_bytes())?;
@@ -209,7 +209,11 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 .is_some_and(|config| {
                     (runtime.host().languages.primary_index as usize) < config.prefixes.len()
                 });
-        if let Err(error) = advance_frame(&mut runtime, now, started.elapsed().as_millis() as u32) {
+        if let Err(error) = runtime.advance(FrameTime {
+            tick: now,
+            increment: 1,
+            system_time_ms: started.elapsed().as_millis() as u32,
+        }) {
             eprintln!("pc {}：{}", error.offset, error.message);
             for id in 0..128 {
                 if let Some(vm) = runtime.object(id).and_then(|object| object.interpreter()) {

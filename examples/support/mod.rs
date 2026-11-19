@@ -9,15 +9,13 @@ use blowfish::{
 };
 use katze_system2::{
     Error, Result,
-    audio::SoundFactory,
-    expression::State,
-    graphics::{DrawingContext, GraphicsFactory, RenderTarget},
-    input::{ButtonSource, DeviceBinding, DeviceKeys, InputFactory},
+    graphics::{DrawingContext, RenderTarget},
+    input::{ButtonSource, DeviceBinding, DeviceKeys},
     io::SharedSource,
     kcs::{LocalDateTime, Program, ResourceServices, SystemServices},
     memory::SharedMemory,
     resource::{ArchiveConfig, KifEntrySource, ResourceMode},
-    runtime::{KcsFactory, ProgramLoader, RootObject, Runtime, fes::FesFactory, kind},
+    runtime::{GameRuntime, ProgramLoader},
     save::SaveServices,
 };
 use std::{collections::BTreeMap, sync::Arc};
@@ -785,17 +783,11 @@ fn patch_number(name: &str) -> Option<u32> {
     number.parse().ok()
 }
 
-pub type Factory = SoundFactory<
-    FesFactory<
-        GraphicsFactory<katze_system2::message::MessageFactory<InputFactory<KcsFactory<Programs>>>>,
-    >,
->;
-
 /// 以探针同一配置链创建运行时；输入设备由调用方随后绑定。
 pub fn build_runtime(
     game: Game,
     surface: [u32; 2],
-) -> std::result::Result<Runtime<Factory>, Box<dyn std::error::Error>> {
+) -> std::result::Result<GameRuntime<Programs>, Box<dyn std::error::Error>> {
     let Game {
         root,
         mut router,
@@ -803,27 +795,11 @@ pub fn build_runtime(
         programs,
         ..
     } = game;
-    let mut runtime = Runtime::new(
-        0,
-        kind::ROOT,
-        Box::new(RootObject::new(1, 2)),
-        State::new(1 << 20),
-        SoundFactory {
-            enabled: true,
-            fallback: FesFactory {
-                fallback: GraphicsFactory {
-                    fallback: katze_system2::message::MessageFactory {
-                        fallback: InputFactory {
-                            fallback: KcsFactory {
-                                programs: Programs { programs },
-                                external: SharedMemory::new(vec![0; 16 << 20])?,
-                            },
-                        },
-                    },
-                },
-            },
-        },
-    );
+    let mut runtime = GameRuntime::with_programs(
+        Programs { programs },
+        1 << 20,
+        SharedMemory::new(vec![0; 16 << 20])?,
+    )?;
     let startup_xml = katze_system2::resource::XmlDocument::parse(startup.as_bytes())?;
     if let Some(importer) = image_import::Import::from_startup(&root, &startup_xml)? {
         runtime.set_platform_job_services(importer);
@@ -937,17 +913,4 @@ pub fn build_runtime(
         katze_system2::graphics::TextureFilter::Point,
     );
     Ok(runtime)
-}
-
-/// 每轮推进一个 1/60 秒逻辑帧，系统毫秒时钟由调用方独立提供。
-pub fn advance_frame(
-    runtime: &mut Runtime<Factory>,
-    frame: u32,
-    system_time_ms: u32,
-) -> Result<bool> {
-    for request in std::mem::take(&mut runtime.host_mut().language_change_requests) {
-        runtime.refresh_language(request.target)?;
-    }
-    runtime.host_mut().system_time_ms = system_time_ms;
-    runtime.update(frame, 1)
 }

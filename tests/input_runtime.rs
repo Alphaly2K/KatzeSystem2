@@ -923,6 +923,75 @@ impl DeviceState {
 
 struct Device(Rc<RefCell<DeviceState>>);
 
+#[test]
+fn game_runtime_boots_the_standard_tasks_and_supplies_the_first_frame_clock() -> Result<()> {
+    use katze_system2::{
+        language::{LanguageChangeRequest, LanguageTarget},
+        memory::SharedMemory,
+        runtime::{FrameTime, GameRuntime, ProgramLoader},
+    };
+
+    struct Entry(Program);
+    impl ProgramLoader for Entry {
+        fn load(&mut self, name: &[u8]) -> Result<Option<Program>> {
+            Ok((name == b"main").then(|| self.0.clone()))
+        }
+    }
+
+    let mut code = vec![0x2b, 3];
+    code.extend(4u32.to_le_bytes());
+    code.push(3);
+    code.extend(0u32.to_le_bytes());
+    code.extend([0x26, 3]);
+    code.extend(0u32.to_le_bytes());
+    code.push(0x3b);
+    let external = SharedMemory::new(vec![0x55; 4])?;
+    let mut runtime = GameRuntime::with_programs(
+        Entry(Program::from_code(&code, vec![0; 4], 8)?),
+        4,
+        external,
+    )?;
+    let device = Rc::new(RefCell::new(DeviceState::new([12, 34])));
+    runtime.set_input_device(Device(device.clone()))?;
+    let (mut runtime, tasks) = runtime.start_game(b"main")?;
+    assert_eq!(device.borrow().pointer_calls, 1);
+    assert!(runtime.sound_mut(tasks.sound).is_some());
+    for (command, task) in [(34, tasks.input), (35, tasks.sound)] {
+        assert_eq!(
+            runtime.dispatch_command(
+                tasks.entry,
+                Command {
+                    target: 0,
+                    sender: tasks.entry,
+                    code: command,
+                    data: [0; 3],
+                }
+            )?,
+            task
+        );
+    }
+
+    let time = FrameTime {
+        tick: 120,
+        increment: 1,
+        system_time_ms: 42_000,
+    };
+    let request = LanguageChangeRequest {
+        task_id: tasks.entry,
+        target: LanguageTarget::MainText,
+    };
+    runtime.host_mut().language_change_requests.push(request);
+    assert!(runtime.advance(time).is_err());
+    assert_eq!(runtime.host().language_change_requests, [request]);
+    assert_eq!(device.borrow().pointer_calls, 1);
+    runtime.host_mut().language_change_requests.clear();
+    assert!(runtime.advance(time)?);
+    let vm = runtime.object(tasks.entry).unwrap().interpreter().unwrap();
+    assert_eq!(vm.read(0, 4)?.as_ref(), 42_000u32.to_le_bytes());
+    assert_eq!(vm.read(0x8000_0000, 4)?.as_ref(), [0x55; 4]);
+    Ok(())
+}
+
 impl InputDevice for Device {
     fn poll(&mut self) -> Result<()> {
         self.0.borrow_mut().calls.push("poll");

@@ -1,6 +1,6 @@
 //! 用本机游戏目录跑启动脚本，报告首个未接入的宿主入口。
 //!
-//! 用法：`cargo run --example probe_startup -- <游戏目录>`。
+//! 用法：`cargo run --example runprobe -- <游戏目录>`。
 
 mod support;
 
@@ -10,10 +10,10 @@ use katze_system2::{
     input::{ButtonSource, DeviceKeys, InputDevice, KeySample, PointerSample, Region},
     kcs::ResourceServices,
     resource::ResourceMode,
-    runtime::kind,
+    runtime::{FrameTime, GameRuntime, GameTasks},
 };
 use std::{cell::Cell, collections::BTreeMap, rc::Rc};
-use support::{Game, advance_frame, build_runtime, load_game};
+use support::{Game, build_runtime, load_game};
 
 struct StoryReplay {
     automatic_from: u32,
@@ -216,7 +216,7 @@ impl InputDevice for ScriptedDevice {
 fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let root = std::env::args()
         .nth(1)
-        .ok_or("用法：probe_startup <游戏目录> [帧数]")?;
+        .ok_or("用法：runprobe <游戏目录> [帧数]")?;
     let frames: u32 = std::env::args()
         .nth(2)
         .map_or(Ok(600), |value| value.parse())?;
@@ -467,10 +467,15 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .ok_or("缺少启动按键配置")?;
     let mut replay = StoryReplay::from_env();
     runtime.set_input_device(ScriptedDevice::new(keys, replay.as_ref()))?;
-    let input = runtime.create(0, kind::INPUT, b"input", b"")?;
-    let sound = runtime.create(0, kind::SOUND, b"sound", b"")?;
+    let (
+        mut runtime,
+        GameTasks {
+            input,
+            sound,
+            entry: task,
+        },
+    ) = runtime.start_game(b"main")?;
     println!("输入 {input} 声音 {sound}");
-    let task = runtime.create(0, kind::ORDINARY, b"main", b"")?;
     println!("主任务 {task}");
     let dump = |vm: &katze_system2::kcs::Interpreter| {
         let instructions = vm.program().instructions();
@@ -520,7 +525,11 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         now += if replay.is_some() { 3 } else { 1 };
         let system_time_ms = (u64::from(now) * 1000 / 60) as u32;
         let started = timing.then(std::time::Instant::now);
-        if let Err(error) = advance_frame(&mut runtime, now, system_time_ms) {
+        if let Err(error) = runtime.advance(FrameTime {
+            tick: now,
+            increment: 1,
+            system_time_ms,
+        }) {
             println!("第 {frame} 帧 pc {}：{}", error.offset, error.message);
             for id in task_ids(&runtime) {
                 if let Some(vm) = runtime.object(id).and_then(|object| object.interpreter()) {
@@ -568,10 +577,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             }
         }
         if let Some(replay) = &mut replay {
-            if let Some(state) = runtime
-                .object_mut(sound)
-                .and_then(|object| object.audio_state_mut())
-            {
+            if let Some(state) = runtime.sound_mut(sound) {
                 state.mix_stereo(48_000, &mut [0.; 4800])?;
             }
             if let Some(state) = runtime.input_state(input) {
@@ -907,7 +913,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn task_ids(runtime: &katze_system2::runtime::Runtime<support::Factory>) -> Vec<u32> {
+fn task_ids(runtime: &GameRuntime<support::Programs>) -> Vec<u32> {
     let root = runtime.tree().root_id();
     std::iter::once(root)
         .chain(runtime.tree().descendants(root).unwrap())

@@ -3975,14 +3975,14 @@ JPEG 在交换字段为零时原地交换第一、第三字节，设置字段一
 
 串行缩放和并行缩放各以独立存档完成 36,000 次更新，输入区域、12 次选项日志、剧情检查点及最终画面一致，无运行诊断。对应旧峰值的第 32,208／32,554 次更新分别从 196.41／194.88 降至 174.86／173.15 毫秒。两帧各两次串行缩放合计约 51 毫秒；并行版的单次缩放均低于 20 毫秒的记录阈值，整段达到该阈值的 730 从九次减至零次。并行版仍有 321 次 710 和 18 次 568 达到阈值。
 
-`probe_startup` 支持同类离屏回放。设置 `KATZE_PROBE_AUTO_FROM` 开启每四轮一次的自动点击，`KATZE_PROBE_CTRL_FROM` 指定开始保持 Ctrl 的轮次；`KATZE_PROBE_CHOICE_PLAN` 为逗号分隔的零起始剧情选项，省略时选首项。显式点击由 `KATZE_PROBE_CLICKS` 指定，回放按三逻辑帧一步，音频在内存中消费。以下参数使用独立存档目录和游戏目录，通过 `KATZE_TRACE_TIMING` 记录耗时达到 20 毫秒的更新及 native 调用：
+`runprobe` 支持同类离屏回放。设置 `KATZE_PROBE_AUTO_FROM` 开启每四轮一次的自动点击，`KATZE_PROBE_CTRL_FROM` 指定开始保持 Ctrl 的轮次；`KATZE_PROBE_CHOICE_PLAN` 为逗号分隔的零起始剧情选项，省略时选首项。显式点击由 `KATZE_PROBE_CLICKS` 指定，回放按三逻辑帧一步，音频在内存中消费。以下参数使用独立存档目录和游戏目录，通过 `KATZE_TRACE_TIMING` 记录耗时达到 20 毫秒的更新及 native 调用：
 
 ```sh
 KATZE_TRACE_TIMING=1 KATZE_SCRIPT_ENCODING=gbk \
 KATZE_SAVE_ROOT="$ISOLATED_SAVE_DIR" KATZE_PROBE_AUTO_FROM=2100 \
 KATZE_PROBE_CTRL_FROM=2417 KATZE_PROBE_CLICKS='2100@120:60' \
 KATZE_PROBE_CHOICE_PLAN='0,1,2,0,1,2,0,1,2,0,1' \
-cargo run --release --example probe_startup -- "$GAME_DIR" 36000
+cargo run --release --example runprobe -- "$GAME_DIR" 36000
 ```
 
 ## 普通任务类型查询与转场来源替换
@@ -4498,3 +4498,9 @@ Metal 同尺寸捕获复用一张目标纹理，每次仍清屏并返回独立�
 ## 字体发现与私有字体读取的宿主迁移
 
 示例宿主发现系统字体并按文件顺序提供 `ReadSource`，运行库继续维护选择、字宽、缺字回退与栅格化。14 项定向回归覆盖字体集合和样式、来源重新打开、私有字体替换已缓存的同名回退，以及 FES 的名称转发。`check_font_fallback` 通过 960 组系统字体度量与字形检查。两款游戏使用隔离存档和内存音频分别完成 1,200／4,500 次离屏更新，日志和多色终帧与迁移前逐字节一致。正常依赖树不再包含 fontdb 和 fontconfig-parser。
+
+## 标准宿主启动与库打包
+
+内存宿主通过标准启动入口检查根任务的输入及声音路由、首次输入位置、共享外部区和脚本首帧读取的毫秒时钟。语言刷新失败保留请求，并且本轮不采集输入。20 项输入和启动资源回归通过，离屏与窗口示例通过定向 Clippy。两款游戏用 `runprobe` 完成 1,200／4,500 次离屏更新，日志与终帧逐字节匹配迁移前结果。
+
+Cargo 从运行库发布包完成重建，库包不包含脚本检查命令。独立 `katze-script` 的求值、合成脚本结构检查和调用点统计通过。

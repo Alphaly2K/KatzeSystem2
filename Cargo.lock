@@ -364,6 +364,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "katze-script"
+version = "0.1.0"
+dependencies = [
+ "katze-system2",
+]
+
+[[package]]
 name = "katze-system2"
 version = "0.1.0"
 dependencies = [

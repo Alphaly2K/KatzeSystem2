@@ -1,0 +1,10 @@
+[package]
+name = "katze-script"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.87"
+license = "LGPL-2.1-only"
+publish = false
+
+[dependencies]
+katze-system2 = { path = "../.." }

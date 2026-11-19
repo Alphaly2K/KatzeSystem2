@@ -82,9 +82,9 @@ C 的 84 份 KCS 共 213,802 条指令、10,749 个宿主调用点。CLI 与独�
 ## 批量提取
 
 ```sh
-cargo run --release --locked --bin katze-script -- native-calls ordinary core-programs/
-cargo run --release --locked --bin katze-script -- native-calls motion motion-programs/
-cargo run --release --locked --bin katze-script -- native-calls particle particle-programs/
+cargo run --release --locked -p katze-script -- native-calls ordinary core-programs/
+cargo run --release --locked -p katze-script -- native-calls motion motion-programs/
+cargo run --release --locked -p katze-script -- native-calls particle particle-programs/
 ```
 
 输入为一个或多个 KCS 文件或单层目录。目录只读取 `.kcs` 文件，表类别由调用方依据宿主装载链指定。结果按程序版本、索引和参数字节数分组。CLI 将标志 `03` 的 DWORD 立即数作为静态值；其余索引计入 `unresolved_indices`，其余参数长度显示 `?`，留待进一步求值分析。输出不列出输入文件名。相同输入路径去重，读取或解析失败会返回错误。

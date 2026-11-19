@@ -4,7 +4,13 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.87"
 license = "LGPL-2.1-only"
-description = "CatSystem2 2.6.1.90 script readers and interpreters"
+description = "Embeddable CatSystem2 2.6.1.90 runtime"
+autobins = false
+
+[workspace]
+members = ["tools/katze-script"]
+default-members = ["."]
+resolver = "3"
 
 [dependencies]
 blowfish = "0.9.1"

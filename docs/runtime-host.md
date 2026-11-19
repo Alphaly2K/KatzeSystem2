@@ -12,11 +12,17 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 
 公开 Rust API 从运行实例和宿主能力出发。文档应覆盖实例创建与释放、推进与输入顺序、帧与 PCM 的所有权、请求取消，以及诊断和正常未命中的区别。入口使用明确的请求与结果类型，记录整数单位和坐标约定；任务树、原始命令编号、VM 缓冲区和分派表保留为实现细节或显式的底层工具。现有 Rust 调用方随迁移调整；等 Rust 契约稳定且有非 Rust 宿主接入时，再定义独立版本的 C ABI 和显式释放约定。
 
+标准宿主用 `GameRuntime::with_programs(loader, shared_slots, external)` 创建根任务并配置共享存储。绑定输入、资源和需要的其他服务，设置画布及帧视图，再调用 `start_game(entry)`。该方法消费准备好的实例，返回已启动的实例和 `GameTasks`，输入、声音和入口脚本按引擎顺序登记。缺失的入口名称返回诊断并释放本次实例。首次更新前可以使用 `sound_mut(tasks.sound)` 取得声音状态并连接 `Mixer`。
+
+调用 `advance(FrameTime { tick, increment, system_time_ms })` 推进一轮。`tick` 为游戏逻辑时钟（通常每秒 60 个单位），`increment` 是本轮传给任务的逻辑增量，`system_time_ms` 为可回绕的系统毫秒计数。先处理上一轮语言请求，再推进媒体和任务；语言刷新失败时保留失败项及后续请求。成功返回 false 表示根任务已退出。宿主在更新后消费绘制和声音输出。需要自定义结构的调用方仍可用 `Runtime::new` 和 `update`。
+
+默认工作区包 `katze-system2` 发布为库；脚本检查工具是单独的仓库内包，用 `cargo run -p katze-script -- ...` 执行。离屏宿主入口是 `cargo run --release --example runprobe -- "$GAME_DIR"`。
+
 迁移按下列顺序进行：
 
-1. 收拢创建、服务接入、推进与输出的公开入口。文件通过 `ReadSource`、`ResourceServices`、`SaveServices`、`FileServices` 访问；当地时间通过 `SystemServices::local_date_time` 提供；字体发现和私有字体读取由宿主提供。继续将命令行检查工具与库发布产物分开。
+1. 继续收拢服务接入和输出的公开入口。文件通过 `ReadSource`、`ResourceServices`、`SaveServices`、`FileServices` 访问；当地时间通过 `SystemServices::local_date_time` 提供；字体发现和私有字体读取由宿主提供。
 2. 沿用 `Compositor → DrawList → GraphicsBackend`，将 Metal 和窗口呈现移出库。先核对画布纹理、电影、光标叠层及脚本截图的提交顺序。以现有 `Mixer` 为 PCM 边界，设备回调留在宿主。
 3. 为已有系统和网络路由明确请求、返回与取消的对应关系。同步查询保持同步；需要宿主等待的操作沿用任务推进和轮询。诊断信息通过公开入口交给宿主。编解码和计算路径的线程、时钟及工具链要求单独检查，在宿主确有需要时提供相应构建路径。
-4. 将现有离屏启动器收拢为 `examples` 中的 `runprobe`，负责本地资源和隔离存档，直接消费绘制列表与 PCM。桌面窗口和设备输出使用独立的可选示例适配。用只提供内存资源的宿主回归验证公开 API，再用 `runprobe` 验证两款游戏的剧情、存档与媒体行为。
+4. `runprobe` 负责本地资源和隔离存档；后续将它改为直接消费绘制列表和 PCM。桌面窗口和设备输出使用独立的可选示例适配。用内存宿主回归验证公开 API，再用 `runprobe` 验证两款游戏的剧情、存档与媒体行为。
 
 发布检查应覆盖不构建示例的独立库、无设备依赖的正常依赖树、内存宿主用例及原有的离屏流程。正常依赖树仍包含 Metal；系统字体发现和当地时间依赖仅由示例宿主构建。
