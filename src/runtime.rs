@@ -35,6 +35,7 @@ pub use effect::{EffectPlayer, EffectServices};
 mod host;
 mod image_cursor;
 mod input;
+mod language;
 mod message;
 mod motion;
 mod movie;
@@ -56,7 +57,7 @@ mod resources;
 mod root;
 mod save;
 mod session;
-pub use session::{FrameTime, GameFactory, GameRuntime, GameTasks};
+pub use session::{FrameOutcome, FrameTime, GameFactory, GameRuntime, GameTasks};
 mod state_records;
 mod system_tasks;
 mod transition;
@@ -212,6 +213,7 @@ pub struct Runtime<F: ObjectFactory> {
     budget: usize,
     limit: usize,
     configuration_notification: Option<BTreeSet<u32>>,
+    interface_language_refreshed: bool,
 }
 
 impl<F: ObjectFactory> Runtime<F> {
@@ -246,6 +248,7 @@ impl<F: ObjectFactory> Runtime<F> {
             budget: DEFAULT_BUDGET,
             limit: DEFAULT_LIMIT,
             configuration_notification: None,
+            interface_language_refreshed: false,
         }
     }
 
@@ -342,88 +345,6 @@ impl<F: ObjectFactory> Runtime<F> {
     /// 最近一次离屏绘制的目标；绘制错误保留已写像素，跳过的调用保留旧目标。
     pub fn offscreen_frame(&self) -> Option<&crate::graphics::RenderTarget> {
         self.resources.offscreen_frame.as_ref()
-    }
-
-    /// The current translation tables for host UI strings.
-    pub fn string_tables(&self) -> &crate::language::StringTables {
-        &self.host.string_tables
-    }
-
-    /// Whether the selected interface language has a configured translation prefix.
-    pub fn interface_language_available(&self) -> bool {
-        self.host
-            .string_table_config
-            .as_ref()
-            .is_some_and(|config| {
-                (self.host.languages.primary_index as usize) < config.prefixes.len()
-            })
-    }
-
-    /// Whether the next advance has a queued refresh for the given language target.
-    pub fn has_pending_language_change(&self, target: crate::language::LanguageTarget) -> bool {
-        self.host
-            .language_change_requests
-            .iter()
-            .any(|request| request.target == target)
-    }
-
-    /// 处理平台语言请求的字符串表部分；请求队列和平台控件由宿主管理。
-    pub fn reload_language_tables(
-        &mut self,
-        target: crate::language::LanguageTarget,
-    ) -> Result<()> {
-        if target == crate::language::LanguageTarget::Subtitle {
-            return Ok(());
-        }
-        let config = self
-            .host
-            .string_table_config
-            .as_ref()
-            .ok_or_else(|| Error::new(0, "运行时未配置字符串表路径"))?;
-        config.reload(
-            target,
-            &self.host.languages,
-            &mut self.host.string_tables,
-            |path| {
-                let services = self
-                    .resources
-                    .services
-                    .as_deref_mut()
-                    .ok_or_else(|| Error::new(0, "运行时未配置字符串表资源服务"))?;
-                if let Some(bytes) =
-                    services.read_utf16(path, crate::resource::ResourceMode::File)?
-                {
-                    return Ok(Some(bytes));
-                }
-                services.read_utf16(path, crate::resource::ResourceMode::LooseFirst)
-            },
-        )
-    }
-
-    /// 按当前选择处理语言请求的资源、编号及变更标记；队列和平台控件由宿主管理。
-    pub fn refresh_language(&mut self, target: crate::language::LanguageTarget) -> Result<()> {
-        use crate::language::LanguageTarget;
-        let count = self.host.languages.prefixes.len();
-        if target == LanguageTarget::Interface
-            && self.host.languages.primary_index as usize >= count
-        {
-            return Ok(());
-        }
-        self.reload_language_tables(target)?;
-        let mark_changed = match target {
-            LanguageTarget::Interface => true,
-            LanguageTarget::MainText => (self.host.languages.message_index as usize) < count,
-            LanguageTarget::Subtitle => {
-                if self.host.languages.subtitle_index as usize >= count {
-                    self.host.languages.subtitle_index = u32::MAX;
-                }
-                true
-            }
-        };
-        if mark_changed {
-            self.host.system_settings_dirty = 1;
-        }
-        Ok(())
     }
 
     pub fn images(&self) -> &crate::graphics::Images {

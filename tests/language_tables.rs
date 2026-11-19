@@ -358,3 +358,94 @@ fn platform_refresh_normalizes_subtitles_and_marks_changes_without_modifying_sou
     runtime.refresh_language(Interface).unwrap();
     assert_eq!(runtime.host().system_settings_dirty, 1);
 }
+
+#[test]
+fn advance_reports_a_completed_interface_refresh_once_after_retry_and_stops_on_exit() {
+    use katze_system2::{
+        Result,
+        expression::State,
+        host::{ResourceMode, ResourceServices},
+        language::{LanguageChangeRequest, LanguageTarget::*, StringTableConfig},
+        runtime::{BaseObject, FrameOutcome, FrameTime, ObjectFactory, Runtime, TaskObject, kind},
+    };
+
+    struct NoChildren;
+    impl ObjectFactory for NoChildren {
+        fn create(&mut self, _: u32, _: u32, _: &[u8]) -> Result<Box<dyn TaskObject>> {
+            unreachable!()
+        }
+    }
+    struct Files(usize);
+    impl ResourceServices for Files {
+        fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
+            assert_eq!(mode, ResourceMode::File);
+            self.0 += 1;
+            match (self.0, name) {
+                (1, b"language_a.txt") => Ok(Some(b"$key$\nNew title\n".to_vec())),
+                (3, b"game.txt") => Err(Error::new(0, "temporary read failure")),
+                (2 | 4 | 5, b"game.txt") => Ok(Some(Vec::new())),
+                _ => panic!("unexpected read: {name:?}"),
+            }
+        }
+    }
+
+    let mut runtime = Runtime::new(
+        0,
+        kind::ROOT,
+        Box::new(BaseObject::new()),
+        State::new(0),
+        NoChildren,
+    );
+    runtime.set_resources(Files(0));
+    let request = |target| LanguageChangeRequest { task_id: 0, target };
+    let host = runtime.host_mut();
+    host.languages.prefixes = vec![b"a".to_vec()];
+    host.string_table_config = Some(StringTableConfig {
+        prefixes: vec![wide("a")],
+        game_path: wide("game.txt"),
+    });
+    host.language_change_requests = vec![request(Interface), request(MainText), request(Subtitle)];
+
+    let time = |tick| FrameTime {
+        tick,
+        increment: 1,
+        system_time_ms: tick,
+    };
+    assert_eq!(
+        runtime.advance(time(1)).unwrap_err().message,
+        "temporary read failure"
+    );
+    assert_eq!(
+        runtime.host().language_change_requests,
+        [request(MainText), request(Subtitle)]
+    );
+    assert_eq!(
+        runtime.advance(time(2)).unwrap(),
+        FrameOutcome::Running {
+            interface_language_refreshed: true,
+        }
+    );
+    assert_eq!(
+        runtime.string_tables().resolve(&wide("$key$")),
+        wide("New title")
+    );
+
+    runtime.host_mut().languages.primary_index = 99;
+    runtime
+        .host_mut()
+        .language_change_requests
+        .push(request(Interface));
+    assert_eq!(
+        runtime.advance(time(3)).unwrap(),
+        FrameOutcome::Running {
+            interface_language_refreshed: false,
+        }
+    );
+    runtime.object_mut(0).unwrap().state().0.deletion_requested = 1;
+    assert_eq!(runtime.advance(time(4)).unwrap(), FrameOutcome::Exited);
+    runtime
+        .host_mut()
+        .language_change_requests
+        .push(request(MainText));
+    assert_eq!(runtime.advance(time(5)).unwrap(), FrameOutcome::Exited);
+}

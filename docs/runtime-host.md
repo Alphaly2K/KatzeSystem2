@@ -18,11 +18,13 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 
 `GameRuntime::set_game_resources` 接受资源服务与声音配置文档。运行库应用声音定义和用户覆盖，再按文件前缀选定归档类别；宿主按该类别补全名称并提供读取源。没有定义时使用启动文档里的声音组。自定义声音路由的宿主可以用底层 `Runtime::set_resources`，由其资源服务直接处理 `sound` 类别。
 
-调用 `advance(FrameTime { tick, increment, system_time_ms })` 推进一轮。`tick` 为游戏逻辑时钟（通常每秒 60 个单位），`increment` 是本轮传给任务的逻辑增量，`system_time_ms` 为可回绕的系统毫秒计数。先处理上一轮语言请求，再推进媒体和任务；语言刷新失败时保留失败项及后续请求。成功返回 false 表示根任务已退出。宿主在更新后消费绘制和声音输出。需要自定义结构的调用方仍可用 `Runtime::new` 和 `update`。
+调用 `advance(FrameTime { tick, increment, system_time_ms })` 推进一轮。`tick` 为游戏逻辑时钟（通常每秒 60 个单位），`increment` 是本轮传给任务的逻辑增量，`system_time_ms` 为可回绕的系统毫秒计数。先处理上一轮语言请求，再推进媒体和任务。语言刷新失败时保留失败项及后续请求，已成功应用的界面刷新在下一次成功推进时报告。
+
+`FrameOutcome::Running { interface_language_refreshed }` 表示本轮成功。标志为真时，窗口宿主可以通过 `string_tables` 更新界面译文，再消费绘制和声音输出。`FrameOutcome::Exited` 表示根任务已退出，应结束会话循环；再次调用 `advance` 仍返回 `Exited`。需要自定义结构的调用方仍可用 `Runtime::new` 和 `update`。
 
 窗口宿主在更新后调用 `process_window_requests(tasks.input, window)` 执行脚本提交的窗口请求。设备操作由 `WindowServices` 提供，运行库负责配置回写和任务通知。返回 true 表示应退出窗口循环；发生错误时可在后续调用继续处理尚未尝试的请求。
 
-宿主通过 `set_archive_config`、`set_folder_paths`、`set_script_settings` 和 `set_platform_settings` 提供脚本可查的路径及初始配置。窗口宿主可在推进前用 `has_pending_language_change` 和 `interface_language_available` 判断本轮是否刷新界面语言，在推进后用 `string_tables` 获取界面译文。
+宿主通过 `set_archive_config`、`set_folder_paths`、`set_script_settings` 和 `set_platform_settings` 提供脚本可查的路径及初始配置。启动配置和资源服务就绪后调用 `load_startup_language_tables` 装入初始译文；没有可用的界面语言前缀时，仅装入游戏表。
 
 `set_surface_size` 提供逻辑画面尺寸；窗口宿主可独立通过 `set_window_content_rect` 和 `set_windowed_mode` 提供客户区绘图矩形和当前窗口模式。`take_clipboard_requests` 取走按序提交的剪贴板写入请求，保留发起任务和原始编码，由宿主解码并写入剪贴板。
 

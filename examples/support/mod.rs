@@ -829,10 +829,7 @@ pub fn build_runtime(
         sound_definition.as_deref(),
         sound_user_settings.as_deref(),
     )?;
-    runtime.reload_language_tables(katze_system2::language::LanguageTarget::Interface)?;
-    if !runtime.interface_language_available() {
-        runtime.reload_language_tables(katze_system2::language::LanguageTarget::MainText)?;
-    }
+    runtime.load_startup_language_tables()?;
     runtime.set_fonts(load_fonts(&root));
     runtime.set_file_services(Files { root });
     runtime.set_save_services(Saves {

@@ -33,8 +33,7 @@ mod window_text;
 use katze_system2::{
     graphics::Rect,
     host::RenderTarget,
-    language::LanguageTarget,
-    runtime::{FrameTime, GameTasks},
+    runtime::{FrameOutcome, FrameTime, GameTasks},
 };
 use sdl2::event::{Event, WindowEvent};
 use std::cell::RefCell;
@@ -195,26 +194,30 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             shared.set_mouse_focus(window.window.has_mouse_focus());
         }
         now = now.wrapping_add(1);
-        let refresh_title = runtime.has_pending_language_change(LanguageTarget::Interface)
-            && runtime.interface_language_available();
         let advancement = runtime.advance(FrameTime {
             tick: now,
             increment: 1,
             system_time_ms: started.elapsed().as_millis() as u32,
         });
         diagnostics.drain(&mut runtime);
-        if let Err(error) = advancement {
-            eprintln!("pc {}：{}", error.offset, error.message);
-            for id in 0..128 {
-                if let Some(vm) = runtime.object(id).and_then(|object| object.interpreter()) {
-                    eprintln!("  任务 {id} pc {}", vm.pc);
+        let refresh_title = match advancement {
+            Ok(FrameOutcome::Running {
+                interface_language_refreshed,
+            }) => interface_language_refreshed,
+            Ok(FrameOutcome::Exited) => break,
+            Err(error) => {
+                eprintln!("pc {}：{}", error.offset, error.message);
+                for id in 0..128 {
+                    if let Some(vm) = runtime.object(id).and_then(|object| object.interpreter()) {
+                        eprintln!("  任务 {id} pc {}", vm.pc);
+                    }
+                    if let Some(scene) = runtime.object(id).and_then(|object| object.fes_scene()) {
+                        eprintln!("  FES {id}: {:?}", scene.interpreter().pending_pc());
+                    }
                 }
-                if let Some(scene) = runtime.object(id).and_then(|object| object.fes_scene()) {
-                    eprintln!("  FES {id}: {:?}", scene.interpreter().pending_pc());
-                }
+                break;
             }
-            break;
-        }
+        };
         if diagnostics.timing && frame_started.elapsed().as_millis() >= 20 {
             eprintln!(
                 "[slow-update] frame={now} ms={:.2}",

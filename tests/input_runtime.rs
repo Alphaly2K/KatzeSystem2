@@ -928,7 +928,7 @@ fn game_runtime_boots_the_standard_tasks_and_supplies_the_first_frame_clock() ->
     use katze_system2::{
         language::{LanguageChangeRequest, LanguageTarget},
         memory::SharedMemory,
-        runtime::{FrameTime, GameRuntime, ProgramLoader},
+        runtime::{FrameOutcome, FrameTime, GameRuntime, ProgramLoader},
     };
 
     struct Entry(Program);
@@ -1011,7 +1011,12 @@ fn game_runtime_boots_the_standard_tasks_and_supplies_the_first_frame_clock() ->
     assert_eq!(runtime.host().language_change_requests, [request]);
     assert_eq!(device.borrow().pointer_calls, 1);
     runtime.host_mut().language_change_requests.clear();
-    assert!(runtime.advance(time)?);
+    assert_eq!(
+        runtime.advance(time)?,
+        FrameOutcome::Running {
+            interface_language_refreshed: false,
+        }
+    );
     runtime.with_frame(|_, canvas| {
         assert_eq!(canvas.size(), [64, 48]);
         Ok(())

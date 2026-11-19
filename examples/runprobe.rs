@@ -9,7 +9,7 @@ use katze_system2::{
     graphics::Rect,
     host::{InputDevice, KeySample, PointerSample, ResourceMode, ResourceServices, WindowServices},
     input::{ButtonSource, DeviceKeys, Region},
-    runtime::{FrameTime, GameRuntime, GameTasks},
+    runtime::{FrameOutcome, FrameTime, GameRuntime, GameTasks},
 };
 use std::{cell::Cell, collections::BTreeMap, ops::RangeInclusive, rc::Rc};
 use support::{Game, build_runtime, load_game};
@@ -593,7 +593,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             }
             break;
         }
-        if matches!(advancement, Ok(false))
+        if matches!(advancement, Ok(FrameOutcome::Exited))
             || runtime.process_window_requests(input, &mut window)?
         {
             break;

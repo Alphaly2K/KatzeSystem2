@@ -59,6 +59,18 @@ pub struct FrameTime {
     pub system_time_ms: u32,
 }
 
+/// The outcome of advancing a session by one frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FrameOutcome {
+    Running {
+        /// Interface strings were refreshed since the previous successful advance.
+        /// The host can now read the current tables to update its UI.
+        interface_language_refreshed: bool,
+    },
+    /// The root task has exited. The host should stop advancing and presenting.
+    Exited,
+}
+
 const ROOT_TASK: u32 = 0;
 const INPUT_TASK: u32 = 1;
 const SOUND_TASK: u32 = 2;
@@ -250,19 +262,23 @@ impl<L: ProgramLoader> GameRuntime<L> {
 impl<F: ObjectFactory> Runtime<F> {
     /// Advance one host frame. Apply pending language changes before advancing the task tree.
     /// On a language error the failed request and remaining requests are retained for retry.
-    /// Returns false once the root task has exited.
-    pub fn advance(&mut self, time: FrameTime) -> Result<bool> {
-        let mut requests = std::mem::take(&mut self.host.language_change_requests).into_iter();
-        while let Some(request) = requests.next() {
-            if let Err(error) = self.refresh_language(request.target) {
-                self.host
-                    .language_change_requests
-                    .extend(std::iter::once(request).chain(requests));
-                return Err(error);
-            }
+    /// Completed interface refreshes are still reported after a failed advance.
+    /// After the root has exited, subsequent calls return [`FrameOutcome::Exited`].
+    pub fn advance(&mut self, time: FrameTime) -> Result<FrameOutcome> {
+        if self.tree.node(self.tree.root_id()).is_none() {
+            return Ok(FrameOutcome::Exited);
         }
+        self.apply_pending_language_changes()?;
         self.host.system_time_ms = time.system_time_ms;
-        self.update(time.tick, time.increment)
+        let active = self.update(time.tick, time.increment)?;
+        let interface_language_refreshed = std::mem::take(&mut self.interface_language_refreshed);
+        Ok(if active {
+            FrameOutcome::Running {
+                interface_language_refreshed,
+            }
+        } else {
+            FrameOutcome::Exited
+        })
     }
 
     /// Transfer PCM consumption to a mixer owned by the host. For a standard game,
