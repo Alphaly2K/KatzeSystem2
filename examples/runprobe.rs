@@ -866,17 +866,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             }
         }
         let mut output = katze_system2::graphics::RenderTarget::new([1280, 720])?;
-        runtime.render_frame(
-            &mut output,
-            &katze_system2::graphics::Projection::default(),
-            [
-                1., 0., 0., 0., //
-                0., 1., 0., 0., //
-                0., 0., 1., 0., //
-                0., 0., 0., 1.,
-            ],
-            katze_system2::graphics::TextureFilter::Point,
-        )?;
+        runtime.with_frame(|draw, canvas| draw.render_into(&mut output, Some(canvas)))?;
         // `KATZE_PROBE_SHOT` 以 "@canvas" 结尾时转储蓄布而非合成帧。
         let path_str = path.to_string_lossy().into_owned();
         let target = if path_str.ends_with("@canvas") {

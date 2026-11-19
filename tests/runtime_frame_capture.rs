@@ -1,9 +1,7 @@
 use katze_system2::{
     Error, Result,
     expression::State,
-    graphics::{
-        DrawList, GraphicsBackend, Projection, RenderTarget, Surface, TextureFilter, Transform,
-    },
+    graphics::{Projection, RenderTarget, Surface, TextureFilter, Transform},
     io::FileServices,
     kcs::{CoreHost, Host, Interpreter, NativeReturn, Program},
     runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, kind},
@@ -248,38 +246,23 @@ fn sequence_output_keeps_rgb_orientation_signed_indices_and_consumes_failed_writ
     Ok(())
 }
 
-struct Backend(Rc<RefCell<Vec<&'static str>>>, bool);
-impl GraphicsBackend for Backend {
-    fn render(&mut self, _: &DrawList, _: &mut RenderTarget, _: [u32; 2]) -> Result<RenderTarget> {
-        self.0.borrow_mut().push("capture");
-        Ok(frame())
-    }
-    fn present(&mut self, _: &DrawList, _: &mut RenderTarget, _: [u32; 2]) -> Result<bool> {
-        self.0.borrow_mut().push("present");
-        Ok(self.1)
-    }
-}
 #[test]
-fn backend_presentation_captures_once_and_disabled_sequences_skip_readback() -> Result<()> {
-    for presented in [false, true] {
-        let mut rt = engine(1, 9, b"dump", 100);
-        let out = output(&mut rt, Mode::Full);
-        let events = Rc::new(RefCell::new(Vec::new()));
-        rt.set_graphics_backend(Backend(events.clone(), presented));
-        assert_eq!(rt.present_frame([3, 2])?, presented);
-        assert_eq!(*events.borrow(), ["present", "capture"]);
-        assert_eq!(rt.host().frame_capture_index, 10);
-        assert_eq!(out.borrow().bytes.len(), 1);
-        rt.host_mut().frame_capture_enabled = 0;
-        rt.present_frame([3, 2])?;
-        rt.host_mut().frame_capture_enabled = 1;
-        rt.drawing_mut().enabled = false;
-        rt.present_frame([3, 2])?;
-        assert_eq!(
-            *events.borrow(),
-            ["present", "capture", "present", "present"]
-        );
-        assert_eq!(rt.host().frame_capture_index, 10);
+fn sequence_capture_request_tells_the_host_when_to_read_back() -> Result<()> {
+    let mut rt = engine(1, 9, b"dump", 100);
+    let out = output(&mut rt, Mode::Full);
+    for (capture, mode, drawing, expected) in [
+        (0, 0, true, false),
+        (1, 1, true, false),
+        (1, 0, false, false),
+        (1, 0, true, true),
+    ] {
+        rt.host_mut().frame_capture_enabled = capture;
+        rt.drawing_mut().mode = mode;
+        rt.drawing_mut().enabled = drawing;
+        assert_eq!(rt.wants_sequence_capture(), expected);
+        assert_eq!(rt.capture_sequence_frame(&frame())?, expected);
     }
+    assert_eq!(rt.host().frame_capture_index, 10);
+    assert_eq!(out.borrow().bytes.len(), 1);
     Ok(())
 }

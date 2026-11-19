@@ -1,8 +1,13 @@
 //! macOS Metal 最终帧绘制。画布仍由运行时维护，设备仅上传变更面块。
 
-use super::{FrameTriangle, Rect, RenderTarget, Surface, TextureFilter, TextureSource};
-use crate::{Error, Result};
 use ::metal::*;
+use katze_system2::{
+    Error, Result,
+    graphics::{
+        DrawList, FrameTexture, FrameTriangle, GraphicsBackend, Rect, RenderTarget, Surface,
+        TextureAddress, TextureFilter, TextureSource,
+    },
+};
 use std::{collections::BTreeMap, sync::Arc};
 
 #[repr(C)]
@@ -33,7 +38,6 @@ pub struct Renderer {
     device: Device,
     queue: CommandQueue,
     pipelines: Vec<RenderPipelineState>,
-    layer: MetalLayer,
     samplers: [SamplerState; 8],
     white: Texture,
     tiles: Vec<Option<Tile>>,
@@ -105,10 +109,6 @@ impl Renderer {
             descriptor.set_address_mode_t(modes[(index >> 2) & 1]);
             device.new_sampler(&descriptor)
         });
-        let layer = MetalLayer::new();
-        layer.set_device(&device);
-        layer.set_pixel_format(MTLPixelFormat::BGRA8Unorm);
-        layer.set_display_sync_enabled(true);
         let white = texture(&device, [1, 1], MTLTextureUsage::ShaderRead);
         white.replace_region(region([1, 1]), 0, [255u8; 4].as_ptr().cast(), 4);
         let queue = device.new_command_queue();
@@ -116,7 +116,6 @@ impl Renderer {
             device,
             queue,
             pipelines,
-            layer,
             samplers,
             white,
             tiles: Vec::new(),
@@ -132,21 +131,14 @@ impl Renderer {
         self.device.name()
     }
 
-    /// 由窗口宿主将此 CAMetalLayer 附着到原生视图。
-    pub fn layer(&self) -> &MetalLayerRef {
-        &self.layer
-    }
-
-    /// 使用窗口宿主持有的 CAMetalLayer，等待此前已提交的帧后替换。
-    pub fn set_presentation_layer(&mut self, layer: &MetalLayerRef) -> Result<()> {
-        self.wait()?;
+    /// Configure a presentation layer owned by the window host.
+    pub fn configure_layer(&self, layer: &MetalLayerRef) {
         layer.set_device(&self.device);
         layer.set_pixel_format(MTLPixelFormat::BGRA8Unorm);
         layer.set_display_sync_enabled(true);
-        self.layer = layer.to_owned();
-        Ok(())
     }
 
+    #[allow(dead_code)] // The offscreen checker exercises explicit invalidation.
     pub fn invalidate_canvas(&mut self) {
         self.tiles.clear();
     }
@@ -165,24 +157,24 @@ impl Renderer {
     /// 直接绘制至窗口交换链；窗口不可呈现时返回 false，保留画布更新标记。
     pub fn present(
         &mut self,
+        layer: &MetalLayerRef,
         triangles: &[FrameTriangle],
         canvas: &mut RenderTarget,
         size: [u32; 2],
         filter: TextureFilter,
     ) -> Result<bool> {
         validate_size(size)?;
-        let mut drawable_size = self.layer.drawable_size();
+        let mut drawable_size = layer.drawable_size();
         drawable_size.width = f64::from(size[0]);
         drawable_size.height = f64::from(size[1]);
-        self.layer.set_drawable_size(drawable_size);
-        // Drawable 必须独立持有，后面的资源更新需要借用整个 renderer。
-        let Some(drawable) = self.layer.next_drawable().map(ToOwned::to_owned) else {
+        layer.set_drawable_size(drawable_size);
+        let Some(drawable) = layer.next_drawable() else {
             return Ok(false);
         };
         self.prepare(triangles, canvas, size, filter)?;
         let command = self.queue.new_command_buffer();
         self.encode(command, drawable.texture(), triangles, canvas, filter);
-        command.present_drawable(&drawable);
+        command.present_drawable(drawable);
         command.commit();
         self.previous = Some(command.to_owned());
         Ok(true)
@@ -238,7 +230,7 @@ impl Renderer {
                 .texture
                 .as_ref()
                 .is_some_and(|t| t.source.surface(canvas).is_some());
-            let interpolate = !super::raster::triangle_culled(triangle.vertices)
+            let interpolate = !triangle.is_culled()
                 && (textured
                     || triangle
                         .vertices
@@ -345,10 +337,10 @@ impl Renderer {
         }
         let mut images = BTreeMap::new();
         for triangle in triangles {
-            if super::raster::triangle_culled(triangle.vertices) {
+            if triangle.is_culled() {
                 continue;
             }
-            let Some(super::FrameTexture {
+            let Some(FrameTexture {
                 source: TextureSource::Image(source),
                 ..
             }) = &triangle.texture
@@ -407,7 +399,7 @@ impl Renderer {
         encoder.set_vertex_buffer(0, self.buffer.as_deref(), 0);
         let bounds = Rect::from_xywh(0, 0, target.width() as i32, target.height() as i32);
         for (index, triangle) in triangles.iter().enumerate() {
-            if super::raster::triangle_culled(triangle.vertices) {
+            if triangle.is_culled() {
                 continue;
             }
             let source = triangle
@@ -471,8 +463,8 @@ impl Renderer {
                 .and_then(|t| t.filter)
                 .unwrap_or(filter);
             let sampler = usize::from(selected_filter == TextureFilter::Linear)
-                | (usize::from(address[0] == super::TextureAddress::Wrap) << 1)
-                | (usize::from(address[1] == super::TextureAddress::Wrap) << 2);
+                | (usize::from(address[0] == TextureAddress::Wrap) << 1)
+                | (usize::from(address[1] == TextureAddress::Wrap) << 2);
             if sampler != sampler_index {
                 encoder.set_fragment_sampler_state(0, Some(&self.samplers[sampler]));
                 sampler_index = sampler;
@@ -484,10 +476,10 @@ impl Renderer {
     }
 }
 
-impl super::GraphicsBackend for Renderer {
+impl GraphicsBackend for Renderer {
     fn render(
         &mut self,
-        frame: &super::DrawList,
+        frame: &DrawList,
         canvas: &mut RenderTarget,
         size: [u32; 2],
     ) -> Result<RenderTarget> {
@@ -495,17 +487,6 @@ impl super::GraphicsBackend for Renderer {
             self.render_offscreen(&frame.commands, canvas, size, frame.filter)
         })?;
         RenderTarget::from_tiles(size, [1, 1], vec![Some(surface)])
-    }
-
-    fn present(
-        &mut self,
-        frame: &super::DrawList,
-        canvas: &mut RenderTarget,
-        size: [u32; 2],
-    ) -> Result<bool> {
-        ::metal::objc::rc::autoreleasepool(|| {
-            Renderer::present(self, &frame.commands, canvas, size, frame.filter)
-        })
     }
 }
 

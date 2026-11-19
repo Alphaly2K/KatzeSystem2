@@ -237,12 +237,8 @@ fn movie_natives_play_present_finish_and_release_through_runtime_services() {
                 )
                 .unwrap()
         );
-        let composed = SoftwareBackend
-            .render(
-                &frame,
-                runtime.drawing_mut().target.as_mut().unwrap(),
-                [32; 2],
-            )
+        let composed = runtime
+            .with_frame(|draw, canvas| SoftwareBackend.render(draw, canvas, [32; 2]))
             .unwrap();
         assert_eq!(software.tiles(), composed.tiles());
         let surface = software.tiles()[0].as_ref().unwrap();

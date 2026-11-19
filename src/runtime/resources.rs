@@ -57,37 +57,6 @@ impl Resources {
         self.compositor.compose(range)
     }
 
-    pub fn present_frame(
-        &mut self,
-        size: [u32; 2],
-        capture: bool,
-        with_cursor: bool,
-    ) -> Result<(bool, Option<RenderTarget>)> {
-        let mut frame = self.compose_frame(None)?;
-        if with_cursor {
-            self.append_image_cursor(&mut frame)?;
-        }
-        let capture =
-            capture && self.compositor.drawing.mode == 0 && self.compositor.drawing.enabled;
-        let canvas = self
-            .compositor
-            .drawing
-            .target
-            .as_mut()
-            .ok_or_else(|| Error::new(0, "运行时未配置画布纹理输入"))?;
-        let backend = self
-            .graphics_backend
-            .as_deref_mut()
-            .ok_or_else(|| Error::new(0, "运行时未配置窗口图形后端"))?;
-        let presented = backend.present(&frame, canvas, size)?;
-        let snapshot = if capture {
-            Some(backend.render(&frame, canvas, size)?)
-        } else {
-            None
-        };
-        Ok((presented, snapshot))
-    }
-
     pub fn render_offscreen(&mut self, size: [u32; 2], range: [f32; 2]) -> Result<bool> {
         let Some(frame) = self.render_depth_frame(size, range)? else {
             return Ok(false);

@@ -3,11 +3,16 @@ use crate::graphics::{Image, RenderTarget};
 use crate::{Error, Result};
 
 impl<F: ObjectFactory> Runtime<F> {
-    /// 为当前呈现帧执行连续 BMP 输出；未启用或绘图设备关闭时返回 false。
-    /// 软件呈现宿主在每次提交帧后调用一次；present_frame 已自动执行。
-    pub fn capture_sequence_frame(&mut self, frame: &RenderTarget) -> Result<bool> {
+    /// Check whether the host should read back this frame for the BMP sequence.
+    pub fn wants_sequence_capture(&self) -> bool {
         let drawing = &self.resources.compositor.drawing;
-        if self.host.frame_capture_enabled == 0 || drawing.mode != 0 || !drawing.enabled {
+        self.host.frame_capture_enabled != 0 && drawing.mode == 0 && drawing.enabled
+    }
+
+    /// 为当前呈现帧执行连续 BMP 输出；未启用或绘图设备关闭时返回 false。
+    /// 宿主在每次提交帧后调用一次。
+    pub fn capture_sequence_frame(&mut self, frame: &RenderTarget) -> Result<bool> {
+        if !self.wants_sequence_capture() {
             return Ok(false);
         }
         let Some(bytes) = Image::encode_frame_bmp(frame, self.resources.capture_rectangle)? else {

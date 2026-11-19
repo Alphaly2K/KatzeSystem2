@@ -1,8 +1,14 @@
 use katze_system2::{
     Error, Result,
-    graphics::{DrawList, GraphicsBackend, RenderTarget, metal::Renderer},
+    graphics::{DrawList, GraphicsBackend, RenderTarget},
+    runtime::{ObjectFactory, Runtime},
 };
-use metal::{MetalLayerRef, foreign_types::ForeignTypeRef};
+use metal::{MetalLayer, MetalLayerRef, foreign_types::ForeignTypeRef, objc::rc::autoreleasepool};
+use std::{cell::RefCell, rc::Rc};
+
+#[path = "metal.rs"]
+mod renderer;
+use renderer::Renderer;
 
 struct View {
     raw: sdl2::sys::SDL_MetalView,
@@ -14,8 +20,8 @@ impl Drop for View {
     }
 }
 pub struct Output {
-    // 先等待 GPU 提交结束，再释放视图及其持有的窗口。
-    renderer: Renderer,
+    renderer: Rc<RefCell<Renderer>>,
+    layer: MetalLayer,
     _view: View,
 }
 impl Output {
@@ -32,30 +38,61 @@ impl Output {
         if layer.is_null() {
             return Err(Error::new(0, "窗口缺少 Metal 图层"));
         }
-        let mut renderer = metal::objc::rc::autoreleasepool(Renderer::new)?;
-        renderer.set_presentation_layer(unsafe { MetalLayerRef::from_ptr(layer.cast()) })?;
+        let layer = unsafe { MetalLayerRef::from_ptr(layer.cast()) }.to_owned();
+        let renderer = autoreleasepool(Renderer::new)?;
+        renderer.configure_layer(&layer);
         println!("绘制设备：Metal / {}", renderer.device_name());
         Ok(Self {
-            renderer,
+            renderer: Rc::new(RefCell::new(renderer)),
+            layer,
             _view: view,
         })
     }
+
+    pub fn capture_backend(&self) -> impl GraphicsBackend + 'static {
+        CaptureBackend(self.renderer.clone())
+    }
+
+    pub fn present<F: ObjectFactory>(
+        &self,
+        runtime: &mut Runtime<F>,
+        size: [u32; 2],
+    ) -> Result<()> {
+        let capture = runtime.wants_sequence_capture();
+        let snapshot = runtime.with_frame(|frame, canvas| {
+            let mut renderer = self.renderer.borrow_mut();
+            autoreleasepool(|| {
+                renderer.present(&self.layer, &frame.commands, canvas, size, frame.filter)
+            })?;
+            if capture {
+                renderer.render(frame, canvas, size).map(Some)
+            } else {
+                Ok(None)
+            }
+        })?;
+        if let Some(snapshot) = snapshot {
+            runtime.capture_sequence_frame(&snapshot)?;
+        }
+        Ok(())
+    }
 }
-impl GraphicsBackend for Output {
+
+impl Drop for Output {
+    fn drop(&mut self) {
+        let _ = self.renderer.borrow_mut().wait();
+    }
+}
+
+// Both passes consume dirty flags from the same canvas and must share its cache.
+struct CaptureBackend(Rc<RefCell<Renderer>>);
+
+impl GraphicsBackend for CaptureBackend {
     fn render(
         &mut self,
         frame: &DrawList,
         canvas: &mut RenderTarget,
         size: [u32; 2],
     ) -> Result<RenderTarget> {
-        GraphicsBackend::render(&mut self.renderer, frame, canvas, size)
-    }
-    fn present(
-        &mut self,
-        frame: &DrawList,
-        canvas: &mut RenderTarget,
-        size: [u32; 2],
-    ) -> Result<bool> {
-        GraphicsBackend::present(&mut self.renderer, frame, canvas, size)
+        self.0.borrow_mut().render(frame, canvas, size)
     }
 }

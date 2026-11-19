@@ -62,7 +62,7 @@ CP932 的最佳匹配补充采用 Unicode 公布的 WindowsBestFit 数据，按 
 
 系统接口的传递依赖 `libc` 0.2.191 选择 MIT 许可，兼容项目 LGPL-2.1；分发时保留其[版权及许可声明](licenses/libc-0.2.191/LICENSE-MIT)。
 
-macOS 图形后端使用 Metal 的 Rust 绑定。以下依赖选择 MIT 分支；`unicode-ident` 另保留 Unicode-3.0 声明，分发时随附全部版权和许可文字。`block`、`malloc_buf` 的发布包通过包元数据声明 MIT，本项目同时保留声明的作者及 MIT 正文。
+macOS 示例宿主使用 Metal 的 Rust 绑定。以下依赖选择 MIT 分支；`unicode-ident` 另保留 Unicode-3.0 声明，分发时随附全部版权和许可文字。`block`、`malloc_buf` 的发布包通过包元数据声明 MIT，本项目同时保留声明的作者及 MIT 正文。
 
 |包|版本|采用的许可|声明|
 |:--|:--|:--|:--|

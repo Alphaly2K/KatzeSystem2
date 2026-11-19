@@ -293,7 +293,7 @@ impl<F: ObjectFactory> Runtime<F> {
             .set_frame_view(projection, parent, filter);
     }
 
-    /// 连接窗口呈现及脚本画面捕获共用的后端；未配置时捕获继续使用软件绘制。
+    /// 连接脚本离屏绘制和画面捕获后端；未配置时捕获继续使用软件绘制。
     /// 后端捕获失败时保留前次完整目标。
     pub fn set_graphics_backend(
         &mut self,
@@ -311,18 +311,21 @@ impl<F: ObjectFactory> Runtime<F> {
         Ok(frame)
     }
 
-    /// 通过已连接的图形后端呈现完整帧；暂时无法呈现时返回 false。
-    pub fn present_frame(&mut self, size: [u32; 2]) -> Result<bool> {
-        let with_cursor = self.uses_image_cursor();
-        let (presented, snapshot) = self.resources.present_frame(
-            size,
-            self.host.frame_capture_enabled != 0,
-            with_cursor,
-        )?;
-        if let Some(snapshot) = snapshot {
-            self.capture_sequence_frame(&snapshot)?;
-        }
-        Ok(presented)
+    /// Provide the complete draw list and its canvas to the host for synchronous rendering.
+    /// The host can consume canvas dirty flags after uploading its textures.
+    pub fn with_frame<T>(
+        &mut self,
+        render: impl FnOnce(&crate::graphics::DrawList, &mut crate::graphics::RenderTarget) -> Result<T>,
+    ) -> Result<T> {
+        let frame = self.compose_frame()?;
+        let canvas = self
+            .resources
+            .compositor
+            .drawing
+            .target
+            .as_mut()
+            .ok_or_else(|| Error::new(0, "运行时未配置画布纹理输入"))?;
+        render(&frame, canvas)
     }
 
     /// 设置内部捕获所读取的画面区域；None 使用 surface_size 定义的整幅画面。

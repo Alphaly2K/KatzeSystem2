@@ -32,7 +32,7 @@ mod window_quiz;
 mod window_text;
 
 use katze_system2::{
-    graphics::{Projection, RenderTarget, TextureFilter, Transform},
+    graphics::{Rect, RenderTarget},
     language::LanguageTarget,
     runtime::{FrameTime, GameTasks},
 };
@@ -126,12 +126,15 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             .set_fullscreen(sdl2::video::FullscreenType::Desktop)?;
     }
     #[cfg(target_os = "macos")]
-    let accelerated = if std::env::var("KATZE_WINDOW_RENDERER").as_deref() == Ok("software") {
-        false
+    let metal_output = if std::env::var("KATZE_WINDOW_RENDERER").as_deref() == Ok("software") {
+        None
     } else {
-        runtime.set_graphics_backend(metal_output::Output::new(&window.window)?);
-        true
+        let output = metal_output::Output::new(&window.window)?;
+        runtime.set_graphics_backend(output.capture_backend());
+        Some(output)
     };
+    #[cfg(target_os = "macos")]
+    let accelerated = metal_output.is_some();
     #[cfg(not(target_os = "macos"))]
     let accelerated = false;
     let mut output = if accelerated {
@@ -287,17 +290,13 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         update_time += frame_started.elapsed();
         let render_started = std::time::Instant::now();
         if !window.window.is_minimized() {
-            if accelerated {
-                runtime.present_frame([1280, 720])?;
+            #[cfg(target_os = "macos")]
+            if let Some(output) = &metal_output {
+                output.present(&mut runtime, [1280, 720])?;
             }
             if let Some(output) = &mut output {
-                output.clear_rect(katze_system2::graphics::Rect::from_xywh(0, 0, 1280, 720));
-                runtime.render_frame(
-                    output,
-                    &Projection::default(),
-                    *Transform::default().matrix(),
-                    TextureFilter::Point,
-                )?;
+                output.clear_rect(Rect::from_xywh(0, 0, 1280, 720));
+                runtime.with_frame(|draw, canvas| draw.render_into(output, Some(canvas)))?;
             }
             render_time += render_started.elapsed();
             if let Some(output) = &output {

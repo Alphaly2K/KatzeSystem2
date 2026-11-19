@@ -110,7 +110,7 @@ fn ordinary_image_cursor_tracks_hotspot_visibility_and_replacement() -> Result<(
     assert_eq!(output.pixel(5, 4), Some(0));
     assert_eq!(output.pixel(5, 6), Some(0));
     let mut composed = RenderTarget::new([16, 12])?;
-    assert!(rt.compose_frame()?.render_into(&mut composed, None)?);
+    assert!(rt.with_frame(|draw, canvas| draw.render_into(&mut composed, Some(canvas)))?);
     assert_eq!(output, composed);
 
     device.borrow_mut().cursor = 0;

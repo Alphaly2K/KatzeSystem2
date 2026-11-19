@@ -209,10 +209,10 @@ fn auxiliary_reservations_preserve_capacity_and_reset_grown_targets() {
 }
 
 #[test]
-fn capture_and_presentation_share_the_backend_with_distinct_depth_selections() {
+fn host_frame_and_script_capture_use_distinct_depth_selections() {
     use std::{cell::RefCell, rc::Rc};
 
-    type Calls = Rc<RefCell<Vec<(bool, DrawList, [u32; 2])>>>;
+    type Calls = Rc<RefCell<Vec<(DrawList, [u32; 2])>>>;
     struct Backend(Calls);
     impl GraphicsBackend for Backend {
         fn render(
@@ -221,18 +221,8 @@ fn capture_and_presentation_share_the_backend_with_distinct_depth_selections() {
             canvas: &mut RenderTarget,
             size: [u32; 2],
         ) -> Result<RenderTarget> {
-            self.0.borrow_mut().push((false, frame.clone(), size));
+            self.0.borrow_mut().push((frame.clone(), size));
             SoftwareBackend.render(frame, canvas, size)
-        }
-
-        fn present(
-            &mut self,
-            frame: &DrawList,
-            _: &mut RenderTarget,
-            size: [u32; 2],
-        ) -> Result<bool> {
-            self.0.borrow_mut().push((true, frame.clone(), size));
-            Ok(false)
         }
     }
 
@@ -248,15 +238,24 @@ fn capture_and_presentation_share_the_backend_with_distinct_depth_selections() {
     assert_eq!(capture.pixel(1, 1), Some(0));
     assert_eq!(capture.pixel(3, 1), Some(0xff123457));
     assert_eq!(capture.pixel(5, 1), Some(0));
-    assert!(!rt.present_frame([16, 8]).unwrap());
+    let (host_frame, rendered) = rt
+        .with_frame(|frame, canvas| {
+            Ok((
+                frame.clone(),
+                SoftwareBackend.render(frame, canvas, [8, 4])?,
+            ))
+        })
+        .unwrap();
+    assert_eq!(rendered.pixel(1, 1), Some(0xff123456));
+    assert_eq!(rendered.pixel(3, 1), Some(0xff123457));
+    assert_eq!(rendered.pixel(5, 1), Some(0xff123458));
     let events = events.borrow();
-    assert_eq!(events.len(), 2);
-    assert_eq!((events[0].0, events[0].2), (false, [8, 4]));
-    assert_eq!((events[1].0, events[1].2), (true, [16, 8]));
-    assert_eq!(events[0].1.commands.len(), 2);
-    assert_eq!(events[1].1.commands.len(), 6);
-    assert_eq!(events[0].1.filter, TextureFilter::Point);
-    assert_eq!(rt.compose_frame().unwrap(), events[1].1);
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].1, [8, 4]);
+    assert_eq!(events[0].0.commands.len(), 2);
+    assert_eq!(host_frame.commands.len(), 6);
+    assert_eq!(events[0].0.filter, TextureFilter::Point);
+    assert_eq!(rt.compose_frame().unwrap(), host_frame);
 }
 
 #[test]

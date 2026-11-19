@@ -120,8 +120,6 @@ mod compositor;
 pub use compositor::Compositor;
 mod backend;
 pub use backend::{GraphicsBackend, SoftwareBackend};
-#[cfg(target_os = "macos")]
-pub mod metal;
 pub(crate) mod resample;
 
 /// 包含左上边、不包含右下边的像素矩形。

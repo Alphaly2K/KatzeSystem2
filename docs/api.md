@@ -522,7 +522,7 @@ Runtime 的普通 740 向两个地址写回指针退出位置，不移动指针�
 
 普通 441 接收模式、前缀格式地址和起始序号，格式输出按 CP932 转换为 UTF-16，保存到 `HostState::frame_capture_folder`，并更新 `frame_capture_enabled` 和 `frame_capture_index`。模式零停止输出，其他 DWORD 启用；即使停止也展开前缀并保存序号。前缀最多 49 个 UTF-16 单元，超出时诊断并保留旧状态。状态二不压值。565／566 分别读取当前模式和下一次捕获序号，默认零；忽略参数，以状态一返回原始 DWORD，查询不启动捕获或增加序号。
 
-`Runtime::present_frame` 在启用连续截图时，使用同一绘制列表和图形后端获取完整帧。软件呈现宿主在提交后调用一次 `capture_sequence_frame(&RenderTarget)`；单独 `render_frame` 不触发文件输出。捕获区域沿用 `set_frame_capture_rectangle`，未配置时使用完整目标；绘图模式非零、设备关闭或目标为空时跳过并返回 false。成功获取像素后输出 24 位 BMP，保留画面 RGB，返回 true 表示消耗了一次序号。名称为 `前缀\前缀_序号.bmp`，不展开目录标记或清理分隔符，序号按有符号十进制补零到十位。文件通过 `FileServices::create_utf16` 创建，来源编号为配置 441 的任务；宿主负责提供目录。序号先按 DWORD 回绕递增，再打开文件并尝试一次写入，普通打开或写入失败仍消耗序号；服务集成错误诊断，已递增的序号保留。
+宿主查 `Runtime::wants_sequence_capture()` 决定是否为连续截图读回完整帧；取得同一帧的像素后调用一次 `capture_sequence_frame(&RenderTarget)`。绘制或呈现本身不触发文件输出。捕获区域沿用 `set_frame_capture_rectangle`，未配置时使用完整目标；绘图模式非零、设备关闭或目标为空时跳过并返回 false。成功获取像素后输出 24 位 BMP，保留画面 RGB，返回 true 表示消耗了一次序号。名称为 `前缀\前缀_序号.bmp`，不展开目录标记或清理分隔符，序号按有符号十进制补零到十位。文件通过 `FileServices::create_utf16` 创建，来源编号为配置 441 的任务；宿主负责提供目录。序号先按 DWORD 回绕递增，再打开文件并尝试一次写入，普通打开或写入失败仍消耗序号；服务集成错误诊断，已递增的序号保留。
 
 普通 272／273 接受目标任务，分别发送启动／停止命令 321／322；274 返回命令 324 的播放状态，未命中为零；275 接受目标任务及 128 字节参数区的 VM 地址，发送命令 325。普通 426／427 接受目标任务与原始 DWORD 值，分别发送命令 326／327，数据为 `[0, value, 0]`。这些入口均路由零目标；274 以状态一返回，其余以状态二保留调用者返回栈。独立宿主也可使用仅支持控制命令的 `graphics::ParticleObject`，详见[粒子任务控制](graphics.md#粒子任务控制)。
 
@@ -636,9 +636,9 @@ Runtime 的普通 740 向两个地址写回指针退出位置，不移动指针�
 
 `GraphicsFactory` 的类型 35／36 提供实时残影和马赛克，普通 521～524 配置及启停。完整帧合成会推进捕获与反馈；指定深度区间的合成直接选择图元。任务创建、首次矩形保持及重启规则见[实时滤镜](graphics.md#实时残影与马赛克)。
 
-`GraphicsBackend::render` 接收绘制列表、画布和输出尺寸，返回从透明背景开始绘制的独立完整目标。`present` 提交至宿主已附着的窗口，暂时无法呈现时返回 false，未提供窗口能力时返回诊断。`SoftwareBackend` 提供无设备的离屏实现。`Runtime::set_graphics_backend` 连接后端，`present_frame(size)` 合成并呈现；脚本画面捕获使用同一后端，捕获失败保留前次完整目标。未连接后端时，既有软件捕获和显式 `render_frame` 接口继续可用。
+`Runtime::with_frame` 将包含电影或场景内容及光标叠层的完整绘制列表连同画布借给宿主编排提交；缺少画布时返回诊断。借用在回调返回时结束，后端上传后可以消耗画布的变更标记。`DrawCommand::is_culled()` 提供与软件后端一致的正反面剔除判断。宿主确定窗口和输出时机。
 
-macOS 的 `graphics::metal::Renderer` 实现该后端接口，`layer()` 交由宿主附着到原生视图。直接调用 `present` 清空并呈现最终帧，`render_offscreen` 同步读回 BGRA。每个实例绑定一份画布并消费其 dirty 标记，更换画布须先调用 `invalidate_canvas`；后端接口管理调用所需的 Objective-C autorelease pool，直接调用底层方法时由宿主提供。无设备、着色器失败及执行错误均返回诊断。
+`GraphicsBackend::render` 接收绘制列表、画布和输出尺寸，返回从透明背景开始绘制的独立像素目标。`Runtime::set_graphics_backend` 设置脚本离屏绘制及捕获后端；捕获失败保留前次完整目标。未配置时使用 `SoftwareBackend`。宿主可以共享窗口和捕获后端的纹理缓存；两个渲染器如果各有缓存，不能依赖同一份会被另一渲染器清除的变更标记。macOS 示例的 Metal 呈现与 BGRA 回读共用一个渲染器。
 
 普通 568 用两个原始 f32 深度边界执行离屏绘制，状态二保留返回栈；与 DIFIMAGE 捕获共用保存的帧视图。`Runtime::offscreen_frame()` 借用最近一次离屏目标，跳过的调用保留旧目标，绘制错误保留已写像素。门控、范围和生命周期见[脚本离屏绘制](graphics.md#脚本离屏绘制)。
 

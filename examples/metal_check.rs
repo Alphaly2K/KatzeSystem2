@@ -2,6 +2,11 @@
 //! 需要 macOS Metal 设备；合成纹理与软件帧对照，不纳入默认测试发现。
 
 #[cfg(target_os = "macos")]
+#[path = "support/metal.rs"]
+#[allow(dead_code)]
+mod renderer;
+
+#[cfg(target_os = "macos")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     metal::objc::rc::autoreleasepool(check)
 }
@@ -15,8 +20,9 @@ fn main() {
 fn check() -> Result<(), Box<dyn std::error::Error>> {
     use katze_system2::graphics::{
         DrawList, FrameTexture, FrameTriangle, GraphicsBackend, ProjectedVertex, Rect,
-        RenderTarget, SoftwareBackend, Surface, TextureFilter, TextureSource, metal::Renderer,
+        RenderTarget, SoftwareBackend, Surface, TextureFilter, TextureSource,
     };
+    use renderer::Renderer;
     let mut renderer = Renderer::new()?;
     println!("Metal 设备：{}", renderer.device_name());
     let texture = Surface::from_bgra(

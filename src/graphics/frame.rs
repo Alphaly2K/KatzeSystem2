@@ -45,6 +45,13 @@ pub struct DrawCommand {
     pub blend_mode: u32,
 }
 
+impl DrawCommand {
+    /// Returns whether the triangle is culled by the engine's screen-space winding rules.
+    pub fn is_culled(&self) -> bool {
+        super::raster::triangle_culled(self.vertices)
+    }
+}
+
 pub type FrameTriangle = DrawCommand;
 
 /// 已完成排序、裁剪和投影的绘制命令；不包含设备资源或脚本对象。
