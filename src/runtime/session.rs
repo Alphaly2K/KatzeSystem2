@@ -41,8 +41,18 @@ impl<L: ProgramLoader> ObjectFactory for GameFactory<L> {
     }
 }
 
-/// Runtime with the standard game objects and a host-provided program loader.
-pub type GameRuntime<L> = Runtime<GameFactory<L>>;
+/// Runtime with the standard game objects. The default reads compiled scripts
+/// through the same resource service as the other game assets.
+pub type GameRuntime<L = ResourcePrograms> = Runtime<GameFactory<L>>;
+
+/// Loader marker for a session that obtains ordinary KCS through its resources.
+pub struct ResourcePrograms(());
+
+impl ProgramLoader for ResourcePrograms {
+    fn load(&mut self, _: &[u8]) -> Result<Option<Program>> {
+        Ok(None)
+    }
+}
 
 /// Task IDs established at game startup. They remain valid until the tasks are destroyed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -78,6 +88,16 @@ pub enum FrameOutcome {
 const ROOT_TASK: u32 = 0;
 const INPUT_TASK: u32 = 1;
 const SOUND_TASK: u32 = 2;
+
+impl GameRuntime {
+    /// Prepare a game that reads and parses KCS through its resource service.
+    /// Install that service before starting the game.
+    pub fn with_resource_programs(shared_slots: usize, external: SharedMemory) -> Result<Self> {
+        let mut game = Self::with_programs(ResourcePrograms(()), shared_slots, external)?;
+        game.resources.resource_programs = true;
+        Ok(game)
+    }
+}
 
 impl<L: ProgramLoader> GameRuntime<L> {
     /// Create the root and standard factory without opening any devices or resources.

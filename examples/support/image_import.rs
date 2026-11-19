@@ -312,8 +312,7 @@ fn copy(source: &Path, directory: &Path, overwrite: bool, cancel: &AtomicBool) -
 mod tests {
     use super::*;
     use katze_system2::{
-        expression::State,
-        runtime::{BaseObject, KcsFactory, Runtime, kind},
+        runtime::{GameRuntime, kind},
         task::Command,
     };
 
@@ -348,15 +347,7 @@ mod tests {
         fs::write(&source, b"replacement bytes")?;
         assert!(!copy(&source, &directory, false, &cancel)?);
         assert_eq!(fs::read(&target)?, b"selected bytes");
-        let mut runtime = Runtime::new(
-            0,
-            kind::ROOT,
-            Box::new(BaseObject::new()),
-            State::new(0),
-            KcsFactory::new(super::super::Programs {
-                programs: Default::default(),
-            }),
-        );
+        let mut runtime = GameRuntime::with_resource_programs(0, Default::default()).unwrap();
         let picker = ImportPicker::default();
         runtime.set_platform_job_services(Import::interactive(directory.clone(), picker.clone()));
         let task = runtime.create(0, kind::IMAGE_IMPORT, b"", b"").unwrap();

@@ -46,22 +46,13 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let root = std::env::args()
         .nth(1)
         .ok_or("用法：window_startup <游戏目录>")?;
-    let mut game = load_game(&root)?;
+    let game = load_game(&root)?;
     let clipboard_encoding = game.router.script_encoding;
     let diagnostics = support::diagnostics::Output::from_env(clipboard_encoding);
     let mut clipboard = clipboard_output::Output::default();
     let startup = game.startup.clone();
-    let programs = std::mem::take(&mut game.programs);
-    let (mut runtime, keys) = build_runtime(
-        support::Game {
-            root: game.root,
-            router: game.router,
-            startup: game.startup,
-            start: game.start,
-            programs,
-        },
-        [1280, 720],
-    )?;
+    let entry = game.start.clone();
+    let (mut runtime, keys) = build_runtime(game, [1280, 720])?;
     diagnostics.connect(&mut runtime);
     runtime.set_system_services(system_output::Output);
     if let Some(path) = std::env::var_os("KATZE_EXPORT_ROOT") {
@@ -70,7 +61,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let shared = Rc::new(RefCell::new(Shared::default()));
     runtime.set_input_device(WindowDevice::new(keys, shared.clone()))?;
     runtime.input_coordinates_mut().logical_size = [1280, 720];
-    let mut runtime = runtime.start_game(b"main")?;
+    let mut runtime = runtime.start_game(entry.as_bytes())?;
     let mut audio = audio_output::Output::new(runtime.connect_audio_output()?)?;
 
     let startup_xml = katze_system2::resource::XmlDocument::parse(startup.as_bytes())?;

@@ -10,13 +10,13 @@ use blowfish::{
 use katze_system2::{
     Error, Result,
     host::{
-        ConfigurationFile, FileServices, LocalDateTime, ProgramLoader, ResourceMode,
-        ResourceServices, SaveServices, SharedSource, SystemServices,
+        ConfigurationFile, FileServices, LocalDateTime, ResourceMode, ResourceServices,
+        SaveServices, SharedSource, SystemServices,
     },
     input::{ButtonSource, DeviceBinding, DeviceKeys},
     kcs::Program,
     memory::SharedMemory,
-    resource::{ArchiveConfig, KifEntrySource},
+    resource::{ArchiveConfig, KifEntrySource, XmlDocument},
     runtime::GameRuntime,
 };
 use std::{collections::BTreeMap, sync::Arc};
@@ -471,22 +471,6 @@ impl ResourceServices for Router {
     }
 }
 
-pub struct Programs {
-    pub programs: BTreeMap<String, Program>,
-}
-
-impl ProgramLoader for Programs {
-    fn load(&mut self, name: &[u8]) -> Result<Option<Program>> {
-        // 装载命令收到补全后的归档名；先按原名再按末段查预载脚本。
-        let full = String::from_utf8_lossy(name).to_ascii_lowercase();
-        if let Some(program) = self.programs.get(&full) {
-            return Ok(Some(program.clone()));
-        }
-        let key = full.rsplit(['/', '\\']).next().unwrap_or(&full).to_string();
-        Ok(self.programs.get(&key).cloned())
-    }
-}
-
 pub struct Saves {
     pub root: String,
 }
@@ -667,7 +651,6 @@ pub struct Game {
     pub router: Router,
     pub startup: String,
     pub start: String,
-    pub programs: BTreeMap<String, Program>,
 }
 
 pub fn load_game(root: &str) -> std::result::Result<Game, Box<dyn std::error::Error>> {
@@ -715,14 +698,21 @@ pub fn load_game(root: &str) -> std::result::Result<Game, Box<dyn std::error::Er
         }
     }
     println!("归档 {}", router.archives.len());
-    let start = startup
-        .split("<start>")
-        .nth(1)
-        .and_then(|rest| rest.split("</start>").next())
-        .ok_or("缺少启动脚本")?
+    let xml = XmlDocument::parse(startup.as_bytes())?;
+    let start = std::str::from_utf8(xml.text(b"SCRIPT/start")?.ok_or("缺少启动脚本")?)?
         .trim()
-        .to_string();
+        .to_owned();
     println!("启动脚本 {start}");
+    Ok(Game {
+        root: root.to_string(),
+        router,
+        startup,
+        start,
+    })
+}
+
+#[allow(dead_code)]
+pub fn inspect_programs(router: &mut Router) -> Result<BTreeMap<String, Program>> {
     let mut programs = BTreeMap::new();
     if let Some(archive) = router.archives.get("kcs.int") {
         let mut names: std::collections::BTreeSet<String> = archive
@@ -751,13 +741,7 @@ pub fn load_game(root: &str) -> std::result::Result<Game, Box<dyn std::error::Er
         }
     }
     println!("脚本 {}", programs.len());
-    Ok(Game {
-        root: root.to_string(),
-        router,
-        startup,
-        start,
-        programs,
-    })
+    Ok(programs)
 }
 
 fn patch_number(name: &str) -> Option<u32> {
@@ -772,20 +756,16 @@ fn patch_number(name: &str) -> Option<u32> {
 pub fn build_runtime(
     game: Game,
     surface: [u32; 2],
-) -> std::result::Result<(GameRuntime<Programs>, DeviceKeys), Box<dyn std::error::Error>> {
+) -> std::result::Result<(GameRuntime, DeviceKeys), Box<dyn std::error::Error>> {
     let Game {
         root,
         mut router,
         startup,
-        programs,
         ..
     } = game;
-    let mut runtime = GameRuntime::with_programs(
-        Programs { programs },
-        1 << 20,
-        SharedMemory::new(vec![0; 16 << 20])?,
-    )?;
-    let startup_xml = katze_system2::resource::XmlDocument::parse(startup.as_bytes())?;
+    let mut runtime =
+        GameRuntime::with_resource_programs(1 << 20, SharedMemory::new(vec![0; 16 << 20])?)?;
+    let startup_xml = XmlDocument::parse(startup.as_bytes())?;
     if let Some(importer) = image_import::Import::from_startup(&root, &startup_xml)? {
         runtime.set_platform_job_services(importer);
     }

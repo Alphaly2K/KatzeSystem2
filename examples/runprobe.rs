@@ -12,7 +12,7 @@ use katze_system2::{
     runtime::{FrameOutcome, FrameTime, GameRuntime, GameTasks},
 };
 use std::{cell::Cell, collections::BTreeMap, ops::RangeInclusive, rc::Rc};
-use support::{Game, build_runtime, load_game};
+use support::{build_runtime, load_game};
 
 struct ProbeWindow {
     fullscreen: bool,
@@ -244,6 +244,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .nth(2)
         .map_or(Ok(600), |value| value.parse())?;
     let mut game = load_game(&root)?;
+    let programs = support::inspect_programs(&mut game.router)?;
     if let Some(name) = std::env::var_os("KATZE_PROBE_LIST") {
         let name = name.to_string_lossy().into_owned();
         if let Some(archive) = game.router.archives.get(&name) {
@@ -337,7 +338,6 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
-    let programs = std::mem::take(&mut game.programs);
     if let Some(spec) = std::env::var_os("KATZE_PROBE_FES") {
         let spec = spec.to_string_lossy().into_owned();
         let data = game
@@ -474,16 +474,8 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     );
 
     let diagnostics = support::diagnostics::Output::from_env(game.router.script_encoding);
-    let (mut runtime, keys) = build_runtime(
-        Game {
-            root: game.root,
-            router: game.router,
-            startup: game.startup,
-            start: game.start,
-            programs,
-        },
-        [1280, 720],
-    )?;
+    let entry = game.start.clone();
+    let (mut runtime, keys) = build_runtime(game, [1280, 720])?;
     diagnostics.connect(&mut runtime);
     let mut replay = StoryReplay::from_env();
     runtime.set_input_device(ScriptedDevice::new(keys, replay.as_ref()))?;
@@ -494,7 +486,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             sound,
             entry: task,
         },
-    ) = runtime.start_game_with_tasks(b"main")?;
+    ) = runtime.start_game_with_tasks(entry.as_bytes())?;
     let mut window = ProbeWindow {
         fullscreen: runtime
             .system_settings()
@@ -934,7 +926,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn task_ids(runtime: &GameRuntime<support::Programs>) -> Vec<u32> {
+fn task_ids(runtime: &GameRuntime) -> Vec<u32> {
     let root = runtime.tree().root_id();
     std::iter::once(root)
         .chain(runtime.tree().descendants(root).unwrap())

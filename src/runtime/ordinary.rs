@@ -1,5 +1,8 @@
-use super::{BaseObject, ObjectFactory, ObjectHost, TaskObject};
-use crate::kcs::{Host, Interpreter, NativeReturn, OrdinaryTask, SharedMemory, format_string};
+use super::{BaseObject, ObjectFactory, ObjectHost, Resources, TaskObject};
+use crate::kcs::{
+    Host, Interpreter, NativeReturn, OrdinaryTask, Program, SharedMemory, format_string,
+};
+use crate::resource::ResourceMode;
 use crate::task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock};
 use crate::{Error, Result, read};
 
@@ -17,6 +20,32 @@ struct Loading {
     command: Command,
     name: Vec<u8>,
     phase: u8,
+}
+
+impl Resources {
+    pub(super) fn resolve_ordinary_program(&mut self, name: &[u8]) -> Result<Vec<u8>> {
+        let mut resolved = self
+            .services
+            .as_deref_mut()
+            .ok_or_else(|| Error::new(0, "运行时未配置 KCS 资源服务"))?
+            .resolve(b"kcs", name)?;
+        if let Some(end) = resolved.iter().position(|&byte| byte == 0) {
+            resolved.truncate(end);
+        }
+        Ok(resolved)
+    }
+
+    pub(super) fn read_ordinary_program(&mut self, name: &[u8]) -> Result<Option<Program>> {
+        if name.is_empty() {
+            return Ok(None);
+        }
+        let bytes = self
+            .services
+            .as_deref_mut()
+            .ok_or_else(|| Error::new(0, "运行时未配置 KCS 资源服务"))?
+            .read(name, ResourceMode::ArchiveFirst)?;
+        bytes.as_deref().map(Program::parse).transpose()
+    }
 }
 
 impl<F: ObjectFactory> ObjectHost<'_, F> {
@@ -86,6 +115,13 @@ pub struct OrdinaryObject {
 }
 
 impl OrdinaryObject {
+    pub(super) fn from_program(id: u32, program: Program, external: SharedMemory) -> Result<Self> {
+        let mut task = OrdinaryTask::new(program, Vec::new())?;
+        task.interpreter.bind_external(external);
+        task.task_id = id;
+        Ok(Self::new(task))
+    }
+
     pub fn new(task: OrdinaryTask) -> Self {
         let external = task.interpreter.external_storage();
         let local_numbers = task.local_numbers.clone();

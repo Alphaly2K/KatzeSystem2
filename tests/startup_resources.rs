@@ -2,7 +2,11 @@
 #[path = "../examples/support/mod.rs"]
 mod support;
 
-use katze_system2::{kcs::ResourceServices, resource::ResourceMode};
+use katze_system2::{
+    host::{ResourceMode, ResourceServices},
+    runtime::GameRuntime,
+    task::{Command, CommandBuffers},
+};
 use std::path::PathBuf;
 
 use blowfish::{
@@ -47,7 +51,7 @@ fn program(control: u32) -> Vec<u8> {
 }
 
 #[test]
-fn startup_discovers_patch_priority_and_preloads_overridden_and_added_programs() {
+fn startup_and_dynamic_script_loads_use_the_higher_priority_patch() {
     let root = Directory(
         std::env::temp_dir().join(format!("katze-startup-patches-{}", std::process::id())),
     );
@@ -80,8 +84,6 @@ fn startup_discovers_patch_priority_and_preloads_overridden_and_added_programs()
     std::fs::write(root.0.join("update99.int"), archive(&[])).unwrap();
     let mut game = support::load_game(root.0.to_str().unwrap()).unwrap();
     assert_eq!(game.router.patches.len(), 3);
-    assert_eq!(game.programs["main"].control, 12);
-    assert_eq!(game.programs["extra.kcs"].control, 13);
     for mode in [
         ResourceMode::File,
         ResourceMode::LooseFirst,
@@ -113,6 +115,48 @@ fn startup_discovers_patch_priority_and_preloads_overridden_and_added_programs()
             .read(b"kcs.int/lower.dat", ResourceMode::LooseFirst)
             .unwrap(),
         Some(Vec::new())
+    );
+    let mut runtime = GameRuntime::with_resource_programs(0, Default::default()).unwrap();
+    runtime.set_resources(game.router);
+    let (mut runtime, tasks) = runtime
+        .start_game_with_tasks(game.start.as_bytes())
+        .unwrap();
+    assert_eq!(
+        runtime
+            .object(tasks.entry)
+            .unwrap()
+            .interpreter()
+            .unwrap()
+            .program()
+            .control,
+        12
+    );
+    let target = runtime.create_unloaded_ordinary(0, b"").unwrap();
+    let mut name = *b"kcs.int/extra.kcs\0";
+    runtime
+        .dispatch_command_with_buffers(
+            tasks.entry,
+            Command {
+                target,
+                sender: tasks.entry,
+                code: 161,
+                data: [0; 3],
+            },
+            &mut CommandBuffers {
+                data1: Some(&mut name),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        runtime
+            .object(target)
+            .unwrap()
+            .interpreter()
+            .unwrap()
+            .program()
+            .control,
+        13
     );
 }
 

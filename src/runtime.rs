@@ -8,7 +8,7 @@
 //! 向执行中普通 VM 同步发送消息返回零。输入同步回调开放同一份区域、键和基类命令状态，图形通知开放响应槽及几何查询；
 //! 其他需要直接借用执行中对象的操作返回诊断。
 
-use crate::kcs::{Host, HostState, Interpreter, NativeReturn, OrdinaryTask, Program, TaskEffects};
+use crate::kcs::{Host, HostState, Interpreter, NativeReturn, Program, TaskEffects};
 use crate::task::{Command, CommandBuffers, Control, Lifecycle, TaskClock, TaskTree};
 use crate::{Error, Result, expression, read};
 use std::collections::{BTreeMap, BTreeSet};
@@ -57,7 +57,7 @@ mod resources;
 mod root;
 mod save;
 mod session;
-pub use session::{FrameOutcome, FrameTime, GameFactory, GameRuntime, GameTasks};
+pub use session::{FrameOutcome, FrameTime, GameFactory, GameRuntime, GameTasks, ResourcePrograms};
 mod state_records;
 mod system_tasks;
 mod transition;
@@ -194,10 +194,11 @@ impl<L: ProgramLoader> ObjectFactory for KcsFactory<L> {
             .programs
             .load(name)?
             .ok_or_else(|| Error::new(0, "KCS 程序不存在"))?;
-        let mut task = OrdinaryTask::new(program, Vec::new())?;
-        task.interpreter.bind_external(self.external.clone());
-        task.task_id = id;
-        Ok(Box::new(OrdinaryObject::new(task)))
+        Ok(Box::new(OrdinaryObject::from_program(
+            id,
+            program,
+            self.external.clone(),
+        )?))
     }
 }
 
@@ -749,6 +750,16 @@ fn create_object_impl<F: ObjectFactory>(
     let id = tree.next_id();
     let mut object = if unloaded {
         factory.create_unloaded_ordinary(id)?
+    } else if kind == kind::ORDINARY && resources.resource_programs {
+        let name = resources.resolve_ordinary_program(name)?;
+        let program = resources
+            .read_ordinary_program(&name)?
+            .ok_or_else(|| Error::new(0, "KCS 程序不存在"))?;
+        Box::new(OrdinaryObject::from_program(
+            id,
+            program,
+            factory.external_storage(),
+        )?)
     } else {
         factory.create(id, kind, name)?
     };
@@ -2077,7 +2088,11 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
             .release_shared_image_owner(self.host.task_id)?;
         self.resources.images.release_owner(self.host.task_id);
         self.resources.raw.release_owner(self.host.task_id);
-        self.factory.load_kcs_program(name)
+        if self.resources.resource_programs {
+            self.resources.read_ordinary_program(name)
+        } else {
+            self.factory.load_kcs_program(name)
+        }
     }
 
     fn fes_services(&mut self) -> Option<&mut dyn fes::Services> {
