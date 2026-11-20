@@ -20,7 +20,7 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 
 宿主通过 `ResourceServices` 提供资源，使用 `FileServices`、`SaveServices` 和 `ConfigurationServices` 分别接入脚本文件、存档和配置持久化。资源服务返回完整字节或可独立读取的 `SharedSource`；宿主可用 `CachedResources` 为自定义装载流程复用预读缓存。这些契约统一从 `host` 导入；旧的 `io`、`save` 和 `settings` 导入路径仍可用。
 
-标准会话在启动前必须通过 `set_input_device` 绑定 `InputDevice`。离屏宿主可提供只返回空闲状态的内存设备。`startup_input_bindings` 返回已经应用用户覆盖的八十个逻辑键槽，宿主可以用它构造 `DeviceKeys`。配置保存优先读取设备当前的绑定；设备未提供绑定时使用启动配置。
+标准会话在启动前必须通过 `set_input_device` 绑定 `host::InputDevice`。离屏宿主可提供只返回空闲状态的内存设备。`startup_input_bindings` 返回已经应用用户覆盖的八十个逻辑键槽，宿主可以用它构造 `DeviceKeys` 或自行维护输入状态。配置保存用 `InputDevice::key_configuration` 借用 `&[DeviceBinding; 80]`；使用 `DeviceKeys` 的宿主可返回 `Some(keys.bindings())`。返回 `None` 时使用启动配置。
 
 `GameRuntime::set_game_resources` 接受资源服务与声音配置文档。运行库按声音定义选定归档类别，应用用户覆盖以控制播放；宿主按该类别补全名称并提供读取源。没有新版声音定义时，使用启动文档里的旧版文件映射和声音组。自定义声音路由的宿主可以用 `set_resources`，由其资源服务直接处理 `sound` 类别。
 
@@ -45,6 +45,8 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 需要连续截图时，回调同时收到一个 `SequenceCapture`。呈现提交后可通过它交回软件渲染目标，或交回从顶行开始的 BGRA 像素及以字节计的行距。每次请求只能提交一次；跳过呈现时可丢弃请求。运行库负责裁剪、编码 BMP 和编号，通过宿主文件服务写入。只需查看或离屏绘制时可用 `with_frame`。
 
 离屏宿主在更新后用 `mix_audio_stereo(rate_hz, buffer)` 拉取 PCM；此调用可等待解码。设备宿主用 `connect_audio_output()` 取得可移交给音频线程的 `Mixer`，由回调用 `Mixer::render(rate_hz, buffer)` 拉取 PCM，无须借用运行实例。两者均覆写调用方缓冲，格式为左右交错、幅度 `[-1, 1]` 的 `f32` 采样。游戏声音只能连接一次，连接后不得再调用离屏混音；会话退出时由宿主停止回调并释放混音器。
+
+宿主可通过 `host::SpeechSynthesizer` 提供合成的 `Pcm`；字体服务从 `host` 导入 `FontServices`、`FontRequest` 和 `GlyphMask`。可复用 `message::Fonts` 处理宿主提供的字体，或实现自己的服务。软件图形后端、字形实现与混音器都可在无设备环境运行。
 
 宿主在更新后可用 `take_script_messages` 取走调试文字。即使更新返回错误，已生成的消息仍可取出。`set_native_trace` 注册当前运行实例的可选回调，运行时分派 native 时发送开始和结束事件，带任务号、原始调用编号、VM 字节偏移及失败标记。调用可嵌套，计时和输出由宿主决定。两个示例使用 `KATZE_TRACE_SCRIPT` 显示脚本消息，使用 `KATZE_TRACE_TIMING` 记录慢调用。
 

@@ -305,11 +305,11 @@ impl InputState {
                         &mut CommandBuffers::default(),
                     )?;
                     if event.kind == KeyEventKind::Repeat {
-                        crate::runtime::trace_detail!(host.diagnostic_trace(), Input,
+                        crate::host::trace_detail!(host.diagnostic_trace(), Input,
                             "[input-repeat] region={} key={} mask={:08x} point={:?} outcome={:?}",
                             command.target, event.key, event.mask, event.point, outcome);
                     } else {
-                        crate::runtime::trace_detail!(host.diagnostic_trace(), Input,
+                        crate::host::trace_detail!(host.diagnostic_trace(), Input,
                             "[input-key] region={} key={} mask={:08x} point={:?} pressed={} outcome={:?}",
                             command.target, event.key, event.mask, event.point, event.pressed, outcome);
                     }

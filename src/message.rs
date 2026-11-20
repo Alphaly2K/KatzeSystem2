@@ -18,6 +18,7 @@ mod timing;
 mod userfont;
 pub(crate) mod window;
 
+pub use crate::host::{FontRequest, FontServices};
 pub use defaults::MessageDefaults;
 pub use display::{Display, DisplayProgress, DisplaySettings};
 pub use effects::GlyphEffects;
@@ -29,7 +30,7 @@ pub(crate) use markup::extract_codes;
 pub use page::Page;
 pub use playback::{DisplayUpdate, GlyphState};
 pub use reveal::{Reveal, RevealGlyph};
-pub use task::{FontRequest, FontServices, MessageFactory, MessageObject};
+pub use task::{MessageFactory, MessageObject};
 pub use timing::{Schedule, TimingSettings};
 pub use window::TextWindowObject;
 

@@ -166,7 +166,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                     state.size = self.fes_image_geometry(&cache, resource, true)?;
                 }
             }
-            crate::runtime::trace_detail!(
+            crate::host::trace_detail!(
                 self.resources.diagnostic_trace.as_ref(),
                 NativeDetail,
                 "[fes-plane] handle={} size={:?} creation={} canvas={} resource={:?}",
@@ -566,7 +566,7 @@ impl<F: ObjectFactory> Store<'_, F> {
         let mut services = super::preload::ImageServices::new(cache, services.as_mut());
         let name = services.resolve(b"image", &expanded)?;
         let Some(data) = services.read(&name, crate::resource::ResourceMode::LooseFirst)? else {
-            crate::runtime::trace_detail!(
+            crate::host::trace_detail!(
                 self.resources.diagnostic_trace.as_ref(),
                 NativeDetail,
                 "[imgref] name={:?} frame={} resolved={:?} 读取失败",
@@ -578,7 +578,7 @@ impl<F: ObjectFactory> Store<'_, F> {
         };
         let metadata = crate::hg3::Metadata::parse(&data)?;
         let Some(info) = metadata.frame(reference.frame).and_then(|frame| frame.info) else {
-            crate::runtime::trace_detail!(
+            crate::host::trace_detail!(
                 self.resources.diagnostic_trace.as_ref(),
                 NativeDetail,
                 "[imgref] name={:?} frame={} resolved={:?} 无帧",
@@ -588,7 +588,7 @@ impl<F: ObjectFactory> Store<'_, F> {
             );
             return Ok([0; 2]);
         };
-        crate::runtime::trace_detail!(
+        crate::host::trace_detail!(
             self.resources.diagnostic_trace.as_ref(),
             NativeDetail,
             "[imgref] name={:?} frame={} resolved={:?} size={:?} offset={:?}",

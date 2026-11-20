@@ -2,7 +2,8 @@ use katze_system2::{
     Error, Result,
     expression::State,
     fes::{ObjectReference, Program},
-    message::{FontRequest, FontServices, GlyphMask, MessageDefaults},
+    host::{FontRequest, FontServices, GlyphMask},
+    message::MessageDefaults,
     runtime::{BaseObject, ObjectFactory, Runtime, TaskObject, fes::Scene, kind},
 };
 use std::{

@@ -1,7 +1,8 @@
 use katze_system2::{
     Error, Result,
-    audio::{Pcm, SoundFactory, SoundGroup, SoundGroups, SpeechSynthesizer},
+    audio::{SoundFactory, SoundGroup, SoundGroups},
     expression::State,
+    host::{Pcm, SpeechSynthesizer},
     kcs::{Program, ResourceServices},
     memory::SharedMemory,
     resource::ResourceMode,

@@ -237,7 +237,7 @@ impl ResourceState {
 }
 
 impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
-    fn diagnostic_trace(&self) -> Option<&crate::runtime::DiagnosticTrace> {
+    fn diagnostic_trace(&self) -> Option<&crate::host::DiagnosticTrace> {
         self.inner.diagnostic_trace()
     }
 
@@ -342,7 +342,7 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
         self.inner.jtalk_enabled()
     }
 
-    fn speech_synthesizer(&mut self) -> Option<&mut dyn crate::audio::SpeechSynthesizer> {
+    fn speech_synthesizer(&mut self) -> Option<&mut dyn crate::host::SpeechSynthesizer> {
         self.inner.speech_synthesizer()
     }
 
@@ -354,7 +354,7 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
         self.inner.system_time_ms()
     }
 
-    fn fonts(&mut self) -> Option<&mut dyn crate::message::FontServices> {
+    fn fonts(&mut self) -> Option<&mut dyn crate::host::FontServices> {
         self.inner.fonts()
     }
 

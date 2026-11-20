@@ -7,8 +7,8 @@ mod support;
 use katze_system2::{
     Result,
     host::{
-        ButtonSource, DeviceKeys, GraphicsBackend, InputDevice, KeySample, PointerSample, Rect,
-        ResourceMode, ResourceServices, SoftwareBackend, WindowServices,
+        ButtonSource, DeviceBinding, DeviceKeys, GraphicsBackend, InputDevice, KeySample,
+        PointerSample, Rect, ResourceMode, ResourceServices, SoftwareBackend, WindowServices,
     },
     input::Region,
     runtime::{GameTasks, TaskRuntime},
@@ -201,8 +201,8 @@ impl ScriptedDevice {
 }
 
 impl InputDevice for ScriptedDevice {
-    fn key_configuration(&self) -> Option<&DeviceKeys> {
-        Some(&self.keys)
+    fn key_configuration(&self) -> Option<&[DeviceBinding; 80]> {
+        Some(self.keys.bindings())
     }
     fn poll(&mut self) -> Result<()> {
         self.polls = self.polls.wrapping_add(1);

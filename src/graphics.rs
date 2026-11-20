@@ -120,7 +120,8 @@ pub use frame::{
 mod compositor;
 pub use compositor::Compositor;
 mod backend;
-pub use backend::{FrameCanvas, GraphicsBackend, SoftwareBackend};
+pub use crate::host::GraphicsBackend;
+pub use backend::{FrameCanvas, SoftwareBackend};
 pub(crate) mod resample;
 
 /// 包含左上边、不包含右下边的像素矩形。

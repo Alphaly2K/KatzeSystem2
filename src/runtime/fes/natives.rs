@@ -135,7 +135,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             }
             630 => {
                 let mut name = format_string(vm, read::u32_at(arguments, 4)?, 0)?;
-                crate::runtime::trace_detail!(
+                crate::host::trace_detail!(
                     self.resources.diagnostic_trace.as_ref(),
                     NativeDetail,
                     "[fes-call] caller={} pc={} target={target} block={:?}",

@@ -1,23 +1,8 @@
-use super::KeySample;
-use crate::{Error, Result, resource::XmlDocument};
-
-/// 配置数组的设备次序；四组分别对应每种设备的第一至第四个绑定。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(usize)]
-pub enum ButtonSource {
-    Keyboard,
-    Mouse,
-    Joypad,
-    Touch,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct DeviceBinding {
-    pub enabled: u32,
-    /// 第一维按 ButtonSource，第二维为绑定组。
-    pub codes: [[u8; 4]; 4],
-    pub repeat: [[u32; 4]; 4],
-}
+use crate::{
+    Error, Result,
+    host::{ButtonSource, DeviceBinding, KeySample},
+    resource::{XmlDocument, XmlWriter},
+};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct BindingState {
@@ -104,27 +89,8 @@ impl DeviceKeys {
     }
 
     /// 写入所有启用槽位的三类设备绑定，不写入槽位定义和触摸绑定。
-    pub fn write_xml(&self, xml: &mut crate::resource::XmlWriter) -> Result<()> {
-        for (key, binding) in self.bindings.iter().enumerate() {
-            if binding.enabled == 0 {
-                continue;
-            }
-            for group in 0..4 {
-                for repeat in [false, true] {
-                    for (source, name) in ["kb", "ms", "jp"].into_iter().enumerate() {
-                        let suffix = if repeat { "r" } else { "" };
-                        let name = format!("{name}{}{suffix}_{key:02}", group + 1);
-                        let value = if repeat {
-                            binding.repeat[source][group] as u8
-                        } else {
-                            binding.codes[source][group]
-                        };
-                        xml.write_integer(&["KEY", &name], value as u32)?;
-                    }
-                }
-            }
-        }
-        Ok(())
+    pub fn write_xml(&self, xml: &mut XmlWriter) -> Result<()> {
+        write_bindings_xml(&self.bindings, xml)
     }
 
     /// 替换单槽配置并清空该槽的按键、重复元数据和强制查询计数。
@@ -220,6 +186,32 @@ impl DeviceKeys {
             state.masks = [0; 4];
         }
     }
+}
+
+pub(crate) fn write_bindings_xml(
+    bindings: &[DeviceBinding; 80],
+    xml: &mut XmlWriter,
+) -> Result<()> {
+    for (key, binding) in bindings.iter().enumerate() {
+        if binding.enabled == 0 {
+            continue;
+        }
+        for group in 0..4 {
+            for repeat in [false, true] {
+                for (source, name) in ["kb", "ms", "jp"].into_iter().enumerate() {
+                    let suffix = if repeat { "r" } else { "" };
+                    let name = format!("{name}{}{suffix}_{key:02}", group + 1);
+                    let value = if repeat {
+                        binding.repeat[source][group] as u8
+                    } else {
+                        binding.codes[source][group]
+                    };
+                    xml.write_integer(&["KEY", &name], value as u32)?;
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 fn key_index(key: u32) -> Result<usize> {

@@ -1,5 +1,6 @@
 use super::{DrawList, RenderTarget, Surface, TextureSource};
 use crate::Result;
+use crate::host::GraphicsBackend;
 
 /// Read-only canvas textures with an explicit upload acknowledgement. A host
 /// cache shared by presentation and script readback can consume the dirty flags.
@@ -34,17 +35,6 @@ impl<'a> FrameCanvas<'a> {
     pub fn acknowledge_upload(&mut self) {
         self.0.clear_dirty();
     }
-}
-
-/// Host renderer for synchronous, script-initiated readback.
-pub trait GraphicsBackend {
-    /// Draw onto a transparent target and return top-down BGRA pixels at `size`.
-    fn render(
-        &mut self,
-        frame: &DrawList,
-        canvas: &mut FrameCanvas<'_>,
-        size: [u32; 2],
-    ) -> Result<Surface>;
 }
 
 /// 不访问窗口或设备的软件图形后端。

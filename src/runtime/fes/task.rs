@@ -964,7 +964,7 @@ impl FesObject {
     fn run_body(&mut self, host: &mut dyn Host, budget: usize) -> Result<bool> {
         self.synchronize(host);
         self.effects(host);
-        crate::runtime::trace_detail!(
+        crate::host::trace_detail!(
             host.diagnostic_trace(),
             FesBody,
             "[fes-body] id={} name={} started={} paused={} deleting={}",

@@ -1,9 +1,10 @@
 use katze_system2::{
     Result,
     expression::State,
+    host::{NativeInvocation, NativeTraceEvent},
     kcs::{CoreHost, Host, Interpreter, NativeReturn, Program},
     memory::SharedMemory,
-    runtime::{NativeInvocation, NativeTraceEvent, ProgramLoader, TaskRuntime, kind},
+    runtime::{ProgramLoader, TaskRuntime, kind},
 };
 use std::{cell::RefCell, rc::Rc};
 

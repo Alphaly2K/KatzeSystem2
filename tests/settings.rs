@@ -914,25 +914,20 @@ fn ordinary_settings_writeback_and_external_reads_share_runtime_state() {
     }
 }
 
-struct ConfigurationDevice(katze_system2::input::DeviceKeys);
+struct ConfigurationDevice([katze_system2::host::DeviceBinding; 80]);
 
-impl katze_system2::input::InputDevice for ConfigurationDevice {
-    fn key_configuration(&self) -> Option<&katze_system2::input::DeviceKeys> {
+impl katze_system2::host::InputDevice for ConfigurationDevice {
+    fn key_configuration(&self) -> Option<&[katze_system2::host::DeviceBinding; 80]> {
         Some(&self.0)
     }
     fn poll(&mut self) -> Result<()> {
         Ok(())
     }
-    fn pointer(&mut self) -> Result<katze_system2::input::PointerSample> {
+    fn pointer(&mut self) -> Result<katze_system2::host::PointerSample> {
         Ok(Default::default())
     }
-    fn key(
-        &mut self,
-        key: u32,
-        group: u32,
-        repeat: bool,
-    ) -> Result<katze_system2::input::KeySample> {
-        self.0.sample(key, group, repeat)
+    fn key(&mut self, _: u32, _: u32, _: bool) -> Result<katze_system2::host::KeySample> {
+        Ok(Default::default())
     }
     fn take_wheel(&mut self) -> Result<u32> {
         Ok(0)
@@ -966,10 +961,7 @@ impl katze_system2::input::InputDevice for ConfigurationDevice {
 #[test]
 fn runtime_configuration_save_reads_current_device_bindings_and_preserves_the_vm_stack() {
     use katze_system2::{
-        input::{DeviceBinding, DeviceKeys},
-        memory::SharedMemory,
-        runtime::TaskRuntime,
-        settings::PlatformSettings,
+        host::DeviceBinding, memory::SharedMemory, runtime::TaskRuntime, settings::PlatformSettings,
     };
     struct SaveSource;
     impl ProgramLoader for SaveSource {
@@ -1012,7 +1004,7 @@ fn runtime_configuration_save_reads_current_device_bindings_and_preserves_the_vm
                 bindings[0].enabled = 1;
                 bindings[0].codes[0][0] = code;
                 runtime
-                    .set_input_device(ConfigurationDevice(DeviceKeys::new(bindings)))
+                    .set_input_device(ConfigurationDevice(bindings))
                     .unwrap();
             }
             let task = runtime.create(0, kind::ORDINARY, b"save", b"").unwrap();

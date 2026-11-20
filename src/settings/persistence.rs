@@ -1,5 +1,11 @@
 use super::{PlatformSettings, SystemSettings, word};
-use crate::{Result, input::DeviceKeys, language::LanguageState, resource::XmlWriter};
+use crate::{
+    Result,
+    host::DeviceBinding,
+    input::{DeviceKeys, write_bindings_xml},
+    language::LanguageState,
+    resource::XmlWriter,
+};
 
 /// 按平台主配置、用户选项的顺序写入同一文档，包含语言及启用的按键槽。
 pub fn write_configuration(
@@ -8,6 +14,16 @@ pub fn write_configuration(
     platform: &PlatformSettings,
     languages: &LanguageState,
     keys: &DeviceKeys,
+) -> Result<()> {
+    write_configuration_with_bindings(xml, system, platform, languages, keys.bindings())
+}
+
+pub(crate) fn write_configuration_with_bindings(
+    xml: &mut XmlWriter,
+    system: &SystemSettings,
+    platform: &PlatformSettings,
+    languages: &LanguageState,
+    keys: &[DeviceBinding; 80],
 ) -> Result<()> {
     platform.write_main(xml, system, languages)?;
     system.write_options(xml, Some((platform, keys)))
@@ -77,7 +93,7 @@ impl SystemSettings {
     fn write_options(
         &self,
         xml: &mut XmlWriter,
-        platform_keys: Option<(&PlatformSettings, &DeviceKeys)>,
+        platform_keys: Option<(&PlatformSettings, &[DeviceBinding; 80])>,
     ) -> Result<()> {
         if let Some((platform, _)) = platform_keys {
             xml.write_integer(&["CONFIG", "type"], platform.config_type)?;
@@ -98,7 +114,7 @@ impl SystemSettings {
         }
         if let Some((platform, keys)) = platform_keys {
             xml.write_integer(&["KEY", "enable_joypad"], platform.joypad_enabled)?;
-            keys.write_xml(xml)?;
+            write_bindings_xml(keys, xml)?;
         }
         write_words(xml, &self.sound, &SOUND_FIELDS[..5])?;
         for channel in 0..48 {

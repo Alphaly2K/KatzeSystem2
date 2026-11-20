@@ -3,6 +3,7 @@ mod platform;
 mod sound;
 pub use crate::host::{ConfigurationFile, ConfigurationServices};
 pub use persistence::write_configuration;
+pub(crate) use persistence::write_configuration_with_bindings;
 use persistence::{EFFECTS_FIELDS, MESSAGE_FIELDS, SOUND_FIELDS, WINDOW_FIELDS};
 pub use platform::PlatformSettings;
 

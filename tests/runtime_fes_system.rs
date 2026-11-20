@@ -2,10 +2,8 @@ use katze_system2::{
     Error, Result,
     expression::State,
     fes::Program,
-    runtime::{
-        BaseObject, DiagnosticTrace, ObjectFactory, Runtime, TaskObject, TraceCategory, fes::Scene,
-        kind,
-    },
+    host::{DiagnosticTrace, TraceCategory},
+    runtime::{BaseObject, ObjectFactory, Runtime, TaskObject, fes::Scene, kind},
 };
 use std::{cell::RefCell, rc::Rc};
 

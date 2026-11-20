@@ -3,7 +3,7 @@ mod file_source;
 #[path = "support/font_sources.rs"]
 mod font_sources;
 
-use katze_system2::message::{FontRequest, FontServices, TextEncoding};
+use katze_system2::host::{FontRequest, FontServices, TextEncoding};
 
 fn main() -> katze_system2::Result<()> {
     let mut fonts = font_sources::load_fonts(".");

@@ -1,7 +1,7 @@
 use katze_system2::{
     Result,
-    host::{InputDevice, KeySample, PointerSample},
-    input::{ButtonSource, DeviceKeys, WheelButtons},
+    host::{ButtonSource, DeviceBinding, DeviceKeys, InputDevice, KeySample, PointerSample},
+    input::WheelButtons,
 };
 use sdl2::{
     event::{Event, WindowEvent},
@@ -179,8 +179,8 @@ impl WindowDevice {
 }
 
 impl InputDevice for WindowDevice {
-    fn key_configuration(&self) -> Option<&DeviceKeys> {
-        Some(&self.keys)
+    fn key_configuration(&self) -> Option<&[DeviceBinding; 80]> {
+        Some(self.keys.bindings())
     }
     fn poll(&mut self) -> Result<()> {
         let mut shared = self.shared.borrow_mut();

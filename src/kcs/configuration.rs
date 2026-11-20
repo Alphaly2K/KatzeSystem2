@@ -1,14 +1,15 @@
 use super::HostState;
 use crate::{
     Error, Result,
+    host::{ConfigurationFile, DeviceBinding},
     input::DeviceKeys,
     resource::XmlWriter,
-    settings::{ConfigurationFile, write_configuration},
+    settings::write_configuration_with_bindings,
 };
 
 pub(crate) fn save_configuration(
     host: &mut HostState,
-    keys: Option<&DeviceKeys>,
+    keys: Option<&[DeviceBinding; 80]>,
     pc: usize,
 ) -> Result<()> {
     let services = host
@@ -24,10 +25,10 @@ pub(crate) fn save_configuration(
         .as_ref()
         .ok_or_else(|| Error::new(pc, "宿主未配置平台设置"))?;
     let keys = keys
-        .or(host.configuration_keys.as_ref())
+        .or_else(|| host.configuration_keys.as_ref().map(DeviceKeys::bindings))
         .ok_or_else(|| Error::new(pc, "宿主未提供按键配置"))?;
     let mut xml = XmlWriter::new();
-    write_configuration(&mut xml, system, platform, &host.languages, keys)?;
+    write_configuration_with_bindings(&mut xml, system, platform, &host.languages, keys)?;
     services.write(host.task_id, ConfigurationFile::Main, &xml.to_bytes()?)?;
     if host.sound_config_enabled != 0 {
         let sound = host

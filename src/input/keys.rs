@@ -1,13 +1,7 @@
 use super::{Events, KeyEvent, KeyEventKind, Regions};
+use crate::host::KeySample;
 use crate::task::Command;
 use crate::{Error, Result};
-
-/// 一次设备查询的原始事件掩码和首次重复开关。
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct KeySample {
-    pub mask: u32,
-    pub repeat: u32,
-}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct KeyState {

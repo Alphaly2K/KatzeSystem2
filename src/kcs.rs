@@ -279,7 +279,7 @@ pub struct TaskEffects {
 
 pub trait Host {
     /// Optional probe output for objects executing through this host.
-    fn diagnostic_trace(&self) -> Option<&crate::runtime::DiagnosticTrace> {
+    fn diagnostic_trace(&self) -> Option<&crate::host::DiagnosticTrace> {
         None
     }
 
@@ -368,7 +368,7 @@ pub trait Host {
         None
     }
 
-    fn fonts(&mut self) -> Option<&mut dyn crate::message::FontServices> {
+    fn fonts(&mut self) -> Option<&mut dyn crate::host::FontServices> {
         None
     }
 
@@ -522,7 +522,7 @@ pub trait Host {
         None
     }
 
-    fn speech_synthesizer(&mut self) -> Option<&mut dyn crate::audio::SpeechSynthesizer> {
+    fn speech_synthesizer(&mut self) -> Option<&mut dyn crate::host::SpeechSynthesizer> {
         None
     }
 
@@ -641,7 +641,7 @@ pub trait Host {
 }
 
 impl<T: Host + ?Sized> Host for &mut T {
-    fn diagnostic_trace(&self) -> Option<&crate::runtime::DiagnosticTrace> {
+    fn diagnostic_trace(&self) -> Option<&crate::host::DiagnosticTrace> {
         (**self).diagnostic_trace()
     }
 
@@ -764,7 +764,7 @@ impl<T: Host + ?Sized> Host for &mut T {
         (**self).system_time_ms()
     }
 
-    fn fonts(&mut self) -> Option<&mut dyn crate::message::FontServices> {
+    fn fonts(&mut self) -> Option<&mut dyn crate::host::FontServices> {
         (**self).fonts()
     }
 
@@ -858,7 +858,7 @@ impl<T: Host + ?Sized> Host for &mut T {
         (**self).effect_services()
     }
 
-    fn speech_synthesizer(&mut self) -> Option<&mut dyn crate::audio::SpeechSynthesizer> {
+    fn speech_synthesizer(&mut self) -> Option<&mut dyn crate::host::SpeechSynthesizer> {
         (**self).speech_synthesizer()
     }
 

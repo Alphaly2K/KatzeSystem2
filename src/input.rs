@@ -1,4 +1,5 @@
 use crate::graphics::Rect;
+pub use crate::host::{ButtonSource, DeviceBinding, InputDevice, KeySample, PointerSample};
 use crate::task::{Command, CommandBuffers};
 use crate::{Error, Result, read};
 
@@ -8,7 +9,7 @@ mod motion;
 mod selection;
 pub use motion::PointerMotion;
 mod keys;
-pub use keys::{KeySample, KeyServices, KeyState, KeyTransition, Keys};
+pub use keys::{KeyServices, KeyState, KeyTransition, Keys};
 mod state;
 pub use state::{CommandState, InputDelivery, InputState};
 mod text_entry;
@@ -29,9 +30,10 @@ pub use slider_task::SliderObject;
 mod coordinates;
 pub use coordinates::CoordinateMap;
 mod device;
-pub use device::{InputDevice, PointerSample, PointerState};
+pub use device::PointerState;
 mod bindings;
-pub use bindings::{ButtonSource, DeviceBinding, DeviceKeys};
+pub use bindings::DeviceKeys;
+pub(crate) use bindings::write_bindings_xml;
 mod wheel;
 pub use wheel::WheelButtons;
 mod update;

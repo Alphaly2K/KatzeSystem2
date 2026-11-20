@@ -1,6 +1,7 @@
 use katze_system2::{
     graphics::{Rect, Surface},
-    message::{FontRequest, FontServices, Fonts, TextEncoding},
+    host::{FontRequest, FontServices, TextEncoding},
+    message::Fonts,
 };
 use sdl2::{
     event::{Event, WindowEvent},

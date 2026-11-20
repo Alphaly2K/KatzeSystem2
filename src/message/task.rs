@@ -1,8 +1,9 @@
 use super::{
-    BreakCharacters, Display, DisplaySettings, GlyphEffects, GlyphMask, LayoutSettings, Style,
-    StyleDefaults, TextEncoding, TimingSettings, VerticalAlignment,
+    BreakCharacters, Display, DisplaySettings, GlyphEffects, LayoutSettings, Style, StyleDefaults,
+    TextEncoding, TimingSettings, VerticalAlignment,
 };
 use crate::graphics::PlaneObject;
+use crate::host::{FontRequest, FontServices};
 use crate::kcs::{Host, Interpreter};
 use crate::runtime::{ObjectFactory, TaskObject, kind};
 use crate::task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock};
@@ -10,20 +11,6 @@ use crate::{Error, Result, read, text};
 
 mod characters;
 use characters::CharacterSets;
-
-/// 字体服务接收字体选择参数；度量使用配置，绘字使用逐字样式。
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FontRequest {
-    pub encoding: TextEncoding,
-    pub name: Vec<u16>,
-    pub weight: u32,
-    pub italic: bool,
-    pub backend: u32,
-    /// GDI 字符集；原字体选择使用低八位。
-    pub glyph_parameter: u32,
-    /// 非零启用定宽规则：CP932 双字节字符用整字号，其余至少占半字号。
-    pub measure_parameter: u32,
-}
 
 impl FontRequest {
     fn for_glyph(&self, style: Style, encoding: TextEncoding) -> Self {
@@ -51,25 +38,6 @@ impl FontRequest {
             measured.max(size.div_ceil(2) as i32)
         })
     }
-}
-
-/// 同步选择字体、度量并生成六十四级灰度遮罩；不支持的请求应返回诊断。
-pub trait FontServices {
-    /// 按平台枚举顺序提供水平字体名，保留重复名称。
-    /// character_set 为原始字符集（MAX 表示全部）；variable_pitch 为零时仅保留定宽字体。
-    fn enumerate(&mut self, _character_set: u32, _variable_pitch: u32) -> Result<Vec<Vec<u16>>> {
-        Err(Error::new(0, "字体服务未提供字体枚举"))
-    }
-
-    /// 注册 CP932 文件名指定的字体；false 表示平台未接受该文件。
-    fn add_resource(&mut self, _name: &[u8]) -> Result<bool> {
-        Err(Error::new(0, "字体服务未提供字体资源注册"))
-    }
-
-    fn validate(&mut self, request: &FontRequest) -> Result<()>;
-    fn measure(&mut self, request: &FontRequest, character: char, size: u32) -> Result<i32>;
-    fn rasterize(&mut self, request: &FontRequest, character: char, size: u32)
-    -> Result<GlyphMask>;
 }
 
 struct Configuration {

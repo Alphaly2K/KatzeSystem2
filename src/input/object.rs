@@ -65,7 +65,7 @@ impl TaskObject for InputObject {
         _increment: u32,
         _budget: usize,
     ) -> Result<bool> {
-        crate::runtime::trace_detail!(
+        crate::host::trace_detail!(
             host.diagnostic_trace(),
             Input,
             "[input-body] id={}",

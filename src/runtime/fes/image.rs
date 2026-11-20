@@ -184,7 +184,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                     .raw
                     .release_owned_image(owner, object.raw_image)?;
                 object.raw_image = raw;
-                crate::runtime::trace_detail!(
+                crate::host::trace_detail!(
                     self.resources.diagnostic_trace.as_ref(),
                     NativeDetail,
                     "[img-raw] object={object_name} handle={handle} name={loaded_name:?} raw={raw}"
