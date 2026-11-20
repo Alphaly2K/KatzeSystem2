@@ -94,6 +94,8 @@
 
 Runtime 的普通主体、对象处理器及系统块均已接入。查询按预算逐文件推进，完成后一次写入结果；预算续跑和服务错误保留参数、当前选择及已完成文件，重试只重新查询当前失败文件。续跑保留所属轮的时刻、主流程等待及处理器位置。实际需要查询时未提供存档服务或未实现 `modified_time` 均返回诊断；空区间不需要文件服务。每条新命令重新查询指定范围，不跨命令缓存文件时间。
 
+`sortsave destination first last` 在 `last > first` 时排序闭区间内的槽号；`sortsave2 destination slot [slot ...]` 按参数顺序收集显式槽号，保留负数及重复项。两条命令均使用同一存档目录和文件名规则。缺失文件按零时间参与排序；时间降序按完整无符号 64 位比较。等时项沿用原入口的中点分区顺序。结果从 `destination` 开始连续写入共享变量，跳过越界写入。预算续跑和服务错误保留已求值的参数和已完成的时间查询，全部完成后才写回。每次排序最多接受 16,384 个槽号。
+
 ## FES 文件校验与写入
 
 `saveexist slot destination [lower [upper]]` 通过所属任务的存档服务读取 `save%04d.dat`。负槽号的形式为 `saveexist slot filename destination [lower [upper]]`，其中 filename 为原始名称，不作为数值表达式求值。

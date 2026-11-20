@@ -213,6 +213,40 @@ fn times(entries: &[(i32, u64)]) -> BTreeMap<Vec<u8>, u64> {
 }
 
 #[test]
+fn save_sort_keeps_the_original_tie_order_after_a_failed_time_query() {
+    for budget in [1, 4096] {
+        let mut runtime = runtime(budget);
+        runtime.numbers_mut().shared[4..12].fill(99);
+        let files = Rc::new(RefCell::new(Files {
+            times: times(&[(-1, 0), (0, 3), (1, 3), (2, u64::MAX)]),
+            fail: Some(b"save0001.dat".to_vec()),
+            ..Default::default()
+        }));
+        runtime.set_save_services(Saves(files.clone()));
+        let mut scene = new_scene(
+            &runtime,
+            b"#START\nsortsave2 ($0+=1)+3 -1 0 ($1+=1) 2\nsortsave 8 7 10\nwait 99\n",
+        );
+        assert!(update(&mut runtime, &mut scene, 100).is_err());
+        assert_eq!(&runtime.numbers().shared[4..12], &[99; 8]);
+        files.borrow_mut().fail = None;
+        files
+            .borrow_mut()
+            .times
+            .insert(b"save0000.dat".to_vec(), u64::MAX);
+        update(&mut runtime, &mut scene, 900).unwrap();
+        assert_eq!(&runtime.numbers().shared[..2], &[1, 1]);
+        assert_eq!(
+            &runtime.numbers().shared[4..12],
+            &[2, 0, 1, -1, 8, 9, 7, 10]
+        );
+        let queried = [-1, 0, 1, 1, 2, 7, 8, 9, 10]
+            .map(|slot| (77, format!("save{slot:04}.dat").into_bytes()));
+        assert_eq!(files.borrow().calls, queried);
+    }
+}
+
+#[test]
 fn save_queries_preserve_signed_slots_ties_and_parameter_order_in_all_fes_entries() {
     let script = b"#DEFINE\nBASE obj[2]\n#START\nnewsave ($8+=1) ($9+=1)\nnewsave ($0+=1)+3 ($1+=1)-2 ($2+=1)+1 ($3+=1)\nnewsave 10 4 3\nnewsave 11 -4 -3\nwait 99\n#_FES_SLEEP_\nnewsave 6 -3 -2\n$12+=1\n#obj.PUSH_L\nnewsave 7 1 2\n$13=@\n";
     for budget in [1, 4096] {

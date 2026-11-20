@@ -52,6 +52,7 @@ pub struct Scene {
     pub(super) property_call: Option<super::properties::PropertyCall>,
     pub(super) preload: super::preload::Preload,
     save_query: Option<save::SaveQuery>,
+    save_sort: Option<save::SaveSort>,
 }
 
 struct Invocation {
@@ -158,6 +159,7 @@ impl Scene {
             property_call: None,
             preload,
             save_query: None,
+            save_sort: None,
         })
     }
 

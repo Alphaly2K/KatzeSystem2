@@ -253,6 +253,8 @@ exit 0
 
 `newsave destination first last` 扫描含两端的有符号槽号范围，按文件最后修改时间选择最新槽号，写入指定共享变量；无文件或空范围得到 −1。它由运行时消费，不改变当前执行块或等待。名称、参数副作用、时间相同及负槽号的规则见[存档查询](save.md#fes-槽号时间查询)。
 
+`sortsave destination first last` 将有符号闭区间内的槽号按修改时间从新到旧写入连续共享变量；`sortsave2 destination slot [slot ...]` 对显式列出的槽号执行相同操作。缺失文件按零时间参与排序。见[存档查询](save.md#fes-槽号时间查询)。
+
 `saveexist` 读取并校验 CSS 存档及其标签范围，`datasave` 写出持久数据容器。两者同样使用所属任务的存档服务；参数、缺省值与结果见[文件校验与写入](save.md#fes-文件校验与写入)。
 
 ## 执行块与调度
