@@ -58,7 +58,7 @@ BMP 使用正高度、底端物理行和四字节对齐的行跨度；头部文�
 
 `graphics::Surface::new([width, height])` 创建零初始化的 BGRA8 像素缓冲区。`from_bgra(size, pixels)` 接收已有像素的所有权，可使用解码帧的像素；长度必须恰好为宽乘高乘四。几何元数据继续由图像对象保存。
 
-渲染面从上到下存行，左上角为 `(0, 0)`，行跨度为宽乘四。`size()`、`stride()`、`bounds()` 提供布局，`pixels()`／`pixels_mut()` 提供固定长度的像素视图，`pixel(x, y)` 返回原始 ARGB DWORD，越界返回 `None`。任一维为零时允许空渲染面；尺寸必须可由正 i32 坐标表示，单面像素长度最多 128 MiB。该图形分配预算独立于文件读取与解压的 64 MiB 预算。
+渲染面从上到下存行，左上角为 `(0, 0)`，行跨度为宽乘四。`size()`、`stride()`、`bounds()` 提供布局，`pixels()`／`pixels_mut()` 提供固定长度的像素视图，`pixel(x, y)` 返回原始 ARGB DWORD，越界返回 `None`。任一维为零时允许空渲染面；尺寸必须可由正 i32 坐标表示，单面像素长度最多 256 MiB。画布和电影帧各自应用 128 MiB 的像素上限，文件读取与解压应用独立的 64 MiB 预算。
 
 `clear(argb)` 覆盖整个缓冲区。`fill_rect(rect, argb)` 与渲染面边界相交后覆盖区域，返回是否存在非空目标。两者将 ARGB DWORD 按小端写为 BGRA 字节，保留全部位模式，包括 Alpha 为零时的颜色。
 
@@ -99,7 +99,7 @@ BMP 使用正高度、底端物理行和四字节对齐的行跨度；头部文�
 
 `Images::load(owner, names, services)` 接收已经完成 KCS 格式展开的名称列表，按 ASCII 空格拆分并忽略空段；制表符和换行留在名称中，引号没有分组作用。每段解析后经 `ResourceServices::resolve(b"image", name)` 补全，再以 `LooseFirst` 读取完整资源。缺失文件、空文件及缺失帧跳过；结构损坏、未支持编码和资源服务错误返回诊断。
 
-第一个成功解码对象成为目标，后续对象依序通过 `Image::composite` 合成，处理后释放。首图的裁剪尺寸、偏移、画布、基点和帧 ID 始终保留。全部缺失时返回零；成功时分配非零递增句柄。`get`／`get_mut` 查询该对象，失效句柄返回诊断；`release_owner(owner)` 释放该任务持有的全部图像，句柄不复用。每个图像的像素最多 128 MiB，存活图像最多一百万个。
+第一个成功解码对象成为目标，后续对象依序通过 `Image::composite` 合成，处理后释放。首图的裁剪尺寸、偏移、画布、基点和帧 ID 始终保留。全部缺失时返回零；成功时分配非零递增句柄。`get`／`get_mut` 查询该对象，失效句柄返回诊断；`release_owner(owner)` 释放该任务持有的全部图像，句柄不复用。每个图像的像素最多 256 MiB，存活图像最多一百万个。
 
 `Images::default()` 使用独立编号源；与其他资源存储组合时使用 `Images::with_handles(handles)` 共享 `HandleAllocator`。Runtime 已自动共享图像、原始数据、XML 及脚本集合的编号源，各类型查询仍分别检查对象是否存活。
 

@@ -14,6 +14,14 @@ pub struct RenderTarget {
 
 const MAX_CANVAS_BYTES: usize = 128 * 1024 * 1024;
 
+fn canvas_tile_bytes(size: [u32; 2]) -> Result<usize> {
+    let bytes = pixel_length(size)?;
+    if bytes > MAX_CANVAS_BYTES {
+        return Err(Error::new(0, "画布像素存储超过上限"));
+    }
+    Ok(bytes)
+}
+
 impl<'a> FrameCanvas<'a> {
     /// Borrow a software canvas for standalone rendering outside a game session.
     pub fn new(target: &'a mut RenderTarget) -> Self {
@@ -24,6 +32,7 @@ impl<'a> FrameCanvas<'a> {
 impl RenderTarget {
     /// 创建一块零初始化的完整渲染面。
     pub fn new(size: [u32; 2]) -> Result<Self> {
+        canvas_tile_bytes(size)?;
         Self::from_tiles(size, [1, 1], vec![Some(Surface::new(size)?)])
     }
 
@@ -49,7 +58,7 @@ impl RenderTarget {
         if size.iter().any(|&value| value > i32::MAX as u32) {
             return Err(Error::new(0, "画布尺寸超出坐标范围"));
         }
-        pixel_length(tile_size)?;
+        canvas_tile_bytes(tile_size)?;
         let count = (grid[0] as usize)
             .checked_mul(grid[1] as usize)
             .filter(|&n| n <= read::MAX_ITEMS)
@@ -108,7 +117,7 @@ impl RenderTarget {
     /// 按区域补建缺失面块，先处理 16 位行，再处理其余 32 位行。
     /// 保留已有面块、像素及脏标记；区域按有符号回绕端点解释。
     pub fn prepare_tiles(&mut self, areas: &[[u32; 4]], split_row: u32) -> Result<usize> {
-        let bytes = pixel_length(self.tile_size)?;
+        let bytes = canvas_tile_bytes(self.tile_size)?;
         let mut used = self
             .tiles
             .iter()

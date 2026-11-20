@@ -8,7 +8,7 @@ pub struct Surface {
     pixels: Vec<u8>,
 }
 
-const MAX_SURFACE_BYTES: usize = 128 * 1024 * 1024;
+const MAX_SURFACE_BYTES: usize = 256 * 1024 * 1024;
 
 impl Surface {
     pub fn new(size: [u32; 2]) -> Result<Self> {
@@ -96,6 +96,11 @@ pub(crate) fn pixel_length(size: [u32; 2]) -> Result<usize> {
         .checked_mul(4)
         .and_then(|stride| stride.checked_mul(size[1] as usize))
         .filter(|&length| length <= MAX_SURFACE_BYTES)
-        .ok_or_else(|| Error::new(0, "渲染面像素长度超过上限"))?;
+        .ok_or_else(|| {
+            Error::new(
+                0,
+                format!("渲染面 {}×{} 的像素长度超过上限", size[0], size[1]),
+            )
+        })?;
     Ok(length)
 }

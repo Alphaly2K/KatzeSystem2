@@ -57,6 +57,7 @@ impl Player {
         let metadata = decoder.metadata();
         let bytes = pixel_length(metadata.size)?;
         if bytes == 0
+            || bytes > 128 * 1024 * 1024
             || !metadata.frame_rate.is_finite()
             || metadata.frame_rate <= 0.
             || !metadata.duration.is_finite()
