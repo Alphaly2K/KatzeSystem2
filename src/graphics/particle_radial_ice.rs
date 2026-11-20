@@ -1,4 +1,8 @@
-use super::{Transform, particle_curve::Path, particle_plugin::next_c_random};
+use super::{
+    Transform,
+    particle_curve::{Path, falling_points},
+    particle_plugin::next_c_random,
+};
 use crate::kcs::{ParticleHost, ParticleVertex, ScriptRandom, transform_vector};
 use std::sync::{Arc, atomic::AtomicU32};
 
@@ -40,16 +44,6 @@ fn integer(value: f64) -> i32 {
         value as i32
     } else {
         i32::MIN
-    }
-}
-
-fn unit([x, y]: [f32; 2]) -> [f32; 2] {
-    let length = (f64::from(x) * f64::from(x) + f64::from(y) * f64::from(y)) as f32;
-    let length = length.sqrt();
-    if length > 0. {
-        [x / length, y / length]
-    } else {
-        [x, y]
     }
 }
 
@@ -99,41 +93,14 @@ fn spawn(
         trail.sprite.alpha = 0;
     }
 
-    let direction = unit([(next(random) - 0.5) as f32, random.next_float()]);
-    let length = (50. + f64::from(next_c_random(module_random) % 500) / 10.) as f32;
-    let mut point = [
-        x + direction[0] * length,
-        -50. + direction[1] * length,
-        position[2],
-    ];
-    let mut points = vec![position, point];
-    let [dx, dy] = unit([point[0] - x, point[1] - position[1]]).map(f64::from);
-    let angle = (10. * f64::from(std::f32::consts::PI) / 180.) as f32;
-    let (sine, cosine) = f64::from(angle).sin_cos();
-    let (sine, cosine) = (f64::from(sine as f32), f64::from(cosine as f32));
-    let minus = [
-        (dx * cosine + dy * sine) as f32,
-        (dy * cosine - dx * sine) as f32,
-    ];
-    let plus = [
-        (dx * cosine - dy * sine) as f32,
-        (dy * cosine + dx * sine) as f32,
-    ];
-    let span = std::array::from_fn::<_, 2, _>(|i| {
-        let d = minus[i] - plus[i];
-        f64::from(d.powf(2.).sqrt())
-    });
-    for _ in 0..8 {
-        let offset = [next(random), next(random)];
-        let turn = unit(std::array::from_fn(|i| {
-            let drift = (span[i] * offset[i] - span[i] * 0.5) as f32;
-            [dx, dy][i] as f32 + drift
-        }));
-        let length = (50. + f64::from(random.next_integer() % 500) / 10.) as f32;
-        point[0] += turn[0] * length;
-        point[1] += turn[1] * length;
-        points.push(point);
-    }
+    let direction = [(next(random) - 0.5) as f32, random.next_float()];
+    let points = falling_points(
+        position,
+        direction,
+        next_c_random(module_random),
+        10.,
+        random,
+    );
     Particle {
         sprite,
         path: Path::new_extended(points, p[1], 50.),

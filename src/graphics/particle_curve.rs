@@ -1,4 +1,53 @@
-use crate::kcs::ieee_float_operation;
+use crate::kcs::{ScriptRandom, ieee_float_operation};
+
+/// Downward paths share the same eight variations after the first step.
+pub(super) fn falling_points(
+    start: [f32; 3],
+    initial_direction: [f32; 2],
+    first_step: u32,
+    turn_degrees: f64,
+    random: &mut ScriptRandom,
+) -> Vec<[f32; 3]> {
+    let unit = |[x, y]: [f32; 2]| {
+        let length = ((f64::from(x) * f64::from(x) + f64::from(y) * f64::from(y)) as f32).sqrt();
+        if length > 0. {
+            [x / length, y / length]
+        } else {
+            [x, y]
+        }
+    };
+    let direction = unit(initial_direction);
+    let step = |n| (50. + f64::from(n % 500) / 10.) as f32;
+    let first = step(first_step);
+    let mut point = [
+        start[0] + direction[0] * first,
+        start[1] + direction[1] * first,
+        start[2],
+    ];
+    let mut points = vec![start, point];
+    let [dx, dy] = unit([point[0] - start[0], point[1] - start[1]]).map(f64::from);
+    let angle = (turn_degrees * f64::from(std::f32::consts::PI) / 180.) as f32;
+    let (sin, cos) = f64::from(angle).sin_cos();
+    let (sin, cos) = (f64::from(sin as f32), f64::from(cos as f32));
+    let minus = [(dx * cos + dy * sin) as f32, (dy * cos - dx * sin) as f32];
+    let plus = [(dx * cos - dy * sin) as f32, (dy * cos + dx * sin) as f32];
+    let span = std::array::from_fn::<_, 2, _>(|i| {
+        let d = minus[i] - plus[i];
+        f64::from(d.powf(2.).sqrt())
+    });
+    for _ in 0..8 {
+        let offset = [random.next_float(), random.next_float()].map(f64::from);
+        let turn = unit(std::array::from_fn(|i| {
+            let drift = (span[i] * offset[i] - span[i] * 0.5) as f32;
+            [dx, dy][i] as f32 + drift
+        }));
+        let length = step(random.next_integer());
+        point[0] += turn[0] * length;
+        point[1] += turn[1] * length;
+        points.push(point);
+    }
+    points
+}
 
 fn length(vector: [f32; 3]) -> f32 {
     let squares = vector.map(|n| n * n);
@@ -188,11 +237,11 @@ pub(super) struct Path {
 
 impl Path {
     pub(super) fn new(points: Vec<[f32; 3]>, duration: f32, strength: f32) -> Self {
-        Self::with_rounding(points, duration, strength, false, false)
+        Self::with_rounding(points, duration, false, |_| strength)
     }
 
     pub(super) fn new_extended(points: Vec<[f32; 3]>, duration: f32, strength: f32) -> Self {
-        Self::with_rounding(points, duration, strength, true, false)
+        Self::with_rounding(points, duration, true, |_| strength)
     }
 
     pub(super) fn new_extended_relative(
@@ -200,15 +249,18 @@ impl Path {
         duration: f32,
         strength: f32,
     ) -> Self {
-        Self::with_rounding(points, duration, strength, true, true)
+        Self::with_rounding(points, duration, true, |total| total * strength)
+    }
+
+    pub(super) fn new_extended_divided(points: Vec<[f32; 3]>, duration: f32, divisor: f32) -> Self {
+        Self::with_rounding(points, duration, true, |total| total / divisor)
     }
 
     fn with_rounding(
         points: Vec<[f32; 3]>,
         duration: f32,
-        strength: f32,
         extended_intermediates: bool,
-        relative_strength: bool,
+        strength: impl FnOnce(f32) -> f32,
     ) -> Self {
         let lengths: Vec<_> = std::iter::once(0.)
             .chain(points.windows(2).map(|p| {
@@ -223,11 +275,7 @@ impl Path {
             }))
             .collect();
         let total = lengths.iter().copied().fold(0., |a, b| a + b);
-        let strength = if relative_strength {
-            total * strength
-        } else {
-            strength
-        };
+        let strength = strength(total);
         let tangents = (0..points.len())
             .map(|i| {
                 if duration == 0. {

@@ -82,6 +82,7 @@ mod particle_energy;
 mod particle_erase;
 mod particle_exclamation;
 mod particle_explosion;
+mod particle_fall_spark;
 mod particle_film_noise;
 mod particle_flower_burst;
 mod particle_glint;

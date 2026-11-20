@@ -2291,6 +2291,46 @@ fn radial_ice_admits_grouped_trails_and_clears_them_before_the_flash() -> Result
 }
 
 #[test]
+fn fall_spark_reuses_its_trail_during_zero_delta_updates() -> Result<()> {
+    let mut runtime = runtime_with_count(plugin(b"fall_spark.ppi"), 3)?;
+    runtime.update(1, 1)?;
+    let mut parameters = [0; 128];
+    for (slot, value) in parameters
+        .chunks_exact_mut(4)
+        .zip([2f32, 100., 100., 60., 1.])
+    {
+        slot.copy_from_slice(&value.to_le_bytes());
+    }
+    runtime.dispatch_command_with_buffers(
+        2,
+        command(325),
+        &mut CommandBuffers {
+            data1: Some(&mut parameters),
+            ..Default::default()
+        },
+    )?;
+    runtime.dispatch_command(2, command(321))?;
+    let alpha = |runtime: &Runtime<GraphicsFactory<KcsFactory<Programs>>>, index| {
+        runtime
+            .drawables()
+            .get(1)
+            .unwrap()
+            .particle_mesh()
+            .unwrap()
+            .projected_quad(index, &Projection::default())
+            .unwrap()[0]
+            .color
+            >> 24
+    };
+    for expected in [100, 96, 93, 90, 86, 0, 100] {
+        runtime.update(2, 1)?;
+        assert_eq!(alpha(&runtime, 0), 190);
+        assert_eq!(alpha(&runtime, 1), expected);
+    }
+    Ok(())
+}
+
+#[test]
 fn scene_light_rises_on_zero_delta_and_respawns_after_fading() -> Result<()> {
     let mut runtime = runtime_with_count(plugin(b"a_light.ppi"), 1)?;
     runtime.update(1, 1)?;

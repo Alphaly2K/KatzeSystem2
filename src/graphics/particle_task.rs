@@ -2,6 +2,7 @@ use super::particle_arrow::Arrow;
 use super::particle_assault::Assault;
 use super::particle_burst::Burst;
 use super::particle_erase::Erase;
+use super::particle_fall_spark::FallSpark;
 use super::particle_radial_ice::RadialIce;
 use super::particle_rolling::Rolling;
 use super::particle_round::{Round, Variant as RoundVariant};
@@ -75,6 +76,7 @@ enum Effect {
     Sakura(Sakura),
     Ice(Ice),
     RadialIce(RadialIce),
+    FallSpark(FallSpark),
     SceneIce(SceneIce),
     Photon(Photon),
     SceneLight(SceneLight),
@@ -161,6 +163,9 @@ impl Effect {
             particle_plugin::Kind::Ice => Self::Ice(Ice::new(host, image, random)),
             particle_plugin::Kind::RadialIce => {
                 Self::RadialIce(RadialIce::new(host, image, random, module_state))
+            }
+            particle_plugin::Kind::FallSpark => {
+                Self::FallSpark(FallSpark::new(host, image, random, module_state))
             }
             particle_plugin::Kind::SceneIce => Self::SceneIce(SceneIce::new(host, image, random)),
             particle_plugin::Kind::Photon => Self::Photon(Photon::new(host, image, random)),
@@ -327,6 +332,7 @@ impl ParticleRunner {
                     Some(Effect::Sakura(effect)) => effect.write_mesh(host),
                     Some(Effect::Ice(effect)) => effect.write_mesh(host),
                     Some(Effect::RadialIce(effect)) => effect.write_mesh(host),
+                    Some(Effect::FallSpark(effect)) => effect.write_mesh(host),
                     Some(Effect::SceneIce(effect)) => effect.write_mesh(host),
                     Some(Effect::Photon(effect)) => effect.write_mesh(host),
                     Some(Effect::SceneLight(effect)) => effect.write_mesh(host),
@@ -622,6 +628,10 @@ impl ParticleRunner {
                                 &host.parameters,
                                 services.random().unwrap_or(&mut host.random),
                             );
+                            effect.write_mesh(host);
+                        }
+                        Effect::FallSpark(effect) => {
+                            effect.update(delta, services.random().unwrap_or(&mut host.random));
                             effect.write_mesh(host);
                         }
                         Effect::SceneIce(effect) => {
