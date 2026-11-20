@@ -1,5 +1,6 @@
 use super::{ObjectAttributes, SubcommandContext};
 use crate::{Error, Result};
+use std::collections::BTreeMap;
 
 /// SOUND 的声明属性及运动状态；文件请求由媒体更新阶段消费。
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -25,6 +26,8 @@ pub struct SoundState {
     pub(crate) channel_result: u32,
     pub(crate) media_refresh: bool,
     pub(crate) started_tick: u32,
+    pub(crate) tags_requested: bool,
+    pub(crate) tags: BTreeMap<Vec<u8>, u32>,
     // false 等待进入处理器，true 保留已进入处理器的续跑位置。
     pub(crate) play_handler: Option<bool>,
 }
@@ -51,6 +54,8 @@ impl Default for SoundState {
             channel_result: 0,
             media_refresh: false,
             started_tick: u32::MAX,
+            tags_requested: false,
+            tags: BTreeMap::new(),
             play_handler: None,
         }
     }

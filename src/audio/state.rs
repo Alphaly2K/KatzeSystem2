@@ -432,10 +432,15 @@ impl SoundState {
                 .find_map(|sound| sound.tags.get(name).copied())
                 .unwrap_or(0)
         } else {
-            self.property_channel(channel)
-                .and_then(|index| self.channels[index].tags.get(name).copied())
+            self.channel_tags(channel)
+                .and_then(|tags| tags.get(name).copied())
                 .unwrap_or(0)
         }
+    }
+
+    pub(crate) fn channel_tags(&self, channel: u32) -> Option<&BTreeMap<Vec<u8>, u32>> {
+        self.property_channel(channel)
+            .map(|index| &self.channels[index].tags)
     }
 
     pub(super) fn is_playing(&self, channel: u32) -> bool {

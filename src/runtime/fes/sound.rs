@@ -219,6 +219,7 @@ impl<F: ObjectFactory> Store<'_, F> {
             sound.load_requested = false;
             sound.media_refresh = true;
         }
+        self.update_fes_sound_tags(owner, objects, handle)?;
         let ObjectState::Sound(sound) = &mut objects.get_mut(handle).unwrap().state else {
             unreachable!()
         };
@@ -451,6 +452,99 @@ impl<F: ObjectFactory> Store<'_, F> {
                 external: None,
             },
         )
+    }
+
+    fn update_fes_sound_tags(
+        &mut self,
+        owner: u32,
+        objects: &mut Objects,
+        handle: u32,
+    ) -> Result<()> {
+        let ObjectState::Sound(sound) = &objects.get(handle).unwrap().state else {
+            unreachable!()
+        };
+        if !sound.tags_requested {
+            return Ok(());
+        }
+        let channel = sound.channel as u32;
+        let tags = if channel < 64 {
+            let task = self.fes_sound_task(owner, objects)?;
+            self.objects
+                .get(&task)
+                .filter(|task| task.audio_enabled() && task.control().deletion_requested == 0)
+                .and_then(|task| task.audio_state())
+                .and_then(|audio| audio.channel_tags(channel))
+        } else {
+            None
+        };
+        let ObjectState::Sound(sound) = &mut objects.get_mut(handle).unwrap().state else {
+            unreachable!()
+        };
+        if let Some(tags) = tags {
+            sound.tags.clone_from(tags);
+        }
+        sound.tags_requested = false;
+        Ok(())
+    }
+
+    pub(super) fn fes_sound_tag_command(
+        &mut self,
+        scene: &mut Scene,
+        args: &[Vec<u8>],
+        offset: usize,
+    ) -> Result<Option<u32>> {
+        if args.get(1).is_none_or(|name| name != b"sndtag") {
+            return Ok(None);
+        }
+        let target = scene
+            .interpreter
+            .command_object_reference(&args[0], self.numbers)?;
+        match args.get(2).map(Vec::as_slice) {
+            Some(b"init") => {
+                let banks = if target.bank == -1 {
+                    0..i64::from(scene.objects.count(&target.name) as i32)
+                } else {
+                    i64::from(target.bank)..i64::from(target.bank) + 1
+                };
+                for bank in banks {
+                    if let Some(handle) = scene.objects.lookup(&target.name, bank as i32) {
+                        if let ObjectState::Sound(sound) =
+                            &mut scene.objects.get_mut(handle).unwrap().state
+                        {
+                            sound.tags_requested = true;
+                        }
+                    }
+                }
+            }
+            Some(op @ (b"wait" | b"remain")) if target.bank != -1 => {
+                let Some(name) = args.get(3) else {
+                    return Ok(Some(0));
+                };
+                let frames = scene
+                    .objects
+                    .lookup(&target.name, target.bank)
+                    .and_then(|handle| match &scene.objects.get(handle).unwrap().state {
+                        ObjectState::Sound(sound) => sound.tags.get(name.as_slice()).map(|cue| {
+                            let elapsed = self.host.system_time_ms.wrapping_sub(sound.started_tick);
+                            cue.saturating_sub(elapsed).wrapping_mul(60) / 1000
+                        }),
+                        _ => None,
+                    })
+                    .unwrap_or(0);
+                if op == b"wait" {
+                    return Ok(Some(frames));
+                }
+                if let Some(output) = args.get(4) {
+                    let output = scene.interpreter.eval(output, self.numbers)?;
+                    if let Some(slot) = self.numbers.shared.get_mut(output as usize) {
+                        *slot = frames as i32;
+                    }
+                }
+            }
+            None | Some(b"wait" | b"remain") => (),
+            _ => return Err(Error::new(offset, "FES 此声音 TAG 命令尚未接入")),
+        }
+        Ok(Some(0))
     }
 
     pub(super) fn fes_sound_command(

@@ -1240,6 +1240,14 @@ impl<F: ObjectFactory> Store<'_, F> {
                         }
                         scene.deferred_decodes += 1;
                         scene.interpreter.finish_event_handler()?;
+                    } else if let Some(frames) =
+                        self.fes_sound_tag_command(scene, &args, line.offset)?
+                    {
+                        if frames == 0 {
+                            scene.interpreter.resume();
+                        } else {
+                            scene.interpreter.finish_event_handler()?;
+                        }
                     } else if scene
                         .wait_command(&args, line.offset, 0, self.numbers)?
                         .is_some()
@@ -1753,9 +1761,18 @@ impl<F: ObjectFactory> Store<'_, F> {
                                 scene.begin_updates(true);
                                 continue;
                             }
-                            if let Some(deadline) =
-                                scene.wait_command(&args, line.offset, now, self.numbers)?
-                            {
+                            let deadline =
+                                match self.fes_sound_tag_command(scene, &args, line.offset)? {
+                                    Some(0) => {
+                                        scene.interpreter.resume();
+                                        continue;
+                                    }
+                                    Some(frames) => Some(now.wrapping_add(frames)),
+                                    None => {
+                                        scene.wait_command(&args, line.offset, now, self.numbers)?
+                                    }
+                                };
+                            if let Some(deadline) = deadline {
                                 scene.deadline = Some(deadline);
                                 scene.publish_notifications();
                                 scene.finish_input();

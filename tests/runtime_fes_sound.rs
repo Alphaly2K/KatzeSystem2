@@ -1,12 +1,14 @@
 use katze_system2::{
     Error, HandleAllocator, Result,
-    audio::{SoundConfig, SoundPart},
+    audio::{SoundConfig, SoundFactory, SoundPart},
     expression::State,
     fes::{
         self, ObjectAttributes, ObjectDefinition, ObjectInitialization, ObjectReference, Program,
         SoundState,
     },
+    host::ResourceServices,
     kcs::{MotionHost, Program as MotionProgram, ScriptRandom},
+    resource::ResourceMode,
     runtime::{
         BaseObject, ObjectFactory, Runtime, TaskObject,
         fes::{ObjectState, Objects, Scene},
@@ -405,6 +407,91 @@ struct Reject;
 impl ObjectFactory for Reject {
     fn create(&mut self, _: u32, _: u32, _: &[u8]) -> Result<Box<dyn TaskObject>> {
         Err(Error::new(0, "合成工厂没有该类型"))
+    }
+}
+
+#[test]
+fn sound_tags_snapshot_loaded_channel_and_wait_on_system_time_without_pcm() {
+    struct Tags;
+    impl ResourceServices for Tags {
+        fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+            Ok([category, b"/", name].concat())
+        }
+
+        fn read(&mut self, name: &[u8], _: ResourceMode) -> Result<Option<Vec<u8>>> {
+            let cue: u32 = match name {
+                b"tag/first" => 1000,
+                b"tag/second" => 300,
+                _ => return Ok(None),
+            };
+            let mut record = vec![0; 24];
+            record[..3].copy_from_slice(b"cue");
+            record[20..].copy_from_slice(&cue.to_le_bytes());
+            Ok(Some(record))
+        }
+    }
+
+    let source = b"#DEFINE
+SOUND sound
+#OBJECT CHANNEL
+sound 5
+#START
+sound load first
+sound sndtag init
+sound sndtag remain cue 0
+sound play 1 1 1
+wait 1
+sound sndtag remain cue 1
+sound load second 1
+wait 1
+sound sndtag remain cue 2
+sound sndtag init
+wait 1
+sound sndtag remain cue 3
+sound sndtag remain absent 4
+sound sndtag wait cue
+$5=1
+wait 1000
+";
+    for budget in [1, 4096] {
+        let mut runtime = Runtime::new(
+            0,
+            kind::ROOT,
+            Box::new(BaseObject::new()),
+            State::new(6),
+            SoundFactory {
+                enabled: true,
+                fallback: Reject,
+            },
+        );
+        runtime.set_budget(budget, 10000);
+        runtime.set_resources(Tags);
+        runtime.host_mut().sound_config_enabled = 1;
+        runtime.host_mut().sound_config = Some(SoundConfig {
+            master_volume: Some(100),
+            ..SoundConfig::default()
+        });
+        runtime.numbers_mut().shared[..5].fill(-1);
+        let task = runtime.create(0, kind::SOUND, b"sound", b"").unwrap();
+        let mut scene = Scene::new(
+            Program::from_text(source).unwrap(),
+            runtime.host().handle_allocator(),
+        )
+        .unwrap();
+        scene.objects_mut().unwrap().set_sound_task(task);
+        for (now, ms, expected) in [
+            (100, 1000, [0, -1, -1, -1, -1, 0]),
+            (101, 1053, [0, 56, -1, -1, -1, 0]),
+            (102, 1100, [0, 56, 54, -1, -1, 0]),
+            (103, 1151, [0, 56, 54, 8, 0, 0]),
+            (110, 1268, [0, 56, 54, 8, 0, 0]),
+            (111, 1285, [0, 56, 54, 8, 0, 1]),
+        ] {
+            runtime.host_mut().system_time_ms = ms;
+            let done = (0..128).any(|_| runtime.update_fes_scene(0, &mut scene, now).unwrap());
+            assert!(done);
+            assert_eq!(&runtime.numbers().shared[..6], &expected, "tick {now}");
+        }
     }
 }
 
