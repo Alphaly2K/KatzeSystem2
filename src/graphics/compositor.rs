@@ -1,4 +1,5 @@
-use super::{DrawList, Drawables, DrawingContext, Projection, RenderTarget, TextureFilter};
+use super::{Drawables, DrawingContext, Projection, RenderTarget};
+use crate::host::graphics::{DrawList, TextureFilter};
 use crate::{Error, Result};
 
 #[derive(Clone, Copy)]

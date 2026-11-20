@@ -1,12 +1,14 @@
 //! Frame presentation data and synchronous rendering for script readback.
 
 mod capture;
+mod commands;
 pub use capture::SequenceCapture;
-
-pub use crate::graphics::{
-    DrawCommand, DrawList, FrameTexture, FrameTriangle, ProjectedVertex, Rect, Surface,
-    TextureAddress, TextureFilter, TextureSource,
+pub use commands::{
+    DrawCommand, DrawList, FrameTexture, FrameTriangle, TextureAddress, TextureFilter,
+    TextureSource,
 };
+
+pub use crate::graphics::{ProjectedVertex, Rect, Surface};
 use crate::{Result, graphics::RenderTarget};
 
 /// Read-only canvas textures with an explicit upload acknowledgement. A host

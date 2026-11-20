@@ -16,13 +16,13 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 |:--|:--|
 |`host::resources`|`ResourceServices`、资源类别、读取模式与缓存|
 |`host::storage`|`ReadSource`、`SharedSource` 及脚本文件、存档、配置和导出服务|
-|`host::graphics`|`DrawList`、`FrameCanvas`、`GraphicsBackend`、`SequenceCapture` 与像素格式|
+|`host::graphics`|`DrawList`、`DrawCommand`、`FrameTexture`、`FrameCanvas`、`GraphicsBackend`、`SequenceCapture` 与像素格式|
 |`host::audio`、`host::movie`|`Mixer`、`Pcm`、语音合成及电影解码契约|
 |`host::input`、`host::font`|输入事件、按键绑定与字体服务|
 |`host::platform`、`host::effect`|窗口、剪贴板、平台任务及外部效果播放器|
 |`host::diagnostics`|脚本位置、调试消息、native 跟踪及问答调试面板|
 
-可选的软件绘制器及其输出目标从 `graphics` 导入，MPEG 解码器从 `movie` 导入。任务树、原始命令编号、VM 缓冲区和分派表在底层 `runtime` 接口中供诊断和工具使用。Rust 契约稳定且有非 Rust 宿主接入时，再定义独立版本的 C ABI 和显式释放约定。
+可选的软件绘制器及其输出目标从 `graphics` 导入，MPEG 解码器从 `movie` 导入。绘制命令原有的 `graphics` 导入路径仍然可用。任务树、原始命令编号、VM 缓冲区和分派表在底层 `runtime` 接口中供诊断和工具使用。Rust 契约稳定且有非 Rust 宿主接入时，再定义独立版本的 C ABI 和显式释放约定。
 
 标准宿主用 `GameSetup::new(shared_slots, external_bytes)` 创建根任务和清零后的脚本存储。前者按 32 位值计数，后者按字节计数。启动前可将启动文档、游戏默认值及用户设置的 XML 字节交给 `configure_startup`，由它应用引擎与平台配置并返回游戏逻辑尺寸；配置无效时保留原有状态。绑定输入、资源和需要的其他服务，调用 `configure_canvas` 设置非零的逻辑输出尺寸并按游戏配置创建画布，再把启动配置中的脚本名称交给 `start_game(entry)`。该方法消费 `GameSetup`，并在创建任务前检查资源、输入和画布。成功后返回 `GameRuntime`，宿主可用它推进帧、呈现和拉取 PCM。宿主可先调用 `validate_startup` 检查这些条件；该检查不会访问宿主服务或装载脚本。两个方法使用 `session::StartupError` 分别报告缺少的服务；任务创建或入口装载失败由 `StartTasks` 携带原始诊断。
 

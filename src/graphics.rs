@@ -124,16 +124,16 @@ mod particle_sword_spark;
 mod particle_thunder;
 mod particle_warukira;
 pub(crate) use particle_task::refresh_particle_source;
-mod raster;
-pub use raster::TextureFilter;
 mod frame;
-pub use frame::{
-    DrawCommand, DrawList, FrameTexture, FrameTriangle, TextureAddress, TextureSource,
+mod raster;
+pub use crate::host::graphics::{
+    DrawCommand, DrawList, FrameTexture, FrameTriangle, TextureAddress, TextureFilter,
+    TextureSource,
 };
 mod compositor;
 pub use compositor::Compositor;
 mod software;
-pub use crate::host::{FrameCanvas, GraphicsBackend};
+pub use crate::host::graphics::{FrameCanvas, GraphicsBackend};
 pub use software::SoftwareBackend;
 pub(crate) mod resample;
 

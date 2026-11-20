@@ -1,8 +1,33 @@
-use super::{DrawList, RenderTarget, Surface};
+use super::{RenderTarget, raster};
 use crate::{
     Result,
-    host::{FrameCanvas, GraphicsBackend},
+    host::graphics::{DrawList, FrameCanvas, GraphicsBackend, Surface},
 };
+
+impl DrawList {
+    /// Draw over an existing software target without clearing it. A source
+    /// canvas is required only for commands referencing canvas tiles.
+    pub fn render_into(
+        &self,
+        output: &mut RenderTarget,
+        canvas: Option<&RenderTarget>,
+    ) -> Result<bool> {
+        self.render_at(output, canvas, [0; 2])
+    }
+
+    fn render_at(
+        &self,
+        output: &mut RenderTarget,
+        canvas: Option<&RenderTarget>,
+        origin: [u32; 2],
+    ) -> Result<bool> {
+        let mut touched = false;
+        for command in &self.commands {
+            touched |= raster::draw_command(output, canvas, command, self.filter, origin)?;
+        }
+        Ok(touched)
+    }
+}
 
 /// 不访问窗口或设备的软件图形后端。
 #[derive(Default)]

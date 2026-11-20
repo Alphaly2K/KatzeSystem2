@@ -1,12 +1,5 @@
-use super::{Drawables, ProjectedVertex, Projection, Rect, Surface, TextureAddress};
+use super::{Drawables, ProjectedVertex, Projection, Rect, Surface, TextureAddress, TextureFilter};
 use crate::{Error, Result};
-
-/// 单级纹理过滤。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TextureFilter {
-    Point,
-    Linear,
-}
 
 #[derive(Clone, Copy, Default)]
 pub(super) struct RasterState {
