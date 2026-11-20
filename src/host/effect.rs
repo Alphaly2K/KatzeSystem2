@@ -2,9 +2,29 @@
 
 use crate::Result;
 
-/// Creates a player for each scripted effect task. The host advances and renders it.
+mod particle;
+pub use particle::{
+    ParticleContext, ParticleFrame, ParticlePlayer, ParticleSource, ParticleVertex,
+};
+
+/// Supplies implementations for external effect formats used by the game.
 pub trait EffectServices {
-    fn create_player(&mut self, task_id: u32) -> Result<Option<Box<dyn EffectPlayer>>>;
+    /// Create a player for a scripted effect task. The host advances and renders it.
+    fn create_player(&mut self, _task_id: u32) -> Result<Option<Box<dyn EffectPlayer>>> {
+        Ok(None)
+    }
+
+    /// Open a particle plugin that the runtime does not recognize. The name and
+    /// bytes come from the configured resource service. Return `None` if the
+    /// plugin is unsupported. The runtime never executes the supplied bytes.
+    fn open_particle(
+        &mut self,
+        _task_id: u32,
+        _name: &[u8],
+        _bytes: &[u8],
+    ) -> Result<Option<Box<dyn ParticlePlayer>>> {
+        Ok(None)
+    }
 }
 
 /// One task's effect asset and instances. Instances retain their asset independently.

@@ -30,6 +30,7 @@ use super::{
     particle_steam::Steam, particle_surprise::Surprise, particle_sweat::Sweat,
     particle_sword_spark::SwordSpark, particle_thunder::Thunder, particle_warukira::Warukira,
 };
+use crate::host::effect::{ParticleContext, ParticleFrame, ParticlePlayer};
 use crate::kcs::{
     Host, Interpreter, ParticleHost, ParticleSource, ParticleTask, Program, ScriptRandom,
 };
@@ -42,6 +43,7 @@ use std::sync::{Arc, atomic::AtomicU32};
 enum ParticleProgram {
     Script(Program),
     Builtin(particle_plugin::Kind),
+    External(Box<dyn ParticlePlayer>),
 }
 
 enum Effect {
@@ -259,6 +261,12 @@ pub(crate) fn refresh_particle_source(particles: &mut ParticleHost, drawings: &s
 
 enum ParticleRunner {
     Script(Box<ParticleTask>),
+    External {
+        player: Box<dyn ParticlePlayer>,
+        host: Box<ParticleHost>,
+        texture_size: [f32; 2],
+        previous_tick: Option<u32>,
+    },
     Builtin {
         kind: particle_plugin::Kind,
         host: Box<ParticleHost>,
@@ -284,14 +292,14 @@ impl ParticleRunner {
     fn host(&self) -> &ParticleHost {
         match self {
             Self::Script(task) => &task.host,
-            Self::Builtin { host, .. } => host,
+            Self::Builtin { host, .. } | Self::External { host, .. } => host,
         }
     }
 
     fn host_mut(&mut self) -> &mut ParticleHost {
         match self {
             Self::Script(task) => &mut task.host,
-            Self::Builtin { host, .. } => host,
+            Self::Builtin { host, .. } | Self::External { host, .. } => host,
         }
     }
 
@@ -301,6 +309,22 @@ impl ParticleRunner {
         particles.active = false;
         match self {
             Self::Script(task) => task.origin = 0,
+            Self::External {
+                player,
+                host,
+                texture_size,
+                previous_tick,
+            } => {
+                *previous_tick = None;
+                host.elapsed = 0;
+                prepare_external_frame(host, services)?;
+                host.active = true;
+                let (context, frame) = external_frame(host, *texture_size, 0);
+                if let Err(error) = player.start(context, frame) {
+                    host.active = false;
+                    return Err(error);
+                }
+            }
             Self::Builtin {
                 kind,
                 host,
@@ -395,6 +419,25 @@ impl ParticleRunner {
     fn update(&mut self, services: &mut dyn Host, now: u32, budget: usize) -> Result<bool> {
         match self {
             Self::Script(task) => services.update_particle(task, now, budget),
+            Self::External {
+                player,
+                host,
+                texture_size,
+                previous_tick,
+            } => {
+                if !host.active {
+                    return Ok(true);
+                }
+                prepare_external_frame(host, services)?;
+                let delta = previous_tick.map_or(1, |previous| now.wrapping_sub(previous));
+                if previous_tick.is_some() {
+                    host.elapsed = host.elapsed.wrapping_add(delta);
+                }
+                *previous_tick = Some(now);
+                let (context, frame) = external_frame(host, *texture_size, delta);
+                player.advance(context, frame)?;
+                Ok(true)
+            }
             Self::Builtin {
                 host,
                 effect,
@@ -754,6 +797,61 @@ impl ParticleRunner {
     }
 }
 
+fn prepare_external_frame(particles: &mut ParticleHost, services: &mut dyn Host) -> Result<()> {
+    particles.surface_size = services.surface_size();
+    if particles.object_id == -1 {
+        particles.source = None;
+    } else {
+        refresh_particle_source(
+            particles,
+            services
+                .drawables()
+                .ok_or_else(|| Error::new(0, "宿主未提供粒子来源查询服务"))?,
+        );
+    }
+    Ok(())
+}
+
+fn external_frame(
+    particles: &mut ParticleHost,
+    texture_size: [f32; 2],
+    delta: u32,
+) -> (ParticleContext<'_>, ParticleFrame<'_>) {
+    let context = ParticleContext {
+        parameters: &particles.parameters,
+        surface_size: particles.surface_size,
+        texture_size,
+        depth_offset: particles.depth_offset,
+        camera_depth: particles.camera_depth,
+        source: particles.source,
+        elapsed: particles.elapsed,
+        delta,
+    };
+    let frame = ParticleFrame {
+        quads: &mut particles.quads,
+        offsets: &mut particles.offsets,
+        flags: &mut particles.quad_flags,
+        blend_mode: &mut particles.render_mode,
+        texture_address: &mut particles.texture_address,
+        active: &mut particles.active,
+    };
+    (context, frame)
+}
+
+fn unsupported_plugin(name: &[u8]) -> Error {
+    let filename = name
+        .rsplit(|&byte| matches!(byte, b'/' | b'\\'))
+        .next()
+        .unwrap_or_default();
+    Error::new(
+        0,
+        format!(
+            "粒子插件类型或版本尚未接入：{}",
+            String::from_utf8_lossy(filename)
+        ),
+    )
+}
+
 /// 类型 16 的三维粒子对象，支持 KCS 脚本及已识别的内置效果。
 pub struct Particle3DObject {
     id: u32,
@@ -814,60 +912,59 @@ impl Particle3DObject {
         self.clear(host)?;
         let count = read::u32_at(record, 0x104)? as usize;
         let name = |at| -> Result<&[u8]> { read::zstr(&record[..at + 128], at) };
-        let (program, image) = {
-            let services = host
-                .resource_services()
-                .ok_or_else(|| Error::new(0, "宿主未提供粒子资源服务"))?;
-            let read_mode = if mode == 1 {
-                ResourceMode::File
-            } else {
-                ResourceMode::LooseFirst
-            };
-            let program_name = name(4)?;
-            let Some(bytes) = services.read(program_name, read_mode)? else {
-                return Ok(());
-            };
-            let program = if mode == 1 {
-                ParticleProgram::Builtin(particle_plugin::identify(&bytes).ok_or_else(|| {
-                    let filename = program_name
-                        .rsplit(|&b| matches!(b, b'/' | b'\\'))
-                        .next()
-                        .unwrap_or_default();
-                    Error::new(
-                        0,
-                        format!(
-                            "粒子插件类型或版本尚未接入：{}",
-                            String::from_utf8_lossy(filename)
-                        ),
+        let read_mode = if mode == 1 {
+            ResourceMode::File
+        } else {
+            ResourceMode::LooseFirst
+        };
+        let program_name = name(4)?;
+        let Some(bytes) = host
+            .resource_services()
+            .ok_or_else(|| Error::new(0, "宿主未提供粒子资源服务"))?
+            .read(program_name, read_mode)?
+        else {
+            return Ok(());
+        };
+        let program = if mode == 1 {
+            match particle_plugin::identify(&bytes) {
+                Some(kind) => ParticleProgram::Builtin(kind),
+                None => {
+                    let Some(services) = host.effect_services() else {
+                        return Err(unsupported_plugin(program_name));
+                    };
+                    ParticleProgram::External(
+                        services
+                            .open_particle(self.id, program_name, &bytes)?
+                            .ok_or_else(|| unsupported_plugin(program_name))?,
                     )
-                })?)
-            } else {
-                ParticleProgram::Script(Program::parse(&bytes)?)
-            };
-            if matches!(
-                &program,
-                ParticleProgram::Builtin(particle_plugin::Kind::Silent)
-            ) && !(1..=4).contains(&count)
-            {
-                return Err(Error::new(0, "静默标记需要一个主体及至多三个附加点"));
+                }
             }
-            if matches!(
-                &program,
-                ParticleProgram::Builtin(particle_plugin::Kind::SceneSuzu)
-            ) && count > 4
-            {
-                return Err(Error::new(0, "场景图集最多支持四个网格"));
-            }
-            let image = if without_draw || name(0x84)?.is_empty() {
-                None
-            } else {
-                services
-                    .read(name(0x84)?, ResourceMode::LooseFirst)?
-                    .map(|bytes| crate::hg3::decode_frame(&bytes, 0))
-                    .transpose()?
-                    .flatten()
-            };
-            (program, image)
+        } else {
+            ParticleProgram::Script(Program::parse(&bytes)?)
+        };
+        if matches!(
+            &program,
+            ParticleProgram::Builtin(particle_plugin::Kind::Silent)
+        ) && !(1..=4).contains(&count)
+        {
+            return Err(Error::new(0, "静默标记需要一个主体及至多三个附加点"));
+        }
+        if matches!(
+            &program,
+            ParticleProgram::Builtin(particle_plugin::Kind::SceneSuzu)
+        ) && count > 4
+        {
+            return Err(Error::new(0, "场景图集最多支持四个网格"));
+        }
+        let image = if without_draw || name(0x84)?.is_empty() {
+            None
+        } else {
+            host.resource_services()
+                .ok_or_else(|| Error::new(0, "宿主未提供粒子资源服务"))?
+                .read(name(0x84)?, ResourceMode::LooseFirst)?
+                .map(|bytes| crate::hg3::decode_frame(&bytes, 0))
+                .transpose()?
+                .flatten()
         };
         self.parameters = std::array::from_fn(|i| {
             u32::from_le_bytes(record[0x10c + i * 4..0x110 + i * 4].try_into().unwrap())
@@ -902,6 +999,12 @@ impl Particle3DObject {
             ParticleProgram::Script(program) => {
                 ParticleRunner::Script(Box::new(ParticleTask::new(program, particles)?))
             }
+            ParticleProgram::External(player) => ParticleRunner::External {
+                player,
+                host: Box::new(particles),
+                texture_size: self.image_size,
+                previous_tick: None,
+            },
             ParticleProgram::Builtin(kind) => ParticleRunner::Builtin {
                 kind,
                 host: Box::new(particles),

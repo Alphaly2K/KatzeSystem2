@@ -425,3 +425,152 @@ fn particle_scripts_query_source_color_position_and_base_with_missing_source_ret
     );
     Ok(())
 }
+
+#[test]
+fn external_particle_controls_mesh_and_wait_through_the_runtime() -> Result<()> {
+    use katze_system2::host::effect::{
+        EffectServices, ParticleContext, ParticleFrame, ParticlePlayer,
+    };
+    use std::{cell::RefCell, rc::Rc};
+
+    #[derive(Debug, PartialEq)]
+    enum Event {
+        Open,
+        Start,
+        Advance(u32, u32),
+        Drop,
+    }
+
+    struct HostEffect(Rc<RefCell<Vec<Event>>>);
+    struct Player(Rc<RefCell<Vec<Event>>>);
+
+    impl EffectServices for HostEffect {
+        fn open_particle(
+            &mut self,
+            task_id: u32,
+            name: &[u8],
+            bytes: &[u8],
+        ) -> Result<Option<Box<dyn ParticlePlayer>>> {
+            assert_eq!(task_id, 1);
+            assert_eq!(name, b"file/test");
+            assert_eq!(bytes, b"synthetic particle plugin");
+            self.0.borrow_mut().push(Event::Open);
+            Ok(Some(Box::new(Player(self.0.clone()))))
+        }
+    }
+    impl ParticlePlayer for Player {
+        fn start(&mut self, context: ParticleContext<'_>, frame: ParticleFrame<'_>) -> Result<()> {
+            assert_eq!(context.surface_size, [320, 180]);
+            assert_eq!(context.texture_size, [256.; 2]);
+            assert_eq!(context.parameters[0], 123);
+            assert_eq!(context.source.unwrap().position_2d, [12., 34.]);
+            assert_eq!(frame.quads[0][0].color, u32::MAX);
+            frame.quads[0][0].color = 0xff00_ffff;
+            self.0.borrow_mut().push(Event::Start);
+            Ok(())
+        }
+        fn advance(
+            &mut self,
+            context: ParticleContext<'_>,
+            frame: ParticleFrame<'_>,
+        ) -> Result<()> {
+            self.0
+                .borrow_mut()
+                .push(Event::Advance(context.elapsed, context.delta));
+            if context.elapsed == 4 {
+                *frame.active = false;
+            }
+            Ok(())
+        }
+    }
+    impl Drop for Player {
+        fn drop(&mut self) {
+            self.0.borrow_mut().push(Event::Drop);
+        }
+    }
+
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let mut runtime = Runtime::new(
+        0,
+        kind::ROOT,
+        Box::new(BaseObject::new()),
+        State::new(0),
+        GraphicsFactory {
+            fallback: KcsFactory::new(Programs(Program::from_code(&[0x3b], Vec::new(), 128)?)),
+        },
+    );
+    runtime.host_mut().surface_size = [320, 180];
+    runtime.set_resources(Files(b"synthetic particle plugin".to_vec()));
+    runtime.set_effect_services(HostEffect(events.clone()));
+    let id = runtime.create(0, kind::PARTICLE_3D, b"", b"")?;
+    runtime.drawables_mut().insert(100, Drawable::default())?;
+    runtime.drawables_mut().set_position(100, [12., 34., 0.]);
+    let command = |code| Command {
+        target: id,
+        sender: 0,
+        code,
+        data: [0; 3],
+    };
+    let mut plugin = [0; 0x190];
+    plugin[0] = 1;
+    plugin[4..14].copy_from_slice(b"file/test\0");
+    plugin[0x104] = 1;
+    plugin[0x10c] = 123;
+    runtime.dispatch_command_with_buffers(
+        0,
+        command(320),
+        &mut CommandBuffers {
+            data1: Some(&mut plugin),
+            ..Default::default()
+        },
+    )?;
+    runtime.dispatch_command(
+        0,
+        Command {
+            data: [0, 100, 0],
+            ..command(327)
+        },
+    )?;
+    runtime.dispatch_command(0, command(321))?;
+    let drawable = runtime.drawables().get(id).unwrap();
+    assert_eq!(drawable.display(), 1);
+    assert_eq!(
+        drawable
+            .particle_mesh()
+            .unwrap()
+            .projected_quad(0, &Projection::default())
+            .unwrap()[0]
+            .color,
+        0xff00_ffff
+    );
+    assert_eq!(runtime.dispatch_command(0, command(324))?, 1);
+    for tick in [10, 14, 20] {
+        runtime.update(tick, 1)?;
+    }
+    assert_eq!(runtime.dispatch_command(0, command(324))?, 0);
+    assert_eq!(runtime.drawables().get(id).unwrap().display(), 0);
+    runtime.dispatch_command(0, command(321))?;
+    runtime.dispatch_command(0, command(322))?;
+    runtime.update(30, 1)?;
+    runtime.dispatch_command(0, command(323))?;
+    assert!(
+        runtime
+            .drawables()
+            .get(id)
+            .unwrap()
+            .particle_mesh()
+            .is_none()
+    );
+    assert_eq!(
+        *events.borrow(),
+        [
+            Event::Open,
+            Event::Start,
+            Event::Advance(0, 1),
+            Event::Advance(4, 4),
+            Event::Start,
+            Event::Drop
+        ]
+    );
+    Ok(())
+}

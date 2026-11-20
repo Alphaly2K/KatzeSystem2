@@ -1,31 +1,7 @@
 use super::{Host, Interpreter, NativeReturn, Program, ScriptRandom, matrix, numeric, strings};
 use crate::{Error, Result, Step, read};
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ParticleVertex {
-    pub position: [f32; 3],
-    pub rhw: f32,
-    pub color: u32,
-    pub uv: [f32; 2],
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct ParticleSource {
-    pub color: u32,
-    pub position_2d: [f32; 2],
-    pub position_3d: [f32; 3],
-}
-
-impl Default for ParticleVertex {
-    fn default() -> Self {
-        Self {
-            position: [0.0; 3],
-            rhw: 1.0,
-            color: u32::MAX,
-            uv: [0.0; 2],
-        }
-    }
-}
+pub use crate::host::effect::{ParticleSource, ParticleVertex};
 
 /// 粒子任务表。宿主在每次推进前提供时间和当前网格上下文。
 pub struct ParticleHost {
