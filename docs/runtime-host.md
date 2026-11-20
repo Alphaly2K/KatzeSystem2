@@ -14,7 +14,7 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 
 |模块|宿主接口|
 |:--|:--|
-|`host::resources`|`ResourceServices`、资源类别、读取模式与缓存|
+|`host::resources`|`ResourceServices`、`ResourceMode`、资源类别与缓存|
 |`host::storage`|`ReadSource`、`SharedSource` 及脚本文件、存档、配置和导出服务|
 |`host::graphics`|`DrawList`、`DrawCommand`、`FrameTexture`、`FrameCanvas`、`GraphicsBackend`、`SequenceCapture` 与像素格式|
 |`host::audio`、`host::movie`|`Mixer`、`Pcm`、语音合成及电影解码契约|

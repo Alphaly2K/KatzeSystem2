@@ -1,3 +1,4 @@
+pub use crate::host::resources::ResourceMode;
 use crate::{Error, Result, read};
 
 mod cache;
@@ -15,8 +16,8 @@ pub use folder::FolderPaths;
 pub use kif::{KifArchive, verification_seed};
 pub use kif_source::KifEntrySource;
 pub use router::{
-    ArchiveMount, ResourceData, ResourceGroup, ResourceMember, ResourceMode, ResourceRouter,
-    ResourceSlot, ResourceSource,
+    ArchiveMount, ResourceData, ResourceGroup, ResourceMember, ResourceRouter, ResourceSlot,
+    ResourceSource,
 };
 pub use xml::{XmlDocument, XmlWriter};
 

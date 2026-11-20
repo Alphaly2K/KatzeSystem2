@@ -1,8 +1,23 @@
 //! Lookup and loading of game assets.
 
 use super::storage::SharedSource;
-pub use crate::resource::{ArchiveConfig, CachedResources, ResourceCache, ResourceMode};
+pub use crate::resource::{ArchiveConfig, CachedResources, ResourceCache};
 use crate::{Error, Result};
+
+/// Lookup policy requested by the game. The host resolves names and applies
+/// its patch and mount rules when choosing a source.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u16)]
+pub enum ResourceMode {
+    /// Use the direct file lookup.
+    File = 1,
+    /// Use archive lookup.
+    Archive = 2,
+    /// Prefer loose files, then look in archives.
+    LooseFirst = 3,
+    /// Prefer archives, then look for loose files.
+    ArchiveFirst = 4,
+}
 
 /// 运行时的同步资源读取服务；None 表示未找到或无法打开。
 pub trait ResourceServices {

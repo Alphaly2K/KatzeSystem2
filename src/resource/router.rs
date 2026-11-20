@@ -1,14 +1,5 @@
 use super::{KifArchive, terminated};
-use crate::{Error, Result, text};
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u16)]
-pub enum ResourceMode {
-    File = 1,
-    Archive = 2,
-    LooseFirst = 3,
-    ArchiveFirst = 4,
-}
+use crate::{Error, Result, host::resources::ResourceMode, text};
 
 /// path 为归档装载时保存的路径；可与所在槽位的 prefix 不同。
 pub struct ArchiveMount<'a> {
