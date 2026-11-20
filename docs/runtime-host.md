@@ -58,7 +58,7 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 
 离屏宿主在更新后用 `mix_audio_stereo(rate_hz, buffer)` 拉取 PCM；此调用可等待解码。设备宿主用 `connect_audio_output()` 取得可移交给音频线程的 `Mixer`，由回调用 `Mixer::render(rate_hz, buffer)` 拉取 PCM，无须借用运行实例。两者均覆写调用方缓冲，格式为左右交错、幅度 `[-1, 1]` 的 `f32` 采样。游戏声音只能连接一次，连接后不得再调用离屏混音；会话退出时由宿主停止回调并释放混音器。
 
-宿主可通过 `host::audio::SpeechSynthesizer` 提供合成的 `Pcm`；字体服务从 `host::font` 导入 `FontServices`、`FontRequest` 和 `GlyphMask`。可复用 `message::Fonts` 处理宿主提供的字体，或实现自己的服务。软件图形后端、字形实现与混音器都可在无设备环境运行。
+宿主可通过 `host::audio::SpeechSynthesizer` 提供合成的 `Pcm`；字体服务及请求、编码和字形遮罩类型从 `host::font` 导入。遮罩每个像素提供一个 `0..=64` 的覆盖值，按从顶行开始的顺序排列。可复用 `message::Fonts` 处理宿主提供的字体，或实现自己的服务。软件图形后端、字形实现与混音器都可在无设备环境运行。
 
 装载电影需要宿主先通过 `set_movie_decoder_factory` 注册 `host::movie::MovieDecoderFactory`。工厂打开 `SharedSource`，解码器在运行库的工作线程返回 BGRA 帧与交错 PCM。更换工厂不影响已装载电影。默认库构建无需 C 工具链；启用 `builtin-mpeg` 并注册 `movie::MpegDecoderFactory` 可解码 MPEG-1 视频及 MP2／MP3 音轨。
 

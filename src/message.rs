@@ -18,11 +18,11 @@ mod timing;
 mod userfont;
 pub(crate) mod window;
 
-pub use crate::host::{FontRequest, FontServices};
+pub use crate::host::font::{FontRequest, FontServices, GlyphMask, TextEncoding};
 pub use defaults::MessageDefaults;
 pub use display::{Display, DisplayProgress, DisplaySettings};
 pub use effects::GlyphEffects;
-pub use font::{Font, GlyphMask, GlyphPaint};
+pub use font::{Font, GlyphPaint};
 pub use fonts::Fonts;
 pub use layout::{Layout, LayoutEntry, LayoutSettings, VerticalAlignment};
 pub use line_breaks::BreakCharacters;
@@ -33,13 +33,6 @@ pub use reveal::{Reveal, RevealGlyph};
 pub use task::{MessageFactory, MessageObject};
 pub use timing::{Schedule, TimingSettings};
 pub use window::TextWindowObject;
-
-/// 已解码文字仍保留原文字对象路径，供布局及消息更新使用。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TextEncoding {
-    Cp932,
-    Unicode,
-}
 
 /// 颜色保留消息语法中的 AABBGGRR；绘制时调用 message_color_argb 换算。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

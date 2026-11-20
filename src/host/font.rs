@@ -1,7 +1,68 @@
 //! Font discovery, metrics and glyph rasterization.
 
-pub use crate::message::{GlyphMask, TextEncoding};
-use crate::{Error, Result};
+use crate::{Error, Result, read};
+
+/// The engine text path that produced a font request.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextEncoding {
+    Cp932,
+    Unicode,
+}
+
+/// Top-down glyph coverage, with one sample in `0..=64` per pixel.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GlyphMask {
+    size: [u32; 2],
+    offset: [i32; 2],
+    advance: i32,
+    coverage: Vec<u8>,
+}
+
+impl GlyphMask {
+    /// `offset` is relative to the top-left of the layout entry; `advance`
+    /// is the horizontal advance in pixels.
+    pub fn new(size: [u32; 2], offset: [i32; 2], advance: i32, coverage: Vec<u8>) -> Result<Self> {
+        let length = mask_length(size)?;
+        if coverage.len() != length {
+            return Err(Error::new(0, "字形遮罩长度与尺寸不符"));
+        }
+        if let Some(index) = coverage.iter().position(|&value| value > 64) {
+            return Err(Error::new(index, "字形灰度超过六十四级"));
+        }
+        Ok(Self {
+            size,
+            offset,
+            advance,
+            coverage,
+        })
+    }
+
+    pub fn size(&self) -> [u32; 2] {
+        self.size
+    }
+
+    pub fn offset(&self) -> [i32; 2] {
+        self.offset
+    }
+
+    pub fn advance(&self) -> i32 {
+        self.advance
+    }
+
+    pub fn coverage(&self) -> &[u8] {
+        &self.coverage
+    }
+}
+
+pub(crate) fn mask_length(size: [u32; 2]) -> Result<usize> {
+    if size.iter().any(|&value| value > i32::MAX as u32) {
+        return Err(Error::new(0, "字形尺寸超出支持范围"));
+    }
+    (size[0] as usize)
+        .checked_mul(size[1] as usize)
+        .filter(|&length| length <= read::MAX_BYTES / 4)
+        .ok_or_else(|| Error::new(0, "字形像素超过存储上限"))
+}
 
 /// Font selection and metric parameters supplied by the runtime.
 #[derive(Clone, Debug, PartialEq, Eq)]
