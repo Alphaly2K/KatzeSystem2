@@ -2,6 +2,7 @@ use super::particle_arrow::Arrow;
 use super::particle_assault::Assault;
 use super::particle_erase::Erase;
 use super::particle_scene_magic::SceneMagic;
+use super::particle_scene_suzu::SceneSuzu;
 use super::particle_rolling::Rolling;
 use super::particle_round::{Round, Variant as RoundVariant};
 use super::{Drawable, ParticleMesh, Surface};
@@ -79,6 +80,7 @@ enum Effect {
     Assault(Assault),
     Erase(Erase),
     SceneMagic(SceneMagic),
+    SceneSuzu(SceneSuzu),
     Thunder(Thunder),
     Paper(Paper),
     Dash(Dash),
@@ -168,6 +170,7 @@ impl Effect {
             particle_plugin::Kind::SceneMagic => {
                 Self::SceneMagic(SceneMagic::new(host, image, module_state))
             }
+            particle_plugin::Kind::SceneSuzu => Self::SceneSuzu(SceneSuzu::new(host, image)),
             particle_plugin::Kind::Thunder => {
                 Self::Thunder(Thunder::new(host, image, random, &module_state))
             }
@@ -320,6 +323,7 @@ impl ParticleRunner {
                     Some(Effect::Assault(effect)) => effect.write_mesh(host),
                     Some(Effect::Erase(effect)) => effect.write_mesh(host),
                     Some(Effect::SceneMagic(effect)) => effect.write_mesh(host),
+                    Some(Effect::SceneSuzu(effect)) => effect.write_mesh(host),
                     Some(Effect::Thunder(effect)) => effect.write_mesh(host),
                     Some(Effect::Paper(effect)) => effect.write_mesh(host),
                     Some(Effect::Dash(effect)) => effect.write_mesh(host),
@@ -570,6 +574,10 @@ impl ParticleRunner {
                             effect.update(delta);
                             effect.write_mesh(host);
                         }
+                        Effect::SceneSuzu(effect) => {
+                            effect.update(delta);
+                            effect.write_mesh(host);
+                        }
                         Effect::SwordSpark(effect) => {
                             effect.update(delta, &host.parameters);
                             effect.write_mesh(host);
@@ -760,6 +768,13 @@ impl Particle3DObject {
             {
                 return Err(Error::new(0, "静默标记需要一个主体及至多三个附加点"));
             }
+            if matches!(
+                &program,
+                ParticleProgram::Builtin(particle_plugin::Kind::SceneSuzu)
+            ) && count > 4
+            {
+                return Err(Error::new(0, "场景图集最多支持四个网格"));
+            }
             let image = if without_draw || name(0x84)?.is_empty() {
                 None
             } else {
@@ -840,7 +855,14 @@ impl Particle3DObject {
             .get_mut(&self.id)
             .ok_or_else(|| Error::new(0, "粒子绘图登记缺失"))?;
         if let Some(mesh) = &mut drawable.particle_mesh {
-            mesh.update(particles)?;
+            let depth_shifts: &[f32] = match task {
+                ParticleRunner::Builtin {
+                    effect: Some(Effect::SceneSuzu(effect)),
+                    ..
+                } => effect.depth_shifts(),
+                _ => &[],
+            };
+            mesh.update_with_depth_shifts(particles, depth_shifts)?;
             mesh.opacity = self.opacity;
             drawable.display = u32::from(particles.active);
             drawable.blend_mode = particles.render_mode;

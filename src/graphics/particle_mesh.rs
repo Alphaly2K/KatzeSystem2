@@ -8,6 +8,7 @@ use std::sync::Arc;
 pub struct ParticleMesh {
     quads: Vec<[ParticleVertex; 4]>,
     offsets: Vec<[f32; 4]>,
+    depth_shifts: Vec<f32>,
     flags: Vec<u32>,
     order: Vec<usize>,
     texture: Option<Arc<Surface>>,
@@ -27,6 +28,7 @@ impl ParticleMesh {
         let mut mesh = Self {
             quads: Vec::new(),
             offsets: Vec::new(),
+            depth_shifts: Vec::new(),
             flags: Vec::new(),
             order: Vec::new(),
             texture,
@@ -42,6 +44,14 @@ impl ParticleMesh {
 
     /// 更新复用已有容量；数组不一致时保留上一份快照。
     pub fn update(&mut self, particles: &ParticleHost) -> Result<()> {
+        self.update_with_depth_shifts(particles, &[])
+    }
+
+    pub(super) fn update_with_depth_shifts(
+        &mut self,
+        particles: &ParticleHost,
+        depth_shifts: &[f32],
+    ) -> Result<()> {
         let count = particles.quads.len();
         if count > read::MAX_BYTES / 244
             || particles.offsets.len() != count
@@ -51,6 +61,8 @@ impl ParticleMesh {
         }
         self.quads.clone_from(&particles.quads);
         self.offsets.clone_from(&particles.offsets);
+        self.depth_shifts.clear();
+        self.depth_shifts.extend_from_slice(depth_shifts);
         self.flags.clone_from(&particles.quad_flags);
         self.address = particles.texture_address;
         self.depth = particles.depth_offset;
@@ -58,7 +70,11 @@ impl ParticleMesh {
         self.order.clear();
         self.order.extend(0..count);
         sort_depth(&mut self.order, &|i| {
-            self.quads[i][0].position[2] + self.offsets[i][2]
+            let depth = self.quads[i][0].position[2] + self.offsets[i][2];
+            // The sort key uses scene depth units; the submitted vertex uses normalized Z.
+            self.depth_shifts
+                .get(i)
+                .map_or(depth, |shift| depth - shift * 65000.)
         });
         Ok(())
     }
@@ -107,6 +123,9 @@ impl ParticleMesh {
             for (axis, component) in point.iter_mut().enumerate().take(2) {
                 *component += view.translation[axis];
                 *component -= view.coordinate_offset[axis];
+            }
+            if let Some(shift) = self.depth_shifts.get(index) {
+                point[2] -= shift;
             }
             let left = ((vertex.color >> 8) & 0xffff_0000).wrapping_mul(self.opacity);
             let right = ((vertex.color >> 8) & 0xff_0000).wrapping_mul(self.opacity);
@@ -193,6 +212,32 @@ fn sort_depth(mut order: &mut [usize], depth: &impl Fn(usize) -> f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn depth_shifts_change_sort_and_submitted_z_without_changing_projection() -> Result<()> {
+        let mut host = ParticleHost::default();
+        host.reset_quads(3, [16.; 2])?;
+        for (quad, depth) in host.quads.iter_mut().zip([0., 100., 200.]) {
+            for v in quad {
+                v.position[2] = depth;
+            }
+        }
+        let mut mesh = ParticleMesh::new(&host, None, 59000.)?;
+        let view = Projection::default();
+        let original = mesh.projected_quad(1, &view).unwrap();
+        assert_eq!(mesh.order, [0, 1, 2]);
+        mesh.update_with_depth_shifts(&host, &[0., 0.003, 0.001])?;
+        assert_eq!(mesh.order, [1, 0, 2]);
+        for (before, after) in original.iter().zip(mesh.projected_quad(1, &view).unwrap()) {
+            assert_eq!(after.position[..2], before.position[..2]);
+            assert_eq!(after.position[2], before.position[2] - 0.003);
+            assert_eq!(after.rhw, before.rhw);
+        }
+        mesh.update(&host)?;
+        assert_eq!(mesh.order, [0, 1, 2]);
+        assert_eq!(mesh.projected_quad(1, &view).unwrap(), original);
+        Ok(())
+    }
 
     #[test]
     fn depth_sort_preserves_equal_and_unordered_partition_order() -> Result<()> {
