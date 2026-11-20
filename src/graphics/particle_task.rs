@@ -186,8 +186,14 @@ impl Effect {
             }
             particle_plugin::Kind::Star => Self::Ice(Ice::new_star(host, image, random)),
             particle_plugin::Kind::Spark => Self::Spark(Box::new(Spark::new(host, image, random))),
-            particle_plugin::Kind::LegacySpark => {
-                Self::LegacySpark(LegacySpark::new(host, image, random, module_state))
+            particle_plugin::Kind::LegacySpark | particle_plugin::Kind::ExtendedSpark => {
+                Self::LegacySpark(LegacySpark::new(
+                    host,
+                    image,
+                    random,
+                    module_state,
+                    matches!(kind, particle_plugin::Kind::ExtendedSpark),
+                ))
             }
             particle_plugin::Kind::Arrow => {
                 Self::Arrow(Arrow::new(host, image, random, module_state))

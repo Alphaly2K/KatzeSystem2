@@ -2085,49 +2085,65 @@ fn spark_path_variant_registers_restarts_stops_and_rejects_unknown_layouts() -> 
 
 #[test]
 fn legacy_spark_updates_all_quads_and_reads_duration_during_playback() -> Result<()> {
-    let mut bytes = plugin(b"spark.ppi");
-    bytes[400..403].copy_from_slice(&[0x6a, 0x40, 0xe8]);
-    let mut runtime = runtime_with_count(bytes, 8)?;
-    runtime.update(1, 1)?;
-    let mut parameters = [0; 128];
-    for (i, value) in [40f32, 640., 360., 20., 75.].into_iter().enumerate() {
-        parameters[4 * i..4 * i + 4].copy_from_slice(&value.to_le_bytes());
+    let mut positions = Vec::new();
+    for name in [b"spark.ppi".as_slice(), b"spark_ex.ppi"] {
+        let mut bytes = plugin(name);
+        bytes[340..344].copy_from_slice(&0x1090u32.to_le_bytes());
+        bytes[400..403].copy_from_slice(&[0x6a, 0x40, 0xe8]);
+        let mut runtime = runtime_with_count(bytes, 8)?;
+        runtime.update(1, 1)?;
+        let mut parameters = [0; 128];
+        for (i, value) in [40f32, 640., 360., 20., 75.].into_iter().enumerate() {
+            parameters[4 * i..4 * i + 4].copy_from_slice(&value.to_le_bytes());
+        }
+        let mut write_parameters =
+            |runtime: &mut Runtime<GraphicsFactory<KcsFactory<Programs>>>, duration: f32| {
+                parameters[..4].copy_from_slice(&duration.to_le_bytes());
+                runtime.dispatch_command_with_buffers(
+                    2,
+                    command(325),
+                    &mut CommandBuffers {
+                        data1: Some(&mut parameters),
+                        ..Default::default()
+                    },
+                )
+            };
+        let alpha = |runtime: &Runtime<GraphicsFactory<KcsFactory<Programs>>>, index| {
+            runtime
+                .drawables()
+                .get(1)
+                .unwrap()
+                .particle_mesh()
+                .unwrap()
+                .projected_quad(index, &Projection::default())
+                .unwrap()[0]
+                .color
+                >> 24
+        };
+        write_parameters(&mut runtime, 40.)?;
+        runtime.dispatch_command(2, command(321))?;
+        assert_eq!(alpha(&runtime, 7), 0);
+        runtime.update(2, 1)?;
+        assert_eq!(alpha(&runtime, 7), 255);
+        runtime.update(8, 6)?;
+        positions.push(
+            runtime
+                .drawables()
+                .get(1)
+                .unwrap()
+                .particle_mesh()
+                .unwrap()
+                .projected_quad(7, &Projection::default())
+                .unwrap()[0]
+                .position,
+        );
+        write_parameters(&mut runtime, 8.)?;
+        runtime.update(9, 1)?;
+        assert_eq!(alpha(&runtime, 7), 255);
+        runtime.update(10, 1)?;
+        assert_eq!(alpha(&runtime, 7), 0);
     }
-    let mut write_parameters = |runtime: &mut Runtime<GraphicsFactory<KcsFactory<Programs>>>,
-                                duration: f32| {
-        parameters[..4].copy_from_slice(&duration.to_le_bytes());
-        runtime.dispatch_command_with_buffers(
-            2,
-            command(325),
-            &mut CommandBuffers {
-                data1: Some(&mut parameters),
-                ..Default::default()
-            },
-        )
-    };
-    let alpha = |runtime: &Runtime<GraphicsFactory<KcsFactory<Programs>>>, index| {
-        runtime
-            .drawables()
-            .get(1)
-            .unwrap()
-            .particle_mesh()
-            .unwrap()
-            .projected_quad(index, &Projection::default())
-            .unwrap()[0]
-            .color
-            >> 24
-    };
-    write_parameters(&mut runtime, 40.)?;
-    runtime.dispatch_command(2, command(321))?;
-    assert_eq!(alpha(&runtime, 7), 0);
-    runtime.update(2, 1)?;
-    assert_eq!(alpha(&runtime, 7), 255);
-    runtime.update(8, 6)?;
-    write_parameters(&mut runtime, 8.)?;
-    runtime.update(9, 1)?;
-    assert_eq!(alpha(&runtime, 7), 255);
-    runtime.update(10, 1)?;
-    assert_eq!(alpha(&runtime, 7), 0);
+    assert_ne!(positions[0], positions[1]);
     Ok(())
 }
 

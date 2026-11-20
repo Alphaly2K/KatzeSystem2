@@ -54,6 +54,7 @@ fn spawn(
     center: [f32; 2],
     step: f32,
     scale: f32,
+    curve_strength: f32,
 ) -> Head {
     let region = random.next_integer() % 3;
     let scale = (f64::from(random.next_float()) * f64::from(scale) + f64::from(scale)) as f32;
@@ -101,7 +102,7 @@ fn spawn(
         age: 0,
         phase_start: 0,
         phase: Phase::Travel,
-        path: Path::new_extended(points, duration, 400.),
+        path: Path::new_extended(points, duration, curve_strength),
         position: start,
         angle: 0.,
         scale,
@@ -116,10 +117,25 @@ impl LegacySpark {
         image: [f32; 2],
         random: &mut ScriptRandom,
         module_state: Arc<AtomicU32>,
+        scale_curve_with_duration: bool,
     ) -> Self {
         let [duration, x, y, step, percent, ..] = host.parameters.map(f32::from_bits);
+        let curve_strength = if scale_curve_with_duration {
+            duration * 0.55
+        } else {
+            400.
+        };
         let heads = (0..host.quads.len())
-            .map(|_| spawn(random, duration, [x, y], step, percent / 100.))
+            .map(|_| {
+                spawn(
+                    random,
+                    duration,
+                    [x, y],
+                    step,
+                    percent / 100.,
+                    curve_strength,
+                )
+            })
             .collect();
         Self {
             image,
