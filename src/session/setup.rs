@@ -202,6 +202,13 @@ impl GameSetup {
         self.0.set_graphics_backend(backend);
     }
 
+    /// Seed the script's integer and floating point random streams before startup.
+    /// The default seed is 4357. Use the same seed with the same inputs to replay
+    /// script decisions that depend on random draws.
+    pub fn set_script_random_seed(&mut self, seed: u32) {
+        self.0.host_mut().random = crate::kcs::ScriptRandom::seeded(seed);
+    }
+
     /// Select how media is decoded. Sessions default to inline decoding for
     /// hosts that do not provide system threads.
     pub fn set_media_decode_mode(&mut self, mode: DecodeMode) {

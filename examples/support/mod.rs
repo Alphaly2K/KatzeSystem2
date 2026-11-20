@@ -828,6 +828,9 @@ pub fn prepare_game(
         ..
     } = game;
     let mut runtime = GameSetup::standard()?;
+    if let Ok(seed) = std::env::var("KATZE_SCRIPT_RANDOM_SEED") {
+        runtime.set_script_random_seed(seed.parse()?);
+    }
     runtime.set_media_decode_mode(katze_system2::host::media::DecodeMode::Threaded);
     if let Some(host) = particle_host::ParticleHost::configured(&root) {
         runtime.set_effect_services(host);

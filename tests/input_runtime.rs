@@ -1072,6 +1072,7 @@ fn public_session_uses_host_resources_and_delivers_frame_and_pcm()
             diagnostics::{ScriptLocation, ScriptPosition},
             resources::{ResourceMode, ResourceServices},
         },
+        kcs::ScriptRandom,
         session::{FrameOutcome, FrameTime, GameRuntime, GameSetup},
     };
 
@@ -1085,11 +1086,28 @@ fn public_session_uses_host_resources_and_delivers_frame_and_pcm()
         fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
             assert_eq!(name, b"main.kcs");
             assert_eq!(mode, ResourceMode::ArchiveFirst);
-            Ok(Some(packed_kcs(&[])))
+            let mut code = Vec::new();
+            for (slot, native) in [33u32, 34, 33, 34].into_iter().enumerate() {
+                for (op, args) in [
+                    (0x25, &[slot as u32][..]),
+                    (0x2b, &[native, 0][..]),
+                    (0x2b, &[211, 8][..]),
+                ] {
+                    code.push(op);
+                    for value in args {
+                        code.push(3);
+                        code.extend(value.to_le_bytes());
+                    }
+                }
+            }
+            code.push(0x3b);
+            Ok(Some(packed_kcs(&code)))
         }
     }
 
     let mut game = GameSetup::standard()?;
+    let seed = 8_713;
+    game.set_script_random_seed(seed);
     assert!(game.window_preferences().is_none());
     assert!(!game.set_image_import_directory(Some(vec![65])));
     let startup = br#"<?xml version="1.0" encoding="UTF-8"?><document><SCREEN><width>64</width><height>48</height></SCREEN><GAME><autoselect>1</autoselect></GAME></document>"#;
@@ -1145,6 +1163,16 @@ fn public_session_uses_host_resources_and_delivers_frame_and_pcm()
     game.mix_audio_stereo(48_000, &mut pcm)?;
     assert_eq!(pcm, [0.0; 4]);
     let runtime = game.into_task_runtime();
+    let mut random = ScriptRandom::seeded(seed);
+    assert_eq!(
+        &runtime.numbers().shared[..4],
+        &[
+            random.next_integer() as i32,
+            random.next_float().to_bits() as i32,
+            random.next_integer() as i32,
+            random.next_float().to_bits() as i32,
+        ]
+    );
     assert_eq!(runtime.input_coordinates().logical_size, [64, 48]);
     assert_eq!(runtime.system_settings().unwrap().auto_select, 1);
     assert_eq!(runtime.system_settings().unwrap().fullscreen, 3);
