@@ -142,7 +142,7 @@ impl WipeObject {
         for y in 0..p.size[1] {
             let source = row(source, p.target_at, y, p.size[0])?;
             let offset = y as usize * frame.stride();
-            frame.pixels[offset..offset + source.len()].copy_from_slice(source);
+            frame.pixels_mut()[offset..offset + source.len()].copy_from_slice(source);
         }
         host.submit_message(frame, frame.bounds(), p.at)?;
         self.active = false;
@@ -171,7 +171,7 @@ impl WipeObject {
             let to = row(target, origin(p.target_at), y, p.clip_size[0])?;
             let shades = row(mask, [0; 2], y, p.clip_size[0])?;
             let offset = (p.clip_at[1] + y) as usize * frame.stride() + p.clip_at[0] as usize * 4;
-            for (((out, from), to), shade) in frame.pixels[offset..offset + from.len()]
+            for (((out, from), to), shade) in frame.pixels_mut()[offset..offset + from.len()]
                 .chunks_exact_mut(4)
                 .zip(from.chunks_exact(4))
                 .zip(to.chunks_exact(4))

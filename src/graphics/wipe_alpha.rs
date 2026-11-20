@@ -110,7 +110,7 @@ impl WipeAlphaObject {
         for y in 0..p.size[1] {
             let source = row(source, p.source_at, y, p.size[0])?;
             let offset = y as usize * frame.stride();
-            let output = &mut frame.pixels[offset..offset + source.len()];
+            let output = &mut frame.pixels_mut()[offset..offset + source.len()];
             output.copy_from_slice(source);
             if p.reveal {
                 for pixel in output.chunks_exact_mut(4) {
@@ -165,7 +165,7 @@ impl WipeAlphaObject {
             let source = row(source, source_at, y, p.clip_size[0])?;
             let mask = row(mask, [0; 2], y, p.clip_size[0])?;
             let offset = (p.clip_at[1] + y) as usize * frame.stride() + p.clip_at[0] as usize * 4;
-            for ((output, source), mask) in frame.pixels[offset..offset + source.len()]
+            for ((output, source), mask) in frame.pixels_mut()[offset..offset + source.len()]
                 .chunks_exact_mut(4)
                 .zip(source.chunks_exact(4))
                 .zip(mask.chunks_exact(4))

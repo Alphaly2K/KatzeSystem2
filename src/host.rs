@@ -19,11 +19,6 @@ pub mod storage;
 
 // Keep existing imports working while documenting the capability modules.
 #[doc(hidden)]
-pub use crate::graphics::{
-    DrawCommand, DrawList, FrameTexture, FrameTriangle, ProjectedVertex, Rect, Surface,
-    TextureAddress, TextureFilter, TextureSource,
-};
-#[doc(hidden)]
 pub use crate::graphics::{RenderTarget, SoftwareBackend};
 #[doc(hidden)]
 pub use crate::language::StringTables;
@@ -40,7 +35,10 @@ pub use effect::{EffectPlayer, EffectServices};
 #[doc(hidden)]
 pub use font::{FontRequest, FontServices, GlyphMask, TextEncoding};
 #[doc(hidden)]
-pub use graphics::{FrameCanvas, GraphicsBackend, SequenceCapture};
+pub use graphics::{
+    DrawCommand, DrawList, FrameCanvas, FrameTexture, FrameTriangle, GraphicsBackend,
+    ProjectedVertex, Rect, SequenceCapture, Surface, TextureAddress, TextureFilter, TextureSource,
+};
 #[doc(hidden)]
 pub use input::{ButtonSource, DeviceBinding, DeviceKeys, InputDevice, KeySample, PointerSample};
 #[doc(hidden)]

@@ -136,7 +136,7 @@ impl FadeObject {
         for y in 0..p.size[1] {
             let from = row(source, p.target_at, y, p.size[0] as u32)?;
             let offset = y as usize * frame.stride();
-            frame.pixels[offset..offset + from.len()].copy_from_slice(from);
+            frame.pixels_mut()[offset..offset + from.len()].copy_from_slice(from);
         }
         host.submit_message(frame, frame.bounds(), p.at)?;
         self.active = false;
@@ -161,7 +161,7 @@ impl FadeObject {
             let to = row(target, p.target_at, y, p.size[0] as u32)?;
             // 画布复制依次消费原图像的物理行；提交面已按顶部起算，不再反转。
             let offset = y as usize * frame.stride();
-            for ((out, &from), &to) in frame.pixels[offset..offset + from.len()]
+            for ((out, &from), &to) in frame.pixels_mut()[offset..offset + from.len()]
                 .iter_mut()
                 .zip(from)
                 .zip(to)

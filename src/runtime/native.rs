@@ -5,6 +5,8 @@ use crate::kcs::{
 };
 use crate::{Error, Result, read};
 
+mod task;
+
 impl<F: ObjectFactory> ObjectHost<'_, F> {
     pub(super) fn call_registered_native(
         &mut self,

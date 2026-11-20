@@ -2,6 +2,7 @@
 
 mod capture;
 mod commands;
+mod surface;
 pub use capture::SequenceCapture;
 pub use commands::{
     DrawCommand, DrawList, FrameTexture, FrameTriangle, ProjectedVertex, Rect, TextureAddress,
@@ -9,7 +10,8 @@ pub use commands::{
 };
 
 use crate::Result;
-pub use crate::graphics::Surface;
+pub use surface::Surface;
+pub(crate) use surface::pixel_length;
 
 /// Read-only canvas textures with an explicit upload acknowledgement. A host
 /// cache shared by presentation and script readback can consume the dirty flags.

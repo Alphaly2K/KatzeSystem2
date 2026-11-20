@@ -7,7 +7,7 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 |资源与持久化|解析归档和脚本、解释资源名称、编解码存档，通过读取源及逻辑操作访问数据。|选择目录或其他存储，实现资源、配置、存档、导出和脚本文件服务；处理文件路径、枚举、权限及修改时间。|
 |画面|合成场景、生成有序绘制命令、记录纹理来源和尺寸；保留脚本内部像素操作与截图语义。|执行绘制和窗口呈现，持有 GPU 资源；按脚本所需提供离屏回读。现有软件绘制可作为示例和测试后端。|
 |声音与电影|解码、混音、控制循环与音量，提供 PCM 及电影帧；保留任务查询和完成时序。|选择音频设备、流格式和缓冲，拉取 PCM 并呈现电影；可选提供语音合成。|
-|网络与系统|按脚本协议分发请求并管理任务状态。类型 62 的旧版社交发帖接收者暂未接入。|执行网络或系统动作，实施策略，回交结果；处理窗口、剪贴板、输入法、插件及对话框。|
+|网络与系统|按脚本协议分发请求并管理任务状态。类型 62 保留脚本包装和任务路由，默认接收者列入兼容缺口。|执行网络或系统动作，实施策略，回交结果；处理窗口、剪贴板、输入法、插件及对话框。|
 |输入、字体和时钟|处理游戏输入和逻辑时钟，按字体数据完成字形度量与栅格化。|提供输入事件、运行时间和当地日期时间，发现字体并提供数据。|
 
 嵌入时从 `katze_system2::session` 导入 `GameSetup`、`GameRuntime`、`FrameTime` 和 `FrameOutcome`。服务与对应的数据类型按下表导入，旧的 `host::类型名` 平铺路径继续兼容。
@@ -16,14 +16,14 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 |:--|:--|
 |`host::resources`|`ResourceServices`、`ResourceMode`、资源类别与缓存|
 |`host::storage`|`ReadSource`、`SharedSource` 及脚本文件、存档、配置和导出服务|
-|`host::graphics`|`DrawList`、`DrawCommand`、`FrameTexture`、`FrameCanvas`、`GraphicsBackend`、`SequenceCapture` 与像素格式|
+|`host::graphics`|`DrawList`、`DrawCommand`、`FrameTexture`、`FrameCanvas`、`GraphicsBackend`、`SequenceCapture`、`Surface`|
 |`host::audio`、`host::movie`|`Mixer`、`Pcm`、语音合成及电影解码契约|
 |`host::model`|模型选择、播放实例和带锚点偏移的透明图像帧|
 |`host::input`、`host::font`|输入事件、按键绑定与字体服务|
 |`host::platform`、`host::effect`|窗口、剪贴板、平台任务及外部效果播放器|
 |`host::diagnostics`|脚本位置、调试消息、native 跟踪及 `QuizDebugSession`、`QuizDebugInput`|
 
-可选的软件绘制器及其输出目标从 `graphics` 导入，MPEG 解码器从 `movie` 导入。绘制命令原有的 `graphics` 导入路径仍然可用。任务树、原始命令编号、VM 缓冲区和分派表在底层 `runtime` 接口中供诊断和工具使用。Rust 契约稳定且有非 Rust 宿主接入时，再定义独立版本的 C ABI 和显式释放约定。
+可选的软件绘制器及其输出目标从 `graphics` 导入，MPEG 解码器从 `movie` 导入。绘制命令和 `Surface` 原有的 `graphics` 导入路径仍然可用。任务树、原始命令编号、VM 缓冲区和分派表在底层 `runtime` 接口中供诊断和工具使用。Rust 契约稳定且有非 Rust 宿主接入时，再定义独立版本的 C ABI 和显式释放约定。
 
 标准宿主用 `GameSetup::new(shared_slots, external_bytes)` 创建根任务和清零后的脚本存储。前者按 32 位值计数，后者按字节计数。启动前可将启动文档、游戏默认值及用户设置的 XML 字节交给 `configure_startup`，由它应用引擎与平台配置并返回游戏逻辑尺寸；配置无效时保留原有状态。绑定输入、资源和需要的其他服务，调用 `configure_canvas` 设置非零的逻辑输出尺寸并按游戏配置创建画布，再把启动配置中的脚本名称交给 `start_game(entry)`。该方法消费 `GameSetup`，并在创建任务前检查资源、输入和画布。成功后返回 `GameRuntime`，宿主可用它推进帧、呈现和拉取 PCM。宿主可先调用 `validate_startup` 检查这些条件；该检查不会访问宿主服务或装载脚本。两个方法使用 `session::StartupError` 分别报告缺少的服务；任务创建或入口装载失败由 `StartTasks` 携带原始诊断。
 

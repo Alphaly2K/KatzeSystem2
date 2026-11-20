@@ -1,8 +1,7 @@
 use super::{Frame, Metadata};
 use crate::{
     Error, Result,
-    graphics::pixel_length,
-    host::{MovieDecoder, MovieDecoderFactory, SharedSource},
+    host::{MovieDecoder, MovieDecoderFactory, SharedSource, graphics::pixel_length},
     read,
 };
 use std::{

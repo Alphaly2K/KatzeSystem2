@@ -68,7 +68,7 @@ impl Surface {
         filter: TextureFilter,
         state: RasterState,
     ) -> bool {
-        if texture.size.contains(&0) || uv.iter().flatten().any(|n| !n.is_finite()) {
+        if texture.size().contains(&0) || uv.iter().flatten().any(|n| !n.is_finite()) {
             return false;
         }
         let Some(interpolation) = Interpolation::new(vertices) else {
@@ -135,18 +135,18 @@ impl Surface {
                 .map(|p| p[i])
                 .fold(f64::INFINITY, f64::min)
                 .ceil()
-                .clamp(origin[i] as f64, (origin[i] + self.size[i]) as f64) as u32
+                .clamp(origin[i] as f64, (origin[i] + self.size()[i]) as f64) as u32
         });
         let upper: [u32; 2] = std::array::from_fn(|i| {
             if crosses_camera {
-                return origin[i] + self.size[i];
+                return origin[i] + self.size()[i];
             }
             points
                 .iter()
                 .map(|p| p[i])
                 .fold(f64::NEG_INFINITY, f64::max)
                 .ceil()
-                .clamp(origin[i] as f64, (origin[i] + self.size[i]) as f64) as u32
+                .clamp(origin[i] as f64, (origin[i] + self.size()[i]) as f64) as u32
         });
         let (lower, upper) = if let Some(clip) = clip {
             let lower = [
@@ -195,7 +195,7 @@ impl Surface {
                     continue;
                 }
                 let at = (y - origin[1]) as usize * stride + (x - origin[0]) as usize * 4;
-                for (target, value) in self.pixels[at..at + 4].iter_mut().zip(source) {
+                for (target, value) in self.pixels_mut()[at..at + 4].iter_mut().zip(source) {
                     let destination = f64::from(*target);
                     let value = match blend_mode {
                         1 => value * source[3] / 255. + destination,
@@ -226,10 +226,10 @@ impl Surface {
             } else {
                 uv[i].rem_euclid(2.)
             };
-            uv * f64::from(self.size[i])
+            uv * f64::from(self.size()[i])
         });
         let resolve =
-            |axis: usize, texel| texture_coordinate(texel, self.size[axis], address[axis]);
+            |axis: usize, texel| texture_coordinate(texel, self.size()[axis], address[axis]);
         if filter == TextureFilter::Point {
             return self.texel(
                 resolve(0, position[0].floor() as i64),
@@ -256,7 +256,7 @@ impl Surface {
 
     fn texel(&self, x: usize, y: usize) -> [f64; 4] {
         let offset = y * self.stride() + x * 4;
-        std::array::from_fn(|i| f64::from(self.pixels[offset + i]))
+        std::array::from_fn(|i| f64::from(self.pixels()[offset + i]))
     }
 }
 

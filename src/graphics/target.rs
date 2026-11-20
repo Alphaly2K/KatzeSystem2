@@ -60,7 +60,7 @@ impl RenderTarget {
         if tiles
             .iter()
             .flatten()
-            .map(|s| s.pixels.len())
+            .map(|s| s.pixels().len())
             .sum::<usize>()
             > MAX_CANVAS_BYTES
         {
@@ -113,7 +113,7 @@ impl RenderTarget {
             .tiles
             .iter()
             .flatten()
-            .map(|s| s.pixels.len())
+            .map(|s| s.pixels().len())
             .sum::<usize>();
         let mut created = 0;
         let mut visits = 0;
@@ -269,7 +269,7 @@ impl RenderTarget {
                     ];
                     if draw(surface, origin) {
                         if self.bit_depths[index] == 16 {
-                            quantize_16(&mut surface.pixels);
+                            quantize_16(surface.pixels_mut());
                         }
                         self.dirty[index] = true;
                         touched = true;
@@ -418,10 +418,10 @@ impl RenderTarget {
                     let from = source_line as usize * input.stride() + source_x as usize * 4;
                     let dest = (clipped.top - y + line) as usize * surface.stride()
                         + (clipped.left - x) as usize * 4;
-                    surface.pixels[dest..dest + width]
-                        .copy_from_slice(&input.pixels[from..from + width]);
+                    surface.pixels_mut()[dest..dest + width]
+                        .copy_from_slice(&input.pixels()[from..from + width]);
                     if self.bit_depths[index] == 16 {
-                        quantize_16(&mut surface.pixels[dest..dest + width]);
+                        quantize_16(&mut surface.pixels_mut()[dest..dest + width]);
                     }
                 }
                 touched = true;
