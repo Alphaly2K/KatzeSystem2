@@ -267,6 +267,7 @@ pub(crate) fn inspect_runtime(
         .into_task_runtime()
         .start_game_with_tasks(entry.as_bytes())?;
     let mut window = ProbeWindow { fullscreen };
+    let mut sound_trace = super::SoundTrace::from_env()?;
     println!("输入 {input} 声音 {sound}");
     println!("主任务 {task}");
     let dump = |vm: &katze_system2::kcs::Interpreter| {
@@ -381,6 +382,14 @@ pub(crate) fn inspect_runtime(
             runtime.mix_audio_stereo(48_000, pcm)?;
             if let Some(stats) = &mut audio_stats {
                 stats.add(frame, pcm);
+            }
+        }
+        if let Some(trace) = &mut sound_trace {
+            if let Some(state) = runtime
+                .object_mut(sound)
+                .and_then(|object| object.audio_state_mut())
+            {
+                trace.update(frame, state)?;
             }
         }
         if let Some(replay) = &mut replay {

@@ -57,6 +57,71 @@ impl AudioStats {
     }
 }
 
+pub(super) struct SoundTrace {
+    channels: Vec<(u32, Option<PlayingSound>)>,
+}
+
+struct PlayingSound {
+    name: Vec<u8>,
+    gain: Option<i32>,
+}
+
+impl SoundTrace {
+    pub(super) fn from_env() -> std::result::Result<Option<Self>, Box<dyn std::error::Error>> {
+        let Ok(value) = std::env::var("KATZE_PROBE_SOUND") else {
+            return Ok(None);
+        };
+        let mut numbers: Vec<u32> = if value == "all" {
+            (0..64).collect()
+        } else {
+            value
+                .split(',')
+                .map(|id| id.trim().parse())
+                .collect::<std::result::Result<_, _>>()?
+        };
+        if numbers.iter().any(|&id| id >= 64) {
+            return Err("KATZE_PROBE_SOUND expects channel numbers from 0 to 63".into());
+        }
+        numbers.sort_unstable();
+        numbers.dedup();
+        Ok(Some(Self {
+            channels: numbers.into_iter().map(|id| (id, None)).collect(),
+        }))
+    }
+
+    pub(super) fn update(
+        &mut self,
+        frame: u32,
+        state: &katze_system2::audio::SoundState,
+    ) -> Result<()> {
+        for (id, previous) in &mut self.channels {
+            let channel = state.channel(*id)?;
+            if !channel.is_playing() {
+                if previous.take().is_some() {
+                    println!("SOUND frame={frame} channel={id} stop");
+                }
+                continue;
+            }
+            let gain = channel.volume();
+            if previous
+                .as_ref()
+                .is_none_or(|old| old.name != channel.file() || old.gain != gain)
+            {
+                let name = channel.file();
+                println!(
+                    "SOUND frame={frame} channel={id} gain={gain:?} file={:?}",
+                    String::from_utf8_lossy(name)
+                );
+                *previous = Some(PlayingSound {
+                    name: name.to_vec(),
+                    gain,
+                });
+            }
+        }
+        Ok(())
+    }
+}
+
 pub(super) fn write_shot(
     path: &std::ffi::OsStr,
     [width, height]: [u32; 2],
