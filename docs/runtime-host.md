@@ -75,6 +75,6 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 
 `set_diagnostic_trace` 为当前实例启用指定类别的诊断，例如输入、任务消息及 FES。回调在推进过程中同步收到类别和借用的格式化参数；如需保留请在回调中转成自有字符串。诊断文字可随版本变化，按编号统计 native 调用应使用结构化的 `set_native_trace`。传入 `None` 关闭探针。示例可设置 `KATZE_TRACE_MOVIE` 查看独占电影句柄的装载、播放、停止及释放；时间字段使用宿主传入的 `system_time_ms`。
 
-默认工作区包 `katze-system2` 发布为库。离屏宿主入口是 `cargo run --release --example runprobe -- "$GAME_DIR"`；需要 MPEG 解码时加入 `--features builtin-mpeg`，或使用上述 FFmpeg 模式。普通运行直接使用 `GameRuntime`，可用 `KATZE_PROBE_SHOT` 输出终帧、用 `KATZE_PROBE_AUDIO_STATS=1` 统计内存 PCM。 `KATZE_PROBE_SOUND=0,1` 记录指定物理声道的播放、音量变化和停止，`all` 记录所有声道。同一示例的自动回放和 VM 检查由辅助模块通过任务接口执行。脚本检查工具和桌面宿主是单独的仓库内包，分别通过 `cargo run -p katze-script -- ...` 和 `cargo run -p katze-desktop --bin window_startup -- "$GAME_DIR"` 执行。桌面宿主默认启用 MPEG 解码，桌面输入的合成验证用 `cargo test -p katze-desktop --test window_host`。
+默认工作区包 `katze-system2` 发布为库。离屏宿主入口是 `cargo run --release --example runprobe -- "$GAME_DIR"`；需要 MPEG 解码时加入 `--features builtin-mpeg`，或使用上述 FFmpeg 模式。普通运行直接使用 `GameRuntime`，可用 `KATZE_PROBE_SHOT` 输出终帧、用 `KATZE_PROBE_AUDIO_STATS=1` 统计内存 PCM。 `KATZE_PROBE_SOUND=0,1` 记录指定物理声道的播放、音量变化和停止，`all` 记录所有声道。 `KATZE_PROBE_DETACHED_MIXER=1` 使用与设备回调相同的独立混音器，将输出写入内存。同一示例的自动回放和 VM 检查由辅助模块通过任务接口执行。脚本检查工具和桌面宿主是单独的仓库内包，分别通过 `cargo run -p katze-script -- ...` 和 `cargo run -p katze-desktop --bin window_startup -- "$GAME_DIR"` 执行。桌面宿主默认启用 MPEG 解码，桌面输入的合成验证用 `cargo test -p katze-desktop --test window_host`。
 
 库依赖树不含 SDL、Metal、系统字体发现或当地时间库。流式音频和电影播放使用工作线程；在不提供线程的目标上须单独评估。`ReadSource::read_at` 可能在解码线程调用，宿主须提供可共享的独立读取源。

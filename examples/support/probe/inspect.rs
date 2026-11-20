@@ -267,6 +267,9 @@ pub(crate) fn inspect_runtime(
         .into_task_runtime()
         .start_game_with_tasks(entry.as_bytes())?;
     let mut window = ProbeWindow { fullscreen };
+    let mut mixer = std::env::var_os("KATZE_PROBE_DETACHED_MIXER")
+        .map(|_| runtime.connect_audio_output())
+        .transpose()?;
     let mut sound_trace = super::SoundTrace::from_env()?;
     println!("输入 {input} 声音 {sound}");
     println!("主任务 {task}");
@@ -376,10 +379,16 @@ pub(crate) fn inspect_runtime(
                 );
             }
         }
-        if (replay.is_some() || audio_stats.is_some()) && runtime.object(sound).is_some() {
+        if (replay.is_some() || audio_stats.is_some() || mixer.is_some())
+            && runtime.object(sound).is_some()
+        {
             let mut buffer = [0.; 4800];
             let pcm = &mut buffer[..(ticks as usize * 800 * 2)];
-            runtime.mix_audio_stereo(48_000, pcm)?;
+            if let Some(mixer) = &mut mixer {
+                mixer.render(48_000, pcm)?;
+            } else {
+                runtime.mix_audio_stereo(48_000, pcm)?;
+            }
             if let Some(stats) = &mut audio_stats {
                 stats.add(frame, pcm);
             }
