@@ -5,6 +5,7 @@ use super::particle_erase::Erase;
 use super::particle_radial_ice::RadialIce;
 use super::particle_rolling::Rolling;
 use super::particle_round::{Round, Variant as RoundVariant};
+use super::particle_scene_light::SceneLight;
 use super::particle_scene_magic::SceneMagic;
 use super::particle_scene_suzu::SceneSuzu;
 use super::{Drawable, ParticleMesh, Surface};
@@ -75,6 +76,7 @@ enum Effect {
     RadialIce(RadialIce),
     SceneIce(SceneIce),
     Photon(Photon),
+    SceneLight(SceneLight),
     Rolling(Rolling),
     SceneSparkle(SceneSparkle),
     Spark(Box<Spark>),
@@ -160,6 +162,9 @@ impl Effect {
             }
             particle_plugin::Kind::SceneIce => Self::SceneIce(SceneIce::new(host, image, random)),
             particle_plugin::Kind::Photon => Self::Photon(Photon::new(host, image, random)),
+            particle_plugin::Kind::SceneLight => {
+                Self::SceneLight(SceneLight::new(host, image, random))
+            }
             particle_plugin::Kind::Rolling => Self::Rolling(Rolling::new(host, image, random)),
             particle_plugin::Kind::CurvedRolling => {
                 Self::Rolling(Rolling::new_curved(host, image, random))
@@ -319,6 +324,7 @@ impl ParticleRunner {
                     Some(Effect::RadialIce(effect)) => effect.write_mesh(host),
                     Some(Effect::SceneIce(effect)) => effect.write_mesh(host),
                     Some(Effect::Photon(effect)) => effect.write_mesh(host),
+                    Some(Effect::SceneLight(effect)) => effect.write_mesh(host),
                     Some(Effect::Rolling(effect)) => effect.write_mesh(host),
                     Some(Effect::SceneSparkle(effect)) => effect.write_mesh(host),
                     Some(Effect::Concentration(effect))
@@ -617,6 +623,10 @@ impl ParticleRunner {
                             effect.write_mesh(host);
                         }
                         Effect::Photon(effect) => {
+                            effect.update(delta, services.random().unwrap_or(&mut host.random));
+                            effect.write_mesh(host);
+                        }
+                        Effect::SceneLight(effect) => {
                             effect.update(delta, services.random().unwrap_or(&mut host.random));
                             effect.write_mesh(host);
                         }

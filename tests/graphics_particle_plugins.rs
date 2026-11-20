@@ -2291,6 +2291,54 @@ fn radial_ice_admits_grouped_trails_and_clears_them_before_the_flash() -> Result
 }
 
 #[test]
+fn scene_light_rises_on_zero_delta_and_respawns_after_fading() -> Result<()> {
+    let mut runtime = runtime_with_count(plugin(b"a_light.ppi"), 1)?;
+    runtime.update(1, 1)?;
+    let mut parameters = [0; 128];
+    for (slot, value) in parameters.chunks_exact_mut(4).zip([330f32, 180., 100.]) {
+        slot.copy_from_slice(&value.to_le_bytes());
+    }
+    runtime.dispatch_command_with_buffers(
+        2,
+        command(325),
+        &mut CommandBuffers {
+            data1: Some(&mut parameters),
+            ..Default::default()
+        },
+    )?;
+    runtime.dispatch_command(2, command(321))?;
+    let sample = |runtime: &Runtime<GraphicsFactory<KcsFactory<Programs>>>| {
+        let drawable = runtime.drawables().get(1).unwrap();
+        let vertex = drawable
+            .particle_mesh()
+            .unwrap()
+            .projected_quad(0, &Projection::default())
+            .unwrap()[0];
+        (drawable.blend_mode(), vertex.color, vertex.position)
+    };
+    let (mode, color, origin) = sample(&runtime);
+    assert_eq!(mode, 1);
+    assert_eq!(color & 0xffff_00ff, 0x0096_0014);
+    runtime.update(2, 1)?;
+    let (_, _, moving) = sample(&runtime);
+    runtime.update(2, 1)?;
+    assert_ne!(sample(&runtime).2[1], moving[1]);
+    runtime.update(130, 1)?;
+    runtime.update(131, 1)?;
+    assert_eq!(sample(&runtime).1 >> 24, 180);
+    runtime.update(162, 1)?;
+    runtime.update(163, 1)?;
+    let (_, faded, fade_end) = sample(&runtime);
+    assert_eq!(faded >> 24, 0);
+    assert_eq!(fade_end[0], origin[0]);
+    runtime.update(164, 1)?;
+    let (_, respawned, new_position) = sample(&runtime);
+    assert_eq!(respawned >> 24, 0);
+    assert_ne!(new_position[0], origin[0]);
+    Ok(())
+}
+
+#[test]
 fn scene_magic_retains_module_activation_across_effect_restarts() -> Result<()> {
     let mut runtime = runtime_with_count(plugin(b"s_080102.ppi"), 3)?;
     runtime.update(1, 1)?;
