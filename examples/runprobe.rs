@@ -126,10 +126,10 @@ impl StoryReplay {
             .collect();
         choices.sort_by_key(|(_, r)| (r.top, r.left));
         let [story_width, _] = replay_scale(self.surface, [900, 0]);
-        let story_choice = |r: Rect| r.right - r.left > story_width;
+        let story_choice = is_story_choice(&choices, self.surface[0] as i32, story_width);
         if choices.len() > 1 && choices != self.previous {
             self.option = 0;
-            if choices.iter().all(|(_, r)| story_choice(*r)) {
+            if story_choice {
                 self.option = self.plan.get(self.step).copied().unwrap_or(0);
                 self.step += 1;
             }
@@ -146,13 +146,28 @@ impl StoryReplay {
         // 单独的消息窗工具按钮不代表剧情选择。
         let target = choices
             .get(self.option.min(choices.len().saturating_sub(1)))
-            .filter(|(_, r)| choices.len() > 1 || story_choice(*r));
+            .filter(|_| choices.len() > 1 || story_choice);
         self.pointer.set(
             target.map_or(replay_scale(self.surface, [900, 400]), |(_, r)| {
                 [(r.left + r.right) / 2, (r.top + r.bottom) / 2]
             }),
         );
     }
+}
+
+fn is_story_choice(choices: &[(u32, Rect)], surface_width: i32, wide: i32) -> bool {
+    let Some(&(_, first)) = choices.first() else {
+        return false;
+    };
+    if choices.iter().all(|(_, r)| r.right - r.left > wide) {
+        return true;
+    }
+    choices.len() > 1
+        && first.right - first.left >= surface_width / 3
+        && choices.windows(2).all(|pair| {
+            let [(_, a), (_, b)] = [pair[0], pair[1]];
+            a.left == b.left && a.right == b.right && a.bottom <= b.top
+        })
 }
 
 fn replay_scale(surface: [u32; 2], [x, y]: [i32; 2]) -> [i32; 2] {
