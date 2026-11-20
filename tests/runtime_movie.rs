@@ -125,7 +125,7 @@ fn word(runtime: &MovieRuntime, address: u32) -> u32 {
 }
 
 #[test]
-fn host_movie_decoder_supplies_the_frame_and_pcm_after_restart() -> Result<()> {
+fn host_movie_decoder_plays_audio_and_silent_tail_after_restart() -> Result<()> {
     use katze_system2::host::{
         MovieAudio, MovieDecoded, MovieDecoder, MovieDecoderFactory, MovieFrame, MovieMetadata,
         SharedSource, Surface, media::DecodeMode,
@@ -143,7 +143,8 @@ fn host_movie_decoder_supplies_the_frame_and_pcm_after_restart() -> Result<()> {
         }
     }
 
-    const CLIP_STEPS: usize = 12;
+    const CLIP_STEPS: usize = 24;
+    const AUDIO_STEPS: usize = 12;
 
     struct Clip(f64);
     impl MovieDecoder for Clip {
@@ -173,7 +174,7 @@ fn host_movie_decoder_supplies_the_frame_and_pcm_after_restart() -> Result<()> {
                     time,
                     surface: Surface::from_bgra([2, 2], [0x20, 0x40, 0x80, 0xff].repeat(4))?,
                 }),
-                audio: Some(MovieAudio {
+                audio: (time + 1e-9 < AUDIO_STEPS as f64 / 60.).then(|| MovieAudio {
                     time,
                     samples: [0.25, -0.25].repeat(10),
                 }),
@@ -207,7 +208,11 @@ fn host_movie_decoder_supplies_the_frame_and_pcm_after_restart() -> Result<()> {
 
         let mut audio = [0.; CLIP_STEPS * 2 * 20];
         runtime.mix_task_audio_stereo(1, 600, &mut audio)?;
-        assert_eq!(audio, [0.25, -0.25].repeat(CLIP_STEPS * 2 * 10).as_slice());
+        for pass in audio.chunks_exact(CLIP_STEPS * 20) {
+            let (audible, tail) = pass.split_at(AUDIO_STEPS * 20);
+            assert_eq!(audible, [0.25, -0.25].repeat(AUDIO_STEPS * 10).as_slice());
+            assert!(tail.iter().all(|&sample| sample == 0.));
+        }
         runtime.update(1, 1)?;
         assert!(runtime.drawing().enabled);
     }

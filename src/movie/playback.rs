@@ -154,7 +154,7 @@ impl Player {
         let decode = Decode::new(decoder, count);
         if let Some(inline) = &self.shared.inline {
             *inline.lock().unwrap_or_else(|e| e.into_inner()) = Some(decode);
-            self.shared.pump_inline(false)?;
+            self.shared.pump_inline()?;
             return Ok(true);
         }
         let shared = self.shared.clone();
@@ -246,7 +246,7 @@ impl Player {
                 self.shared.changed.notify_all();
             }
         }
-        self.shared.pump_inline(false)
+        self.shared.pump_inline()
     }
 }
 
@@ -271,12 +271,11 @@ impl Shared {
         self.changed.notify_all();
     }
 
-    fn pump_inline(&self, force_step: bool) -> Result<()> {
+    fn pump_inline(&self) -> Result<()> {
         let Some(inline) = &self.inline else {
             return Ok(());
         };
         let mut inline = inline.lock().unwrap_or_else(|e| e.into_inner());
-        let mut force_step = force_step;
         while let Some(decode) = inline.as_mut() {
             {
                 let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
@@ -284,11 +283,10 @@ impl Shared {
                     *inline = None;
                     break;
                 }
-                if !force_step && state.decoded_until >= state.clock + self.lead {
+                if state.decoded_until >= state.clock + self.lead {
                     break;
                 }
             }
-            force_step = false;
             match decode.step(self) {
                 Ok(true) => (),
                 Ok(false) => *inline = None,
@@ -486,7 +484,9 @@ impl AudioOutput {
                     }
                     break;
                 }
-                if state.end.is_some() {
+                // At the decode watermark, the decoder waits for playback to advance.
+                // With no queued samples this part of the movie is silent.
+                if state.end.is_some() || state.decoded_until >= state.clock + self.0.lead {
                     break;
                 }
                 if !wait {
@@ -495,7 +495,7 @@ impl AudioOutput {
                 }
                 if self.0.inline.is_some() {
                     drop(state);
-                    self.0.pump_inline(true)?;
+                    self.0.pump_inline()?;
                     state = self.0.state.lock().unwrap_or_else(|e| e.into_inner());
                 } else {
                     self.0.changed.notify_all();
