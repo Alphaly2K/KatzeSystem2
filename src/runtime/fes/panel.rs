@@ -250,10 +250,7 @@ impl<F: ObjectFactory> Store<'_, F> {
         };
         let text = match std::str::from_utf8(content.text()) {
             Ok(text) => text.to_owned(),
-            Err(_) if encoding != encoding_rs::SHIFT_JIS => {
-                crate::text::decode_script(content.text(), encoding)?
-            }
-            Err(_) => return Err(Error::new(0, "面板文字不是有效 UTF-8")),
+            Err(_) => crate::text::decode_script(content.text(), encoding)?,
         };
         let name = content.record()[0x64..].split(|&b| b == 0).next().unwrap();
         let name = if name.is_empty() {

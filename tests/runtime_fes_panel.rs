@@ -242,6 +242,11 @@ fn panel_text_wraps_using_character_advances_and_retries_a_failed_font() {
         ),
         (encoding_rs::GBK, "中文\0".as_bytes(), ['中', '文']),
         (encoding_rs::SHIFT_JIS, "日本\0".as_bytes(), ['日', '本']),
+        (
+            encoding_rs::SHIFT_JIS,
+            b"\x93\xfa\x96\x7b\0".as_slice(),
+            ['日', '本'],
+        ),
     ] {
         runtime.set_resources(Files(file.clone(), encoding));
         let ObjectState::SavePanel(panel) = &mut objects.get_mut(handle).unwrap().state else {
