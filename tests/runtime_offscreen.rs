@@ -41,7 +41,9 @@ fn program(args: &[u8]) -> Program {
 }
 
 fn engine(args: &[u8], view: bool) -> Engine {
-    engine_program(program(args), view)
+    let mut rt = engine_program(program(args), view);
+    rt.set_graphics_backend(SoftwareBackend);
+    rt
 }
 
 fn engine_program(program: Program, view: bool) -> Engine {
@@ -118,12 +120,9 @@ fn execute(rt: &mut Engine, calls: &[(u32, Vec<u32>)]) {
 
 #[test]
 fn auxiliary_passes_keep_each_target_capture_and_canvas_independent() {
-    for (budget, backend) in [(1, false), (4096, false), (1, true), (4096, true)] {
+    for budget in [1, 4096] {
         let mut rt = engine(&[0; 8], true);
         rt.set_budget(budget, 4096);
-        if backend {
-            rt.set_graphics_backend(SoftwareBackend);
-        }
         let canvas = rt.drawing().clone();
         execute(
             &mut rt,
@@ -228,7 +227,7 @@ fn host_frame_and_script_capture_use_distinct_depth_selections() {
         .into_iter()
         .flat_map(f32::to_le_bytes)
         .collect();
-    let mut rt = engine(&args, true);
+    let mut rt = engine_program(program(&args), true);
     let events = Rc::new(RefCell::new(Vec::new()));
     rt.set_graphics_backend(Backend(events.clone()));
     call(&mut rt);
@@ -258,7 +257,7 @@ fn host_frame_and_script_capture_use_distinct_depth_selections() {
 
 #[test]
 fn native_pass_uses_saved_view_ordered_depth_bounds_and_clears_each_output() {
-    for (budget, backend) in [(1, false), (4096, false), (1, true), (4096, true)] {
+    for budget in [1, 4096] {
         for (range, visible) in [
             ([10.0, 20.0], [false, true, false]),
             ([f32::from_bits(0x7fa12345), 20.0], [true, true, false]),
@@ -277,9 +276,6 @@ fn native_pass_uses_saved_view_ordered_depth_bounds_and_clears_each_output() {
                     args.extend([0xff; 8]);
                 }
                 let mut rt = engine(&args, true);
-                if backend {
-                    rt.set_graphics_backend(SoftwareBackend);
-                }
                 rt.set_budget(budget, 4096);
                 let canvas = rt.drawing().clone();
                 call(&mut rt);
@@ -341,6 +337,28 @@ fn skipped_passes_keep_the_last_frame_and_short_arguments_precede_gating() {
 }
 
 #[test]
+fn presentation_needs_no_readback_backend_but_script_capture_does() {
+    let args: Vec<_> = [0.0f32, 30.0]
+        .into_iter()
+        .flat_map(f32::to_le_bytes)
+        .collect();
+    let mut rt = engine_program(program(&args), true);
+    assert!(!rt.compose_frame().unwrap().commands.is_empty());
+
+    rt.drawing_mut().enabled = false;
+    call(&mut rt);
+    rt.drawing_mut().enabled = true;
+    rt.create(0, kind::ORDINARY, b"caller", b"").unwrap();
+    assert!(
+        rt.update(0, 0)
+            .unwrap_err()
+            .message
+            .contains("离屏绘制后端")
+    );
+    assert!(rt.offscreen_frame().is_none());
+}
+
+#[test]
 fn frame_capture_returns_an_owned_cropped_image_and_skips_a_disabled_device() {
     let mut code = vec![0x2b, 3];
     code.extend(113u32.to_le_bytes());
@@ -363,6 +381,9 @@ fn frame_capture_returns_an_owned_cropped_image_and_skips_a_disabled_device() {
     code.push(0x3b);
     for enabled in [false, true] {
         let mut rt = engine_program(Program::from_code(&code, vec![0; 16], 128).unwrap(), true);
+        if enabled {
+            rt.set_graphics_backend(SoftwareBackend);
+        }
         rt.drawing_mut().enabled = enabled;
         rt.set_frame_capture_rectangle(Some(katze_system2::graphics::Rect::from_xywh(1, 1, 3, 2)));
         let caller = rt.create(0, kind::ORDINARY, b"capture", b"").unwrap();

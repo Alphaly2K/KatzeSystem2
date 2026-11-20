@@ -80,8 +80,8 @@ impl GameRuntime {
         self.0.set_platform_job_services(services);
     }
 
-    /// Install the executor for script offscreen drawing and readback. The
-    /// default uses the software backend. The host handles final presentation.
+    /// Install the executor for script offscreen drawing and readback. A
+    /// requested readback fails if no backend has been installed.
     pub fn set_graphics_backend(&mut self, backend: impl GraphicsBackend + 'static) {
         self.0.set_graphics_backend(backend);
     }

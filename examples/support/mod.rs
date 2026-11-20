@@ -11,7 +11,8 @@ use katze_system2::{
     Error, Result,
     host::{
         ButtonSource, ConfigurationFile, DeviceBinding, DeviceKeys, FileServices, LocalDateTime,
-        ResourceMode, ResourceServices, SaveServices, SharedSource, SystemServices,
+        ResourceMode, ResourceServices, SaveServices, SharedSource, SoftwareBackend,
+        SystemServices,
     },
     kcs::Program,
     resource::{ArchiveConfig, KifEntrySource, XmlDocument},
@@ -823,6 +824,7 @@ pub fn prepare_game(
         ..
     } = game;
     let mut runtime = GameSetup::new(1 << 20, 16 << 20)?;
+    runtime.set_graphics_backend(SoftwareBackend);
     let startup_xml = XmlDocument::parse(startup.as_bytes())?;
     if let Some(importer) = image_import::Import::from_startup(&root, &startup_xml)? {
         runtime.set_platform_job_services(importer);

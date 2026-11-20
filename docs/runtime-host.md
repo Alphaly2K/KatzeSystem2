@@ -38,7 +38,7 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 
 宿主用 `GameRuntime::present_frame` 借用当前绘制列表和 `FrameCanvas`。通过 `texture` 解析命令中的纹理，通过 `tiles` 和 `dirty_tiles` 更新画布缓存。呈现和脚本回读共用一个纹理缓存时，由宿主上传所有变更面块后调用 `acknowledge_upload`；有独立缓存的多个消费者应各自跟踪更新。
 
-`set_graphics_backend` 设置脚本同步离屏回读使用的后端。`GraphicsBackend::render` 在透明背景上执行命令，返回与请求尺寸一致、从顶行开始紧密排列的 BGRA8 `Surface`。旧实现若返回单块 `RenderTarget`，可直接返回该块的像素面。未设置时使用库内的软件后端；软件宿主若复用已有目标，可用 `SoftwareBackend::render_into`。
+`set_graphics_backend` 设置脚本同步离屏回读使用的后端。`GraphicsBackend::render` 在透明背景上执行命令，返回与请求尺寸一致、从顶行开始紧密排列的 BGRA8 `Surface`。没有回读需求的会话可以不注册后端；脚本实际请求回读时，缺少后端会报错。此前依赖默认软件回读的宿主，迁移时应在启动前显式调用 `setup.set_graphics_backend(host::SoftwareBackend)`。软件宿主若复用已有呈现目标，可用 `SoftwareBackend::render_into`。
 
 全屏转场的活动状态随 `advance` 更新。宿主可跳过或重复取帧，脚本无需等待呈现便能收到转场完成状态。
 

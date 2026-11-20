@@ -2,6 +2,7 @@ use katze_system2::{
     Result,
     expression::State,
     graphics::{Drawable, GraphicsFactory, Projection, RenderTarget, TextureFilter, Transform},
+    host::SoftwareBackend,
     kcs::{Interpreter, Program},
     runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, kind},
     task::Command,
@@ -25,6 +26,7 @@ fn engine(budget: usize) -> Engine {
             fallback: KcsFactory::new(Source),
         },
     );
+    runtime.set_graphics_backend(SoftwareBackend);
     runtime.set_budget(budget, 1 << 20);
     runtime.host_mut().surface_size = [8, 6];
     runtime.drawing_mut().enabled = true;

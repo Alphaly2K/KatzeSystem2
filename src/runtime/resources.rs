@@ -1,7 +1,5 @@
-use crate::graphics::{
-    Compositor, FrameCanvas, GraphicsBackend, Images, Rect, RenderTarget, SoftwareBackend,
-};
-use crate::host::ResourceServices;
+use crate::graphics::{Compositor, FrameCanvas, Images, Rect, RenderTarget};
+use crate::host::{GraphicsBackend, ResourceServices};
 use crate::kcs::{Interpreter, NativeReturn, ResourceState, format_string};
 use crate::{Error, Result};
 
@@ -20,7 +18,7 @@ pub(super) struct Resources {
     pub fonts: Option<Box<dyn crate::host::FontServices>>,
     pub images: Images,
     pub compositor: Compositor,
-    pub graphics_backend: Option<Box<dyn crate::host::GraphicsBackend>>,
+    pub graphics_backend: Option<Box<dyn GraphicsBackend>>,
     pub capture_rectangle: Option<Rect>,
     pub offscreen_frame: Option<crate::graphics::RenderTarget>,
     pub raw: ResourceState,
@@ -129,13 +127,16 @@ impl Resources {
         if self.compositor.drawing.target.is_none() {
             return Ok(None);
         }
+        if self.graphics_backend.is_none() {
+            return Err(Error::new(0, "宿主未配置脚本离屏绘制后端"));
+        }
         let frame = self.compose_frame(Some(range))?;
         let mut canvas = FrameCanvas::new(self.compositor.drawing.target.as_mut().unwrap());
-        let rendered = if let Some(backend) = self.graphics_backend.as_deref_mut() {
-            backend.render(&frame, &mut canvas, size)?
-        } else {
-            SoftwareBackend.render(&frame, &mut canvas, size)?
-        };
+        let rendered =
+            self.graphics_backend
+                .as_deref_mut()
+                .unwrap()
+                .render(&frame, &mut canvas, size)?;
         if rendered.size() != size {
             return Err(Error::new(0, "宿主回读尺寸与请求不符"));
         }

@@ -48,7 +48,7 @@ impl<F: ObjectFactory> Runtime<F> {
     }
 
     /// Install the backend for script-initiated offscreen drawing and readback.
-    /// Without one the session uses software drawing for these operations.
+    /// A requested readback fails if no backend has been installed.
     pub fn set_graphics_backend(&mut self, backend: impl GraphicsBackend + 'static) {
         self.resources.graphics_backend = Some(Box::new(backend));
     }

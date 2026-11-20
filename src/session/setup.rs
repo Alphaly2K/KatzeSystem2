@@ -159,8 +159,8 @@ impl GameSetup {
         self.0.set_fonts(fonts);
     }
 
-    /// Install the executor for script offscreen drawing and readback. The
-    /// default uses the software backend. The host handles final presentation.
+    /// Install the executor for script offscreen drawing and readback. A
+    /// backend is required only when the script requests readback.
     pub fn set_graphics_backend(&mut self, backend: impl GraphicsBackend + 'static) {
         self.0.set_graphics_backend(backend);
     }

@@ -6,6 +6,7 @@ use katze_system2::{
         Drawable, GraphicsFactory, ImageFilter, ImageList, ImageListProperties, Images, Projection,
         Rect, RenderTarget, TextureFilter, Transform,
     },
+    host::SoftwareBackend,
     runtime::{
         BaseObject, ObjectFactory, Runtime, TaskObject,
         fes::{ObjectState, Objects, Scene},
@@ -29,6 +30,7 @@ fn engine() -> (Engine, Objects) {
         State::new(4),
         GraphicsFactory { fallback: Reject },
     );
+    rt.set_graphics_backend(SoftwareBackend);
     rt.host_mut().surface_size = [8, 6];
     rt.drawing_mut().enabled = true;
     rt.drawing_mut().active = true;
