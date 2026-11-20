@@ -110,6 +110,7 @@ mod particle_sakura;
 mod particle_scene_ice;
 mod particle_scene_light;
 mod particle_scene_magic;
+mod particle_scene_shards;
 mod particle_scene_sparkle;
 mod particle_scene_suzu;
 mod particle_scene_wind;

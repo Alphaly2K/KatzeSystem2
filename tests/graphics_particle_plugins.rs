@@ -2383,6 +2383,60 @@ fn happy_moves_on_zero_delta_without_advancing_the_fade() -> Result<()> {
 }
 
 #[test]
+fn scene_shards_use_three_groups_and_preserve_the_final_face_alpha() -> Result<()> {
+    let mut runtime = runtime_with_count(plugin(b"o_150101.ppi"), 19)?;
+    runtime.update(1, 1)?;
+    let mut parameters = [0; 128];
+    let group = [640f32, 360., 700., 360., 80., 0., 2.];
+    for (slot, value) in parameters.chunks_exact_mut(4).zip(group.repeat(3)) {
+        slot.copy_from_slice(&value.to_le_bytes());
+    }
+    runtime.dispatch_command_with_buffers(
+        2,
+        command(325),
+        &mut CommandBuffers {
+            data1: Some(&mut parameters),
+            ..Default::default()
+        },
+    )?;
+    runtime.dispatch_command(2, command(321))?;
+    let vertex = |rt: &Runtime<GraphicsFactory<KcsFactory<Programs>>>, index| {
+        rt.drawables()
+            .get(1)
+            .unwrap()
+            .particle_mesh()
+            .unwrap()
+            .projected_quad(index, &Projection::default())
+            .unwrap()[0]
+    };
+    let max_alpha = |rt: &_, group: usize| {
+        (group * 6..group * 6 + 6)
+            .map(|index| vertex(rt, index).color >> 24)
+            .max()
+            .unwrap()
+    };
+    let extra = vertex(&runtime, 18);
+    runtime.update(2, 1)?;
+    runtime.update(2, 1)?;
+    let before = vertex(&runtime, 0);
+    runtime.update(2, 1)?;
+    assert_ne!(vertex(&runtime, 0).position, before.position);
+    for group in 0..3 {
+        assert_eq!(max_alpha(&runtime, group), 51);
+    }
+    for now in [8, 8, 20, 20, 32, 32, 44, 44, 44] {
+        runtime.update(now, 1)?;
+    }
+    for group in 0..3 {
+        assert_eq!(max_alpha(&runtime, group), 10);
+    }
+    assert_eq!(vertex(&runtime, 18), extra);
+    runtime.dispatch_command(2, command(321))?;
+    assert_eq!(max_alpha(&runtime, 0), 0);
+    Ok(())
+}
+
+#[test]
 fn scene_light_rises_on_zero_delta_and_respawns_after_fading() -> Result<()> {
     let mut runtime = runtime_with_count(plugin(b"a_light.ppi"), 1)?;
     runtime.update(1, 1)?;

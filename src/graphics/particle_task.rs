@@ -9,6 +9,7 @@ use super::particle_rolling::Rolling;
 use super::particle_round::{Round, Variant as RoundVariant};
 use super::particle_scene_light::SceneLight;
 use super::particle_scene_magic::SceneMagic;
+use super::particle_scene_shards::SceneShards;
 use super::particle_scene_suzu::SceneSuzu;
 use super::particle_scene_wind::SceneWind;
 use super::{Drawable, ParticleMesh, Surface};
@@ -91,6 +92,7 @@ enum Effect {
     Assault(Assault),
     Erase(Erase),
     SceneMagic(SceneMagic),
+    SceneShards(Box<SceneShards>),
     SceneSuzu(SceneSuzu),
     Thunder(Thunder),
     Paper(Paper),
@@ -196,6 +198,9 @@ impl Effect {
                 Self::SceneMagic(SceneMagic::new(host, image, module_state))
             }
             particle_plugin::Kind::SceneSuzu => Self::SceneSuzu(SceneSuzu::new(host, image)),
+            particle_plugin::Kind::SceneShards => {
+                Self::SceneShards(Box::new(SceneShards::new(host)))
+            }
             particle_plugin::Kind::Thunder => {
                 Self::Thunder(Thunder::new(host, image, random, &module_state))
             }
@@ -355,6 +360,7 @@ impl ParticleRunner {
                     Some(Effect::Erase(effect)) => effect.write_mesh(host),
                     Some(Effect::SceneMagic(effect)) => effect.write_mesh(host),
                     Some(Effect::SceneSuzu(effect)) => effect.write_mesh(host),
+                    Some(Effect::SceneShards(effect)) => effect.initialize_mesh(host),
                     Some(Effect::Thunder(effect)) => effect.write_mesh(host),
                     Some(Effect::Paper(effect)) => effect.write_mesh(host),
                     Some(Effect::Dash(effect)) => effect.write_mesh(host),
@@ -614,6 +620,7 @@ impl ParticleRunner {
                             effect.update(delta);
                             effect.write_mesh(host);
                         }
+                        Effect::SceneShards(effect) => effect.update(delta, host),
                         Effect::SwordSpark(effect) => {
                             effect.update(delta, &host.parameters);
                             effect.write_mesh(host);
@@ -922,6 +929,10 @@ impl Particle3DObject {
             let depth_shifts: &[f32] = match task {
                 ParticleRunner::Builtin {
                     effect: Some(Effect::SceneSuzu(effect)),
+                    ..
+                } => effect.depth_shifts(),
+                ParticleRunner::Builtin {
+                    effect: Some(Effect::SceneShards(effect)),
                     ..
                 } => effect.depth_shifts(),
                 _ => &[],
