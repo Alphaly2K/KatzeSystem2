@@ -374,6 +374,39 @@ fn value(state: &ObjectState) -> u32 {
 }
 
 #[test]
+fn plane_color_sets_argb_and_queues_motion_with_channels_in_order() {
+    let source = b"#DEFINE\nCPLANE panel[2]\n#START\nwait 99\n#_FES_SLEEP_\npanel color (($0+=1)+0x11442682) ($1+=7)\n";
+    let files = Files {
+        motion: Some(motion()),
+        ..Default::default()
+    };
+    let budget = 1;
+    let (mut runtime, mut scene) = setup(source, budget, files);
+    while !scene.prepare(runtime.numbers_mut(), budget).unwrap() {}
+    system(&mut runtime, &mut scene);
+    assert_eq!(runtime.numbers().shared[..2], [1, 0]);
+    for bank in 0..2 {
+        let id = scene.objects().lookup("panel", bank).unwrap();
+        let object = scene.objects().get(id).unwrap();
+        let ObjectState::CPlane(plane) = &object.state else {
+            unreachable!();
+        };
+        assert_eq!(plane.color(), 0x11442683);
+        assert_eq!(object.motions().base_properties[28], plane.color());
+        assert_eq!(
+            object
+                .motions()
+                .task(1)
+                .unwrap()
+                .state()
+                .unwrap()
+                .parameters[..4],
+            [17f32, 68., 38., 131.].map(f32::to_bits)
+        );
+    }
+}
+
+#[test]
 fn plane_blend_keeps_rgb_and_raw_alpha_parameters_across_resource_retry() {
     for kind in ["CPLANE", "PLANE"] {
         for budget in [1, 4096] {
