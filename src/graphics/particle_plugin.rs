@@ -71,6 +71,7 @@ pub(super) enum Kind {
     Sakura,
     Ice,
     SceneIce,
+    SceneMagic,
     SceneSparkle,
     Spark,
     LegacySpark,
@@ -203,6 +204,8 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
         Kind::SceneIce
     } else if name.eq_ignore_ascii_case(b"s_040101.ppi") {
         Kind::SceneSparkle
+    } else if name.eq_ignore_ascii_case(b"s_080102.ppi") {
+        Kind::SceneMagic
     } else if name.eq_ignore_ascii_case(b"spark.ppi") {
         Kind::Spark
     } else if name.eq_ignore_ascii_case(b"s_arrow.ppi") {

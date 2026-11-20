@@ -1,6 +1,7 @@
 use super::particle_arrow::Arrow;
 use super::particle_assault::Assault;
 use super::particle_erase::Erase;
+use super::particle_scene_magic::SceneMagic;
 use super::particle_rolling::Rolling;
 use super::particle_round::{Round, Variant as RoundVariant};
 use super::{Drawable, ParticleMesh, Surface};
@@ -77,6 +78,7 @@ enum Effect {
     Arrow(Arrow),
     Assault(Assault),
     Erase(Erase),
+    SceneMagic(SceneMagic),
     Thunder(Thunder),
     Paper(Paper),
     Dash(Dash),
@@ -163,6 +165,9 @@ impl Effect {
             }
             particle_plugin::Kind::Assault => Self::Assault(Assault::new(host, image, random)),
             particle_plugin::Kind::Erase => Self::Erase(Erase::new(host, image, random)),
+            particle_plugin::Kind::SceneMagic => {
+                Self::SceneMagic(SceneMagic::new(host, image, module_state))
+            }
             particle_plugin::Kind::Thunder => {
                 Self::Thunder(Thunder::new(host, image, random, &module_state))
             }
@@ -314,6 +319,7 @@ impl ParticleRunner {
                     Some(Effect::Arrow(effect)) => effect.write_mesh(host),
                     Some(Effect::Assault(effect)) => effect.write_mesh(host),
                     Some(Effect::Erase(effect)) => effect.write_mesh(host),
+                    Some(Effect::SceneMagic(effect)) => effect.write_mesh(host),
                     Some(Effect::Thunder(effect)) => effect.write_mesh(host),
                     Some(Effect::Paper(effect)) => effect.write_mesh(host),
                     Some(Effect::Dash(effect)) => effect.write_mesh(host),
@@ -557,6 +563,10 @@ impl ParticleRunner {
                             effect.write_mesh(host);
                         }
                         Effect::Erase(effect) => {
+                            effect.update(delta);
+                            effect.write_mesh(host);
+                        }
+                        Effect::SceneMagic(effect) => {
                             effect.update(delta);
                             effect.write_mesh(host);
                         }
