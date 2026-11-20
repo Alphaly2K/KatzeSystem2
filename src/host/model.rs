@@ -35,7 +35,8 @@ pub trait ModelPlayer {
 
 pub struct ModelFrame {
     pub pixels: Arc<Surface>,
-    /// Top-left of the image relative to the model anchor, in logical pixels.
+    /// The image top-left relative to the model anchor, in logical pixels
+    /// before the FES plane transform is applied.
     pub origin: [i32; 2],
 }
 

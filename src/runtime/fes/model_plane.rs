@@ -88,15 +88,15 @@ impl<F: ObjectFactory> Store<'_, F> {
             drawables.insert(handle, Drawable::image_rectangle([0.; 3], size))?;
         }
         drawables.set_image(handle, Some(frame.pixels));
-        drawables.set_base_point(handle, [base[0], base[1], state.plane.priority as f32]);
-        drawables.set_position(
+        drawables.set_base_point(
             handle,
             [
-                position[0] + frame.origin[0] as f32,
-                position[1] + frame.origin[1] as f32,
-                position[2],
+                base[0] - frame.origin[0] as f32,
+                base[1] - frame.origin[1] as f32,
+                state.plane.priority as f32,
             ],
         );
+        drawables.set_position(handle, [position[0], position[1], position[2]]);
         drawables.set_scale(handle, state.plane.scale()[..3].try_into().unwrap());
         drawables.set_matrix(handle, *state.plane.matrix());
         drawables.set_color(handle, state.plane.color, 1);

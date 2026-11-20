@@ -136,6 +136,24 @@ wait 100
         )
         .unwrap();
         for (tick, displayed) in [(1, false), (2, true), (3, true), (4, false)] {
+            if tick == 3 {
+                let id = scene.objects().lookup("actor", 0).unwrap();
+                let mut code = vec![0x15, 3];
+                code.extend((0x8000_0000u32 + 25 * 4).to_le_bytes());
+                code.push(3);
+                code.extend(2f32.to_le_bytes());
+                code.extend([0x2d, 0x3b]);
+                scene
+                    .objects_mut()
+                    .unwrap()
+                    .start_motion(
+                        id,
+                        katze_system2::kcs::Program::from_code(&code, vec![], 64).unwrap(),
+                        &[],
+                        0,
+                    )
+                    .unwrap();
+            }
             runtime.host_mut().system_time_ms = tick * 20;
             assert!(runtime.update_fes_scene(0, &mut scene, tick).unwrap());
             let id = scene.objects().lookup("actor", 0).unwrap();
@@ -146,12 +164,19 @@ wait 100
             );
             if available && displayed {
                 let drawable = drawable.unwrap();
-                assert_eq!(drawable.transform().position(), [18.0, 37.0, 0.0]);
                 assert_eq!(drawable.transform().base_point()[2], 5.0);
             }
             let frame = runtime
                 .with_frame(|draw, canvas| SoftwareBackend.render(draw, canvas, [64; 2]))
                 .unwrap();
+            assert_eq!(
+                frame.pixel(17, 40),
+                Some(if available && tick == 3 {
+                    0xff40_2010
+                } else {
+                    0
+                })
+            );
             assert_eq!(
                 frame.pixel(20, 40),
                 Some(if available && displayed {
@@ -160,6 +185,13 @@ wait 100
                     0
                 })
             );
+            if tick == 3 {
+                scene
+                    .objects_mut()
+                    .unwrap()
+                    .stop_motions(id, &mut Default::default(), 64)
+                    .unwrap();
+            }
         }
         let id = scene.objects().lookup("actor", 0).unwrap();
         runtime
