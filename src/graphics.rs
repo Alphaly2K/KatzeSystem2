@@ -95,6 +95,7 @@ mod particle_radiate;
 mod particle_rain;
 mod particle_ring;
 mod particle_rising;
+mod particle_rolling;
 mod particle_round;
 mod particle_rubble;
 mod particle_sakura;

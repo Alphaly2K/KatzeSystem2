@@ -75,6 +75,7 @@ pub(super) enum Kind {
     Thunder,
     Paper,
     Photon,
+    Rolling,
     Dash,
     Star,
     Explosion,
@@ -204,6 +205,8 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
         Kind::Paper
     } else if name.eq_ignore_ascii_case(b"a_photon.ppi") {
         Kind::Photon
+    } else if name.eq_ignore_ascii_case(b"rolling.ppi") {
+        Kind::Rolling
     } else if name.eq_ignore_ascii_case(b"dash.ppi") {
         Kind::Dash
     } else if name.eq_ignore_ascii_case(b"star.ppi") {
