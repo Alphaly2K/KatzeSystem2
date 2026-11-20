@@ -4,7 +4,11 @@ use super::{
     DrawCommand, DrawList, FrameTexture, ProjectedVertex, Rect, RenderTarget, Surface,
     TextureFilter, TextureSource,
 };
-use crate::{Error, Result, read};
+use crate::{
+    Error, Result,
+    host::graphics::{FrameCanvas, GraphicsBackend},
+    read,
+};
 
 #[derive(Clone, Copy)]
 pub(super) enum FilterKind {
@@ -210,60 +214,63 @@ impl ScreenFilter {
 
     pub fn frame(
         &mut self,
-        middle: &DrawList,
-        canvas: Option<&RenderTarget>,
+        mut middle: DrawList,
+        backend: &mut dyn GraphicsBackend,
+        canvas: &mut FrameCanvas<'_>,
         targets: &mut [RenderTarget],
         output: &mut Vec<DrawCommand>,
     ) -> Result<()> {
         if targets.len() < self.effect.kind().target_count() {
             return Err(Error::new(0, "实时滤镜的辅助渲染目标不足"));
         }
-        let index = match &mut self.effect {
-            Filter::Blur(blur) => {
-                blur.index = 1 - blur.index;
-                blur.index
-            }
-            Filter::Mosaic(_) | Filter::Shade(_) => 0,
-        };
-        let bounds = Rect::from_xywh(0, 0, self.size[0] as i32, self.size[1] as i32);
-        let background = if matches!(self.effect, Filter::Shade(_)) {
-            0xff00_0000
-        } else {
-            0
-        };
-        targets[index].fill_rect(bounds, background);
-        middle.render_into(&mut targets[index], canvas)?;
         match &mut self.effect {
             Filter::Blur(blur) => {
                 if !blur.first_frame {
-                    let image = padded_image(&targets[1 - index], self.texture_size)?;
+                    let image = padded_image(&targets[blur.index], self.texture_size)?;
                     let quad = blur.feedback(self.size);
-                    DrawList {
-                        commands: quad.commands(image, self.size, None).to_vec(),
-                        filter: middle.filter,
-                    }
-                    .render_into(&mut targets[index], None)?;
+                    middle
+                        .commands
+                        .extend(quad.commands(image, self.size, None));
                 }
+                let index = 1 - blur.index;
+                let target = render_pass(backend, canvas, &middle, self.size)?;
+                let image = padded_image(&target, self.texture_size)?;
+                targets[index] = target;
+                blur.index = index;
                 blur.first_frame = false;
-                let image = padded_image(&targets[index], self.texture_size)?;
                 output.extend(blur.quad.commands(image, self.size, None));
             }
             Filter::Mosaic(mosaic) => {
                 let (small, expanded) = mosaic.quads(self.texture_size);
-                let image = padded_image(&targets[0], self.texture_size)?;
-                targets[1].clear_rect(bounds);
-                DrawList {
+                let target = render_pass(backend, canvas, &middle, self.size)?;
+                let image = padded_image(&target, self.texture_size)?;
+                let reduction = DrawList {
                     commands: small
                         .commands(image, self.size, Some(TextureFilter::Point))
                         .to_vec(),
                     filter: middle.filter,
-                }
-                .render_into(&mut targets[1], None)?;
-                let image = padded_image(&targets[1], self.texture_size)?;
+                };
+                let reduced = render_pass(backend, canvas, &reduction, self.size)?;
+                let image = padded_image(&reduced, self.texture_size)?;
+                targets[0] = target;
+                targets[1] = reduced;
                 output.extend(expanded.commands(image, self.size, Some(TextureFilter::Point)));
             }
             Filter::Shade(shade) => {
-                let image = padded_image(&targets[0], self.texture_size)?;
+                let mut opaque = DrawList {
+                    commands: Vec::with_capacity(2 + middle.commands.len()),
+                    filter: middle.filter,
+                };
+                opaque.push_screen_quad(
+                    Rect::from_xywh(0, 0, self.size[0] as i32, self.size[1] as i32),
+                    None,
+                    0xff00_0000,
+                    None,
+                );
+                opaque.commands.extend(middle.commands);
+                let target = render_pass(backend, canvas, &opaque, self.size)?;
+                let image = padded_image(&target, self.texture_size)?;
+                targets[0] = target;
                 for quad in shade.quads() {
                     output.extend(quad.commands(image.clone(), self.size, None));
                 }
@@ -271,6 +278,19 @@ impl ScreenFilter {
         }
         Ok(())
     }
+}
+
+fn render_pass(
+    backend: &mut dyn GraphicsBackend,
+    canvas: &mut FrameCanvas<'_>,
+    frame: &DrawList,
+    size: [u32; 2],
+) -> Result<RenderTarget> {
+    let surface = backend.render(frame, canvas, size)?;
+    if surface.size() != size {
+        return Err(Error::new(0, "宿主回读尺寸与请求不符"));
+    }
+    RenderTarget::from_tiles(size, [1, 1], vec![Some(surface)])
 }
 
 impl Shade {

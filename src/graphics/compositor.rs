@@ -1,5 +1,5 @@
-use super::{Drawables, DrawingContext, Projection, RenderTarget};
-use crate::host::graphics::{DrawList, TextureFilter};
+use super::{Drawables, DrawingContext, Projection, RenderTarget, SoftwareBackend};
+use crate::host::graphics::{DrawList, FrameCanvas, GraphicsBackend, TextureFilter};
 use crate::{Error, Result};
 
 #[derive(Clone, Copy)]
@@ -99,13 +99,21 @@ impl Compositor {
         projection
     }
 
-    /// 合成全帧或指定深度区间；调用前须配置帧视图。
+    /// Compose with the software renderer for any intermediate filter passes.
     pub fn compose(&mut self, range: Option<[f32; 2]>) -> Result<DrawList> {
+        self.compose_with_backend(range, Some(&mut SoftwareBackend))
+    }
+
+    pub(crate) fn compose_with_backend(
+        &mut self,
+        range: Option<[f32; 2]>,
+        backend: Option<&mut dyn GraphicsBackend>,
+    ) -> Result<DrawList> {
         let (projection, parent, filter) = self
             .frame_view
             .as_ref()
             .ok_or_else(|| Error::new(0, "绘制列表需要配置运行时帧视图"))?;
-        self.compose_view(projection.clone(), *parent, *filter, range)
+        self.compose_view(projection.clone(), *parent, *filter, range, backend)
     }
 
     fn compose_view(
@@ -114,6 +122,7 @@ impl Compositor {
         parent: [f32; 16],
         filter: TextureFilter,
         range: Option<[f32; 2]>,
+        backend: Option<&mut dyn GraphicsBackend>,
     ) -> Result<DrawList> {
         let projection = self.project_view(projection);
         if range.is_some() {
@@ -131,9 +140,15 @@ impl Compositor {
             let middle = self
                 .drawables
                 .compose(&projection, parent, filter, Some([near, far]))?;
+            let backend = backend.ok_or_else(|| Error::new(0, "宿主未配置实时滤镜绘制后端"))?;
+            let mut canvas = match self.drawing.target.as_mut() {
+                Some(target) => FrameCanvas::new(target),
+                None => FrameCanvas::from_tiles([0; 2], &[], &mut []),
+            };
             effect.frame(
-                &middle,
-                self.drawing.target.as_ref(),
+                middle,
+                backend,
+                &mut canvas,
                 &mut self.auxiliary_targets,
                 &mut frame.commands,
             )?;
@@ -252,7 +267,13 @@ impl Compositor {
         parent: [f32; 16],
         filter: TextureFilter,
     ) -> Result<bool> {
-        let frame = self.compose_view(projection.clone(), parent, filter, None)?;
+        let frame = self.compose_view(
+            projection.clone(),
+            parent,
+            filter,
+            None,
+            Some(&mut SoftwareBackend),
+        )?;
         let canvas = self
             .drawing
             .target

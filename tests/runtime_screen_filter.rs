@@ -1,12 +1,27 @@
 use katze_system2::{
     Result,
     expression::State,
-    graphics::{Drawable, GraphicsFactory, Projection, RenderTarget, TextureFilter, Transform},
-    host::SoftwareBackend,
+    graphics::{Drawable, GraphicsFactory, Projection, RenderTarget, SoftwareBackend, Transform},
+    host::graphics::{DrawList, FrameCanvas, GraphicsBackend, Surface, TextureFilter},
     kcs::{Interpreter, Program},
     runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, kind},
     task::Command,
 };
+use std::{cell::RefCell, rc::Rc};
+
+struct RecordedBackend(Rc<RefCell<Vec<[u32; 2]>>>);
+
+impl GraphicsBackend for RecordedBackend {
+    fn render(
+        &mut self,
+        frame: &DrawList,
+        canvas: &mut FrameCanvas<'_>,
+        size: [u32; 2],
+    ) -> Result<Surface> {
+        self.0.borrow_mut().push(size);
+        SoftwareBackend.render(frame, canvas, size)
+    }
+}
 
 struct Source;
 impl ProgramLoader for Source {
@@ -181,6 +196,8 @@ fn blur_natives_preserve_depth_bands_and_reset_feedback_on_every_enable() {
 fn live_mosaic_keeps_its_first_rectangle_and_uses_point_sampling_inside_linear_frames() {
     for budget in [1, 4096] {
         let mut runtime = engine(budget);
+        let readbacks = Rc::new(RefCell::new(Vec::new()));
+        runtime.set_graphics_backend(RecordedBackend(readbacks.clone()));
         for x in 0..8 {
             rectangle(
                 &mut runtime,
@@ -197,6 +214,7 @@ fn live_mosaic_keeps_its_first_rectangle_and_uses_point_sampling_inside_linear_f
         execute(&mut runtime, &[(524, &[effect, 7])], vec![], false);
         assert_eq!(state(&mut runtime, effect), 7);
         assert_eq!(pixels(&mut runtime).pixel(2, 2), Some(0xff00ff00));
+        assert!(readbacks.borrow().is_empty());
         execute(
             &mut runtime,
             &[(
@@ -217,7 +235,8 @@ fn live_mosaic_keeps_its_first_rectangle_and_uses_point_sampling_inside_linear_f
             vec![],
             false,
         );
-        let frame = runtime.compose_frame().unwrap();
+        let frame = runtime.with_frame(|draw, _| Ok(draw.clone())).unwrap();
+        assert_eq!(*readbacks.borrow(), [[8, 6], [8, 6]]);
         let filtered = &frame.commands[2..4];
         assert!(
             filtered
@@ -343,6 +362,8 @@ fn shade_natives_render_the_middle_band_with_ordered_shifted_samples() {
         );
         assert_eq!(state(&mut runtime, effect), 0x80000001);
         let scene = runtime.compose_frame().unwrap();
+        let source = &runtime.compositor().auxiliary_targets()[0];
+        assert_eq!(source.pixel(7, 5), Some(0xff000000));
         assert_eq!(scene.commands.len(), 100);
         let shade = &scene.commands[2..98];
         assert_eq!(shade[0].vertices[0].color, 0xd1ffffff);

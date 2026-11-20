@@ -1,4 +1,4 @@
-//! Frame presentation data and synchronous rendering for script readback.
+//! Frame presentation data and synchronous rendering for offscreen readback.
 
 mod capture;
 mod commands;
@@ -56,7 +56,9 @@ impl<'a> FrameCanvas<'a> {
     }
 }
 
-/// Host renderer for synchronous, script-initiated readback.
+/// Host renderer for synchronous offscreen readback.
+/// The runtime calls it during script updates and when composing active screen
+/// filters before giving the final drawing commands to the presentation host.
 pub trait GraphicsBackend {
     /// Draw onto a transparent target and return top-down BGRA pixels at `size`.
     fn render(

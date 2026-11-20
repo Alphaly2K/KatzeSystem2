@@ -1,6 +1,8 @@
 use crate::graphics::{Compositor, Images, Rect, RenderTarget};
-use crate::host::FrameCanvas;
-use crate::host::{GraphicsBackend, ResourceServices};
+use crate::host::{
+    graphics::{DrawList, FrameCanvas, GraphicsBackend},
+    resources::ResourceServices,
+};
 use crate::kcs::{Interpreter, NativeReturn, ResourceState, format_string};
 use crate::{Error, Result};
 
@@ -47,7 +49,7 @@ pub(super) struct Resources {
 }
 
 impl Resources {
-    pub fn compose_frame(&mut self, range: Option<[f32; 2]>) -> Result<crate::graphics::DrawList> {
+    pub fn compose_frame(&mut self, range: Option<[f32; 2]>) -> Result<DrawList> {
         self.update_plane_movie_frames()?;
         if range.is_none() {
             let size = self.movie.as_ref().map(|movie| movie.surface_size);
@@ -62,7 +64,11 @@ impl Resources {
                 }
             }
         }
-        self.compositor.compose(range)
+        let backend = self
+            .graphics_backend
+            .as_mut()
+            .map(|backend| &mut **backend as &mut dyn GraphicsBackend);
+        self.compositor.compose_with_backend(range, backend)
     }
 
     pub fn render_offscreen(&mut self, size: [u32; 2], range: [f32; 2]) -> Result<bool> {
