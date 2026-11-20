@@ -2,8 +2,9 @@ use katze_system2::{
     Error, Result,
     expression::State,
     fes::Program,
+    graphics::{Projection, RenderTarget, SoftwareBackend, Transform},
     host::{
-        graphics::Surface,
+        graphics::{GraphicsBackend, Surface, TextureFilter},
         model::{ModelConfig, ModelFrame, ModelPlayer, ModelServices},
         resources::{ResourceMode, ResourceServices},
     },
@@ -72,7 +73,7 @@ impl ModelPlayer for Player {
     fn frame(&mut self, time: u32) -> Result<Option<ModelFrame>> {
         self.0.borrow_mut().push(Event::Frame(time));
         Ok(Some(ModelFrame {
-            pixels: Arc::new(Surface::new([8, 12])?),
+            pixels: Arc::new(Surface::from_bgra([8, 12], [16, 32, 64, 255].repeat(96))?),
             origin: [-2, -3],
         }))
     }
@@ -116,6 +117,13 @@ wait 100
             State::new(0),
             NoTasks,
         );
+        runtime.drawing_mut().target = Some(RenderTarget::new([64; 2]).unwrap());
+        runtime.drawing_mut().enabled = true;
+        runtime.set_frame_view(
+            Projection::default(),
+            *Transform::default().matrix(),
+            TextureFilter::Point,
+        );
         let events = Rc::new(RefCell::new(Vec::new()));
         if bound_resources {
             runtime.set_resources(Resources);
@@ -142,6 +150,17 @@ wait 100
                 assert_eq!(drawable.transform().position(), [18.0, 37.0, 0.0]);
                 assert_eq!(drawable.transform().base_point()[2], 5.0);
             }
+            let frame = runtime
+                .with_frame(|draw, canvas| SoftwareBackend.render(draw, canvas, [64; 2]))
+                .unwrap();
+            assert_eq!(
+                frame.pixel(20, 40),
+                Some(if available && displayed {
+                    0xff40_2010
+                } else {
+                    0
+                })
+            );
         }
         let id = scene.objects().lookup("actor", 0).unwrap();
         runtime
