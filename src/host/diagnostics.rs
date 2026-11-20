@@ -1,6 +1,5 @@
 //! Script diagnostics and the optional quiz debug panel.
 
-pub use crate::runtime::{QuizDebugInput, QuizDebugSession};
 use std::{fmt::Arguments, rc::Rc};
 
 /// Selects a family of optional diagnostic probes.
@@ -47,7 +46,7 @@ impl DiagnosticTrace {
 
 macro_rules! trace_detail {
     ($trace:expr, $category:ident, $($message:tt)+) => {{
-        let category = $crate::host::TraceCategory::$category;
+        let category = $crate::host::diagnostics::TraceCategory::$category;
         if let Some(trace) = $trace.filter(|trace| trace.enabled(category)) {
             trace.write(category, format_args!($($message)+));
         }
@@ -100,4 +99,32 @@ pub enum NativeTraceEvent {
         invocation: NativeInvocation,
         failed: bool,
     },
+}
+
+/// State of the quiz debug panel. Selection indices are zero-based; question
+/// numbers retain their script values.
+#[derive(Debug)]
+pub struct QuizDebugSession {
+    pub(crate) bank: u32,
+    pub packs: Vec<Vec<u8>>,
+    pub pack: Option<usize>,
+    pub questions: Vec<u32>,
+    pub question: Option<usize>,
+    pub visible: bool,
+    pub enabled: bool,
+    pub lock_question_and_answers: bool,
+    pub pause_counting: bool,
+    pub auto_advance: bool,
+}
+
+/// Input from an open quiz debug panel.
+#[derive(Clone, Copy, Debug)]
+pub enum QuizDebugInput {
+    Close,
+    Enable(bool),
+    SelectPack(usize),
+    SelectQuestion(usize),
+    LockQuestionAndAnswers(bool),
+    PauseCounting(bool),
+    AutoAdvance(bool),
 }

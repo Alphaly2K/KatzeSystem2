@@ -1,4 +1,5 @@
 use super::{BaseObject, ObjectFactory, ObjectHost, Runtime, TaskObject, kind};
+use crate::host::diagnostics::{QuizDebugInput, QuizDebugSession};
 use crate::kcs::{Host, Interpreter, NativeReturn, decode_utf8_units, format_string};
 use crate::task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock};
 use crate::{Error, Result, read};
@@ -97,33 +98,6 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         }
         Ok(NativeReturn::Continue)
     }
-}
-
-/// 问答调试面板的状态。索引从零开始，题号保留原始 DWORD。
-#[derive(Debug)]
-pub struct QuizDebugSession {
-    bank: u32,
-    pub packs: Vec<Vec<u8>>,
-    pub pack: Option<usize>,
-    pub questions: Vec<u32>,
-    pub question: Option<usize>,
-    pub visible: bool,
-    pub enabled: bool,
-    pub lock_question_and_answers: bool,
-    pub pause_counting: bool,
-    pub auto_advance: bool,
-}
-
-/// 已打开会话接收的面板输入。
-#[derive(Clone, Copy, Debug)]
-pub enum QuizDebugInput {
-    Close,
-    Enable(bool),
-    SelectPack(usize),
-    SelectQuestion(usize),
-    LockQuestionAndAnswers(bool),
-    PauseCounting(bool),
-    AutoAdvance(bool),
 }
 
 impl QuizDebugSession {

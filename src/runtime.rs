@@ -18,13 +18,12 @@ mod backlog;
 mod bmb;
 mod cst;
 mod debug_window;
-pub use debug_window::{QuizDebugInput, QuizDebugSession};
 mod diagnostics;
-use crate::host::trace_detail;
-pub use crate::host::{
-    DiagnosticTrace, NativeInvocation, NativeTraceEvent, ScriptLocation, ScriptMessages,
-    ScriptPosition, TraceCategory,
+pub use crate::host::diagnostics::{
+    DiagnosticTrace, NativeInvocation, NativeTraceEvent, QuizDebugInput, QuizDebugSession,
+    ScriptLocation, ScriptMessages, ScriptPosition, TraceCategory,
 };
+use crate::host::trace_detail;
 mod emocon;
 mod export;
 pub mod fes;

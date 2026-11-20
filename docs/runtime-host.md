@@ -20,7 +20,7 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 |`host::audio`、`host::movie`|`Mixer`、`Pcm`、语音合成及电影解码契约|
 |`host::input`、`host::font`|输入事件、按键绑定与字体服务|
 |`host::platform`、`host::effect`|窗口、剪贴板、平台任务及外部效果播放器|
-|`host::diagnostics`|脚本位置、调试消息、native 跟踪及问答调试面板|
+|`host::diagnostics`|脚本位置、调试消息、native 跟踪及 `QuizDebugSession`、`QuizDebugInput`|
 
 可选的软件绘制器及其输出目标从 `graphics` 导入，MPEG 解码器从 `movie` 导入。绘制命令原有的 `graphics` 导入路径仍然可用。任务树、原始命令编号、VM 缓冲区和分派表在底层 `runtime` 接口中供诊断和工具使用。Rust 契约稳定且有非 Rust 宿主接入时，再定义独立版本的 C ABI 和显式释放约定。
 
