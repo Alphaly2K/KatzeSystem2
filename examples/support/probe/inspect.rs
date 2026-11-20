@@ -315,6 +315,25 @@ pub(crate) fn inspect_runtime(
             );
         }
     };
+    let shared_range = std::env::var("KATZE_PROBE_SHARED")
+        .ok()
+        .map(
+            |spec| -> std::result::Result<_, Box<dyn std::error::Error>> {
+                let (start, count) = spec
+                    .split_once(':')
+                    .ok_or("KATZE_PROBE_SHARED expects start:count")?;
+                let start = start.parse::<usize>()?;
+                let end = start
+                    .checked_add(count.parse::<usize>()?)
+                    .ok_or("KATZE_PROBE_SHARED range overflow")?;
+                let range = start..end;
+                if runtime.numbers().shared.get(range.clone()).is_none() {
+                    return Err("KATZE_PROBE_SHARED range exceeds script storage".into());
+                }
+                Ok(range)
+            },
+        )
+        .transpose()?;
     let mut now = 0;
     let ticks = if replay.is_some() { 3 } else { 1 };
     for frame in 0..frames {
@@ -419,6 +438,12 @@ pub(crate) fn inspect_runtime(
             }
         });
         if dump_frame {
+            if let Some(range) = &shared_range {
+                println!(
+                    "SHARED frame={frame} range={range:?} values={:?}",
+                    &runtime.numbers().shared[range.clone()]
+                );
+            }
             for id in task_ids(&runtime) {
                 if let Some(node) = runtime.tree().node(id) {
                     let object = runtime.object(id);
