@@ -41,7 +41,7 @@ struct Shared {
 /// 在独立线程解码的电影播放器；画面和音频由宿主分别取走。
 pub struct Player {
     source: SharedSource,
-    factory: Option<Arc<dyn MovieDecoderFactory>>,
+    factory: Arc<dyn MovieDecoderFactory>,
     initial: Option<Box<dyn MovieDecoder>>,
     shared: Arc<Shared>,
     worker: Option<JoinHandle<()>>,
@@ -52,15 +52,9 @@ pub struct Player {
 pub struct AudioOutput(Arc<Shared>);
 
 impl Player {
-    pub fn new(source: SharedSource) -> Result<Self> {
-        Self::with_decoder_factory(source, None)
-    }
-
-    pub(crate) fn with_decoder_factory(
-        source: SharedSource,
-        factory: Option<Arc<dyn MovieDecoderFactory>>,
-    ) -> Result<Self> {
-        let decoder = open_decoder(source.clone(), factory.as_deref())?;
+    /// Prepare playback with the given factory, also used to reopen the source.
+    pub fn new(source: SharedSource, factory: Arc<dyn MovieDecoderFactory>) -> Result<Self> {
+        let decoder = factory.open(source.clone())?;
         let metadata = decoder.metadata();
         let bytes = pixel_length(metadata.size)?;
         if bytes == 0
@@ -128,7 +122,7 @@ impl Player {
         let decoder = match self.initial.take() {
             Some(decoder) => decoder,
             None => {
-                let decoder = open_decoder(self.source.clone(), self.factory.as_deref())?;
+                let decoder = self.factory.open(self.source.clone())?;
                 if decoder.metadata() != self.shared.metadata {
                     return Err(Error::new(0, "Movie decoder metadata changed on reopen"));
                 }
@@ -249,22 +243,6 @@ fn finish(state: &mut State) {
     if state.end.is_some_and(|end| state.clock >= end - 1e-9) {
         state.playing = false;
     }
-}
-
-fn open_decoder(
-    source: SharedSource,
-    factory: Option<&dyn MovieDecoderFactory>,
-) -> Result<Box<dyn MovieDecoder>> {
-    if let Some(factory) = factory {
-        return factory.open(source);
-    }
-    #[cfg(feature = "builtin-mpeg")]
-    return Ok(Box::new(super::Decoder::new(source)?));
-    #[cfg(not(feature = "builtin-mpeg"))]
-    Err(Error::new(
-        0,
-        "Movie playback requires a host decoder or the builtin-mpeg feature",
-    ))
 }
 
 fn decode(mut decoder: Box<dyn MovieDecoder>, shared: &Shared, count: u32) -> Result<()> {

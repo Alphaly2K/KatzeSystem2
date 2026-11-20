@@ -1,5 +1,5 @@
 #[cfg(feature = "builtin-mpeg")]
-use katze_system2::movie::Decoder;
+use katze_system2::movie::{Decoder, MpegDecoderFactory};
 use katze_system2::{
     Result,
     audio::SoundFactory,
@@ -219,6 +219,7 @@ fn plane_movie_loads_without_exclusive_playback_or_audio_and_keeps_native_return
     instruction(&mut code, 0x26, &[4]);
     instruction(&mut code, 0x3b, &[]);
     let mut runtime = setup(code, 4096, b"clip_%u[G128].mpg\0");
+    runtime.set_movie_decoder_factory(MpegDecoderFactory);
     assert_eq!(runtime.create(0, kind::PLANE, b"layer", b"").unwrap(), 3);
     runtime.update(0, 1).unwrap();
     assert_eq!(word(&runtime, 0), 0xdead_beef);
@@ -246,6 +247,7 @@ fn plane_movie_loads_without_exclusive_playback_or_audio_and_keeps_native_return
     call(&mut code, 988, &[3, 64], false);
     instruction(&mut code, 0x3b, &[]);
     let mut runtime = setup(code, 4096, b"effect_%u[G128].mpg\0");
+    runtime.set_movie_decoder_factory(MpegDecoderFactory);
     runtime.host_mut().platform_settings = Some(katze_system2::settings::PlatformSettings {
         etc_disablemovie: 1,
         ..Default::default()
@@ -298,6 +300,7 @@ fn movie_natives_play_present_finish_and_release_through_runtime_services() {
         instruction(&mut code, 0x26, &[24]);
         instruction(&mut code, 0x3b, &[]);
         let mut runtime = setup(code, budget, b"clip_%u[G128].mpg\0");
+        runtime.set_movie_decoder_factory(MpegDecoderFactory);
         runtime.update(0, 1).unwrap();
         assert_ne!(word(&runtime, 0), 0);
         assert_eq!(word(&runtime, 4), 1);
@@ -397,6 +400,16 @@ fn missing_and_disabled_movies_preserve_the_return_protocol_and_restore_drawing(
         assert_eq!(word(&runtime, 4), 0xdead_beef);
         assert!(runtime.drawing().enabled);
     }
+}
+
+#[test]
+fn existing_movie_requires_a_host_factory_and_restores_drawing_on_failure() {
+    let mut code = Vec::new();
+    call(&mut code, 265, &[64], false);
+    let mut runtime = setup(code, 4096, b"clip_%u[G128].mpg\0");
+    let error = runtime.update(0, 1).unwrap_err();
+    assert!(error.message.contains("requires a host decoder factory"));
+    assert!(runtime.drawing().enabled);
 }
 
 #[test]
@@ -608,19 +621,20 @@ fn plane_movie_handles_play_transform_mix_and_release_independently() {
         instruction(&mut code, 0x26, &[36]);
         instruction(&mut code, 0x3b, &[]);
         let mut runtime = setup(code, 4096, b"clip_%u[G128].mpg\0");
+        runtime.set_movie_decoder_factory(MpegDecoderFactory);
         runtime.create(0, kind::PLANE, b"movie", b"").unwrap();
         runtime.create(0, kind::PLANE, b"effect", b"").unwrap();
         let source = || {
             Arc::new(include_bytes!("fixtures/movie/clip.mpg").to_vec())
                 as katze_system2::io::SharedSource
         };
-        let mut global = Player::new(source()).unwrap();
+        let mut global = Player::new(source(), Arc::new(MpegDecoderFactory)).unwrap();
         global.set_volume(15);
         global.play(0).unwrap();
         let sound = runtime.object_mut(1).unwrap().audio_state_mut().unwrap();
         sound.set_movie_output(Some(global.audio_output()));
         let mut mixer = connected.then(|| sound.connect_output().unwrap());
-        let mut reference = Player::new(source()).unwrap();
+        let mut reference = Player::new(source(), Arc::new(MpegDecoderFactory)).unwrap();
         reference.set_volume(70);
         reference.play(0).unwrap();
         let mut expected_sound = SoundState::default();

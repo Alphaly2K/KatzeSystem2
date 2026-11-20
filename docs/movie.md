@@ -1,6 +1,6 @@
 # 电影
 
-`movie::Decoder::new(SharedSource)` 创建独占流式解码器，输入为 MPEG Program Stream，视频为 MPEG-1，音频为可选 MP2／MP3。资源服务、归档和文件均通过同一随机读取接口提供字节。创建会探测首个 MiB 的实际 PES 流；音轨不依赖系统头的 audio_bound 声明。
+启用 `builtin-mpeg` 后，`movie::Decoder::new(SharedSource)` 可创建 MPEG Program Stream 的流式解码器，视频为 MPEG-1，音频为可选 MP2／MP3。会话宿主可注册 `movie::MpegDecoderFactory` 来选择这个实现。资源服务、归档和文件均通过同一随机读取接口提供字节。创建会探测首个 MiB 的实际 PES 流；音轨不依赖系统头的 audio_bound 声明。
 
 `metadata()` 返回尺寸、帧率、音频采样率和容器视频时长。当前视频要求非零偶数宽高，输出面受图形像素容量上限约束，输入长度不超过有符号 32 位位置范围。采样率为零表示没有音轨。容器视频时长可能早于音频或最后一幅画面的结束，播放完成应使用 `Decoded::ended`。
 
@@ -12,7 +12,7 @@
 
 ## 播放与输出
 
-`Player::new(source)` 探测媒体，`play(count)` 在后台解码；返回前预取少量输出。零和 `u32::MAX` 无限循环，其他值为完整播放次数。正在播放时再次启动返回 false；完成或停止后可以重播。`stop()` 清除待消费输出、唤醒并回收线程，返回停止前的播放状态。`is_playing()` 同时报告后台读取或解码错误。
+`Player::new(source, factory)` 通过指定的工厂探测媒体，`play(count)` 在后台解码；返回前预取少量输出。零和 `u32::MAX` 无限循环，其他值为完整播放次数。正在播放时再次启动返回 false；完成或停止后可以重播。`stop()` 清除待消费输出、唤醒并回收线程，返回停止前的播放状态。`is_playing()` 同时报告后台读取或解码错误。
 
 `audio_output()` 提供单个音频消费端；通过 `SoundState::set_movie_output` 接入声音状态或已连接的 `Mixer`，不占六十四个脚本声音通道。设备混音不等待文件或解码，暂缺输出时保留电影消费位置。直接调用 `SoundState::mix_stereo` 的离线混音等待所需数据。有音轨时以实际采样消费为时钟；无音轨时由宿主调用 `advance(seconds)`。`set_volume` 接受 0～100，静音仍推进播放。
 

@@ -165,8 +165,8 @@ impl GameSetup {
         self.0.set_graphics_backend(backend);
     }
 
-    /// Use a host decoder for future movie loads. Already loaded movies retain
-    /// their decoder factory when stopped and played again.
+    /// Install the host decoder for movie resources. A decoder is required only
+    /// when a script loads a movie. Already loaded movies retain their factory.
     pub fn set_movie_decoder_factory(&mut self, factory: impl MovieDecoderFactory + 'static) {
         self.0.set_movie_decoder_factory(factory);
     }

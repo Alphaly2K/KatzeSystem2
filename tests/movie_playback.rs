@@ -3,7 +3,7 @@
 use katze_system2::{
     audio::SoundState,
     io::SharedSource,
-    movie::{Decoder, Player},
+    movie::{Decoder, MpegDecoderFactory, Player},
 };
 use std::sync::Arc;
 
@@ -28,7 +28,7 @@ fn movie_clock_follows_audio_and_restarts_full_passes_without_touching_sound_cha
     let first = reference.advance(1. / 60.).unwrap();
     assert_eq!(first.video.unwrap().time, 0.);
     assert_eq!(first.audio.unwrap().time, 0.);
-    let mut player = Player::new(source()).unwrap();
+    let mut player = Player::new(source(), Arc::new(MpegDecoderFactory)).unwrap();
     let mut sound = SoundState::default();
     sound.set_movie_output(Some(player.audio_output()));
     for count in [1, 2] {
@@ -77,7 +77,8 @@ fn connected_mixer_consumes_movie_audio_with_volume_and_continuous_resampling() 
         include_bytes!("fixtures/movie/clip-mp3.mpg").as_slice(),
     ] {
         for rate in [44100, 48000] {
-            let mut player = Player::new(Arc::new(bytes.to_vec())).unwrap();
+            let mut player =
+                Player::new(Arc::new(bytes.to_vec()), Arc::new(MpegDecoderFactory)).unwrap();
             let mut sound = SoundState::default();
             let mut mixer = sound.connect_output().unwrap();
             sound.set_movie_output(Some(player.audio_output()));

@@ -60,7 +60,11 @@ impl Movie {
 
 impl Resources {
     fn open_movie_player(&self, source: crate::host::SharedSource) -> Result<Player> {
-        Player::with_decoder_factory(source, self.movie_decoder_factory.clone())
+        let factory = self
+            .movie_decoder_factory
+            .clone()
+            .ok_or_else(|| Error::new(0, "Movie playback requires a host decoder factory"))?;
+        Player::new(source, factory)
     }
 
     pub(super) fn advance_movies(&mut self, now: u32) -> Result<()> {

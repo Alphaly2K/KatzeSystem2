@@ -19,7 +19,6 @@ default-members = ["."]
 resolver = "3"
 
 [features]
-default = ["builtin-mpeg"]
 builtin-mpeg = ["dep:cc"]
 
 [dependencies]

@@ -828,6 +828,9 @@ pub fn prepare_game(
     runtime.set_graphics_backend(SoftwareBackend);
     if std::env::var_os("KATZE_FFMPEG_MOVIES").is_some() {
         runtime.set_movie_decoder_factory(movie_decoder::Ffmpeg);
+    } else {
+        #[cfg(feature = "builtin-mpeg")]
+        runtime.set_movie_decoder_factory(katze_system2::movie::MpegDecoderFactory);
     }
     let startup_xml = XmlDocument::parse(startup.as_bytes())?;
     if let Some(importer) = image_import::Import::from_startup(&root, &startup_xml)? {

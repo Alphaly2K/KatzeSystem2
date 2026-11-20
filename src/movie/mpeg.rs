@@ -2,10 +2,19 @@ use super::{Audio, Decoded, Frame, Metadata, ffi};
 use crate::{
     Error, Result,
     graphics::Surface,
-    host::{MovieDecoder, SharedSource},
+    host::{MovieDecoder, MovieDecoderFactory, SharedSource},
     read,
 };
 use std::{ffi::c_void, panic::AssertUnwindSafe, ptr::NonNull};
+
+/// Optional MPEG-1 decoder adapter. Register it explicitly with the session.
+pub struct MpegDecoderFactory;
+
+impl MovieDecoderFactory for MpegDecoderFactory {
+    fn open(&self, source: SharedSource) -> Result<Box<dyn MovieDecoder>> {
+        Ok(Box::new(Decoder::new(source)?))
+    }
+}
 
 struct Input {
     source: SharedSource,

@@ -6,6 +6,10 @@ rust-version = "1.87"
 license = "LGPL-2.1-only"
 publish = false
 
+[features]
+default = ["builtin-mpeg"]
+builtin-mpeg = ["katze-system2/builtin-mpeg"]
+
 [[bin]]
 name = "window_startup"
 path = "src/window_startup.rs"

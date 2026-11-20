@@ -17,7 +17,7 @@ mod storage;
 
 pub use crate::audio::{Mixer, Pcm};
 pub use crate::graphics::{
-    DrawCommand, DrawList, FrameCanvas, FrameTexture, FrameTriangle, ProjectedVertex, Rect,
+    DrawCommand, DrawList, FrameTexture, FrameTriangle, ProjectedVertex, Rect,
     RenderTarget, SoftwareBackend, Surface, TextureAddress, TextureFilter, TextureSource,
 };
 pub use crate::input::DeviceKeys;
@@ -37,7 +37,7 @@ pub use diagnostics::{
 pub use effect::{EffectPlayer, EffectServices};
 pub use export::{ExportDestination, ExportServices};
 pub use font::{FontRequest, FontServices};
-pub use graphics::GraphicsBackend;
+pub use graphics::{FrameCanvas, GraphicsBackend};
 pub use input::{ButtonSource, DeviceBinding, InputDevice, KeySample, PointerSample};
 pub use movie::{
     MovieAudio, MovieDecoded, MovieDecoder, MovieDecoderFactory, MovieFrame, MovieMetadata,

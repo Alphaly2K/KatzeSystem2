@@ -1,4 +1,5 @@
-use crate::graphics::{Compositor, FrameCanvas, Images, Rect, RenderTarget};
+use crate::graphics::{Compositor, Images, Rect, RenderTarget};
+use crate::host::FrameCanvas;
 use crate::host::{GraphicsBackend, ResourceServices};
 use crate::kcs::{Interpreter, NativeReturn, ResourceState, format_string};
 use crate::{Error, Result};

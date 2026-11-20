@@ -1,5 +1,6 @@
 use super::{ObjectFactory, Runtime};
-use crate::graphics::{DrawList, FrameCanvas, Image, Rect, RenderTarget};
+use crate::graphics::{DrawList, Image, Rect, RenderTarget};
+use crate::host::FrameCanvas;
 use crate::kcs::HostState;
 use crate::{Error, Result};
 

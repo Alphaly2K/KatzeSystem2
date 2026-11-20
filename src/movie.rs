@@ -1,4 +1,4 @@
-//! Streaming movie playback. The built-in MPEG-1 decoder is optional.
+//! Streaming playback for host-provided movie decoders.
 
 #[cfg(feature = "builtin-mpeg")]
 mod ffi;
@@ -10,5 +10,5 @@ pub use crate::host::{
     MovieAudio as Audio, MovieDecoded as Decoded, MovieFrame as Frame, MovieMetadata as Metadata,
 };
 #[cfg(feature = "builtin-mpeg")]
-pub use mpeg::Decoder;
+pub use mpeg::{Decoder, MpegDecoderFactory};
 pub use playback::{AudioOutput, Player};

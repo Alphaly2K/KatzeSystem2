@@ -2,11 +2,11 @@
 
 CatSystem2 2.6.1.90 的可嵌入 Rust 运行库。宿主提供资源、输入和设备服务；仓库另提供离屏运行示例及脚本检查工具。
 
-需要 Rust 1.87 或更新版本；默认的电影解码功能还需要 C 编译器。嵌入时可关闭 `builtin-mpeg` 并接入宿主解码器。
+需要 Rust 1.87 或更新版本。默认库构建无需 C 编译器；宿主按游戏需要接入电影解码器。下方离屏示例选择了可选的 MPEG 解码功能，该功能需要 C 编译器。
 
 ```sh
-cargo test --locked
-cargo run --locked --release --example runprobe -- "$GAME_DIR"
+cargo test --locked --all-features
+cargo run --locked --release --features builtin-mpeg --example runprobe -- "$GAME_DIR"
 cargo run --locked -p katze-script -- eval 2048 '1+2*3'
 cargo run --locked -p katze-script -- inspect demo.cst
 cargo run --locked -p katze-script -- native-calls ordinary scripts/
@@ -18,7 +18,7 @@ cargo run --locked -p katze-script -- native-calls ordinary scripts/
 
 桌面宿主单独构建：`cargo run --locked --release -p katze-desktop --bin window_startup -- "$GAME_DIR"`。
 
-有 WebM 电影的游戏可设置 `KATZE_FFMPEG_MOVIES=1`，并确保 `ffmpeg` 和 `ffprobe` 在 `PATH` 上。
+示例也可设置 `KATZE_FFMPEG_MOVIES=1`，用 `PATH` 上的 `ffmpeg` 和 `ffprobe` 播放 WebM 等格式；此时 `runprobe` 无需启用 `builtin-mpeg`。
 
 [嵌入运行库](docs/runtime-host.md) · [脚本参考](docs/README.md) · [接口使用与实现范围](docs/api.md) · [阶段进展](GOAL.md) · [依赖许可证](THIRD_PARTY.md)
 

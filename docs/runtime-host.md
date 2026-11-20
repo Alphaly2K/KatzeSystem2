@@ -10,7 +10,7 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 |网络与系统|按脚本协议分发请求并管理任务状态。类型 62 的旧版社交发帖接收者暂未接入。|执行网络或系统动作，实施策略，回交结果；处理窗口、剪贴板、输入法、插件及对话框。|
 |输入、字体和时钟|处理游戏输入和逻辑时钟，按字体数据完成字形度量与栅格化。|提供输入事件、运行时间和当地日期时间，发现字体并提供数据。|
 
-嵌入时从 `katze_system2::session` 导入 `GameSetup`、`GameRuntime`、`FrameTime` 和 `FrameOutcome`，从 `katze_system2::host` 导入服务契约及输入、绘制命令、纹理、PCM 和诊断类型。任务树、原始命令编号、VM 缓冲区和分派表在底层 `runtime` 接口中供诊断和工具使用。Rust 契约稳定且有非 Rust 宿主接入时，再定义独立版本的 C ABI 和显式释放约定。
+嵌入时从 `katze_system2::session` 导入 `GameSetup`、`GameRuntime`、`FrameTime` 和 `FrameOutcome`，从 `katze_system2::host` 导入服务契约及输入、绘制命令、纹理、PCM 和诊断类型。软件绘制和 MPEG 解码等现成的可选实现分别从 `graphics` 和 `movie` 导入。任务树、原始命令编号、VM 缓冲区和分派表在底层 `runtime` 接口中供诊断和工具使用。Rust 契约稳定且有非 Rust 宿主接入时，再定义独立版本的 C ABI 和显式释放约定。
 
 标准宿主用 `GameSetup::new(shared_slots, external_bytes)` 创建根任务和清零后的脚本存储。前者按 32 位值计数，后者按字节计数。启动前可将启动文档、游戏默认值及用户设置的 XML 字节交给 `configure_startup`，由它应用引擎与平台配置并返回游戏逻辑尺寸；配置无效时保留原有状态。绑定输入、资源和需要的其他服务，调用 `configure_canvas` 设置非零的逻辑输出尺寸并按游戏配置创建画布，再把启动配置中的脚本名称交给 `start_game(entry)`。该方法消费 `GameSetup`，并在创建任务前检查资源、输入和画布。成功后返回 `GameRuntime`，宿主可用它推进帧、呈现和拉取 PCM。宿主可先调用 `validate_startup` 检查这些条件；该检查不会访问宿主服务或装载脚本。两个方法使用 `session::StartupError` 分别报告缺少的服务；任务创建或入口装载失败由 `StartTasks` 携带原始诊断。
 
@@ -38,7 +38,7 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 
 宿主用 `GameRuntime::present_frame` 借用当前绘制列表和 `FrameCanvas`。通过 `texture` 解析命令中的纹理，通过 `tiles` 和 `dirty_tiles` 更新画布缓存。呈现和脚本回读共用一个纹理缓存时，由宿主上传所有变更面块后调用 `acknowledge_upload`；有独立缓存的多个消费者应各自跟踪更新。
 
-`set_graphics_backend` 设置脚本同步离屏回读使用的后端。`GraphicsBackend::render` 在透明背景上执行命令，返回与请求尺寸一致、从顶行开始紧密排列的 BGRA8 `Surface`。没有回读需求的会话可以不注册后端；脚本实际请求回读时，缺少后端会报错。此前依赖默认软件回读的宿主，迁移时应在启动前显式调用 `setup.set_graphics_backend(host::SoftwareBackend)`。软件宿主若复用已有呈现目标，可用 `SoftwareBackend::render_into`。
+`set_graphics_backend` 设置脚本同步离屏回读使用的后端。`GraphicsBackend::render` 在透明背景上执行命令，返回与请求尺寸一致、从顶行开始紧密排列的 BGRA8 `Surface`。没有回读需求的会话可以不注册后端；脚本实际请求回读时，缺少后端会报错。软件宿主可调用 `setup.set_graphics_backend(graphics::SoftwareBackend)`，并用 `SoftwareBackend::render_into` 复用已有呈现目标。
 
 全屏转场的活动状态随 `advance` 更新。宿主可跳过或重复取帧，脚本无需等待呈现便能收到转场完成状态。
 
@@ -48,7 +48,7 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 
 宿主可通过 `host::SpeechSynthesizer` 提供合成的 `Pcm`；字体服务从 `host` 导入 `FontServices`、`FontRequest` 和 `GlyphMask`。可复用 `message::Fonts` 处理宿主提供的字体，或实现自己的服务。软件图形后端、字形实现与混音器都可在无设备环境运行。
 
-默认启用 `builtin-mpeg`，解码 MPEG-1 视频及 MP2／MP3 音轨。宿主可通过 `set_movie_decoder_factory` 为之后装载的独占与图层电影接入自己的 `host::MovieDecoderFactory`。工厂打开 `SharedSource`，解码器在运行库的工作线程返回 BGRA 帧与交错 PCM；循环、呈现和混音由原有流程处理。更换工厂不影响已装载电影。使用 `default-features = false` 可省去内置 C 解码器及其构建依赖；该配置装载电影时需要已注册的工厂。
+装载电影需要宿主先通过 `set_movie_decoder_factory` 注册 `host::MovieDecoderFactory`。工厂打开 `SharedSource`，解码器在运行库的工作线程返回 BGRA 帧与交错 PCM。更换工厂不影响已装载电影。默认库构建无需 C 工具链；启用 `builtin-mpeg` 并注册 `movie::MpegDecoderFactory` 可解码 MPEG-1 视频及 MP2／MP3 音轨。
 
 离屏和桌面示例可设置 `KATZE_FFMPEG_MOVIES=1`，让示例使用 `PATH` 中的 `ffprobe` 和 `ffmpeg` 探测并解码电影，支持 VP8／Vorbis WebM。此模式要求媒体能够从不可寻址的输入管道解码。视频按报告的帧率输出，音轨输出同一时间基准下的立体声 PCM。电影资源通过宿主提供的流读取，示例无需把电影解包到磁盘。运行库不需要外部媒体程序。
 
@@ -58,6 +58,6 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 
 `set_diagnostic_trace` 为当前实例启用指定类别的诊断，例如输入、任务消息及 FES。回调在推进过程中同步收到类别和借用的格式化参数；如需保留请在回调中转成自有字符串。诊断文字可随版本变化，按编号统计 native 调用应使用结构化的 `set_native_trace`。传入 `None` 关闭探针。示例可设置 `KATZE_TRACE_MOVIE` 查看独占电影句柄的装载、播放、停止及释放；时间字段使用宿主传入的 `system_time_ms`。
 
-默认工作区包 `katze-system2` 发布为库。离屏宿主入口是 `cargo run --release --example runprobe -- "$GAME_DIR"`。普通运行直接使用 `GameRuntime`，可用 `KATZE_PROBE_SHOT` 输出终帧、用 `KATZE_PROBE_AUDIO_STATS=1` 统计内存 PCM。自动选项回放和 VM 检查通过同一示例的任务接口执行。脚本检查工具和桌面宿主是单独的仓库内包，分别通过 `cargo run -p katze-script -- ...` 和 `cargo run -p katze-desktop --bin window_startup -- "$GAME_DIR"` 执行。桌面输入的合成验证用 `cargo test -p katze-desktop --test window_host`。
+默认工作区包 `katze-system2` 发布为库。离屏宿主入口是 `cargo run --release --example runprobe -- "$GAME_DIR"`；需要 MPEG 解码时加入 `--features builtin-mpeg`，或使用上述 FFmpeg 模式。普通运行直接使用 `GameRuntime`，可用 `KATZE_PROBE_SHOT` 输出终帧、用 `KATZE_PROBE_AUDIO_STATS=1` 统计内存 PCM。自动选项回放和 VM 检查通过同一示例的任务接口执行。脚本检查工具和桌面宿主是单独的仓库内包，分别通过 `cargo run -p katze-script -- ...` 和 `cargo run -p katze-desktop --bin window_startup -- "$GAME_DIR"` 执行。桌面宿主默认启用 MPEG 解码，桌面输入的合成验证用 `cargo test -p katze-desktop --test window_host`。
 
 库依赖树不含 SDL、Metal、系统字体发现或当地时间库。流式音频和电影播放使用工作线程；在不提供线程的目标上须单独评估。`ReadSource::read_at` 可能在解码线程调用，宿主须提供可共享的独立读取源。
