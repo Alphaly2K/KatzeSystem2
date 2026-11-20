@@ -2,8 +2,13 @@
 
 pub use super::export::{ExportDestination, ExportServices};
 use crate::{Error, Result};
-pub use crate::{kcs::ScriptSettings, resource::FolderPaths};
 use std::{io::Write, sync::Arc};
+
+mod folder;
+mod script_settings;
+pub use folder::FolderPaths;
+pub use script_settings::ScriptSettings;
+pub(crate) use script_settings::fold_key;
 
 pub type SharedSource = Arc<dyn ReadSource>;
 

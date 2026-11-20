@@ -43,6 +43,7 @@ mod task_host;
 mod triples;
 mod utf8;
 mod vectors;
+pub use crate::host::storage::ScriptSettings;
 pub use crate::host::{
     AchievementServices, ClipboardRequest, ClipboardText, LocalDateTime, MenuItemRequest,
     ResourceServices, SystemServices, WindowAction, WindowCloseRequest, WindowRequest,
@@ -80,7 +81,6 @@ pub(crate) use resource_cache::call as prefetch_call;
 pub use resource_host::ResourceHost;
 pub(crate) use resource_host::ResourceState;
 pub(crate) use resource_host::load_sequence_file;
-pub use script_settings::ScriptSettings;
 pub use sequences::SequenceData;
 pub(crate) use sequences::{SequenceGroup, SequenceMap};
 pub(crate) use strings::format as format_string;

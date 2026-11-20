@@ -4,9 +4,9 @@ use crate::{
         AchievementServices, ConfigurationServices, EffectServices, ExportServices, FileServices,
         FontServices, GraphicsBackend, MovieDecoderFactory, PlatformJobServices, ResourceServices,
         SaveServices, SpeechSynthesizer, SystemServices,
+        storage::{FolderPaths, ScriptSettings},
     },
-    kcs::{CachedResources, ScriptSettings},
-    resource::{ArchiveConfig, FolderPaths},
+    resource::{ArchiveConfig, CachedResources},
     settings::PlatformSettings,
 };
 
@@ -47,7 +47,7 @@ impl<F: ObjectFactory> Runtime<F> {
         self.host.platform_settings.as_mut()
     }
 
-    /// Install the backend for script-initiated offscreen drawing and readback.
+    /// Install the renderer for script captures and active screen filter passes.
     /// A requested readback fails if no backend has been installed.
     pub fn set_graphics_backend(&mut self, backend: impl GraphicsBackend + 'static) {
         self.resources.graphics_backend = Some(Box::new(backend));

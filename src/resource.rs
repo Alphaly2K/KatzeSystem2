@@ -4,15 +4,14 @@ use crate::{Error, Result, read};
 mod cache;
 mod config;
 mod directory;
-mod folder;
 mod kif;
 mod kif_source;
 mod router;
 mod xml;
+pub use crate::host::storage::FolderPaths;
 pub use cache::{CachedResources, ResourceCache};
 pub use config::{ArchiveConfig, ArchiveEntry};
 pub use directory::{ArchiveDirectory, DirectoryEntry};
-pub use folder::FolderPaths;
 pub use kif::{KifArchive, verification_seed};
 pub use kif_source::KifEntrySource;
 pub use router::{
