@@ -2132,6 +2132,49 @@ fn legacy_spark_updates_all_quads_and_reads_duration_during_playback() -> Result
 }
 
 #[test]
+fn arrow_recycles_trails_and_preserves_the_unused_quad() -> Result<()> {
+    let mut runtime = runtime_with_count(plugin(b"s_arrow.ppi"), 5)?;
+    runtime.update(1, 1)?;
+    let quad = |runtime: &Runtime<GraphicsFactory<KcsFactory<Programs>>>, index| {
+        runtime
+            .drawables()
+            .get(1)
+            .unwrap()
+            .particle_mesh()
+            .unwrap()
+            .projected_quad(index, &Projection::default())
+            .unwrap()
+    };
+    let unused = quad(&runtime, 4);
+    let mut parameters = [0; 128];
+    for (i, value) in [4f32, 100., 120., 240., 150., 40., 9.]
+        .into_iter()
+        .enumerate()
+    {
+        parameters[4 * i..4 * i + 4].copy_from_slice(&value.to_le_bytes());
+    }
+    runtime.dispatch_command_with_buffers(
+        2,
+        command(325),
+        &mut CommandBuffers {
+            data1: Some(&mut parameters),
+            ..Default::default()
+        },
+    )?;
+    runtime.dispatch_command(2, command(321))?;
+    assert_eq!(quad(&runtime, 0)[0].color >> 24, 128);
+    assert_eq!(quad(&runtime, 1)[0].color >> 24, 0);
+    runtime.update(2, 1)?;
+    assert_eq!(quad(&runtime, 1)[0].color >> 24, 255);
+    runtime.update(5, 3)?;
+    assert_eq!(quad(&runtime, 1)[0].color >> 24, 0);
+    runtime.update(6, 1)?;
+    assert_eq!(quad(&runtime, 1)[0].color >> 24, 255);
+    assert_eq!(quad(&runtime, 4), unused);
+    Ok(())
+}
+
+#[test]
 fn thunder_finishes_hides_and_preserves_module_randomness_across_restarts() -> Result<()> {
     let mut runtime = runtime_with_count(plugin(b"thunder.ppi"), 3)?;
     runtime.update(1, 1)?;

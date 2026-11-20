@@ -1,3 +1,4 @@
+use super::particle_arrow::Arrow;
 use super::particle_rolling::Rolling;
 use super::particle_round::{Round, Variant as RoundVariant};
 use super::{Drawable, ParticleMesh, Surface};
@@ -71,6 +72,7 @@ enum Effect {
     SceneSparkle(SceneSparkle),
     Spark(Box<Spark>),
     LegacySpark(LegacySpark),
+    Arrow(Arrow),
     Thunder(Thunder),
     Paper(Paper),
     Dash(Dash),
@@ -151,6 +153,9 @@ impl Effect {
             particle_plugin::Kind::Spark => Self::Spark(Box::new(Spark::new(host, image, random))),
             particle_plugin::Kind::LegacySpark => {
                 Self::LegacySpark(LegacySpark::new(host, image, random, module_state))
+            }
+            particle_plugin::Kind::Arrow => {
+                Self::Arrow(Arrow::new(host, image, random, module_state))
             }
             particle_plugin::Kind::Thunder => {
                 Self::Thunder(Thunder::new(host, image, random, &module_state))
@@ -300,6 +305,7 @@ impl ParticleRunner {
                     }
                     Some(Effect::Spark(effect)) => effect.write_mesh(host),
                     Some(Effect::LegacySpark(effect)) => effect.write_mesh(host),
+                    Some(Effect::Arrow(effect)) => effect.write_mesh(host),
                     Some(Effect::Thunder(effect)) => effect.write_mesh(host),
                     Some(Effect::Paper(effect)) => effect.write_mesh(host),
                     Some(Effect::Dash(effect)) => effect.write_mesh(host),
@@ -532,6 +538,10 @@ impl ParticleRunner {
                                 f32::from_bits(host.parameters[0]),
                                 services.random().unwrap_or(&mut host.random),
                             );
+                            effect.write_mesh(host);
+                        }
+                        Effect::Arrow(effect) => {
+                            effect.update(delta, services.random().unwrap_or(&mut host.random));
                             effect.write_mesh(host);
                         }
                         Effect::SwordSpark(effect) => {
