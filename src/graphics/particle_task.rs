@@ -3,6 +3,7 @@ use super::particle_assault::Assault;
 use super::particle_burst::Burst;
 use super::particle_erase::Erase;
 use super::particle_fall_spark::FallSpark;
+use super::particle_happy::Happy;
 use super::particle_radial_ice::RadialIce;
 use super::particle_rolling::Rolling;
 use super::particle_round::{Round, Variant as RoundVariant};
@@ -63,6 +64,7 @@ enum Effect {
     Sparkle(Sparkle),
     Concentration(Concentration),
     Glint(Glint),
+    Happy(Happy),
     Energy(Energy),
     Digi(Digi),
     DigiRing(DigiRing),
@@ -149,6 +151,7 @@ impl Effect {
                 Concentration::new_legacy(host, image, random, module_state)?,
             ),
             particle_plugin::Kind::Glint => Self::Glint(Glint::new(host, image)),
+            particle_plugin::Kind::Happy => Self::Happy(Happy::new(host, image, random)),
             particle_plugin::Kind::Energy => Self::Energy(Energy::new(host, image, random)),
             particle_plugin::Kind::Digi => Self::Digi(Digi::new(host, image, random)),
             particle_plugin::Kind::DigiRing => Self::DigiRing(DigiRing::new(host, image, random)),
@@ -333,6 +336,7 @@ impl ParticleRunner {
                     Some(Effect::Ice(effect)) => effect.write_mesh(host),
                     Some(Effect::RadialIce(effect)) => effect.write_mesh(host),
                     Some(Effect::FallSpark(effect)) => effect.write_mesh(host),
+                    Some(Effect::Happy(effect)) => effect.write_mesh(host),
                     Some(Effect::SceneIce(effect)) => effect.write_mesh(host),
                     Some(Effect::Photon(effect)) => effect.write_mesh(host),
                     Some(Effect::SceneLight(effect)) => effect.write_mesh(host),
@@ -674,6 +678,14 @@ impl ParticleRunner {
                             effect.update(
                                 delta,
                                 host.source.unwrap_or_default().position_2d,
+                                services.random().unwrap_or(&mut host.random),
+                            );
+                            effect.write_mesh(host);
+                        }
+                        Effect::Happy(effect) => {
+                            effect.update(
+                                delta,
+                                f32::from_bits(host.parameters[0]),
                                 services.random().unwrap_or(&mut host.random),
                             );
                             effect.write_mesh(host);

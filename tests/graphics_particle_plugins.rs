@@ -2331,6 +2331,58 @@ fn fall_spark_reuses_its_trail_during_zero_delta_updates() -> Result<()> {
 }
 
 #[test]
+fn happy_moves_on_zero_delta_without_advancing_the_fade() -> Result<()> {
+    let mut runtime = runtime_with_count(plugin(b"happy.ppi"), 1)?;
+    runtime.update(1, 1)?;
+    let mut parameters = [0; 128];
+    for (slot, value) in parameters
+        .chunks_exact_mut(4)
+        .zip([140f32, 120., 110., 135., 4., 60., 80., 100.])
+    {
+        slot.copy_from_slice(&value.to_le_bytes());
+    }
+    runtime.dispatch_command_with_buffers(
+        2,
+        command(325),
+        &mut CommandBuffers {
+            data1: Some(&mut parameters),
+            ..Default::default()
+        },
+    )?;
+    runtime.dispatch_command(2, command(321))?;
+    let vertex = |runtime: &Runtime<GraphicsFactory<KcsFactory<Programs>>>| {
+        runtime
+            .drawables()
+            .get(1)
+            .unwrap()
+            .particle_mesh()
+            .unwrap()
+            .projected_quad(0, &Projection::default())
+            .unwrap()[0]
+    };
+    let origin = vertex(&runtime);
+    assert_eq!(origin.color, 0x00ff_ffeb);
+    for _ in 0..120 {
+        runtime.update(2, 1)?;
+        if vertex(&runtime).position != origin.position {
+            break;
+        }
+    }
+    assert_ne!(vertex(&runtime).position, origin.position);
+    runtime.update(2, 1)?;
+    let before = vertex(&runtime);
+    runtime.update(2, 1)?;
+    let after = vertex(&runtime);
+    assert_ne!(after.position, before.position);
+    assert_eq!(after.color, before.color);
+
+    runtime.update(32, 1)?;
+    runtime.update(32, 1)?;
+    assert!(vertex(&runtime).color >> 24 > after.color >> 24);
+    Ok(())
+}
+
+#[test]
 fn scene_light_rises_on_zero_delta_and_respawns_after_fading() -> Result<()> {
     let mut runtime = runtime_with_count(plugin(b"a_light.ppi"), 1)?;
     runtime.update(1, 1)?;

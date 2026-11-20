@@ -56,6 +56,7 @@ pub(super) enum Kind {
     Concentration,
     LegacyConcentration,
     Glint,
+    Happy,
     Energy,
     Digi,
     DigiRing,
@@ -182,6 +183,8 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
         Kind::Concentration
     } else if name.eq_ignore_ascii_case(b"em_kyupin.ppi") {
         Kind::Glint
+    } else if name.eq_ignore_ascii_case(b"happy.ppi") {
+        Kind::Happy
     } else if name.eq_ignore_ascii_case(b"energy.ppi") {
         Kind::Energy
     } else if name.eq_ignore_ascii_case(b"digi.ppi") {
