@@ -52,7 +52,11 @@ impl<F: ObjectFactory> Store<'_, F> {
             let player = if state.selection.is_empty() {
                 None
             } else if let Some(services) = self.resources.model_services.as_mut() {
-                services.open(&state.selection)?
+                if let Some(resources) = self.resources.services.as_deref_mut() {
+                    services.open_with_resources(&state.selection, resources)?
+                } else {
+                    services.open(&state.selection)?
+                }
             } else {
                 None
             };

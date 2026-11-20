@@ -1,13 +1,29 @@
 //! Character model playback delegated to the host.
 
-use super::graphics::Surface;
+mod config;
+pub use config::{ModelBody, ModelConfig, ModelMotion};
+
+use super::{graphics::Surface, resources::ResourceServices};
 use crate::{Error, Result, read};
 use std::sync::Arc;
 
 pub trait ModelServices {
     /// Open a model and its options from a script selection in the original byte encoding.
     /// Return `None` if the model format or asset is unavailable.
-    fn open(&mut self, selection: &[u8]) -> Result<Option<Box<dyn ModelPlayer>>>;
+    fn open(&mut self, _selection: &[u8]) -> Result<Option<Box<dyn ModelPlayer>>> {
+        Ok(None)
+    }
+
+    /// Open a model through the same resource resolver used by the session.
+    /// This is called when a resource service is bound. The default delegates
+    /// to [`Self::open`] for hosts that manage model resources separately.
+    fn open_with_resources(
+        &mut self,
+        selection: &[u8],
+        _resources: &mut dyn ResourceServices,
+    ) -> Result<Option<Box<dyn ModelPlayer>>> {
+        self.open(selection)
+    }
 }
 
 pub trait ModelPlayer {

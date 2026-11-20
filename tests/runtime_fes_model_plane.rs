@@ -4,7 +4,8 @@ use katze_system2::{
     fes::Program,
     host::{
         graphics::Surface,
-        model::{ModelFrame, ModelPlayer, ModelServices},
+        model::{ModelConfig, ModelFrame, ModelPlayer, ModelServices},
+        resources::{ResourceMode, ResourceServices},
     },
     runtime::{BaseObject, ObjectFactory, Runtime, TaskObject, fes::Scene, kind},
 };
@@ -13,6 +14,7 @@ use std::{cell::RefCell, rc::Rc, sync::Arc};
 #[derive(Debug, PartialEq)]
 enum Event {
     Open(Vec<u8>),
+    ReadModel,
     Frame(u32),
     Drop,
 }
@@ -23,6 +25,44 @@ impl ModelServices for Models {
     fn open(&mut self, selection: &[u8]) -> Result<Option<Box<dyn ModelPlayer>>> {
         self.0.borrow_mut().push(Event::Open(selection.to_vec()));
         Ok(Some(Box::new(Player(self.0.clone()))))
+    }
+
+    fn open_with_resources(
+        &mut self,
+        selection: &[u8],
+        resources: &mut dyn ResourceServices,
+    ) -> Result<Option<Box<dyn ModelPlayer>>> {
+        let mut fields = selection.split(|&byte| byte == b',');
+        let profile = resources.resolve(b"m2config", fields.next().unwrap())?;
+        let bytes = resources.read(&profile, ResourceMode::LooseFirst)?.unwrap();
+        let config = ModelConfig::parse(&bytes)?;
+        let body = config.body(fields.next().unwrap()).unwrap();
+        let resource = resources.resolve(b"m2psb", body.resource)?;
+        assert_eq!(
+            resources
+                .read(&resource, ResourceMode::LooseFirst)?
+                .unwrap(),
+            b"model bytes"
+        );
+        self.0.borrow_mut().push(Event::ReadModel);
+        self.open(selection)
+    }
+}
+
+struct Resources;
+
+impl ResourceServices for Resources {
+    fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+        Ok([category, b"/", name].concat())
+    }
+
+    fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
+        assert_eq!(mode, ResourceMode::LooseFirst);
+        Ok(match name {
+            b"m2config/model" => Some(b"#charaname\n1\tactor\tactor.psz".to_vec()),
+            b"m2psb/actor.psz" => Some(b"model bytes".to_vec()),
+            _ => None,
+        })
     }
 }
 
@@ -68,7 +108,7 @@ wait 1
 actor disp 0
 wait 100
 ";
-    for available in [false, true] {
+    for (available, bound_resources) in [(false, false), (true, false), (true, true)] {
         let mut runtime = Runtime::new(
             0,
             kind::ROOT,
@@ -77,6 +117,9 @@ wait 100
             NoTasks,
         );
         let events = Rc::new(RefCell::new(Vec::new()));
+        if bound_resources {
+            runtime.set_resources(Resources);
+        }
         if available {
             runtime.set_model_services(Models(events.clone()));
         }
@@ -106,15 +149,19 @@ wait 100
             .unwrap();
         assert!(runtime.drawables().get(id).is_none());
         if available {
-            assert_eq!(
-                *events.borrow(),
-                [
-                    Event::Open(b"model,1,0,5".to_vec()),
-                    Event::Frame(40),
-                    Event::Frame(60),
-                    Event::Drop
-                ]
-            );
+            let expected = [
+                Event::Open(b"model,1,0,5".to_vec()),
+                Event::Frame(40),
+                Event::Frame(60),
+                Event::Drop,
+            ];
+            let events = events.borrow();
+            if bound_resources {
+                assert_eq!(events[0], Event::ReadModel);
+                assert_eq!(events[1..], expected);
+            } else {
+                assert_eq!(*events, expected);
+            }
         } else {
             assert!(events.borrow().is_empty());
         }
