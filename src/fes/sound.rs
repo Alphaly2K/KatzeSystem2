@@ -2,6 +2,10 @@ use super::{ObjectAttributes, SubcommandContext};
 use crate::{Error, Result};
 use std::collections::BTreeMap;
 
+mod table;
+use table::SoundTable;
+pub(crate) use table::TrackSelection;
+
 /// SOUND 的声明属性及运动状态；文件请求由媒体更新阶段消费。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SoundState {
@@ -28,8 +32,15 @@ pub struct SoundState {
     pub(crate) started_tick: u32,
     pub(crate) tags_requested: bool,
     pub(crate) tags: BTreeMap<Vec<u8>, u32>,
-    // false 等待进入处理器，true 保留已进入处理器的续跑位置。
-    pub(crate) play_handler: Option<bool>,
+    pub(crate) table: Option<SoundTable>,
+    pub(crate) playback_started: bool,
+    pub(crate) media_handler: Option<(SoundEvent, bool)>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SoundEvent {
+    Play,
+    Stop,
 }
 
 impl Default for SoundState {
@@ -56,12 +67,21 @@ impl Default for SoundState {
             started_tick: u32::MAX,
             tags_requested: false,
             tags: BTreeMap::new(),
-            play_handler: None,
+            table: None,
+            playback_started: false,
+            media_handler: None,
         }
     }
 }
 
 impl SoundState {
+    pub(crate) fn new_table() -> Self {
+        Self {
+            table: Some(SoundTable::default()),
+            ..Self::default()
+        }
+    }
+
     pub fn is_dirty(&self) -> bool {
         self.dirty
     }
@@ -116,6 +136,9 @@ impl SoundState {
         }
         if let Some(group) = &attributes.group {
             self.group = name(group, 32)?.to_vec();
+        }
+        if let (Some(table), Some([count, _])) = (&mut self.table, attributes.size) {
+            table.resize(count)?;
         }
         Ok(dirty)
     }

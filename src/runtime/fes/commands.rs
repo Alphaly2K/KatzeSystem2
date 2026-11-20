@@ -28,6 +28,16 @@ impl Objects {
         line: &fes::Line,
         state: &mut State,
     ) -> Result<bool> {
+        self.dispatch_object_command_with_random(interpreter, line, state, None)
+    }
+
+    pub(super) fn dispatch_object_command_with_random(
+        &mut self,
+        interpreter: &mut fes::Interpreter,
+        line: &fes::Line,
+        state: &mut State,
+        random: Option<&mut crate::kcs::ScriptRandom>,
+    ) -> Result<bool> {
         let args = interpreter.parameters(&line.bytes, state)?;
         let Some(name) = args.get(1).map(Vec::as_slice) else {
             return Ok(false);
@@ -66,6 +76,11 @@ impl Objects {
                 | b"init"
                 | b"param"
                 | b"start"
+                | b"sndtbl"
+                | b"next"
+                | b"rev"
+                | b"repeat"
+                | b"shuffle"
         ) {
             return Ok(false);
         }
@@ -81,6 +96,19 @@ impl Objects {
         }
         if self.count(&target.name) == 1 {
             target.bank = 0;
+        }
+        if matches!(
+            name,
+            b"sndtbl" | b"setid" | b"getid" | b"next" | b"rev" | b"repeat" | b"shuffle"
+        ) && self.dispatch_sound_table_command(
+            interpreter,
+            line.offset,
+            &args,
+            &target,
+            state,
+            random,
+        )? {
+            return Ok(true);
         }
         if matches!(name, b"init" | b"param" | b"start") {
             return self.dispatch_particle_command(interpreter, line.offset, &args, &target, state);

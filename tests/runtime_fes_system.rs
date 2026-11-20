@@ -63,6 +63,22 @@ fn event(runtime: &mut Runtime<NoTasks>, scene: &mut Scene) -> bool {
 }
 
 #[test]
+fn legacy_config_reads_effective_volumes_and_keeps_unknown_destinations() {
+    let source = "#START\nconfig 0 VOL_BGM\nconfig 1 vol_se\nconfig 2 vol_pcm\nconfig ($5+=1)+2 vol_voice\ngetconf 4 vol_bgm\nwait 1000\n";
+    let (mut runtime, mut scene) = setup(source, 1);
+    let mut settings = katze_system2::settings::SystemSettings::default();
+    for (index, volume) in [50u32, 80, 60, 40].into_iter().enumerate() {
+        let offset = 0x15d4 + index * 4;
+        settings.sound[offset..offset + 4].copy_from_slice(&volume.to_le_bytes());
+    }
+    settings.refresh_sound_volumes();
+    runtime.host_mut().system_settings = Some(settings);
+    runtime.numbers_mut().shared[3] = 77;
+    update(&mut runtime, &mut scene, 10);
+    assert_eq!(runtime.numbers().shared[..6], [40, 30, 20, 77, 80, 1]);
+}
+
+#[test]
 fn detailed_probes_are_balanced_with_each_runtime_and_filter_categories() {
     let source = "#DEFINE\nBASE button\n#START\nwait 77\n#button.PUSH_L\ndbgstr pushed\n";
     let (mut traced, mut scene) = setup(source, 1);

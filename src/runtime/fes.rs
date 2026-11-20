@@ -32,6 +32,7 @@ mod scene;
 mod screen_transition;
 mod slider;
 mod sound;
+mod sound_table;
 mod string;
 mod task;
 mod viewport;
@@ -118,6 +119,7 @@ impl ObjectState {
             Self::Plane(_) => "PLANE",
             Self::Slider(_) => "SLIDER",
             Self::Scroll2(_) => "SCROLL2",
+            Self::Sound(sound) if sound.table.is_some() => "SNDTABLE",
             Self::Sound(_) => "SOUND",
             Self::Particle(_) => "PARTICLE",
             Self::Draw(_) => "DRAW",
@@ -142,6 +144,7 @@ impl ObjectState {
             "SLIDER" => Self::Slider(Box::default()),
             "SCROLL2" => Self::Scroll2(Box::default()),
             "SOUND" => Self::Sound(Box::default()),
+            "SNDTABLE" => Self::Sound(Box::new(SoundState::new_table())),
             "PARTICLE" => Self::Particle(Box::default()),
             "DRAW" => Self::Draw(Box::default()),
             "RDRAW" | "RWIPE" => Self::ScreenTransition(Box::new(ScreenTransition::new(kind))),

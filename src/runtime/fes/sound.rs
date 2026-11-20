@@ -1,7 +1,7 @@
 use super::{ObjectState, Objects, Scene};
 use crate::runtime::{ObjectFactory, Store, kind, route_with_buffers};
 use crate::task::{Command, CommandBuffers};
-use crate::{Error, Result};
+use crate::{Error, Result, fes::SoundEvent};
 
 impl Objects {
     pub(super) fn dispatch_sound_value_command(
@@ -101,7 +101,7 @@ impl<F: ObjectFactory> Store<'_, F> {
         handle: u32,
     ) -> Result<()> {
         if self.update_fes_sound_media(owner, objects, handle)? {
-            return Err(Error::new(0, "FES SOUND PLAY 处理器需要所属场景"));
+            return Err(Error::new(0, "FES SOUND 媒体处理器需要所属场景"));
         }
         Ok(())
     }
@@ -120,26 +120,33 @@ impl<F: ObjectFactory> Store<'_, F> {
         let ObjectState::Sound(sound) = &object.state else {
             unreachable!()
         };
-        if sound.play_handler == Some(false) {
+        let (event, entered) = sound.media_handler.unwrap();
+        if !entered {
             let name = object.name.clone();
             let bank = object.bank as i32;
             if !sound.event_alias.is_empty() {
                 return Err(Error::new(0, "FES SOUND 非空媒体别名尚未接入"));
             }
-            let dispatched = scene
-                .interpreter
-                .dispatch_event_at_host_boundary(&name, bank, "PLAY", None)?;
+            let dispatched = scene.interpreter.dispatch_event_at_host_boundary(
+                &name,
+                bank,
+                match event {
+                    SoundEvent::Play => "PLAY",
+                    SoundEvent::Stop => "STOP",
+                },
+                None,
+            )?;
             if let ObjectState::Sound(sound) = &mut scene.objects.get_mut(handle).unwrap().state {
-                sound.play_handler = Some(dispatched);
+                sound.media_handler = Some((event, dispatched));
             }
             if !dispatched {
-                return self.finish_fes_sound_action(owner, &mut scene.objects, handle);
+                return self.finish_fes_sound_handler(owner, &mut scene.objects, handle, event);
             }
         }
         crate::runtime::drain(self.budget, self.limit, || {
             self.run_fes_handler(owner, scene)
         })?;
-        self.finish_fes_sound_action(owner, &mut scene.objects, handle)
+        self.finish_fes_sound_handler(owner, &mut scene.objects, handle, event)
     }
 
     fn update_fes_sound_media(
@@ -151,7 +158,7 @@ impl<F: ObjectFactory> Store<'_, F> {
         let ObjectState::Sound(sound) = &objects.get(handle).unwrap().state else {
             unreachable!()
         };
-        if sound.play_handler.is_some() {
+        if sound.media_handler.is_some() {
             return Ok(true);
         }
         if sound.needs_load() {
@@ -279,7 +286,9 @@ impl<F: ObjectFactory> Store<'_, F> {
                 if sound.started_tick == u32::MAX {
                     sound.started_tick = self.host.system_time_ms;
                 }
-                sound.play_handler = Some(false);
+                sound.playback_started =
+                    sound.table.is_some() && enabled && count != 0 && sound.channel_result != 0;
+                sound.media_handler = Some((SoundEvent::Play, false));
                 return Ok(true);
             }
             if playing {
@@ -294,12 +303,48 @@ impl<F: ObjectFactory> Store<'_, F> {
             } else {
                 self.sound_command(owner, task, 185, [channel, 0, 0], None)?;
             }
+            let ObjectState::Sound(sound) = &mut objects.get_mut(handle).unwrap().state else {
+                unreachable!()
+            };
+            sound.playback_started = false;
             return self
                 .finish_fes_sound_action(owner, objects, handle)
                 .map(|()| false);
         }
+        if sound.playback_started && sound.action != 0 && sound.channel >= 0 {
+            let channel = sound.channel as u32;
+            let task = self.fes_sound_task(owner, objects)?;
+            if self.sound_command(owner, task, 186, [channel, 0, 0], None)? == 0 {
+                let ObjectState::Sound(sound) = &mut objects.get_mut(handle).unwrap().state else {
+                    unreachable!()
+                };
+                sound.playback_started = false;
+                sound.action = 0;
+                sound.media_handler = Some((SoundEvent::Stop, false));
+                return Ok(true);
+            }
+        }
         self.finish_fes_sound_update(owner, objects, handle)?;
         Ok(false)
+    }
+
+    fn finish_fes_sound_handler(
+        &mut self,
+        owner: u32,
+        objects: &mut Objects,
+        handle: u32,
+        event: SoundEvent,
+    ) -> Result<()> {
+        match event {
+            SoundEvent::Play => self.finish_fes_sound_action(owner, objects, handle),
+            SoundEvent::Stop => {
+                let ObjectState::Sound(sound) = &mut objects.get_mut(handle).unwrap().state else {
+                    unreachable!()
+                };
+                sound.media_handler = None;
+                Ok(())
+            }
+        }
     }
 
     fn finish_fes_sound_action(
@@ -311,7 +356,7 @@ impl<F: ObjectFactory> Store<'_, F> {
         let ObjectState::Sound(sound) = &mut objects.get_mut(handle).unwrap().state else {
             unreachable!()
         };
-        sound.play_handler = None;
+        sound.media_handler = None;
         sound.action_requested = false;
         self.finish_fes_sound_update(owner, objects, handle)
     }

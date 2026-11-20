@@ -34,6 +34,7 @@ pub use save_panel::{PanelCell, PanelContent, SavePanelState};
 pub use scroll2::Scroll2State;
 pub use slider::{SliderState, SliderUpdates};
 pub use sound::SoundState;
+pub(crate) use sound::{SoundEvent, TrackSelection};
 use std::collections::{BTreeMap, VecDeque};
 pub use string::StringState;
 pub use subcommands::{

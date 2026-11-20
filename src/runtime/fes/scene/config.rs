@@ -14,6 +14,29 @@ impl<F: ObjectFactory> Store<'_, F> {
         offset: usize,
     ) -> Result<bool> {
         let write = match args.first().map(Vec::as_slice) {
+            Some(b"config") => {
+                if let Some(destination) = args.get(1) {
+                    let destination = scene.interpreter.eval(destination, self.numbers)?;
+                    let word = args.get(2).and_then(|name| {
+                        [b"vol_bgm".as_slice(), b"vol_se", b"vol_pcm"]
+                            .iter()
+                            .position(|key| name.eq_ignore_ascii_case(key))
+                    });
+                    if let Some(word) = word {
+                        let settings = self
+                            .host
+                            .system_settings
+                            .as_ref()
+                            .ok_or_else(|| Error::new(offset, "运行时未配置全局设置"))?;
+                        if let Some(slot) = self.numbers.shared.get_mut(destination as usize) {
+                            *slot = i32::from_le_bytes(
+                                settings.sound[word * 4..word * 4 + 4].try_into().unwrap(),
+                            );
+                        }
+                    }
+                }
+                return Ok(true);
+            }
             Some(b"getconf") => false,
             Some(b"setconf") => true,
             _ => return Ok(false),

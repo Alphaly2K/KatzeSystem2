@@ -87,6 +87,7 @@ impl Interpreter {
                 | "SCRL_P"
                 | "TOUCH"
                 | "PLAY"
+                | "STOP"
         ) {
             return Err(Error::new(0, "未支持的 FES 对象事件"));
         }

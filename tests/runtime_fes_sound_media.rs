@@ -164,6 +164,71 @@ fn setup() -> (Runtime<Services>, Objects, u32, Rc<RefCell<Trace>>) {
     (runtime, objects, id, trace)
 }
 
+#[test]
+fn sound_table_skips_locked_tracks_and_preserves_replay_requested_by_stop_handler() {
+    use katze_system2::{fes::Program, runtime::fes::Scene};
+
+    let source = b"#DEFINE
+SNDTABLE jukebox
+#OBJECT CHANNEL SIZE TYPE
+jukebox 5 4 1
+#START
+jukebox sndtbl 0 locked 0
+jukebox sndtbl 1 first 1
+jukebox sndtbl 2 second 1
+jukebox shuffle 1 2
+jukebox getid 3
+jukebox shuffle 0
+jukebox setid 0
+jukebox getid 0
+jukebox play 1
+wait 1000
+#jukebox.STOP
+$1+=1
+@ next
+@ getid 2
+@ play 1
+";
+    for budget in [1, 4096] {
+        let (mut runtime, _, _, trace) = setup();
+        runtime.set_budget(budget, 10000);
+        runtime.numbers_mut().shared.resize(4, 0);
+        runtime.host_mut().sound_config_enabled = 1;
+        runtime.host_mut().sound_config = Some(SoundConfig {
+            master_volume: Some(100),
+            ..SoundConfig::default()
+        });
+        let mut scene = Scene::new(
+            Program::from_text(source).unwrap(),
+            runtime.host().handle_allocator(),
+        )
+        .unwrap();
+        scene.objects_mut().unwrap().set_sound_task(1);
+
+        for (tick, playing, expected, plays) in [
+            (10, 1, [1, 0, 0, 2], 1),
+            (11, 1, [1, 0, 0, 2], 1),
+            (12, 0, [1, 1, 2, 2], 1),
+            (13, 1, [1, 1, 2, 2], 2),
+        ] {
+            trace.borrow_mut().playing = playing;
+            assert!((0..128).any(|_| runtime.update_fes_scene(0, &mut scene, tick).unwrap()));
+            assert_eq!(runtime.numbers().shared, expected);
+            assert_eq!(
+                trace
+                    .borrow()
+                    .events
+                    .iter()
+                    .filter(|event| matches!(event, Event::Command(183, [5, 1, 0], _)))
+                    .count(),
+                plays
+            );
+        }
+        let handle = scene.objects().lookup("jukebox", 0).unwrap();
+        assert_eq!(state(scene.objects(), handle).file, b"second");
+    }
+}
+
 fn apply(objects: &mut Objects, attributes: ObjectAttributes) {
     objects
         .initialize(

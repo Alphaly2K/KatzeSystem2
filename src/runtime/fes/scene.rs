@@ -1296,10 +1296,11 @@ impl<F: ObjectFactory> Store<'_, F> {
                             &mut scene.interpreter,
                             &line,
                             self.numbers,
-                        )? && !scene.objects.dispatch_object_command(
+                        )? && !scene.objects.dispatch_object_command_with_random(
                             &mut scene.interpreter,
                             &line,
                             self.numbers,
+                            Some(&mut self.host.random),
                         )? && !self.fes_unknown_object_command(scene, &args, &line)?
                         {
                             return Err(Error::new(line.offset, "FES 事件对象命令尚未接入"));
@@ -1523,10 +1524,13 @@ impl<F: ObjectFactory> Store<'_, F> {
                 if !self.advance_fes_motions(&mut scene.objects, 0, Some(handle))? {
                     return Ok(Some(false));
                 }
-                if let ObjectState::Particle(particle) =
-                    &mut scene.objects.get_mut(handle).unwrap().state
-                {
-                    particle.stop = true;
+                match &mut scene.objects.get_mut(handle).unwrap().state {
+                    ObjectState::Particle(particle) => particle.stop = true,
+                    ObjectState::Sound(sound) => {
+                        sound.action = 0;
+                        sound.action_requested = true;
+                    }
+                    _ => (),
                 }
             }
             scene.motion_stop.as_mut().unwrap().bank += 1;
@@ -1819,10 +1823,11 @@ impl<F: ObjectFactory> Store<'_, F> {
                                 &mut scene.interpreter,
                                 &line,
                                 self.numbers,
-                            )? && !scene.objects.dispatch_object_command(
+                            )? && !scene.objects.dispatch_object_command_with_random(
                                 &mut scene.interpreter,
                                 &line,
                                 self.numbers,
+                                Some(&mut self.host.random),
                             )? && !self.fes_unknown_object_command(scene, &args, &line)?
                             {
                                 return Err(Error::new(line.offset, "FES 对象命令尚未接入"));
