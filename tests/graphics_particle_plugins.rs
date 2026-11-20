@@ -2017,7 +2017,7 @@ fn scene_sparkle_initializes_transparently_and_restarts_with_shared_randomness()
 }
 
 #[test]
-fn spark_path_variant_registers_restarts_stops_and_rejects_the_other_layout() -> Result<()> {
+fn spark_path_variant_registers_restarts_stops_and_rejects_unknown_layouts() -> Result<()> {
     let mut runtime = runtime_with_count(plugin(b"spark.ppi"), 3)?;
     runtime.update(1, 1)?;
     let mut parameters = [0; 128];
@@ -2078,8 +2078,56 @@ fn spark_path_variant_registers_restarts_stops_and_rejects_the_other_layout() ->
     assert!(runtime.drawables().get(1).is_none());
 
     let mut other = plugin(b"spark.ppi");
-    other[400..403].copy_from_slice(&[0x6a, 0x40, 0xe8]);
+    other[400..403].copy_from_slice(&[0x6a, 0x41, 0xe8]);
     assert!(runtime_with_count(other, 3)?.update(1, 1).is_err());
+    Ok(())
+}
+
+#[test]
+fn legacy_spark_updates_all_quads_and_reads_duration_during_playback() -> Result<()> {
+    let mut bytes = plugin(b"spark.ppi");
+    bytes[400..403].copy_from_slice(&[0x6a, 0x40, 0xe8]);
+    let mut runtime = runtime_with_count(bytes, 8)?;
+    runtime.update(1, 1)?;
+    let mut parameters = [0; 128];
+    for (i, value) in [40f32, 640., 360., 20., 75.].into_iter().enumerate() {
+        parameters[4 * i..4 * i + 4].copy_from_slice(&value.to_le_bytes());
+    }
+    let mut write_parameters = |runtime: &mut Runtime<GraphicsFactory<KcsFactory<Programs>>>,
+                                duration: f32| {
+        parameters[..4].copy_from_slice(&duration.to_le_bytes());
+        runtime.dispatch_command_with_buffers(
+            2,
+            command(325),
+            &mut CommandBuffers {
+                data1: Some(&mut parameters),
+                ..Default::default()
+            },
+        )
+    };
+    let alpha = |runtime: &Runtime<GraphicsFactory<KcsFactory<Programs>>>, index| {
+        runtime
+            .drawables()
+            .get(1)
+            .unwrap()
+            .particle_mesh()
+            .unwrap()
+            .projected_quad(index, &Projection::default())
+            .unwrap()[0]
+            .color
+            >> 24
+    };
+    write_parameters(&mut runtime, 40.)?;
+    runtime.dispatch_command(2, command(321))?;
+    assert_eq!(alpha(&runtime, 7), 0);
+    runtime.update(2, 1)?;
+    assert_eq!(alpha(&runtime, 7), 255);
+    runtime.update(8, 6)?;
+    write_parameters(&mut runtime, 8.)?;
+    runtime.update(9, 1)?;
+    assert_eq!(alpha(&runtime, 7), 255);
+    runtime.update(10, 1)?;
+    assert_eq!(alpha(&runtime, 7), 0);
     Ok(())
 }
 

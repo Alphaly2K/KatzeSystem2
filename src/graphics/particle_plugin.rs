@@ -73,6 +73,7 @@ pub(super) enum Kind {
     SceneIce,
     SceneSparkle,
     Spark,
+    LegacySpark,
     Thunder,
     Paper,
     Photon,
@@ -262,19 +263,17 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
     }
     if matches!(kind, Kind::Spark | Kind::Ring) {
         let code_at = function_offset(1)?;
-        let (at, size) = if matches!(kind, Kind::Ring) {
-            (3, 0xacu32)
-        } else {
-            (35, 0x324)
+        let code = bytes.get(code_at..)?;
+        kind = match (kind, code) {
+            (Kind::Spark, [0x6a, 0x40, 0xe8, ..]) => Kind::LegacySpark,
+            (Kind::Spark, [0x55, 0x8b, 0xec, ..])
+                if code.get(35..40) == Some(&[0x68, 0x24, 0x03, 0x00, 0x00]) =>
+            {
+                Kind::Spark
+            }
+            (Kind::Ring, [0x55, 0x8b, 0xec, 0x68, 0xac, 0x00, 0x00, 0x00, ..]) => Kind::Ring,
+            _ => return None,
         };
-        let code = bytes.get(code_at..code_at.checked_add(at + 5)?)?;
-        // 内部标识不足以区分布局，另核对构造入口的分配尺寸。
-        if code[..3] != [0x55, 0x8b, 0xec]
-            || code[at] != 0x68
-            || read::u32_at(code, at + 1).ok()? != size
-        {
-            return None;
-        }
     }
     let constant = |ordinal: u32| -> Option<u32> {
         let code_at = function_offset(ordinal)?;

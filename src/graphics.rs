@@ -83,6 +83,7 @@ mod particle_flower_burst;
 mod particle_glint;
 mod particle_hadou;
 mod particle_ice;
+mod particle_legacy_spark;
 mod particle_mirror;
 mod particle_note;
 mod particle_notice;
