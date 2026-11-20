@@ -826,7 +826,7 @@ pub fn prepare_game(
         startup,
         ..
     } = game;
-    let mut runtime = GameSetup::new(1 << 20, 16 << 20)?;
+    let mut runtime = GameSetup::standard()?;
     runtime.set_graphics_backend(SoftwareBackend);
     if std::env::var_os("KATZE_FFMPEG_MOVIES").is_some() {
         runtime.set_movie_decoder_factory(movie_decoder::Ffmpeg);

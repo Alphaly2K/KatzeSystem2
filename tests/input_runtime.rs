@@ -1089,7 +1089,7 @@ fn public_session_uses_host_resources_and_delivers_frame_and_pcm()
         }
     }
 
-    let mut game = GameSetup::new(0, 0)?;
+    let mut game = GameSetup::standard()?;
     assert!(game.window_preferences().is_none());
     assert!(!game.set_image_import_directory(Some(vec![65])));
     let startup = br#"<?xml version="1.0" encoding="UTF-8"?><document><SCREEN><width>64</width><height>48</height></SCREEN><GAME><autoselect>1</autoselect></GAME></document>"#;

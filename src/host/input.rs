@@ -1,7 +1,9 @@
 //! Input device queries and logical key bindings.
 
-pub use crate::input::DeviceKeys;
+mod keys;
 use crate::{Error, Result};
+pub use keys::DeviceKeys;
+pub(crate) use keys::write_bindings_xml;
 
 /// Device order in a key binding table.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

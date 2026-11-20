@@ -1,6 +1,6 @@
+use super::{ButtonSource, DeviceBinding, KeySample};
 use crate::{
     Error, Result,
-    host::{ButtonSource, DeviceBinding, KeySample},
     resource::{XmlDocument, XmlWriter},
 };
 
@@ -11,7 +11,7 @@ struct BindingState {
     forced: u32,
 }
 
-/// 将物理按钮事件映射到八十个逻辑键槽，供平台 InputDevice 使用。
+/// Maps physical button events to the logical key slots sampled by a host input device.
 pub struct DeviceKeys {
     bindings: [DeviceBinding; 80],
     current: [BindingState; 80],

@@ -80,7 +80,7 @@ pub struct HostState {
     /// 平台当前窗口模式的原始 DWORD；独立于保存的全屏选项。
     pub windowed_mode: Option<u32>,
     /// 独立宿主的按键配置；运行时优先读取输入设备的当前配置。
-    pub configuration_keys: Option<crate::input::DeviceKeys>,
+    pub configuration_keys: Option<crate::host::input::DeviceKeys>,
     pub configuration_services: Option<Box<dyn crate::host::ConfigurationServices>>,
     /// 全局配置变更标记；宿主处理配置变更通知后清除。
     pub system_settings_dirty: u32,

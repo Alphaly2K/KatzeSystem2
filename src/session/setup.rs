@@ -32,6 +32,13 @@ use crate::{
 pub struct GameSetup(TaskRuntime);
 
 impl GameSetup {
+    /// Prepare a session using the standard script storage capacities.
+    /// Hosts can use [`Self::new`] to override the capacities for tools or games
+    /// that require a different memory layout.
+    pub fn standard() -> Result<Self> {
+        Self::new(1 << 20, 16 << 20)
+    }
+
     /// Allocate zeroed script storage. Each area is limited to 64 MiB;
     /// `shared_slots` counts 32-bit values, and `external_bytes` counts bytes.
     pub fn new(shared_slots: usize, external_bytes: usize) -> Result<Self> {
