@@ -48,6 +48,8 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 
 宿主可通过 `host::SpeechSynthesizer` 提供合成的 `Pcm`；字体服务从 `host` 导入 `FontServices`、`FontRequest` 和 `GlyphMask`。可复用 `message::Fonts` 处理宿主提供的字体，或实现自己的服务。软件图形后端、字形实现与混音器都可在无设备环境运行。
 
+默认启用 `builtin-mpeg`，解码 MPEG-1 视频及 MP2／MP3 音轨。宿主可通过 `set_movie_decoder_factory` 为之后装载的独占与图层电影接入自己的 `host::MovieDecoderFactory`。工厂打开 `SharedSource`，解码器在运行库的工作线程返回 BGRA 帧与交错 PCM；循环、呈现和混音由原有流程处理。更换工厂不影响已装载电影。使用 `default-features = false` 可省去内置 C 解码器及其构建依赖；该配置装载电影时需要已注册的工厂。
+
 宿主在更新后可用 `take_script_messages` 取走调试文字。即使更新返回错误，已生成的消息仍可取出。`set_native_trace` 注册当前运行实例的可选回调，运行时分派 native 时发送开始和结束事件，带任务号、原始调用编号、VM 字节偏移及失败标记。调用可嵌套，计时和输出由宿主决定。两个示例使用 `KATZE_TRACE_SCRIPT` 显示脚本消息，使用 `KATZE_TRACE_TIMING` 记录慢调用。
 
 宿主可通过 `script_positions` 只读枚举已登记脚本的当前位置，包括失败后仍登记的脚本。KCS 报告字节偏移；FES 报告块、块内指令索引和是否有待续处理的指令。失败位置以 `advance` 返回的错误为准。
@@ -56,4 +58,4 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 
 默认工作区包 `katze-system2` 发布为库。离屏宿主入口是 `cargo run --release --example runprobe -- "$GAME_DIR"`。普通运行直接使用 `GameRuntime`，可用 `KATZE_PROBE_SHOT` 输出终帧、用 `KATZE_PROBE_AUDIO_STATS=1` 统计内存 PCM。自动选项回放和 VM 检查通过同一示例的任务接口执行。脚本检查工具和桌面宿主是单独的仓库内包，分别通过 `cargo run -p katze-script -- ...` 和 `cargo run -p katze-desktop --bin window_startup -- "$GAME_DIR"` 执行。桌面输入的合成验证用 `cargo test -p katze-desktop --test window_host`。
 
-库依赖树不含 SDL、Metal、系统字体发现或当地时间库。当前电影解码构建使用 C 编译器，流式音频解码使用工作线程；在不提供这些能力的目标上须单独评估。`ReadSource::read_at` 可能在解码线程调用，宿主须提供可共享的独立读取源。
+库依赖树不含 SDL、Metal、系统字体发现或当地时间库。流式音频和电影播放使用工作线程；在不提供线程的目标上须单独评估。`ReadSource::read_at` 可能在解码线程调用，宿主须提供可共享的独立读取源。

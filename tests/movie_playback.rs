@@ -1,3 +1,5 @@
+#![cfg(feature = "builtin-mpeg")]
+
 use katze_system2::{
     audio::SoundState,
     io::SharedSource,

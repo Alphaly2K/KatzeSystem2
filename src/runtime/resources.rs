@@ -41,6 +41,7 @@ pub(super) struct Resources {
     pub legacy_cst: std::collections::BTreeMap<u32, super::CstContext>,
     pub emocon: std::collections::BTreeMap<u32, super::emocon::EmoconState>,
     pub movie: Option<super::movie::Movie>,
+    pub movie_decoder_factory: Option<std::sync::Arc<dyn crate::host::MovieDecoderFactory>>,
     pub plane_movies: std::collections::BTreeMap<u32, super::movie::Movie>,
 }
 

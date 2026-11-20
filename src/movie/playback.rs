@@ -1,5 +1,10 @@
-use super::{Decoder, Frame, Metadata};
-use crate::{Error, Result, io::SharedSource, read};
+use super::{Frame, Metadata};
+use crate::{
+    Error, Result,
+    graphics::pixel_length,
+    host::{MovieDecoder, MovieDecoderFactory, SharedSource},
+    read,
+};
 use std::{
     collections::VecDeque,
     sync::{Arc, Condvar, Mutex},
@@ -36,7 +41,8 @@ struct Shared {
 /// 在独立线程解码的电影播放器；画面和音频由宿主分别取走。
 pub struct Player {
     source: SharedSource,
-    initial: Option<Decoder>,
+    factory: Option<Arc<dyn MovieDecoderFactory>>,
+    initial: Option<Box<dyn MovieDecoder>>,
     shared: Arc<Shared>,
     worker: Option<JoinHandle<()>>,
 }
@@ -47,12 +53,28 @@ pub struct AudioOutput(Arc<Shared>);
 
 impl Player {
     pub fn new(source: SharedSource) -> Result<Self> {
-        let decoder = Decoder::new(source.clone())?;
+        Self::with_decoder_factory(source, None)
+    }
+
+    pub(crate) fn with_decoder_factory(
+        source: SharedSource,
+        factory: Option<Arc<dyn MovieDecoderFactory>>,
+    ) -> Result<Self> {
+        let decoder = open_decoder(source.clone(), factory.as_deref())?;
         let metadata = decoder.metadata();
-        let bytes = metadata.size[0] as usize * metadata.size[1] as usize * 4;
+        let bytes = pixel_length(metadata.size)?;
+        if bytes == 0
+            || !metadata.frame_rate.is_finite()
+            || metadata.frame_rate <= 0.
+            || !metadata.duration.is_finite()
+            || metadata.duration < 0.
+        {
+            return Err(Error::new(0, "Invalid movie decoder metadata"));
+        }
         let capacity = (32 * 1024 * 1024 / bytes).clamp(2, 8);
         Ok(Self {
             source,
+            factory,
             initial: Some(decoder),
             shared: Arc::new(Shared {
                 state: Mutex::new(State {
@@ -105,7 +127,13 @@ impl Player {
         self.stop()?;
         let decoder = match self.initial.take() {
             Some(decoder) => decoder,
-            None => Decoder::new(self.source.clone())?,
+            None => {
+                let decoder = open_decoder(self.source.clone(), self.factory.as_deref())?;
+                if decoder.metadata() != self.shared.metadata {
+                    return Err(Error::new(0, "Movie decoder metadata changed on reopen"));
+                }
+                decoder
+            }
         };
         {
             let mut state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
@@ -223,7 +251,23 @@ fn finish(state: &mut State) {
     }
 }
 
-fn decode(mut decoder: Decoder, shared: &Shared, count: u32) -> Result<()> {
+fn open_decoder(
+    source: SharedSource,
+    factory: Option<&dyn MovieDecoderFactory>,
+) -> Result<Box<dyn MovieDecoder>> {
+    if let Some(factory) = factory {
+        return factory.open(source);
+    }
+    #[cfg(feature = "builtin-mpeg")]
+    return Ok(Box::new(super::Decoder::new(source)?));
+    #[cfg(not(feature = "builtin-mpeg"))]
+    Err(Error::new(
+        0,
+        "Movie playback requires a host decoder or the builtin-mpeg feature",
+    ))
+}
+
+fn decode(mut decoder: Box<dyn MovieDecoder>, shared: &Shared, count: u32) -> Result<()> {
     let mut remaining = (!matches!(count, 0 | u32::MAX)).then_some(count);
     let mut origin = 0.;
     let mut end = 0f64;
@@ -244,12 +288,23 @@ fn decode(mut decoder: Decoder, shared: &Shared, count: u32) -> Result<()> {
                 return Ok(());
             }
         }
+        let previous = decoder.time();
         let decoded = decoder.advance(tick)?;
+        let time = decoder.time();
+        if !time.is_finite() || time < 0. || (!decoded.ended && time <= previous) {
+            return Err(Error::new(0, "Movie decoder did not advance"));
+        }
         let mut state = shared.state.lock().unwrap_or_else(|e| e.into_inner());
         if !state.playing {
             return Ok(());
         }
         if let Some(mut frame) = decoded.video {
+            if !frame.time.is_finite()
+                || frame.time < 0.
+                || frame.surface.size() != shared.metadata.size
+            {
+                return Err(Error::new(0, "Invalid movie decoder frame"));
+            }
             end = end.max(frame.time + 1. / shared.metadata.frame_rate);
             frame.time += origin;
             if first {
@@ -263,6 +318,13 @@ fn decode(mut decoder: Decoder, shared: &Shared, count: u32) -> Result<()> {
             }
         }
         if let Some(audio) = decoded.audio {
+            if shared.metadata.sample_rate == 0
+                || !audio.time.is_finite()
+                || audio.time < 0.
+                || !audio.samples.len().is_multiple_of(2)
+            {
+                return Err(Error::new(0, "Invalid movie decoder audio"));
+            }
             end = end.max(
                 audio.time + audio.samples.len() as f64 / 2. / shared.metadata.sample_rate as f64,
             );
@@ -271,7 +333,7 @@ fn decode(mut decoder: Decoder, shared: &Shared, count: u32) -> Result<()> {
                 samples: audio.samples,
             });
         }
-        state.decoded_until = origin + decoder.time();
+        state.decoded_until = origin + time;
         shared.changed.notify_all();
         if decoded.ended {
             if remaining == Some(1) {
@@ -283,6 +345,12 @@ fn decode(mut decoder: Decoder, shared: &Shared, count: u32) -> Result<()> {
             }
             if let Some(count) = &mut remaining {
                 *count -= 1;
+            }
+            if end <= 0. {
+                return Err(Error::new(
+                    0,
+                    "Movie decoder produced no frames or audio to loop",
+                ));
             }
             origin += end;
             end = 0.;

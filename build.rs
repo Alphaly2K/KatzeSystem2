@@ -1,3 +1,4 @@
+#[cfg(feature = "builtin-mpeg")]
 fn main() {
     println!("cargo:rerun-if-changed=src/movie/decoder.c");
     println!("cargo:rerun-if-changed=vendor/pl_mpeg/pl_mpeg.h");
@@ -10,3 +11,6 @@ fn main() {
         .warnings(false)
         .compile("katze_mpeg");
 }
+
+#[cfg(not(feature = "builtin-mpeg"))]
+fn main() {}

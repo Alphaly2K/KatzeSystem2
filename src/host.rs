@@ -10,6 +10,7 @@ mod export;
 mod font;
 mod graphics;
 mod input;
+mod movie;
 mod platform;
 mod resources;
 mod storage;
@@ -38,6 +39,9 @@ pub use export::{ExportDestination, ExportServices};
 pub use font::{FontRequest, FontServices};
 pub use graphics::GraphicsBackend;
 pub use input::{ButtonSource, DeviceBinding, InputDevice, KeySample, PointerSample};
+pub use movie::{
+    MovieAudio, MovieDecoded, MovieDecoder, MovieDecoderFactory, MovieFrame, MovieMetadata,
+};
 pub use platform::{
     AchievementServices, ClipboardRequest, ClipboardText, LocalDateTime, MenuItemRequest,
     PlatformJob, PlatformJobRequest, PlatformJobServices, SystemServices, WindowAction,

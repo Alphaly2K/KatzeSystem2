@@ -59,6 +59,10 @@ impl Movie {
 }
 
 impl Resources {
+    fn open_movie_player(&self, source: crate::host::SharedSource) -> Result<Player> {
+        Player::with_decoder_factory(source, self.movie_decoder_factory.clone())
+    }
+
     pub(super) fn advance_movies(&mut self, now: u32) -> Result<()> {
         if let Some(movie) = &mut self.movie {
             movie.advance(now)?;
@@ -331,7 +335,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
         source: crate::io::SharedSource,
         effect: bool,
     ) -> Result<[u32; 2]> {
-        let player = Player::new(source)?;
+        let player = self.resources.open_movie_player(source)?;
         let size = player.metadata().size;
         let handle = self.host.handle_allocator().allocate()?;
         self.resources.plane_movies.insert(
@@ -385,7 +389,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
             let Some(source) = source else {
                 return Ok(None);
             };
-            let player = Player::new(source)?;
+            let player = self.resources.open_movie_player(source)?;
             let handle = self.host.handle_allocator().allocate()?;
             self.set_movie_audio(Some(player.audio_output()))?;
             Ok(Some(Movie {

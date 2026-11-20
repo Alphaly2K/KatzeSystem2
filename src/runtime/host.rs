@@ -2,8 +2,8 @@ use super::{ObjectFactory, Runtime};
 use crate::{
     host::{
         AchievementServices, ConfigurationServices, EffectServices, ExportServices, FileServices,
-        FontServices, GraphicsBackend, PlatformJobServices, ResourceServices, SaveServices,
-        SpeechSynthesizer, SystemServices,
+        FontServices, GraphicsBackend, MovieDecoderFactory, PlatformJobServices, ResourceServices,
+        SaveServices, SpeechSynthesizer, SystemServices,
     },
     kcs::{CachedResources, ScriptSettings},
     resource::{ArchiveConfig, FolderPaths},
@@ -51,6 +51,11 @@ impl<F: ObjectFactory> Runtime<F> {
     /// Without one the session uses software drawing for these operations.
     pub fn set_graphics_backend(&mut self, backend: impl GraphicsBackend + 'static) {
         self.resources.graphics_backend = Some(Box::new(backend));
+    }
+
+    /// Set the decoder factory for future movie loads, including plane movies.
+    pub fn set_movie_decoder_factory(&mut self, factory: impl MovieDecoderFactory + 'static) {
+        self.resources.movie_decoder_factory = Some(std::sync::Arc::new(factory));
     }
 
     pub fn set_system_services(&mut self, services: impl SystemServices + 'static) {

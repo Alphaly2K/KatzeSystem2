@@ -1,3 +1,5 @@
+#[cfg(feature = "builtin-mpeg")]
+use katze_system2::movie::Decoder;
 use katze_system2::{
     Result,
     audio::SoundFactory,
@@ -6,7 +8,6 @@ use katze_system2::{
         GraphicsBackend, GraphicsFactory, Projection, RenderTarget, SoftwareBackend, TextureFilter,
     },
     kcs::{Program, ResourceServices},
-    movie::Decoder,
     resource::ResourceMode,
     runtime::{KcsFactory, ProgramLoader, RootObject, Runtime, kind},
 };
@@ -124,6 +125,89 @@ fn word(runtime: &MovieRuntime, address: u32) -> u32 {
 }
 
 #[test]
+fn host_movie_decoder_supplies_the_frame_and_pcm_after_restart() -> Result<()> {
+    use katze_system2::host::{
+        MovieAudio, MovieDecoded, MovieDecoder, MovieDecoderFactory, MovieFrame, MovieMetadata,
+        SharedSource, Surface,
+    };
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct Factory(Arc<AtomicUsize>);
+    impl MovieDecoderFactory for Factory {
+        fn open(&self, source: SharedSource) -> Result<Box<dyn MovieDecoder>> {
+            let mut signature = [0; 4];
+            source.read_exact_at(0, &mut signature)?;
+            assert_eq!(signature, [0, 0, 1, 0xba]);
+            self.0.fetch_add(1, Ordering::Relaxed);
+            Ok(Box::new(Clip(0.)))
+        }
+    }
+
+    struct Clip(f64);
+    impl MovieDecoder for Clip {
+        fn metadata(&self) -> MovieMetadata {
+            MovieMetadata {
+                size: [2, 2],
+                frame_rate: 60.,
+                sample_rate: 600,
+                duration: 1. / 60.,
+            }
+        }
+
+        fn time(&self) -> f64 {
+            self.0
+        }
+
+        fn rewind(&mut self) -> Result<()> {
+            self.0 = 0.;
+            Ok(())
+        }
+
+        fn advance(&mut self, seconds: f64) -> Result<MovieDecoded> {
+            self.0 += seconds;
+            Ok(MovieDecoded {
+                video: Some(MovieFrame {
+                    time: 0.,
+                    surface: Surface::from_bgra([2, 2], [0x20, 0x40, 0x80, 0xff].repeat(4))?,
+                }),
+                audio: Some(MovieAudio {
+                    time: 0.,
+                    samples: [0.25, -0.25].repeat(10),
+                }),
+                ended: true,
+            })
+        }
+    }
+
+    let mut code = Vec::new();
+    call(&mut code, 265, &[64], false);
+    instruction(&mut code, 0x26, &[0]);
+    call(&mut code, 266, &[1], true);
+    call(&mut code, 267, &[], true);
+    call(&mut code, 266, &[1], true);
+    call(&mut code, 65, &[], false);
+    call(&mut code, 268, &[], true);
+    instruction(&mut code, 0x3b, &[]);
+
+    let opened = Arc::new(AtomicUsize::new(0));
+    let mut runtime = setup(code, 4096, b"clip_%u[G128].mpg\0");
+    runtime.set_movie_decoder_factory(Factory(opened.clone()));
+    runtime.update(0, 1)?;
+    assert_ne!(word(&runtime, 0), 0);
+    assert_eq!(opened.load(Ordering::Relaxed), 2);
+    assert!(!runtime.drawing().enabled);
+    let frame = runtime.with_frame(|draw, canvas| SoftwareBackend.render(draw, canvas, [32; 2]))?;
+    assert_eq!(frame.pixel(16, 16), Some(0xff80_4020));
+    let mut audio = [0.; 20];
+    runtime.mix_task_audio_stereo(1, 600, &mut audio)?;
+    assert_eq!(audio, [0.25, -0.25].repeat(10).as_slice());
+    runtime.update(1, 1)?;
+    assert!(runtime.drawing().enabled);
+    Ok(())
+}
+
+#[test]
+#[cfg(feature = "builtin-mpeg")]
 fn plane_movie_loads_without_exclusive_playback_or_audio_and_keeps_native_return_slot() {
     let mut code = Vec::new();
     instruction(&mut code, 0x25, &[0xdead_beef]);
@@ -181,6 +265,7 @@ fn plane_movie_loads_without_exclusive_playback_or_audio_and_keeps_native_return
 }
 
 #[test]
+#[cfg(feature = "builtin-mpeg")]
 fn movie_natives_play_present_finish_and_release_through_runtime_services() {
     for budget in [1, 4096] {
         let mut code = Vec::new();
@@ -315,6 +400,7 @@ fn missing_and_disabled_movies_preserve_the_return_protocol_and_restore_drawing(
 }
 
 #[test]
+#[cfg(feature = "builtin-mpeg")]
 fn plane_movie_sources_release_on_replacement_failure_and_task_cleanup() {
     use katze_system2::{
         graphics::{Drawable, Drawables, PlaneObject},
@@ -456,6 +542,7 @@ fn plane_movie_sources_release_on_replacement_failure_and_task_cleanup() {
 }
 
 #[test]
+#[cfg(feature = "builtin-mpeg")]
 fn plane_movie_handles_play_transform_mix_and_release_independently() {
     use katze_system2::{
         audio::SoundState,

@@ -462,7 +462,7 @@ fn blend_pixel(target: &mut [u8], source: &[u8], opacity: u32) {
     }
 }
 
-fn pixel_length(size: [u32; 2]) -> Result<usize> {
+pub(crate) fn pixel_length(size: [u32; 2]) -> Result<usize> {
     if size.iter().any(|&value| value > i32::MAX as u32) {
         return Err(Error::new(0, "渲染面尺寸超出坐标范围"));
     }

@@ -1,3 +1,5 @@
+#![cfg(feature = "builtin-mpeg")]
+
 use katze_system2::{
     Error, Result,
     io::{ReadSource, SharedSource},

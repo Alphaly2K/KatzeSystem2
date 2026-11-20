@@ -5,12 +5,22 @@ edition = "2024"
 rust-version = "1.87"
 license = "LGPL-2.1-only"
 description = "Embeddable CatSystem2 2.6.1.90 runtime"
+repository = "https://github.com/Alphaly2K/KatzeSystem2"
 autobins = false
+include = [
+    "/src/**", "/build.rs", "/vendor/**", "/examples/*.rs", "/examples/support/**",
+    "/tests/**", "/docs/**", "/licenses/**", "/LICENSE", "/THIRD_PARTY.md", "/README.md",
+    "/GOAL.md", "!**/.DS_Store",
+]
 
 [workspace]
 members = ["examples/desktop", "tools/katze-script"]
 default-members = ["."]
 resolver = "3"
+
+[features]
+default = ["builtin-mpeg"]
+builtin-mpeg = ["dep:cc"]
 
 [dependencies]
 blowfish = "0.9.1"
@@ -26,7 +36,7 @@ png = "=0.17.16"
 roxmltree = "0.20.0"
 
 [build-dependencies]
-cc = "=1.11.1"
+cc = { version = "=1.11.1", optional = true }
 
 [dev-dependencies]
 chrono = { version = "=0.4.42", default-features = false, features = ["clock"] }
