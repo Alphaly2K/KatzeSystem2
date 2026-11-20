@@ -418,7 +418,7 @@ impl Drawables {
     }
 }
 
-pub(super) fn draw_command(
+pub(crate) fn draw_command(
     output: &mut super::RenderTarget,
     tiles: Option<&[Option<Surface>]>,
     command: &super::DrawCommand,

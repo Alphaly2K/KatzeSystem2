@@ -125,17 +125,16 @@ mod particle_thunder;
 mod particle_warukira;
 pub(crate) use particle_task::refresh_particle_source;
 mod frame;
-mod raster;
+pub(crate) mod raster;
 pub use crate::host::graphics::{
     DrawCommand, DrawList, FrameTexture, FrameTriangle, ProjectedVertex, Rect, TextureAddress,
     TextureFilter, TextureSource,
 };
 mod compositor;
-pub use compositor::Compositor;
-mod software;
 use crate::host::graphics::pixel_length;
+pub use crate::host::graphics::software::SoftwareBackend;
 pub use crate::host::graphics::{FrameCanvas, GraphicsBackend, Surface};
-pub use software::SoftwareBackend;
+pub use compositor::Compositor;
 pub(crate) mod resample;
 mod surface_ops;
 use surface_ops::{ImageRegion, blend_pixel};

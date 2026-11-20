@@ -1,10 +1,9 @@
-use super::{RenderTarget, raster};
-use crate::{
-    Result,
-    host::graphics::{
-        DrawList, FrameCanvas, GraphicsBackend, SequenceCapture, Surface, TextureSource,
-    },
-};
+//! Reference CPU renderer for hosts that need an offscreen backend.
+
+use super::{DrawList, FrameCanvas, GraphicsBackend, SequenceCapture, Surface, TextureSource};
+use crate::{Result, graphics::raster};
+
+pub use crate::graphics::RenderTarget;
 
 impl TextureSource {
     /// Resolve a texture against a software canvas. Session hosts can use
@@ -46,7 +45,7 @@ impl DrawList {
     }
 }
 
-/// 不访问窗口或设备的软件图形后端。
+/// Software renderer for host presentation and synchronous readback.
 #[derive(Default)]
 pub struct SoftwareBackend;
 

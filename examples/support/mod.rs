@@ -9,8 +9,8 @@ use blowfish::{
 };
 use katze_system2::{
     Error, Result,
-    graphics::SoftwareBackend,
     host::{
+        graphics::software::SoftwareBackend,
         input::{ButtonSource, DeviceBinding, DeviceKeys},
         platform::{LocalDateTime, SystemServices},
         resources::{ArchiveConfig, ResourceMode, ResourceServices},

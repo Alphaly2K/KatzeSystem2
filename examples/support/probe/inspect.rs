@@ -1,8 +1,10 @@
 use super::{AudioStats, ProbeWindow, ScriptedDevice, input::StoryReplay, write_shot};
 use crate::support::{self, prepare_game};
 use katze_system2::{
-    graphics::SoftwareBackend,
-    host::resources::{ResourceMode, ResourceServices},
+    host::{
+        graphics::software::SoftwareBackend,
+        resources::{ResourceMode, ResourceServices},
+    },
     runtime::{GameTasks, TaskRuntime},
     session::{FrameOutcome, FrameTime},
 };

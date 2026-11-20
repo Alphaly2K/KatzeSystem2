@@ -36,7 +36,7 @@ impl RenderTarget {
         Self::from_tiles(size, [1, 1], vec![Some(Surface::new(size)?)])
     }
 
-    pub(super) fn into_single_surface(mut self) -> Surface {
+    pub(crate) fn into_single_surface(mut self) -> Surface {
         debug_assert_eq!(self.grid, [1, 1]);
         self.tiles.pop().flatten().unwrap()
     }

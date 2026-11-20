@@ -7,8 +7,7 @@ mod probe;
 mod support;
 
 use katze_system2::{
-    graphics::SoftwareBackend,
-    host::graphics::GraphicsBackend,
+    host::graphics::{GraphicsBackend, software::SoftwareBackend},
     session::{FrameOutcome, FrameTime},
 };
 use probe::{AudioStats, ProbeWindow, ScriptedDevice, inspect_runtime, write_shot};

@@ -2,6 +2,7 @@
 
 mod capture;
 mod commands;
+pub mod software;
 mod surface;
 pub use capture::SequenceCapture;
 pub use commands::{

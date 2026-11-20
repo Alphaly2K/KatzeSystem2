@@ -19,8 +19,6 @@ pub mod storage;
 
 // Keep existing imports working while documenting the capability modules.
 #[doc(hidden)]
-pub use crate::graphics::{RenderTarget, SoftwareBackend};
-#[doc(hidden)]
 pub use crate::language::StringTables;
 #[doc(hidden)]
 pub use audio::{Mixer, Pcm, SpeechSynthesizer};
@@ -34,6 +32,8 @@ pub use diagnostics::{
 pub use effect::{EffectPlayer, EffectServices};
 #[doc(hidden)]
 pub use font::{FontRequest, FontServices, GlyphMask, TextEncoding};
+#[doc(hidden)]
+pub use graphics::software::{RenderTarget, SoftwareBackend};
 #[doc(hidden)]
 pub use graphics::{
     DrawCommand, DrawList, FrameCanvas, FrameTexture, FrameTriangle, GraphicsBackend,
