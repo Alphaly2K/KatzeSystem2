@@ -373,6 +373,7 @@ dependencies = [
  "fontdb",
  "katze-system2",
  "metal",
+ "roxmltree",
  "sdl2",
 ]
 

@@ -31,6 +31,7 @@ pub use font_sources::load_fonts;
 // The desktop example uses the picker; the offline probe only uses preselection.
 #[allow(dead_code)]
 pub mod image_import;
+mod movie_decoder;
 
 const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
@@ -825,6 +826,9 @@ pub fn prepare_game(
     } = game;
     let mut runtime = GameSetup::new(1 << 20, 16 << 20)?;
     runtime.set_graphics_backend(SoftwareBackend);
+    if std::env::var_os("KATZE_FFMPEG_MOVIES").is_some() {
+        runtime.set_movie_decoder_factory(movie_decoder::Ffmpeg);
+    }
     let startup_xml = XmlDocument::parse(startup.as_bytes())?;
     if let Some(importer) = image_import::Import::from_startup(&root, &startup_xml)? {
         runtime.set_platform_job_services(importer);

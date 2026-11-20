@@ -50,6 +50,8 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 
 默认启用 `builtin-mpeg`，解码 MPEG-1 视频及 MP2／MP3 音轨。宿主可通过 `set_movie_decoder_factory` 为之后装载的独占与图层电影接入自己的 `host::MovieDecoderFactory`。工厂打开 `SharedSource`，解码器在运行库的工作线程返回 BGRA 帧与交错 PCM；循环、呈现和混音由原有流程处理。更换工厂不影响已装载电影。使用 `default-features = false` 可省去内置 C 解码器及其构建依赖；该配置装载电影时需要已注册的工厂。
 
+离屏和桌面示例可设置 `KATZE_FFMPEG_MOVIES=1`，让示例使用 `PATH` 中的 `ffprobe` 和 `ffmpeg` 探测并解码电影，支持 VP8／Vorbis WebM。此模式要求媒体能够从不可寻址的输入管道解码。视频按报告的帧率输出，音轨输出同一时间基准下的立体声 PCM。电影资源通过宿主提供的流读取，示例无需把电影解包到磁盘。运行库不需要外部媒体程序。
+
 宿主在更新后可用 `take_script_messages` 取走调试文字。即使更新返回错误，已生成的消息仍可取出。`set_native_trace` 注册当前运行实例的可选回调，运行时分派 native 时发送开始和结束事件，带任务号、原始调用编号、VM 字节偏移及失败标记。调用可嵌套，计时和输出由宿主决定。两个示例使用 `KATZE_TRACE_SCRIPT` 显示脚本消息，使用 `KATZE_TRACE_TIMING` 记录慢调用。
 
 宿主可通过 `script_positions` 只读枚举已登记脚本的当前位置，包括失败后仍登记的脚本。KCS 报告字节偏移；FES 报告块、块内指令索引和是否有待续处理的指令。失败位置以 `advance` 返回的错误为准。

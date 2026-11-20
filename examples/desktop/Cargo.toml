@@ -20,6 +20,7 @@ blowfish = "0.9.1"
 encoding_rs = "0.8.35"
 chrono = { version = "=0.4.42", default-features = false, features = ["clock"] }
 fontdb = { version = "=0.23.0", default-features = false, features = ["fs", "fontconfig"] }
+roxmltree = "0.20.0"
 sdl2 = { version = "=0.38.0", default-features = false, features = ["bundled", "static-link"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]

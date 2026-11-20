@@ -18,6 +18,8 @@ cargo run --locked -p katze-script -- native-calls ordinary scripts/
 
 桌面宿主单独构建：`cargo run --locked --release -p katze-desktop --bin window_startup -- "$GAME_DIR"`。
 
+有 WebM 电影的游戏可设置 `KATZE_FFMPEG_MOVIES=1`，并确保 `ffmpeg` 和 `ffprobe` 在 `PATH` 上。
+
 [嵌入运行库](docs/runtime-host.md) · [脚本参考](docs/README.md) · [接口使用与实现范围](docs/api.md) · [阶段进展](GOAL.md) · [依赖许可证](THIRD_PARTY.md)
 
 项目采用 [LGPL-2.1](LICENSE)。
