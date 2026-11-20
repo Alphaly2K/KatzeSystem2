@@ -80,7 +80,7 @@ impl GameSetup {
 
     /// Read the configured window preferences after [`Self::configure_startup`].
     pub fn window_preferences(&self) -> Option<WindowPreferences> {
-        WindowPreferences::from_runtime(&self.0)
+        self.0.window_preferences()
     }
 
     /// Set up the canvas, presentation and input coordinates for a logical size

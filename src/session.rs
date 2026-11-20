@@ -19,32 +19,11 @@ use std::sync::Arc;
 
 mod error;
 mod setup;
+pub use crate::host::platform::WindowPreferences;
 pub use crate::language::StringTables;
 pub use crate::runtime::frame::{AdvanceError, FrameOutcome, FrameTime};
 pub use error::StartupError;
 pub use setup::GameSetup;
-
-/// Window preferences from the game configuration. The host selects the
-/// actual window and display modes independently of the logical canvas size.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct WindowPreferences {
-    pub window_size: [u32; 2],
-    pub fullscreen_size: [u32; 2],
-    pub fullscreen: bool,
-}
-
-impl WindowPreferences {
-    fn from_runtime(runtime: &TaskRuntime) -> Option<Self> {
-        let platform = runtime.platform_settings()?;
-        let system = runtime.system_settings()?;
-        Some(Self {
-            window_size: platform.window_size.map(u32::from),
-            fullscreen_size: platform.fullscreen_size.map(u32::from),
-            fullscreen: system.fullscreen != 0,
-        })
-    }
-}
 
 /// A running game session created by [`GameSetup::start_game`].
 pub struct GameRuntime(TaskRuntime);
@@ -52,7 +31,7 @@ pub struct GameRuntime(TaskRuntime);
 impl GameRuntime {
     /// Read the window preferences, including changes made by the game.
     pub fn window_preferences(&self) -> Option<WindowPreferences> {
-        WindowPreferences::from_runtime(&self.0)
+        self.0.window_preferences()
     }
 
     /// The last directory selected by the image import dialog, in UTF-16.

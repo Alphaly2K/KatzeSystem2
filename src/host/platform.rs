@@ -26,6 +26,16 @@ pub trait PlatformJobServices {
     ) -> Result<Option<Box<dyn PlatformJob>>>;
 }
 
+/// Window preferences from the game configuration. The host selects the
+/// actual window and display modes independently of the logical canvas size.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct WindowPreferences {
+    pub window_size: [u32; 2],
+    pub fullscreen_size: [u32; 2],
+    pub fullscreen: bool,
+}
+
 /// Window operations supplied by the host after a runtime update.
 pub trait WindowServices {
     /// Toggle fullscreen and report the resulting mode (true for fullscreen).

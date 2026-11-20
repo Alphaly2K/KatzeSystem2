@@ -20,7 +20,7 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 |`host::audio`、`host::movie`、`host::media`|`Mixer`、`Pcm`、语音合成、电影解码及媒体执行方式|
 |`host::model`|模型选择、播放实例和带锚点偏移的透明图像帧|
 |`host::input`、`host::font`|输入事件、按键绑定、`DeviceKeys` 和字体服务|
-|`host::platform`、`host::effect`|窗口、剪贴板、平台任务及外部效果播放器|
+|`host::platform`、`host::effect`|`WindowPreferences`、窗口与剪贴板请求、平台任务及外部效果播放器|
 |`host::diagnostics`|脚本位置、调试消息、native 跟踪及 `QuizDebugSession`、`QuizDebugInput`|
 
 未识别的 3D 粒子插件可由 `host::effect::EffectServices::open_particle` 接入。服务取得资源名和字节，为当前任务创建 `ParticlePlayer`。播放器通过借用的 `ParticleFrame` 更新运行库持有的网格，可在启动或更新时清除 `active` 来结束脚本等待。活动实例收到脚本停止命令时调用 `ParticlePlayer::stop`，之后仍可重启。运行库继续生成绘制命令，由图形宿主呈现。服务不可用时，装载返回插件诊断。
@@ -64,7 +64,7 @@ KATZE_PARTICLE_HOST="$PWD/particle-host.exe" cargo run --release --example runpr
 
 宿主用 `GameRuntime::present_frame` 借用当前绘制列表和 `FrameCanvas`，无需创建软件渲染目标。通过 `texture` 解析命令中的纹理，通过 `tiles` 和 `dirty_tiles` 更新画布缓存。呈现和脚本回读共用一个纹理缓存时，由宿主上传所有变更面块后调用 `acknowledge_upload`；有独立缓存的多个消费者应各自跟踪更新。
 
-`set_graphics_backend` 设置脚本画面捕获与实时滤镜共用的离屏后端。实时模糊、马赛克和阴影在合成时同步回读中间结果，再把它们作为纹理交给最终绘制列表。`GraphicsBackend::render` 在透明背景上执行命令，返回与请求尺寸一致、从顶行开始紧密排列的 BGRA8 `Surface`。没有回读需求的会话可以不注册后端；脚本实际请求画面捕获或合成启用的实时滤镜时，缺少后端会报错。软件宿主可调用 `setup.set_graphics_backend(graphics::SoftwareBackend)`，并用 `SoftwareBackend::render_into` 复用已有呈现目标。
+`set_graphics_backend` 设置脚本画面捕获与实时滤镜共用的离屏后端。实时模糊、马赛克和阴影在合成时同步回读中间结果，再把它们作为纹理交给最终绘制列表。`GraphicsBackend::render` 在透明背景上执行命令，返回与请求尺寸一致、从顶行开始紧密排列的 BGRA8 `Surface`。没有回读需求的会话可以不注册后端；脚本实际请求画面捕获或合成启用的实时滤镜时，缺少后端会报错。软件宿主可调用 `setup.set_graphics_backend(SoftwareBackend)`，并用 `SoftwareBackend::render_into` 复用已有呈现目标。
 
 全屏转场的活动状态随 `advance` 更新。宿主可跳过或重复取帧，脚本无需等待呈现便能收到转场完成状态。
 
@@ -78,7 +78,7 @@ KATZE_PARTICLE_HOST="$PWD/particle-host.exe" cargo run --release --example runpr
 
 角色模型由 `set_model_services` 注册的宿主负责。会话已绑定资源服务时，`ModelServices::open_with_resources` 同时接收 FES 模型选择的原始字节和会话的资源解析器，可沿用同一归档、补丁和散装资源查找规则。自行管理资源的宿主可实现 `ModelServices::open`。 宿主可用 `ModelSelection::parse` 和 `ModelSelection::open` 取得主体 PSZ 的读取源、初始动作名与选中动作行的差分表名称。选择中的后续选项仍保留原始字节。`host::model::ModelConfig` 解析 `m2config` 类别中的主体及动作表，保留主体别名和空动作字段。主体资源可经 `m2psb` 类别解析，`decode_psz` 按宿主指定的解压字节上限提取 PSB 数据。
 
-运行库按会话时钟向可见对象的播放实例请求透明 BGRA 帧，并把帧及锚点偏移交给合成器。服务缺失或返回 `None` 时，脚本继续推进，模型平面无可见内容。删除平面或释放场景会释放播放实例。
+运行库按会话时钟向可见对象的播放实例请求透明 BGRA 帧，并把帧及锚点偏移交给合成器。偏移用平面变换前的逻辑像素表示。服务缺失或返回 `None` 时，脚本继续推进，模型平面无可见内容。删除平面或释放场景会释放播放实例。
 
 离屏和桌面示例可设置 `KATZE_FFMPEG_MOVIES=1`，让示例使用 `PATH` 中的 `ffprobe` 和 `ffmpeg` 探测并解码电影，支持 VP8／Vorbis WebM。此模式要求媒体能够从不可寻址的输入管道解码。视频按报告的帧率输出，音轨输出同一时间基准下的立体声 PCM。电影资源通过宿主提供的流读取，示例无需把电影解包到磁盘。运行库不需要外部媒体程序。
 
