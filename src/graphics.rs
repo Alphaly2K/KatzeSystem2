@@ -52,7 +52,7 @@ pub use rwipe_task::RWipeObject;
 pub use wipe::WipeObject;
 pub use wipe_alpha::WipeAlphaObject;
 mod projection;
-pub use projection::{ProjectedVertex, Projection};
+pub use projection::Projection;
 mod camera;
 pub use camera::{Camera2D, Camera2DObject};
 mod particle;
@@ -128,8 +128,8 @@ pub(crate) use particle_task::refresh_particle_source;
 mod frame;
 mod raster;
 pub use crate::host::graphics::{
-    DrawCommand, DrawList, FrameTexture, FrameTriangle, TextureAddress, TextureFilter,
-    TextureSource,
+    DrawCommand, DrawList, FrameTexture, FrameTriangle, ProjectedVertex, Rect, TextureAddress,
+    TextureFilter, TextureSource,
 };
 mod compositor;
 pub use compositor::Compositor;
@@ -137,37 +137,6 @@ mod software;
 pub use crate::host::graphics::{FrameCanvas, GraphicsBackend};
 pub use software::SoftwareBackend;
 pub(crate) mod resample;
-
-/// 包含左上边、不包含右下边的像素矩形。
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Rect {
-    pub left: i32,
-    pub top: i32,
-    pub right: i32,
-    pub bottom: i32,
-}
-
-impl Rect {
-    /// 端点相加按基线的 i32 回绕，不交换反向边界。
-    pub fn from_xywh(x: i32, y: i32, width: i32, height: i32) -> Self {
-        Self {
-            left: x,
-            top: y,
-            right: x.wrapping_add(width),
-            bottom: y.wrapping_add(height),
-        }
-    }
-
-    pub fn intersect(self, other: Self) -> Option<Self> {
-        let rect = Self {
-            left: self.left.max(other.left),
-            top: self.top.max(other.top),
-            right: self.right.min(other.right),
-            bottom: self.bottom.min(other.bottom),
-        };
-        (rect.left < rect.right && rect.top < rect.bottom).then_some(rect)
-    }
-}
 
 /// 从上到下紧密排列的 BGRA8 渲染面，Alpha 不预乘。
 #[derive(Clone, Debug, PartialEq, Eq)]

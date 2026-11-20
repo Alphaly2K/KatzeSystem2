@@ -4,50 +4,53 @@ mod capture;
 mod commands;
 pub use capture::SequenceCapture;
 pub use commands::{
-    DrawCommand, DrawList, FrameTexture, FrameTriangle, TextureAddress, TextureFilter,
-    TextureSource,
+    DrawCommand, DrawList, FrameTexture, FrameTriangle, ProjectedVertex, Rect, TextureAddress,
+    TextureFilter, TextureSource,
 };
 
-pub use crate::graphics::{ProjectedVertex, Rect, Surface};
-use crate::{Result, graphics::RenderTarget};
+use crate::Result;
+pub use crate::graphics::Surface;
 
 /// Read-only canvas textures with an explicit upload acknowledgement. A host
 /// cache shared by presentation and script readback can consume the dirty flags.
-pub struct FrameCanvas<'a>(&'a mut RenderTarget);
+pub struct FrameCanvas<'a> {
+    size: [u32; 2],
+    tiles: &'a [Option<Surface>],
+    dirty: &'a mut [bool],
+}
 
 impl<'a> FrameCanvas<'a> {
-    /// Wrap a canvas for standalone rendering outside a game session.
-    pub fn new(target: &'a mut RenderTarget) -> Self {
-        Self(target)
+    pub(crate) fn from_tiles(
+        size: [u32; 2],
+        tiles: &'a [Option<Surface>],
+        dirty: &'a mut [bool],
+    ) -> Self {
+        Self { size, tiles, dirty }
     }
 
     /// Logical canvas size in pixels, including unallocated tiles.
     pub fn size(&self) -> [u32; 2] {
-        self.0.size()
+        self.size
     }
 
     /// Texture slots in canvas order. `None` denotes an unallocated tile.
     pub fn tiles(&self) -> &[Option<Surface>] {
-        self.0.tiles()
+        self.tiles
     }
 
     /// Upload flags indexed in the same order as `tiles`.
     pub fn dirty_tiles(&self) -> &[bool] {
-        self.0.dirty_tiles()
+        self.dirty
     }
 
     /// Resolve a draw command's texture, including standalone images.
     pub fn texture<'b>(&'b self, source: &'b TextureSource) -> Option<&'b Surface> {
-        source.surface(self.0)
+        source.resolve(self.tiles)
     }
 
     /// Clear dirty flags after uploading all changed tiles to the shared cache.
     pub fn acknowledge_upload(&mut self) {
-        self.0.clear_dirty();
-    }
-
-    pub(crate) fn target(&self) -> &RenderTarget {
-        self.0
+        self.dirty.fill(false);
     }
 }
 

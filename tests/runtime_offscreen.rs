@@ -1,8 +1,9 @@
 use katze_system2::{
     Result,
     expression::State,
+    graphics::SoftwareBackend,
     graphics::{Drawable, Projection, RenderTarget, TextureFilter, Transform},
-    host::{DrawList, FrameCanvas, GraphicsBackend, SoftwareBackend, Surface},
+    host::graphics::{DrawList, FrameCanvas, GraphicsBackend, Surface, TextureSource},
     kcs::Program,
     runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, kind},
 };
@@ -343,7 +344,24 @@ fn presentation_needs_no_readback_backend_but_script_capture_does() {
         .flat_map(f32::to_le_bytes)
         .collect();
     let mut rt = engine_program(program(&args), true);
-    assert!(!rt.compose_frame().unwrap().commands.is_empty());
+    let mut marker = Surface::new([1, 1]).unwrap();
+    marker.clear(0xff123456);
+    let target = rt.drawing_mut().target.as_mut().unwrap();
+    assert!(target.copy_surface(&marker, marker.bounds(), [0, 0]));
+    rt.with_frame(|frame, canvas| {
+        assert!(!frame.commands.is_empty());
+        assert_eq!(canvas.dirty_tiles(), &[true]);
+        let tile = canvas.texture(&TextureSource::Canvas(0)).unwrap();
+        assert_eq!(tile.pixel(0, 0), Some(0xff123456));
+        canvas.acknowledge_upload();
+        Ok(())
+    })
+    .unwrap();
+    rt.with_frame(|_, canvas| {
+        assert_eq!(canvas.dirty_tiles(), &[false]);
+        Ok(())
+    })
+    .unwrap();
 
     rt.drawing_mut().enabled = false;
     call(&mut rt);

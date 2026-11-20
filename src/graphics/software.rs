@@ -1,8 +1,25 @@
 use super::{RenderTarget, raster};
 use crate::{
     Result,
-    host::graphics::{DrawList, FrameCanvas, GraphicsBackend, Surface},
+    host::graphics::{
+        DrawList, FrameCanvas, GraphicsBackend, SequenceCapture, Surface, TextureSource,
+    },
 };
+
+impl TextureSource {
+    /// Resolve a texture against a software canvas. Session hosts can use
+    /// [`FrameCanvas::texture`] directly on the frame they receive.
+    pub fn surface<'a>(&'a self, canvas: &'a RenderTarget) -> Option<&'a Surface> {
+        self.resolve(canvas.tiles())
+    }
+}
+
+impl SequenceCapture<'_> {
+    /// Submit the software-rendered frame.
+    pub fn write_render_target(self, frame: &RenderTarget) -> Result<bool> {
+        self.write_frame(frame.size(), |x, y| frame.pixel(x, y))
+    }
+}
 
 impl DrawList {
     /// Draw over an existing software target without clearing it. A source
@@ -12,18 +29,18 @@ impl DrawList {
         output: &mut RenderTarget,
         canvas: Option<&RenderTarget>,
     ) -> Result<bool> {
-        self.render_at(output, canvas, [0; 2])
+        self.render_at(output, canvas.map(RenderTarget::tiles), [0; 2])
     }
 
     fn render_at(
         &self,
         output: &mut RenderTarget,
-        canvas: Option<&RenderTarget>,
+        tiles: Option<&[Option<Surface>]>,
         origin: [u32; 2],
     ) -> Result<bool> {
         let mut touched = false;
         for command in &self.commands {
-            touched |= raster::draw_command(output, canvas, command, self.filter, origin)?;
+            touched |= raster::draw_command(output, tiles, command, self.filter, origin)?;
         }
         Ok(touched)
     }
@@ -40,7 +57,7 @@ impl SoftwareBackend {
         canvas: &FrameCanvas<'_>,
         output: &mut RenderTarget,
     ) -> Result<bool> {
-        frame.render_into(output, Some(canvas.target()))
+        frame.render_at(output, Some(canvas.tiles()), [0; 2])
     }
 }
 
@@ -63,7 +80,7 @@ impl GraphicsBackend for SoftwareBackend {
         if workers == 1 {
             Self::render_into(frame, canvas, &mut output)?;
         } else {
-            render_in_bands(frame, canvas.target(), &mut output, workers)?;
+            render_in_bands(frame, canvas.tiles(), &mut output, workers)?;
         }
         Ok(output.into_single_surface())
     }
@@ -71,7 +88,7 @@ impl GraphicsBackend for SoftwareBackend {
 
 fn render_in_bands(
     frame: &DrawList,
-    canvas: &RenderTarget,
+    tiles: &[Option<Surface>],
     output: &mut RenderTarget,
     workers: usize,
 ) -> Result<()> {
@@ -80,7 +97,7 @@ fn render_in_bands(
     // 各分块使用同一全局像素坐标；不平移顶点或改变命令顺序。
     let render_band = |top| -> Result<RenderTarget> {
         let mut band = RenderTarget::new([width, rows.min(height - top)])?;
-        frame.render_at(&mut band, Some(canvas), [0, top])?;
+        frame.render_at(&mut band, Some(tiles), [0, top])?;
         Ok(band)
     };
     let mut copy_band = |top, band: RenderTarget| {
@@ -158,7 +175,7 @@ mod tests {
         let mut serial = RenderTarget::new(size).unwrap();
         let mut parallel = serial.clone();
         assert!(frame.render_into(&mut serial, Some(&canvas)).unwrap());
-        render_in_bands(&frame, &canvas, &mut parallel, 4).unwrap();
+        render_in_bands(&frame, canvas.tiles(), &mut parallel, 4).unwrap();
         assert_eq!(parallel, serial);
     }
 }

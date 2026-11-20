@@ -1,17 +1,9 @@
-use super::{Vertex, drawable::arithmetic as f};
+use super::{ProjectedVertex, Vertex, drawable::arithmetic as f};
 use crate::kcs::{multiply_matrix, transform_vector};
 
 const IDENTITY: [f32; 16] = [
     1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.,
 ];
-
-/// 进入栅格化阶段的顶点；RHW 独立保存，不隐式除以 W。
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ProjectedVertex {
-    pub position: [f32; 3],
-    pub rhw: f32,
-    pub color: u32,
-}
 
 /// 本对象变换之后的投影、绘图坐标组及最终画布变换。
 #[derive(Clone, Debug, PartialEq)]

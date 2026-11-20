@@ -1,4 +1,4 @@
-use super::{Image, ProjectedVertex, Rect, Surface, TextureFilter, pixel_length};
+use super::{FrameCanvas, Image, ProjectedVertex, Rect, Surface, TextureFilter, pixel_length};
 use crate::{Error, Result, read};
 
 /// 按行排列的 CPU 渲染面块和对应的更新标记。
@@ -13,6 +13,13 @@ pub struct RenderTarget {
 }
 
 const MAX_CANVAS_BYTES: usize = 128 * 1024 * 1024;
+
+impl<'a> FrameCanvas<'a> {
+    /// Borrow a software canvas for standalone rendering outside a game session.
+    pub fn new(target: &'a mut RenderTarget) -> Self {
+        Self::from_tiles(target.size, &target.tiles, &mut target.dirty)
+    }
+}
 
 impl RenderTarget {
     /// 创建一块零初始化的完整渲染面。

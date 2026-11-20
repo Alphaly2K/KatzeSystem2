@@ -411,15 +411,16 @@ impl Drawables {
         filter: TextureFilter,
         range: Option<[f32; 2]>,
     ) -> Result<bool> {
+        let tiles = canvas.map(super::RenderTarget::tiles);
         self.visit_frame(projection, parent, range, |command| {
-            draw_command(output, canvas, &command, filter, [0; 2])
+            draw_command(output, tiles, &command, filter, [0; 2])
         })
     }
 }
 
 pub(super) fn draw_command(
     output: &mut super::RenderTarget,
-    canvas: Option<&super::RenderTarget>,
+    tiles: Option<&[Option<Surface>]>,
     command: &super::DrawCommand,
     filter: TextureFilter,
     origin: [u32; 2],
@@ -440,14 +441,10 @@ pub(super) fn draw_command(
             address: source.address,
             ..state
         };
-        let texture = match &source.source {
-            super::TextureSource::Canvas(tile) => canvas
-                .ok_or_else(|| Error::new(0, "纹理图元需要独立画布输入与帧输出"))?
-                .tiles()
-                .get(*tile as usize)
-                .and_then(Option::as_ref),
-            super::TextureSource::Image(image) => Some(image.as_ref()),
-        };
+        if tiles.is_none() && matches!(source.source, super::TextureSource::Canvas(_)) {
+            return Err(Error::new(0, "纹理图元需要独立画布输入与帧输出"));
+        }
+        let texture = source.source.resolve(tiles.unwrap_or_default());
         if let Some(texture) = texture {
             if vertices.iter().any(|v| !v.rhw.is_finite()) {
                 return Err(Error::new(0, "纹理插值需要有限的 RHW"));

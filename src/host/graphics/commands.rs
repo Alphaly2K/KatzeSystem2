@@ -1,6 +1,44 @@
-use super::{ProjectedVertex, Rect, Surface};
-use crate::graphics::RenderTarget;
+use super::Surface;
 use std::sync::Arc;
+
+/// Projected position, reciprocal W for interpolation, and packed ARGB color.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ProjectedVertex {
+    pub position: [f32; 3],
+    pub rhw: f32,
+    pub color: u32,
+}
+
+/// A pixel rectangle with inclusive left/top and exclusive right/bottom edges.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Rect {
+    pub left: i32,
+    pub top: i32,
+    pub right: i32,
+    pub bottom: i32,
+}
+
+impl Rect {
+    /// Endpoints use wrapping addition. Negative extents are not normalized.
+    pub fn from_xywh(x: i32, y: i32, width: i32, height: i32) -> Self {
+        Self {
+            left: x,
+            top: y,
+            right: x.wrapping_add(width),
+            bottom: y.wrapping_add(height),
+        }
+    }
+
+    pub fn intersect(self, other: Self) -> Option<Self> {
+        let rect = Self {
+            left: self.left.max(other.left),
+            top: self.top.max(other.top),
+            right: self.right.min(other.right),
+            bottom: self.bottom.min(other.bottom),
+        };
+        (rect.left < rect.right && rect.top < rect.bottom).then_some(rect)
+    }
+}
 
 /// A tile from the frame canvas or an immutable standalone texture.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -10,9 +48,9 @@ pub enum TextureSource {
 }
 
 impl TextureSource {
-    pub fn surface<'a>(&'a self, canvas: &'a RenderTarget) -> Option<&'a Surface> {
+    pub(crate) fn resolve<'a>(&'a self, tiles: &'a [Option<Surface>]) -> Option<&'a Surface> {
         match self {
-            Self::Canvas(tile) => canvas.tiles().get(*tile as usize).and_then(Option::as_ref),
+            Self::Canvas(tile) => tiles.get(*tile as usize).and_then(Option::as_ref),
             Self::Image(image) => Some(image),
         }
     }

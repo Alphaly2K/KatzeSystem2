@@ -1,9 +1,5 @@
 use super::Rect;
-use crate::{
-    Error, Result,
-    graphics::{Image, RenderTarget},
-    kcs::HostState,
-};
+use crate::{Error, Result, graphics::Image, kcs::HostState};
 
 /// A request to record the frame being submitted as a BMP. Submit readback once
 /// after presenting the frame, or drop the request if presentation is skipped.
@@ -15,11 +11,6 @@ pub struct SequenceCapture<'a> {
 impl<'a> SequenceCapture<'a> {
     pub(crate) fn new(host: &'a mut HostState, rectangle: Option<Rect>) -> Self {
         Self { host, rectangle }
-    }
-
-    /// Submit the software-rendered frame.
-    pub fn write_render_target(self, frame: &RenderTarget) -> Result<bool> {
-        self.write_frame(frame.size(), |x, y| frame.pixel(x, y))
     }
 
     /// Submit top-down BGRA pixels, with `row_stride` bytes between row starts.
@@ -47,7 +38,11 @@ impl<'a> SequenceCapture<'a> {
         })
     }
 
-    fn write_frame(self, size: [u32; 2], pixel: impl Fn(u32, u32) -> Option<u32>) -> Result<bool> {
+    pub(crate) fn write_frame(
+        self,
+        size: [u32; 2],
+        pixel: impl Fn(u32, u32) -> Option<u32>,
+    ) -> Result<bool> {
         let Some(bytes) = Image::encode_frame_bmp(size, self.rectangle, pixel)? else {
             return Ok(false);
         };
