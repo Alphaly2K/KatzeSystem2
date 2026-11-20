@@ -173,6 +173,48 @@ fn packet_seeks_preserve_exact_samples_across_pages_and_end_of_stream() {
 }
 
 #[test]
+fn seeking_uses_packet_positions_when_an_interior_granule_is_inaccurate() {
+    let original = include_bytes!("fixtures/audio/stereo-8000-stream.ogg");
+    let expected = decode_vorbis(original).unwrap();
+    let mut bytes = original.to_vec();
+    let mut offset = 0;
+    loop {
+        let segments = bytes[offset + 26] as usize;
+        let length = 27
+            + segments
+            + bytes[offset + 27..offset + 27 + segments]
+                .iter()
+                .map(|&count| count as usize)
+                .sum::<usize>();
+        let page = &mut bytes[offset..offset + length];
+        let granule = u64::from_le_bytes(page[6..14].try_into().unwrap());
+        if granule > 10_000 {
+            assert_eq!(page[5] & 4, 0);
+            page[6..14].copy_from_slice(&(granule - 128).to_le_bytes());
+            page[22..26].fill(0);
+            let crc = page.iter().fold(0u32, |crc, &byte| {
+                let mut crc = crc ^ (u32::from(byte) << 24);
+                for _ in 0..8 {
+                    crc = (crc << 1) ^ if crc >> 31 != 0 { 0x04c1_1db7 } else { 0 };
+                }
+                crc
+            });
+            page[22..26].copy_from_slice(&crc.to_le_bytes());
+            let mut decoder = VorbisDecoder::new(&bytes).unwrap();
+            let target = granule as usize + 37;
+            decoder.seek_frame(target).unwrap();
+            let mut samples = Vec::new();
+            while let Some(packet) = decoder.read_packet().unwrap() {
+                samples.extend(packet);
+            }
+            assert_eq!(samples, expected.samples()[target * 2..]);
+            break;
+        }
+        offset += length;
+    }
+}
+
+#[test]
 fn vorbis_rejects_incomplete_pages_corruption_chained_streams_and_excessive_frame_counts() {
     let pages: Vec<_> = MONO
         .windows(4)

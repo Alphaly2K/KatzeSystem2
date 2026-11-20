@@ -1,6 +1,7 @@
 use crate::io::{ReadSource, SharedSource, SourceReader};
 use crate::{Error, Result, read};
 use lewton::{
+    audio::get_decoded_sample_count,
     inside_ogg::OggStreamReader,
     samples::{InterleavedSamples, Samples},
 };
@@ -11,6 +12,7 @@ pub struct VorbisDecoder<'a, S: ReadSource + ?Sized> {
     decoder: OggStreamReader<SourceReader<'a, S>>,
     source: SourceReader<'a, S>,
     granules: Vec<u64>,
+    seek_points: Option<Vec<SeekPoint>>,
     serial: u32,
     frames: usize,
     decoded: usize,
@@ -22,6 +24,12 @@ struct Metadata {
     serial: u32,
     frames: u64,
     granules: Vec<u64>,
+}
+
+#[derive(Clone, Copy)]
+struct SeekPoint {
+    granule: u64,
+    frame: usize,
 }
 
 struct Packet {
@@ -83,6 +91,7 @@ impl<'a, S: ReadSource + ?Sized> VorbisDecoder<'a, S> {
             decoder,
             source,
             granules: metadata.granules,
+            seek_points: None,
             serial: metadata.serial,
             frames,
             decoded: 0,
@@ -153,9 +162,15 @@ impl<'a, S: ReadSource + ?Sized> VorbisDecoder<'a, S> {
             self.decoded = target;
             return Ok(());
         }
-        let previous = self.granules.partition_point(|end| *end < frame as u64);
-        if let Some(anchor) = previous.checked_sub(1).map(|index| self.granules[index]) {
-            self.decoder.seek_absgp_pg(anchor).map_err(decode_error)?;
+        if self.seek_points.is_none() && self.granules.first().is_some_and(|&g| g < frame as u64) {
+            self.seek_points = Some(self.index_seek_points()?);
+        }
+        let points = self.seek_points.as_deref().unwrap_or_default();
+        let previous = points.partition_point(|point| point.frame < frame);
+        if let Some(point) = previous.checked_sub(1).map(|index| points[index]) {
+            self.decoder
+                .seek_absgp_pg(point.granule)
+                .map_err(decode_error)?;
             // 先完成前一页，使重叠窗口及绝对采样位置都已就绪。
             loop {
                 if self
@@ -170,16 +185,16 @@ impl<'a, S: ReadSource + ?Sized> VorbisDecoder<'a, S> {
                     return Err(Error::new(0, "Ogg Vorbis 不支持串联或混合逻辑流"));
                 }
                 if let Some(end) = self.decoder.get_last_absgp() {
-                    if end > frame as u64 {
-                        return Err(Error::new(0, "Ogg Vorbis 定位前置页超过目标"));
+                    if end == point.granule {
+                        self.decoded = point.frame * self.channels() as usize;
+                    } else {
+                        self.restart()?;
                     }
-                    self.decoded = end as usize * self.channels() as usize;
                     break;
                 }
             }
         } else {
-            self.decoder = OggStreamReader::new(self.source.reopen()).map_err(decode_error)?;
-            self.decoded = 0;
+            self.restart()?;
         }
         while self.decoded < target {
             let Some(mut packet) = self.read_packet()? else {
@@ -192,6 +207,48 @@ impl<'a, S: ReadSource + ?Sized> VorbisDecoder<'a, S> {
             }
         }
         Ok(())
+    }
+
+    fn restart(&mut self) -> Result<()> {
+        self.decoder = OggStreamReader::new(self.source.reopen()).map_err(decode_error)?;
+        self.decoded = 0;
+        Ok(())
+    }
+
+    fn index_seek_points(&self) -> Result<Vec<SeekPoint>> {
+        let mut reader = OggStreamReader::new(self.source.reopen())
+            .map_err(decode_error)?
+            .into_inner();
+        let mut points = Vec::new();
+        let mut frame = 0usize;
+        let mut primed = false;
+        let (ident, setup) = (&self.decoder.ident_hdr, &self.decoder.setup_hdr);
+        // A page's granule locates the encoded page. Packet durations locate its PCM.
+        while let Some(packet) = reader.read_packet().map_err(|e| decode_error(e.into()))? {
+            if packet.last_in_stream() {
+                break;
+            }
+            if primed {
+                // Lewton's packet-size helper can panic on an invalid mode index.
+                let count = std::panic::catch_unwind(|| {
+                    get_decoded_sample_count(ident, setup, &packet.data)
+                })
+                .map_err(|_| Error::new(0, "Ogg Vorbis 音频包模式无效"))?
+                .map_err(|e| decode_error(e.into()))?;
+                frame = frame
+                    .checked_add(count)
+                    .ok_or_else(|| Error::new(0, "Ogg Vorbis 采样位置溢出"))?;
+            }
+            primed = true;
+            let granule = packet.absgp_page();
+            if packet.last_in_page() && granule != 0 && granule != u64::MAX {
+                let index = self.granules.partition_point(|&end| end < granule);
+                if self.granules.get(index + 1) != Some(&granule) {
+                    points.push(SeekPoint { granule, frame });
+                }
+            }
+        }
+        Ok(points)
     }
 }
 
