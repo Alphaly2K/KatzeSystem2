@@ -188,11 +188,19 @@ pub(super) struct Path {
 
 impl Path {
     pub(super) fn new(points: Vec<[f32; 3]>, duration: f32, strength: f32) -> Self {
-        Self::with_rounding(points, duration, strength, false)
+        Self::with_rounding(points, duration, strength, false, false)
     }
 
     pub(super) fn new_extended(points: Vec<[f32; 3]>, duration: f32, strength: f32) -> Self {
-        Self::with_rounding(points, duration, strength, true)
+        Self::with_rounding(points, duration, strength, true, false)
+    }
+
+    pub(super) fn new_extended_relative(
+        points: Vec<[f32; 3]>,
+        duration: f32,
+        strength: f32,
+    ) -> Self {
+        Self::with_rounding(points, duration, strength, true, true)
     }
 
     fn with_rounding(
@@ -200,6 +208,7 @@ impl Path {
         duration: f32,
         strength: f32,
         extended_intermediates: bool,
+        relative_strength: bool,
     ) -> Self {
         let lengths: Vec<_> = std::iter::once(0.)
             .chain(points.windows(2).map(|p| {
@@ -214,6 +223,11 @@ impl Path {
             }))
             .collect();
         let total = lengths.iter().copied().fold(0., |a, b| a + b);
+        let strength = if relative_strength {
+            total * strength
+        } else {
+            strength
+        };
         let tangents = (0..points.len())
             .map(|i| {
                 if duration == 0. {

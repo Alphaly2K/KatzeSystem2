@@ -140,6 +140,9 @@ impl Effect {
             particle_plugin::Kind::SceneIce => Self::SceneIce(SceneIce::new(host, image, random)),
             particle_plugin::Kind::Photon => Self::Photon(Photon::new(host, image, random)),
             particle_plugin::Kind::Rolling => Self::Rolling(Rolling::new(host, image, random)),
+            particle_plugin::Kind::CurvedRolling => {
+                Self::Rolling(Rolling::new_curved(host, image, random))
+            }
             particle_plugin::Kind::Star => Self::Ice(Ice::new_star(host, image, random)),
             particle_plugin::Kind::Spark => Self::Spark(Box::new(Spark::new(host, image, random))),
             particle_plugin::Kind::Thunder => {
