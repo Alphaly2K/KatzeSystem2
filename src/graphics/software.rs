@@ -15,9 +15,9 @@ impl TextureSource {
 }
 
 impl SequenceCapture<'_> {
-    /// Submit the software-rendered frame.
+    #[doc(hidden)]
     pub fn write_render_target(self, frame: &RenderTarget) -> Result<bool> {
-        self.write_frame(frame.size(), |x, y| frame.pixel(x, y))
+        SoftwareBackend::submit_capture(self, frame)
     }
 }
 
@@ -51,6 +51,11 @@ impl DrawList {
 pub struct SoftwareBackend;
 
 impl SoftwareBackend {
+    /// Submit the software-rendered frame to a pending sequence capture.
+    pub fn submit_capture(capture: SequenceCapture<'_>, frame: &RenderTarget) -> Result<bool> {
+        capture.write_frame(frame.size(), |x, y| frame.pixel(x, y))
+    }
+
     /// Draw over an existing software target without clearing it.
     pub fn render_into(
         frame: &DrawList,

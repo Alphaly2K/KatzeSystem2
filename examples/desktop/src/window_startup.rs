@@ -277,7 +277,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                         .present(output)
                         .map_err(|error| katze_system2::Error::new(0, error))?;
                     if let Some(capture) = capture {
-                        capture.write_render_target(output)?;
+                        SoftwareBackend::submit_capture(capture, output)?;
                     }
                     Ok(())
                 })?;

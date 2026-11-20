@@ -1,16 +1,22 @@
 use super::Rect;
-use crate::{Error, Result, graphics::Image, kcs::HostState};
+use crate::{Error, Result, graphics::Image};
 
 /// A request to record the frame being submitted as a BMP. Submit readback once
 /// after presenting the frame, or drop the request if presentation is skipped.
 pub struct SequenceCapture<'a> {
-    host: &'a mut HostState,
     rectangle: Option<Rect>,
+    write_bmp: &'a mut dyn FnMut(&[u8]) -> Result<()>,
 }
 
 impl<'a> SequenceCapture<'a> {
-    pub(crate) fn new(host: &'a mut HostState, rectangle: Option<Rect>) -> Self {
-        Self { host, rectangle }
+    pub(crate) fn new(
+        rectangle: Option<Rect>,
+        write_bmp: &'a mut dyn FnMut(&[u8]) -> Result<()>,
+    ) -> Self {
+        Self {
+            rectangle,
+            write_bmp,
+        }
     }
 
     /// Submit top-down BGRA pixels, with `row_stride` bytes between row starts.
@@ -46,23 +52,7 @@ impl<'a> SequenceCapture<'a> {
         let Some(bytes) = Image::encode_frame_bmp(size, self.rectangle, pixel)? else {
             return Ok(false);
         };
-        let index = self.host.frame_capture_index;
-        self.host.frame_capture_index = index.wrapping_add(1);
-        let folder = &self.host.frame_capture_folder;
-        let mut name = Vec::with_capacity(folder.len() * 2 + 20);
-        name.extend_from_slice(folder);
-        name.push(92);
-        name.extend_from_slice(folder);
-        name.extend(format!("_{:010}.bmp", index as i32).encode_utf16());
-        if let Some(mut writer) = self
-            .host
-            .file_services
-            .as_deref_mut()
-            .ok_or_else(|| Error::new(0, "运行时未配置连续截图文件输出服务"))?
-            .create_utf16(self.host.frame_capture_task_id, &name)?
-        {
-            let _ = writer.write(&bytes);
-        }
+        (self.write_bmp)(&bytes)?;
         Ok(true)
     }
 }

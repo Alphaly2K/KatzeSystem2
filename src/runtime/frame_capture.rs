@@ -1,7 +1,10 @@
 use super::{ObjectFactory, Runtime};
-use crate::graphics::RenderTarget;
-use crate::host::graphics::{DrawList, FrameCanvas, SequenceCapture};
-use crate::{Error, Result};
+use crate::{
+    Error, Result,
+    graphics::{RenderTarget, SoftwareBackend},
+    host::graphics::{DrawList, FrameCanvas, SequenceCapture},
+    kcs::HostState,
+};
 
 impl<F: ObjectFactory> Runtime<F> {
     /// Borrow the draw list and canvas for synchronous presentation. The canvas
@@ -12,9 +15,10 @@ impl<F: ObjectFactory> Runtime<F> {
         present: impl FnOnce(&DrawList, &mut FrameCanvas<'_>, Option<SequenceCapture<'_>>) -> Result<T>,
     ) -> Result<T> {
         let frame = self.compose_frame()?;
-        let capture = self
-            .wants_sequence_capture()
-            .then(|| SequenceCapture::new(&mut self.host, self.resources.capture_rectangle));
+        let wants_capture = self.wants_sequence_capture();
+        let mut write_bmp = |bytes: &[u8]| write_sequence_bmp(&mut self.host, bytes);
+        let capture = wants_capture
+            .then(|| SequenceCapture::new(self.resources.capture_rectangle, &mut write_bmp));
         let canvas = self
             .resources
             .compositor
@@ -42,8 +46,7 @@ impl<F: ObjectFactory> Runtime<F> {
     /// 为当前呈现帧执行连续 BMP 输出；未启用或绘图设备关闭时返回 false。
     /// 宿主在每次提交帧后调用一次。
     pub fn capture_sequence_frame(&mut self, frame: &RenderTarget) -> Result<bool> {
-        self.sequence_capture()
-            .map_or(Ok(false), |capture| capture.write_render_target(frame))
+        self.submit_sequence_capture(|capture| SoftwareBackend::submit_capture(capture, frame))
     }
 
     /// Submit host readback for callers that manage presentation separately.
@@ -54,13 +57,40 @@ impl<F: ObjectFactory> Runtime<F> {
         row_stride: usize,
         pixels: &[u8],
     ) -> Result<bool> {
-        self.sequence_capture().map_or(Ok(false), |capture| {
-            capture.write_bgra(size, row_stride, pixels)
-        })
+        self.submit_sequence_capture(|capture| capture.write_bgra(size, row_stride, pixels))
     }
 
-    fn sequence_capture(&mut self) -> Option<SequenceCapture<'_>> {
-        self.wants_sequence_capture()
-            .then(|| SequenceCapture::new(&mut self.host, self.resources.capture_rectangle))
+    fn submit_sequence_capture(
+        &mut self,
+        submit: impl FnOnce(SequenceCapture<'_>) -> Result<bool>,
+    ) -> Result<bool> {
+        if !self.wants_sequence_capture() {
+            return Ok(false);
+        }
+        let mut write_bmp = |bytes: &[u8]| write_sequence_bmp(&mut self.host, bytes);
+        submit(SequenceCapture::new(
+            self.resources.capture_rectangle,
+            &mut write_bmp,
+        ))
     }
+}
+
+fn write_sequence_bmp(host: &mut HostState, bytes: &[u8]) -> Result<()> {
+    let index = host.frame_capture_index;
+    host.frame_capture_index = index.wrapping_add(1);
+    let folder = &host.frame_capture_folder;
+    let mut name = Vec::with_capacity(folder.len() * 2 + 20);
+    name.extend_from_slice(folder);
+    name.push(92);
+    name.extend_from_slice(folder);
+    name.extend(format!("_{:010}.bmp", index as i32).encode_utf16());
+    if let Some(mut writer) = host
+        .file_services
+        .as_deref_mut()
+        .ok_or_else(|| Error::new(0, "运行时未配置连续截图文件输出服务"))?
+        .create_utf16(host.frame_capture_task_id, &name)?
+    {
+        let _ = writer.write(bytes);
+    }
+    Ok(())
 }
