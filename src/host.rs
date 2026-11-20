@@ -7,10 +7,10 @@
 pub mod audio;
 pub mod diagnostics;
 pub mod effect;
-mod export;
 pub mod font;
 pub mod graphics;
 pub mod input;
+pub mod media;
 pub mod model;
 pub mod movie;
 pub mod platform;

@@ -2,6 +2,7 @@ use katze_system2::{
     Error, Result,
     audio::{SoundFactory, SoundGroup, SoundGroups},
     expression::State,
+    host::media::DecodeMode,
     kcs::ResourceServices,
     resource::ResourceMode,
     runtime::{BaseObject, ObjectFactory, Runtime, TaskObject, kind},
@@ -63,11 +64,12 @@ impl ObjectFactory for Reject {
 }
 
 fn setup() -> (Runtime<SoundFactory<Reject>>, Rc<RefCell<Source>>) {
-    setup_with_groups(None)
+    setup_with_groups(None, DecodeMode::Threaded)
 }
 
 fn setup_with_groups(
     groups: Option<SoundGroups>,
+    mode: DecodeMode,
 ) -> (Runtime<SoundFactory<Reject>>, Rc<RefCell<Source>>) {
     let source = Rc::new(RefCell::new(Source::default()));
     let mut runtime = Runtime::new(
@@ -81,6 +83,7 @@ fn setup_with_groups(
         },
     );
     runtime.set_resources(Resources(source.clone()));
+    runtime.set_media_decode_mode(mode);
     runtime.host_mut().sound_groups = groups;
     assert_eq!(runtime.create(0, kind::SOUND, b"sound", b"").unwrap(), 1);
     (runtime, source)
@@ -370,7 +373,7 @@ fn load_variants_select_group_keys_or_categories_and_keep_distinct_loop_rules() 
             })
             .collect(),
     };
-    let (mut runtime, _) = setup_with_groups(Some(groups));
+    let (mut runtime, _) = setup_with_groups(Some(groups), DecodeMode::Threaded);
     let mut point = [0; 48];
     point[..14].copy_from_slice(b"audio/tone.ogg");
     point[32..40].copy_from_slice(&3i64.to_le_bytes());
@@ -501,7 +504,7 @@ fn group_names_follow_live_configuration_while_channel_ranges_keep_the_creation_
             },
         ],
     };
-    let (mut runtime, source) = setup_with_groups(Some(groups));
+    let (mut runtime, source) = setup_with_groups(Some(groups), DecodeMode::Threaded);
     assert_eq!(audio(&runtime).group_range(7), Some([4, 5]));
     let query = |runtime: &mut Runtime<SoundFactory<Reject>>, name: &[u8]| {
         let mut name = [name, b"\0"].concat();
@@ -568,7 +571,7 @@ fn grouped_loads_allocate_physical_channels_recycle_busy_sources_and_preserve_fa
         })
         .collect(),
     };
-    let (mut runtime, source) = setup_with_groups(Some(groups));
+    let (mut runtime, source) = setup_with_groups(Some(groups), DecodeMode::Threaded);
     let play = |runtime: &mut Runtime<SoundFactory<Reject>>, channel| {
         let mut request = command(183, channel);
         request.data[1] = 1;
@@ -685,58 +688,57 @@ fn grouped_loads_allocate_physical_channels_recycle_busy_sources_and_preserve_fa
 }
 
 #[test]
-fn streaming_task_count_changes_preserve_samples_prefetched_with_the_registered_loop() {
+fn streaming_playback_keeps_the_script_loop_rules_in_both_decode_modes() {
     let expected = katze_system2::audio::decode_vorbis(LONG_MONO).unwrap();
     assert_eq!(expected.frames(), 40_000);
-    let (mut runtime, _) = setup();
-    let mut point = [0; 48];
-    point[..14].copy_from_slice(b"audio/long.ogg");
-    point[32..40].copy_from_slice(&1000i64.to_le_bytes());
-    point[40..].copy_from_slice(&35_000i64.to_le_bytes());
-    runtime
-        .dispatch_command_with_buffers(
-            0,
-            command(199, 0),
-            &mut CommandBuffers {
-                data1: Some(&mut point),
-                ..Default::default()
-            },
-        )
-        .unwrap();
-    load(&mut runtime, &mut record(5, 0, 0, b"audio/long.ogg")).unwrap();
-    let mut play = command(183, 5);
-    play.data[1] = 2;
-    runtime.dispatch_command(0, play).unwrap();
-    assert_eq!(
-        read_channel(&mut runtime, 4000).samples(),
-        &expected.samples()[..4000]
-    );
-    assert_eq!(audio(&runtime).channel(5).unwrap().remaining_plays(), 1);
-    let mut count = command(219, 5);
-    count.data[1] = 1;
-    runtime.dispatch_command(0, count).unwrap();
-    assert_eq!(
-        read_channel(&mut runtime, 28_000).samples(),
-        &expected.samples()[4000..32_000]
-    );
-    let prefetched = read_channel(&mut runtime, 4000);
-    assert_eq!(
-        &prefetched.samples()[..3000],
-        &expected.samples()[32_000..35_000]
-    );
-    assert_eq!(
-        &prefetched.samples()[3000..],
-        &expected.samples()[1000..2000]
-    );
-    assert_eq!(audio(&runtime).channel(5).unwrap().completed_passes(), 0);
-    assert_eq!(runtime.dispatch_command(0, command(202, 5)).unwrap(), 0);
-    runtime.dispatch_command(0, command(185, 5)).unwrap();
-    play.data[1] = 1;
-    runtime.dispatch_command(0, play).unwrap();
-    assert_eq!(
-        read_channel(&mut runtime, 4000).samples(),
-        &expected.samples()[..4000]
-    );
+    for mode in [DecodeMode::Inline, DecodeMode::Threaded] {
+        let (mut runtime, _) = setup_with_groups(None, mode);
+        let mut point = [0; 48];
+        point[..14].copy_from_slice(b"audio/long.ogg");
+        point[32..40].copy_from_slice(&1000i64.to_le_bytes());
+        point[40..].copy_from_slice(&35_000i64.to_le_bytes());
+        runtime
+            .dispatch_command_with_buffers(
+                0,
+                command(199, 0),
+                &mut CommandBuffers {
+                    data1: Some(&mut point),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        load(&mut runtime, &mut record(5, 0, 0, b"audio/long.ogg")).unwrap();
+        let mut play = command(183, 5);
+        play.data[1] = 2;
+        runtime.dispatch_command(0, play).unwrap();
+        assert_eq!(
+            read_channel(&mut runtime, 4000).samples(),
+            &expected.samples()[..4000]
+        );
+        assert_eq!(audio(&runtime).channel(5).unwrap().remaining_plays(), 1);
+        let mut count = command(219, 5);
+        count.data[1] = 1;
+        runtime.dispatch_command(0, count).unwrap();
+        assert_eq!(
+            read_channel(&mut runtime, 28_000).samples(),
+            &expected.samples()[4000..32_000]
+        );
+        let looped = read_channel(&mut runtime, 4000);
+        assert_eq!(
+            &looped.samples()[..3000],
+            &expected.samples()[32_000..35_000]
+        );
+        assert_eq!(&looped.samples()[3000..], &expected.samples()[1000..2000]);
+        assert_eq!(audio(&runtime).channel(5).unwrap().completed_passes(), 0);
+        assert_eq!(runtime.dispatch_command(0, command(202, 5)).unwrap(), 0);
+        runtime.dispatch_command(0, command(185, 5)).unwrap();
+        play.data[1] = 1;
+        runtime.dispatch_command(0, play).unwrap();
+        assert_eq!(
+            read_channel(&mut runtime, 4000).samples(),
+            &expected.samples()[..4000]
+        );
+    }
 }
 
 #[test]

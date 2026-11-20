@@ -1,6 +1,5 @@
 use super::{BaseObject, ObjectFactory, ObjectHost, TaskObject};
-use crate::host::ExportDestination;
-use crate::io::SharedSource;
+use crate::host::storage::{ExportJob, ExportWork};
 use crate::kcs::{Host, Interpreter, NativeReturn, format_string};
 use crate::resource::ResourceMode;
 use crate::task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock};
@@ -9,16 +8,13 @@ use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
-use std::thread::{self, JoinHandle};
-
-mod bundle;
 
 pub(super) struct ExportObject {
     base: BaseObject,
     id: u32,
     started: bool,
     cancel: Arc<AtomicBool>,
-    worker: Option<JoinHandle<Result<()>>>,
+    job: Option<Box<dyn ExportJob>>,
 }
 
 impl ExportObject {
@@ -28,7 +24,7 @@ impl ExportObject {
             id,
             started: false,
             cancel: Arc::default(),
-            worker: None,
+            job: None,
         }
     }
 
@@ -36,7 +32,7 @@ impl ExportObject {
         let Some(services) = host.export_services() else {
             return Ok(());
         };
-        let Some(mut destination) = services.select_destination(self.id)? else {
+        let Some(destination) = services.select_destination(self.id)? else {
             return Ok(());
         };
         let source = host
@@ -44,48 +40,27 @@ impl ExportObject {
             .ok_or_else(|| Error::new(0, "运行时未配置导出资源服务"))?
             .open(name, ResourceMode::LooseFirst)?
             .ok_or_else(|| Error::new(0, "找不到导出资源"))?;
-        let cancel = Arc::clone(&self.cancel);
-        self.worker = Some(
-            thread::Builder::new()
-                .spawn(move || unpack(source, destination.as_mut(), &cancel))
-                .map_err(|err| Error::new(0, format!("导出工作线程启动失败：{err}")))?,
-        );
+        let work = ExportWork::new(source, destination, self.cancel.clone());
+        if let Some(services) = host.export_services() {
+            self.job = Some(services.start(self.id, work)?);
+        }
         Ok(())
     }
 
     fn poll(&mut self, host: &mut dyn Host) -> bool {
-        if self.worker.as_ref().is_some_and(JoinHandle::is_finished) {
-            let result = self
-                .worker
-                .take()
-                .unwrap()
-                .join()
-                .unwrap_or_else(|_| Err(Error::new(0, "导出工作线程异常结束")));
+        if let Some(result) = self.job.as_mut().and_then(|job| job.poll()) {
+            self.job = None;
             if let Some(services) = host.export_services() {
                 services.finished(self.id, result);
             }
         }
-        self.worker.is_none()
+        self.job.is_none()
     }
-}
-
-fn unpack(
-    source: SharedSource,
-    destination: &mut dyn ExportDestination,
-    cancel: &AtomicBool,
-) -> Result<()> {
-    let size = u32::try_from(source.len()?).map_err(|_| Error::new(0, "导出包长度溢出"))?;
-    let mut bytes = vec![0; read::sized(size, 0)?];
-    source.read_exact_at(0, &mut bytes)?;
-    bundle::unpack(&bytes, destination, cancel)
 }
 
 impl Drop for ExportObject {
     fn drop(&mut self) {
-        if let Some(worker) = self.worker.take() {
-            self.cancel.store(true, Ordering::Relaxed);
-            let _ = worker.join();
-        }
+        self.cancel.store(true, Ordering::Relaxed);
     }
 }
 

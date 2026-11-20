@@ -1,11 +1,12 @@
 //! Byte sources and persistence for files, configuration and game saves.
 
-pub use super::export::{ExportDestination, ExportServices};
 use crate::{Error, Result};
 use std::{io::Write, sync::Arc};
 
+mod export;
 mod folder;
 mod script_settings;
+pub use export::{ExportDestination, ExportJob, ExportServices, ExportWork};
 pub use folder::FolderPaths;
 pub use script_settings::ScriptSettings;
 pub(crate) use script_settings::fold_key;

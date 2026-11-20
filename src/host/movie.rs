@@ -32,7 +32,8 @@ pub struct MovieMetadata {
     pub duration: f64,
 }
 
-/// One stream's decode state, moved to the runtime's playback worker.
+/// Decode state for one stream. A session may move the decoder to a worker
+/// when the host selects threaded decoding.
 pub trait MovieDecoder: Send {
     fn metadata(&self) -> MovieMetadata;
     /// Seconds decoded since start. Must increase on each step before EOF.

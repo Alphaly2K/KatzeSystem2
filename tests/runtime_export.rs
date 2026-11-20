@@ -1,6 +1,7 @@
 use katze_system2::{
     Error, Result,
     expression::State,
+    host::storage::{ExportJob, ExportWork},
     kcs::{Host, Interpreter, Program, ResourceServices, SharedMemory},
     resource::ResourceMode,
     runtime::{
@@ -9,11 +10,11 @@ use katze_system2::{
     },
     task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock},
 };
-use std::{cell::RefCell, rc::Rc};
 use std::{
+    cell::{Cell, RefCell},
     io::Write,
-    sync::mpsc::{self, Receiver as ChannelReceiver, Sender},
-    time::{Duration, Instant},
+    rc::Rc,
+    sync::mpsc::{self, Sender},
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -414,9 +415,44 @@ impl ExportServices for MemoryExport {
     }
 }
 
+struct DeferredExport {
+    services: MemoryExport,
+    released: Rc<Cell<bool>>,
+}
+
+impl ExportServices for DeferredExport {
+    fn select_destination(&mut self, id: u32) -> Result<Option<Box<dyn ExportDestination>>> {
+        self.services.select_destination(id)
+    }
+
+    fn start(&mut self, _: u32, work: ExportWork) -> Result<Box<dyn ExportJob>> {
+        Ok(Box::new(DeferredJob {
+            work: Some(work),
+            released: self.released.clone(),
+        }))
+    }
+
+    fn finished(&mut self, id: u32, result: Result<()>) {
+        self.services.finished(id, result);
+    }
+}
+
+struct DeferredJob {
+    work: Option<ExportWork>,
+    released: Rc<Cell<bool>>,
+}
+
+impl ExportJob for DeferredJob {
+    fn poll(&mut self) -> Option<Result<()>> {
+        if !self.released.get() {
+            return None;
+        }
+        self.work.take().map(ExportWork::run)
+    }
+}
+
 struct MemoryDestination {
     events: Sender<ExportEvent>,
-    gate: Option<ChannelReceiver<()>>,
 }
 
 impl ExportDestination for MemoryDestination {
@@ -424,10 +460,6 @@ impl ExportDestination for MemoryDestination {
         self.events
             .send(ExportEvent::Directory(path.join("/")))
             .unwrap();
-        if let Some(gate) = self.gate.take() {
-            gate.recv_timeout(Duration::from_secs(5))
-                .map_err(|e| Error::new(0, e.to_string()))?;
-        }
         Ok(())
     }
 
@@ -462,6 +494,7 @@ fn start_export(
     bundle: Option<Vec<u8>>,
     events: Sender<ExportEvent>,
     destination: Option<MemoryDestination>,
+    released: Option<Rc<Cell<bool>>>,
     budget: usize,
 ) -> Result<(Runtime<KcsFactory<Programs>>, u32, u32)> {
     let mut code = Vec::new();
@@ -503,10 +536,15 @@ fn start_export(
         bytes: bundle,
         reads: reads.clone(),
     });
-    runtime.set_export_services(MemoryExport {
+    let services = MemoryExport {
         events,
         destination,
-    });
+    };
+    if let Some(released) = released {
+        runtime.set_export_services(DeferredExport { services, released });
+    } else {
+        runtime.set_export_services(services);
+    }
     assert_eq!(task, runtime.create(0, kind::EXPORT, b"export", b"")?);
     let caller = runtime.create(0, kind::ORDINARY, b"caller", b"")?;
     runtime.update(0, 1)?;
@@ -519,23 +557,18 @@ fn start_export(
     Ok((runtime, task, caller))
 }
 
-fn wait_export(runtime: &mut Runtime<KcsFactory<Programs>>, task: u32) -> Result<()> {
+fn export_done(runtime: &mut Runtime<KcsFactory<Programs>>, task: u32) -> Result<bool> {
     let query = Command {
         sender: 0,
         target: task,
         code: 517,
         data: [0; 3],
     };
-    let until = Instant::now() + Duration::from_secs(5);
-    while runtime.dispatch_command(0, query)? == 0 {
-        assert!(Instant::now() < until, "export did not finish");
-        std::thread::sleep(Duration::from_millis(1));
-    }
-    Ok(())
+    Ok(runtime.dispatch_command(0, query)? != 0)
 }
 
 #[test]
-fn export_worker_uses_first_resource_and_polls_without_blocking() -> Result<()> {
+fn host_defers_export_while_script_can_poll_for_completion() -> Result<()> {
     let mut bundle = bundle_node(b"bonus", None);
     let child = bundle_node(b"\x83\x5c.txt", Some(b"hello"));
     let sibling = bundle_node(b"empty.txt", Some(b""));
@@ -547,21 +580,28 @@ fn export_worker_uses_first_resource_and_polls_without_blocking() -> Result<()> 
 
     for budget in [1, 4096] {
         let (events, receive) = mpsc::channel();
-        let (release, gate) = mpsc::channel();
+        let released = Rc::new(Cell::new(false));
         let destination = MemoryDestination {
             events: events.clone(),
-            gate: Some(gate),
         };
-        let (mut runtime, task, caller) =
-            start_export(692, Some(bundle.clone()), events, Some(destination), budget)?;
-        let recv = || receive.recv_timeout(Duration::from_secs(5)).unwrap();
+        let (mut runtime, task, caller) = start_export(
+            692,
+            Some(bundle.clone()),
+            events,
+            Some(destination),
+            Some(released.clone()),
+            budget,
+        )?;
+        let recv = || receive.try_recv().unwrap();
         let vm = runtime.object(caller).unwrap().interpreter().unwrap();
         assert_eq!(vm.stack_bytes(), [1, 0, 0, 0, 0, 0, 0, 0]);
         assert_eq!(recv(), ExportEvent::Selected(task));
+        assert!(!export_done(&mut runtime, task)?);
+        assert!(receive.try_recv().is_err());
+        released.set(true);
+        assert!(export_done(&mut runtime, task)?);
         assert_eq!(recv(), ExportEvent::File("empty.txt".into(), Vec::new()));
         assert_eq!(recv(), ExportEvent::Directory("bonus".into()));
-        release.send(()).unwrap();
-        wait_export(&mut runtime, task)?;
         assert_eq!(
             recv(),
             ExportEvent::File("bonus/ソ.txt".into(), b"hello".to_vec())
@@ -575,9 +615,9 @@ fn export_worker_uses_first_resource_and_polls_without_blocking() -> Result<()> 
 #[test]
 fn cancelled_or_invalid_exports_finish_without_writing_files() -> Result<()> {
     let (events, receive) = mpsc::channel();
-    let (mut runtime, task, _) = start_export(690, None, events, None, 4096)?;
+    let (mut runtime, task, _) = start_export(690, None, events, None, None, 4096)?;
     assert_eq!(receive.try_recv(), Ok(ExportEvent::Selected(task)));
-    wait_export(&mut runtime, task)?;
+    assert!(export_done(&mut runtime, task)?);
     assert!(receive.try_recv().is_err());
 
     let mut bad_link = bundle_node(b"file.txt", Some(b"content"));
@@ -593,10 +633,10 @@ fn cancelled_or_invalid_exports_finish_without_writing_files() -> Result<()> {
         let (events, receive) = mpsc::channel();
         let destination = MemoryDestination {
             events: events.clone(),
-            gate: None,
         };
-        let (mut runtime, task, _) = start_export(690, bundle, events, Some(destination), 4096)?;
-        wait_export(&mut runtime, task)?;
+        let (mut runtime, task, _) =
+            start_export(690, bundle, events, Some(destination), None, 4096)?;
+        assert!(export_done(&mut runtime, task)?);
         assert_eq!(receive.try_recv(), Ok(ExportEvent::Selected(task)));
         assert!(
             matches!(receive.try_recv(), Ok(ExportEvent::Done(Err(error))) if error.contains(message))

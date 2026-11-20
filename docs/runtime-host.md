@@ -17,7 +17,7 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 |`host::resources`|`ResourceServices`、`ResourceMode`、`ArchiveConfig`、`ArchiveEntry`、`Category` 及资源缓存|
 |`host::storage`|`ReadSource`、`SharedSource`、`FolderPaths`、`ScriptSettings` 及脚本文件、存档、配置和导出服务|
 |`host::graphics`|`DrawList`、`DrawCommand`、`FrameTexture`、`FrameCanvas`、`GraphicsBackend`、`SequenceCapture`、`Surface`|
-|`host::audio`、`host::movie`|`Mixer`、`Pcm`、语音合成及电影解码契约|
+|`host::audio`、`host::movie`、`host::media`|`Mixer`、`Pcm`、语音合成、电影解码及媒体执行方式|
 |`host::model`|模型选择、播放实例和带锚点偏移的透明图像帧|
 |`host::input`、`host::font`|输入事件、按键绑定、`DeviceKeys` 和字体服务|
 |`host::platform`、`host::effect`|窗口、剪贴板、平台任务及外部效果播放器|
@@ -72,7 +72,7 @@ KATZE_PARTICLE_HOST="$PWD/particle-host.exe" cargo run --release --example runpr
 
 宿主可通过 `host::audio::SpeechSynthesizer` 提供合成的 `Pcm`；字体服务及请求、编码和字形遮罩类型从 `host::font` 导入。遮罩每个像素提供一个 `0..=64` 的覆盖值，按从顶行开始的顺序排列。可复用 `message::Fonts` 处理宿主提供的字体，或实现自己的服务。软件图形后端、字形实现与混音器都可在无设备环境运行。
 
-装载电影需要宿主先通过 `set_movie_decoder_factory` 注册 `host::movie::MovieDecoderFactory`。工厂打开 `SharedSource`，解码器在运行库的工作线程返回 BGRA 帧与交错 PCM。更换工厂不影响已装载电影。默认库构建无需 C 工具链；启用 `builtin-mpeg` 并注册 `movie::MpegDecoderFactory` 可解码 MPEG-1 视频及 MP2／MP3 音轨。
+装载电影需要宿主先通过 `set_movie_decoder_factory` 注册 `host::movie::MovieDecoderFactory`。工厂打开 `SharedSource`，解码器返回 BGRA 帧与交错 PCM。更换工厂不影响已装载电影。默认库构建无需 C 工具链；启用 `builtin-mpeg` 并注册 `movie::MpegDecoderFactory` 可解码 MPEG-1 视频及 MP2／MP3 音轨。
 
 角色模型由 `set_model_services` 注册的宿主负责。运行库传入 FES 的原始模型选择和选项，按会话时钟向可见对象的播放实例请求帧。帧使用透明 BGRA 图像，锚点偏移按逻辑像素计，随平面属性进入绘制列表。服务缺失或返回 `None` 时，脚本继续推进，模型平面无可见内容。删除平面或释放场景会释放播放实例。 `host::model::decode_psz` 可按宿主指定的解压字节上限提取 PSB 输入，供模型解码器使用。
 
@@ -86,4 +86,6 @@ KATZE_PARTICLE_HOST="$PWD/particle-host.exe" cargo run --release --example runpr
 
 默认工作区包 `katze-system2` 发布为库。离屏宿主入口是 `cargo run --release --example runprobe -- "$GAME_DIR"`；需要 MPEG 解码时加入 `--features builtin-mpeg`，或使用上述 FFmpeg 模式。普通运行直接使用 `GameRuntime`，可用 `KATZE_PROBE_SHOT` 输出终帧、用 `KATZE_PROBE_AUDIO_STATS=1` 统计内存 PCM。 `KATZE_PROBE_SOUND=0,1` 记录指定物理声道的播放、音量变化和停止，`all` 记录所有声道。 `KATZE_PROBE_DETACHED_MIXER=1` 使用与设备回调相同的独立混音器，将输出写入内存。同一示例的自动回放和 VM 检查由辅助模块通过任务接口执行。脚本检查工具和桌面宿主是单独的仓库内包，分别通过 `cargo run -p katze-script -- ...` 和 `cargo run -p katze-desktop --bin window_startup -- "$GAME_DIR"` 执行。桌面宿主默认启用 MPEG 解码，桌面输入的合成验证用 `cargo test -p katze-desktop --test window_host`。
 
-库依赖树不含 SDL、Metal、系统字体发现或当地时间库。流式音频和电影播放使用工作线程；在不提供线程的目标上须单独评估。`ReadSource::read_at` 可能在解码线程调用，宿主须提供可共享的独立读取源。
+标准会话默认在调用线程解码。Vorbis 装载时准备完整 PCM，每个来源受 64 MiB 的 PCM 容量上限约束。电影随会话推进增量解码，内存混音在需要更多样本时也可以推进解码。设备回调只取已准备的 PCM。宿主可在启动前用 `set_media_decode_mode(DecodeMode::Threaded)` 开启后台电影解码和 Vorbis 预取。两个示例宿主均启用此模式。`ReadSource::read_at` 可能在后台调用，读取源须支持独立偏移与并发读取。
+
+文件导出服务在会话线程选择目的地。`ExportServices::start` 默认同步执行 `ExportWork`。宿主也可以自行安排工作并返回 `ExportJob`，由会话轮询完成状态。完成通知仍在会话线程回调，导出任务销毁时会取消未执行的工作。

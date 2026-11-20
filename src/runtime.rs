@@ -689,8 +689,11 @@ fn create_object_impl<F: ObjectFactory>(
     };
     object.initialize_language(host.languages.selection());
     object.set_creation_context(context)?;
-    if let (Some(audio), Some(groups)) = (object.audio_state_mut(), host.sound_groups.as_ref()) {
-        audio.set_groups(groups)?;
+    if let Some(audio) = object.audio_state_mut() {
+        audio.set_decode_mode(resources.decode_mode);
+        if let Some(groups) = &host.sound_groups {
+            audio.set_groups(groups)?;
+        }
     }
     if let (Some(state), Some(device)) = (object.input_state_mut(), resources.input_device.as_mut())
     {

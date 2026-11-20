@@ -1,4 +1,4 @@
-use super::ExportDestination;
+use crate::host::storage::ExportDestination;
 use crate::{Error, Result, read};
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -7,7 +7,7 @@ const NAME_END: usize = 260;
 const FILE_HEADER: usize = 272;
 const MAX_DEPTH: usize = 64;
 
-pub(super) fn unpack(
+pub(crate) fn unpack(
     bytes: &[u8],
     destination: &mut dyn ExportDestination,
     cancel: &AtomicBool,

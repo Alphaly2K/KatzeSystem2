@@ -64,7 +64,7 @@ impl Resources {
             .movie_decoder_factory
             .clone()
             .ok_or_else(|| Error::new(0, "Movie playback requires a host decoder factory"))?;
-        Player::new(source, factory)
+        Player::with_decode_mode(source, factory, self.decode_mode)
     }
 
     pub(super) fn advance_movies(&mut self, now: u32) -> Result<()> {

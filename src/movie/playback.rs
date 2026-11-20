@@ -1,7 +1,9 @@
 use super::{Frame, Metadata};
 use crate::{
     Error, Result,
-    host::{MovieDecoder, MovieDecoderFactory, SharedSource, graphics::pixel_length},
+    host::{
+        MovieDecoder, MovieDecoderFactory, SharedSource, graphics::pixel_length, media::DecodeMode,
+    },
     read,
 };
 use std::{
@@ -30,6 +32,7 @@ struct State {
 }
 
 struct Shared {
+    inline: Option<Mutex<Option<Decode>>>,
     state: Mutex<State>,
     changed: Condvar,
     metadata: Metadata,
@@ -37,7 +40,7 @@ struct Shared {
     video_capacity: usize,
 }
 
-/// 在独立线程解码的电影播放器；画面和音频由宿主分别取走。
+/// Movie playback state. The host consumes video and audio separately.
 pub struct Player {
     source: SharedSource,
     factory: Arc<dyn MovieDecoderFactory>,
@@ -46,13 +49,22 @@ pub struct Player {
     worker: Option<JoinHandle<()>>,
 }
 
-/// 单个消费端的共享音频入口；解码工作始终由播放器线程完成。
+/// Shared audio output for a single consumer.
 #[derive(Clone)]
 pub struct AudioOutput(Arc<Shared>);
 
 impl Player {
     /// Prepare playback with the given factory, also used to reopen the source.
     pub fn new(source: SharedSource, factory: Arc<dyn MovieDecoderFactory>) -> Result<Self> {
+        Self::with_decode_mode(source, factory, DecodeMode::Threaded)
+    }
+
+    /// Prepare playback using the selected decode policy.
+    pub fn with_decode_mode(
+        source: SharedSource,
+        factory: Arc<dyn MovieDecoderFactory>,
+        mode: DecodeMode,
+    ) -> Result<Self> {
         let decoder = factory.open(source.clone())?;
         let metadata = decoder.metadata();
         let bytes = pixel_length(metadata.size)?;
@@ -71,6 +83,7 @@ impl Player {
             factory,
             initial: Some(decoder),
             shared: Arc::new(Shared {
+                inline: (mode == DecodeMode::Inline).then(|| Mutex::new(None)),
                 state: Mutex::new(State {
                     gain: 1.,
                     ..State::default()
@@ -113,7 +126,7 @@ impl Player {
     }
 
     /// 已在播放时返回 false；零和 u32::MAX 均循环播放，其他值为完整播放次数。
-    /// 返回前准备少量输出；后续文件读取与解码不占用调用线程。
+    /// 返回前准备少量输出。
     pub fn play(&mut self, count: u32) -> Result<bool> {
         if self.is_playing()? {
             return Ok(false);
@@ -138,20 +151,22 @@ impl Player {
                 ..State::default()
             };
         }
+        let decode = Decode::new(decoder, count);
+        if let Some(inline) = &self.shared.inline {
+            *inline.lock().unwrap_or_else(|e| e.into_inner()) = Some(decode);
+            self.shared.pump_inline(false)?;
+            return Ok(true);
+        }
         let shared = self.shared.clone();
         self.worker = match std::thread::Builder::new()
             .name("katze-movie".into())
             .spawn(move || {
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    decode(decoder, &shared, count)
+                    decode_thread(decode, &shared)
                 }))
                 .unwrap_or_else(|_| Err(Error::new(0, "电影解码线程发生 panic")));
                 if let Err(error) = result {
-                    let mut state = shared.state.lock().unwrap_or_else(|e| e.into_inner());
-                    state.error = Some(error);
-                    state.playing = false;
-                    state.ready = true;
-                    shared.changed.notify_all();
+                    shared.fail(error);
                 }
             }) {
             Ok(worker) => Some(worker),
@@ -175,7 +190,7 @@ impl Player {
         state.error.clone().map_or(Ok(true), Err)
     }
 
-    /// 停止音频与解码并等待线程退出，返回停止前是否仍在播放。
+    /// 停止音频与解码，返回停止前是否仍在播放。
     pub fn stop(&mut self) -> Result<bool> {
         let playing = {
             let mut state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
@@ -187,6 +202,9 @@ impl Player {
             self.shared.changed.notify_all();
             playing
         };
+        if let Some(inline) = &self.shared.inline {
+            inline.lock().unwrap_or_else(|e| e.into_inner()).take();
+        }
         if let Some(worker) = self.worker.take() {
             worker
                 .join()
@@ -217,19 +235,18 @@ impl Player {
         if !seconds.is_finite() || seconds < 0. {
             return Err(Error::new(0, "电影时钟增量无效"));
         }
-        if self.shared.metadata.sample_rate != 0 {
-            return Ok(());
+        if self.shared.metadata.sample_rate == 0 {
+            let mut state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(error) = &state.error {
+                return Err(error.clone());
+            }
+            if state.playing {
+                state.clock += seconds;
+                finish(&mut state);
+                self.shared.changed.notify_all();
+            }
         }
-        let mut state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(error) = &state.error {
-            return Err(error.clone());
-        }
-        if state.playing {
-            state.clock += seconds;
-            finish(&mut state);
-            self.shared.changed.notify_all();
-        }
-        Ok(())
+        self.shared.pump_inline(false)
     }
 }
 
@@ -245,12 +262,48 @@ fn finish(state: &mut State) {
     }
 }
 
-fn decode(mut decoder: Box<dyn MovieDecoder>, shared: &Shared, count: u32) -> Result<()> {
-    let mut remaining = (!matches!(count, 0 | u32::MAX)).then_some(count);
-    let mut origin = 0.;
-    let mut end = 0f64;
-    let mut first = true;
-    let tick = 1. / shared.metadata.frame_rate.max(60.);
+impl Shared {
+    fn fail(&self, error: Error) {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        state.error = Some(error);
+        state.playing = false;
+        state.ready = true;
+        self.changed.notify_all();
+    }
+
+    fn pump_inline(&self, force_step: bool) -> Result<()> {
+        let Some(inline) = &self.inline else {
+            return Ok(());
+        };
+        let mut inline = inline.lock().unwrap_or_else(|e| e.into_inner());
+        let mut force_step = force_step;
+        while let Some(decode) = inline.as_mut() {
+            {
+                let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+                if !state.playing {
+                    *inline = None;
+                    break;
+                }
+                if !force_step && state.decoded_until >= state.clock + self.lead {
+                    break;
+                }
+            }
+            force_step = false;
+            match decode.step(self) {
+                Ok(true) => (),
+                Ok(false) => *inline = None,
+                Err(error) => {
+                    *inline = None;
+                    self.fail(error.clone());
+                    return Err(error);
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+fn decode_thread(mut decode: Decode, shared: &Shared) -> Result<()> {
     loop {
         {
             let mut state = shared.state.lock().unwrap_or_else(|e| e.into_inner());
@@ -266,15 +319,43 @@ fn decode(mut decoder: Box<dyn MovieDecoder>, shared: &Shared, count: u32) -> Re
                 return Ok(());
             }
         }
-        let previous = decoder.time();
-        let decoded = decoder.advance(tick)?;
-        let time = decoder.time();
+        if !decode.step(shared)? {
+            return Ok(());
+        }
+    }
+}
+
+struct Decode {
+    decoder: Box<dyn MovieDecoder>,
+    remaining: Option<u32>,
+    origin: f64,
+    end: f64,
+    first: bool,
+}
+
+impl Decode {
+    fn new(decoder: Box<dyn MovieDecoder>, count: u32) -> Self {
+        Self {
+            decoder,
+            remaining: (!matches!(count, 0 | u32::MAX)).then_some(count),
+            origin: 0.,
+            end: 0.,
+            first: true,
+        }
+    }
+
+    fn step(&mut self, shared: &Shared) -> Result<bool> {
+        let previous = self.decoder.time();
+        let decoded = self
+            .decoder
+            .advance(1. / shared.metadata.frame_rate.max(60.))?;
+        let time = self.decoder.time();
         if !time.is_finite() || time < 0. || (!decoded.ended && time <= previous) {
             return Err(Error::new(0, "Movie decoder did not advance"));
         }
         let mut state = shared.state.lock().unwrap_or_else(|e| e.into_inner());
         if !state.playing {
-            return Ok(());
+            return Ok(false);
         }
         if let Some(mut frame) = decoded.video {
             if !frame.time.is_finite()
@@ -283,11 +364,11 @@ fn decode(mut decoder: Box<dyn MovieDecoder>, shared: &Shared, count: u32) -> Re
             {
                 return Err(Error::new(0, "Invalid movie decoder frame"));
             }
-            end = end.max(frame.time + 1. / shared.metadata.frame_rate);
-            frame.time += origin;
-            if first {
+            self.end = self.end.max(frame.time + 1. / shared.metadata.frame_rate);
+            frame.time += self.origin;
+            if self.first {
                 state.first = Some(frame);
-                first = false;
+                self.first = false;
             } else {
                 state.video.push_back(frame);
                 while state.video.len() > shared.video_capacity {
@@ -303,38 +384,39 @@ fn decode(mut decoder: Box<dyn MovieDecoder>, shared: &Shared, count: u32) -> Re
             {
                 return Err(Error::new(0, "Invalid movie decoder audio"));
             }
-            end = end.max(
+            self.end = self.end.max(
                 audio.time + audio.samples.len() as f64 / 2. / shared.metadata.sample_rate as f64,
             );
             state.audio.push_back(Chunk {
-                time: origin + audio.time,
+                time: self.origin + audio.time,
                 samples: audio.samples,
             });
         }
-        state.decoded_until = origin + time;
+        state.decoded_until = self.origin + time;
         shared.changed.notify_all();
         if decoded.ended {
-            if remaining == Some(1) {
-                state.end = Some(origin + end);
+            if self.remaining == Some(1) {
+                state.end = Some(self.origin + self.end);
                 state.ready = true;
                 finish(&mut state);
                 shared.changed.notify_all();
-                return Ok(());
+                return Ok(false);
             }
-            if let Some(count) = &mut remaining {
+            if let Some(count) = &mut self.remaining {
                 *count -= 1;
             }
-            if end <= 0. {
+            if self.end <= 0. {
                 return Err(Error::new(
                     0,
                     "Movie decoder produced no frames or audio to loop",
                 ));
             }
-            origin += end;
-            end = 0.;
+            self.origin += self.end;
+            self.end = 0.;
             drop(state);
-            decoder.rewind()?;
+            self.decoder.rewind()?;
         }
+        Ok(true)
     }
 }
 
@@ -411,12 +493,18 @@ impl AudioOutput {
                     self.0.changed.notify_all();
                     return Ok(());
                 }
-                self.0.changed.notify_all();
-                state = self
-                    .0
-                    .changed
-                    .wait(state)
-                    .unwrap_or_else(|e| e.into_inner());
+                if self.0.inline.is_some() {
+                    drop(state);
+                    self.0.pump_inline(true)?;
+                    state = self.0.state.lock().unwrap_or_else(|e| e.into_inner());
+                } else {
+                    self.0.changed.notify_all();
+                    state = self
+                        .0
+                        .changed
+                        .wait(state)
+                        .unwrap_or_else(|e| e.into_inner());
+                }
             }
             state.clock += 1. / sample_rate as f64;
             finish(&mut state);

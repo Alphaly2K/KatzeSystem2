@@ -2,6 +2,7 @@ pub use crate::host::resources::ResourceMode;
 
 mod cache;
 mod directory;
+pub(crate) mod export;
 mod kif;
 mod kif_source;
 mod router;

@@ -8,6 +8,7 @@ use crate::{
         font::FontServices,
         graphics::GraphicsBackend,
         input::{DeviceBinding, InputDevice},
+        media::DecodeMode,
         movie::MovieDecoderFactory,
         platform::{AchievementServices, PlatformJobServices, SystemServices},
         resources::{ArchiveConfig, ResourceServices},
@@ -42,7 +43,9 @@ impl GameSetup {
     /// Allocate zeroed script storage. Each area is limited to 64 MiB;
     /// `shared_slots` counts 32-bit values, and `external_bytes` counts bytes.
     pub fn new(shared_slots: usize, external_bytes: usize) -> Result<Self> {
-        TaskRuntime::prepare(shared_slots, external_bytes).map(Self)
+        let mut runtime = TaskRuntime::prepare(shared_slots, external_bytes)?;
+        runtime.set_media_decode_mode(DecodeMode::Inline);
+        Ok(Self(runtime))
     }
 
     /// Apply engine settings and platform preferences from the supplied XML.
@@ -197,6 +200,12 @@ impl GameSetup {
     /// A backend is required when those passes request readback.
     pub fn set_graphics_backend(&mut self, backend: impl GraphicsBackend + 'static) {
         self.0.set_graphics_backend(backend);
+    }
+
+    /// Select how media is decoded. Sessions default to inline decoding for
+    /// hosts that do not provide system threads.
+    pub fn set_media_decode_mode(&mut self, mode: DecodeMode) {
+        self.0.set_media_decode_mode(mode);
     }
 
     /// Install the host decoder for movie resources. A decoder is required only

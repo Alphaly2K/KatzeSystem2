@@ -1,11 +1,12 @@
 use katze_system2::{
     Error, Result,
-    host::storage::{ExportDestination, ExportServices},
+    host::storage::{ExportDestination, ExportJob, ExportServices, ExportWork},
 };
 use std::{
     fs::{self, File},
     io::Write,
     path::PathBuf,
+    thread::{self, JoinHandle},
 };
 
 #[derive(Clone)]
@@ -38,9 +39,41 @@ impl ExportServices for Directory {
         Ok(Some(Box::new(self.clone())))
     }
 
+    fn start(&mut self, _task_id: u32, work: ExportWork) -> Result<Box<dyn ExportJob>> {
+        let worker = thread::Builder::new()
+            .name("katze-export".into())
+            .spawn(move || work.run())
+            .map_err(io_error)?;
+        Ok(Box::new(Worker(Some(worker))))
+    }
+
     fn finished(&mut self, task: u32, result: Result<()>) {
         if let Err(error) = result {
             eprintln!("导出任务 {task}：{error}");
+        }
+    }
+}
+
+struct Worker(Option<JoinHandle<Result<()>>>);
+
+impl ExportJob for Worker {
+    fn poll(&mut self) -> Option<Result<()>> {
+        if !self.0.as_ref()?.is_finished() {
+            return None;
+        }
+        Some(
+            self.0
+                .take()?
+                .join()
+                .unwrap_or_else(|_| Err(Error::new(0, "导出工作线程异常结束"))),
+        )
+    }
+}
+
+impl Drop for Worker {
+    fn drop(&mut self) {
+        if let Some(worker) = self.0.take() {
+            let _ = worker.join();
         }
     }
 }

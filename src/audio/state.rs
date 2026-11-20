@@ -12,6 +12,7 @@ pub struct SoundState {
     pub(super) groups: Option<BTreeMap<u32, GroupRange>>,
     pub(super) output: Option<super::output::Link>,
     pub(super) movies: BTreeMap<u32, crate::movie::AudioOutput>,
+    pub(super) decode_mode: crate::host::media::DecodeMode,
     pub(super) sources: super::source::Cache,
 }
 
@@ -29,12 +30,17 @@ impl Default for SoundState {
             groups: None,
             output: None,
             movies: BTreeMap::new(),
+            decode_mode: crate::host::media::DecodeMode::Threaded,
             sources: super::source::Cache::default(),
         }
     }
 }
 
 impl SoundState {
+    pub(crate) fn set_decode_mode(&mut self, mode: crate::host::media::DecodeMode) {
+        self.decode_mode = mode;
+    }
+
     /// 捕获组范围；同一表键保留首次配置，之后的全局标签变化不修改此快照。
     pub fn set_groups(&mut self, groups: &SoundGroups) -> Result<()> {
         if groups.entries.len() > read::MAX_ITEMS {

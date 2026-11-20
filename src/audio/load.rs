@@ -62,7 +62,8 @@ impl SoundState {
         sound.resampler = super::mix::Resampler::default();
         self.output_replace(physical as usize);
         let sound = &mut self.channels[physical as usize];
-        if let Some(pcm) = load_source(&mut self.sources, services, name, whole)? {
+        let decode_whole = whole || self.decode_mode == crate::host::media::DecodeMode::Inline;
+        if let Some(pcm) = load_source(&mut self.sources, services, name, decode_whole)? {
             let mut playback = Playback::new(&pcm, whole, options)?;
             playback.prepare_signal(&pcm, sound.signal_enabled)?;
             sound.file.extend_from_slice(name);

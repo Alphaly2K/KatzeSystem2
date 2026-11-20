@@ -128,7 +128,7 @@ fn word(runtime: &MovieRuntime, address: u32) -> u32 {
 fn host_movie_decoder_supplies_the_frame_and_pcm_after_restart() -> Result<()> {
     use katze_system2::host::{
         MovieAudio, MovieDecoded, MovieDecoder, MovieDecoderFactory, MovieFrame, MovieMetadata,
-        SharedSource, Surface,
+        SharedSource, Surface, media::DecodeMode,
     };
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -143,6 +143,8 @@ fn host_movie_decoder_supplies_the_frame_and_pcm_after_restart() -> Result<()> {
         }
     }
 
+    const CLIP_STEPS: usize = 12;
+
     struct Clip(f64);
     impl MovieDecoder for Clip {
         fn metadata(&self) -> MovieMetadata {
@@ -150,7 +152,7 @@ fn host_movie_decoder_supplies_the_frame_and_pcm_after_restart() -> Result<()> {
                 size: [2, 2],
                 frame_rate: 60.,
                 sample_rate: 600,
-                duration: 1. / 60.,
+                duration: CLIP_STEPS as f64 / 60.,
             }
         }
 
@@ -164,17 +166,18 @@ fn host_movie_decoder_supplies_the_frame_and_pcm_after_restart() -> Result<()> {
         }
 
         fn advance(&mut self, seconds: f64) -> Result<MovieDecoded> {
+            let time = self.0;
             self.0 += seconds;
             Ok(MovieDecoded {
                 video: Some(MovieFrame {
-                    time: 0.,
+                    time,
                     surface: Surface::from_bgra([2, 2], [0x20, 0x40, 0x80, 0xff].repeat(4))?,
                 }),
                 audio: Some(MovieAudio {
-                    time: 0.,
+                    time,
                     samples: [0.25, -0.25].repeat(10),
                 }),
-                ended: true,
+                ended: self.0 + 1e-9 >= self.metadata().duration,
             })
         }
     }
@@ -184,25 +187,30 @@ fn host_movie_decoder_supplies_the_frame_and_pcm_after_restart() -> Result<()> {
     instruction(&mut code, 0x26, &[0]);
     call(&mut code, 266, &[1], true);
     call(&mut code, 267, &[], true);
-    call(&mut code, 266, &[1], true);
+    call(&mut code, 266, &[2], true);
     call(&mut code, 65, &[], false);
     call(&mut code, 268, &[], true);
     instruction(&mut code, 0x3b, &[]);
 
-    let opened = Arc::new(AtomicUsize::new(0));
-    let mut runtime = setup(code, 4096, b"clip_%u[G128].mpg\0");
-    runtime.set_movie_decoder_factory(Factory(opened.clone()));
-    runtime.update(0, 1)?;
-    assert_ne!(word(&runtime, 0), 0);
-    assert_eq!(opened.load(Ordering::Relaxed), 2);
-    assert!(!runtime.drawing().enabled);
-    let frame = runtime.with_frame(|draw, canvas| SoftwareBackend.render(draw, canvas, [32; 2]))?;
-    assert_eq!(frame.pixel(16, 16), Some(0xff80_4020));
-    let mut audio = [0.; 20];
-    runtime.mix_task_audio_stereo(1, 600, &mut audio)?;
-    assert_eq!(audio, [0.25, -0.25].repeat(10).as_slice());
-    runtime.update(1, 1)?;
-    assert!(runtime.drawing().enabled);
+    for mode in [DecodeMode::Inline, DecodeMode::Threaded] {
+        let opened = Arc::new(AtomicUsize::new(0));
+        let mut runtime = setup(code.clone(), 4096, b"clip_%u[G128].mpg\0");
+        runtime.set_media_decode_mode(mode);
+        runtime.set_movie_decoder_factory(Factory(opened.clone()));
+        runtime.update(0, 1)?;
+        assert_ne!(word(&runtime, 0), 0);
+        assert_eq!(opened.load(Ordering::Relaxed), 2);
+        assert!(!runtime.drawing().enabled);
+        let frame =
+            runtime.with_frame(|draw, canvas| SoftwareBackend.render(draw, canvas, [32; 2]))?;
+        assert_eq!(frame.pixel(16, 16), Some(0xff80_4020));
+
+        let mut audio = [0.; CLIP_STEPS * 2 * 20];
+        runtime.mix_task_audio_stereo(1, 600, &mut audio)?;
+        assert_eq!(audio, [0.25, -0.25].repeat(CLIP_STEPS * 2 * 10).as_slice());
+        runtime.update(1, 1)?;
+        assert!(runtime.drawing().enabled);
+    }
     Ok(())
 }
 

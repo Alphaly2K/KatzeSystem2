@@ -53,6 +53,11 @@ impl<F: ObjectFactory> Runtime<F> {
         self.resources.graphics_backend = Some(Box::new(backend));
     }
 
+    /// Select the media execution mode for objects created after this call.
+    pub fn set_media_decode_mode(&mut self, mode: crate::host::media::DecodeMode) {
+        self.resources.decode_mode = mode;
+    }
+
     /// Set the decoder factory for future movie loads, including plane movies.
     pub fn set_movie_decoder_factory(&mut self, factory: impl MovieDecoderFactory + 'static) {
         self.resources.movie_decoder_factory = Some(std::sync::Arc::new(factory));

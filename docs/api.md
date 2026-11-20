@@ -315,7 +315,7 @@ Runtime 的普通 279～283／287／288 路由开发调试命令。279／280／2
 
 Runtime 的普通 690／692 依次展开首参数之后的路径，并经 `ResourceServices::resolve` 补全 `export` 类别，以命令 516 发送。690 通过 `CommandBuffers::data1` 携带第一条路径；692 另以 `data0` 携带第二条，第一条仍在 `data1`。路径保留原始字节并附零，补全结果最多 259 字节；空名称仍补全和转发。两项状态二，忽略接收者返回值。691 接受目标任务，发送 517，以状态一返回完整 DWORD；`data1` 提供临时工作缓冲。零目标正常路由，不可达目标的查询返回零。
 
-`KcsFactory` 提供类型 45 的默认导出任务。每个任务只开始一次，读取第一条路径。691 在任务未开始或已结束时返回一，运行期间返回零。`Runtime::set_export_services` 接受 `ExportServices`，由宿主选择目录；没有服务或选择返回 `None` 时按取消处理。`ExportDestination` 在后台接收相对路径组件及文件数据，宿主决定覆盖策略；`ExportServices::finished` 在运行时线程接收成功或错误。窗口示例可用 `KATZE_EXPORT_ROOT` 指定现有输出目录，保留其中已有文件。
+`KcsFactory` 提供类型 45 的默认导出任务。每个任务只开始一次，读取第一条路径。691 在任务未开始或已结束时返回一，运行期间返回零。`GameSetup::set_export_services` 接受 `host::storage::ExportServices`。宿主选择目的地并安排 `ExportWork`，无服务或目的地时取消导出。`ExportDestination` 接收相对路径组件及文件数据，宿主决定覆盖策略。`ExportServices::finished` 在会话线程接收成功或错误。窗口示例可用 `KATZE_EXPORT_ROOT` 指定现有输出目录，保留其中已有文件。
 
 普通 600 接受目标、资源名称格式地址、附加文字格式地址。名称先按 CP932 转为 UTF-16，再经 `ResourceServices::resolve_utf16` 补全 `export` 类别；补全结果最多 259 个单元，附加文字最多 259 字节。命令 453 的第一数据项为二，`data1` 携带 780 字节记录：前 520 字节为零结束的 UTF-16 名称，后 260 字节为零结束的附加文字。601 接受目标，发送 454 并返回完整任务结果。
 
