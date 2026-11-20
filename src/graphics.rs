@@ -78,6 +78,7 @@ mod particle_double;
 mod particle_down;
 mod particle_emitter;
 mod particle_energy;
+mod particle_erase;
 mod particle_exclamation;
 mod particle_explosion;
 mod particle_film_noise;

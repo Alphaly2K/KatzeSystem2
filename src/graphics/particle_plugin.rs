@@ -81,6 +81,7 @@ pub(super) enum Kind {
     Rolling,
     CurvedRolling,
     Assault,
+    Erase,
     Dash,
     Star,
     Explosion,
@@ -216,6 +217,8 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
         Kind::Rolling
     } else if name.eq_ignore_ascii_case(b"s_040102.ppi") {
         Kind::Assault
+    } else if name.eq_ignore_ascii_case(b"erase.ppi") {
+        Kind::Erase
     } else if name.eq_ignore_ascii_case(b"s_040103.ppi") {
         Kind::CurvedRolling
     } else if name.eq_ignore_ascii_case(b"dash.ppi") {

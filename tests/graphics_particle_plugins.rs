@@ -2211,6 +2211,46 @@ fn assault_prefills_half_the_particles_and_admits_one_more_per_update() -> Resul
 }
 
 #[test]
+fn erase_updates_every_quad_and_does_not_restart_after_fade_out() -> Result<()> {
+    let mut runtime = runtime_with_count(plugin(b"erase.ppi"), 2)?;
+    runtime.update(1, 1)?;
+    let mut parameters = [0; 128];
+    for (slot, value) in parameters.chunks_exact_mut(4).zip([
+        1f32, 40., 20., 150., -20., 175., -35., 260., 21., 80., 160., 95., 48., 20., 8., 3.,
+        4., 5., 20., 0.,
+    ]) {
+        slot.copy_from_slice(&value.to_le_bytes());
+    }
+    runtime.dispatch_command_with_buffers(
+        2,
+        command(325),
+        &mut CommandBuffers {
+            data1: Some(&mut parameters),
+            ..Default::default()
+        },
+    )?;
+    let alphas = |runtime: &Runtime<GraphicsFactory<KcsFactory<Programs>>>| {
+        let mesh = runtime.drawables().get(1).unwrap().particle_mesh().unwrap();
+        std::array::from_fn::<_, 2, _>(|i| {
+            mesh.projected_quad(i, &Projection::default()).unwrap()[0].color >> 24
+        })
+    };
+    runtime.dispatch_command(2, command(321))?;
+    assert_eq!(alphas(&runtime), [0, 0]);
+    runtime.update(2, 1)?;
+    assert_eq!(alphas(&runtime), [0, 0]);
+    runtime.update(2, 1)?;
+    assert_eq!(alphas(&runtime), [42, 42]);
+    for tick in 3..=22 {
+        runtime.update(tick, 1)?;
+    }
+    assert_eq!(alphas(&runtime), [0, 0]);
+    runtime.update(200, 1)?;
+    assert_eq!(alphas(&runtime), [0, 0]);
+    Ok(())
+}
+
+#[test]
 fn thunder_finishes_hides_and_preserves_module_randomness_across_restarts() -> Result<()> {
     let mut runtime = runtime_with_count(plugin(b"thunder.ppi"), 3)?;
     runtime.update(1, 1)?;
