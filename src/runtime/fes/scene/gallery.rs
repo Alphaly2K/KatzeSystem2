@@ -19,8 +19,28 @@ impl<F: ObjectFactory> Store<'_, F> {
             [command, file, key, list, ..] if command == b"cgreg_init" => {
                 self.load_fes_gallery(owner, scene, file, key, list)
             }
-            [command, group, dest, ..] if command == b"cgregnum" => {
-                self.count_fes_gallery_images(scene, group, dest)
+            [command, dest, tail @ ..] if command == b"cgreg_t" => self.query_fes_gallery(
+                scene,
+                command,
+                dest,
+                tail.first().map(Vec::as_slice),
+                tail.get(1).map(Vec::as_slice),
+            ),
+            [command, group, dest, tail @ ..]
+                if matches!(command.as_slice(), b"cgregnum" | b"cgregmax") =>
+            {
+                self.query_fes_gallery(
+                    scene,
+                    command,
+                    dest,
+                    Some(group),
+                    tail.first().map(Vec::as_slice),
+                )
+            }
+            [command, ..]
+                if matches!(command.as_slice(), b"cgreg_t" | b"cgregnum" | b"cgregmax") =>
+            {
+                Ok(())
             }
             [target, command, list, group, row, frame, ..] if command == b"loadlist2" => {
                 self.load_fes_gallery_image(scene, line, target, [list, group, row, frame])
@@ -67,21 +87,33 @@ impl<F: ObjectFactory> Store<'_, F> {
         Ok(())
     }
 
-    fn count_fes_gallery_images(
+    fn query_fes_gallery(
         &mut self,
         scene: &mut Scene,
-        group: &[u8],
+        command: &[u8],
         dest: &[u8],
+        group: Option<&[u8]>,
+        list: Option<&[u8]>,
     ) -> Result<()> {
-        let group = self.gallery_group(scene, 0, group)?;
         let dest = scene.interpreter.eval(dest, self.numbers)?;
+        let list = match list {
+            Some(list) => scene.interpreter.eval(list, self.numbers)? as u32,
+            None => 0,
+        };
         let mut count = 0;
-        scene.gallery.for_each_seen(group, |_| {
-            count += 1;
-            true
-        })?;
+        if let Some(group) = group {
+            let group = self.gallery_group(scene, list, group)?;
+            if command == b"cgregmax" {
+                count = scene.gallery.group_count(group)?;
+            } else {
+                scene.gallery.for_each_seen(group, |_| {
+                    count += 1;
+                    command != b"cgreg_t"
+                })?;
+            }
+        }
         if let Some(slot) = self.numbers.shared.get_mut(dest as usize) {
-            *slot = count;
+            *slot = count as i32;
         }
         Ok(())
     }
@@ -220,6 +252,7 @@ mod tests {
         save.append(50, &saved_record)?;
 
         let mut list = vec![0; 12 + 72];
+        list[4..8].copy_from_slice(&7u32.to_le_bytes());
         list[8..12].copy_from_slice(&1u32.to_le_bytes());
         list[16..19].copy_from_slice(b"row");
         list[80..84].copy_from_slice(&3u32.to_le_bytes());
@@ -242,11 +275,18 @@ mod tests {
             runtime.host().handle_allocator(),
         )?;
         assert!(scene.prepare(runtime.numbers_mut(), 16)?);
+        runtime.numbers_mut().shared.fill(-1);
         for text in [
             b"cgreg_init progress.dat 50 gallery.dat".as_slice(),
             b"cgregnum 0 1",
+            b"cgreg_t 2 0",
+            b"cgregmax 0 3",
+            b"cgregmax row 4 7",
+            b"cgreg_t 5 row 7",
+            b"cgregnum row 6 0",
+            b"cgreg_t 7",
             b"picture loadlist2 0 0 1 7",
-            b"picture loadlist2 0 row 2 9",
+            b"picture loadlist2 7 row 2 9",
         ] {
             let line = fes::Line {
                 offset: 0,
@@ -267,7 +307,7 @@ mod tests {
             .state
             .image_source()
             .unwrap();
-        assert_eq!(runtime.numbers().shared[1], 2);
+        assert_eq!(runtime.numbers().shared, [-1, 2, 1, 3, 3, 1, 0, 0]);
         assert_eq!(image.requested_file, b"second");
         assert_eq!(image.image_number, 7);
         Ok(())

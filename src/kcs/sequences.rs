@@ -156,16 +156,23 @@ impl SequenceMap {
         Ok(())
     }
 
+    fn group_records(&self, group: SequenceGroup<'_>) -> Result<Option<(usize, u32)>> {
+        match group {
+            SequenceGroup::Index(index) => self.data.indexed_group(index),
+            SequenceGroup::Named { list, name } => self.data.group(list, name),
+        }
+    }
+
+    pub(crate) fn group_count(&self, group: SequenceGroup<'_>) -> Result<u32> {
+        Ok(self.group_records(group)?.map_or(0, |(_, count)| count))
+    }
+
     pub(crate) fn for_each_seen(
         &self,
         group: SequenceGroup<'_>,
         mut visit: impl FnMut(&[u8]) -> bool,
     ) -> Result<()> {
-        let group = match group {
-            SequenceGroup::Index(index) => self.data.indexed_group(index)?,
-            SequenceGroup::Named { list, name } => self.data.group(list, name)?,
-        };
-        let Some((mut offset, count)) = group else {
+        let Some((mut offset, count)) = self.group_records(group)? else {
             return Ok(());
         };
         if count as usize > read::MAX_ITEMS {
