@@ -1,7 +1,9 @@
 use katze_system2::{
     Error, Result,
     graphics::Transform,
-    host::effect::{EffectServices, ParticleContext, ParticleFrame, ParticlePlayer},
+    host::effect::{
+        EffectServices, ParticleContext, ParticleFrame, ParticlePlayer, ParticleVertex,
+    },
 };
 use std::{
     ffi::OsString,
@@ -103,26 +105,7 @@ impl Player {
             .iter_mut()
             .zip(self.mesh.chunks_exact(MESH_BYTES))
         {
-            let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
-            let float = |at| f32::from_bits(word(at));
-            let mut transform = Transform::default();
-            transform.set_scale([float(0x84), float(0x88), float(0x8c)]);
-            transform.set_rotation([float(0x78), float(0x7c), float(0x80)]);
-            let mut matrix = *transform.matrix();
-            matrix[12..15].copy_from_slice(&[float(0x6c), float(0x70), float(0x74)]);
-            for (index, vertex) in quad.iter_mut().enumerate() {
-                let at = index * 24;
-                let point: [f32; 4] = std::array::from_fn(|axis| {
-                    float(at) * matrix[axis]
-                        + float(at + 4) * matrix[axis + 4]
-                        + float(at + 8) * matrix[axis + 8]
-                        + matrix[axis + 12]
-                });
-                vertex.position.copy_from_slice(&point[..3]);
-                vertex.rhw = point[3];
-                vertex.color = word(at + 12);
-                vertex.uv = [float(at + 16), float(at + 20)];
-            }
+            *quad = transform_quad(bytes);
         }
         Ok(())
     }
@@ -149,6 +132,56 @@ impl Drop for Player {
     }
 }
 
+fn transform_quad(bytes: &[u8]) -> [ParticleVertex; 4] {
+    let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
+    let float = |at| f32::from_bits(word(at));
+    let pivot = [float(0x60), float(0x64), float(0x68)];
+    let mut transform = Transform::default();
+    transform.set_scale([float(0x84), float(0x88), float(0x8c)]);
+    transform.set_rotation([float(0x78), float(0x7c), float(0x80)]);
+    let mut matrix = *transform.matrix();
+    matrix[12..15].copy_from_slice(&[float(0x6c), float(0x70), float(0x74)]);
+    std::array::from_fn(|index| {
+        let at = index * 24;
+        let x = float(at) - pivot[0];
+        let y = float(at + 4) - pivot[1];
+        let z = float(at + 8) - pivot[2];
+        let point: [f32; 4] = std::array::from_fn(|axis| {
+            x * matrix[axis] + y * matrix[axis + 4] + z * matrix[axis + 8] + matrix[axis + 12]
+        });
+        ParticleVertex {
+            position: [point[0], point[1], point[2]],
+            rhw: point[3],
+            color: word(at + 12),
+            uv: [float(at + 16), float(at + 20)],
+        }
+    })
+}
+
 fn host_error(error: std::io::Error) -> Error {
     Error::new(0, format!("Particle host: {error}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mesh_pivot_precedes_scale_and_translation() {
+        let mut bytes = [0; MESH_BYTES];
+        for (start, floats) in [
+            (0, [4., 8., 2.]),
+            (24, [6., 12., 5.]),
+            (0x60, [4., 8., 2.]),
+            (0x6c, [100., 200., 30.]),
+            (0x84, [2., 3., 4.]),
+        ] {
+            for (word, value) in bytes[start..start + 12].chunks_exact_mut(4).zip(floats) {
+                word.copy_from_slice(&f32::to_le_bytes(value));
+            }
+        }
+        let quad = transform_quad(&bytes);
+        assert_eq!(quad[0].position, [100., 200., 30.]);
+        assert_eq!(quad[1].position, [104., 212., 42.]);
+    }
 }
