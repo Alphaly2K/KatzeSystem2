@@ -1,8 +1,11 @@
 //! Lookup and loading of game assets.
 
 use super::storage::SharedSource;
-pub use crate::resource::{ArchiveConfig, CachedResources, ResourceCache};
+pub use crate::resource::{CachedResources, ResourceCache};
+
+mod config;
 use crate::{Error, Result};
+pub use config::{ArchiveConfig, ArchiveEntry, Category};
 
 /// Lookup policy requested by the game. The host resolves names and applies
 /// its patch and mount rules when choosing a source.

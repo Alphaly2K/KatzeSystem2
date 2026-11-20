@@ -4,9 +4,9 @@ use crate::{
         AchievementServices, ConfigurationServices, EffectServices, ExportServices, FileServices,
         FontServices, GraphicsBackend, MovieDecoderFactory, PlatformJobServices, ResourceServices,
         SaveServices, SpeechSynthesizer, SystemServices,
+        resources::{ArchiveConfig, CachedResources},
         storage::{FolderPaths, ScriptSettings},
     },
-    resource::{ArchiveConfig, CachedResources},
     settings::PlatformSettings,
 };
 
