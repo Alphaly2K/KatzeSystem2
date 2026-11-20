@@ -240,7 +240,7 @@ mod tests {
     #[test]
     fn gallery_counts_and_loads_only_seen_entries_in_list_order() -> Result<()> {
         let mut saved_record = Vec::new();
-        for name in [b"second".as_slice(), b"first"] {
+        for name in [b"second_b".as_slice(), b"first"] {
             saved_record.extend_from_slice(&1u32.to_le_bytes());
             let start = saved_record.len();
             saved_record.extend_from_slice(name);
@@ -256,7 +256,7 @@ mod tests {
         list[8..12].copy_from_slice(&1u32.to_le_bytes());
         list[16..19].copy_from_slice(b"row");
         list[80..84].copy_from_slice(&3u32.to_le_bytes());
-        for name in [b"first".as_slice(), b"locked", b"second"] {
+        for name in [b"first".as_slice(), b"locked", b"second,b"] {
             let start = list.len();
             list.extend_from_slice(name);
             list.resize(start + 64, 0);
@@ -308,7 +308,7 @@ mod tests {
             .image_source()
             .unwrap();
         assert_eq!(runtime.numbers().shared, [-1, 2, 1, 3, 3, 1, 0, 0]);
-        assert_eq!(image.requested_file, b"second");
+        assert_eq!(image.requested_file, b"second_b");
         assert_eq!(image.image_number, 7);
         Ok(())
     }

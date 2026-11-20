@@ -167,6 +167,7 @@ impl SequenceMap {
         Ok(self.group_records(group)?.map_or(0, |(_, count)| count))
     }
 
+    /// Visit the resource names of unlocked entries in list order.
     pub(crate) fn for_each_seen(
         &self,
         group: SequenceGroup<'_>,
@@ -181,8 +182,10 @@ impl SequenceMap {
         for _ in 0..count {
             let record = read::range(&self.data.bytes, offset, self.data.stride as usize)?;
             let text = read::zstr(record, 0)?;
-            if self.contains(text)? && !visit(text) {
-                break;
+            if let Some((name, values)) = parse(text)? {
+                if self.contains_key(&name, &values) && !visit(&name) {
+                    break;
+                }
             }
             offset = advance(offset, self.data.stride)?;
         }
@@ -251,19 +254,23 @@ impl SequenceMap {
         let Some((name, values)) = parse(source)? else {
             return Ok(false);
         };
-        let Some(mut node) = self.names.get(&name) else {
-            return Ok(false);
+        Ok(self.contains_key(&name, &values))
+    }
+
+    fn contains_key(&self, name: &[u8], values: &[i8]) -> bool {
+        let Some(mut node) = self.names.get(name) else {
+            return false;
         };
         for (index, value) in values.iter().enumerate() {
             if node.children.is_empty() {
-                return Ok(values[index..].iter().all(|&value| value == 0));
+                return values[index..].iter().all(|&value| value == 0);
             }
             let Some(child) = node.children.get(&i32::from(*value)) else {
-                return Ok(false);
+                return false;
             };
             node = child;
         }
-        Ok(node.children.is_empty() || node.children.contains_key(&-1))
+        node.children.is_empty() || node.children.contains_key(&-1)
     }
 
     fn save(&self) -> Result<Vec<u8>> {
