@@ -2216,8 +2216,8 @@ fn erase_updates_every_quad_and_does_not_restart_after_fade_out() -> Result<()> 
     runtime.update(1, 1)?;
     let mut parameters = [0; 128];
     for (slot, value) in parameters.chunks_exact_mut(4).zip([
-        1f32, 40., 20., 150., -20., 175., -35., 260., 21., 80., 160., 95., 48., 20., 8., 3.,
-        4., 5., 20., 0.,
+        1f32, 40., 20., 150., -20., 175., -35., 260., 21., 80., 160., 95., 48., 20., 8., 3., 4.,
+        5., 20., 0.,
     ]) {
         slot.copy_from_slice(&value.to_le_bytes());
     }
@@ -2247,6 +2247,46 @@ fn erase_updates_every_quad_and_does_not_restart_after_fade_out() -> Result<()> 
     assert_eq!(alphas(&runtime), [0, 0]);
     runtime.update(200, 1)?;
     assert_eq!(alphas(&runtime), [0, 0]);
+    Ok(())
+}
+
+#[test]
+fn radial_ice_admits_grouped_trails_and_clears_them_before_the_flash() -> Result<()> {
+    let mut runtime = runtime_with_count(plugin(b"ice.ppi"), 9)?;
+    runtime.update(1, 1)?;
+    let mut parameters = [0; 128];
+    for (slot, value) in parameters
+        .chunks_exact_mut(4)
+        .zip([2f32, 100., 30., 1., 0., -500.])
+    {
+        slot.copy_from_slice(&value.to_le_bytes());
+    }
+    runtime.dispatch_command_with_buffers(
+        2,
+        command(325),
+        &mut CommandBuffers {
+            data1: Some(&mut parameters),
+            ..Default::default()
+        },
+    )?;
+    let alphas = |runtime: &Runtime<GraphicsFactory<KcsFactory<Programs>>>| {
+        let mesh = runtime.drawables().get(1).unwrap().particle_mesh().unwrap();
+        std::array::from_fn::<_, 9, _>(|i| {
+            mesh.projected_quad(i, &Projection::default()).unwrap()[0].color >> 24
+        })
+    };
+    runtime.dispatch_command(2, command(321))?;
+    let untouched = alphas(&runtime)[8];
+    assert_eq!(alphas(&runtime)[..8], [0; 8]);
+    runtime.update(2, 1)?;
+    let flying = alphas(&runtime);
+    assert_eq!([flying[0], flying[4]], [64, 32]);
+    for tick in [202, 203, 204] {
+        runtime.update(tick, 1)?;
+    }
+    let flashed = alphas(&runtime);
+    assert!(flashed[4..8].iter().all(|&alpha| alpha == 0));
+    assert_eq!(flashed[8], untouched);
     Ok(())
 }
 

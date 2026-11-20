@@ -70,6 +70,7 @@ pub(super) enum Kind {
     DarkTriangle,
     Sakura,
     Ice,
+    RadialIce,
     SceneIce,
     SceneMagic,
     SceneSparkle,
@@ -202,6 +203,8 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
         Kind::DarkTriangle
     } else if name.eq_ignore_ascii_case(b"o_150102.ppi") {
         Kind::Ice
+    } else if name.eq_ignore_ascii_case(b"ice.ppi") {
+        Kind::RadialIce
     } else if name.eq_ignore_ascii_case(b"s_020402.ppi") {
         Kind::SceneIce
     } else if name.eq_ignore_ascii_case(b"s_040101.ppi") {

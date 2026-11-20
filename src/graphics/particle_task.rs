@@ -2,10 +2,11 @@ use super::particle_arrow::Arrow;
 use super::particle_assault::Assault;
 use super::particle_burst::Burst;
 use super::particle_erase::Erase;
-use super::particle_scene_magic::SceneMagic;
-use super::particle_scene_suzu::SceneSuzu;
+use super::particle_radial_ice::RadialIce;
 use super::particle_rolling::Rolling;
 use super::particle_round::{Round, Variant as RoundVariant};
+use super::particle_scene_magic::SceneMagic;
+use super::particle_scene_suzu::SceneSuzu;
 use super::{Drawable, ParticleMesh, Surface};
 use super::{
     particle_anger::Anger, particle_angry::Angry, particle_asease::Asease, particle_common::Common,
@@ -71,6 +72,7 @@ enum Effect {
     Dark(Dark),
     Sakura(Sakura),
     Ice(Ice),
+    RadialIce(RadialIce),
     SceneIce(SceneIce),
     Photon(Photon),
     Rolling(Rolling),
@@ -153,6 +155,9 @@ impl Effect {
             particle_plugin::Kind::Warukira => Self::Warukira(Warukira::new(host, image, random)),
             particle_plugin::Kind::Hadou => Self::Hadou(Hadou::new(host, image)?),
             particle_plugin::Kind::Ice => Self::Ice(Ice::new(host, image, random)),
+            particle_plugin::Kind::RadialIce => {
+                Self::RadialIce(RadialIce::new(host, image, random, module_state))
+            }
             particle_plugin::Kind::SceneIce => Self::SceneIce(SceneIce::new(host, image, random)),
             particle_plugin::Kind::Photon => Self::Photon(Photon::new(host, image, random)),
             particle_plugin::Kind::Rolling => Self::Rolling(Rolling::new(host, image, random)),
@@ -311,6 +316,7 @@ impl ParticleRunner {
                     Some(Effect::Dark(effect)) => effect.write_mesh(host),
                     Some(Effect::Sakura(effect)) => effect.write_mesh(host),
                     Some(Effect::Ice(effect)) => effect.write_mesh(host),
+                    Some(Effect::RadialIce(effect)) => effect.write_mesh(host),
                     Some(Effect::SceneIce(effect)) => effect.write_mesh(host),
                     Some(Effect::Photon(effect)) => effect.write_mesh(host),
                     Some(Effect::Rolling(effect)) => effect.write_mesh(host),
@@ -596,6 +602,14 @@ impl ParticleRunner {
                         }
                         Effect::Ice(effect) => {
                             effect.update(delta, services.random().unwrap_or(&mut host.random));
+                            effect.write_mesh(host);
+                        }
+                        Effect::RadialIce(effect) => {
+                            effect.update(
+                                delta,
+                                &host.parameters,
+                                services.random().unwrap_or(&mut host.random),
+                            );
                             effect.write_mesh(host);
                         }
                         Effect::SceneIce(effect) => {
