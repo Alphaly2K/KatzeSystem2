@@ -74,7 +74,7 @@ KATZE_PARTICLE_HOST="$PWD/particle-host.exe" cargo run --release --example runpr
 
 装载电影需要宿主先通过 `set_movie_decoder_factory` 注册 `host::movie::MovieDecoderFactory`。工厂打开 `SharedSource`，解码器在运行库的工作线程返回 BGRA 帧与交错 PCM。更换工厂不影响已装载电影。默认库构建无需 C 工具链；启用 `builtin-mpeg` 并注册 `movie::MpegDecoderFactory` 可解码 MPEG-1 视频及 MP2／MP3 音轨。
 
-角色模型由 `set_model_services` 注册的宿主负责。运行库传入 FES 的原始模型选择和选项，按会话时钟向可见对象的播放实例请求帧。帧使用透明 BGRA 图像，锚点偏移按逻辑像素计，随平面属性进入绘制列表。服务缺失或返回 `None` 时，脚本继续推进，模型平面无可见内容。删除平面或释放场景会释放播放实例。
+角色模型由 `set_model_services` 注册的宿主负责。运行库传入 FES 的原始模型选择和选项，按会话时钟向可见对象的播放实例请求帧。帧使用透明 BGRA 图像，锚点偏移按逻辑像素计，随平面属性进入绘制列表。服务缺失或返回 `None` 时，脚本继续推进，模型平面无可见内容。删除平面或释放场景会释放播放实例。 `host::model::decode_psz` 可按宿主指定的解压字节上限提取 PSB 输入，供模型解码器使用。
 
 离屏和桌面示例可设置 `KATZE_FFMPEG_MOVIES=1`，让示例使用 `PATH` 中的 `ffprobe` 和 `ffmpeg` 探测并解码电影，支持 VP8／Vorbis WebM。此模式要求媒体能够从不可寻址的输入管道解码。视频按报告的帧率输出，音轨输出同一时间基准下的立体声 PCM。电影资源通过宿主提供的流读取，示例无需把电影解包到磁盘。运行库不需要外部媒体程序。
 

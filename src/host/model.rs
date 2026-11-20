@@ -1,7 +1,7 @@
 //! Character model playback delegated to the host.
 
 use super::graphics::Surface;
-use crate::Result;
+use crate::{Error, Result, read};
 use std::sync::Arc;
 
 pub trait ModelServices {
@@ -19,4 +19,23 @@ pub struct ModelFrame {
     pub pixels: Arc<Surface>,
     /// Top-left of the image relative to the model anchor, in logical pixels.
     pub origin: [i32; 2],
+}
+
+/// Unpack a PSZ model resource for a host decoder. `limit` caps the decoded
+/// buffer in bytes. The returned bytes retain the original PSB container.
+pub fn decode_psz(bytes: &[u8], limit: usize) -> Result<Vec<u8>> {
+    let header = read::range(bytes, 0, 16)?;
+    if &header[..4] != b"PSZ\0" {
+        return Err(Error::new(0, "模型资源缺少 PSZ 标记"));
+    }
+    let packed = &bytes[16..];
+    if read::u32_at(header, 4)? as usize != packed.len() {
+        return Err(Error::new(4, "PSZ 压缩长度与资源不匹配"));
+    }
+    let expected = read::u32_at(header, 8)? as usize;
+    let payload = read::inflate_bounded(packed, expected, limit)?;
+    if !payload.starts_with(b"PSB\0") {
+        return Err(Error::new(16, "PSZ 解包结果缺少 PSB 标记"));
+    }
+    Ok(payload)
 }

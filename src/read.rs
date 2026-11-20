@@ -25,11 +25,21 @@ pub fn sized(value: u32, offset: usize) -> Result<usize> {
 }
 
 pub fn inflate(data: &[u8], expected: usize) -> Result<Vec<u8>> {
-    if expected > MAX_BYTES {
+    inflate_bounded(data, expected, MAX_BYTES)
+}
+
+pub fn inflate_bounded(data: &[u8], expected: usize, limit: usize) -> Result<Vec<u8>> {
+    if expected > limit {
         return Err(Error::new(0, "解压长度超过读取上限"));
     }
     let mut decoder = flate2::Decompress::new(true);
-    let mut out = vec![0; expected + 1];
+    let capacity = expected
+        .checked_add(1)
+        .ok_or_else(|| Error::new(0, "Zlib 解压长度溢出"))?;
+    let mut out = Vec::new();
+    out.try_reserve_exact(capacity)
+        .map_err(|error| Error::new(0, format!("无法分配 Zlib 解压缓冲区：{error}")))?;
+    out.resize(capacity, 0);
     let status = decoder
         .decompress(data, &mut out, flate2::FlushDecompress::Finish)
         .map_err(|e| Error::new(0, format!("Zlib 解压失败：{e}")))?;
