@@ -61,9 +61,7 @@ pub(super) fn call(
             return Err(Error::new(vm.pc, "Unicode 调试文字队列超过上限"));
         }
         let mut output = display(&utf8::decode_units(&escaped, false)?)?;
-        if output.len() >= 500 {
-            return Err(Error::new(vm.pc, "Unicode 调试文字触及基线未终止缓冲区"));
-        }
+        output.truncate(499);
         output.push(u16::from(b'\n'));
         host.unicode_debug_messages.push(output);
     }

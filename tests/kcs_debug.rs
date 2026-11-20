@@ -93,7 +93,9 @@ fn debug_limits_and_unprovided_printf_arguments_preserve_existing_queues() -> Re
     let address = 0u32.to_le_bytes();
     for (length, native, success) in [
         (499, 1040, true),
-        (500, 1040, false),
+        (500, 1040, true),
+        (2046, 1040, true),
+        (2047, 1040, false),
         (2046, 1, true),
         (2047, 1, false),
     ] {
@@ -108,9 +110,10 @@ fn debug_limits_and_unprovided_printf_arguments_preserve_existing_queues() -> Re
         assert_eq!(vm.read(0, 4096)?, before);
     }
     assert_eq!(host.debug_messages, [vec![b'a'; 499]]);
+    let wide = [vec![u16::from(b'a'); 499], vec![10]].concat();
     assert_eq!(
         host.unicode_debug_messages,
-        [[vec![u16::from(b'a'); 499], vec![10]].concat()]
+        [wide.clone(), wide.clone(), wide]
     );
     for format in [b"%%%%d\0", b"%%%%C\0"] {
         vm.write(0, format)?;
@@ -119,6 +122,6 @@ fn debug_limits_and_unprovided_printf_arguments_preserve_existing_queues() -> Re
         }
     }
     assert_eq!(host.debug_messages.len(), 1);
-    assert_eq!(host.unicode_debug_messages.len(), 1);
+    assert_eq!(host.unicode_debug_messages.len(), 3);
     Ok(())
 }
