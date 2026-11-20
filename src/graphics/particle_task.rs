@@ -8,13 +8,14 @@ use super::{
     particle_exclamation::Exclamation, particle_explosion::Explosion,
     particle_film_noise::FilmNoise, particle_flower_burst::FlowerBurst, particle_glint::Glint,
     particle_hadou::Hadou, particle_ice::Ice, particle_mirror::Mirror, particle_note::Note,
-    particle_notice::Notice, particle_paper::Paper, particle_plugin, particle_protect::Protect,
-    particle_question::Question, particle_radiate::Radiate, particle_rain::Rain,
-    particle_ring::Ring, particle_rising::Rising, particle_rubble::Rubble, particle_sakura::Sakura,
-    particle_scene_ice::SceneIce, particle_scene_sparkle::SceneSparkle, particle_shy::Shy,
-    particle_sigh::Sigh, particle_silent::Silent, particle_spark::Spark, particle_sparkle::Sparkle,
-    particle_steam::Steam, particle_surprise::Surprise, particle_sweat::Sweat,
-    particle_sword_spark::SwordSpark, particle_thunder::Thunder, particle_warukira::Warukira,
+    particle_notice::Notice, particle_paper::Paper, particle_photon::Photon, particle_plugin,
+    particle_protect::Protect, particle_question::Question, particle_radiate::Radiate,
+    particle_rain::Rain, particle_ring::Ring, particle_rising::Rising, particle_rubble::Rubble,
+    particle_sakura::Sakura, particle_scene_ice::SceneIce, particle_scene_sparkle::SceneSparkle,
+    particle_shy::Shy, particle_sigh::Sigh, particle_silent::Silent, particle_spark::Spark,
+    particle_sparkle::Sparkle, particle_steam::Steam, particle_surprise::Surprise,
+    particle_sweat::Sweat, particle_sword_spark::SwordSpark, particle_thunder::Thunder,
+    particle_warukira::Warukira,
 };
 use crate::kcs::{
     Host, Interpreter, ParticleHost, ParticleSource, ParticleTask, Program, ScriptRandom,
@@ -64,6 +65,7 @@ enum Effect {
     Sakura(Sakura),
     Ice(Ice),
     SceneIce(SceneIce),
+    Photon(Photon),
     SceneSparkle(SceneSparkle),
     Spark(Box<Spark>),
     Thunder(Thunder),
@@ -134,6 +136,7 @@ impl Effect {
             particle_plugin::Kind::Hadou => Self::Hadou(Hadou::new(host, image)?),
             particle_plugin::Kind::Ice => Self::Ice(Ice::new(host, image, random)),
             particle_plugin::Kind::SceneIce => Self::SceneIce(SceneIce::new(host, image, random)),
+            particle_plugin::Kind::Photon => Self::Photon(Photon::new(host, image, random)),
             particle_plugin::Kind::Star => Self::Ice(Ice::new_star(host, image, random)),
             particle_plugin::Kind::Spark => Self::Spark(Box::new(Spark::new(host, image, random))),
             particle_plugin::Kind::Thunder => {
@@ -274,6 +277,7 @@ impl ParticleRunner {
                     Some(Effect::Sakura(effect)) => effect.write_mesh(host),
                     Some(Effect::Ice(effect)) => effect.write_mesh(host),
                     Some(Effect::SceneIce(effect)) => effect.write_mesh(host),
+                    Some(Effect::Photon(effect)) => effect.write_mesh(host),
                     Some(Effect::SceneSparkle(effect)) => effect.write_mesh(host),
                     Some(Effect::Spark(effect)) => effect.write_mesh(host),
                     Some(Effect::Thunder(effect)) => effect.write_mesh(host),
@@ -515,6 +519,10 @@ impl ParticleRunner {
                             effect.write_mesh(host);
                         }
                         Effect::SceneIce(effect) => {
+                            effect.update(delta, services.random().unwrap_or(&mut host.random));
+                            effect.write_mesh(host);
+                        }
+                        Effect::Photon(effect) => {
                             effect.update(delta, services.random().unwrap_or(&mut host.random));
                             effect.write_mesh(host);
                         }

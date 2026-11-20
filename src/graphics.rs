@@ -87,6 +87,7 @@ mod particle_mirror;
 mod particle_note;
 mod particle_notice;
 mod particle_paper;
+mod particle_photon;
 mod particle_plugin;
 mod particle_protect;
 mod particle_question;
