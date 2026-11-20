@@ -60,6 +60,39 @@ impl SequenceData {
         }
         Err(Error::new(group, "KCS 序列文件分组链超过上限"))
     }
+
+    fn indexed_group(&self, mut index: u32) -> Result<Option<(usize, u32)>> {
+        if self.bytes.is_empty() {
+            return Ok(None);
+        }
+        let mut group = 0;
+        for _ in 0..read::MAX_ITEMS {
+            let header = read::range(&self.bytes, group, 12)?;
+            let count = read::u32_at(header, 8)?;
+            if count as usize > read::MAX_ITEMS {
+                return Err(Error::new(group, "KCS 序列文件分组数量超过上限"));
+            }
+            if index < count {
+                let mut entry = group + 12;
+                for _ in 0..index {
+                    let next = read::u32_at(&self.bytes, entry)?;
+                    if next == 0 {
+                        return Ok(None);
+                    }
+                    entry = advance(entry, next)?;
+                }
+                let header = read::range(&self.bytes, entry, 72)?;
+                return Ok(Some((entry + 72, read::u32_at(header, 68)?)));
+            }
+            index -= count;
+            let next = read::u32_at(header, 0)?;
+            if next == 0 {
+                return Ok(None);
+            }
+            group = advance(group, next)?;
+        }
+        Err(Error::new(group, "KCS 序列文件分组链超过上限"))
+    }
 }
 
 fn advance(offset: usize, increment: u32) -> Result<usize> {
@@ -73,8 +106,13 @@ struct Node {
     children: BTreeMap<i32, Node>,
 }
 
+pub(crate) enum SequenceGroup<'a> {
+    Index(u32),
+    Named { list: u32, name: &'a [u8] },
+}
+
 #[derive(Default)]
-pub(super) struct SequenceMap {
+pub(crate) struct SequenceMap {
     names: BTreeMap<Vec<u8>, Node>,
     nodes: usize,
     pub(super) data: SequenceData,
@@ -112,6 +150,32 @@ impl SequenceMap {
         for _ in 0..count {
             if let Some((name, values)) = parse(read::zstr(&self.data.bytes, offset)?)? {
                 self.insert(&name, &values)?;
+            }
+            offset = advance(offset, self.data.stride)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn for_each_seen(
+        &self,
+        group: SequenceGroup<'_>,
+        mut visit: impl FnMut(&[u8]) -> bool,
+    ) -> Result<()> {
+        let group = match group {
+            SequenceGroup::Index(index) => self.data.indexed_group(index)?,
+            SequenceGroup::Named { list, name } => self.data.group(list, name)?,
+        };
+        let Some((mut offset, count)) = group else {
+            return Ok(());
+        };
+        if count as usize > read::MAX_ITEMS {
+            return Err(Error::new(offset, "KCS 序列文件记录数量超过上限"));
+        }
+        for _ in 0..count {
+            let record = read::range(&self.data.bytes, offset, self.data.stride as usize)?;
+            let text = read::zstr(record, 0)?;
+            if self.contains(text)? && !visit(text) {
+                break;
             }
             offset = advance(offset, self.data.stride)?;
         }
@@ -209,7 +273,7 @@ impl SequenceMap {
         Ok(bytes)
     }
 
-    fn restore(&mut self, bytes: &[u8]) -> Result<()> {
+    pub(crate) fn restore(&mut self, bytes: &[u8]) -> Result<()> {
         self.clear();
         if bytes.len() > read::MAX_BYTES {
             return Err(Error::new(0, "KCS 序列存档超过读取上限"));

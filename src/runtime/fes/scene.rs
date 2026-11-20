@@ -9,6 +9,7 @@ mod achievements;
 mod background;
 mod config;
 mod database;
+mod gallery;
 mod panel;
 mod save;
 mod scripts;
@@ -51,6 +52,7 @@ pub struct Scene {
     pub(super) draw_call: Option<super::draw::DrawCall>,
     pub(super) property_call: Option<super::properties::PropertyCall>,
     pub(super) preload: super::preload::Preload,
+    gallery: crate::kcs::SequenceMap,
     save_query: Option<save::SaveQuery>,
     save_sort: Option<save::SaveSort>,
 }
@@ -158,6 +160,7 @@ impl Scene {
             draw_call: None,
             property_call: None,
             preload,
+            gallery: Default::default(),
             save_query: None,
             save_sort: None,
         })
@@ -1219,6 +1222,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                         }
                     } else if scene.string_command(&args, line.offset, self.numbers)?
                         || self.fes_database_command(scene, &args, line.offset)?
+                        || self.fes_gallery_command(owner, scene, &args, &line)?
                         || self.fes_config_command(scene, &args, line.offset)?
                         || self.fes_achievement_command(owner, scene, &args, line.offset)?
                         || self.fes_debug_command(scene, &args)?
@@ -1741,6 +1745,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                             }
                             if scene.string_command(&args, line.offset, self.numbers)?
                                 || self.fes_database_command(scene, &args, line.offset)?
+                                || self.fes_gallery_command(owner, scene, &args, &line)?
                                 || self.fes_config_command(scene, &args, line.offset)?
                                 || self.fes_achievement_command(owner, scene, &args, line.offset)?
                                 || self.fes_debug_command(scene, &args)?

@@ -49,16 +49,18 @@ impl Objects {
         numbers: &mut State,
     ) -> Result<bool> {
         let command = args[1].as_slice();
-        if command == b"getpos2" && target.bank == -1 {
+        if matches!(command, b"getpos2" | b"getbase" | b"getoffset" | b"getfile")
+            && target.bank == -1
+        {
             return Ok(true);
         }
         if command == b"lineinfo" && args.get(2).is_none() {
             return Ok(true);
         }
-        let count = if matches!(command, b"endpos" | b"drawarea") {
-            2
-        } else {
-            3
+        let count = match command {
+            b"getfile" => 1,
+            b"endpos" | b"drawarea" | b"getbase" | b"getoffset" => 2,
+            _ => 3,
         };
         let mut values = [if command == b"lineinfo" { 0 } else { -1 }; 3];
         for (value, bytes) in values.iter_mut().take(count).zip(args.iter().skip(2)) {
@@ -80,7 +82,27 @@ impl Objects {
                 continue;
             };
             let object = self.get(handle).unwrap();
-            let position = if matches!(command, b"endpos" | b"drawarea") {
+            if command == b"getfile" {
+                if values[0] != -1 {
+                    if let Some(image) = object.state.image_source() {
+                        let name = image.file.split(|&byte| byte == 0).next().unwrap();
+                        numbers.strings.insert(values[0] as u32, name.to_vec());
+                    }
+                }
+                continue;
+            }
+            let position = if matches!(command, b"getbase" | b"getoffset") {
+                let Some(image) = object.state.image() else {
+                    continue;
+                };
+                let [x, y] = if command == b"getbase" {
+                    image.base_point
+                } else {
+                    object.image_offset
+                }
+                .map(super::plane::integer_position);
+                [x, y, 0]
+            } else if matches!(command, b"endpos" | b"drawarea") {
                 let ObjectState::String(state) = &object.state else {
                     continue;
                 };

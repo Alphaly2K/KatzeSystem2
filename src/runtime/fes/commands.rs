@@ -59,6 +59,9 @@ impl Objects {
                 | b"page"
                 | b"getpos"
                 | b"getpos2"
+                | b"getbase"
+                | b"getoffset"
+                | b"getfile"
                 | b"getsize"
                 | b"endpos"
                 | b"drawarea"
@@ -116,7 +119,16 @@ impl Objects {
         if name == b"getsize" {
             return self.dispatch_size_query(interpreter, line.offset, &args, &target, state);
         }
-        if matches!(name, b"getpos2" | b"endpos" | b"drawarea" | b"lineinfo") {
+        if matches!(
+            name,
+            b"getpos2"
+                | b"getbase"
+                | b"getoffset"
+                | b"getfile"
+                | b"endpos"
+                | b"drawarea"
+                | b"lineinfo"
+        ) {
             return self.dispatch_query_command(interpreter, line.offset, &args, &target, state);
         }
         if matches!(name, b"play" | b"channel" | b"stype") {
