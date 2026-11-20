@@ -76,7 +76,7 @@ KATZE_PARTICLE_HOST="$PWD/particle-host.exe" cargo run --release --example runpr
 
 装载电影需要宿主先通过 `set_movie_decoder_factory` 注册 `host::movie::MovieDecoderFactory`。工厂打开 `SharedSource`，解码器返回 BGRA 帧与交错 PCM。更换工厂不影响已装载电影。默认库构建无需 C 工具链；启用 `builtin-mpeg` 并注册 `movie::MpegDecoderFactory` 可解码 MPEG-1 视频及 MP2／MP3 音轨。
 
-角色模型由 `set_model_services` 注册的宿主负责。会话已绑定资源服务时，`ModelServices::open_with_resources` 同时接收 FES 模型选择的原始字节和会话的资源解析器，可沿用同一归档、补丁和散装资源查找规则。自行管理资源的宿主可实现 `ModelServices::open`。`host::model::ModelConfig` 解析 `m2config` 类别中的主体及动作表，保留主体别名和空动作字段。主体资源可经 `m2psb` 类别解析，`decode_psz` 按宿主指定的解压字节上限提取 PSB 数据。
+角色模型由 `set_model_services` 注册的宿主负责。会话已绑定资源服务时，`ModelServices::open_with_resources` 同时接收 FES 模型选择的原始字节和会话的资源解析器，可沿用同一归档、补丁和散装资源查找规则。自行管理资源的宿主可实现 `ModelServices::open`。 宿主可用 `ModelSelection::parse` 和 `ModelSelection::open` 取得主体 PSZ 的读取源、初始动作名与选中动作行的差分表名称。选择中的后续选项仍保留原始字节。`host::model::ModelConfig` 解析 `m2config` 类别中的主体及动作表，保留主体别名和空动作字段。主体资源可经 `m2psb` 类别解析，`decode_psz` 按宿主指定的解压字节上限提取 PSB 数据。
 
 运行库按会话时钟向可见对象的播放实例请求透明 BGRA 帧，并把帧及锚点偏移交给合成器。服务缺失或返回 `None` 时，脚本继续推进，模型平面无可见内容。删除平面或释放场景会释放播放实例。
 

@@ -1,7 +1,9 @@
 //! Character model playback delegated to the host.
 
 mod config;
+mod selection;
 pub use config::{ModelBody, ModelConfig, ModelMotion};
+pub use selection::{ModelSelection, ModelSource};
 
 use super::{graphics::Surface, resources::ResourceServices};
 use crate::{Error, Result, read};

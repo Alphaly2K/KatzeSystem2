@@ -5,7 +5,7 @@ use katze_system2::{
     graphics::{Projection, RenderTarget, SoftwareBackend, Transform},
     host::{
         graphics::{GraphicsBackend, Surface, TextureFilter},
-        model::{ModelConfig, ModelFrame, ModelPlayer, ModelServices},
+        model::{ModelFrame, ModelPlayer, ModelSelection, ModelServices},
         resources::{ResourceMode, ResourceServices},
     },
     runtime::{BaseObject, ObjectFactory, Runtime, TaskObject, fes::Scene, kind},
@@ -33,18 +33,15 @@ impl ModelServices for Models {
         selection: &[u8],
         resources: &mut dyn ResourceServices,
     ) -> Result<Option<Box<dyn ModelPlayer>>> {
-        let mut fields = selection.split(|&byte| byte == b',');
-        let profile = resources.resolve(b"m2config", fields.next().unwrap())?;
-        let bytes = resources.read(&profile, ResourceMode::LooseFirst)?.unwrap();
-        let config = ModelConfig::parse(&bytes)?;
-        let body = config.body(fields.next().unwrap()).unwrap();
-        let resource = resources.resolve(b"m2psb", body.resource)?;
-        assert_eq!(
-            resources
-                .read(&resource, ResourceMode::LooseFirst)?
-                .unwrap(),
-            b"model bytes"
-        );
+        let selection_fields = ModelSelection::parse(selection).unwrap();
+        assert_eq!(selection_fields.options, b"5");
+        let source = selection_fields.open(resources)?.unwrap();
+        let mut signature = [0; 4];
+        source.psz.read_exact_at(0, &mut signature)?;
+        assert_eq!(&signature, b"PSZ\0");
+        assert_eq!(source.initial_motion.as_deref(), Some(b"stand".as_slice()));
+        assert_eq!(source.expression_config, None);
+        assert_eq!(source.body_config.as_deref(), Some(b"body.dif".as_slice()));
         self.0.borrow_mut().push(Event::ReadModel);
         self.open(selection)
     }
@@ -60,8 +57,10 @@ impl ResourceServices for Resources {
     fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
         assert_eq!(mode, ResourceMode::LooseFirst);
         Ok(match name {
-            b"m2config/model" => Some(b"#charaname\n1\tactor\tactor.psz".to_vec()),
-            b"m2psb/actor.psz" => Some(b"model bytes".to_vec()),
+            b"m2config/model.pfl" => {
+                Some(b"#charaname\n1\tactor\tactor.psz\n#motname\n1\t0\tstand\t\tbody.dif".to_vec())
+            }
+            b"m2psb/actor.psz" => Some(b"PSZ\0synthetic bytes".to_vec()),
             _ => None,
         })
     }
