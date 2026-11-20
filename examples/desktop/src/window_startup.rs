@@ -95,8 +95,8 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let mut quiz_windows = window_quiz::QuizWindows::default();
     runtime.set_windowed_mode(Some(1));
     if runtime
-        .system_settings()
-        .is_some_and(|settings| settings.fullscreen != 0)
+        .window_preferences()
+        .is_some_and(|prefs| prefs.fullscreen)
     {
         window
             .window
@@ -225,11 +225,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             text_window.sync(&window.window, runtime.text_entry_request())?;
         }
         if let Some(importer) = &mut image_import {
-            importer.sync(
-                &window.window,
-                runtime.platform_settings_mut(),
-                text_window.active(),
-            );
+            importer.sync(&window.window, &mut runtime, text_window.active());
             if importer.active() {
                 shared.borrow_mut().set_foreground(false);
             }

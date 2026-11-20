@@ -26,8 +26,7 @@ pub use crate::message::{GlyphMask, TextEncoding};
 pub use crate::resource::{
     ArchiveConfig, CachedResources, FolderPaths, ResourceCache, ResourceMode,
 };
-pub use crate::runtime::{ProgramLoader, QuizDebugInput, QuizDebugSession, SequenceCapture};
-pub use crate::settings::{PlatformSettings, SystemSettings};
+pub use crate::runtime::{QuizDebugInput, QuizDebugSession, SequenceCapture};
 pub use audio::SpeechSynthesizer;
 pub(crate) use diagnostics::trace_detail;
 pub use diagnostics::{

@@ -1087,14 +1087,18 @@ fn public_session_uses_host_resources_and_delivers_frame_and_pcm()
     }
 
     let mut game = GameRuntime::prepare(0, 0)?;
+    assert!(game.window_preferences().is_none());
+    assert!(!game.set_image_import_directory(Some(vec![65])));
     let startup = br#"<?xml version="1.0" encoding="UTF-8"?><document><SCREEN><width>64</width><height>48</height></SCREEN><GAME><autoselect>1</autoselect></GAME></document>"#;
-    let user = br#"<?xml version="1.0" encoding="UTF-8"?><document><WINDOW><width>256</width><height>192</height><full_width>160</full_width></WINDOW><SOUND><stereo>0</stereo></SOUND></document>"#;
+    let user = br#"<?xml version="1.0" encoding="UTF-8"?><document><WINDOW><width>256</width><height>192</height><full_width>160</full_width><fullscreen>3</fullscreen></WINDOW><SOUND><stereo>0</stereo></SOUND><ETC><imgimport>initial</imgimport></ETC></document>"#;
     let logical_size = game.configure_startup(startup, None, Some(user))?;
     assert_eq!(logical_size, [64, 48]);
-    let platform = game.platform_settings().unwrap().clone();
-    assert_eq!(platform.window_size, [256, 192]);
-    assert_eq!(platform.fullscreen_size, [64, 48]);
-    assert_eq!(platform.sound_stereo, 0);
+    let prefs = game.window_preferences().unwrap();
+    assert_eq!(prefs.window_size, [256, 192]);
+    assert_eq!(prefs.fullscreen_size, [64, 48]);
+    assert!(prefs.fullscreen);
+    let initial: Vec<_> = "initial".encode_utf16().collect();
+    assert_eq!(game.image_import_directory(), Some(initial.as_slice()));
 
     let invalid = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?><document><GAME><autoselect>2</autoselect></GAME><TTS><id>{}</id></TTS></document>",
@@ -1104,8 +1108,13 @@ fn public_session_uses_host_resources_and_delivers_frame_and_pcm()
         game.configure_startup(startup, None, Some(invalid.as_bytes()))
             .is_err()
     );
-    assert_eq!(game.platform_settings(), Some(&platform));
-    assert_eq!(game.system_settings().unwrap().auto_select, 1);
+    assert_eq!(game.window_preferences(), Some(prefs));
+    assert_eq!(game.image_import_directory(), Some(initial.as_slice()));
+    let last = vec![65; 259];
+    assert!(game.set_image_import_directory(Some(last.clone())));
+    assert!(!game.set_image_import_directory(Some(vec![65; 260])));
+    assert!(!game.set_image_import_directory(Some(vec![65, 0])));
+    assert_eq!(game.image_import_directory(), Some(last.as_slice()));
 
     game.set_resources(Entry);
     let device = Rc::new(RefCell::new(DeviceState::new([12, 34])));
@@ -1131,10 +1140,13 @@ fn public_session_uses_host_resources_and_delivers_frame_and_pcm()
     let mut pcm = [1.0; 4];
     game.mix_audio_stereo(48_000, &mut pcm)?;
     assert_eq!(pcm, [0.0; 4]);
-    assert_eq!(
-        game.into_task_runtime().input_coordinates().logical_size,
-        [64, 48]
-    );
+    let runtime = game.into_task_runtime();
+    assert_eq!(runtime.input_coordinates().logical_size, [64, 48]);
+    assert_eq!(runtime.system_settings().unwrap().auto_select, 1);
+    assert_eq!(runtime.system_settings().unwrap().fullscreen, 3);
+    let platform = runtime.platform_settings().unwrap();
+    assert_eq!(platform.sound_stereo, 0);
+    assert_eq!(platform.directories[2], Some(last));
     Ok(())
 }
 

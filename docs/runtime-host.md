@@ -14,7 +14,7 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 
 标准宿主用 `GameRuntime::prepare(shared_slots, external_bytes)` 创建根任务和清零后的脚本存储。前者按 32 位值计数，后者按字节计数。启动前可将启动文档、游戏默认值及用户设置的 XML 字节交给 `configure_startup`，由它应用引擎与平台配置并返回游戏逻辑尺寸；配置无效时保留原有状态。绑定输入、资源和需要的其他服务，调用 `configure_canvas` 设置非零的逻辑输出尺寸并按游戏配置创建画布，再把启动配置中的脚本名称交给 `start_game(entry)`。该方法消费准备好的实例，并在创建任务前检查资源、输入和画布。宿主可先调用 `validate_startup` 检查这些条件；该检查不会访问宿主服务或装载脚本。两个方法使用 `session::StartupError` 分别报告缺少的服务；任务创建或入口装载失败由 `StartTasks` 携带原始诊断。
 
-逻辑尺寸取启动文档的 `SCREEN/width` 和 `SCREEN/height`，用户保存的 `WINDOW` 尺寸仅写入平台配置。运行库保留启动文档的全屏候选尺寸，由宿主根据设备能力决定实际模式；宿主可查询 `platform_settings`，并更新需要由脚本读取的平台字段。`configure_canvas` 同时设置呈现和输入使用的逻辑尺寸。桌面宿主按实际窗口尺寸换算鼠标坐标；离屏宿主的显式回放点击使用逻辑坐标，截图保持逻辑尺寸。
+逻辑尺寸取启动文档的 `SCREEN/width` 和 `SCREEN/height`。宿主通过 `window_preferences` 读取用户窗口尺寸、启动文档的全屏候选尺寸及当前全屏偏好，再根据设备能力决定实际模式。`configure_canvas` 同时设置呈现和输入使用的逻辑尺寸。桌面宿主按实际窗口尺寸换算鼠标坐标；离屏宿主的显式回放点击使用逻辑坐标，截图保持逻辑尺寸。
 
 普通 KCS 的入口和后续装载使用已绑定的 `ResourceServices`。运行库按 `kcs` 类别补全名称，以 `ArchiveFirst` 模式读取字节并解析；补丁与归档顺序由资源服务决定。工具可用 `GameRuntime::into_task_runtime` 接续同一个实例，也可直接使用 `runtime::TaskRuntime::with_programs` 提供预解析程序，或用 `TaskRuntime::with_resource_programs` 绑定现有外部存储。`TaskRuntime::start_game_with_tasks(entry)` 可另外取得用于诊断的任务编号。
 
@@ -32,7 +32,7 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 
 窗口宿主在更新后调用 `process_window_requests(window)` 执行脚本提交的窗口请求。设备操作由 `WindowServices` 提供，运行库负责配置回写和任务通知。返回 true 表示应退出窗口循环；发生错误时可在后续调用继续处理尚未尝试的请求。文本对话框通过 `text_entry_request` 取得初始文字及请求句柄，使用同一个句柄调用 `complete_text_entry` 确认或取消。以 `Arc::ptr_eq` 区分请求；同样的初始文字可以属于不同请求。过期请求返回 false。
 
-宿主通过 `set_archive_config`、`set_folder_paths`、`set_script_settings` 和 `set_platform_settings` 提供脚本可查的路径及初始配置。启动配置和资源服务就绪后调用 `load_startup_language_tables` 装入初始译文；没有可用的界面语言前缀时，仅装入游戏表。
+宿主通过 `set_archive_config`、`set_folder_paths` 和 `set_script_settings` 提供脚本可查的路径及初始配置。图片导入宿主可用 `image_import_directory` 读取、用 `set_image_import_directory` 更新最后选择的 UTF-16 路径，供随后保存配置。标准会话的窗口和目录接口取代直接借用或替换原始设置；任务工具仍可从 `settings` 访问原始设置类型。启动配置和资源服务就绪后调用 `load_startup_language_tables` 装入初始译文；没有可用的界面语言前缀时，仅装入游戏表。
 
 窗口宿主可通过 `set_window_content_rect` 和 `set_windowed_mode` 提供客户区绘图矩形和当前窗口模式。`take_clipboard_requests` 取走按序提交的剪贴板写入请求，保留发起任务和原始编码，由宿主解码并写入剪贴板。
 

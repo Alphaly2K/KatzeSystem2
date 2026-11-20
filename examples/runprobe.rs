@@ -322,8 +322,8 @@ fn run_session(
     let mut session = session.start_game(entry.as_bytes())?;
     let mut window = ProbeWindow {
         fullscreen: session
-            .system_settings()
-            .is_some_and(|settings| settings.fullscreen != 0),
+            .window_preferences()
+            .is_some_and(|prefs| prefs.fullscreen),
     };
     let mut audio = std::env::var_os("KATZE_PROBE_AUDIO_STATS")
         .is_some()
@@ -602,6 +602,9 @@ fn inspect_runtime(
         .then(AudioStats::default);
     runtime.set_input_device(ScriptedDevice::new(keys, replay.as_ref(), surface))?;
     runtime.validate_startup()?;
+    let fullscreen = runtime
+        .window_preferences()
+        .is_some_and(|prefs| prefs.fullscreen);
     let (
         mut runtime,
         GameTasks {
@@ -612,11 +615,7 @@ fn inspect_runtime(
     ) = runtime
         .into_task_runtime()
         .start_game_with_tasks(entry.as_bytes())?;
-    let mut window = ProbeWindow {
-        fullscreen: runtime
-            .system_settings()
-            .is_some_and(|settings| settings.fullscreen != 0),
-    };
+    let mut window = ProbeWindow { fullscreen };
     println!("输入 {input} 声音 {sound}");
     println!("主任务 {task}");
     let dump = |vm: &katze_system2::kcs::Interpreter| {

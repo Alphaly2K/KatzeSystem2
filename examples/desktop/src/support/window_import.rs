@@ -2,7 +2,7 @@ use super::{
     support::image_import::{ImportPicker, ImportRequest, is_image_path},
     window_text::FilePathDialog,
 };
-use katze_system2::settings::PlatformSettings;
+use katze_system2::session::GameRuntime;
 use sdl2::{
     event::Event,
     messagebox::{self, ButtonData, ClickedButton, MessageBoxButtonFlag, MessageBoxFlag},
@@ -65,12 +65,7 @@ impl WindowImport {
         self.dialog.take().unwrap().0.complete(choice);
     }
 
-    pub fn sync(
-        &mut self,
-        parent: &Window,
-        mut settings: Option<&mut PlatformSettings>,
-        text_active: bool,
-    ) {
+    pub fn sync(&mut self, parent: &Window, runtime: &mut GameRuntime, text_active: bool) {
         if self
             .dialog
             .as_ref()
@@ -78,19 +73,16 @@ impl WindowImport {
         {
             self.dialog = None;
         }
-        let last = self.picker.take_last_directory();
-        if let (Some(settings), Some(last)) = (settings.as_deref_mut(), last.as_ref()) {
-            let path: Vec<_> = last.to_string_lossy().encode_utf16().collect();
-            if path.len() < 260 {
-                settings.directories[2] = Some(path);
-            }
+        if let Some(last) = self.picker.take_last_directory() {
+            runtime
+                .set_image_import_directory(Some(last.to_string_lossy().encode_utf16().collect()));
         }
         if text_active || self.dialog.is_some() {
             return;
         }
         if let Some(request) = self.picker.next_request() {
-            let initial = settings
-                .and_then(|settings| settings.directories[2].as_deref())
+            let initial = runtime
+                .image_import_directory()
                 .map(String::from_utf16_lossy)
                 .unwrap_or_default();
             match FilePathDialog::new(parent, &initial) {

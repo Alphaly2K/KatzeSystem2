@@ -5,6 +5,8 @@ use crate::{
     resource::{XmlDocument, XmlWriter},
 };
 
+const DIRECTORY_CAPACITY: usize = 260;
+
 /// 平台用户配置的原始字段；设备应用由宿主负责，目录缺省沿用宿主选择。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlatformSettings {
@@ -110,6 +112,21 @@ impl Default for PlatformSettings {
 }
 
 impl PlatformSettings {
+    pub(crate) fn image_import_directory(&self) -> Option<&[u16]> {
+        self.directories[2].as_deref()
+    }
+
+    pub(crate) fn set_image_import_directory(&mut self, directory: Option<Vec<u16>>) -> bool {
+        if directory
+            .as_ref()
+            .is_some_and(|path| path.len() >= DIRECTORY_CAPACITY || path.contains(&0))
+        {
+            return false;
+        }
+        self.directories[2] = directory;
+        true
+    }
+
     /// 读取启动文档的 SCREEN、GENERAL、APP 等平台字段。
     /// 全屏候选先取低十六位，再交由宿主按可用显示模式调整。
     pub fn apply_startup_xml(
@@ -220,7 +237,7 @@ impl PlatformSettings {
             .zip(&mut self.directories)
         {
             if let Some(directory) = xml.wide_text(format!("ETC/{name}").as_bytes())? {
-                check_wide(&directory, 260)?;
+                check_wide(&directory, DIRECTORY_CAPACITY)?;
                 *value = Some(directory);
             }
         }

@@ -1,7 +1,7 @@
 //! Standard game session for embedding CatSystem2. The application supplies
 //! [`crate::host`] services and drives the session one frame at a time.
 
-use crate::{Error, Result, host::*, runtime::TaskRuntime};
+use crate::{Error, Result, host::*, runtime::TaskRuntime, settings::PlatformSettings};
 use std::sync::Arc;
 
 mod error;
@@ -29,6 +29,16 @@ pub enum FrameOutcome {
     Exited,
 }
 
+/// Window preferences from the game configuration. The host selects the
+/// actual window and display modes independently of the logical canvas size.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct WindowPreferences {
+    pub window_size: [u32; 2],
+    pub fullscreen_size: [u32; 2],
+    pub fullscreen: bool,
+}
+
 /// A game session backed by resources supplied by the host. Prepare it,
 /// configure it and bind services, then start the entry script.
 pub struct GameRuntime(TaskRuntime);
@@ -42,7 +52,7 @@ impl GameRuntime {
 
     /// Apply engine settings and platform preferences from the supplied XML.
     /// Returns the game's logical size in pixels, before user window overrides.
-    /// The host chooses actual display modes and may replace the platform settings.
+    /// The host chooses actual display modes independently.
     /// Invalid input leaves the current settings unchanged.
     pub fn configure_startup(
         &mut self,
@@ -61,7 +71,7 @@ impl GameRuntime {
         }
         self.0
             .configure_startup(startup, game_defaults, user_settings)?;
-        self.set_platform_settings(platform);
+        self.0.set_platform_settings(platform);
         Ok(logical_size)
     }
 
@@ -70,8 +80,15 @@ impl GameRuntime {
         self.0.startup_input_bindings()
     }
 
-    pub fn system_settings(&self) -> Option<&SystemSettings> {
-        self.0.system_settings()
+    /// Read the configured window preferences after [`Self::configure_startup`].
+    pub fn window_preferences(&self) -> Option<WindowPreferences> {
+        let platform = self.0.platform_settings()?;
+        let system = self.0.system_settings()?;
+        Some(WindowPreferences {
+            window_size: platform.window_size.map(u32::from),
+            fullscreen_size: platform.fullscreen_size.map(u32::from),
+            fullscreen: system.fullscreen != 0,
+        })
     }
 
     /// Set up the canvas, presentation and input coordinates for a logical size
@@ -121,16 +138,18 @@ impl GameRuntime {
         self.0.set_script_settings(settings);
     }
 
-    pub fn set_platform_settings(&mut self, settings: PlatformSettings) {
-        self.0.set_platform_settings(settings);
+    /// The last directory selected by the image import dialog, in UTF-16.
+    pub fn image_import_directory(&self) -> Option<&[u16]> {
+        self.0.platform_settings()?.image_import_directory()
     }
 
-    pub fn platform_settings(&self) -> Option<&PlatformSettings> {
-        self.0.platform_settings()
-    }
-
-    pub fn platform_settings_mut(&mut self) -> Option<&mut PlatformSettings> {
-        self.0.platform_settings_mut()
+    /// Set the directory for later image import and configuration saves, or
+    /// clear it with `None`. Returns false before startup configuration or if
+    /// the path contains NUL or exceeds 259 UTF-16 units. Does not access files.
+    pub fn set_image_import_directory(&mut self, directory: Option<Vec<u16>>) -> bool {
+        self.0
+            .platform_settings_mut()
+            .is_some_and(|settings| settings.set_image_import_directory(directory))
     }
 
     pub fn set_input_device(&mut self, device: impl InputDevice + 'static) -> Result<()> {
