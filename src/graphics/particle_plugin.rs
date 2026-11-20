@@ -87,6 +87,7 @@ pub(super) enum Kind {
     Dash,
     Star,
     Explosion,
+    Burst,
     Roundy,
     Roundz,
     Steam,
@@ -233,6 +234,8 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
         Kind::Star
     } else if name.eq_ignore_ascii_case(b"exprode.ppi") {
         Kind::Explosion
+    } else if name.eq_ignore_ascii_case(b"bang2.ppi") {
+        Kind::Burst
     } else if name.eq_ignore_ascii_case(b"roundy.ppi") {
         Kind::Roundy
     } else if name.eq_ignore_ascii_case(b"roundz.ppi") {

@@ -66,6 +66,7 @@ mod particle_angry;
 mod particle_arrow;
 mod particle_asease;
 mod particle_assault;
+mod particle_burst;
 mod particle_common;
 mod particle_concentration;
 mod particle_curve;

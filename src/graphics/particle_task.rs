@@ -1,5 +1,6 @@
 use super::particle_arrow::Arrow;
 use super::particle_assault::Assault;
+use super::particle_burst::Burst;
 use super::particle_erase::Erase;
 use super::particle_scene_magic::SceneMagic;
 use super::particle_scene_suzu::SceneSuzu;
@@ -85,6 +86,7 @@ enum Effect {
     Paper(Paper),
     Dash(Dash),
     Explosion(Explosion),
+    Burst(Burst),
     Round(Round),
     Steam(Box<Steam>),
     Mirror(Mirror),
@@ -181,6 +183,7 @@ impl Effect {
             particle_plugin::Kind::Explosion => {
                 Self::Explosion(Explosion::new(host, image, random, module_state))
             }
+            particle_plugin::Kind::Burst => Self::Burst(Burst::new(host, image, random)?),
             particle_plugin::Kind::Roundy => Self::Round(Round::new(host, random, RoundVariant::Y)),
             particle_plugin::Kind::Roundz => Self::Round(Round::new(host, random, RoundVariant::Z)),
             particle_plugin::Kind::Steam => Self::Steam(Box::new(Steam::new(host, image, random))),
@@ -328,6 +331,7 @@ impl ParticleRunner {
                     Some(Effect::Paper(effect)) => effect.write_mesh(host),
                     Some(Effect::Dash(effect)) => effect.write_mesh(host),
                     Some(Effect::Explosion(effect)) => effect.write_mesh(host),
+                    Some(Effect::Burst(effect)) => effect.write_mesh(host),
                     Some(Effect::Round(effect)) => effect.write_mesh(host),
                     Some(Effect::Steam(effect)) => effect.write_mesh(host),
                     Some(Effect::Mirror(effect)) => effect.write_mesh(host),
@@ -415,6 +419,10 @@ impl ParticleRunner {
                         }
                         Effect::Explosion(effect) => {
                             effect.update(delta, services.random().unwrap_or(&mut host.random));
+                            effect.write_mesh(host);
+                        }
+                        Effect::Burst(effect) => {
+                            effect.update(delta, &host.parameters);
                             effect.write_mesh(host);
                         }
                         Effect::Dash(effect) => {
