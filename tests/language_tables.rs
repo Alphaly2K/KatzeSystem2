@@ -366,7 +366,8 @@ fn advance_reports_a_completed_interface_refresh_once_after_retry_and_stops_on_e
         expression::State,
         host::{ResourceMode, ResourceServices},
         language::{LanguageChangeRequest, LanguageTarget::*, StringTableConfig},
-        runtime::{BaseObject, FrameOutcome, FrameTime, ObjectFactory, Runtime, TaskObject, kind},
+        runtime::{BaseObject, ObjectFactory, Runtime, TaskObject, kind},
+        session::{FrameOutcome, FrameTime},
     };
 
     struct NoChildren;

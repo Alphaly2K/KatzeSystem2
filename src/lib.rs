@@ -1,7 +1,8 @@
 //! Embeddable runtime for CatSystem2 2.6.1.90.
 //!
-//! Start a session with [`session::GameRuntime`]. Use [`host`] for the services
-//! and data exchanged with the application that advances the session.
+//! Configure and start a game with [`session::GameSetup`], then advance the
+//! resulting [`session::GameRuntime`]. Use [`host`] for the application's
+//! services and exchanged data.
 //! Format readers and the lower-level task and script APIs are available separately.
 
 pub mod anm;

@@ -15,7 +15,7 @@ use katze_system2::{
     },
     kcs::Program,
     resource::{ArchiveConfig, KifEntrySource, XmlDocument},
-    session::GameRuntime,
+    session::GameSetup,
 };
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -676,7 +676,7 @@ impl SystemServices for ProbeSystem {
     }
 }
 
-/// 游戏目录装载结果；`router` 在 `build_runtime` 时被移交资源服务。
+/// 游戏目录装载结果；`router` 在 `prepare_game` 时被移交资源服务。
 pub struct Game {
     pub root: String,
     pub router: Router,
@@ -813,16 +813,16 @@ fn patch_number(name: &str) -> Option<u32> {
 }
 
 /// 准备示例运行时、输入绑定和启动配置指定的逻辑尺寸。
-pub fn build_runtime(
+pub fn prepare_game(
     game: Game,
-) -> std::result::Result<(GameRuntime, DeviceKeys, [u32; 2]), Box<dyn std::error::Error>> {
+) -> std::result::Result<(GameSetup, DeviceKeys, [u32; 2]), Box<dyn std::error::Error>> {
     let Game {
         root,
         mut router,
         startup,
         ..
     } = game;
-    let mut runtime = GameRuntime::prepare(1 << 20, 16 << 20)?;
+    let mut runtime = GameSetup::new(1 << 20, 16 << 20)?;
     let startup_xml = XmlDocument::parse(startup.as_bytes())?;
     if let Some(importer) = image_import::Import::from_startup(&root, &startup_xml)? {
         runtime.set_platform_job_services(importer);

@@ -921,7 +921,7 @@ struct Device(Rc<RefCell<DeviceState>>);
 fn standard_startup_rejects_incomplete_host_setup_before_calling_services() -> Result<()> {
     use katze_system2::{
         host::{ResourceMode, ResourceServices},
-        session::{GameRuntime, StartupError},
+        session::{GameSetup, StartupError},
     };
 
     struct Entry;
@@ -941,7 +941,7 @@ fn standard_startup_rejects_incomplete_host_setup_before_calling_services() -> R
         StartupError::MissingCanvas,
     ] {
         let device = Rc::new(RefCell::new(DeviceState::new([12, 34])));
-        let mut game = GameRuntime::prepare(0, 0)?;
+        let mut game = GameSetup::new(0, 0)?;
         if missing != StartupError::MissingResources {
             game.set_resources(Entry);
         }
@@ -978,7 +978,7 @@ fn packed_kcs(code: &[u8]) -> Vec<u8> {
 fn public_session_reports_startup_and_update_failures_by_stage() -> Result<()> {
     use katze_system2::{
         host::{ResourceMode, ResourceServices},
-        session::{AdvanceError, FrameTime, GameRuntime, StartupError},
+        session::{AdvanceError, FrameTime, GameSetup, StartupError},
     };
 
     struct Files {
@@ -1009,7 +1009,7 @@ fn public_session_reports_startup_and_update_failures_by_stage() -> Result<()> {
 
     let prepare = |entry| -> Result<_> {
         let device = Rc::new(RefCell::new(DeviceState::new([0; 2])));
-        let mut game = GameRuntime::prepare(0, 0)?;
+        let mut game = GameSetup::new(0, 0)?;
         let startup = br#"<?xml version="1.0" encoding="UTF-8"?><document><SCREEN><width>64</width><height>48</height></SCREEN><language><OPTTABLE>options.txt</OPTTABLE></language></document>"#;
         let size = game.configure_startup(startup, None, None)?;
         game.configure_canvas(size)?;
@@ -1069,7 +1069,7 @@ fn public_session_uses_host_resources_and_delivers_frame_and_pcm()
 -> std::result::Result<(), Box<dyn std::error::Error>> {
     use katze_system2::{
         host::{ResourceMode, ResourceServices, ScriptLocation, ScriptPosition},
-        session::{FrameOutcome, FrameTime, GameRuntime},
+        session::{FrameOutcome, FrameTime, GameRuntime, GameSetup},
     };
 
     struct Entry;
@@ -1086,7 +1086,7 @@ fn public_session_uses_host_resources_and_delivers_frame_and_pcm()
         }
     }
 
-    let mut game = GameRuntime::prepare(0, 0)?;
+    let mut game = GameSetup::new(0, 0)?;
     assert!(game.window_preferences().is_none());
     assert!(!game.set_image_import_directory(Some(vec![65])));
     let startup = br#"<?xml version="1.0" encoding="UTF-8"?><document><SCREEN><width>64</width><height>48</height></SCREEN><GAME><autoselect>1</autoselect></GAME></document>"#;
@@ -1120,8 +1120,9 @@ fn public_session_uses_host_resources_and_delivers_frame_and_pcm()
     let device = Rc::new(RefCell::new(DeviceState::new([12, 34])));
     game.set_input_device(Device(device))?;
     game.configure_canvas(logical_size)?;
-    assert!(game.script_positions().next().is_none());
-    let mut game = game.start_game(b"main")?;
+    let mut game: GameRuntime = game.start_game(b"main")?;
+    assert_eq!(game.window_preferences(), Some(prefs));
+    assert_eq!(game.image_import_directory(), Some(last.as_slice()));
     assert!(game.script_positions().eq([ScriptPosition {
         task_id: 3,
         location: ScriptLocation::Kcs { byte_offset: 0 },
@@ -1155,7 +1156,8 @@ fn game_runtime_boots_the_standard_tasks_and_supplies_the_first_frame_clock() ->
     use katze_system2::{
         language::{LanguageChangeRequest, LanguageTarget},
         memory::SharedMemory,
-        runtime::{FrameOutcome, FrameTime, ProgramLoader, TaskRuntime},
+        runtime::{ProgramLoader, TaskRuntime},
+        session::{FrameOutcome, FrameTime},
     };
 
     struct Entry(Program);

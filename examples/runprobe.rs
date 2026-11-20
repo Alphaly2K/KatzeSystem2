@@ -15,7 +15,7 @@ use katze_system2::{
     session::{FrameOutcome, FrameTime},
 };
 use std::{cell::Cell, collections::BTreeMap, ops::RangeInclusive, rc::Rc};
-use support::{build_runtime, load_game};
+use support::{load_game, prepare_game};
 
 struct ProbeWindow {
     fullscreen: bool,
@@ -313,7 +313,7 @@ fn run_session(
 ) -> std::result::Result<(), Box<dyn std::error::Error>> {
     let diagnostics = support::diagnostics::Output::from_env(game.router.script_encoding);
     let entry = game.start.clone();
-    let (mut session, keys, size) = build_runtime(game)?;
+    let (mut session, keys, size) = prepare_game(game)?;
     session.set_input_device(ScriptedDevice::new(keys, None, size))?;
     session.set_diagnostic_trace(diagnostics.trace());
     if let Some(trace) = diagnostics.native_trace() {
@@ -591,7 +591,7 @@ fn inspect_runtime(
 
     let diagnostics = support::diagnostics::Output::from_env(game.router.script_encoding);
     let entry = game.start.clone();
-    let (mut runtime, keys, surface) = build_runtime(game)?;
+    let (mut runtime, keys, surface) = prepare_game(game)?;
     runtime.set_diagnostic_trace(diagnostics.trace());
     if let Some(trace) = diagnostics.native_trace() {
         runtime.set_native_trace(trace);

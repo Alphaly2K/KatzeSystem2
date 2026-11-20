@@ -38,7 +38,7 @@ use sdl2::event::{Event, WindowEvent};
 use std::cell::RefCell;
 use std::rc::Rc;
 use support::image_import::{Import, ImportPicker, import_directory};
-use support::{build_runtime, load_game};
+use support::{load_game, prepare_game};
 use window_input::{Shared, WindowDevice};
 
 fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
@@ -51,7 +51,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let mut clipboard = clipboard_output::Output::default();
     let startup = game.startup.clone();
     let entry = game.start.clone();
-    let (mut runtime, keys, surface) = build_runtime(game)?;
+    let (mut runtime, keys, surface) = prepare_game(game)?;
     runtime.set_diagnostic_trace(diagnostics.trace());
     if let Some(trace) = diagnostics.native_trace() {
         runtime.set_native_trace(trace);
