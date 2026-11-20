@@ -100,12 +100,17 @@ fn is_story_choice(choices: &[(u32, Rect)], surface_width: i32, wide: i32) -> bo
     if choices.iter().all(|(_, r)| r.right - r.left > wide) {
         return true;
     }
-    choices.len() > 1
-        && first.right - first.left >= surface_width / 3
-        && choices.windows(2).all(|pair| {
-            let [(_, a), (_, b)] = [pair[0], pair[1]];
-            a.left == b.left && a.right == b.right && a.bottom <= b.top
-        })
+    if first.right - first.left < surface_width / 3 {
+        return false;
+    }
+    if choices.len() == 1 {
+        let center = first.left + (first.right - first.left) / 2;
+        return center.abs_diff(surface_width / 2) <= (surface_width / 16) as u32;
+    }
+    choices.windows(2).all(|pair| {
+        let [(_, a), (_, b)] = [pair[0], pair[1]];
+        a.left == b.left && a.right == b.right && a.bottom <= b.top
+    })
 }
 
 fn replay_scale(surface: [u32; 2], [x, y]: [i32; 2]) -> [i32; 2] {
