@@ -166,8 +166,14 @@ impl Effect {
             particle_plugin::Kind::Warukira => Self::Warukira(Warukira::new(host, image, random)),
             particle_plugin::Kind::Hadou => Self::Hadou(Hadou::new(host, image)?),
             particle_plugin::Kind::Ice => Self::Ice(Ice::new(host, image, random)),
-            particle_plugin::Kind::RadialIce => {
-                Self::RadialIce(RadialIce::new(host, image, random, module_state))
+            particle_plugin::Kind::RadialIce | particle_plugin::Kind::ExtendedRadialIce => {
+                Self::RadialIce(RadialIce::new(
+                    host,
+                    image,
+                    random,
+                    module_state,
+                    matches!(kind, particle_plugin::Kind::ExtendedRadialIce),
+                ))
             }
             particle_plugin::Kind::FallSpark => {
                 Self::FallSpark(FallSpark::new(host, image, random, module_state))

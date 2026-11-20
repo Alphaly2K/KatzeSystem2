@@ -36,6 +36,7 @@ pub(super) struct RadialIce {
     active: usize,
     image: [f32; 2],
     mode: u32,
+    extended_opacity: Option<i32>,
     module_random: Arc<AtomicU32>,
 }
 
@@ -117,6 +118,7 @@ impl RadialIce {
         image: [f32; 2],
         random: &mut ScriptRandom,
         module_random: Arc<AtomicU32>,
+        extended: bool,
     ) -> Self {
         let p = host.parameters.map(f32::from_bits);
         let group = (integer(f64::from(p[0])) as u32 as usize).max(1);
@@ -148,11 +150,13 @@ impl RadialIce {
                 particle
             })
             .collect();
+        let parameter = integer(f64::from(p[6]));
         Self {
             particles,
             active: prefill,
             image,
-            mode: u32::from(integer(f64::from(p[6])) == 0),
+            mode: u32::from(!extended && parameter == 0),
+            extended_opacity: extended.then_some(parameter),
             module_random,
         }
     }
@@ -165,6 +169,7 @@ impl RadialIce {
         let limit = (f64::from(p[1]) * f64::from(0.9f32)) as f32;
         let limit = integer((f64::from(limit) + 0.5).floor());
         let delta = integer(f64::from(delta as f32));
+        let maximum_alpha = self.extended_opacity.unwrap_or(64);
         for particle in &mut self.particles[..self.active] {
             let s = &mut particle.sprite;
             let age = particle.age;
@@ -184,9 +189,15 @@ impl RadialIce {
                 0 | 1 => {
                     s.position[..2].copy_from_slice(&particle.path.at(age as f32)[..2]);
                     s.alpha = if particle.phase == 0 {
-                        64
+                        maximum_alpha as u8
                     } else {
-                        opacity(64., 0., particle.phase_start as f32, p[1], age as f32)
+                        opacity(
+                            maximum_alpha as f32,
+                            0.,
+                            particle.phase_start as f32,
+                            p[1],
+                            age as f32,
+                        )
                     };
                     turn(s, random);
                     advance_phase = if particle.phase == 0 {
@@ -233,7 +244,11 @@ impl RadialIce {
                 _ => {}
             }
             if advance_phase {
-                particle.phase += 1;
+                particle.phase = if particle.phase == 1 && self.extended_opacity.is_some() {
+                    5
+                } else {
+                    particle.phase + 1
+                };
                 particle.phase_start = age;
             }
             if particle.phase == 0 {

@@ -72,6 +72,7 @@ pub(super) enum Kind {
     Sakura,
     Ice,
     RadialIce,
+    ExtendedRadialIce,
     FallSpark,
     SceneIce,
     SceneMagic,
@@ -215,6 +216,8 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
         Kind::SceneShards
     } else if name.eq_ignore_ascii_case(b"ice.ppi") {
         Kind::RadialIce
+    } else if name.eq_ignore_ascii_case(b"ice2.ppi") {
+        Kind::ExtendedRadialIce
     } else if name.eq_ignore_ascii_case(b"fall_spark.ppi") {
         Kind::FallSpark
     } else if name.eq_ignore_ascii_case(b"s_020402.ppi") {
@@ -300,12 +303,16 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
             _ => return None,
         };
     }
-    if matches!(kind, Kind::Spark | Kind::ExtendedSpark | Kind::Ring) {
+    if matches!(
+        kind,
+        Kind::Spark | Kind::ExtendedSpark | Kind::ExtendedRadialIce | Kind::Ring
+    ) {
         let code_at = function_offset(1)?;
         let code = bytes.get(code_at..)?;
         kind = match (kind, code) {
             (Kind::Spark, [0x6a, 0x40, 0xe8, ..]) => Kind::LegacySpark,
             (Kind::ExtendedSpark, [0x6a, 0x40, 0xe8, ..]) => Kind::ExtendedSpark,
+            (Kind::ExtendedRadialIce, [0x6a, 0x48, 0xe8, ..]) => Kind::ExtendedRadialIce,
             (Kind::Spark, [0x55, 0x8b, 0xec, ..])
                 if code.get(35..40) == Some(&[0x68, 0x24, 0x03, 0x00, 0x00]) =>
             {
