@@ -55,7 +55,8 @@ pub(super) fn parse(bytes: &[u8]) -> Result<Node> {
     let mut tokens = 0;
     while cursor < bytes.len() {
         let byte = bytes[cursor];
-        if byte.is_ascii_whitespace() {
+        // 反引号在原词法器中产生未知词项，构树器跳过该词项。
+        if byte.is_ascii_whitespace() || byte == b'`' {
             cursor += 1;
             continue;
         }

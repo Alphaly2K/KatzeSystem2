@@ -180,9 +180,12 @@ impl Objects {
         };
         let mut number = |index: usize, default| {
             args.get(index).map_or(Ok(default), |bytes| {
-                interpreter
-                    .eval(bytes, state)
-                    .map_err(|error| Error::new(line.offset + error.offset, error.message))
+                let result = if name == b"disp" {
+                    interpreter.eval_fallback(bytes, state)
+                } else {
+                    interpreter.eval(bytes, state)
+                };
+                result.map_err(|error| Error::new(line.offset + error.offset, error.message))
             })
         };
         let command = match name {

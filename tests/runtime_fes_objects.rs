@@ -31,6 +31,29 @@ fn object_command(
 }
 
 #[test]
+fn display_uses_the_native_numeric_parameter_grammar() {
+    let mut objects = Objects::new(HandleAllocator::default()).unwrap();
+    let id = objects.define(&definition("CIMAGE", "cursor", 1)).unwrap()[0];
+    let mut interpreter =
+        fes::Interpreter::new(fes::Program::from_text(b"#START\nwait 9\n").unwrap()).unwrap();
+    objects.publish_bindings(&mut interpreter);
+    let mut numbers = State::new(1);
+    for (command, expected) in [
+        (b"cursor disp".as_slice(), 1),
+        (b"cursor disp 3stray`", 0),
+        (b"cursor disp (0 ($0+=1)`)", 1),
+    ] {
+        assert!(object_command(&mut objects, &mut interpreter, &mut numbers, command).unwrap());
+        let ObjectState::CImage(image) = &objects.get(id).unwrap().state else {
+            unreachable!()
+        };
+        assert_eq!(image.display, expected);
+    }
+    assert_eq!(numbers.shared, [1]);
+    assert!(katze_system2::expression::eval("3stray`", &mut numbers).is_err());
+}
+
+#[test]
 fn getpos_reads_local_coordinates_truncates_nonfinite_values_and_skips_array_arguments() {
     let mut objects = Objects::new(HandleAllocator::default()).unwrap();
     let ids = objects.define(&definition("CIMAGE", "item", 3)).unwrap();
