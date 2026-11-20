@@ -883,33 +883,13 @@ fn buffered_playback_consumes_pcm_and_keeps_pause_stop_repeat_and_tick_semantics
     assert!(audio(&runtime).channel(5).unwrap().is_playing());
     assert_eq!(audio(&runtime).channel(5).unwrap().position_frames(), 0);
     load(&mut runtime, &mut record(5, 1, 17, b"audio/tone.ogg")).unwrap();
-    assert!(
-        runtime
-            .dispatch_command(
-                0,
-                Command {
-                    data: [5, 1, 0],
-                    ..command(183, 5)
-                }
-            )
-            .unwrap_err()
-            .message
-            .contains("淡变")
-    );
-    assert!(!audio(&runtime).channel(37).unwrap().is_playing());
-    assert!(
-        runtime
-            .dispatch_command(
-                0,
-                Command {
-                    data: [5, 100 | (10 << 16), 0],
-                    ..command(189, 5)
-                }
-            )
-            .unwrap_err()
-            .message
-            .contains("延迟释放")
-    );
+    set(&mut runtime, 187, 100);
+    set(&mut runtime, 183, 1);
+    assert!(audio(&runtime).channel(37).unwrap().is_playing());
+    assert_eq!(audio(&runtime).channel(37).unwrap().volume(), Some(0));
+    assert_eq!(ramp_status(&mut runtime, 5), 1);
+    set(&mut runtime, 189, 100 | (10 << 16));
+    assert_eq!(ramp_status(&mut runtime, 5), 1);
     set(&mut runtime, 185, 0);
     assert_eq!(runtime.dispatch_command(0, command(186, 5)).unwrap(), 0);
     set(&mut runtime, 182, 0);

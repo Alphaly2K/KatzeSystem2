@@ -166,35 +166,46 @@ impl SoundState {
 
     pub(super) fn update_idle(&mut self, now: u32, stereo: bool) -> Result<()> {
         self.sync_output();
-        for index in 0..self.channels.len() {
+        let mut index = 0;
+        while index < self.channels.len() {
             let channel = &mut self.channels[index];
             if channel.allocation_flags[0] != 0 || channel.deferred_control.is_some() {
-                // 到达零音量后的下一次更新才执行收尾；淡出期间不累计通道时刻。
+                // The terminal gain is applied one update before the source is released.
                 if channel.ramps.remaining[0] <= 0.0 {
-                    self.finish_deferred(index)?;
+                    if self.finish_deferred(index)? {
+                        index = 0;
+                        continue;
+                    }
                 } else {
                     let volume = channel.ramps.advance(0, now);
                     if channel.source.is_some() {
                         channel.pcm_volume = volume;
                     }
                 }
-                continue;
-            }
-            channel.update_controls(now, stereo);
-            let clock = &mut channel.clock;
-            let previous = if clock.previous == u32::MAX {
-                now.wrapping_sub(1)
             } else {
-                clock.previous
-            };
-            clock.previous = now;
-            clock.elapsed = clock.elapsed.wrapping_add(now.wrapping_sub(previous));
+                let alternate_fade = channel.parameters[0] != 0 && channel.ramps.active & 1 != 0;
+                channel.update_controls(now, stereo);
+                let completed = alternate_fade && channel.ramps.active & 1 == 0;
+                let clock = &mut channel.clock;
+                let previous = if clock.previous == u32::MAX {
+                    now.wrapping_sub(1)
+                } else {
+                    clock.previous
+                };
+                clock.previous = now;
+                clock.elapsed = clock.elapsed.wrapping_add(now.wrapping_sub(previous));
+                if let Some(old) = index.checked_sub(32).filter(|_| completed) {
+                    self.channels[old].allocation_flags[0] = 1;
+                    self.channels[old].ramps.remaining[0] = 0.0;
+                }
+            }
+            index += 1;
         }
         self.output_gains();
         Ok(())
     }
 
-    fn finish_deferred(&mut self, index: usize) -> Result<()> {
+    fn finish_deferred(&mut self, index: usize) -> Result<bool> {
         let sound = &mut self.channels[index];
         let release = sound.allocation_flags[0] != 0;
         let control = sound.deferred_control.take();
@@ -220,7 +231,7 @@ impl SoundState {
         sound.ramps.active = 0;
         sound.allocation_flags = [0; 2];
         sound.parameters = [0; 2];
-        sound.linked = None;
+        let linked = sound.linked.take();
         sound.pcm_volume = sound.requested_volume as i64 as i32;
         if release {
             self.output_replace(index);
@@ -230,11 +241,22 @@ impl SoundState {
                 match control {
                     Some(DeferredControl::Pause) => Action::Pause,
                     Some(DeferredControl::Stop) => Action::Stop,
-                    None => return Ok(()),
+                    None => return Ok(false),
                 },
             );
         }
-        Ok(())
+        if let Some(next) = linked
+            .map(|next| next as usize)
+            .filter(|&next| next != index)
+        {
+            self.channels.swap(index, next);
+            self.channels[index].parameters = [0; 2];
+            self.channels[index].linked = None;
+            self.output_swap(index, next);
+            // Transferring a live source restarts the ordered channel scan.
+            return Ok(true);
+        }
+        Ok(false)
     }
 
     pub(super) fn configuration_changed(&mut self) {
@@ -315,18 +337,9 @@ impl SoundState {
         self.output_gains();
     }
 
-    pub(super) fn start_ramp(
-        &mut self,
-        channel: u32,
-        packed: u32,
-        pan: bool,
-        now: u32,
-    ) -> Result<()> {
+    pub(super) fn start_ramp(&mut self, channel: u32, packed: u32, pan: bool, now: u32) {
         if let Some(index) = self.property_channel(channel) {
             let sound = &mut self.channels[index];
-            if !pan && sound.parameters[0] != 0 {
-                return Err(Error::new(0, "声音备用通道淡变完成与延迟释放尚未接入"));
-            }
             let slot = usize::from(pan);
             sound.ramps.active |= 1 << slot;
             sound.ramps.target[slot] = if pan {
@@ -342,32 +355,42 @@ impl SoundState {
             sound.ramps.remaining[slot] = (packed >> 16) as f32;
             sound.ramps.previous = now;
         }
-        Ok(())
     }
 
-    pub(super) fn start(&mut self, channel: u32, count: u32, tick: u32) -> Result<()> {
+    pub(super) fn start(&mut self, channel: u32, count: u32, tick: u32, now: u32) -> Result<()> {
         self.sync_output();
         if let Some(index) = self.property_channel(channel) {
             let sound = &mut self.channels[index];
-            if sound.parameters[0] != 0 {
-                return Err(Error::new(0, "声音淡变播放尚未接入"));
+            let fade = (sound.parameters[0] != 0).then_some(sound.parameters[1] as u32);
+            if let Some(duration) = fade {
+                sound
+                    .ramps
+                    .start_volume(0.0, sound.requested_volume, duration, now);
+                if sound.source.is_some() {
+                    sound.pcm_volume = 0;
+                }
+                let old = &mut self.channels[channel as usize];
+                old.ramps
+                    .start_volume(old.requested_volume, 0.0, duration, now);
+            } else {
+                sound.ramps.active = 0;
+                if sound.source.is_some() {
+                    sound.pcm_volume = super::control::truncate(sound.requested_volume);
+                }
             }
-            sound.ramps.active = 0;
+            let sound = &mut self.channels[index];
             sound.deferred_control = None;
+            let range = playback_range(sound, count);
             if let Some(pcm) = &sound.source {
                 if sound.playback.playing || !sound.resampler.paused {
                     sound.resampler = super::mix::Resampler::default();
                 }
                 sound.resampler.paused = false;
-                sound
-                    .playback
-                    .start(pcm, count, playback_range(sound, count))?;
-                sound.pcm_volume = super::control::truncate(sound.requested_volume);
+                sound.playback.start(pcm, count, range)?;
             }
             if sound.started_tick == u32::MAX {
                 sound.started_tick = tick;
             }
-            let range = playback_range(sound, count);
             self.output_gains();
             self.output_action(index, Action::Start(count, range));
         }

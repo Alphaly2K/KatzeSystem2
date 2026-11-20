@@ -219,8 +219,12 @@ impl TaskObject for SoundObject {
                 return Ok(CommandOutcome::finished(false));
             }
             183 => {
-                self.audio
-                    .start(command.data[0], command.data[1], host.system_time_ms())?;
+                self.audio.start(
+                    command.data[0],
+                    command.data[1],
+                    host.system_time_ms(),
+                    self.base.clock.elapsed(),
+                )?;
                 return Ok(CommandOutcome::finished(false));
             }
             184 | 185 | 218 => {
@@ -259,7 +263,7 @@ impl TaskObject for SoundObject {
                     command.data[1],
                     command.code == 192,
                     self.base.clock.elapsed(),
-                )?;
+                );
                 return Ok(CommandOutcome::finished(false));
             }
             193 | 194 | 196 | 197 => {
@@ -471,6 +475,87 @@ mod tests {
     }
 
     #[test]
+    fn alternate_fade_promotes_the_incoming_loop_without_restarting_its_samples() {
+        for detached in [false, true] {
+            let mut sound = SoundState::default();
+            let old = Pcm::new(8, 1, vec![8192; 16]).unwrap().into();
+            let new = Pcm::new(8, 1, (1..=16).map(|i| -256 * i).collect())
+                .unwrap()
+                .into();
+            for (index, source, volume, name) in [(2, old, 80.0, b"old"), (34, new, 100.0, b"new")]
+            {
+                let channel = &mut sound.channels[index];
+                channel.playback = Playback::new(&source, true, 0).unwrap();
+                channel.source = Some(source);
+                channel.file = name.to_vec();
+                channel.requested_volume = volume;
+            }
+            let mut mixer = detached.then(|| sound.connect_output().unwrap());
+            let mut render = |sound: &mut SoundState, expected: f32| {
+                let mut samples = [0.0; 2];
+                if let Some(mixer) = &mut mixer {
+                    mixer.render(8, &mut samples).unwrap();
+                } else {
+                    sound.mix_stereo(8, &mut samples).unwrap();
+                }
+                assert_eq!(samples, [expected; 2]);
+            };
+            sound.start(2, 0, 150, 9).unwrap();
+            sound.channels[2].linked = Some(34);
+            sound.channels[34].parameters = [1, 4];
+            sound.start(2, 0, 151, 11).unwrap();
+            assert_eq!(sound.channel(34).unwrap().volume(), Some(0));
+            render(&mut sound, 0.25 * 0.8);
+            for (frame, (now, old, new)) in [(11, 60, 25), (12, 40, 50), (13, 20, 75), (15, 0, 100)]
+                .into_iter()
+                .enumerate()
+            {
+                sound.update_idle(now, true).unwrap();
+                assert_eq!(sound.channel(2).unwrap().volume(), Some(old));
+                assert_eq!(sound.channel(34).unwrap().volume(), Some(new));
+                let old_gain = old as f32 / 100.0;
+                let new_gain = new as f32 / 100.0;
+                render(
+                    &mut sound,
+                    0.25 * old_gain - (frame + 2) as f32 / 128.0 * new_gain,
+                );
+            }
+            assert_eq!(sound.channel(2).unwrap().file(), b"old");
+            assert_eq!(sound.channel(34).unwrap().position_frames(), 5);
+            sound.update_idle(16, true).unwrap();
+            assert_eq!(sound.channel(2).unwrap().file(), b"new");
+            assert_eq!(sound.property_channel(2), Some(2));
+            assert_eq!(sound.channel(2).unwrap().started_tick(), 151);
+            assert_eq!(sound.channel(2).unwrap().position_frames(), 5);
+            assert!(sound.channel(34).unwrap().pcm().is_none());
+            render(&mut sound, -6.0 / 128.0);
+            sound.set_volume(2, 50);
+            render(&mut sound, -7.0 / 256.0);
+            assert_eq!(sound.channel(2).unwrap().position_frames(), 7);
+        }
+    }
+
+    #[test]
+    fn explicit_alternate_ramp_releases_the_old_channel_after_its_terminal_update() {
+        let mut sound = output_state();
+        sound.channels[0].linked = Some(32);
+        sound.channels[32] = sound.channels[0].clone();
+        sound.channels[32].linked = None;
+        sound.channels[32].parameters = [1, 4];
+        sound.channels[32].pcm_volume = 55;
+        sound.start_ramp(0, (4 << 16) | 100, false, 11);
+        sound.update_idle(11, true).unwrap();
+        assert_eq!(sound.channel(32).unwrap().volume(), Some(66));
+        sound.update_idle(15, true).unwrap();
+        assert_eq!(sound.channel(32).unwrap().volume(), Some(100));
+        assert!(sound.channel(0).unwrap().pcm().is_some());
+        sound.update_idle(16, true).unwrap();
+        assert_eq!(sound.property_channel(0), Some(0));
+        assert_eq!(sound.channel(0).unwrap().volume(), Some(100));
+        assert!(sound.channel(32).unwrap().pcm().is_none());
+    }
+
+    #[test]
     fn grouped_release_fades_old_loop_out_of_both_mixers_and_keeps_new_music() {
         for connected in [false, true] {
             let mut sound = output_state();
@@ -492,10 +577,10 @@ mod tests {
                 }
                 samples
             };
-            sound.start(0, 0, 7).unwrap();
+            sound.start(0, 0, 7, 0).unwrap();
             assert_eq!(render(&mut sound, &mut mixer), [0.25; 16]);
             sound.unload(0, 20).unwrap();
-            sound.start(1, 0, 8).unwrap();
+            sound.start(1, 0, 8, 0).unwrap();
             for (now, volume) in [(21, 88), (24, 74), (29, 0), (30, 0)] {
                 sound.update_idle(now, true).unwrap();
                 assert_eq!(sound.channel(0).unwrap().volume(), Some(volume));
@@ -526,7 +611,7 @@ mod tests {
             let mut sound = output_state();
             sound.channels[0].grouped = true;
             let mut mixer = sound.connect_output().unwrap();
-            sound.start(0, 0, 7).unwrap();
+            sound.start(0, 0, 7, 0).unwrap();
             mixer.render(8, &mut [0.0; 2]).unwrap();
             sound.control_pair(0, code, 0, 20).unwrap();
             assert!(sound.channel(0).unwrap().is_playing());
@@ -545,7 +630,7 @@ mod tests {
                 sound.channel(0).unwrap().position_frames(),
                 if code == 184 { position } else { 0 }
             );
-            sound.start(0, 0, 8).unwrap();
+            sound.start(0, 0, 8, 0).unwrap();
             mixer.render(8, &mut samples).unwrap();
             assert_eq!(samples, [if code == 184 { 0.75 } else { 0.25 }; 2]);
         }
@@ -558,7 +643,7 @@ mod tests {
         assert!(sound.connect_output().is_err());
         assert!(sound.read_channel(0, 1).is_err());
         assert!(sound.mix_stereo(8, &mut [0.0; 2]).is_err());
-        sound.start(0, 1, 7).unwrap();
+        sound.start(0, 1, 7, 0).unwrap();
         assert!(sound.channel(0).unwrap().is_playing());
         let mut sample = [0.0; 2];
         mixer.render(8, &mut sample).unwrap();
@@ -568,7 +653,7 @@ mod tests {
         assert!(!sound.channel(0).unwrap().is_playing());
         mixer.render(8, &mut sample).unwrap();
         assert_eq!(sample, [0.0; 2]);
-        sound.start(0, 1, 8).unwrap();
+        sound.start(0, 1, 8, 0).unwrap();
         sound.set_volume(0, 50);
         sound.set_pan(0, -100, true);
         mixer.render(8, &mut sample).unwrap();
@@ -585,18 +670,18 @@ mod tests {
         assert_eq!(sound.channel(0).unwrap().completed_passes(), 1);
         sound.set_volume(0, 100);
         sound.set_pan(0, 0, true);
-        sound.start(0, 0, 9).unwrap();
+        sound.start(0, 0, 9, 0).unwrap();
         mixer.render(8, &mut [0.0; 18]).unwrap();
         assert!(sound.channel(0).unwrap().is_playing());
         sound.change_count(0, 1).unwrap();
         mixer.render(8, &mut [0.0; 8]).unwrap();
         assert!(!sound.channel(0).unwrap().is_playing());
-        sound.start(0, 2, 10).unwrap();
+        sound.start(0, 2, 10, 0).unwrap();
         sound.control_pair(0, 185, 0, 0).unwrap();
         mixer.render(8, &mut sample).unwrap();
         assert_eq!(sample, [0.0; 2]);
         assert_eq!(sound.channel(0).unwrap().position_frames(), 0);
-        sound.start(0, 1, 11).unwrap();
+        sound.start(0, 1, 11, 0).unwrap();
         mixer.render(8, &mut sample).unwrap();
         assert_eq!(sample, [0.25; 2]);
         sound.unload(0, 0).unwrap();
@@ -608,21 +693,21 @@ mod tests {
     fn pending_output_controls_keep_newer_status_and_replacement_gain() {
         let mut sound = output_state();
         let mut mixer = sound.connect_output().unwrap();
-        sound.start(0, 0, 1).unwrap();
+        sound.start(0, 0, 1, 0).unwrap();
         mixer.render(8, &mut [0.0; 2]).unwrap();
         let progress = sound.channels[0].progress.as_ref().unwrap().clone();
         let status = progress.lock().unwrap();
         mixer.render(8, &mut [0.0; 2]).unwrap();
         drop(status);
         sound.control_pair(0, 185, 0, 0).unwrap();
-        sound.start(0, 1, 2).unwrap();
+        sound.start(0, 1, 2, 0).unwrap();
         assert!(sound.channel(0).unwrap().is_playing());
         mixer.render(8, &mut [0.0; 8]).unwrap();
         assert!(!sound.channel(0).unwrap().is_playing());
         sound.set_volume(0, 50);
         sound.channels[0].pcm_volume = 100;
         sound.output_replace(0);
-        sound.start(0, 1, 3).unwrap();
+        sound.start(0, 1, 3, 0).unwrap();
         let mut output = [0.0; 2];
         mixer.render(8, &mut output).unwrap();
         assert_eq!(output, [0.125; 2]);

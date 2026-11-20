@@ -17,6 +17,14 @@ pub(super) struct Ramps {
 }
 
 impl Ramps {
+    pub(super) fn start_volume(&mut self, current: f32, target: f32, duration: u32, now: u32) {
+        self.active |= 1;
+        self.current[0] = current;
+        self.target[0] = target;
+        self.remaining[0] = duration as f32;
+        self.previous = now;
+    }
+
     pub(super) fn advance(&mut self, slot: usize, now: u32) -> i32 {
         self.remaining[slot] -= now.wrapping_sub(self.previous) as f32;
         if self.remaining[slot] <= 0.0 {

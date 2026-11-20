@@ -29,6 +29,7 @@ enum Update {
         action: Action,
     },
     Movie(u32, Option<crate::movie::AudioOutput>),
+    Swap(usize, usize),
 }
 
 pub(super) struct Link {
@@ -173,6 +174,14 @@ impl SoundState {
         }
     }
 
+    pub(super) fn output_swap(&mut self, first: usize, second: usize) {
+        if let Some(link) = &mut self.output {
+            link.progress.swap(first, second);
+            link.gains.swap(first, second);
+            let _ = link.sender.send(Update::Swap(first, second));
+        }
+    }
+
     pub(super) fn sync_output(&mut self) {
         let Some(link) = &self.output else { return };
         for (channel, progress) in self.channels.iter_mut().zip(&link.progress) {
@@ -205,17 +214,22 @@ impl Mixer {
     /// output must contain an even number of samples. Does not wait for decoded data.
     pub fn render(&mut self, sample_rate: u32, output: &mut [f32]) -> Result<()> {
         for update in self.receiver.try_iter() {
-            let Update::Channel {
-                channel,
-                generation,
-                action,
-            } = update
-            else {
-                let Update::Movie(handle, movie) = update else {
-                    unreachable!()
-                };
-                self.sound.set_movie_track(handle, movie);
-                continue;
+            let (channel, generation, action) = match update {
+                Update::Channel {
+                    channel,
+                    generation,
+                    action,
+                } => (channel, generation, action),
+                Update::Movie(handle, movie) => {
+                    self.sound.set_movie_track(handle, movie);
+                    continue;
+                }
+                Update::Swap(first, second) => {
+                    self.sound.channels.swap(first, second);
+                    self.progress.swap(first, second);
+                    self.generations.swap(first, second);
+                    continue;
+                }
             };
             let sound_channel = &mut self.sound.channels[channel];
             match action {

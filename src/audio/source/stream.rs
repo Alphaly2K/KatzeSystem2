@@ -303,7 +303,7 @@ mod tests {
             let position = actual.channel(0).unwrap().position_frames();
             actual.control_pair(0, 184, 0, 0).unwrap();
             mixer.render(rate, &mut [0.0; 4]).unwrap();
-            actual.start(0, 0, 0).unwrap();
+            actual.start(0, 0, 0, 0).unwrap();
             mixer.render(rate, &mut [0.0; 4]).unwrap();
             assert_eq!(actual.channel(0).unwrap().position_frames(), position);
             sender.send(Ok(Some(samples[40..].to_vec()))).unwrap();
