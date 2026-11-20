@@ -110,6 +110,7 @@ mod particle_scene_light;
 mod particle_scene_magic;
 mod particle_scene_sparkle;
 mod particle_scene_suzu;
+mod particle_scene_wind;
 mod particle_shy;
 mod particle_sigh;
 mod particle_silent;

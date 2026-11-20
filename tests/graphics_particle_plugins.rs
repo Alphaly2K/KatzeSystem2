@@ -2339,6 +2339,53 @@ fn scene_light_rises_on_zero_delta_and_respawns_after_fading() -> Result<()> {
 }
 
 #[test]
+fn scene_wind_emits_and_retires_trails_without_touching_the_remainder() -> Result<()> {
+    let mut runtime = runtime_with_count(plugin(b"a_wind.ppi"), 7)?;
+    runtime.update(1, 1)?;
+    let mut parameters = [0; 128];
+    for (slot, value) in parameters.chunks_exact_mut(4).zip([
+        3f32, 410., 240., 660., 390., 12., 30., 60., 80., 40., 50., 50., 50., 3., 30.,
+    ]) {
+        slot.copy_from_slice(&value.to_le_bytes());
+    }
+    runtime.dispatch_command_with_buffers(
+        2,
+        command(325),
+        &mut CommandBuffers {
+            data1: Some(&mut parameters),
+            ..Default::default()
+        },
+    )?;
+    let quad = |runtime: &Runtime<GraphicsFactory<KcsFactory<Programs>>>, index| {
+        runtime
+            .drawables()
+            .get(1)
+            .unwrap()
+            .particle_mesh()
+            .unwrap()
+            .projected_quad(index, &Projection::default())
+            .unwrap()
+    };
+    runtime.dispatch_command(2, command(321))?;
+    let remainder = quad(&runtime, 6);
+    assert!((0..6).all(|i| quad(&runtime, i)[0].color >> 24 == 0));
+    let mut emitted = None;
+    for tick in 2..160 {
+        runtime.update(tick, 1)?;
+        if let Some(slot) = (2..6).find(|&i| quad(&runtime, i)[0].color == 0xffff_1e1e) {
+            emitted = Some((tick, slot));
+            break;
+        }
+    }
+    let (tick, slot) = emitted.expect("the seeded update should emit a wind trail");
+    assert!((0..2).all(|i| quad(&runtime, i)[0].color >> 24 == 0));
+    runtime.update(tick + 60, 1)?;
+    assert_eq!(quad(&runtime, slot)[0].color >> 24, 0);
+    assert_eq!(quad(&runtime, 6), remainder);
+    Ok(())
+}
+
+#[test]
 fn scene_magic_retains_module_activation_across_effect_restarts() -> Result<()> {
     let mut runtime = runtime_with_count(plugin(b"s_080102.ppi"), 3)?;
     runtime.update(1, 1)?;
