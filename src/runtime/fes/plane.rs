@@ -130,6 +130,9 @@ impl<F: ObjectFactory> Store<'_, F> {
         if matches!(object.state, ObjectState::Particle(_)) {
             return self.update_fes_particle(owner, objects, handle);
         }
+        if matches!(object.state, ObjectState::ModelPlane(_)) {
+            return self.update_fes_model_plane(objects, handle);
+        }
         let object = objects.get(handle).unwrap();
         if object.state.plane().is_none() {
             return match object.state {
@@ -420,6 +423,9 @@ impl<F: ObjectFactory> Store<'_, F> {
         id: u32,
         list: Option<u32>,
     ) -> Result<()> {
+        if self.resources.model_players.remove(&id).is_some() {
+            self.resources.compositor.drawables_mut().remove(id);
+        }
         for image in objects.get(id).unwrap().images.clone() {
             if let Some(list) = list {
                 let pixels = self.resources.images.pixel_handle(image)?;

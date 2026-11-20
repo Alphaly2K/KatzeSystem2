@@ -18,6 +18,7 @@ mod image;
 mod image_attributes;
 mod input;
 mod logstring;
+mod model_plane;
 mod motion;
 mod natives;
 mod navigation;
@@ -40,6 +41,7 @@ pub use animation::ImageAnimationRequest;
 pub use difimage::DifImageState;
 pub use draw::DrawState;
 pub use logstring::LogStringState;
+pub use model_plane::ModelPlaneState;
 pub use navigation::NavigationOutcome;
 pub use particle::ParticleState;
 pub use scene::Scene;
@@ -94,6 +96,7 @@ pub enum ObjectState {
     Button(Box<ButtonState>),
     CPlane(Box<CPlaneState>),
     Plane(Box<PlaneState>),
+    ModelPlane(Box<ModelPlaneState>),
     Slider(Box<SliderState>),
     Scroll2(Box<Scroll2State>),
     Sound(Box<SoundState>),
@@ -117,6 +120,7 @@ impl ObjectState {
             Self::Button(_) => "BUTTON",
             Self::CPlane(_) => "CPLANE",
             Self::Plane(_) => "PLANE",
+            Self::ModelPlane(_) => "M2PLANE",
             Self::Slider(_) => "SLIDER",
             Self::Scroll2(_) => "SCROLL2",
             Self::Sound(sound) if sound.table.is_some() => "SNDTABLE",
@@ -141,6 +145,7 @@ impl ObjectState {
             "BUTTON" => Self::Button(Box::default()),
             "CPLANE" => Self::CPlane(Box::default()),
             "PLANE" => Self::Plane(Box::default()),
+            "M2PLANE" => Self::ModelPlane(Box::default()),
             "SLIDER" => Self::Slider(Box::default()),
             "SCROLL2" => Self::Scroll2(Box::default()),
             "SOUND" => Self::Sound(Box::default()),
@@ -161,6 +166,7 @@ impl ObjectState {
         match self {
             Self::CPlane(state) => Some(state),
             Self::Plane(state) => Some(&state.base),
+            Self::ModelPlane(state) => Some(&state.plane),
             Self::String(state) => Some(&state.layout.base.base),
             Self::LogString(state) => Some(&state.template.layout.base.base),
             _ => None,
@@ -171,6 +177,7 @@ impl ObjectState {
         match self {
             Self::CPlane(state) => Some(state),
             Self::Plane(state) => Some(&mut state.base),
+            Self::ModelPlane(state) => Some(&mut state.plane),
             Self::String(state) => Some(&mut state.layout.base.base),
             Self::LogString(state) => Some(&mut state.template.layout.base.base),
             _ => None,
@@ -672,6 +679,9 @@ impl Objects {
                 }
                 ObjectState::CPlane(state) => state.apply(&initialization.attributes, bank as u32),
                 ObjectState::Plane(state) => state.apply(&initialization.attributes, bank as u32),
+                ObjectState::ModelPlane(state) => {
+                    state.plane.apply(&initialization.attributes, bank as u32)
+                }
                 ObjectState::String(state) => state
                     .layout
                     .base

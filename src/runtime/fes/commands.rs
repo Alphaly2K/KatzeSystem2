@@ -453,6 +453,10 @@ impl Objects {
                 return Err(Error::new(offset, "FES 图形 pos 需要场景运动资源服务"));
             }
             if name == b"load" {
+                if let ObjectState::ModelPlane(plane) = object {
+                    plane.select(args.get(2).map_or(b"", Vec::as_slice))?;
+                    continue;
+                }
                 if let Some(image) = object.image_source_mut() {
                     image.apply(
                         &fes::ObjectAttributes {

@@ -162,6 +162,14 @@ impl GameSetup {
         self.0.set_effect_services(services);
     }
 
+    /// Install optional model playback for FES character planes.
+    pub fn set_model_services(
+        &mut self,
+        services: impl crate::host::model::ModelServices + 'static,
+    ) {
+        self.0.set_model_services(services);
+    }
+
     pub fn set_speech_synthesizer(&mut self, synthesizer: impl SpeechSynthesizer + 'static) {
         self.0.set_speech_synthesizer(synthesizer);
     }

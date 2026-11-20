@@ -11,6 +11,7 @@ mod export;
 pub mod font;
 pub mod graphics;
 pub mod input;
+pub mod model;
 pub mod movie;
 pub mod platform;
 pub mod resources;

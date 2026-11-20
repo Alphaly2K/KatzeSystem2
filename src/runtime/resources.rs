@@ -15,6 +15,8 @@ pub(super) struct Resources {
     pub bmb_buffer: std::rc::Rc<std::cell::RefCell<Vec<u8>>>,
     pub platform_jobs: Option<Box<dyn super::PlatformJobServices>>,
     pub effects: Option<Box<dyn super::EffectServices>>,
+    pub model_services: Option<Box<dyn crate::host::model::ModelServices>>,
+    pub model_players: std::collections::BTreeMap<u32, Box<dyn crate::host::model::ModelPlayer>>,
     pub speech: Option<Box<dyn crate::host::SpeechSynthesizer>>,
     pub fonts: Option<Box<dyn crate::host::FontServices>>,
     pub images: Images,

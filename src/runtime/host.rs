@@ -58,6 +58,14 @@ impl<F: ObjectFactory> Runtime<F> {
         self.resources.movie_decoder_factory = Some(std::sync::Arc::new(factory));
     }
 
+    /// Install the service for subsequent FES character model selections.
+    pub fn set_model_services(
+        &mut self,
+        services: impl crate::host::model::ModelServices + 'static,
+    ) {
+        self.resources.model_services = Some(Box::new(services));
+    }
+
     pub fn set_system_services(&mut self, services: impl SystemServices + 'static) {
         self.host.system_services = Some(Box::new(services));
     }
