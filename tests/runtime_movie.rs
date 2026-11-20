@@ -314,7 +314,9 @@ fn movie_natives_play_present_finish_and_release_through_runtime_services() {
         instruction(&mut code, 0x3b, &[]);
         let mut runtime = setup(code, budget, b"clip_%u[G128].mpg\0");
         runtime.set_movie_decoder_factory(MpegDecoderFactory);
+        assert!(!runtime.has_exclusive_movie());
         runtime.update(0, 1).unwrap();
+        assert!(runtime.has_exclusive_movie());
         assert_ne!(word(&runtime, 0), 0);
         assert_eq!(word(&runtime, 4), 1);
         assert_eq!(word(&runtime, 12), 1);
@@ -363,10 +365,12 @@ fn movie_natives_play_present_finish_and_release_through_runtime_services() {
         assert_eq!(runtime.compose_frame().unwrap().commands.len(), 4);
         runtime.update(3, 1).unwrap();
         assert_eq!(word(&runtime, 16), 0);
+        assert!(runtime.has_exclusive_movie());
         assert!(runtime.drawing().enabled);
         assert!(runtime.compose_frame().unwrap().commands.is_empty());
         runtime.update(4, 1).unwrap();
         assert_eq!(word(&runtime, 20), 1);
+        assert!(!runtime.has_exclusive_movie());
         assert_eq!(word(&runtime, 24), 0xdead_beef);
         assert!(runtime.drawing().enabled);
         audio.fill(1.);

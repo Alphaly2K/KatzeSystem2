@@ -402,6 +402,7 @@ pub(crate) fn inspect_runtime(
             }
         }
         if let Some(replay) = &mut replay {
+            replay.observe_movie(runtime.has_exclusive_movie());
             if let Some(state) = runtime.input_state(input) {
                 replay.update(frame, state.regions().records());
             }

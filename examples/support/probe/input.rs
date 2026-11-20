@@ -11,6 +11,7 @@ use std::{cell::Cell, ops::RangeInclusive, rc::Rc};
 pub(crate) struct StoryReplay {
     automatic: RangeInclusive<u32>,
     advance_key: Option<RangeInclusive<u32>>,
+    movie_pause: Option<Rc<Cell<bool>>>,
     pointer: Rc<Cell<[i32; 2]>>,
     surface: [u32; 2],
     plan: Vec<usize>,
@@ -29,6 +30,8 @@ impl StoryReplay {
         Some(Self {
             automatic,
             advance_key,
+            movie_pause: std::env::var_os("KATZE_PROBE_NATURAL_MOVIES")
+                .map(|_| Rc::new(Cell::new(false))),
             pointer: Rc::new(Cell::new(replay_scale(surface, [900, 400]))),
             surface,
             plan: std::env::var("KATZE_PROBE_CHOICE_PLAN")
@@ -40,6 +43,12 @@ impl StoryReplay {
             option: 0,
             step: 0,
         })
+    }
+
+    pub(super) fn observe_movie(&self, exclusive: bool) {
+        if let Some(pause) = &self.movie_pause {
+            pause.set(exclusive);
+        }
     }
 
     pub(super) fn update(&mut self, frame: u32, regions: &[Region]) {
@@ -126,6 +135,7 @@ pub(crate) struct ScriptedDevice {
     automatic: Option<RangeInclusive<u32>>,
     advance_key: Option<RangeInclusive<u32>>,
     replay_pointer: Option<Rc<Cell<[i32; 2]>>>,
+    movie_pause: Option<Rc<Cell<bool>>>,
 }
 
 impl ScriptedDevice {
@@ -157,6 +167,7 @@ impl ScriptedDevice {
             automatic: replay.map(|replay| replay.automatic.clone()),
             advance_key: replay.and_then(|replay| replay.advance_key.clone()),
             replay_pointer: replay.map(|replay| replay.pointer.clone()),
+            movie_pause: replay.and_then(|replay| replay.movie_pause.clone()),
         }
     }
 }
@@ -167,19 +178,21 @@ impl InputDevice for ScriptedDevice {
     }
     fn poll(&mut self) -> Result<()> {
         self.polls = self.polls.wrapping_add(1);
-        let pressed =
-            self.clicks
-                .iter()
-                .any(|&(round, _)| self.polls.wrapping_sub(round) < 2)
-                || self.automatic.as_ref().is_some_and(|range| {
+        let automatic = !self.movie_pause.as_ref().is_some_and(|pause| pause.get());
+        let pressed = self
+            .clicks
+            .iter()
+            .any(|&(round, _)| self.polls.wrapping_sub(round) < 2)
+            || (automatic
+                && self.automatic.as_ref().is_some_and(|range| {
                     range.contains(&self.polls) && self.polls.is_multiple_of(4)
-                });
+                }));
         self.keys.button(ButtonSource::Mouse, 1, u32::from(pressed));
         if let Some(range) = &self.advance_key {
             self.keys.button(
                 ButtonSource::Keyboard,
                 0x11,
-                u32::from(range.contains(&self.polls)),
+                u32::from(automatic && range.contains(&self.polls)),
             );
         }
         if std::env::var_os("KATZE_TRACE_INPUT").is_some() && self.polls < 320 {

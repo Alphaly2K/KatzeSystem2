@@ -1,4 +1,4 @@
-use super::{ObjectFactory, ObjectHost, Resources, TaskObject};
+use super::{ObjectFactory, ObjectHost, Resources, Runtime, TaskObject};
 use crate::graphics::{DrawList, Rect, Surface, TextureFilter};
 use crate::kcs::{Interpreter, NativeReturn, format_string};
 use crate::movie::Player;
@@ -144,6 +144,14 @@ impl Resources {
             Some(movie) => movie.compose(size, filter),
             None => Ok(None),
         }
+    }
+}
+
+impl<F: ObjectFactory> Runtime<F> {
+    /// Whether an exclusive movie has been loaded and has yet to be released.
+    /// Plane movies do not hold this slot.
+    pub fn has_exclusive_movie(&self) -> bool {
+        self.resources.movie.is_some()
     }
 }
 
