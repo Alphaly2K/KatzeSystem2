@@ -437,6 +437,7 @@ fn external_particle_controls_mesh_and_wait_through_the_runtime() -> Result<()> 
     enum Event {
         Open,
         Start,
+        Stop,
         Advance(u32, u32),
         Drop,
     }
@@ -462,11 +463,11 @@ fn external_particle_controls_mesh_and_wait_through_the_runtime() -> Result<()> 
         fn start(&mut self, context: ParticleContext<'_>, frame: ParticleFrame<'_>) -> Result<()> {
             assert_eq!(context.surface_size, [320, 180]);
             assert_eq!(context.texture_size, [256.; 2]);
-            assert_eq!(context.parameters[0], 123);
             assert_eq!(context.source.unwrap().position_2d, [12., 34.]);
             assert_eq!(frame.quads[0][0].color, u32::MAX);
             frame.quads[0][0].color = 0xff00_ffff;
             self.0.borrow_mut().push(Event::Start);
+            *frame.active = context.parameters[0] == 123;
             Ok(())
         }
         fn advance(
@@ -481,6 +482,9 @@ fn external_particle_controls_mesh_and_wait_through_the_runtime() -> Result<()> 
                 *frame.active = false;
             }
             Ok(())
+        }
+        fn stop(&mut self) {
+            self.0.borrow_mut().push(Event::Stop);
         }
     }
     impl Drop for Player {
@@ -551,7 +555,20 @@ fn external_particle_controls_mesh_and_wait_through_the_runtime() -> Result<()> 
     assert_eq!(runtime.drawables().get(id).unwrap().display(), 0);
     runtime.dispatch_command(0, command(321))?;
     runtime.dispatch_command(0, command(322))?;
+    runtime.dispatch_command(0, command(322))?;
     runtime.update(30, 1)?;
+    runtime.dispatch_command_with_buffers(
+        0,
+        command(325),
+        &mut CommandBuffers {
+            data1: Some(&mut [0; 128]),
+            ..Default::default()
+        },
+    )?;
+    runtime.dispatch_command(0, command(321))?;
+    assert_eq!(runtime.dispatch_command(0, command(324))?, 0);
+    assert_eq!(runtime.drawables().get(id).unwrap().display(), 0);
+    runtime.update(32, 1)?;
     runtime.dispatch_command(0, command(323))?;
     assert!(
         runtime
@@ -568,6 +585,8 @@ fn external_particle_controls_mesh_and_wait_through_the_runtime() -> Result<()> 
             Event::Start,
             Event::Advance(0, 1),
             Event::Advance(4, 4),
+            Event::Start,
+            Event::Stop,
             Event::Start,
             Event::Drop
         ]

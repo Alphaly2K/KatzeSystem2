@@ -23,7 +23,7 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 |`host::platform`、`host::effect`|窗口、剪贴板、平台任务及外部效果播放器|
 |`host::diagnostics`|脚本位置、调试消息、native 跟踪及 `QuizDebugSession`、`QuizDebugInput`|
 
-未识别的 3D 粒子插件可由 `host::effect::EffectServices::open_particle` 接入。服务取得资源名和字节，为当前任务创建 `ParticlePlayer`。播放器通过借用的 `ParticleFrame` 更新运行库持有的网格，通过 `active` 结束脚本等待。运行库继续生成绘制命令，由图形宿主呈现。服务不可用时，装载返回插件诊断。
+未识别的 3D 粒子插件可由 `host::effect::EffectServices::open_particle` 接入。服务取得资源名和字节，为当前任务创建 `ParticlePlayer`。播放器通过借用的 `ParticleFrame` 更新运行库持有的网格，可在启动或更新时清除 `active` 来结束脚本等待。活动实例收到脚本停止命令时调用 `ParticlePlayer::stop`，之后仍可重启。运行库继续生成绘制命令，由图形宿主呈现。服务不可用时，装载返回插件诊断。
 
 可选的软件绘制器及其输出目标从 `graphics` 导入，MPEG 解码器从 `movie` 导入。绘制命令和 `Surface` 原有的 `graphics` 导入路径仍然可用。任务树、原始命令编号、VM 缓冲区和分派表在底层 `runtime` 接口中供诊断和工具使用。Rust 契约稳定且有非 Rust 宿主接入时，再定义独立版本的 C ABI 和显式释放约定。
 

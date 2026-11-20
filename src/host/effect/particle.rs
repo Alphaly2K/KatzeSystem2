@@ -60,4 +60,7 @@ pub trait ParticlePlayer {
     /// Restart from the initial state. The runtime has reset the mesh.
     fn start(&mut self, context: ParticleContext<'_>, frame: ParticleFrame<'_>) -> Result<()>;
     fn advance(&mut self, context: ParticleContext<'_>, frame: ParticleFrame<'_>) -> Result<()>;
+    /// Stop an active effect on a script request. The player stays loaded and
+    /// can be started again. Dropping it releases any remaining resources.
+    fn stop(&mut self) {}
 }

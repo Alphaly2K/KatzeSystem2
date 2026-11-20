@@ -320,10 +320,11 @@ impl ParticleRunner {
                 prepare_external_frame(host, services)?;
                 host.active = true;
                 let (context, frame) = external_frame(host, *texture_size, 0);
-                if let Err(error) = player.start(context, frame) {
+                let result = player.start(context, frame);
+                if result.is_err() {
                     host.active = false;
-                    return Err(error);
                 }
+                return result;
             }
             Self::Builtin {
                 kind,
@@ -414,6 +415,15 @@ impl ParticleRunner {
         }
         self.host_mut().active = true;
         Ok(())
+    }
+
+    fn stop(&mut self) {
+        if let Self::External { player, host, .. } = self {
+            if host.active {
+                player.stop();
+            }
+        }
+        self.host_mut().active = false;
     }
 
     fn update(&mut self, services: &mut dyn Host, now: u32, budget: usize) -> Result<bool> {
@@ -1150,7 +1160,7 @@ impl TaskObject for Particle3DObject {
             }
             322 => {
                 if let Some(task) = &mut self.task {
-                    task.host_mut().active = false;
+                    task.stop();
                 }
                 self.sync(host)?;
             }
