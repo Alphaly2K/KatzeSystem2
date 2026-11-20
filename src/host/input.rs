@@ -1,3 +1,6 @@
+//! Input device queries and logical key bindings.
+
+pub use crate::input::DeviceKeys;
 use crate::{Error, Result};
 
 /// Device order in a key binding table.

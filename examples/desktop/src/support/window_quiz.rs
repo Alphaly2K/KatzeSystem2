@@ -1,6 +1,9 @@
 use katze_system2::{
     graphics::{Rect, Surface},
-    host::{FontRequest, FontServices, QuizDebugInput, QuizDebugSession, TextEncoding},
+    host::{
+        diagnostics::{QuizDebugInput, QuizDebugSession},
+        font::{FontRequest, FontServices, TextEncoding},
+    },
     message::Fonts,
     session::GameRuntime,
 };

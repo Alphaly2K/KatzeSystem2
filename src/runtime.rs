@@ -44,7 +44,7 @@ mod text_window;
 pub use motion::MotionSnapshot;
 mod frame;
 mod frame_capture;
-pub use frame_capture::SequenceCapture;
+pub use crate::host::graphics::SequenceCapture;
 mod game_tasks;
 mod image_animation;
 mod image_data;

@@ -1,4 +1,6 @@
-use katze_system2::host::{DiagnosticTrace, NativeTraceEvent, ScriptMessages, TraceCategory};
+use katze_system2::host::diagnostics::{
+    DiagnosticTrace, NativeTraceEvent, ScriptMessages, TraceCategory,
+};
 use std::{cell::RefCell, time::Instant};
 
 pub struct Output {

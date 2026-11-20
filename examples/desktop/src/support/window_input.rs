@@ -1,6 +1,6 @@
 use katze_system2::{
     Result,
-    host::{ButtonSource, DeviceBinding, DeviceKeys, InputDevice, KeySample, PointerSample},
+    host::input::{ButtonSource, DeviceBinding, DeviceKeys, InputDevice, KeySample, PointerSample},
     input::WheelButtons,
 };
 use sdl2::{

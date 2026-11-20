@@ -9,13 +9,15 @@ use blowfish::{
 };
 use katze_system2::{
     Error, Result,
+    graphics::SoftwareBackend,
     host::{
-        ButtonSource, ConfigurationFile, DeviceBinding, DeviceKeys, FileServices, LocalDateTime,
-        ResourceMode, ResourceServices, SaveServices, SharedSource, SoftwareBackend,
-        SystemServices,
+        input::{ButtonSource, DeviceBinding, DeviceKeys},
+        platform::{LocalDateTime, SystemServices},
+        resources::{ArchiveConfig, ResourceMode, ResourceServices},
+        storage::{ConfigurationFile, FileServices, SaveServices, SharedSource},
     },
     kcs::Program,
-    resource::{ArchiveConfig, KifEntrySource, XmlDocument},
+    resource::{KifEntrySource, XmlDocument},
     session::GameSetup,
 };
 use std::{collections::BTreeMap, sync::Arc};

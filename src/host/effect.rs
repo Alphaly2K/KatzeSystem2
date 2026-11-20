@@ -1,3 +1,5 @@
+//! Playback services for external effect formats.
+
 use crate::Result;
 
 /// Creates a player for each scripted effect task. The host advances and renders it.

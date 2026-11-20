@@ -1,5 +1,7 @@
-use super::SharedSource;
-use crate::{Result, graphics::Surface};
+//! Movie decoders for the formats supported by the host.
+
+use super::{graphics::Surface, storage::SharedSource};
+use crate::Result;
 
 /// Top-down BGRA frame. The presentation time is in seconds from stream start.
 pub struct MovieFrame {

@@ -1,11 +1,25 @@
 //! Standard game session for embedding CatSystem2. The application supplies
 //! [`crate::host`] services and drives the session one frame at a time.
 
-use crate::{Result, host::*, runtime::TaskRuntime};
+use crate::{
+    Result,
+    host::{
+        audio::Mixer,
+        diagnostics::{
+            DiagnosticTrace, NativeTraceEvent, QuizDebugInput, QuizDebugSession, ScriptMessages,
+            ScriptPosition,
+        },
+        graphics::{DrawList, FrameCanvas, GraphicsBackend, Rect, SequenceCapture},
+        movie::MovieDecoderFactory,
+        platform::{ClipboardRequest, PlatformJobServices, WindowRequest, WindowServices},
+    },
+    runtime::TaskRuntime,
+};
 use std::sync::Arc;
 
 mod error;
 mod setup;
+pub use crate::language::StringTables;
 pub use error::{AdvanceError, StartupError};
 pub use setup::GameSetup;
 

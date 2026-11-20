@@ -10,7 +10,19 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 |网络与系统|按脚本协议分发请求并管理任务状态。类型 62 的旧版社交发帖接收者暂未接入。|执行网络或系统动作，实施策略，回交结果；处理窗口、剪贴板、输入法、插件及对话框。|
 |输入、字体和时钟|处理游戏输入和逻辑时钟，按字体数据完成字形度量与栅格化。|提供输入事件、运行时间和当地日期时间，发现字体并提供数据。|
 
-嵌入时从 `katze_system2::session` 导入 `GameSetup`、`GameRuntime`、`FrameTime` 和 `FrameOutcome`，从 `katze_system2::host` 导入服务契约及输入、绘制命令、纹理、PCM 和诊断类型。软件绘制和 MPEG 解码等现成的可选实现分别从 `graphics` 和 `movie` 导入。任务树、原始命令编号、VM 缓冲区和分派表在底层 `runtime` 接口中供诊断和工具使用。Rust 契约稳定且有非 Rust 宿主接入时，再定义独立版本的 C ABI 和显式释放约定。
+嵌入时从 `katze_system2::session` 导入 `GameSetup`、`GameRuntime`、`FrameTime` 和 `FrameOutcome`。服务与对应的数据类型按下表导入，旧的 `host::类型名` 平铺路径继续兼容。
+
+|模块|宿主接口|
+|:--|:--|
+|`host::resources`|`ResourceServices`、资源类别、读取模式与缓存|
+|`host::storage`|`ReadSource`、`SharedSource` 及脚本文件、存档、配置和导出服务|
+|`host::graphics`|`DrawList`、`FrameCanvas`、`GraphicsBackend`、`SequenceCapture` 与像素格式|
+|`host::audio`、`host::movie`|`Mixer`、`Pcm`、语音合成及电影解码契约|
+|`host::input`、`host::font`|输入事件、按键绑定与字体服务|
+|`host::platform`、`host::effect`|窗口、剪贴板、平台任务及外部效果播放器|
+|`host::diagnostics`|脚本位置、调试消息、native 跟踪及问答调试面板|
+
+可选的软件绘制器及其输出目标从 `graphics` 导入，MPEG 解码器从 `movie` 导入。任务树、原始命令编号、VM 缓冲区和分派表在底层 `runtime` 接口中供诊断和工具使用。Rust 契约稳定且有非 Rust 宿主接入时，再定义独立版本的 C ABI 和显式释放约定。
 
 标准宿主用 `GameSetup::new(shared_slots, external_bytes)` 创建根任务和清零后的脚本存储。前者按 32 位值计数，后者按字节计数。启动前可将启动文档、游戏默认值及用户设置的 XML 字节交给 `configure_startup`，由它应用引擎与平台配置并返回游戏逻辑尺寸；配置无效时保留原有状态。绑定输入、资源和需要的其他服务，调用 `configure_canvas` 设置非零的逻辑输出尺寸并按游戏配置创建画布，再把启动配置中的脚本名称交给 `start_game(entry)`。该方法消费 `GameSetup`，并在创建任务前检查资源、输入和画布。成功后返回 `GameRuntime`，宿主可用它推进帧、呈现和拉取 PCM。宿主可先调用 `validate_startup` 检查这些条件；该检查不会访问宿主服务或装载脚本。两个方法使用 `session::StartupError` 分别报告缺少的服务；任务创建或入口装载失败由 `StartTasks` 携带原始诊断。
 
@@ -18,9 +30,9 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 
 普通 KCS 的入口和后续装载使用已绑定的 `ResourceServices`。运行库按 `kcs` 类别补全名称，以 `ArchiveFirst` 模式读取字节并解析；补丁与归档顺序由资源服务决定。工具可用 `GameRuntime::into_task_runtime` 接续已启动的实例，或用 `GameSetup::into_task_runtime` 接管启动步骤。也可直接使用 `runtime::TaskRuntime::with_programs` 提供预解析程序，或用 `TaskRuntime::with_resource_programs` 绑定现有外部存储。`TaskRuntime::start_game_with_tasks(entry)` 可另外取得用于诊断的任务编号。
 
-宿主通过 `ResourceServices` 提供资源，使用 `FileServices`、`SaveServices` 和 `ConfigurationServices` 分别接入脚本文件、存档和配置持久化。资源服务返回完整字节或可独立读取的 `SharedSource`；宿主可用 `CachedResources` 为自定义装载流程复用预读缓存。这些契约统一从 `host` 导入；旧的 `io`、`save` 和 `settings` 导入路径仍可用。
+宿主通过 `host::resources::ResourceServices` 提供资源，通过 `host::storage` 中的 `FileServices`、`SaveServices` 和 `ConfigurationServices` 分别接入脚本文件、存档和配置持久化。资源服务返回完整字节或可独立读取的 `SharedSource`；宿主可用 `CachedResources` 为自定义装载流程复用预读缓存。
 
-标准会话在启动前必须通过 `set_input_device` 绑定 `host::InputDevice`。离屏宿主可提供只返回空闲状态的内存设备。`startup_input_bindings` 返回已经应用用户覆盖的八十个逻辑键槽，宿主可以用它构造 `DeviceKeys` 或自行维护输入状态。配置保存用 `InputDevice::key_configuration` 借用 `&[DeviceBinding; 80]`；使用 `DeviceKeys` 的宿主可返回 `Some(keys.bindings())`。返回 `None` 时使用启动配置。
+标准会话在启动前必须通过 `set_input_device` 绑定 `host::input::InputDevice`。离屏宿主可提供只返回空闲状态的内存设备。`startup_input_bindings` 返回已经应用用户覆盖的八十个逻辑键槽，宿主可以用它构造 `DeviceKeys` 或自行维护输入状态。配置保存用 `InputDevice::key_configuration` 借用 `&[DeviceBinding; 80]`；使用 `DeviceKeys` 的宿主可返回 `Some(keys.bindings())`。返回 `None` 时使用启动配置。
 
 `GameSetup::set_game_resources` 接受资源服务与声音配置文档。运行库按声音定义选定归档类别，应用用户覆盖以控制播放；宿主按该类别补全名称并提供读取源。没有新版声音定义时，使用启动文档里的旧版文件映射和声音组。自定义声音路由的宿主可以用 `set_resources`，由其资源服务直接处理 `sound` 类别。
 
@@ -46,9 +58,9 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 
 离屏宿主在更新后用 `mix_audio_stereo(rate_hz, buffer)` 拉取 PCM；此调用可等待解码。设备宿主用 `connect_audio_output()` 取得可移交给音频线程的 `Mixer`，由回调用 `Mixer::render(rate_hz, buffer)` 拉取 PCM，无须借用运行实例。两者均覆写调用方缓冲，格式为左右交错、幅度 `[-1, 1]` 的 `f32` 采样。游戏声音只能连接一次，连接后不得再调用离屏混音；会话退出时由宿主停止回调并释放混音器。
 
-宿主可通过 `host::SpeechSynthesizer` 提供合成的 `Pcm`；字体服务从 `host` 导入 `FontServices`、`FontRequest` 和 `GlyphMask`。可复用 `message::Fonts` 处理宿主提供的字体，或实现自己的服务。软件图形后端、字形实现与混音器都可在无设备环境运行。
+宿主可通过 `host::audio::SpeechSynthesizer` 提供合成的 `Pcm`；字体服务从 `host::font` 导入 `FontServices`、`FontRequest` 和 `GlyphMask`。可复用 `message::Fonts` 处理宿主提供的字体，或实现自己的服务。软件图形后端、字形实现与混音器都可在无设备环境运行。
 
-装载电影需要宿主先通过 `set_movie_decoder_factory` 注册 `host::MovieDecoderFactory`。工厂打开 `SharedSource`，解码器在运行库的工作线程返回 BGRA 帧与交错 PCM。更换工厂不影响已装载电影。默认库构建无需 C 工具链；启用 `builtin-mpeg` 并注册 `movie::MpegDecoderFactory` 可解码 MPEG-1 视频及 MP2／MP3 音轨。
+装载电影需要宿主先通过 `set_movie_decoder_factory` 注册 `host::movie::MovieDecoderFactory`。工厂打开 `SharedSource`，解码器在运行库的工作线程返回 BGRA 帧与交错 PCM。更换工厂不影响已装载电影。默认库构建无需 C 工具链；启用 `builtin-mpeg` 并注册 `movie::MpegDecoderFactory` 可解码 MPEG-1 视频及 MP2／MP3 音轨。
 
 离屏和桌面示例可设置 `KATZE_FFMPEG_MOVIES=1`，让示例使用 `PATH` 中的 `ffprobe` 和 `ffmpeg` 探测并解码电影，支持 VP8／Vorbis WebM。此模式要求媒体能够从不可寻址的输入管道解码。视频按报告的帧率输出，音轨输出同一时间基准下的立体声 PCM。电影资源通过宿主提供的流读取，示例无需把电影解包到磁盘。运行库不需要外部媒体程序。
 

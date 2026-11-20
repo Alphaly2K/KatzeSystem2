@@ -1,4 +1,4 @@
-use katze_system2::host::{ClipboardRequest, ClipboardText};
+use katze_system2::host::platform::{ClipboardRequest, ClipboardText};
 
 #[derive(Default)]
 pub struct Output {

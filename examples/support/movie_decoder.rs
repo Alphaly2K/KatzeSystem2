@@ -1,8 +1,11 @@
 use katze_system2::{
     Error, Result,
     host::{
-        MovieAudio, MovieDecoded, MovieDecoder, MovieDecoderFactory, MovieFrame, MovieMetadata,
-        SharedSource, Surface,
+        graphics::Surface,
+        movie::{
+            MovieAudio, MovieDecoded, MovieDecoder, MovieDecoderFactory, MovieFrame, MovieMetadata,
+        },
+        storage::SharedSource,
     },
     io::SourceReader,
 };

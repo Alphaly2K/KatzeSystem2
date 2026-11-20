@@ -1,3 +1,6 @@
+//! Script diagnostics and the optional quiz debug panel.
+
+pub use crate::runtime::{QuizDebugInput, QuizDebugSession};
 use std::{fmt::Arguments, rc::Rc};
 
 /// Selects a family of optional diagnostic probes.

@@ -3,7 +3,7 @@
 use ::metal::*;
 use katze_system2::{
     Error, Result,
-    host::{
+    host::graphics::{
         DrawList, FrameCanvas, FrameTexture, FrameTriangle, GraphicsBackend, Rect, Surface,
         TextureAddress, TextureFilter, TextureSource,
     },

@@ -1,6 +1,6 @@
 use katze_system2::{
     Error, Result,
-    host::{PlatformJob, PlatformJobRequest, PlatformJobServices},
+    host::platform::{PlatformJob, PlatformJobRequest, PlatformJobServices},
     resource::XmlDocument,
 };
 use std::{

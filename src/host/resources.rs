@@ -1,8 +1,8 @@
-use super::SharedSource;
-use crate::{
-    Error, Result,
-    resource::{ResourceCache, ResourceMode},
-};
+//! Lookup and loading of game assets.
+
+use super::storage::SharedSource;
+pub use crate::resource::{ArchiveConfig, CachedResources, ResourceCache, ResourceMode};
+use crate::{Error, Result};
 
 /// 运行时的同步资源读取服务；None 表示未找到或无法打开。
 pub trait ResourceServices {

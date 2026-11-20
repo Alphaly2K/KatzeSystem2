@@ -1,7 +1,7 @@
-use crate::{
-    Error, Result,
-    message::{GlyphMask, TextEncoding},
-};
+//! Font discovery, metrics and glyph rasterization.
+
+pub use crate::message::{GlyphMask, TextEncoding};
+use crate::{Error, Result};
 
 /// Font selection and metric parameters supplied by the runtime.
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -1,4 +1,8 @@
+//! Byte sources and persistence for files, configuration and game saves.
+
+pub use super::export::{ExportDestination, ExportServices};
 use crate::{Error, Result};
+pub use crate::{kcs::ScriptSettings, resource::FolderPaths};
 use std::{io::Write, sync::Arc};
 
 pub type SharedSource = Arc<dyn ReadSource>;

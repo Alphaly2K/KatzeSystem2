@@ -1068,7 +1068,10 @@ fn public_session_reports_startup_and_update_failures_by_stage() -> Result<()> {
 fn public_session_uses_host_resources_and_delivers_frame_and_pcm()
 -> std::result::Result<(), Box<dyn std::error::Error>> {
     use katze_system2::{
-        host::{ResourceMode, ResourceServices, ScriptLocation, ScriptPosition},
+        host::{
+            diagnostics::{ScriptLocation, ScriptPosition},
+            resources::{ResourceMode, ResourceServices},
+        },
         session::{FrameOutcome, FrameTime, GameRuntime, GameSetup},
     };
 

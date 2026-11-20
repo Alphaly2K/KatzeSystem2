@@ -1,3 +1,5 @@
+//! Host requests for windows, system integration and platform jobs.
+
 use crate::{Error, Result};
 
 /// Requests for platform work that runs independently of the script VM.

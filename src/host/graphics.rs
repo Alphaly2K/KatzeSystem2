@@ -1,13 +1,20 @@
-use crate::{
-    Result,
-    graphics::{DrawList, RenderTarget, Surface, TextureSource},
+//! Frame presentation data and synchronous rendering for script readback.
+
+mod capture;
+pub use capture::SequenceCapture;
+
+pub use crate::graphics::{
+    DrawCommand, DrawList, FrameTexture, FrameTriangle, ProjectedVertex, Rect, Surface,
+    TextureAddress, TextureFilter, TextureSource,
 };
+use crate::{Result, graphics::RenderTarget};
 
 /// Read-only canvas textures with an explicit upload acknowledgement. A host
 /// cache shared by presentation and script readback can consume the dirty flags.
 pub struct FrameCanvas<'a>(&'a mut RenderTarget);
 
 impl<'a> FrameCanvas<'a> {
+    /// Wrap a canvas for standalone rendering outside a game session.
     pub fn new(target: &'a mut RenderTarget) -> Self {
         Self(target)
     }

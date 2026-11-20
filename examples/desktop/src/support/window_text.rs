@@ -1,6 +1,6 @@
 use katze_system2::{
     graphics::{Rect, Surface},
-    host::{FontRequest, FontServices, TextEncoding},
+    host::font::{FontRequest, FontServices, TextEncoding},
     message::Fonts,
 };
 use sdl2::{

@@ -1,4 +1,7 @@
-use crate::{Result, audio::Pcm};
+//! PCM output and optional speech synthesis.
+
+use crate::Result;
+pub use crate::audio::{Mixer, Pcm};
 
 /// Supplies speech as PCM in the source sample format used by the mixer.
 pub trait SpeechSynthesizer {

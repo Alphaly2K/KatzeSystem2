@@ -6,9 +6,12 @@ mod support;
 
 use katze_system2::{
     Result,
+    graphics::SoftwareBackend,
     host::{
-        ButtonSource, DeviceBinding, DeviceKeys, GraphicsBackend, InputDevice, KeySample,
-        PointerSample, Rect, ResourceMode, ResourceServices, SoftwareBackend, WindowServices,
+        graphics::{GraphicsBackend, Rect},
+        input::{ButtonSource, DeviceBinding, DeviceKeys, InputDevice, KeySample, PointerSample},
+        platform::WindowServices,
+        resources::{ResourceMode, ResourceServices},
     },
     input::Region,
     runtime::{GameTasks, TaskRuntime},

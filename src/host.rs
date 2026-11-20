@@ -2,53 +2,62 @@
 //!
 //! The host provides storage, input and platform services, and handles device
 //! presentation. See [`crate::session::GameRuntime`] for the session lifecycle.
+//! Import each service and its data from the module for that capability.
 
-mod audio;
-mod diagnostics;
-mod effect;
+pub mod audio;
+pub mod diagnostics;
+pub mod effect;
 mod export;
-mod font;
-mod graphics;
-mod input;
-mod movie;
-mod platform;
-mod resources;
-mod storage;
+pub mod font;
+pub mod graphics;
+pub mod input;
+pub mod movie;
+pub mod platform;
+pub mod resources;
+pub mod storage;
 
-pub use crate::audio::{Mixer, Pcm};
+// Keep existing imports working while documenting the capability modules.
+#[doc(hidden)]
 pub use crate::graphics::{
-    DrawCommand, DrawList, FrameTexture, FrameTriangle, ProjectedVertex, Rect,
-    RenderTarget, SoftwareBackend, Surface, TextureAddress, TextureFilter, TextureSource,
+    DrawCommand, DrawList, FrameTexture, FrameTriangle, ProjectedVertex, Rect, Surface,
+    TextureAddress, TextureFilter, TextureSource,
 };
-pub use crate::input::DeviceKeys;
-pub use crate::kcs::ScriptSettings;
+#[doc(hidden)]
+pub use crate::graphics::{RenderTarget, SoftwareBackend};
+#[doc(hidden)]
 pub use crate::language::StringTables;
-pub use crate::message::{GlyphMask, TextEncoding};
-pub use crate::resource::{
-    ArchiveConfig, CachedResources, FolderPaths, ResourceCache, ResourceMode,
-};
-pub use crate::runtime::{QuizDebugInput, QuizDebugSession, SequenceCapture};
-pub use audio::SpeechSynthesizer;
+#[doc(hidden)]
+pub use audio::{Mixer, Pcm, SpeechSynthesizer};
 pub(crate) use diagnostics::trace_detail;
+#[doc(hidden)]
 pub use diagnostics::{
-    DiagnosticTrace, NativeInvocation, NativeTraceEvent, ScriptLocation, ScriptMessages,
-    ScriptPosition, TraceCategory,
+    DiagnosticTrace, NativeInvocation, NativeTraceEvent, QuizDebugInput, QuizDebugSession,
+    ScriptLocation, ScriptMessages, ScriptPosition, TraceCategory,
 };
+#[doc(hidden)]
 pub use effect::{EffectPlayer, EffectServices};
-pub use export::{ExportDestination, ExportServices};
-pub use font::{FontRequest, FontServices};
-pub use graphics::{FrameCanvas, GraphicsBackend};
-pub use input::{ButtonSource, DeviceBinding, InputDevice, KeySample, PointerSample};
+#[doc(hidden)]
+pub use font::{FontRequest, FontServices, GlyphMask, TextEncoding};
+#[doc(hidden)]
+pub use graphics::{FrameCanvas, GraphicsBackend, SequenceCapture};
+#[doc(hidden)]
+pub use input::{ButtonSource, DeviceBinding, DeviceKeys, InputDevice, KeySample, PointerSample};
+#[doc(hidden)]
 pub use movie::{
     MovieAudio, MovieDecoded, MovieDecoder, MovieDecoderFactory, MovieFrame, MovieMetadata,
 };
+#[doc(hidden)]
 pub use platform::{
     AchievementServices, ClipboardRequest, ClipboardText, LocalDateTime, MenuItemRequest,
     PlatformJob, PlatformJobRequest, PlatformJobServices, SystemServices, WindowAction,
     WindowCloseRequest, WindowRequest, WindowServices,
 };
-pub use resources::ResourceServices;
+#[doc(hidden)]
+pub use resources::{
+    ArchiveConfig, CachedResources, ResourceCache, ResourceMode, ResourceServices,
+};
+#[doc(hidden)]
 pub use storage::{
-    ConfigurationFile, ConfigurationServices, FileServices, ReadSnapshot, ReadSource, SaveServices,
-    SharedSource,
+    ConfigurationFile, ConfigurationServices, ExportDestination, ExportServices, FileServices,
+    FolderPaths, ReadSnapshot, ReadSource, SaveServices, ScriptSettings, SharedSource,
 };
