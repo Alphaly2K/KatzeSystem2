@@ -49,6 +49,7 @@ pub(super) struct Concentration {
     image: [f32; 2],
     visible: Arc<AtomicU32>,
     heads: Vec<Head>,
+    legacy: bool,
 }
 
 impl Concentration {
@@ -58,6 +59,25 @@ impl Concentration {
         random: &mut ScriptRandom,
         visible: Arc<AtomicU32>,
     ) -> Result<Self> {
+        Self::with_layout(host, image, random, visible, false)
+    }
+
+    pub(super) fn new_legacy(
+        host: &ParticleHost,
+        image: [f32; 2],
+        random: &mut ScriptRandom,
+        visible: Arc<AtomicU32>,
+    ) -> Result<Self> {
+        Self::with_layout(host, image, random, visible, true)
+    }
+
+    fn with_layout(
+        host: &ParticleHost,
+        image: [f32; 2],
+        random: &mut ScriptRandom,
+        visible: Arc<AtomicU32>,
+        legacy: bool,
+    ) -> Result<Self> {
         let p = host.parameters.map(f32::from_bits);
         let group = integer(p[0]) as u32 as usize;
         let count = host
@@ -65,17 +85,23 @@ impl Concentration {
             .len()
             .checked_div(group)
             .unwrap_or(host.quads.len());
-        if count != 0 && [p[5], p[6]].into_iter().any(|n| integer(n) == 0) {
+        let (center, extent) = if legacy {
+            ([p[2], p[3]], [p[4], p[5]])
+        } else {
+            ([p[3], p[4]], [p[5], p[6]])
+        };
+        if count != 0 && extent.into_iter().any(|n| integer(n) == 0) {
             return Err(Error::new(0, "集中线的散布尺寸整数部分不能为零"));
         }
         let mut effect = Self {
             duration: p[1],
             scale: p[2] / 1000.,
-            center: [p[3], p[4]],
-            extent: [p[5], p[6]],
+            center,
+            extent,
             image,
             visible,
             heads: Vec::with_capacity(count),
+            legacy,
         };
         for _ in 0..count {
             let mut head = effect.spawn(random);
@@ -96,19 +122,35 @@ impl Concentration {
     }
 
     fn spawn(&self, random: &mut ScriptRandom) -> Head {
-        let scale = (random.next_float() * self.scale) * 0.2 + self.scale * 0.8;
+        let sample = random.next_float();
+        let scale = if self.legacy {
+            (sample as f64 * 0.05f32 as f64 + 0.1f32 as f64) as f32
+        } else {
+            (sample * self.scale) * 0.2 + self.scale * 0.8
+        };
         let point = std::array::from_fn::<_, 2, _>(|i| {
             let sample = random.next_integer() % integer(self.extent[i]) as u32;
-            (sample as f32 - self.extent[i] * 0.5) + self.center[i]
+            if self.legacy {
+                (sample as f64 + self.center[i] as f64 - self.extent[i] as f64 * 0.5) as f32
+            } else {
+                (sample as f32 - self.extent[i] * 0.5) + self.center[i]
+            }
         });
-        let position = [point[0], point[1], 500.];
-        let path = TwoPointPath::new(
-            [position, [self.center[0], self.center[1], 500.]],
-            self.duration,
-            100.,
-        );
-        let lifetime = (random.next_float() as f64 * (self.duration as f64 * 0.2)
-            + (self.duration * 0.6) as f64) as f32;
+        let depth = if self.legacy { 0. } else { 500. };
+        let position = [point[0], point[1], depth];
+        let points = [position, [self.center[0], self.center[1], depth]];
+        let path = if self.legacy {
+            TwoPointPath::new_extended(points, self.duration, 100.)
+        } else {
+            TwoPointPath::new(points, self.duration, 100.)
+        };
+        let sample = random.next_float() as f64;
+        let lifetime = if self.legacy {
+            let fraction = (sample * 0.2f32 as f64 + 0.6f32 as f64) as f32;
+            (fraction * self.duration + 0.5).floor()
+        } else {
+            (sample * (self.duration as f64 * 0.2) + (self.duration * 0.6) as f64) as f32
+        };
         Head {
             age: 0,
             phase_time: 0,

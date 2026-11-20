@@ -54,6 +54,7 @@ pub(super) enum Kind {
     Question,
     Sparkle,
     Concentration,
+    LegacyConcentration,
     Glint,
     Energy,
     Digi,
@@ -130,7 +131,7 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
     let exports = bytes.get(exports_at..exports_at.checked_add(40)?)?;
     let name_at = offset(read::u32_at(exports, 12).ok()?)?;
     let name = read::zstr(bytes, name_at).ok()?;
-    let kind = if name.eq_ignore_ascii_case(b"rain.ppi") {
+    let mut kind = if name.eq_ignore_ascii_case(b"rain.ppi") {
         Kind::Rain
     } else if name.eq_ignore_ascii_case(b"em_notice.ppi") {
         Kind::Notice
@@ -244,10 +245,23 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
     let base = read::u32_at(exports, 16).ok()?;
     let count = read::u32_at(exports, 20).ok()?;
     let functions_at = offset(read::u32_at(exports, 28).ok()?)?;
-    if matches!(kind, Kind::Spark | Kind::Ring) {
-        let index = 1u32.checked_sub(base).filter(|&i| i < count)? as usize;
+    let function_offset = |ordinal: u32| -> Option<usize> {
+        let index = ordinal.checked_sub(base).filter(|&i| i < count)? as usize;
         let at = functions_at.checked_add(index.checked_mul(4)?)?;
-        let code_at = offset(read::u32_at(bytes, at).ok()?)?;
+        offset(read::u32_at(bytes, at).ok()?)
+    };
+    if matches!(kind, Kind::Concentration) {
+        // Both versions export the same name and version but use different layouts.
+        let start = function_offset(1)?;
+        let factory = bytes.get(start..start.checked_add(6)?)?;
+        kind = match factory {
+            [0x55, 0x8b, 0xec, 0x6a, 0x60, 0xe8] => Kind::Concentration,
+            [0x6a, 0x40, 0xe8, ..] => Kind::LegacyConcentration,
+            _ => return None,
+        };
+    }
+    if matches!(kind, Kind::Spark | Kind::Ring) {
+        let code_at = function_offset(1)?;
         let (at, size) = if matches!(kind, Kind::Ring) {
             (3, 0xacu32)
         } else {
@@ -263,9 +277,7 @@ pub(super) fn identify(bytes: &[u8]) -> Option<Kind> {
         }
     }
     let constant = |ordinal: u32| -> Option<u32> {
-        let index = ordinal.checked_sub(base).filter(|&i| i < count)? as usize;
-        let at = functions_at.checked_add(index.checked_mul(4)?)?;
-        let code_at = offset(read::u32_at(bytes, at).ok()?)?;
+        let code_at = function_offset(ordinal)?;
         let code = bytes.get(code_at..code_at.checked_add(6)?)?;
         if code[0] != 0xb8 || code[5] != 0xc3 {
             return None;

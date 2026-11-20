@@ -124,6 +124,9 @@ impl Effect {
             particle_plugin::Kind::Concentration => {
                 Self::Concentration(Concentration::new(host, image, random, module_state)?)
             }
+            particle_plugin::Kind::LegacyConcentration => Self::Concentration(
+                Concentration::new_legacy(host, image, random, module_state)?,
+            ),
             particle_plugin::Kind::Glint => Self::Glint(Glint::new(host, image)),
             particle_plugin::Kind::Energy => Self::Energy(Energy::new(host, image, random)),
             particle_plugin::Kind::Digi => Self::Digi(Digi::new(host, image, random)),
@@ -286,6 +289,11 @@ impl ParticleRunner {
                     Some(Effect::Photon(effect)) => effect.write_mesh(host),
                     Some(Effect::Rolling(effect)) => effect.write_mesh(host),
                     Some(Effect::SceneSparkle(effect)) => effect.write_mesh(host),
+                    Some(Effect::Concentration(effect))
+                        if matches!(kind, particle_plugin::Kind::LegacyConcentration) =>
+                    {
+                        effect.write_mesh(host);
+                    }
                     Some(Effect::Spark(effect)) => effect.write_mesh(host),
                     Some(Effect::Thunder(effect)) => effect.write_mesh(host),
                     Some(Effect::Paper(effect)) => effect.write_mesh(host),

@@ -62,6 +62,10 @@ fn plugin(name: &[u8]) -> Vec<u8> {
         bytes[435] = 0x68;
         bytes[436..440].copy_from_slice(&0x324u32.to_le_bytes());
     }
+    if name == b"concent.ppi" {
+        bytes[340..344].copy_from_slice(&0x1090u32.to_le_bytes());
+        bytes[400..406].copy_from_slice(&[0x55, 0x8b, 0xec, 0x6a, 0x60, 0xe8]);
+    }
     if name == b"aoi.ppi" {
         bytes[340..344].copy_from_slice(&0x1090u32.to_le_bytes());
         bytes[400..404].copy_from_slice(&[0x55, 0x8b, 0xec, 0x68]);
@@ -403,6 +407,9 @@ fn invalid_plugin_metadata_and_layout_are_rejected_before_start() -> Result<()> 
     let mut bytes = plugin(b"aoi.ppi");
     bytes[404..408].copy_from_slice(&0xbcu32.to_le_bytes());
     assert!(runtime(bytes)?.update(1, 1).is_err());
+    let mut bytes = plugin(b"concent.ppi");
+    bytes[404] = 0x48;
+    assert!(runtime(bytes)?.update(1, 1).is_err());
     for count in [0, 5] {
         let mut runtime = runtime_with_count(plugin(b"em_silent.ppi"), count)?;
         assert!(runtime.update(1, 1).is_err());
@@ -415,6 +422,49 @@ fn invalid_plugin_metadata_and_layout_are_rejected_before_start() -> Result<()> 
                 .is_none()
         );
     }
+    Ok(())
+}
+
+#[test]
+fn legacy_concentration_uses_its_six_parameters_and_starts_hidden() -> Result<()> {
+    let mut bytes = plugin(b"concent.ppi");
+    bytes[400..406].copy_from_slice(&[0x6a, 0x40, 0xe8, 0, 0, 0]);
+    let mut runtime = runtime_with_count(bytes, 8)?;
+    runtime.update(1, 1)?;
+    let mut parameters = [0; 128];
+    for (i, value) in [4f32, 20., 640., 360., 1280., 720.].into_iter().enumerate() {
+        parameters[4 * i..4 * i + 4].copy_from_slice(&value.to_le_bytes());
+    }
+    runtime.dispatch_command_with_buffers(
+        2,
+        command(325),
+        &mut CommandBuffers {
+            data1: Some(&mut parameters),
+            ..Default::default()
+        },
+    )?;
+    runtime.dispatch_command(2, command(321))?;
+    let view = Projection::default();
+    let trail = runtime
+        .drawables()
+        .get(1)
+        .unwrap()
+        .particle_mesh()
+        .unwrap()
+        .projected_quad(2, &view)
+        .unwrap();
+    assert_eq!(trail[0].color >> 24, 0);
+    runtime.update(2, 1)?;
+    let trail = runtime
+        .drawables()
+        .get(1)
+        .unwrap()
+        .particle_mesh()
+        .unwrap()
+        .projected_quad(2, &view)
+        .unwrap();
+    assert_eq!(trail[0].color >> 24, 255);
+    assert_eq!(runtime.dispatch_command(2, command(324))?, 1);
     Ok(())
 }
 
