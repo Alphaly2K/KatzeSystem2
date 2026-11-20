@@ -496,26 +496,18 @@ pub(crate) fn inspect_runtime(
                             }
                         }
                         if std::env::var_os("KATZE_PROBE_FESBTN").is_some() {
-                            for (name, kind) in [
-                                ("btn1", 5),
-                                ("btn2", 5),
-                                ("btn3", 2),
-                                ("btn4", 3),
-                                ("btn5", 4),
-                            ] {
-                                for bank in 0..kind {
-                                    if let Some(handle) = scene.objects().lookup(name, bank) {
-                                        let object = scene.objects().get(handle).unwrap();
-                                        if let katze_system2::runtime::fes::ObjectState::Button(
-                                            button,
-                                        ) = &object.state
-                                        {
-                                            println!(
-                                                "    FES {id} {name}[{bank}] 启用 {}",
-                                                button.enabled
-                                            );
-                                        }
-                                    }
+                            for handle in scene.objects().update_order() {
+                                let object = scene.objects().get(handle).unwrap();
+                                if let katze_system2::runtime::fes::ObjectState::Button(button) =
+                                    &object.state
+                                {
+                                    println!(
+                                        "    FES {id} {}[{}] 启用 {} 按钮任务 {:?}",
+                                        object.name(),
+                                        object.bank(),
+                                        button.enabled,
+                                        object.task_id()
+                                    );
                                 }
                             }
                         }
