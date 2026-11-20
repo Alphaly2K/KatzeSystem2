@@ -8,7 +8,7 @@ description = "Embeddable CatSystem2 2.6.1.90 runtime"
 repository = "https://github.com/Alphaly2K/KatzeSystem2"
 autobins = false
 include = [
-    "/src/**", "/build.rs", "/vendor/**", "/examples/*.rs", "/examples/support/**",
+    "/src/**", "/build.rs", "/vendor/**", "/examples/*.rs", "/examples/support/**", "/examples/particle-host/*.c",
     "/tests/**", "/docs/**", "/licenses/**", "/LICENSE", "/THIRD_PARTY.md", "/README.md",
     "/GOAL.md", "!**/.DS_Store",
 ]

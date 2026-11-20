@@ -34,6 +34,7 @@ pub use font_sources::load_fonts;
 #[allow(dead_code)]
 pub mod image_import;
 mod movie_decoder;
+mod particle_host;
 
 const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
@@ -827,6 +828,9 @@ pub fn prepare_game(
         ..
     } = game;
     let mut runtime = GameSetup::standard()?;
+    if let Some(host) = particle_host::ParticleHost::configured(&root) {
+        runtime.set_effect_services(host);
+    }
     runtime.set_graphics_backend(SoftwareBackend);
     if std::env::var_os("KATZE_FFMPEG_MOVIES").is_some() {
         runtime.set_movie_decoder_factory(movie_decoder::Ffmpeg);

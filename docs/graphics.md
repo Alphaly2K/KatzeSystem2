@@ -1441,7 +1441,7 @@ FES 任务销毁时也恢复共享列表提交，独立于 DRAW 的正常完成�
 
 普通 272／273 分别发送命令 321／322，普通 274 查询命令 324（未到达接收者时返回零）；普通 275 将第二参数指向的 128 字节交给命令 325。普通 426／427 分别转发命令 326／327。所有发送者均为调用任务，零目标仍路由；274 以状态一返回查询值，其余以状态二保留返回槽。在独立的 `ParticleObject` 上，320～323、591／592 返回未实现诊断。
 
-`graphics::Particle3DObject` 是独立的类型 16 对象，支持普通 271 装载旧式及 2.0 KCS、693 装载已识别的雨、提示、怒气、叹气、低落、汗滴及 `em_dis`／`em_common`／`em_note`／`em_angry`／`ohanaburst`／`em_exclamation`／`filmnoise`／`asease`／`em_suprise`／`em_silent`／`em_question`／`kirakira`／`concent`／`em_kyupin`／`energy`／`digi`／`digiring`／`rising3`／`rising4`／`em_double`／`em_shy`／`warukira`／`hadou`／`protect`／`dark`／`dark_tri`／`sakura`／`o_150102`／`s_040101`／`spark` 路径变体及 `thunder`／`paper`／`dash`／`star`／`exprode`／`roundy`／`roundz`／`steam`／`mirror`／`ring`／`radiate`／`swordspark`／`cmnptcl`／`rubble` 效果。这些效果使用跨平台内置实现，共用参数、启停、状态查询、不透明度、坐标组和释放命令，以及统一的网格与绘图后端。资源缺失会清理旧效果，未知插件类型或版本返回诊断。
+`graphics::Particle3DObject` 是独立的类型 16 对象，支持普通 271 装载旧式及 2.0 KCS、693 装载已识别的雨、提示、怒气、叹气、低落、汗滴及 `em_dis`／`em_common`／`em_note`／`em_angry`／`ohanaburst`／`em_exclamation`／`filmnoise`／`asease`／`em_suprise`／`em_silent`／`em_question`／`kirakira`／`concent`／`em_kyupin`／`energy`／`digi`／`digiring`／`rising3`／`rising4`／`em_double`／`em_shy`／`warukira`／`hadou`／`protect`／`dark`／`dark_tri`／`sakura`／`o_150102`／`s_040101`／`spark` 路径变体及 `thunder`／`paper`／`dash`／`star`／`exprode`／`roundy`／`roundz`／`steam`／`mirror`／`ring`／`radiate`／`swordspark`／`cmnptcl`／`rubble` 效果。这些效果使用跨平台内置实现，共用参数、启停、状态查询、不透明度、坐标组和释放命令，以及统一的网格与绘图后端。资源缺失会清理旧效果。未识别的插件可由 `host::effect::EffectServices` 提供播放器。该服务未能提供播放器时，运行库返回装载诊断。
 
 普通 669 接收目标、KCS 程序名格式地址、图像名格式地址、网格数、128 字节参数区地址和附加文本格式地址。名称分别按 `ptcl`、`image` 类别补全，随后发送命令 320，以状态一返回一。接收者按无绘制模式装载粒子脚本，保留参数传递及启动、停止、查询和释放接口；更新不读取图像、不提交网格。附加文本随命令发送，默认类型 16 接收端不使用它。
 
