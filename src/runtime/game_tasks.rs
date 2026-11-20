@@ -4,15 +4,16 @@ use crate::{
     audio::{Mixer, SoundConfig, SoundFactory, SoundGroups, SoundState},
     expression::State,
     graphics::{DrawingContext, GraphicsFactory, Projection, RenderTarget, TextureFilter},
-    host::WindowServices,
-    host::input::{DeviceBinding, DeviceKeys},
-    host::{CachedResources, ResourceServices},
+    host::{
+        input::{DeviceBinding, DeviceKeys},
+        platform::WindowServices,
+        resources::{CachedResources, ResourceServices},
+    },
     input::InputFactory,
     kcs::Program,
     language::{LanguageState, StringTableConfig},
     memory::SharedMemory,
     resource::XmlDocument,
-    session::StartupError,
     settings::SystemSettings,
 };
 use std::sync::Arc;
@@ -86,17 +87,12 @@ impl TaskRuntime {
         Ok(game)
     }
 
-    pub(crate) fn validate_session_startup(&self) -> std::result::Result<(), StartupError> {
-        if self.resources.services.is_none() {
-            return Err(StartupError::MissingResources);
-        }
-        if self.resources.input_device.is_none() {
-            return Err(StartupError::MissingInput);
-        }
-        if self.drawing().target.is_none() {
-            return Err(StartupError::MissingCanvas);
-        }
-        Ok(())
+    pub(crate) fn has_resource_services(&self) -> bool {
+        self.resources.services.is_some()
+    }
+
+    pub(crate) fn has_input_device(&self) -> bool {
+        self.resources.input_device.is_some()
     }
 }
 

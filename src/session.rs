@@ -20,30 +20,9 @@ use std::sync::Arc;
 mod error;
 mod setup;
 pub use crate::language::StringTables;
-pub use error::{AdvanceError, StartupError};
+pub use crate::runtime::frame::{AdvanceError, FrameOutcome, FrameTime};
+pub use error::StartupError;
 pub use setup::GameSetup;
-
-/// Clock values supplied by the host for a single update.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct FrameTime {
-    /// Absolute game clock in logical ticks (normally 60 per second).
-    pub tick: u32,
-    /// Logical increment forwarded to tasks for this update.
-    pub increment: u32,
-    /// Wrapping millisecond clock for system queries and movies.
-    pub system_time_ms: u32,
-}
-
-/// The outcome of advancing a session by one frame.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum FrameOutcome {
-    Running {
-        /// The host can read the current string tables to refresh its UI.
-        interface_language_refreshed: bool,
-    },
-    /// The root task has exited. The host should stop advancing and presenting.
-    Exited,
-}
 
 /// Window preferences from the game configuration. The host selects the
 /// actual window and display modes independently of the logical canvas size.

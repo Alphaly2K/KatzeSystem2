@@ -10,7 +10,7 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 |网络与系统|按脚本协议分发请求并管理任务状态。类型 62 保留脚本包装和任务路由，默认接收者列入兼容缺口。|执行网络或系统动作，实施策略，回交结果；处理窗口、剪贴板、输入法、插件及对话框。|
 |输入、字体和时钟|处理游戏输入和逻辑时钟，按字体数据完成字形度量与栅格化。|提供输入事件、运行时间和当地日期时间，发现字体并提供数据。|
 
-嵌入时从 `katze_system2::session` 导入 `GameSetup`、`GameRuntime`、`FrameTime` 和 `FrameOutcome`。服务与对应的数据类型按下表导入，旧的 `host::类型名` 平铺路径继续兼容。
+嵌入时从 `katze_system2::session` 导入 `GameSetup`、`GameRuntime`、`FrameTime`、`FrameOutcome`、`StartupError` 和 `AdvanceError`。服务与对应的数据类型按下表导入，旧的 `host::类型名` 平铺路径继续兼容。
 
 |模块|宿主接口|
 |:--|:--|

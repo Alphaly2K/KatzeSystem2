@@ -41,7 +41,7 @@ mod native;
 mod particle;
 mod text_window;
 pub use motion::MotionSnapshot;
-mod frame;
+pub(crate) mod frame;
 mod frame_capture;
 pub use crate::host::graphics::SequenceCapture;
 mod game_tasks;

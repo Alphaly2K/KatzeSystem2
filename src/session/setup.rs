@@ -222,7 +222,16 @@ impl GameSetup {
     /// Check that resources, input and the canvas are ready. This does not
     /// call host services or attempt to load the entry script.
     pub fn validate_startup(&self) -> std::result::Result<(), StartupError> {
-        self.0.validate_session_startup()
+        if !self.0.has_resource_services() {
+            return Err(StartupError::MissingResources);
+        }
+        if !self.0.has_input_device() {
+            return Err(StartupError::MissingInput);
+        }
+        if self.0.drawing().target.is_none() {
+            return Err(StartupError::MissingCanvas);
+        }
+        Ok(())
     }
 
     /// Check the startup requirements and create the tasks for the named entry
