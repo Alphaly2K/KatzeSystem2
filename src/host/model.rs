@@ -50,7 +50,8 @@ pub trait ModelPlayer {
 
     /// Set the plane's RGB percentages before compositing model layers. A new
     /// player starts at `[100; 3]`. Return `false` to let the runtime apply the
-    /// tone to the composited frame returned by [`Self::frame`].
+    /// tone to the composited frame returned by [`Self::frame`]. A `false`
+    /// response requires neutral frames, even after an earlier accepted tone.
     fn set_tone(&mut self, _rgb: [u32; 3]) -> Result<bool> {
         Ok(false)
     }

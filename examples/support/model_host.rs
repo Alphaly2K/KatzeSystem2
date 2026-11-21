@@ -18,6 +18,11 @@ const MODEL_LIMIT: usize = 128 * 1024 * 1024;
 const TABLE_LIMIT: usize = 4 * 1024 * 1024;
 const FRAME_LIMIT: usize = 64 * 1024 * 1024;
 
+const BODY_OPTIONS: u8 = 1;
+const EFFECTS_MODE: u8 = 2;
+const TONE: u8 = 4;
+const EFFECTS_ACTIVE: u8 = 8;
+
 pub(super) struct ModelHost(OsString);
 
 impl ModelHost {
@@ -63,15 +68,11 @@ impl ModelServices for ModelHost {
         ] {
             write_field(&mut player.input, bytes).map_err(host_error)?;
         }
-        match read_tag(&mut player.output)? {
-            b'N' => Ok(None),
-            tag @ (b'Y' | b'B' | b'E') => {
-                player.body_commands = tag != b'Y';
-                player.effects_mode_command = tag == b'E';
-                Ok(Some(Box::new(player)))
-            }
-            _ => Err(Error::new(0, "Invalid model host acknowledgement")),
-        }
+        let Some(capabilities) = read_capabilities(&mut player.output)? else {
+            return Ok(None);
+        };
+        player.capabilities = capabilities;
+        Ok(Some(Box::new(player)))
     }
 }
 
@@ -80,8 +81,7 @@ struct Player {
     input: ChildStdin,
     output: ChildStdout,
     last_frame: Option<ModelFrame>,
-    body_commands: bool,
-    effects_mode_command: bool,
+    capabilities: u8,
 }
 
 impl Player {
@@ -96,9 +96,18 @@ impl Player {
             output: child.stdout.take().unwrap(),
             child,
             last_frame: None,
-            body_commands: false,
-            effects_mode_command: false,
+            capabilities: 0,
         })
+    }
+
+    fn request_words(&mut self, tag: u8, words: &[u32]) -> Result<bool> {
+        self.input.write_all(&[tag]).map_err(host_error)?;
+        for word in words {
+            self.input
+                .write_all(&word.to_le_bytes())
+                .map_err(host_error)?;
+        }
+        self.accepted()
     }
 
     fn accepted(&mut self) -> Result<bool> {
@@ -118,7 +127,7 @@ impl ModelPlayer for Player {
     }
 
     fn set_body_options(&mut self, options: &[u8]) -> Result<()> {
-        if self.body_commands {
+        if self.capabilities & BODY_OPTIONS != 0 {
             self.input.write_all(b"B").map_err(host_error)?;
             write_field(&mut self.input, options).map_err(host_error)?;
             if !self.accepted()? {
@@ -129,15 +138,26 @@ impl ModelPlayer for Player {
     }
 
     fn set_effects_mode(&mut self, mode: u32) -> Result<()> {
-        if self.effects_mode_command {
-            let mut request = [b'E', 0, 0, 0, 0];
-            request[1..].copy_from_slice(&mode.to_le_bytes());
-            self.input.write_all(&request).map_err(host_error)?;
-            if !self.accepted()? {
-                return Err(Error::new(0, "Model host rejected effect mode"));
-            }
+        if self.capabilities & EFFECTS_MODE != 0 && !self.request_words(b'E', &[mode])? {
+            return Err(Error::new(0, "Model host rejected effect mode"));
         }
         Ok(())
+    }
+
+    fn set_tone(&mut self, rgb: [u32; 3]) -> Result<bool> {
+        if self.capabilities & TONE == 0 {
+            return Ok(false);
+        }
+        let applied = self.request_words(b'T', &rgb)?;
+        self.last_frame = None;
+        Ok(applied)
+    }
+
+    fn effects_active(&mut self, system_time_ms: u32) -> Result<bool> {
+        if self.capabilities & EFFECTS_ACTIVE == 0 {
+            return Ok(false);
+        }
+        self.request_words(b'A', &[system_time_ms])
     }
 
     fn frame(&mut self, system_time_ms: u32) -> Result<Option<ModelFrame>> {
@@ -187,6 +207,17 @@ fn read_tag(input: &mut impl Read) -> Result<u8> {
     Ok(tag[0])
 }
 
+fn read_capabilities(input: &mut impl Read) -> Result<Option<u8>> {
+    Ok(match read_tag(input)? {
+        b'N' => None,
+        b'Y' => Some(0),
+        b'B' => Some(BODY_OPTIONS),
+        b'E' => Some(BODY_OPTIONS | EFFECTS_MODE),
+        b'C' => Some(read_tag(input)?),
+        _ => return Err(Error::new(0, "Invalid model host acknowledgement")),
+    })
+}
+
 fn read_frame(input: &mut impl Read) -> Result<ModelFrame> {
     let mut header = [0; 16];
     input.read_exact(&mut header).map_err(host_error)?;
@@ -212,6 +243,22 @@ fn host_error(error: io::Error) -> Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn model_open_negotiates_capabilities_without_reading_past_legacy_responses() {
+        for (message, expected) in [
+            (b"NY".as_slice(), None),
+            (b"YY", Some(0)),
+            (b"BY", Some(BODY_OPTIONS)),
+            (b"EY", Some(BODY_OPTIONS | EFFECTS_MODE)),
+            (b"C\x0cY", Some(TONE | EFFECTS_ACTIVE)),
+        ] {
+            let mut input = message;
+            assert_eq!(read_capabilities(&mut input).unwrap(), expected);
+            assert_eq!(input, b"Y");
+        }
+        assert!(read_capabilities(&mut b"C".as_slice()).is_err());
+    }
 
     #[test]
     fn model_frame_rejects_invalid_size_and_truncation() {
