@@ -26,7 +26,7 @@ fn engine() -> Engine {
             fallback: KcsFactory::new(Source),
         },
     );
-    rt.set_graphics_backend(SoftwareBackend);
+    rt.set_readback_backend(SoftwareBackend);
     rt.host_mut().surface_size = [8, 6];
     rt.drawing_mut().enabled = true;
     rt.drawing_mut().target = Some(RenderTarget::new([8, 6]).unwrap());

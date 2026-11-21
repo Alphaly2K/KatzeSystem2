@@ -153,7 +153,9 @@ impl<F: ObjectFactory> Store<'_, F> {
             return Ok(None);
         }
         self.resources
-            .render_depth_frame(self.host.surface_size, range)
+            .readback_depth_frame(self.host.surface_size, range)?
+            .map(|frame| RenderTarget::from_tiles(frame.size(), [1, 1], vec![Some(frame)]))
+            .transpose()
     }
 
     pub(super) fn prepare_fes_screen_transition(

@@ -42,7 +42,6 @@ mod particle;
 mod text_window;
 pub use motion::MotionSnapshot;
 pub(crate) mod frame;
-mod frame_capture;
 pub use crate::host::graphics::SequenceCapture;
 mod game_tasks;
 mod image_animation;
@@ -53,6 +52,8 @@ mod image_resources;
 mod object;
 mod ordinary;
 mod platform_job;
+mod presentation;
+mod readback;
 mod resources;
 mod root;
 mod save;
@@ -328,7 +329,13 @@ impl<F: ObjectFactory> Runtime<F> {
         self.resources.capture_rectangle = rectangle;
     }
 
-    /// 最近一次离屏绘制的目标；绘制错误保留已写像素，跳过的调用保留旧目标。
+    /// Pixels from the last successful script readback. Skipped or failed
+    /// readbacks leave the previous frame available.
+    pub fn offscreen_surface(&self) -> Option<&crate::host::graphics::Surface> {
+        self.resources.offscreen_surface()
+    }
+
+    #[doc(hidden)]
     pub fn offscreen_frame(&self) -> Option<&crate::graphics::RenderTarget> {
         self.resources.offscreen_frame.as_ref()
     }

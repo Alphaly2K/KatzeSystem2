@@ -54,8 +54,13 @@ impl GameRuntime {
 
     /// Install the renderer for script captures and active screen filter passes.
     /// An offscreen pass requiring readback fails without a backend.
+    pub fn set_readback_backend(&mut self, backend: impl GraphicsBackend + 'static) {
+        self.0.set_readback_backend(backend);
+    }
+
+    #[doc(hidden)]
     pub fn set_graphics_backend(&mut self, backend: impl GraphicsBackend + 'static) {
-        self.0.set_graphics_backend(backend);
+        self.set_readback_backend(backend);
     }
 
     /// Use a host decoder for future movie loads. Already loaded movies retain

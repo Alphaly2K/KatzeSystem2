@@ -30,7 +30,7 @@ fn engine() -> (Engine, Objects) {
         State::new(4),
         GraphicsFactory { fallback: Reject },
     );
-    rt.set_graphics_backend(SoftwareBackend);
+    rt.set_readback_backend(SoftwareBackend);
     rt.host_mut().surface_size = [8, 6];
     rt.drawing_mut().enabled = true;
     rt.drawing_mut().active = true;
@@ -130,7 +130,7 @@ fn capture_uses_saved_view_depth_bounds_crop_and_replaces_sources() {
     assert_eq!(snapshot.surface().pixel(3, 0), Some(0));
     assert_eq!(snapshot.surface().pixel(0, 2), Some(0));
     assert_eq!(rt.drawing().target, canvas);
-    let frame = rt.offscreen_frame().unwrap().tiles()[0].as_ref().unwrap();
+    let frame = rt.offscreen_surface().unwrap();
     assert_eq!(frame.size(), [8, 6]);
     assert_eq!(frame.pixel(1, 0), Some(0xff123456));
     command(&mut rt, &mut objects, "item filter np");

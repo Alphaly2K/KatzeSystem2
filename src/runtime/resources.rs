@@ -1,8 +1,5 @@
 use crate::graphics::{Compositor, Images, Rect, RenderTarget};
-use crate::host::{
-    graphics::{DrawList, FrameCanvas, GraphicsBackend},
-    resources::ResourceServices,
-};
+use crate::host::{graphics::GraphicsBackend, resources::ResourceServices};
 use crate::kcs::{Interpreter, NativeReturn, ResourceState, format_string};
 use crate::{Error, Result};
 
@@ -23,9 +20,9 @@ pub(super) struct Resources {
     pub fonts: Option<Box<dyn crate::host::FontServices>>,
     pub images: Images,
     pub compositor: Compositor,
-    pub graphics_backend: Option<Box<dyn GraphicsBackend>>,
+    pub readback_backend: Option<Box<dyn GraphicsBackend>>,
     pub capture_rectangle: Option<Rect>,
-    pub offscreen_frame: Option<crate::graphics::RenderTarget>,
+    pub offscreen_frame: Option<RenderTarget>,
     pub raw: ResourceState,
     pub input_callbacks: std::collections::BTreeMap<u32, crate::input::CommandState>,
     pub button_callbacks: std::collections::BTreeMap<u32, crate::input::ButtonObject>,
@@ -50,135 +47,6 @@ pub(super) struct Resources {
 }
 
 impl Resources {
-    pub fn compose_frame(&mut self, range: Option<[f32; 2]>) -> Result<DrawList> {
-        self.update_plane_movie_frames()?;
-        if range.is_none() {
-            let size = self.movie.as_ref().map(|movie| movie.surface_size);
-            if let Some(size) = size {
-                let filter = self
-                    .compositor
-                    .frame_view
-                    .as_ref()
-                    .map_or(crate::graphics::TextureFilter::Linear, |view| view.2);
-                if let Some(frame) = self.movie_frame(size, filter)? {
-                    return Ok(frame);
-                }
-            }
-        }
-        let backend = self
-            .graphics_backend
-            .as_mut()
-            .map(|backend| &mut **backend as &mut dyn GraphicsBackend);
-        self.compositor.compose_with_backend(range, backend)
-    }
-
-    pub fn render_offscreen(&mut self, size: [u32; 2], range: [f32; 2]) -> Result<bool> {
-        let Some(frame) = self.render_depth_frame(size, range)? else {
-            return Ok(false);
-        };
-        self.offscreen_frame = Some(frame);
-        Ok(true)
-    }
-
-    pub fn render_auxiliary(
-        &mut self,
-        index: u32,
-        size: [u32; 2],
-        range: [f32; 2],
-    ) -> Result<bool> {
-        if index as usize >= self.compositor.auxiliary_targets.len() {
-            return Ok(false);
-        }
-        let Some(frame) = self.render_depth_frame(size, range)? else {
-            return Ok(false);
-        };
-        if index == 0 && !self.compositor.shatters.entries.is_empty() {
-            let image = frame.tiles()[0].as_ref().cloned().map(std::sync::Arc::new);
-            for effect in self.compositor.shatters.entries.values_mut() {
-                effect.source = image.clone();
-            }
-        }
-        if index == 0 && !self.compositor.page_flips.is_empty() {
-            if let Some(image) = frame.tiles()[0].as_ref() {
-                let image = std::sync::Arc::new(image.clone());
-                for effect in self.compositor.page_flips.values_mut() {
-                    effect.set_source(image.clone());
-                }
-            }
-        }
-        if index == 0 && !self.compositor.render_draws.is_empty() {
-            if let Some(image) = frame.tiles()[0].as_ref() {
-                let image = std::sync::Arc::new(image.clone());
-                for effect in self.compositor.render_draws.values_mut() {
-                    effect.source = image.clone();
-                }
-            }
-        }
-        if !self.compositor.cell_flips.is_empty() {
-            if let Some(image) = frame.tiles()[0].as_ref() {
-                let image = std::sync::Arc::new(image.clone());
-                for effect in self.compositor.cell_flips.values_mut() {
-                    effect.set_source(index as usize, image.clone());
-                }
-            }
-        }
-        self.compositor.auxiliary_targets[index as usize] = frame;
-        Ok(true)
-    }
-
-    pub(super) fn render_depth_frame(
-        &mut self,
-        size: [u32; 2],
-        range: [f32; 2],
-    ) -> Result<Option<RenderTarget>> {
-        if self.compositor.drawing.mode != 0 || !self.compositor.drawing.enabled {
-            return Ok(None);
-        }
-        if self.compositor.drawing.target.is_none() {
-            return Ok(None);
-        }
-        if self.graphics_backend.is_none() {
-            return Err(Error::new(0, "宿主未配置脚本离屏绘制后端"));
-        }
-        let frame = self.compose_frame(Some(range))?;
-        let mut canvas = FrameCanvas::new(self.compositor.drawing.target.as_mut().unwrap());
-        let rendered =
-            self.graphics_backend
-                .as_deref_mut()
-                .unwrap()
-                .render(&frame, &mut canvas, size)?;
-        if rendered.size() != size {
-            return Err(Error::new(0, "宿主回读尺寸与请求不符"));
-        }
-        RenderTarget::from_tiles(size, [1, 1], vec![Some(rendered)]).map(Some)
-    }
-
-    pub fn capture_image(
-        &mut self,
-        size: [u32; 2],
-        range: [f32; 2],
-    ) -> Result<Option<crate::graphics::Image>> {
-        if !self.render_offscreen(size, range)? {
-            return Ok(None);
-        }
-        let frame = self.offscreen_frame.as_ref().unwrap();
-        let rectangle = self
-            .capture_rectangle
-            .unwrap_or_else(|| Rect::from_xywh(0, 0, size[0] as i32, size[1] as i32));
-        let extent = [
-            rectangle.right.wrapping_sub(rectangle.left),
-            rectangle.bottom.wrapping_sub(rectangle.top),
-        ];
-        if extent.iter().any(|&value| value < 0) {
-            return Err(Error::new(0, "画面捕获区域尺寸不能为负数"));
-        }
-        let mut snapshot = crate::graphics::Surface::new(extent.map(|value| value as u32))?;
-        snapshot.copy_from(frame.tiles()[0].as_ref().unwrap(), rectangle, [0; 2]);
-        let mut image = crate::graphics::Image::new(snapshot.size())?;
-        image.pixels_mut().copy_from_slice(snapshot.pixels());
-        Ok(Some(image))
-    }
-
     pub fn load_motion(&mut self, name: &[u8]) -> Result<Option<crate::kcs::Program>> {
         let name = &name[..name
             .iter()

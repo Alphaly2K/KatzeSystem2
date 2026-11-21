@@ -113,7 +113,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         None
     } else {
         let output = metal_output::Output::new(&window.window)?;
-        runtime.set_graphics_backend(output.capture_backend());
+        runtime.set_readback_backend(output.capture_backend());
         Some(output)
     };
     #[cfg(target_os = "macos")]

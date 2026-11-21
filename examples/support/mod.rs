@@ -839,7 +839,7 @@ pub fn prepare_game(
     if let Some(host) = model_host::ModelHost::configured() {
         runtime.set_model_services(host);
     }
-    runtime.set_graphics_backend(SoftwareBackend);
+    runtime.set_readback_backend(SoftwareBackend);
     if std::env::var_os("KATZE_FFMPEG_MOVIES").is_some() {
         runtime.set_movie_decoder_factory(movie_decoder::Ffmpeg);
     } else {

@@ -43,7 +43,7 @@ fn program(args: &[u8]) -> Program {
 
 fn engine(args: &[u8], view: bool) -> Engine {
     let mut rt = engine_program(program(args), view);
-    rt.set_graphics_backend(SoftwareBackend);
+    rt.set_readback_backend(SoftwareBackend);
     rt
 }
 
@@ -146,14 +146,17 @@ fn auxiliary_passes_keep_each_target_capture_and_canvas_independent() {
                 assert_eq!(frame.pixel(x, 1), Some(expected));
             }
         }
-        assert_eq!(rt.offscreen_frame().unwrap().pixel(5, 1), Some(0xff123458));
+        assert_eq!(
+            rt.offscreen_surface().unwrap().pixel(5, 1),
+            Some(0xff123458)
+        );
         let other = targets[1].clone();
-        let capture = rt.offscreen_frame().cloned();
+        let capture = rt.offscreen_surface().cloned();
         rt.drawables_mut().set_display(101, 0);
         execute(&mut rt, &[(859, vec![0, 10f32.to_bits(), 20f32.to_bits()])]);
         assert_eq!(rt.compositor().auxiliary_targets()[0].pixel(3, 1), Some(0));
         assert_eq!(rt.compositor().auxiliary_targets()[1], other);
-        assert_eq!(rt.offscreen_frame(), capture.as_ref());
+        assert_eq!(rt.offscreen_surface(), capture.as_ref());
         assert_eq!(rt.drawing(), &canvas);
     }
 }
@@ -230,9 +233,9 @@ fn host_frame_and_script_capture_use_distinct_depth_selections() {
         .collect();
     let mut rt = engine_program(program(&args), true);
     let events = Rc::new(RefCell::new(Vec::new()));
-    rt.set_graphics_backend(Backend(events.clone()));
+    rt.set_readback_backend(Backend(events.clone()));
     call(&mut rt);
-    let capture = rt.offscreen_frame().unwrap();
+    let capture = rt.offscreen_surface().unwrap();
     assert_eq!(capture.pixel(1, 1), Some(0));
     assert_eq!(capture.pixel(3, 1), Some(0xff123457));
     assert_eq!(capture.pixel(5, 1), Some(0));
@@ -280,12 +283,11 @@ fn native_pass_uses_saved_view_ordered_depth_bounds_and_clears_each_output() {
                 rt.set_budget(budget, 4096);
                 let canvas = rt.drawing().clone();
                 call(&mut rt);
-                let frame = rt.offscreen_frame().unwrap();
+                let frame = rt.offscreen_surface().unwrap();
                 assert_eq!(frame.size(), [8, 4]);
-                let pixels = frame.tiles()[0].as_ref().unwrap();
                 for (i, shown) in visible.into_iter().enumerate() {
                     assert_eq!(
-                        pixels.pixel(1 + i as u32 * 2, 1),
+                        frame.pixel(1 + i as u32 * 2, 1),
                         Some(if shown { 0xff123456 + i as u32 } else { 0 })
                     );
                 }
@@ -295,8 +297,7 @@ fn native_pass_uses_saved_view_ordered_depth_bounds_and_clears_each_output() {
                 }
                 call(&mut rt);
                 assert!(
-                    rt.offscreen_frame().unwrap().tiles()[0]
-                        .as_ref()
+                    rt.offscreen_surface()
                         .unwrap()
                         .pixels()
                         .iter()
@@ -315,7 +316,7 @@ fn skipped_passes_keep_the_last_frame_and_short_arguments_precede_gating() {
         .collect::<Vec<_>>();
     let mut rt = engine(&args, true);
     call(&mut rt);
-    let previous = rt.offscreen_frame().unwrap().clone();
+    let previous = rt.offscreen_surface().unwrap().clone();
     rt.drawing_mut().mode = 1;
     call(&mut rt);
     rt.drawing_mut().mode = 0;
@@ -324,17 +325,17 @@ fn skipped_passes_keep_the_last_frame_and_short_arguments_precede_gating() {
     rt.drawing_mut().enabled = true;
     rt.drawing_mut().target = None;
     call(&mut rt);
-    assert_eq!(rt.offscreen_frame(), Some(&previous));
+    assert_eq!(rt.offscreen_surface(), Some(&previous));
 
     let mut missing = engine(&args, false);
     missing.create(0, kind::ORDINARY, b"caller", b"").unwrap();
     assert!(missing.update(0, 0).unwrap_err().message.contains("帧视图"));
-    assert!(missing.offscreen_frame().is_none());
+    assert!(missing.offscreen_surface().is_none());
     let mut short = engine(&args[..7], false);
     short.drawing_mut().enabled = false;
     short.create(0, kind::ORDINARY, b"caller", b"").unwrap();
     assert!(short.update(0, 0).unwrap_err().message.contains("范围"));
-    assert!(short.offscreen_frame().is_none());
+    assert!(short.offscreen_surface().is_none());
 }
 
 #[test]
@@ -373,7 +374,7 @@ fn presentation_needs_no_readback_backend_but_script_capture_does() {
             .message
             .contains("离屏绘制后端")
     );
-    assert!(rt.offscreen_frame().is_none());
+    assert!(rt.offscreen_surface().is_none());
 }
 
 #[test]
@@ -400,7 +401,7 @@ fn frame_capture_returns_an_owned_cropped_image_and_skips_a_disabled_device() {
     for enabled in [false, true] {
         let mut rt = engine_program(Program::from_code(&code, vec![0; 16], 128).unwrap(), true);
         if enabled {
-            rt.set_graphics_backend(SoftwareBackend);
+            rt.set_readback_backend(SoftwareBackend);
         }
         rt.drawing_mut().enabled = enabled;
         rt.set_frame_capture_rectangle(Some(katze_system2::graphics::Rect::from_xywh(1, 1, 3, 2)));

@@ -1,8 +1,8 @@
-use super::{ObjectFactory, Runtime};
+use super::{ObjectFactory, Resources, Runtime};
 use crate::{
     Error, Result,
     graphics::RenderTarget,
-    host::graphics::{DrawList, FrameCanvas, SequenceCapture},
+    host::graphics::{DrawList, FrameCanvas, GraphicsBackend, SequenceCapture},
     kcs::HostState,
 };
 
@@ -95,4 +95,28 @@ fn write_sequence_bmp(host: &mut HostState, bytes: &[u8]) -> Result<()> {
         let _ = writer.write(bytes);
     }
     Ok(())
+}
+
+impl Resources {
+    pub fn compose_frame(&mut self, range: Option<[f32; 2]>) -> Result<DrawList> {
+        self.update_plane_movie_frames()?;
+        if range.is_none() {
+            let size = self.movie.as_ref().map(|movie| movie.surface_size);
+            if let Some(size) = size {
+                let filter = self
+                    .compositor
+                    .frame_view
+                    .as_ref()
+                    .map_or(crate::graphics::TextureFilter::Linear, |view| view.2);
+                if let Some(frame) = self.movie_frame(size, filter)? {
+                    return Ok(frame);
+                }
+            }
+        }
+        let backend = self
+            .readback_backend
+            .as_mut()
+            .map(|backend| &mut **backend as &mut dyn GraphicsBackend);
+        self.compositor.compose_with_backend(range, backend)
+    }
 }

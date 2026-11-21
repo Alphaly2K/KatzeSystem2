@@ -41,7 +41,7 @@ fn engine(budget: usize) -> Engine {
             fallback: KcsFactory::new(Source),
         },
     );
-    runtime.set_graphics_backend(SoftwareBackend);
+    runtime.set_readback_backend(SoftwareBackend);
     runtime.set_budget(budget, 1 << 20);
     runtime.host_mut().surface_size = [8, 6];
     runtime.drawing_mut().enabled = true;
@@ -197,7 +197,7 @@ fn live_mosaic_keeps_its_first_rectangle_and_uses_point_sampling_inside_linear_f
     for budget in [1, 4096] {
         let mut runtime = engine(budget);
         let readbacks = Rc::new(RefCell::new(Vec::new()));
-        runtime.set_graphics_backend(RecordedBackend(readbacks.clone()));
+        runtime.set_readback_backend(RecordedBackend(readbacks.clone()));
         for x in 0..8 {
             rectangle(
                 &mut runtime,

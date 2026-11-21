@@ -49,8 +49,13 @@ impl<F: ObjectFactory> Runtime<F> {
 
     /// Install the renderer for script captures and active screen filter passes.
     /// A requested readback fails if no backend has been installed.
+    pub fn set_readback_backend(&mut self, backend: impl GraphicsBackend + 'static) {
+        self.resources.readback_backend = Some(Box::new(backend));
+    }
+
+    #[doc(hidden)]
     pub fn set_graphics_backend(&mut self, backend: impl GraphicsBackend + 'static) {
-        self.resources.graphics_backend = Some(Box::new(backend));
+        self.set_readback_backend(backend);
     }
 
     /// Select the media execution mode for objects created after this call.

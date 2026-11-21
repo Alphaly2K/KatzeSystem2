@@ -64,7 +64,7 @@ KATZE_PARTICLE_HOST="$PWD/particle-host.exe" cargo run --release --example runpr
 
 宿主用 `GameRuntime::present_frame` 借用当前绘制列表和 `FrameCanvas`，无需创建软件渲染目标。通过 `texture` 解析命令中的纹理，通过 `tiles` 和 `dirty_tiles` 更新画布缓存。呈现和脚本回读共用一个纹理缓存时，由宿主上传所有变更面块后调用 `acknowledge_upload`；有独立缓存的多个消费者应各自跟踪更新。
 
-`set_graphics_backend` 设置脚本画面捕获与实时滤镜共用的离屏后端。实时模糊、马赛克和阴影在合成时同步回读中间结果，再把它们作为纹理交给最终绘制列表。`GraphicsBackend::render` 在透明背景上执行命令，返回与请求尺寸一致、从顶行开始紧密排列的 BGRA8 `Surface`。没有回读需求的会话可以不注册后端；脚本实际请求画面捕获或合成启用的实时滤镜时，缺少后端会报错。软件宿主可调用 `setup.set_graphics_backend(SoftwareBackend)`，并用 `SoftwareBackend::render_into` 复用已有呈现目标。
+`set_readback_backend` 设置脚本画面捕获与实时滤镜共用的离屏后端。实时模糊、马赛克和阴影在合成时同步回读中间结果，再把它们作为纹理交给最终绘制列表。`GraphicsBackend::render` 在透明背景上执行命令，返回与请求尺寸一致、从顶行开始紧密排列的 BGRA8 `Surface`。没有回读需求的会话可以不注册后端；脚本实际请求画面捕获或合成启用的实时滤镜时，缺少后端会报错。软件宿主可调用 `setup.set_readback_backend(SoftwareBackend)`，并用 `SoftwareBackend::render_into` 复用已有呈现目标。
 
 全屏转场的活动状态随 `advance` 更新。宿主可跳过或重复取帧，脚本无需等待呈现便能收到转场完成状态。
 
