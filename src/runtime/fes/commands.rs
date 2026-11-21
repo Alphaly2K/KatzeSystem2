@@ -16,7 +16,7 @@ enum Command {
     Plane(fes::ObjectReference),
     Lock(i32),
     Capture([u32; 2]),
-    ModelBody(Vec<u8>),
+    ModelBody(Option<Vec<u8>>),
     ModelEffects(u32),
     Filter(crate::graphics::ImageFilter),
 }
@@ -196,7 +196,7 @@ impl Objects {
             b"disp" => Command::Display(i32::from(number(2, 1)? != 0)),
             b"refcap" => Command::Capture([number(2, 0)? as u32, number(3, 45000)? as u32]),
             b"m2enable_eff" => Command::ModelEffects(number(2, 1)? as u32),
-            b"m2body" => Command::ModelBody(args.get(2).cloned().unwrap_or_default()),
+            b"m2body" => Command::ModelBody(args.get(2).cloned()),
             b"filter" => Command::Filter(crate::graphics::ImageFilter::parse(
                 args.get(2).map_or(b"", Vec::as_slice),
             )),
@@ -282,7 +282,7 @@ impl Objects {
                 }
                 Command::ModelBody(options) => {
                     if let ObjectState::ModelPlane(model) = &mut object.state {
-                        model.push_body_options(options)?;
+                        model.set_body_options(options.as_deref())?;
                     }
                 }
                 Command::Capture(range) => {

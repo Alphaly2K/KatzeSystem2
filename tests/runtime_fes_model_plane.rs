@@ -265,6 +265,17 @@ actor load MODEL,1,0,6,,9
 actor m2body 1,,3
 actor m2body ,2
 wait 1
+actor m2body GLOW,,
+actor m2body glow,,
+wait 1
+actor m2body Glow,,
+wait 1
+actor m2body
+wait 1
+actor m2body $str76
+wait 1
+actor m2body $str76
+wait 1
 actor load MODEL,1,2,6,,9
 wait 100
 ";
@@ -286,7 +297,8 @@ wait 100
             runtime.host().handle_allocator(),
         )
         .unwrap();
-        for tick in 1..=3 {
+        runtime.numbers_mut().strings.insert(76, b"$str77".to_vec());
+        for tick in 1..=8 {
             assert!(runtime.update_fes_scene(0, &mut scene, tick).unwrap());
         }
         let mut expected = vec![
@@ -297,8 +309,10 @@ wait 100
             expected.extend([Event::Open(b"MODEL,1,0,6,,9".to_vec()), Event::Drop]);
         }
         expected.extend([
-            Event::BodyOptions(b"1,,3".to_vec()),
             Event::BodyOptions(b",2".to_vec()),
+            Event::BodyOptions(b"GLOW,,".to_vec()),
+            Event::BodyOptions(b"GLOW,,".to_vec()),
+            Event::BodyOptions(Vec::new()),
             Event::Open(b"MODEL,1,2,6,,9".to_vec()),
             Event::Drop,
         ]);

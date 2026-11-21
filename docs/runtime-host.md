@@ -78,7 +78,7 @@ KATZE_PARTICLE_HOST="$PWD/particle-host.exe" cargo run --release --example runpr
 
 角色模型由 `set_model_services` 注册的宿主负责。会话已绑定资源服务时，`ModelServices::open_with_resources` 同时接收 FES 模型选择的原始字节和会话的资源解析器，可沿用同一归档、补丁和散装资源查找规则。自行管理资源的宿主可实现 `ModelServices::open`。 宿主可用 `ModelSelection::parse` 和 `ModelSelection::open` 取得主体 PSZ 的读取源、初始动作名与选中动作行的差分表名称。选择中的后续选项仍保留原始字节。主体和初始动作相同的选择可通过 `ModelPlayer::set_options` 更新参数并延续播放。返回 `false` 时会话重新打开播放器，返回错误时保留请求供重试。`host::model::ModelConfig` 解析 `m2config` 类别中的主体及动作表，保留主体别名和空动作字段。主体资源可经 `m2psb` 类别解析，`decode_psz` 按宿主指定的解压字节上限提取 PSB 数据。
 
-FES 的 `m2body` 指令通过 `ModelPlayer::set_body_options` 交给当前播放器。同一更新中的指令按脚本顺序在取帧前执行，错误时保留尚未执行的指令。`m2enable_eff` 通过 `ModelPlayer::set_effects_mode` 提交模型平面的效果值。默认值为 `1`，显式设置会保留完整 DWORD，并在播放器替换后重新应用。
+FES 的 `m2body` 指令通过 `ModelPlayer::set_body_options` 交给当前播放器。每次更新在取帧前最多提交一组主体选项，多次修改时提交最后一组。显式参数按 ASCII 大小写无关比较，省略参数会重发当前值。宿主返回错误时保留待提交值。`m2enable_eff` 通过 `ModelPlayer::set_effects_mode` 提交模型平面的效果值。默认值为 `1`，显式设置会保留完整 DWORD，并在播放器替换后重新应用。
 
 运行库按会话时钟向可见对象的播放实例请求透明 BGRA 帧，并把帧及锚点偏移交给合成器。偏移用平面变换前的逻辑像素表示。服务缺失或返回 `None` 时，脚本继续推进，模型平面无可见内容。删除平面或释放场景会释放播放实例。
 

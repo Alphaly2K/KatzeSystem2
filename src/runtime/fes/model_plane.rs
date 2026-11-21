@@ -6,7 +6,6 @@ use crate::{
     host::model::ModelSelection,
     runtime::{ObjectFactory, Store},
 };
-use std::collections::VecDeque;
 
 /// FES character model plane and its pending model selection.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -14,7 +13,8 @@ pub struct ModelPlaneState {
     pub(super) plane: CPlaneState,
     selection: Vec<u8>,
     pending_selection: Option<Vec<u8>>,
-    body_commands: VecDeque<Vec<u8>>,
+    body_options: Vec<u8>,
+    body_pending: bool,
     effects_mode: Option<u32>,
     applied_effects_mode: Option<u32>,
 }
@@ -28,12 +28,19 @@ impl ModelPlaneState {
         self.effects_mode = Some(mode);
     }
 
-    pub(super) fn push_body_options(&mut self, options: &[u8]) -> Result<()> {
-        let options = options.split(|&byte| byte == 0).next().unwrap_or_default();
-        if options.len() >= 0x300 {
-            return Err(Error::new(0, "FES 模型主体参数超过存储上限"));
+    pub(super) fn set_body_options(&mut self, options: Option<&[u8]>) -> Result<()> {
+        if let Some(options) = options {
+            let options = options.split(|&byte| byte == 0).next().unwrap_or_default();
+            if options.len() >= 0x300 {
+                return Err(Error::new(0, "FES 模型主体参数超过存储上限"));
+            }
+            if self.body_options.eq_ignore_ascii_case(options) {
+                return Ok(());
+            }
+            self.body_options.clear();
+            self.body_options.extend_from_slice(options);
         }
-        self.body_commands.push_back(options.to_vec());
+        self.body_pending = true;
         Ok(())
     }
 
@@ -108,12 +115,12 @@ impl<F: ObjectFactory> Store<'_, F> {
             state.selection = state.pending_selection.take().unwrap();
         }
         let Some(player) = self.resources.model_players.get_mut(&handle) else {
-            state.body_commands.clear();
+            state.body_pending = false;
             return Ok(());
         };
-        while let Some(options) = state.body_commands.front() {
-            player.set_body_options(options)?;
-            state.body_commands.pop_front();
+        if state.body_pending {
+            player.set_body_options(&state.body_options)?;
+            state.body_pending = false;
         }
         if let Some(mode) = state
             .effects_mode
