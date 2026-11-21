@@ -338,7 +338,7 @@ impl PlaneObject {
         let input = self.input_task(host)?;
         if self.input_configured {
             let (rect, _) = self.input_geometry(host)?;
-            crate::host::trace_detail!(
+            crate::host::diagnostics::trace_detail!(
                 host.diagnostic_trace(),
                 NativeDetail,
                 "[plane-input-refresh] id={} rect={:?} size={:?} offset={:?}",
@@ -393,7 +393,7 @@ impl PlaneObject {
                 },
                 host,
             )?;
-            crate::host::trace_detail!(
+            crate::host::diagnostics::trace_detail!(
                 host.diagnostic_trace(),
                 NativeDetail,
                 "[plane-input] id={} rect={:?} size={:?} offset={:?}",
@@ -673,7 +673,7 @@ impl TaskObject for PlaneObject {
                     self.offset = [0.0; 2];
                     self.size =
                         std::array::from_fn(|i| arithmetic(2, bounds[1][i], bounds[0][i]).abs());
-                    crate::host::trace_detail!(
+                    crate::host::diagnostics::trace_detail!(
                         host.diagnostic_trace(),
                         NativeDetail,
                         "[plane41] id={} code={} flags={} bounds={:?} size={:?}",

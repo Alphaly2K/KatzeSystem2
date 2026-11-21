@@ -6,7 +6,7 @@ mod ffi;
 mod mpeg;
 mod playback;
 
-pub use crate::host::{
+pub use crate::host::movie::{
     MovieAudio as Audio, MovieDecoded as Decoded, MovieFrame as Frame, MovieMetadata as Metadata,
 };
 #[cfg(feature = "builtin-mpeg")]

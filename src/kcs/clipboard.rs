@@ -1,7 +1,7 @@
 use super::{HostState, Interpreter, NativeReturn, strings, utf8};
 use crate::{Error, Result, read};
 
-use crate::host::{ClipboardRequest, ClipboardText};
+use crate::host::platform::{ClipboardRequest, ClipboardText};
 
 pub(super) fn call(
     host: &mut HostState,

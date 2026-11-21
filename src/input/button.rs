@@ -132,7 +132,7 @@ impl ButtonObject {
             code,
             data,
         };
-        crate::host::trace_detail!(
+        crate::host::diagnostics::trace_detail!(
             host.diagnostic_trace(),
             Input,
             "[button-notify] button={} target={} code={} data={:?}",
@@ -442,7 +442,7 @@ impl TaskObject for ButtonObject {
                 self.parameter = values[5];
                 self.response = 1;
                 self.rectangle = rect;
-                crate::host::trace_detail!(
+                crate::host::diagnostics::trace_detail!(
                     host.diagnostic_trace(),
                     NativeDetail,
                     "[button-input] id={} rect={:?} full={}",

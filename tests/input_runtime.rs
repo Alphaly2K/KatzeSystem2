@@ -920,7 +920,7 @@ struct Device(Rc<RefCell<DeviceState>>);
 #[test]
 fn standard_startup_rejects_incomplete_host_setup_before_calling_services() -> Result<()> {
     use katze_system2::{
-        host::{ResourceMode, ResourceServices},
+        host::resources::{ResourceMode, ResourceServices},
         session::{GameSetup, StartupError},
     };
 
@@ -977,7 +977,7 @@ fn packed_kcs(code: &[u8]) -> Vec<u8> {
 #[test]
 fn public_session_reports_startup_and_update_failures_by_stage() -> Result<()> {
     use katze_system2::{
-        host::{ResourceMode, ResourceServices},
+        host::resources::{ResourceMode, ResourceServices},
         session::{AdvanceError, FrameTime, GameSetup, StartupError},
     };
 
@@ -1073,6 +1073,7 @@ fn public_session_uses_host_resources_and_delivers_frame_and_pcm()
             resources::{ResourceMode, ResourceServices},
         },
         kcs::ScriptRandom,
+        runtime::TaskRuntime,
         session::{FrameOutcome, FrameTime, GameRuntime, GameSetup},
     };
 
@@ -1162,7 +1163,7 @@ fn public_session_uses_host_resources_and_delivers_frame_and_pcm()
     let mut pcm = [1.0; 4];
     game.mix_audio_stereo(48_000, &mut pcm)?;
     assert_eq!(pcm, [0.0; 4]);
-    let runtime = game.into_task_runtime();
+    let runtime = TaskRuntime::from_session(game);
     let mut random = ScriptRandom::seeded(seed);
     assert_eq!(
         &runtime.numbers().shared[..4],
@@ -1189,6 +1190,7 @@ fn public_session_delivers_window_requests_to_the_host_event_loop() -> Result<()
             platform::{MenuItemRequest, WindowAction, WindowCloseRequest},
             resources::{ResourceMode, ResourceServices},
         },
+        runtime::TaskRuntime,
         session::{FrameTime, GameSetup},
     };
 
@@ -1283,7 +1285,10 @@ fn public_session_delivers_window_requests_to_the_host_event_loop() -> Result<()
     assert!(game.window_preferences().unwrap().fullscreen);
     game.prepare_menu_close()?;
     game.notify_window_tasks()?;
-    assert_eq!(game.into_task_runtime().host().system_settings_dirty, 1);
+    assert_eq!(
+        TaskRuntime::from_session(game).host().system_settings_dirty,
+        1
+    );
     Ok(())
 }
 

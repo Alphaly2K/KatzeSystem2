@@ -265,9 +265,7 @@ pub(crate) fn inspect_runtime(
             sound,
             entry: task,
         },
-    ) = runtime
-        .into_task_runtime()
-        .start_game_with_tasks(entry.as_bytes())?;
+    ) = TaskRuntime::from_setup(runtime).start_game_with_tasks(entry.as_bytes())?;
     let mut window = ProbeWindow { fullscreen };
     let mut mixer = std::env::var_os("KATZE_PROBE_DETACHED_MIXER")
         .map(|_| runtime.connect_audio_output())

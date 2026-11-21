@@ -1,6 +1,6 @@
 use super::{ObjectState, Objects};
 use crate::fes::ImageReference;
-use crate::host::ResourceServices;
+use crate::host::resources::ResourceServices;
 use crate::runtime::{ObjectFactory, Runtime, Store, create_object, kind, route_with_buffers};
 use crate::task::{Command, CommandBuffers};
 use crate::{Error, Result};
@@ -172,7 +172,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                     state.size = self.fes_image_geometry(&cache, resource, true)?;
                 }
             }
-            crate::host::trace_detail!(
+            crate::host::diagnostics::trace_detail!(
                 self.resources.diagnostic_trace.as_ref(),
                 NativeDetail,
                 "[fes-plane] handle={} size={:?} creation={} canvas={} resource={:?}",
@@ -575,7 +575,7 @@ impl<F: ObjectFactory> Store<'_, F> {
         let mut services = super::preload::ImageServices::new(cache, services.as_mut());
         let name = services.resolve(b"image", &expanded)?;
         let Some(data) = services.read(&name, crate::resource::ResourceMode::LooseFirst)? else {
-            crate::host::trace_detail!(
+            crate::host::diagnostics::trace_detail!(
                 self.resources.diagnostic_trace.as_ref(),
                 NativeDetail,
                 "[imgref] name={:?} frame={} resolved={:?} 读取失败",
@@ -587,7 +587,7 @@ impl<F: ObjectFactory> Store<'_, F> {
         };
         let metadata = crate::hg3::Metadata::parse(&data)?;
         let Some(info) = metadata.frame(reference.frame).and_then(|frame| frame.info) else {
-            crate::host::trace_detail!(
+            crate::host::diagnostics::trace_detail!(
                 self.resources.diagnostic_trace.as_ref(),
                 NativeDetail,
                 "[imgref] name={:?} frame={} resolved={:?} 无帧",
@@ -597,7 +597,7 @@ impl<F: ObjectFactory> Store<'_, F> {
             );
             return Ok([0; 2]);
         };
-        crate::host::trace_detail!(
+        crate::host::diagnostics::trace_detail!(
             self.resources.diagnostic_trace.as_ref(),
             NativeDetail,
             "[imgref] name={:?} frame={} resolved={:?} size={:?} offset={:?}",

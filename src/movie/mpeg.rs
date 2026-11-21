@@ -2,7 +2,10 @@ use super::{Audio, Decoded, Frame, Metadata, ffi};
 use crate::{
     Error, Result,
     graphics::Surface,
-    host::{MovieDecoder, MovieDecoderFactory, SharedSource},
+    host::{
+        movie::{MovieDecoder, MovieDecoderFactory},
+        storage::SharedSource,
+    },
     read,
 };
 use std::{ffi::c_void, panic::AssertUnwindSafe, ptr::NonNull};

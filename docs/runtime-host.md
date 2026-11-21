@@ -10,7 +10,7 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 |网络与系统|按脚本协议分发请求并管理任务状态。类型 62 保留脚本包装和任务路由，默认接收者列入兼容缺口。|执行网络或系统动作，实施策略，回交结果；处理窗口、剪贴板、输入法、插件及对话框。|
 |输入、字体和时钟|处理游戏输入和逻辑时钟，按字体数据完成字形度量与栅格化。|提供输入事件、运行时间和当地日期时间，发现字体并提供数据。|
 
-嵌入时从 `katze_system2::session` 导入 `GameSetup`、`GameRuntime`、`FrameTime`、`FrameOutcome`、`StartupError` 和 `AdvanceError`。服务与对应的数据类型按下表导入，旧的 `host::类型名` 平铺路径继续兼容。
+嵌入时从 `katze_system2::session` 导入 `GameSetup`、`GameRuntime`、`FrameTime`、`FrameOutcome`、`StartupError` 和 `AdvanceError`。服务与对应的数据类型按下表从各职责模块导入。
 
 |模块|宿主接口|
 |:--|:--|
@@ -44,7 +44,7 @@ KATZE_PARTICLE_HOST="$PWD/particle-host.exe" cargo run --release --example runpr
 
 逻辑尺寸取启动文档的 `SCREEN/width` 和 `SCREEN/height`。宿主通过 `window_preferences` 读取用户窗口尺寸、启动文档的全屏候选尺寸及当前全屏偏好，再根据设备能力决定实际模式。`configure_canvas` 同时设置呈现和输入使用的逻辑尺寸。桌面宿主按实际窗口尺寸换算鼠标坐标；离屏宿主的显式回放点击使用逻辑坐标，截图保持逻辑尺寸。
 
-普通 KCS 的入口和后续装载使用已绑定的 `ResourceServices`。运行库按 `kcs` 类别补全名称，以 `ArchiveFirst` 模式读取字节并解析；补丁与归档顺序由资源服务决定。工具可用 `GameRuntime::into_task_runtime` 接续已启动的实例，或用 `GameSetup::into_task_runtime` 接管启动步骤。也可直接使用 `runtime::TaskRuntime::with_programs` 提供预解析程序，或用 `TaskRuntime::with_resource_programs` 绑定现有外部存储。`TaskRuntime::start_game_with_tasks(entry)` 可另外取得用于诊断的任务编号。
+普通 KCS 的入口和后续装载使用已绑定的 `ResourceServices`。运行库按 `kcs` 类别补全名称，以 `ArchiveFirst` 模式读取字节并解析；补丁与归档顺序由资源服务决定。脚本工具从 `runtime` 导入 `TaskRuntime`。其中 `from_session` 接续已启动的会话，`from_setup` 接管启动步骤，`with_programs` 接收预解析程序，`with_resource_programs` 绑定现有外部存储。`TaskRuntime::start_game_with_tasks(entry)` 可另外取得用于诊断的任务编号。
 
 宿主通过 `host::resources::ResourceServices` 提供资源，通过 `host::storage` 中的 `FileServices`、`SaveServices` 和 `ConfigurationServices` 分别接入脚本文件、存档和配置持久化。资源服务返回完整字节或可独立读取的 `SharedSource`；宿主可用 `CachedResources` 为自定义装载流程复用预读缓存。
 

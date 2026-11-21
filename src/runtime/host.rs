@@ -1,11 +1,17 @@
 use super::{ObjectFactory, Runtime};
 use crate::{
     host::{
-        AchievementServices, ConfigurationServices, EffectServices, ExportServices, FileServices,
-        FontServices, GraphicsBackend, MovieDecoderFactory, PlatformJobServices, ResourceServices,
-        SaveServices, SpeechSynthesizer, SystemServices,
-        resources::{ArchiveConfig, CachedResources},
-        storage::{FolderPaths, ScriptSettings},
+        audio::SpeechSynthesizer,
+        effect::EffectServices,
+        font::FontServices,
+        graphics::GraphicsBackend,
+        movie::MovieDecoderFactory,
+        platform::{AchievementServices, PlatformJobServices, SystemServices},
+        resources::{ArchiveConfig, CachedResources, ResourceServices},
+        storage::{
+            ConfigurationServices, ExportServices, FileServices, FolderPaths, SaveServices,
+            ScriptSettings,
+        },
     },
     settings::PlatformSettings,
 };

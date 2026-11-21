@@ -2,7 +2,10 @@ use super::{Frame, Metadata};
 use crate::{
     Error, Result,
     host::{
-        MovieDecoder, MovieDecoderFactory, SharedSource, graphics::pixel_length, media::DecodeMode,
+        graphics::pixel_length,
+        media::DecodeMode,
+        movie::{MovieDecoder, MovieDecoderFactory},
+        storage::SharedSource,
     },
     read,
 };

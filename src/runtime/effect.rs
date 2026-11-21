@@ -1,6 +1,6 @@
 use super::{BaseObject, ObjectFactory, ObjectHost, TaskObject, route_command};
 use crate::graphics::{Drawable, Drawables, query_geometry};
-use crate::host::EffectPlayer;
+use crate::host::effect::EffectPlayer;
 use crate::kcs::{Host, Interpreter, NativeReturn, format_string};
 use crate::task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock};
 use crate::{Error, Result, read};

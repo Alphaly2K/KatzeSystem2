@@ -364,7 +364,7 @@ fn advance_reports_a_completed_interface_refresh_once_after_retry_and_stops_on_e
     use katze_system2::{
         Result,
         expression::State,
-        host::{ResourceMode, ResourceServices},
+        host::resources::{ResourceMode, ResourceServices},
         language::{LanguageChangeRequest, LanguageTarget::*, StringTableConfig},
         runtime::{BaseObject, ObjectFactory, Runtime, TaskObject, kind},
         session::{FrameOutcome, FrameTime},

@@ -237,7 +237,7 @@ impl ResourceState {
 }
 
 impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
-    fn diagnostic_trace(&self) -> Option<&crate::host::DiagnosticTrace> {
+    fn diagnostic_trace(&self) -> Option<&crate::host::diagnostics::DiagnosticTrace> {
         self.inner.diagnostic_trace()
     }
 
@@ -342,7 +342,7 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
         self.inner.jtalk_enabled()
     }
 
-    fn speech_synthesizer(&mut self) -> Option<&mut dyn crate::host::SpeechSynthesizer> {
+    fn speech_synthesizer(&mut self) -> Option<&mut dyn crate::host::audio::SpeechSynthesizer> {
         self.inner.speech_synthesizer()
     }
 
@@ -354,7 +354,7 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
         self.inner.system_time_ms()
     }
 
-    fn fonts(&mut self) -> Option<&mut dyn crate::host::FontServices> {
+    fn fonts(&mut self) -> Option<&mut dyn crate::host::font::FontServices> {
         self.inner.fonts()
     }
 
@@ -436,7 +436,7 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
         self.state.quiz_debug_packs(handle)
     }
 
-    fn export_services(&mut self) -> Option<&mut dyn crate::host::ExportServices> {
+    fn export_services(&mut self) -> Option<&mut dyn crate::host::storage::ExportServices> {
         self.inner.export_services()
     }
 

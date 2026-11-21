@@ -45,8 +45,11 @@ mod utf8;
 mod vectors;
 pub use crate::host::storage::ScriptSettings;
 pub use crate::host::{
-    AchievementServices, ClipboardRequest, ClipboardText, LocalDateTime, MenuItemRequest,
-    ResourceServices, SystemServices, WindowAction, WindowCloseRequest, WindowRequest,
+    platform::{
+        AchievementServices, ClipboardRequest, ClipboardText, LocalDateTime, MenuItemRequest,
+        SystemServices, WindowAction, WindowCloseRequest, WindowRequest,
+    },
+    resources::ResourceServices,
 };
 pub use crate::resource::{CachedResources, ResourceCache};
 pub use crate::task::TaskClock;
@@ -280,7 +283,7 @@ pub struct TaskEffects {
 
 pub trait Host {
     /// Optional probe output for objects executing through this host.
-    fn diagnostic_trace(&self) -> Option<&crate::host::DiagnosticTrace> {
+    fn diagnostic_trace(&self) -> Option<&crate::host::diagnostics::DiagnosticTrace> {
         None
     }
 
@@ -369,7 +372,7 @@ pub trait Host {
         None
     }
 
-    fn fonts(&mut self) -> Option<&mut dyn crate::host::FontServices> {
+    fn fonts(&mut self) -> Option<&mut dyn crate::host::font::FontServices> {
         None
     }
 
@@ -511,19 +514,21 @@ pub trait Host {
         Err(Error::new(0, "宿主未提供问答调试题库"))
     }
 
-    fn export_services(&mut self) -> Option<&mut dyn crate::host::ExportServices> {
+    fn export_services(&mut self) -> Option<&mut dyn crate::host::storage::ExportServices> {
         None
     }
 
-    fn platform_job_services(&mut self) -> Option<&mut dyn crate::host::PlatformJobServices> {
+    fn platform_job_services(
+        &mut self,
+    ) -> Option<&mut dyn crate::host::platform::PlatformJobServices> {
         None
     }
 
-    fn effect_services(&mut self) -> Option<&mut dyn crate::host::EffectServices> {
+    fn effect_services(&mut self) -> Option<&mut dyn crate::host::effect::EffectServices> {
         None
     }
 
-    fn speech_synthesizer(&mut self) -> Option<&mut dyn crate::host::SpeechSynthesizer> {
+    fn speech_synthesizer(&mut self) -> Option<&mut dyn crate::host::audio::SpeechSynthesizer> {
         None
     }
 
@@ -642,7 +647,7 @@ pub trait Host {
 }
 
 impl<T: Host + ?Sized> Host for &mut T {
-    fn diagnostic_trace(&self) -> Option<&crate::host::DiagnosticTrace> {
+    fn diagnostic_trace(&self) -> Option<&crate::host::diagnostics::DiagnosticTrace> {
         (**self).diagnostic_trace()
     }
 
@@ -765,7 +770,7 @@ impl<T: Host + ?Sized> Host for &mut T {
         (**self).system_time_ms()
     }
 
-    fn fonts(&mut self) -> Option<&mut dyn crate::host::FontServices> {
+    fn fonts(&mut self) -> Option<&mut dyn crate::host::font::FontServices> {
         (**self).fonts()
     }
 
@@ -847,19 +852,21 @@ impl<T: Host + ?Sized> Host for &mut T {
         (**self).quiz_debug_packs(handle)
     }
 
-    fn export_services(&mut self) -> Option<&mut dyn crate::host::ExportServices> {
+    fn export_services(&mut self) -> Option<&mut dyn crate::host::storage::ExportServices> {
         (**self).export_services()
     }
 
-    fn platform_job_services(&mut self) -> Option<&mut dyn crate::host::PlatformJobServices> {
+    fn platform_job_services(
+        &mut self,
+    ) -> Option<&mut dyn crate::host::platform::PlatformJobServices> {
         (**self).platform_job_services()
     }
 
-    fn effect_services(&mut self) -> Option<&mut dyn crate::host::EffectServices> {
+    fn effect_services(&mut self) -> Option<&mut dyn crate::host::effect::EffectServices> {
         (**self).effect_services()
     }
 
-    fn speech_synthesizer(&mut self) -> Option<&mut dyn crate::host::SpeechSynthesizer> {
+    fn speech_synthesizer(&mut self) -> Option<&mut dyn crate::host::audio::SpeechSynthesizer> {
         (**self).speech_synthesizer()
     }
 

@@ -1,5 +1,5 @@
 use super::{Events, KeyEvent, KeyEventKind, Regions};
-use crate::host::KeySample;
+use crate::host::input::KeySample;
 use crate::task::Command;
 use crate::{Error, Result};
 

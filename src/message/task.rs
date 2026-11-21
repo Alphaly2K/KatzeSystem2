@@ -3,7 +3,7 @@ use super::{
     TextEncoding, TimingSettings, VerticalAlignment,
 };
 use crate::graphics::PlaneObject;
-use crate::host::{FontRequest, FontServices};
+use crate::host::font::{FontRequest, FontServices};
 use crate::kcs::{Host, Interpreter};
 use crate::runtime::{ObjectFactory, TaskObject, kind};
 use crate::task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock};

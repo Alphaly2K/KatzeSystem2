@@ -1,5 +1,5 @@
 use super::{BaseObject, ObjectFactory, ObjectHost, TaskObject, kind};
-use crate::host::{PlatformJob, PlatformJobRequest};
+use crate::host::platform::{PlatformJob, PlatformJobRequest};
 use crate::kcs::{Host, Interpreter, NativeReturn, format_string};
 use crate::task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock};
 use crate::{Error, Result, read};

@@ -1,5 +1,5 @@
 use crate::graphics::Rect;
-pub use crate::host::{ButtonSource, DeviceBinding, InputDevice, KeySample, PointerSample};
+pub use crate::host::input::{ButtonSource, DeviceBinding, InputDevice, KeySample, PointerSample};
 use crate::task::{Command, CommandBuffers};
 use crate::{Error, Result, read};
 

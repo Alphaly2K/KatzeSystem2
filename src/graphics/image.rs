@@ -1,6 +1,6 @@
 use super::{ImageRegion, Rect, Surface};
 use crate::hg3::{DecodedFrame, StandardInfo};
-use crate::host::ResourceServices;
+use crate::host::resources::ResourceServices;
 use crate::resource::ResourceMode;
 use crate::{Error, HandleAllocator, Result, hg3, jpeg, read};
 use std::collections::BTreeMap;

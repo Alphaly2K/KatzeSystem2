@@ -169,7 +169,7 @@ impl TaskObject for Camera2DObject {
                 .ok_or_else(|| Error::new(0, "宿主未提供绘图对象服务"))?;
             if let Some(camera) = self.camera.and_then(|id| drawings.camera_mut(id)) {
                 if command.code == 51 {
-                    crate::host::trace_detail!(
+                    crate::host::diagnostics::trace_detail!(
                         trace.as_ref(),
                         NativeDetail,
                         "[camera] id={:?} offset={:?}",

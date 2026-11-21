@@ -914,19 +914,19 @@ fn ordinary_settings_writeback_and_external_reads_share_runtime_state() {
     }
 }
 
-struct ConfigurationDevice([katze_system2::host::DeviceBinding; 80]);
+struct ConfigurationDevice([katze_system2::host::input::DeviceBinding; 80]);
 
-impl katze_system2::host::InputDevice for ConfigurationDevice {
-    fn key_configuration(&self) -> Option<&[katze_system2::host::DeviceBinding; 80]> {
+impl katze_system2::host::input::InputDevice for ConfigurationDevice {
+    fn key_configuration(&self) -> Option<&[katze_system2::host::input::DeviceBinding; 80]> {
         Some(&self.0)
     }
     fn poll(&mut self) -> Result<()> {
         Ok(())
     }
-    fn pointer(&mut self) -> Result<katze_system2::host::PointerSample> {
+    fn pointer(&mut self) -> Result<katze_system2::host::input::PointerSample> {
         Ok(Default::default())
     }
-    fn key(&mut self, _: u32, _: u32, _: bool) -> Result<katze_system2::host::KeySample> {
+    fn key(&mut self, _: u32, _: u32, _: bool) -> Result<katze_system2::host::input::KeySample> {
         Ok(Default::default())
     }
     fn take_wheel(&mut self) -> Result<u32> {
@@ -961,7 +961,8 @@ impl katze_system2::host::InputDevice for ConfigurationDevice {
 #[test]
 fn runtime_configuration_save_reads_current_device_bindings_and_preserves_the_vm_stack() {
     use katze_system2::{
-        host::DeviceBinding, memory::SharedMemory, runtime::TaskRuntime, settings::PlatformSettings,
+        host::input::DeviceBinding, memory::SharedMemory, runtime::TaskRuntime,
+        settings::PlatformSettings,
     };
     struct SaveSource;
     impl ProgramLoader for SaveSource {

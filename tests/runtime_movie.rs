@@ -127,8 +127,12 @@ fn word(runtime: &MovieRuntime, address: u32) -> u32 {
 #[test]
 fn host_movie_decoder_plays_audio_and_silent_tail_after_restart() -> Result<()> {
     use katze_system2::host::{
-        MovieAudio, MovieDecoded, MovieDecoder, MovieDecoderFactory, MovieFrame, MovieMetadata,
-        SharedSource, Surface, media::DecodeMode,
+        graphics::Surface,
+        media::DecodeMode,
+        movie::{
+            MovieAudio, MovieDecoded, MovieDecoder, MovieDecoderFactory, MovieFrame, MovieMetadata,
+        },
+        storage::SharedSource,
     };
     use std::sync::atomic::{AtomicUsize, Ordering};
 

@@ -19,11 +19,11 @@ mod bmb;
 mod cst;
 mod debug_window;
 mod diagnostics;
+use crate::host::diagnostics::trace_detail;
 pub use crate::host::diagnostics::{
     DiagnosticTrace, NativeInvocation, NativeTraceEvent, QuizDebugInput, QuizDebugSession,
     ScriptLocation, ScriptMessages, ScriptPosition, TraceCategory,
 };
-use crate::host::trace_detail;
 mod emocon;
 mod export;
 pub mod fes;
@@ -64,8 +64,12 @@ mod task_host;
 mod transition;
 mod window;
 pub use crate::host::{
-    ClipboardRequest, ClipboardText, EffectPlayer, EffectServices, ExportDestination,
-    ExportServices, PlatformJob, PlatformJobRequest, PlatformJobServices, WindowServices,
+    effect::{EffectPlayer, EffectServices},
+    platform::{
+        ClipboardRequest, ClipboardText, PlatformJob, PlatformJobRequest, PlatformJobServices,
+        WindowServices,
+    },
+    storage::{ExportDestination, ExportServices},
 };
 
 use resources::Resources;

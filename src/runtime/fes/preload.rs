@@ -1,5 +1,5 @@
 use super::{Objects, Scene};
-use crate::host::ResourceServices;
+use crate::host::resources::ResourceServices;
 use crate::resource::ResourceMode;
 use crate::runtime::{ObjectFactory, Store};
 use crate::{Error, Result, fes, read};

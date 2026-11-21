@@ -124,7 +124,7 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         Some(&mut self.resources.images)
     }
 
-    fn fonts(&mut self) -> Option<&mut dyn crate::host::FontServices> {
+    fn fonts(&mut self) -> Option<&mut dyn crate::host::font::FontServices> {
         self.resources
             .fonts
             .as_mut()
@@ -305,7 +305,7 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         Ok(count <= 2 && self.resources.compositor.auxiliary_targets.len() >= count as usize)
     }
 
-    fn resource_services(&mut self) -> Option<&mut dyn crate::host::ResourceServices> {
+    fn resource_services(&mut self) -> Option<&mut dyn crate::host::resources::ResourceServices> {
         match &mut self.resources.services {
             Some(services) => Some(services.as_mut()),
             None => None,
@@ -337,7 +337,7 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         }
     }
 
-    fn speech_synthesizer(&mut self) -> Option<&mut dyn crate::host::SpeechSynthesizer> {
+    fn speech_synthesizer(&mut self) -> Option<&mut dyn crate::host::audio::SpeechSynthesizer> {
         self.resources
             .speech
             .as_mut()

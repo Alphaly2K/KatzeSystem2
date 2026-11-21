@@ -168,7 +168,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                 let mut registration = bytes.clone();
                 registration.extend(priority.to_le_bytes());
                 registration.extend(0u32.to_le_bytes());
-                crate::host::trace_detail!(
+                crate::host::diagnostics::trace_detail!(
                     self.resources.diagnostic_trace.as_ref(),
                     NativeDetail,
                     "[fes-button] owner={} handle={} name={} task={} rect={:?}",
@@ -249,7 +249,7 @@ impl<F: ObjectFactory> Store<'_, F> {
         }
         let state = objects.get(handle).unwrap().state.image().unwrap();
         let mut size = state.size;
-        crate::host::trace_detail!(
+        crate::host::diagnostics::trace_detail!(
             self.resources.diagnostic_trace.as_ref(),
             NativeDetail,
             "[btnrect] handle={handle} size={:?} resource={:?} wrapper={wrapper}",

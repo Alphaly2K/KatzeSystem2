@@ -60,11 +60,6 @@ impl GameRuntime {
         self.0.set_readback_backend(backend);
     }
 
-    #[doc(hidden)]
-    pub fn set_graphics_backend(&mut self, backend: impl GraphicsBackend + 'static) {
-        self.set_readback_backend(backend);
-    }
-
     /// Use a host decoder for future movie loads. Already loaded movies retain
     /// their decoder factory when stopped and played again.
     pub fn set_movie_decoder_factory(&mut self, factory: impl MovieDecoderFactory + 'static) {
@@ -172,7 +167,7 @@ impl GameRuntime {
 
     /// Transfer this session to the task API for probes that need to inspect
     /// task objects, VM state, or engine commands directly.
-    pub fn into_task_runtime(self) -> TaskRuntime {
+    pub(crate) fn into_task_runtime(self) -> TaskRuntime {
         self.0
     }
 }

@@ -19,8 +19,8 @@ pub(super) struct Resources {
     pub effects: Option<Box<dyn super::EffectServices>>,
     pub model_services: Option<Box<dyn crate::host::model::ModelServices>>,
     pub model_players: std::collections::BTreeMap<u32, Box<dyn crate::host::model::ModelPlayer>>,
-    pub speech: Option<Box<dyn crate::host::SpeechSynthesizer>>,
-    pub fonts: Option<Box<dyn crate::host::FontServices>>,
+    pub speech: Option<Box<dyn crate::host::audio::SpeechSynthesizer>>,
+    pub fonts: Option<Box<dyn crate::host::font::FontServices>>,
     pub images: Images,
     pub compositor: Compositor,
     pub readback_backend: Option<Box<dyn GraphicsBackend>>,
@@ -45,7 +45,7 @@ pub(super) struct Resources {
     pub emocon: std::collections::BTreeMap<u32, super::emocon::EmoconState>,
     pub decode_mode: crate::host::media::DecodeMode,
     pub movie: Option<super::movie::Movie>,
-    pub movie_decoder_factory: Option<std::sync::Arc<dyn crate::host::MovieDecoderFactory>>,
+    pub movie_decoder_factory: Option<std::sync::Arc<dyn crate::host::movie::MovieDecoderFactory>>,
     pub plane_movies: std::collections::BTreeMap<u32, super::movie::Movie>,
 }
 

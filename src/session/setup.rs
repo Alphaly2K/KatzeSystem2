@@ -202,11 +202,6 @@ impl GameSetup {
         self.0.set_readback_backend(backend);
     }
 
-    #[doc(hidden)]
-    pub fn set_graphics_backend(&mut self, backend: impl GraphicsBackend + 'static) {
-        self.set_readback_backend(backend);
-    }
-
     /// Seed the script's integer and floating point random streams before startup.
     /// The default seed is 4357. Use the same seed with the same inputs to replay
     /// script decisions that depend on random draws.
@@ -265,7 +260,7 @@ impl GameSetup {
     }
 
     /// Transfer the prepared state to the task API for custom startup or inspection.
-    pub fn into_task_runtime(self) -> TaskRuntime {
+    pub(crate) fn into_task_runtime(self) -> TaskRuntime {
         self.0
     }
 }

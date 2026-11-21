@@ -1,8 +1,10 @@
 use super::HostState;
 use crate::{
     Error, Result,
-    host::input::DeviceKeys,
-    host::{ConfigurationFile, DeviceBinding},
+    host::{
+        input::{DeviceBinding, DeviceKeys},
+        storage::ConfigurationFile,
+    },
     resource::XmlWriter,
     settings::write_configuration_with_bindings,
 };

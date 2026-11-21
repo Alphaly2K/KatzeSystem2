@@ -64,6 +64,17 @@ const INPUT_TASK: u32 = 1;
 const SOUND_TASK: u32 = 2;
 
 impl TaskRuntime {
+    /// Take ownership of a configured game before it has started, for tools
+    /// that need to run their own task startup sequence.
+    pub fn from_setup(setup: crate::session::GameSetup) -> Self {
+        setup.into_task_runtime()
+    }
+
+    /// Take ownership of a running session to inspect or control its tasks.
+    pub fn from_session(session: crate::session::GameRuntime) -> Self {
+        session.into_task_runtime()
+    }
+
     /// Prepare a resource-backed session with zeroed script storage.
     /// `shared_slots` counts 32-bit values; `external_bytes` counts bytes.
     /// Both storage areas are limited to 64 MiB each.

@@ -1,7 +1,7 @@
 use super::{HostState, Interpreter, NativeReturn, strings};
 use crate::{Error, Result};
 
-use crate::host::AchievementServices;
+use crate::host::platform::AchievementServices;
 
 impl HostState {
     /// 绑定服务，供 KCS 和 FES 共用。替换服务后允许新服务初始化一次。

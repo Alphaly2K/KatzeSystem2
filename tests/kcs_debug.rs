@@ -1,7 +1,7 @@
 use katze_system2::{
     Result,
     expression::State,
-    host::{NativeInvocation, NativeTraceEvent},
+    host::diagnostics::{NativeInvocation, NativeTraceEvent},
     kcs::{CoreHost, Host, Interpreter, NativeReturn, Program},
     memory::SharedMemory,
     runtime::{ProgramLoader, TaskRuntime, kind},

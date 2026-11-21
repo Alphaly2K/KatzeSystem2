@@ -1,7 +1,7 @@
 use super::{PlatformSettings, SystemSettings, word};
 use crate::{
     Result,
-    host::DeviceBinding,
+    host::input::DeviceBinding,
     host::input::{DeviceKeys, write_bindings_xml},
     language::LanguageState,
     resource::XmlWriter,

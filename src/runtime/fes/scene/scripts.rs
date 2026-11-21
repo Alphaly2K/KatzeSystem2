@@ -1,5 +1,5 @@
 use super::{Notification, Scene};
-use crate::host::{WindowAction, WindowRequest};
+use crate::host::platform::{WindowAction, WindowRequest};
 use crate::runtime::{
     FesSceneLoan, ObjectFactory, Store, create_object, create_unloaded_ordinary, kind,
     route_command,

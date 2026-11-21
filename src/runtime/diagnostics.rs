@@ -1,5 +1,5 @@
 use super::{ObjectFactory, Runtime};
-use crate::host::{
+use crate::host::diagnostics::{
     DiagnosticTrace, NativeTraceEvent, ScriptLocation, ScriptMessages, ScriptPosition,
 };
 use std::rc::Rc;

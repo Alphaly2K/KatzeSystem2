@@ -1,5 +1,5 @@
 use super::{CstContext, ObjectFactory, ObjectHost};
-use crate::host::ResourceServices;
+use crate::host::resources::ResourceServices;
 use crate::kcs::{Interpreter, NativeReturn, format_string};
 use crate::{Error, Result, read};
 

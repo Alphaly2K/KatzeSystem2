@@ -1,6 +1,6 @@
 use super::{Image, Images};
 use crate::Result;
-use crate::host::ResourceServices;
+use crate::host::resources::ResourceServices;
 use crate::resource::ResourceMode;
 use std::collections::VecDeque;
 

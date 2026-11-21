@@ -1,5 +1,5 @@
 use super::{SoundState, Source, playback::Playback};
-use crate::host::{ResourceServices, SpeechSynthesizer};
+use crate::host::{audio::SpeechSynthesizer, resources::ResourceServices};
 use crate::{Error, Result, read};
 
 impl SoundState {

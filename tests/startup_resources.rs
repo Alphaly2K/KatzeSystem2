@@ -3,7 +3,7 @@
 mod support;
 
 use katze_system2::{
-    host::{ResourceMode, ResourceServices},
+    host::resources::{ResourceMode, ResourceServices},
     runtime::TaskRuntime,
     task::{Command, CommandBuffers},
 };
