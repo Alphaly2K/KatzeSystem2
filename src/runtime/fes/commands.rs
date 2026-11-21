@@ -30,15 +30,16 @@ impl Objects {
         line: &fes::Line,
         state: &mut State,
     ) -> Result<bool> {
-        self.dispatch_object_command_with_random(interpreter, line, state, None)
+        self.dispatch_object_command_with_services(interpreter, line, state, None, |_| Ok(None))
     }
 
-    pub(super) fn dispatch_object_command_with_random(
+    pub(super) fn dispatch_object_command_with_services(
         &mut self,
         interpreter: &mut fes::Interpreter,
         line: &fes::Line,
         state: &mut State,
         random: Option<&mut crate::kcs::ScriptRandom>,
+        load_table: impl FnMut(&[u8]) -> Result<Option<Vec<u8>>>,
     ) -> Result<bool> {
         let args = interpreter.parameters(&line.bytes, state)?;
         let Some(name) = args.get(1).map(Vec::as_slice) else {
@@ -66,6 +67,9 @@ impl Objects {
                 | b"getfile"
                 | b"max"
                 | b"baseopt"
+                | b"tonetbl"
+                | b"gettonetbl"
+                | b"exist"
                 | b"getsize"
                 | b"endpos"
                 | b"drawarea"
@@ -130,7 +134,23 @@ impl Objects {
         {
             return Ok(true);
         }
-        if matches!(name, b"baseopt" | b"max") {
+        if matches!(
+            name,
+            b"max" | b"exist" | b"load" | b"tonetbl" | b"gettonetbl"
+        ) && self.dispatch_background_table_command(
+            interpreter,
+            line.offset,
+            &args,
+            &target,
+            state,
+            load_table,
+        )? {
+            return Ok(true);
+        }
+        if matches!(
+            name,
+            b"baseopt" | b"max" | b"exist" | b"tonetbl" | b"gettonetbl"
+        ) {
             return Ok(false);
         }
         if matches!(name, b"init" | b"param" | b"start") {

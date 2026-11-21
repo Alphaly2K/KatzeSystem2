@@ -315,7 +315,10 @@ impl<F: ObjectFactory> Store<'_, F> {
         let cache = objects.preloaded_images.clone();
         let object = objects.get(handle).unwrap();
         let file = object.state.image_source().is_some();
-        let simple_image = matches!(object.state, ObjectState::Image(_));
+        let simple_image = matches!(
+            object.state,
+            ObjectState::Image(_) | ObjectState::BackgroundTable(_)
+        );
         let window = matches!(object.state, ObjectState::ImageWindow(_));
         let captured = matches!(objects.get(handle).unwrap().state, ObjectState::DifImage(_));
         let state = objects.get_mut(handle).unwrap().state.image_mut().unwrap();

@@ -815,7 +815,7 @@ impl<F: ObjectFactory> Store<'_, F> {
         if scene.media_preparation.is_none()
             && !scene.preload.is_pending()
             && !scene.prepare_with_tables(self.numbers, self.budget, |name| {
-                super::character_table::read_table(self.resources, name)
+                super::read_table(self.resources, name)
             })?
         {
             return Ok(false);
@@ -1320,11 +1320,12 @@ impl<F: ObjectFactory> Store<'_, F> {
                             &mut scene.interpreter,
                             &line,
                             self.numbers,
-                        )? && !scene.objects.dispatch_object_command_with_random(
+                        )? && !scene.objects.dispatch_object_command_with_services(
                             &mut scene.interpreter,
                             &line,
                             self.numbers,
                             Some(&mut self.host.random),
+                            |name| super::read_table(self.resources, name),
                         )? && !self.fes_unknown_object_command(scene, &args, &line)?
                         {
                             return Err(Error::new(line.offset, "FES 事件对象命令尚未接入"));
@@ -1336,7 +1337,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                     scene.objects.initialize_with_tables(
                         &initialization,
                         |name| self.host.languages.expand_image(name),
-                        |name| super::character_table::read_table(self.resources, name),
+                        |name| super::read_table(self.resources, name),
                     )?;
                     scene.interpreter.resume();
                 }
@@ -1743,7 +1744,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                         &event,
                         self.numbers,
                         |name| self.host.languages.expand_image(name),
-                        |name| super::character_table::read_table(self.resources, name),
+                        |name| super::read_table(self.resources, name),
                     )? {
                         scene.interpreter.resume();
                         continue;
@@ -1853,11 +1854,12 @@ impl<F: ObjectFactory> Store<'_, F> {
                                 &mut scene.interpreter,
                                 &line,
                                 self.numbers,
-                            )? && !scene.objects.dispatch_object_command_with_random(
+                            )? && !scene.objects.dispatch_object_command_with_services(
                                 &mut scene.interpreter,
                                 &line,
                                 self.numbers,
                                 Some(&mut self.host.random),
+                                |name| super::read_table(self.resources, name),
                             )? && !self.fes_unknown_object_command(scene, &args, &line)?
                             {
                                 return Err(Error::new(line.offset, "FES 对象命令尚未接入"));

@@ -106,7 +106,10 @@ impl<F: ObjectFactory> Store<'_, F> {
         if matches!(object.state, ObjectState::CImage(_)) {
             return self.update_fes_cimage(owner, objects, handle, image);
         }
-        if matches!(object.state, ObjectState::Image(_)) {
+        if matches!(
+            object.state,
+            ObjectState::Image(_) | ObjectState::BackgroundTable(_)
+        ) {
             return self.update_fes_image(owner, objects, handle, image);
         }
         if matches!(object.state, ObjectState::ImageWindow(_)) {

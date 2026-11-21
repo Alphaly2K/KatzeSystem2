@@ -25,19 +25,6 @@ struct Choice {
     options: Vec<u8>,
 }
 
-pub(in crate::runtime) fn read_table(
-    resources: &mut crate::runtime::Resources,
-    name: &[u8],
-) -> Result<Option<Vec<u8>>> {
-    let Some(services) = resources.services.as_deref_mut() else {
-        return Ok(None);
-    };
-    services.read(
-        terminated(name),
-        crate::host::resources::ResourceMode::LooseFirst,
-    )
-}
-
 impl CharacterTable {
     pub(super) fn load(&mut self, bytes: &[u8]) -> Result<()> {
         self.roots = if bytes.is_empty() {

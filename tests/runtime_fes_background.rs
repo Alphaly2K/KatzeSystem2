@@ -174,3 +174,37 @@ fn plane_background_crops_the_current_list_before_later_media_updates() {
         assert_eq!(surface.pixel(2, 2), Some(0));
     }
 }
+
+#[test]
+fn background_table_keeps_sparse_variations_and_uses_the_selected_files_tone() {
+    use katze_system2::{
+        host::resources::{ResourceMode, ResourceServices},
+        runtime::fes::ObjectState,
+    };
+    struct Files;
+    impl ResourceServices for Files {
+        fn resolve(&mut self, _: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+            Ok(name.to_vec())
+        }
+        fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
+            assert_eq!(mode, ResourceMode::LooseFirst);
+            Ok(match name {
+                b"list.csv" => Some(b"ignore,hidden,bad\r\n\x81\x9b,\"scene, label\",day,,night\r\n\x81\x9b,place,day\r\n".to_vec()),
+                b"tone.tbl" => Some(b"#night(72,80,92)\r\nNIGHT\r\n".to_vec()),
+                _ => None,
+            })
+        }
+    }
+    let script = b"#DEFINE\nBGTABLE2 bg\n#OBJECT TABLE\nbg list.csv\n#START\nbg tonetbl tone.tbl\nbg max 1\nbg exist 0 0 2\nbg exist 0 1 3\nbg exist 0 2 4\nbg gettonetbl 5 6 7\nwait 1\nbg load 0 2\nbg load 0 1\nbg gettonetbl 5 6 7\nwait 100\n";
+    let (mut runtime, mut scene, _, _) = setup(script, 4096);
+    runtime.set_resources(Files);
+    update(&mut runtime, &mut scene, 100).unwrap();
+    assert_eq!(&runtime.numbers().shared[1..], &[2, 1, 0, 1, 100, 100, 100]);
+    update(&mut runtime, &mut scene, 101).unwrap();
+    assert_eq!(&runtime.numbers().shared[5..], &[72, 80, 92]);
+    let handle = scene.objects().lookup("bg", 0).unwrap();
+    assert!(matches!(
+        scene.objects().get(handle).unwrap().state,
+        ObjectState::BackgroundTable(_)
+    ));
+}

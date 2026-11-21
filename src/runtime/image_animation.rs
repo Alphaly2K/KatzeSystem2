@@ -2,6 +2,7 @@ use super::{ObjectFactory, ObjectHost, Resources};
 use crate::kcs::{Interpreter, NativeReturn, format_string};
 use crate::resource::ResourceMode;
 use crate::task::CommandBuffers;
+use crate::text::delimited::{char_width, field};
 use crate::{Error, Result, read};
 use std::collections::BTreeMap;
 
@@ -105,15 +106,6 @@ pub(super) fn name_parts(name: &[u8]) -> (usize, usize) {
     (basename, extension)
 }
 
-fn char_width(bytes: &[u8]) -> usize {
-    usize::from(
-        matches!(bytes[0], 0x81..=0x9f | 0xe0..=0xef)
-            && bytes
-                .get(1)
-                .is_some_and(|b| matches!(b, 0x40..=0x7e | 0x80..=0xfc)),
-    ) + 1
-}
-
 fn lowercase(bytes: &[u8]) -> Vec<u8> {
     let mut key = bytes.to_vec();
     let mut pos = 0;
@@ -132,14 +124,14 @@ fn parse_aliases(bytes: &[u8]) -> Result<AnimationAliases> {
     let mut aliases = BTreeMap::new();
     while !bytes.is_empty() {
         if !matches!(bytes[0], b'\r' | b'\n') {
-            let key = field(&mut bytes)?;
+            let key = field(&mut bytes, b'\t')?;
             if !bytes.is_empty() && !matches!(bytes[0], b'\r' | b'\n') {
-                let value = field(&mut bytes)?;
+                let value = field(&mut bytes, b'\t')?;
                 if !key.is_empty() {
                     aliases.entry(key).or_insert(value);
                 }
                 while !bytes.is_empty() && !matches!(bytes[0], b'\r' | b'\n') {
-                    field(&mut bytes)?;
+                    field(&mut bytes, b'\t')?;
                 }
             }
         }
@@ -148,48 +140,4 @@ fn parse_aliases(bytes: &[u8]) -> Result<AnimationAliases> {
         }
     }
     Ok(aliases)
-}
-
-// 此 CSV 资源使用制表符分隔；引号中的换行由读取器合并。
-fn field(input: &mut &[u8]) -> Result<Vec<u8>> {
-    let quoted = input.starts_with(b"\"");
-    if quoted {
-        *input = &input[1..];
-    }
-    let mut value = Vec::new();
-    while let Some(&byte) = input.first() {
-        match byte {
-            b'\t' | b'\r' | b'\n' if !quoted => break,
-            b'\r' | b'\n' => {
-                let pair = if byte == b'\r' { b"\r\n" } else { b"\n\r" };
-                *input = &input[if input.starts_with(pair) { 2 } else { 1 }..];
-            }
-            b'"' if !input.starts_with(b"\"\"") => {
-                *input = &input[1..];
-                break;
-            }
-            b'"' => {
-                value.push(byte);
-                *input = &input[2..];
-            }
-            _ => {
-                let width = char_width(input);
-                value.extend_from_slice(&input[..width]);
-                *input = &input[width..];
-            }
-        }
-        if value.len() > 255 {
-            return Err(Error::new(0, "动画别名表字段超过缓冲区上限"));
-        }
-    }
-    while input
-        .first()
-        .is_some_and(|b| !matches!(b, b'\t' | b'\r' | b'\n'))
-    {
-        *input = &input[char_width(input)..];
-    }
-    if input.starts_with(b"\t") {
-        *input = &input[1..];
-    }
-    Ok(value)
 }

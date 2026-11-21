@@ -8,8 +8,9 @@ use crate::{Error, HandleAllocator, Result, read};
 use std::collections::{BTreeMap, BTreeSet};
 
 mod animation;
+mod background_table;
 mod button;
-pub(super) mod character_table;
+mod character_table;
 mod commands;
 mod configuration;
 mod difimage;
@@ -39,6 +40,7 @@ mod string;
 mod task;
 mod viewport;
 pub use animation::ImageAnimationRequest;
+pub use background_table::BackgroundTable;
 pub use character_table::CharacterTable;
 pub use difimage::DifImageState;
 pub use draw::DrawState;
@@ -100,6 +102,7 @@ pub enum ObjectState {
     Plane(Box<PlaneState>),
     ModelPlane(Box<ModelPlaneState>),
     CharacterTable(Box<CharacterTable>),
+    BackgroundTable(Box<BackgroundTable>),
     Slider(Box<SliderState>),
     Scroll2(Box<Scroll2State>),
     Sound(Box<SoundState>),
@@ -125,6 +128,7 @@ impl ObjectState {
             Self::Plane(_) => "PLANE",
             Self::ModelPlane(_) => "M2PLANE",
             Self::CharacterTable(_) => "CHTABLE2",
+            Self::BackgroundTable(_) => "BGTABLE2",
             Self::Slider(_) => "SLIDER",
             Self::Scroll2(_) => "SCROLL2",
             Self::Sound(sound) if sound.table.is_some() => "SNDTABLE",
@@ -151,6 +155,7 @@ impl ObjectState {
             "PLANE" => Self::Plane(Box::default()),
             "M2PLANE" => Self::ModelPlane(Box::default()),
             "CHTABLE2" => Self::CharacterTable(Box::default()),
+            "BGTABLE2" => Self::BackgroundTable(Box::default()),
             "SLIDER" => Self::Slider(Box::default()),
             "SCROLL2" => Self::Scroll2(Box::default()),
             "SOUND" => Self::Sound(Box::default()),
@@ -196,6 +201,7 @@ impl ObjectState {
             Self::DifImage(state) => Some(&state.base),
             Self::Button(state) => Some(&state.image.base),
             Self::SavePanel(state) => Some(&state.image.base),
+            Self::BackgroundTable(state) => Some(&state.image.base),
             _ => None,
         }
     }
@@ -207,6 +213,7 @@ impl ObjectState {
             Self::DifImage(state) => Some(&mut state.base),
             Self::Button(state) => Some(&mut state.image.base),
             Self::SavePanel(state) => Some(&mut state.image.base),
+            Self::BackgroundTable(state) => Some(&mut state.image.base),
             _ => None,
         }
     }
@@ -216,6 +223,7 @@ impl ObjectState {
             Self::Image(state) | Self::ImageWindow(state) => Some(state),
             Self::Button(state) => Some(&state.image),
             Self::SavePanel(state) => Some(&state.image),
+            Self::BackgroundTable(state) => Some(&state.image),
             _ => None,
         }
     }
@@ -225,6 +233,7 @@ impl ObjectState {
             Self::Image(state) | Self::ImageWindow(state) => Some(state),
             Self::Button(state) => Some(&mut state.image),
             Self::SavePanel(state) => Some(&mut state.image),
+            Self::BackgroundTable(state) => Some(&mut state.image),
             _ => None,
         }
     }
@@ -688,6 +697,18 @@ impl Objects {
                     }
                     false
                 }
+                ObjectState::BackgroundTable(table) => {
+                    if let Some(name) = &initialization.attributes.table {
+                        if let Some(bytes) = load_table(name)? {
+                            table.load(&bytes)?;
+                        }
+                    }
+                    table.image.apply(
+                        &initialization.attributes,
+                        bank as u32,
+                        &mut transform_name,
+                    )?
+                }
                 ObjectState::Viewport(state) => state.apply(&initialization.attributes),
                 ObjectState::CImage(state) => state.apply(&initialization.attributes, bank as u32),
                 ObjectState::Image(state) | ObjectState::ImageWindow(state) => {
@@ -827,4 +848,17 @@ impl Objects {
         }
         Ok(removed)
     }
+}
+
+pub(in crate::runtime) fn read_table(
+    resources: &mut crate::runtime::Resources,
+    name: &[u8],
+) -> Result<Option<Vec<u8>>> {
+    let Some(services) = resources.services.as_deref_mut() else {
+        return Ok(None);
+    };
+    services.read(
+        name.split(|&byte| byte == 0).next().unwrap_or_default(),
+        crate::host::resources::ResourceMode::LooseFirst,
+    )
 }

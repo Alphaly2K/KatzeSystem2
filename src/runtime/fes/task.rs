@@ -155,7 +155,7 @@ impl<F: ObjectFactory> Services for ObjectHost<'_, F> {
             row,
             self.numbers,
             |name| self.host.languages.expand_image(name),
-            |name| super::character_table::read_table(self.resources, name),
+            |name| super::read_table(self.resources, name),
         )
     }
     fn prepare(&mut self, scene: &mut Scene, budget: usize) -> Result<bool> {

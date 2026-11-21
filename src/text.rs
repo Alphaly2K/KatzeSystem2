@@ -2,6 +2,7 @@ use crate::{Error, Result};
 use std::collections::BTreeMap;
 
 mod cp932;
+pub(crate) mod delimited;
 pub(crate) use cp932::encode_replacing as cp932_encoded_replacing;
 
 pub fn cp932(bytes: &[u8]) -> Result<String> {
