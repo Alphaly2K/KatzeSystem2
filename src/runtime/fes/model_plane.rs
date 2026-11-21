@@ -17,12 +17,19 @@ pub struct ModelPlaneState {
     body_pending: bool,
     effects_mode: Option<u32>,
     applied_effects_mode: Option<u32>,
+    tone: Option<[u32; 3]>,
+    applied_tone: Option<[u32; 3]>,
+    host_tone: bool,
     pub(super) effects_active: bool,
 }
 
 impl ModelPlaneState {
     pub fn plane(&self) -> &CPlaneState {
         &self.plane
+    }
+
+    pub(super) fn set_tone(&mut self, rgb: [u32; 3]) {
+        self.tone = (rgb != [100; 3]).then_some(rgb);
     }
 
     pub(super) fn set_effects_mode(&mut self, mode: u32) {
@@ -108,6 +115,8 @@ impl<F: ObjectFactory> Store<'_, F> {
                 if let Some(player) = player {
                     self.resources.model_players.insert(handle, player);
                     state.applied_effects_mode = Some(1);
+                    state.applied_tone = None;
+                    state.host_tone = false;
                 } else {
                     self.resources.model_players.remove(&handle);
                     drawables.remove(handle);
@@ -131,15 +140,22 @@ impl<F: ObjectFactory> Store<'_, F> {
             player.set_effects_mode(mode)?;
             state.applied_effects_mode = Some(mode);
         }
+        if state.tone != state.applied_tone {
+            state.host_tone = player.set_tone(state.tone.unwrap_or([100; 3]))?;
+            state.applied_tone = state.tone;
+        }
         state.effects_active = player.effects_active(self.host.system_time_ms)?;
         if state.plane.display == 0 {
             drawables.set_display(handle, 0);
             return Ok(());
         }
-        let Some(frame) = player.frame(self.host.system_time_ms)? else {
+        let Some(mut frame) = player.frame(self.host.system_time_ms)? else {
             drawables.set_display(handle, 0);
             return Ok(());
         };
+        if let Some(tone) = state.tone.filter(|_| !state.host_tone) {
+            std::sync::Arc::make_mut(&mut frame.pixels).adjust_rgb_percent(tone);
+        }
         let size = frame.pixels.size().map(|axis| axis as f32);
         if drawables
             .get(handle)

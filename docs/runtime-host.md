@@ -23,7 +23,7 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 |`host::platform`、`host::effect`|`WindowPreferences`、窗口与剪贴板请求、平台任务及外部效果播放器|
 |`host::diagnostics`|脚本位置、调试消息、native 跟踪及 `QuizDebugSession`、`QuizDebugInput`|
 
-模型宿主可用 `ModelPlayer::effects_active(system_time_ms)` 报告仍在播放的差分过渡或效果。运行时在提交待处理的模型参数后读取该状态，隐藏平面也会更新。即时应用参数的播放器可沿用默认的 `false`。
+模型宿主可用 `ModelPlayer::effects_active(system_time_ms)` 报告仍在播放的差分过渡或效果。运行时在提交待处理的模型参数后读取该状态，隐藏平面也会更新。即时应用参数的播放器可沿用默认的 `false`。 模型宿主可实现 `ModelPlayer::set_tone([red, green, blue])`，在合成模型图层时应用脚本给出的百分比。新实例默认 `[100; 3]`，色调变化在取帧前交给播放器。播放器返回 `false` 时，运行库调节返回帧的 RGB 并保留 Alpha。
 
 未识别的 3D 粒子插件可由 `host::effect::EffectServices::open_particle` 接入。服务取得资源名和字节，为当前任务创建 `ParticlePlayer`。播放器通过借用的 `ParticleFrame` 更新运行库持有的网格，可在启动或更新时清除 `active` 来结束脚本等待。活动实例收到脚本停止命令时调用 `ParticlePlayer::stop`，之后仍可重启。运行库继续生成绘制命令，由图形宿主呈现。服务不可用时，装载返回插件诊断。
 

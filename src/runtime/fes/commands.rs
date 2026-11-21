@@ -155,13 +155,17 @@ impl Objects {
             return Ok(false);
         }
         if name == b"tone" {
-            if let Some(value) = args.get(2).filter(|value| !value.is_empty()) {
-                interpreter
-                    .eval(value, state)
-                    .map_err(|error| Error::new(line.offset + error.offset, error.message))?;
+            let mut tone = [100; 3];
+            for (channel, value) in tone.iter_mut().zip(args.iter().skip(2)) {
+                if !value.is_empty() {
+                    *channel = interpreter
+                        .eval(value, state)
+                        .map_err(|error| Error::new(line.offset + error.offset, error.message))?
+                        as u32;
+                }
             }
             let banks = if target.bank == -1 {
-                0..i64::from(self.count(&target.name))
+                0..i64::from(self.count(&target.name) as i32)
             } else {
                 i64::from(target.bank)..i64::from(target.bank) + 1
             };
@@ -169,8 +173,17 @@ impl Objects {
                 let Some(handle) = self.lookup(&target.name, bank as i32) else {
                     break;
                 };
-                if matches!(self.get(handle).unwrap().state, ObjectState::Sound(_)) {
-                    return Err(Error::new(line.offset, "FES 声音 tone 命令尚未接入"));
+                let object = self.get_mut(handle).unwrap();
+                match &mut object.state {
+                    ObjectState::ModelPlane(model) => model.set_tone(tone),
+                    ObjectState::Image(_)
+                    | ObjectState::BackgroundTable(_)
+                    | ObjectState::Button(_) => {
+                        let image = object.state.image_source_mut().unwrap();
+                        image.tone = tone;
+                        image.base.updates.request_rebuild();
+                    }
+                    _ => (),
                 }
             }
             return Ok(true);

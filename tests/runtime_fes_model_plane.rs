@@ -19,6 +19,7 @@ enum Event {
     Options(Vec<u8>),
     BodyOptions(Vec<u8>),
     EffectsMode(u32),
+    Tone([u32; 3]),
     Frame(u32),
     Drop,
 }
@@ -100,6 +101,11 @@ impl ModelPlayer for Player {
     fn set_effects_mode(&mut self, mode: u32) -> Result<()> {
         self.events.borrow_mut().push(Event::EffectsMode(mode));
         Ok(())
+    }
+
+    fn set_tone(&mut self, rgb: [u32; 3]) -> Result<bool> {
+        self.events.borrow_mut().push(Event::Tone(rgb));
+        Ok(false)
     }
 
     fn frame(&mut self, time: u32) -> Result<Option<ModelFrame>> {
@@ -433,10 +439,12 @@ table baseopt s
 table getfile 601 5 3 7 9
 table baseopt
 table getfile 600 5 3 7 9
-actor tone ($0+=1) ($1+=1) ($2+=1)
+actor tone ($0+=50) ($1+=200) ($2+=25) ($3+=1)
 actor load $str600;
 strvar 602 old
 table getfile 602 99 3 7 9
+wait 1
+actor tone
 wait 100
 ";
     for prepare in [false, true] {
@@ -446,6 +454,13 @@ wait 100
             Box::new(BaseObject::new()),
             State::new(16),
             NoTasks,
+        );
+        runtime.drawing_mut().target = Some(RenderTarget::new([64; 2]).unwrap());
+        runtime.drawing_mut().enabled = true;
+        runtime.set_frame_view(
+            Projection::default(),
+            *Transform::default().matrix(),
+            TextureFilter::Point,
         );
         runtime.set_resources(TableResources(table.clone()));
         let events = Rc::new(RefCell::new(Vec::new()));
@@ -463,14 +478,25 @@ wait 100
         }
         assert!(runtime.update_fes_scene(0, &mut scene, 1).unwrap());
         let numbers = runtime.numbers();
-        assert_eq!(&numbers.shared[..3], &[1, 0, 0]);
+        assert_eq!(&numbers.shared[..4], &[50, 200, 25, 0]);
         assert_eq!(&numbers.shared[10..15], &[1, 1, 2, 1, 0]);
         assert_eq!(numbers.strings[&600], b"model,1,0,5");
         assert_eq!(numbers.strings[&601], b"models,1,0,5");
         assert!(numbers.strings[&602].is_empty());
+        for (tick, color) in [(1, 0xff20_4004), (2, 0xff40_2010)] {
+            if tick > 1 {
+                assert!(runtime.update_fes_scene(0, &mut scene, tick).unwrap());
+            }
+            let frame = runtime
+                .with_frame(|draw, canvas| SoftwareBackend.render(draw, canvas, [64; 2]))
+                .unwrap();
+            assert_eq!(frame.pixel(20, 40), Some(color));
+        }
         let events = events.borrow();
         assert_eq!(events[0], Event::ReadModel);
         assert_eq!(events[1], Event::Open(b"model,1,0,5".to_vec()));
+        assert_eq!(events[2], Event::Tone([50, 200, 25]));
+        assert_eq!(events[4], Event::Tone([100; 3]));
         assert!(events.iter().any(|event| matches!(event, Event::Frame(_))));
     }
 }

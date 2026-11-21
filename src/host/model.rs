@@ -48,6 +48,13 @@ pub trait ModelPlayer {
         Ok(())
     }
 
+    /// Set the plane's RGB percentages before compositing model layers. A new
+    /// player starts at `[100; 3]`. Return `false` to let the runtime apply the
+    /// tone to the composited frame returned by [`Self::frame`].
+    fn set_tone(&mut self, _rgb: [u32; 3]) -> Result<bool> {
+        Ok(false)
+    }
+
     /// Report whether a model effect is still active at the given session time.
     /// Called during media updates after pending controls, including when the
     /// plane is hidden. The default suits players that apply changes immediately.

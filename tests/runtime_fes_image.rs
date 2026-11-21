@@ -2368,7 +2368,7 @@ fn scene_object_commands_select_frames_reload_sizes_and_update_final_pixels() {
             ]),
             reads: reads.clone(),
         });
-        let program = fes::Program::from_text(b"#DEFINE\nIMAGE sprite\nPLANE panel\n#OBJECT FILE IDN PRI POS DISP\nsprite texture 7 5 1,1 0\n#OBJECT POS SIZE VRAM PRI DISP\npanel 0,0 8,6 0,0 500 1\n#START\n\\0=0\nsprite disp\nsprite pri 7\nwait 1\nsprite load replacement 8 ($0+=100)\nsprite getid 0\nsprite size (\\0+=1) (\\0+=1)\n$1=\\0\nwait 1\nsprite size 1 2\nwait 1\nsprite size -1 -1\nsprite pos2 position 7\nwait 1\nsprite disp 0\nwait 99\n").unwrap();
+        let program = fes::Program::from_text(b"#DEFINE\nIMAGE sprite\nPLANE panel\n#OBJECT FILE IDN PRI POS DISP\nsprite texture 7 5 1,1 0\n#OBJECT POS SIZE VRAM PRI DISP\npanel 0,0 8,6 0,0 500 1\n#START\n\\0=0\nsprite disp\nsprite pri 7\nsprite tone 50\nwait 1\nsprite tone\nsprite load replacement 8 ($0+=100)\nsprite getid 0\nsprite size (\\0+=1) (\\0+=1)\n$1=\\0\nwait 1\nsprite size 1 2\nwait 1\nsprite size -1 -1\nsprite pos2 position 7\nwait 1\nsprite disp 0\nwait 99\n").unwrap();
         let mut scene =
             katze_system2::runtime::fes::Scene::new(program, runtime.host().handle_allocator())
                 .unwrap();
@@ -2377,7 +2377,7 @@ fn scene_object_commands_select_frames_reload_sizes_and_update_final_pixels() {
             .unwrap()
             .set_image_list(list, Rect::from_xywh(0, 0, 8, 6));
         for (now, color, point, read_count, size) in [
-            (100, 0xffff_0000, [1, 1], 1, [1, 1]),
+            (100, 0xff7f_0000, [1, 1], 1, [1, 1]),
             (101, 0xff00_ff00, [1, 1], 2, [1, 2]),
             (102, 0xff00_ff00, [1, 1], 2, [1, 2]),
             (103, 0xff00_ff00, [3, 2], 3, [1, 1]),

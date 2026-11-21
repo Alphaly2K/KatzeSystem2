@@ -63,6 +63,14 @@ impl Surface {
         ))
     }
 
+    pub(crate) fn adjust_rgb_percent(&mut self, rgb: [u32; 3]) {
+        for pixel in self.pixels_mut().chunks_exact_mut(4) {
+            for (value, percent) in pixel[..3].iter_mut().zip(rgb.into_iter().rev()) {
+                *value = (u32::from(*value).wrapping_mul(percent) / 100).min(255) as u8;
+            }
+        }
+    }
+
     pub fn clear(&mut self, argb: u32) {
         let pixel = argb.to_le_bytes();
         for target in self.pixels.chunks_exact_mut(4) {

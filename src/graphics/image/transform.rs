@@ -21,11 +21,7 @@ impl Image {
         if rgb == [100; 3] {
             return;
         }
-        for pixel in self.pixels_mut().chunks_exact_mut(4) {
-            for (value, percent) in pixel[..3].iter_mut().zip(rgb.into_iter().rev()) {
-                *value = (u32::from(*value).wrapping_mul(percent) / 100).min(255) as u8;
-            }
-        }
+        self.surface.adjust_rgb_percent(rgb);
         self.filter_revision = self.filter_revision.wrapping_add(1);
     }
 

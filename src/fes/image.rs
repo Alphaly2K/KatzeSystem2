@@ -282,6 +282,8 @@ fn replace<T: PartialEq>(current: &mut T, next: T) -> bool {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ImageState {
     pub base: CImageState,
+    /// RGB percentages applied to the decoded image.
+    pub tone: [u32; 3],
     pub requested_file: Vec<u8>,
     pub file: Vec<u8>,
     pub image_number: i32,
@@ -296,6 +298,7 @@ impl Default for ImageState {
     fn default() -> Self {
         Self {
             base: CImageState::default(),
+            tone: [100; 3],
             requested_file: Vec::new(),
             file: Vec::new(),
             image_number: 0,

@@ -248,7 +248,17 @@ impl<F: ObjectFactory> Store<'_, F> {
                 }
             };
             if loaded {
+                let tone = objects
+                    .get(handle)
+                    .unwrap()
+                    .state
+                    .image_source()
+                    .unwrap()
+                    .tone;
                 let image = self.resources.images.get_mut(wrapper)?;
+                if !image.is_rgb() {
+                    image.adjust_rgb_percent(tone);
+                }
                 let info = *image.info();
                 let object = objects.get_mut(handle).unwrap();
                 let state = object.state.image_mut().unwrap();

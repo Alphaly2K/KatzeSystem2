@@ -1289,7 +1289,7 @@ fn destroying_a_fes_during_draw_restores_submission_and_releases_its_sources() {
 
 #[test]
 fn fes_tasks_load_without_starting_then_drive_pixels_and_keep_exit_properties() {
-    let source = b"#DEFINE\nCIMAGE sprite\nPLANE view\n#OBJECT SIZE COLOR PRI POS DISP\nsprite 2,2 0xff123456 5 1,1 1\n#OBJECT POS SIZE VRAM PRI DISP\nview 0,0 8,6 0,0 500 1\n#START\n$0=$0+1\nwait 2\n$1=$1+1\nexit 37\n";
+    let source = b"#DEFINE\nCIMAGE sprite\nPLANE view\n#OBJECT SIZE COLOR PRI POS DISP\nsprite 2,2 0xff123456 5 1,1 1\n#OBJECT POS SIZE VRAM PRI DISP\nview 0,0 8,6 0,0 500 1\n#START\nsprite tone 50 120 30\n$0=$0+1\nwait 2\n$1=$1+1\nexit 37\n";
     for budget in [1, 4096] {
         let Setup {
             mut runtime,
