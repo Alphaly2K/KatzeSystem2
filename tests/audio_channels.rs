@@ -302,6 +302,29 @@ fn dropping_a_mixer_allows_the_host_to_resume_pcm_consumption() -> Result<()> {
 }
 
 #[test]
+fn detached_mixer_stops_output_when_its_sound_task_is_destroyed() -> Result<()> {
+    let (mut runtime, _) = setup_with_groups(None, DecodeMode::Inline);
+    runtime.host_mut().sound_stereo = Some(1);
+    load(&mut runtime, &mut record(5, 0, 0, b"audio/tone.ogg"))?;
+    runtime.dispatch_command(
+        0,
+        Command {
+            data: [5, 100, 0],
+            ..command(187, 5)
+        },
+    )?;
+    runtime.dispatch_command(0, command(183, 5))?;
+    let mut mixer = runtime.connect_task_audio_output(1)?;
+    let mut pcm = [0.0; 192];
+    mixer.render(48_000, &mut pcm)?;
+    assert!(pcm.iter().any(|&sample| sample != 0.0));
+    runtime.destroy(1)?;
+    mixer.render(48_000, &mut pcm)?;
+    assert!(pcm.iter().all(|&sample| sample == 0.0));
+    Ok(())
+}
+
+#[test]
 fn volume_and_pan_ramps_share_time_and_immediate_settings_cancel_their_own_ramp() {
     let (mut runtime, _) = setup();
     load(&mut runtime, &mut record(5, 0, 0, b"audio/tone.ogg")).unwrap();

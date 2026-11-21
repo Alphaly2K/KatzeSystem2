@@ -404,7 +404,7 @@ pub(crate) fn inspect_runtime(
         }
         let mut buffer = [0.; 4800];
         let pcm = &mut buffer[..(ticks as usize * 800 * 2)];
-        if let Some(mixer) = mixer.as_mut().filter(|_| runtime.object(sound).is_some()) {
+        if let Some(mixer) = &mut mixer {
             mixer.render(48_000, pcm)?;
         } else {
             runtime.mix_audio_stereo(48_000, pcm)?;

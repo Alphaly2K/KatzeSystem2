@@ -275,12 +275,17 @@ impl Mixer {
     /// Apply pending controls, write interleaved left/right `f32` PCM in `[-1, 1]`,
     /// and report playback progress to the runtime. The rate is in Hz and the
     /// output must contain an even number of samples. Does not wait for decoded data.
+    /// When the sound task is destroyed the mixer starts returning silence.
     pub fn render(&mut self, sample_rate: u32, output: &mut [f32]) -> Result<()> {
         let connected = self
             .connected
             .as_mut()
             .ok_or_else(|| Error::new(0, "混音器已断开连接"))?;
-        connected.apply_controls()?;
+        if !connected.apply_controls()? {
+            super::validate_stereo_output(sample_rate, output.len())?;
+            output.fill(0.0);
+            return Ok(());
+        }
         connected.sound.mix(sample_rate, output, false)?;
         connected.publish_progress();
         Ok(())
@@ -288,8 +293,13 @@ impl Mixer {
 }
 
 impl ConnectedMixer {
-    fn apply_controls(&mut self) -> Result<()> {
-        for update in self.receiver.try_iter() {
+    fn apply_controls(&mut self) -> Result<bool> {
+        loop {
+            let update = match self.receiver.try_recv() {
+                Ok(update) => update,
+                Err(mpsc::TryRecvError::Empty) => return Ok(true),
+                Err(mpsc::TryRecvError::Disconnected) => return Ok(false),
+            };
             let (channel, generation, action) = match update {
                 Update::Channel {
                     channel,
@@ -341,7 +351,6 @@ impl ConnectedMixer {
             }
             self.generations[channel] = generation;
         }
-        Ok(())
     }
 
     fn publish_progress(&self) {
