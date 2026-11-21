@@ -8,7 +8,7 @@
 
 `audio::decode_vorbis(bytes)` 解码单个完整 Ogg Vorbis 逻辑流，返回 PCM。输入和解码容量各限 64 MiB；结束页的 granule position 决定最终采样帧数，多出的尾部采样截去，解码不足时诊断。截断页、校验失败、缺少起始／结束页、串联或混合逻辑流、结束页后的额外数据及其他编码返回诊断。
 
-`decode_vorbis_source(&source)` 接受 `io::ReadSource`，遵守相同格式及容量规则，支持短读和独立游标。调用期间来源内容须保持一致；此接口同步完成整段解码，不持有资源路由。声音通道通过 `ResourceServices::open` 获取共享来源，再交给 `Source` 管理解码。
+`decode_vorbis_source(&source)` 接受 `host::storage::ReadSource`，遵守相同格式及容量规则，支持短读和独立游标。调用期间来源内容须保持一致；此接口同步完成整段解码，不持有资源路由。声音通道通过 `ResourceServices::open` 获取共享来源，再交给 `Source` 管理解码。
 
 `VorbisDecoder::new(&source)` 读取格式、页面边界与最终长度，音频包由 `read_packet()` 按需解码。每次返回非空、对齐完整采样帧的交错 i16 数据；最终数据裁到声明长度，后续调用返回 `None`。逐包读取允许声明长度超过完整 PCM 容量上限，仍要求采样位置可寻址。`seek_frame(frame)` 同步定位，下一包从指定帧开始；末尾位置有效，越界请求保留已有位置。数据页面损坏及采样不足在读取或定位时诊断。解码器借用独立读取源，宿主可在预取线程使用它，并把已解码采样交给设备回调。
 

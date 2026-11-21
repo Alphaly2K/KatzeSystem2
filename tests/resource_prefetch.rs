@@ -41,7 +41,7 @@ fn source_opening_forwards_host_overrides_and_keeps_cached_sources_after_evictio
             &mut self,
             _: &[u8],
             _: ResourceMode,
-        ) -> Result<Option<katze_system2::io::SharedSource>> {
+        ) -> Result<Option<katze_system2::host::storage::SharedSource>> {
             self.opens += 1;
             Ok(Some(std::sync::Arc::new(vec![9; 4])))
         }

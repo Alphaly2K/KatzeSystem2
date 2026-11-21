@@ -160,15 +160,15 @@ XML 路径及字段名称区分大小写，类别标识查询忽略 ASCII 大小
 
 运行时 `kcs::ResourceServices::read_utf16` 提供宽字符名称读取；默认转换为 CP932 后调用字节入口，无法表示的名称或无效 UTF-16 返回诊断。需要完整宽字符名称的宿主应覆盖该方法，`CachedResources` 和可变引用包装会转发宿主实现。启动示例的宽字符入口直接使用宿主文件名，并保留直接文件读取与资源回退的区别。
 
-`ResourceServices::open(name, mode)` 返回可选的 `io::SharedSource`，名称及模式沿用 `read`，缺失与读取失败分别返回 `Ok(None)` 和诊断。默认实现持有 `read` 返回的字节；宿主可覆盖以提供独立文件或其他存储源，可变引用包装转发该实现。`CachedResources` 优先使用已预读的字节，未命中时调用内部服务的 `open`；已打开的源在缓存淘汰后继续有效。声音装载通过该入口取得源，解码仍同步执行。
+`ResourceServices::open(name, mode)` 返回可选的 `host::storage::SharedSource`，名称及模式沿用 `read`，缺失与读取失败分别返回 `Ok(None)` 和诊断。默认实现持有 `read` 返回的字节；宿主可覆盖以提供独立文件或其他存储源，可变引用包装转发该实现。`CachedResources` 优先使用已预读的字节，未命中时调用内部服务的 `open`；已打开的源在缓存淘汰后继续有效。声音装载通过该入口取得源，解码仍同步执行。
 
-`io::ReadSource: Send + Sync` 提供 `len`、`is_empty`、`read_at(offset, output)` 及 `read_exact_at`。偏移不改变其他读取者的位置，允许短读，到达末尾返回零；完整读取遇到提前结束返回诊断，并保留已写入的前缀。源实现负责保证并发读取安全，读取期间内容须保持一致。`[u8]`、`Vec<u8>` 可直接作为源，`SharedSource` 为共享源句柄。宿主负责打开文件或其他存储来源；启动示例提供本地文件的 `ReadSource` 实现。
+`host::storage::ReadSource: Send + Sync` 提供 `len`、`is_empty`、`read_at(offset, output)` 及 `read_exact_at`。偏移不改变其他读取者的位置，允许短读，到达末尾返回零；完整读取遇到提前结束返回诊断，并保留已写入的前缀。源实现负责保证并发读取安全，读取期间内容须保持一致。`[u8]`、`Vec<u8>` 可直接作为源，`SharedSource` 为共享源句柄。宿主负责打开文件或其他存储来源；启动示例提供本地文件的 `ReadSource` 实现。
 
 `KifEntrySource::new(source, offset, length, key)` 将共享归档源映射为独立条目。offset 是归档内起点，length 是条目长度；key 为既有目录长度种子生成的密钥 DWORD，未加密时传 None。创建检查完整范围，读取偏移相对于条目，不改变其他条目或读取者的位置。加密块对齐到条目起点，末尾不足八字节保留原值；单次加密 `read_at` 最多返回 32 KiB，`read_exact_at` 可读取更大范围。批量读取失败时按普通分块重新读取，保留成功解密的前缀。输出尾部保持不变，读取无需持有完整归档或条目字节。
 
 启动示例的归档和资源路由共用该读取源。`ResourceServices::open` 返回可交给解码线程的源，普通 `read` 再显式读取完整字节；补丁、散文件和归档的查找顺序保持相同。
 
-`io::SourceReader::new(&source)` 将源适配为标准 `Read`／`Seek`，每个适配器保存独立游标，允许定位到末尾之后；无效负偏移或位置溢出返回错误并保留原位置。适配器借用的源须在读取期间存活；解码器无需持有资源服务或宿主路径。
+`host::storage::SourceReader::new(&source)` 将源适配为标准 `Read`／`Seek`，每个适配器保存独立游标，允许定位到末尾之后；无效负偏移或位置溢出返回错误并保留原位置。适配器借用的源须在读取期间存活；解码器无需持有资源服务或宿主路径。
 
 `SourceReader::from_shared(source)` 持有共享来源，游标可随消费者移交其他线程；释放原共享句柄不影响读取。`audio::VorbisDecoder::from_shared(source)` 同样持有来源和逐包解码状态，可在预取线程继续读取。
 

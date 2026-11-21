@@ -59,11 +59,6 @@ impl<F: ObjectFactory> Runtime<F> {
         self.resources.readback_backend = Some(Box::new(backend));
     }
 
-    #[doc(hidden)]
-    pub fn set_graphics_backend(&mut self, backend: impl GraphicsBackend + 'static) {
-        self.set_readback_backend(backend);
-    }
-
     /// Select the media execution mode for objects created after this call.
     pub fn set_media_decode_mode(&mut self, mode: crate::host::media::DecodeMode) {
         self.resources.decode_mode = mode;

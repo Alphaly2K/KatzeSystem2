@@ -1740,7 +1740,7 @@ struct DirectSource {
     skipped: std::ops::Range<u64>,
 }
 
-impl katze_system2::io::ReadSource for DirectSource {
+impl katze_system2::host::storage::ReadSource for DirectSource {
     fn len(&self) -> Result<u64> {
         Ok(self.bytes.len() as u64)
     }
@@ -1748,7 +1748,7 @@ impl katze_system2::io::ReadSource for DirectSource {
     fn read_at(&self, offset: u64, output: &mut [u8]) -> Result<usize> {
         let end = offset + output.len() as u64;
         assert!(end <= self.skipped.start || offset >= self.skipped.end);
-        katze_system2::io::ReadSource::read_at(&self.bytes, offset, output)
+        katze_system2::host::storage::ReadSource::read_at(&self.bytes, offset, output)
     }
 }
 
@@ -1765,12 +1765,12 @@ impl ResourceServices for DirectFiles {
         &mut self,
         name: &[u8],
         mode: ResourceMode,
-    ) -> Result<Option<katze_system2::io::SharedSource>> {
+    ) -> Result<Option<katze_system2::host::storage::SharedSource>> {
         Ok(self.files.read(name, mode)?.map(|bytes| {
             std::sync::Arc::new(DirectSource {
                 bytes,
                 skipped: self.skipped.clone(),
-            }) as katze_system2::io::SharedSource
+            }) as katze_system2::host::storage::SharedSource
         }))
     }
 }

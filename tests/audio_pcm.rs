@@ -1,7 +1,7 @@
 use katze_system2::{
     Result,
     audio::{VorbisDecoder, decode_vorbis, decode_vorbis_source},
-    io::ReadSource,
+    host::storage::ReadSource,
 };
 
 const MONO: &[u8] = include_bytes!("fixtures/audio/mono-44100.ogg");
@@ -98,7 +98,8 @@ fn packet_reader_reports_corruption_when_reading_the_audio_page() {
 #[test]
 fn shared_source_and_partial_decoder_state_move_together_to_a_worker() {
     for bytes in [MONO, STEREO] {
-        let source: katze_system2::io::SharedSource = std::sync::Arc::new(bytes.to_vec());
+        let source: katze_system2::host::storage::SharedSource =
+            std::sync::Arc::new(bytes.to_vec());
         let mut decoder = VorbisDecoder::from_shared(source.clone()).unwrap();
         let mut actual = decoder.read_packet().unwrap().unwrap();
         drop(source);
@@ -118,7 +119,7 @@ fn shared_source_and_partial_decoder_state_move_together_to_a_worker() {
 
 #[test]
 fn packet_seeks_preserve_exact_samples_across_pages_and_end_of_stream() {
-    fn check<S: katze_system2::io::ReadSource + ?Sized>(
+    fn check<S: katze_system2::host::storage::ReadSource + ?Sized>(
         bytes: &[u8],
         mut decoder: VorbisDecoder<'_, S>,
     ) {

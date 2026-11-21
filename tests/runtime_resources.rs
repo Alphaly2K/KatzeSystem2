@@ -1,7 +1,7 @@
 use katze_system2::{
     Error, Result,
     expression::State,
-    io::{ReadSource, SharedSource},
+    host::storage::{ReadSource, SharedSource},
     kcs::{Program, ResourceServices},
     resource::ResourceMode,
     runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, kind},

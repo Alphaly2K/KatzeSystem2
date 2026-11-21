@@ -2,7 +2,7 @@
 
 use katze_system2::{
     audio::SoundState,
-    io::SharedSource,
+    host::storage::SharedSource,
     movie::{Decoder, MpegDecoderFactory, Player},
 };
 use std::sync::Arc;

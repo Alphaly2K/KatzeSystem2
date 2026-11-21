@@ -5,9 +5,8 @@ use katze_system2::{
         movie::{
             MovieAudio, MovieDecoded, MovieDecoder, MovieDecoderFactory, MovieFrame, MovieMetadata,
         },
-        storage::SharedSource,
+        storage::{SharedSource, SourceReader},
     },
-    io::SourceReader,
 };
 use std::{
     io::{self, Read},

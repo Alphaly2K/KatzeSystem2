@@ -19,7 +19,6 @@ pub mod hg3;
 mod hg_pixels;
 pub mod host;
 pub mod input;
-pub mod io;
 mod jpeg;
 pub mod kcs;
 pub mod language;

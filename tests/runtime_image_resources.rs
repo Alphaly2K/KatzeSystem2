@@ -686,7 +686,7 @@ fn snapshot_loading_uses_open_and_preserves_prefetched_image_precedence() {
             &mut self,
             name: &[u8],
             _: ResourceMode,
-        ) -> Result<Option<katze_system2::io::SharedSource>> {
+        ) -> Result<Option<katze_system2::host::storage::SharedSource>> {
             if name.ends_with(b".anm") {
                 return Ok(None);
             }

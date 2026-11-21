@@ -4,7 +4,7 @@ use blowfish::{
 };
 use katze_system2::{
     Result,
-    io::{ReadSource, SharedSource},
+    host::storage::{ReadSource, SharedSource},
     resource::KifEntrySource,
 };
 use std::sync::Arc;

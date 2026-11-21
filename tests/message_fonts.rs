@@ -1,5 +1,5 @@
 use katze_system2::{
-    io::SharedSource,
+    host::storage::SharedSource,
     message::{FontRequest, FontServices, Fonts, TextEncoding},
 };
 use std::sync::{

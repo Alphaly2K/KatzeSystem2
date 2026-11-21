@@ -59,13 +59,13 @@ FES `fontcom add name` 调用同一字体服务的 `add_resource`，名称为已
 
 `SoundConfig::file_part(name)` 按非空文件前缀、先父后子查首个匹配；`file_volume`／`file_play_enabled`／`file_system_voice`／`file_mute` 处理各字段的缺省值，`master_mute()` 查询主静音。`group_volume(name)` 单独按分类名称查询，master 在这里是普通名称。规则与缺省值见[文件分类与播放设置](audio.md#文件分类与播放设置)。`HostState::sound_settings_dirty` 保存外层管理的媒体属性刷新标记。
 
-`audio::decode_vorbis(bytes)` 与 `decode_vorbis_source(&source)` 返回保留采样率和声道顺序的 `audio::Pcm`，分别接收字节切片和 `io::ReadSource`。通过 `frames()`、`samples()` 查询完整采样帧和交错 i16 数据。完整逻辑流、容量和结束页规则见[PCM 与解码](audio.md#pcm-与-vorbis-解码)。
+`audio::decode_vorbis(bytes)` 与 `decode_vorbis_source(&source)` 返回保留采样率和声道顺序的 `audio::Pcm`，分别接收字节切片和 `host::storage::ReadSource`。通过 `frames()`、`samples()` 查询完整采样帧和交错 i16 数据。完整逻辑流、容量和结束页规则见[PCM 与解码](audio.md#pcm-与-vorbis-解码)。
 
 `audio::VorbisDecoder::new(&source)` 提供相同格式的逐包解码，`from_shared(source)` 持有共享来源并允许移交其他线程。`sample_rate()`、`channels()`、`frames()` 查询来源格式，`read_packet()` 按需返回交错采样并在流结束后返回 `None`。读取期间来源内容须保持一致，音频包错误在对应读取时报告。
 
 `audio::Source::from_vorbis(source, whole)` 持有共享读取源；长流式来源准备前四秒后在后台继续解码。`read_frames(offset, output)` 等待所需采样，`try_read_frames` 在数据未就绪时返回 `false` 并保留输出。`pcm()` 等待完整数据并报告解码错误；`SoundChannel::pcm()` 同样可能等待，失败返回 `None`。设备混音使用非阻塞读取，离线混音与通道读取等待所需数据。
 
-`io::ReadSource::snapshot()` 默认为 `None`。宿主可用 `io::ReadSnapshot::new(generation, entry)` 标识不可变归档快照中的条目；同一 `Arc<()>` 世代内每个条目使用不同编号。内容替换或重新挂载时使用新的世代。`KifEntrySource::with_snapshot` 将该标识随读取源交给声音装载缓存。散装文件沿用默认行为。
+`host::storage::ReadSource::snapshot()` 默认为 `None`。宿主可用 `host::storage::ReadSnapshot::new(generation, entry)` 标识不可变归档快照中的条目；同一 `Arc<()>` 世代内每个条目使用不同编号。内容替换或重新挂载时使用新的世代。`KifEntrySource::with_snapshot` 将该标识随读取源交给声音装载缓存。散装文件沿用默认行为。
 
 FES SOUND 文件请求通过 `Objects::set_sound_task` 的绑定发送 180／182／201／206／210，新配置下属性刷新依次发送 187 音量与 190 声像；未绑定的独立对象更新向根 35 查询。`fes::SoundState::channel_result()` 查询最近装载后的原始结果。场景媒体更新按文件播放／系统语音开关发送播放、停止及首次毫秒命令，同步执行对象自身 PLAY 处理器；`started_tick()` 查询对象首次毫秒。仅持有 Objects 的更新在需要回调时要求所属场景。缓冲区、请求消费及失败契约见[声音媒体提交](audio.md#文件请求的媒体提交)与[播放动作](audio.md#播放动作与-play-处理器)；组通道自动回收、淡变和设备继续接入。
 
@@ -99,7 +99,7 @@ FES SOUND 文件请求通过 `Objects::set_sound_task` 的绑定发送 180／182
 
 FES `getconf screen` 查询 `SystemSettings::fullscreen`，`getconf iswindow` 查询宿主经 `Runtime::set_windowed_mode` 提供的窗口模式，两者保留独立的原始 DWORD。当前窗口模式为 None 时返回诊断。
 
-普通 29～32 通过 `ResourceServices::open` 和 `io::FileServices::create` 连接顺序文件读写。`create(task_id, name)` 接受格式展开后的 CP932 名称，返回可选的 `Write` 端；普通创建失败返回 None，服务未提供时诊断。30／31 返回实际字节数，32 释放读取源或写入端；默认方法不改变已有追加服务的实现。完整模式、游标及失败契约见[文件读写](kcs.md#文件读写)。
+普通 29～32 通过 `ResourceServices::open` 和 `host::storage::FileServices::create` 连接顺序文件读写。`create(task_id, name)` 接受格式展开后的 CP932 名称，返回可选的 `Write` 端；普通创建失败返回 None，服务未提供时诊断。30／31 返回实际字节数，32 释放读取源或写入端；默认方法不改变已有追加服务的实现。完整模式、游标及失败契约见[文件读写](kcs.md#文件读写)。
 
 普通 1009 经 `FileServices::create_utf16(task_id, name)` 输出 BMP／PNG／JPEG；名称以首个零结束，默认严格转换到 CP932 后委托 `create`，无法表示时要求宿主提供宽字符覆盖。创建失败返回 None，服务集成错误返回诊断。图像预处理会永久修改共享源的位深与字节，且保留原入口单次写入的特殊返回规则，详见[图像导出](graphics.md#图像导出及三通道操作)。启动文件宿主直接使用 Unicode 名称，不创建父目录。
 
@@ -230,7 +230,7 @@ FES 内部执行宏声明，初始化按以下顺序交给宿主：
 
 `fes::ImageReference::parse` 将 POS2／SIZE2 的值拆为资源名称字节和帧 ID。省略帧号时取 0，冒号后读取带可选符号的十进制／十六进制整数前缀，非法前缀取零，不运行表达式。
 
-`hg3::Metadata::parse` 从切片读取 HG-3 0x300 的帧顺序及 stdinfo；`Metadata::read(&source)` 接收 `io::ReadSource`，读取相同元数据并跳过像素正文。两者保留裁剪尺寸、偏移、完整画布尺寸和绘制基点。`frame(id)` 返回第一个匹配 ID 的帧；ID 与数组下标分别保存。`StandardInfo::reserved` 保存 stdinfo 的 Alpha 标记，零表示不透明，非零表示使用 Alpha。两个接口均校验全部帧及标签范围，不解码像素，容器上限为 64 MiB。
+`hg3::Metadata::parse` 从切片读取 HG-3 0x300 的帧顺序及 stdinfo；`Metadata::read(&source)` 接收 `host::storage::ReadSource`，读取相同元数据并跳过像素正文。两者保留裁剪尺寸、偏移、完整画布尺寸和绘制基点。`frame(id)` 返回第一个匹配 ID 的帧；ID 与数组下标分别保存。`StandardInfo::reserved` 保存 stdinfo 的 Alpha 标记，零表示不透明，非零表示使用 Alpha。两个接口均校验全部帧及标签范围，不解码像素，容器上限为 64 MiB。
 
 `hg3::decode_frame(bytes, id)` 解码首个匹配 ID 的 24／32 位帧，缺失 ID 返回 `None`。`decode_frame_from(&source, Some(id))` 校验全部元数据后仅读取选中帧所用的像素正文；参数为 `None` 时取最小无符号 ID，重复 ID 仍取首帧。读取源可短读，提前结束或读取失败返回诊断。`DecodedFrame` 包含 `id`、解码后的 `info`、`attributes: BTreeMap<u16, [u32; 5]>` 和从上到下紧密排列的 BGRA8 `pixels`，Alpha 保持独立，不应用裁剪偏移或绘制基点。解码后的 `info.bit_depth` 为 32，`Metadata` 保留源位深字段。`Frame::attributes` 提供相同属性记录，`Image::attribute(id)` 查询编号低十六位，未命中返回 `None`。支持范围与约束见 [图像接口](graphics.md)。
 

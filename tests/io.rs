@@ -1,6 +1,6 @@
 use katze_system2::{
     Result,
-    io::{ReadSource, SourceReader},
+    host::storage::{ReadSource, SourceReader},
 };
 use std::io::{Read, Seek, SeekFrom, Write};
 
@@ -22,7 +22,8 @@ impl ReadSource for Chunked {
 
 #[test]
 fn readers_keep_independent_positions_short_reads_and_failed_seek_state() {
-    let source: katze_system2::io::SharedSource = std::sync::Arc::new(Chunked(b"0123456789abcdef"));
+    let source: katze_system2::host::storage::SharedSource =
+        std::sync::Arc::new(Chunked(b"0123456789abcdef"));
     let mut first = SourceReader::new(source.as_ref());
     let mut second = SourceReader::from_shared(source.clone());
     let mut bytes = [0; 6];
@@ -111,7 +112,7 @@ fn file_source_reads_concurrently_without_sharing_reader_positions() {
 
 #[test]
 fn wide_file_creation_bridges_cp932_and_stops_at_the_first_zero() {
-    use katze_system2::io::FileServices;
+    use katze_system2::host::storage::FileServices;
     #[derive(Default)]
     struct Files(Vec<(u32, Vec<u8>)>);
     impl FileServices for Files {

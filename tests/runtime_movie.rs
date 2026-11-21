@@ -40,7 +40,7 @@ impl ResourceServices for Resources {
         &mut self,
         name: &[u8],
         mode: ResourceMode,
-    ) -> Result<Option<katze_system2::io::SharedSource>> {
+    ) -> Result<Option<katze_system2::host::storage::SharedSource>> {
         assert_eq!(mode, ResourceMode::LooseFirst);
         Ok(matches!(name, b"clip_7.mpg" | b"effect_7.mpg")
             .then(|| Arc::new(include_bytes!("fixtures/movie/clip.mpg").to_vec()) as _))
@@ -457,7 +457,7 @@ fn plane_movie_sources_release_on_replacement_failure_and_task_cleanup() {
             &mut self,
             name: &[u8],
             mode: ResourceMode,
-        ) -> Result<Option<katze_system2::io::SharedSource>> {
+        ) -> Result<Option<katze_system2::host::storage::SharedSource>> {
             assert_eq!(mode, ResourceMode::LooseFirst);
             self.opens += 1;
             Ok((name == b"clip.mpg").then(|| self.source.clone() as _))
@@ -476,7 +476,7 @@ fn plane_movie_sources_release_on_replacement_failure_and_task_cleanup() {
         fn load_plane_movie(
             &mut self,
             _: u32,
-            source: katze_system2::io::SharedSource,
+            source: katze_system2::host::storage::SharedSource,
             _: bool,
         ) -> Result<[u32; 2]> {
             let movie = Decoder::new(source)?;
@@ -647,7 +647,7 @@ fn plane_movie_handles_play_transform_mix_and_release_independently() {
         runtime.create(0, kind::PLANE, b"effect", b"").unwrap();
         let source = || {
             Arc::new(include_bytes!("fixtures/movie/clip.mpg").to_vec())
-                as katze_system2::io::SharedSource
+                as katze_system2::host::storage::SharedSource
         };
         let mut global = Player::new(source(), Arc::new(MpegDecoderFactory)).unwrap();
         global.set_volume(15);
