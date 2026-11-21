@@ -83,11 +83,6 @@ impl RenderTarget {
         Self::from_tiles(size, [1, 1], vec![Some(Surface::new(size)?)])
     }
 
-    pub(crate) fn into_single_surface(mut self) -> Surface {
-        debug_assert_eq!(self.grid, [1, 1]);
-        self.tiles.pop().flatten().unwrap()
-    }
-
     /// 每块尺寸必须一致；None 对应尚未提供表面的槽位，像素操作跳过该槽。
     pub fn from_tiles(
         tile_size: [u32; 2],
@@ -271,7 +266,7 @@ impl RenderTarget {
         )
     }
 
-    pub(crate) fn blend_triangle_clipped(
+    fn blend_triangle_clipped(
         &mut self,
         points: [[f32; 2]; 3],
         argb: u32,
@@ -282,7 +277,7 @@ impl RenderTarget {
         })
     }
 
-    pub(crate) fn blend_projected_triangle_clipped(
+    fn blend_projected_triangle_clipped(
         &mut self,
         vertices: [ProjectedVertex; 3],
         state: super::raster::RasterState,
@@ -295,7 +290,7 @@ impl RenderTarget {
         })
     }
 
-    pub(crate) fn blend_textured_triangle_clipped(
+    fn blend_textured_triangle_clipped(
         &mut self,
         vertices: [ProjectedVertex; 3],
         uv: [[f32; 2]; 3],
@@ -314,7 +309,7 @@ impl RenderTarget {
         })
     }
 
-    fn draw_tiles(
+    pub(crate) fn draw_tiles(
         &mut self,
         start: [u32; 2],
         mut draw: impl FnMut(&mut Surface, [u32; 2]) -> bool,

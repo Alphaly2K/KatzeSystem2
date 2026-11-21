@@ -1,11 +1,8 @@
 use super::{ObjectFactory, Runtime};
 use crate::{
     Result,
-    graphics::Projection,
-    host::graphics::{
-        DrawList, TextureFilter,
-        software::{RenderTarget, SoftwareBackend},
-    },
+    graphics::{Projection, RenderTarget},
+    host::graphics::{DrawList, TextureFilter},
 };
 
 impl<F: ObjectFactory> Runtime<F> {
@@ -38,6 +35,6 @@ impl<F: ObjectFactory> Runtime<F> {
     /// 为当前呈现帧执行连续 BMP 输出；未启用或绘图设备关闭时返回 false。
     /// 宿主在每次提交帧后调用一次。
     pub fn capture_sequence_frame(&mut self, frame: &RenderTarget) -> Result<bool> {
-        self.submit_sequence_capture(|capture| SoftwareBackend::submit_capture(capture, frame))
+        self.submit_sequence_capture(|capture| capture.write_render_target(frame))
     }
 }

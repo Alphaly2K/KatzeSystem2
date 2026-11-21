@@ -33,10 +33,7 @@ mod window_text;
 use katze_system2::{
     host::{
         diagnostics::ScriptLocation,
-        graphics::{
-            Rect,
-            software::{RenderTarget, SoftwareBackend},
-        },
+        graphics::{Surface, software::SoftwareBackend},
     },
     session::{FrameOutcome, FrameTime},
 };
@@ -123,7 +120,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let mut output = if accelerated {
         None
     } else {
-        Some(RenderTarget::new(surface)?)
+        Some(Surface::new(surface)?)
     };
     let mut window_pending_noted = false;
     let limit = std::env::var("KATZE_WINDOW_FRAMES")
@@ -276,7 +273,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             }
             if let Some(output) = &mut output {
                 runtime.present_frame(|draw, canvas, capture| {
-                    output.clear_rect(Rect::from_xywh(0, 0, surface[0] as i32, surface[1] as i32));
+                    output.clear(0);
                     SoftwareBackend::render_into(draw, canvas, output)?;
                     window
                         .present(output)

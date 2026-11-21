@@ -2,7 +2,7 @@ use katze_system2::{
     Error, Result,
     expression::State,
     graphics::{Projection, RenderTarget, Surface, TextureFilter, Transform},
-    host::storage::FileServices,
+    host::{graphics::software::SoftwareBackend, storage::FileServices},
     kcs::{CoreHost, Host, Interpreter, NativeReturn, Program},
     runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, kind},
 };
@@ -277,7 +277,8 @@ fn sequence_capture_request_tells_the_host_when_to_read_back() -> Result<()> {
         .is_err()
     );
     let frame = frame();
-    let pixels = frame.tiles()[0].as_ref().unwrap().pixels();
+    let surface = frame.tiles()[0].as_ref().unwrap();
+    let pixels = surface.pixels();
     let mut padded = pixels[..12].to_vec();
     padded.extend([0xac; 4]);
     padded.extend(&pixels[12..]);
@@ -293,7 +294,9 @@ fn sequence_capture_request_tells_the_host_when_to_read_back() -> Result<()> {
     assert_eq!(rt.host().frame_capture_index, 9);
     assert!(out.borrow().bytes.is_empty());
     rt.set_frame_capture_rectangle(Some(katze_system2::graphics::Rect::from_xywh(-1, 0, 3, 2)));
-    assert!(rt.present_frame(|_, _, capture| capture.unwrap().write_render_target(&frame))?);
+    assert!(rt.present_frame(|_, _, capture| {
+        SoftwareBackend::submit_capture(capture.unwrap(), surface)
+    })?);
     assert!(rt.present_frame(|_, _, capture| capture.unwrap().write_bgra([3, 2], 16, &padded))?);
     assert_eq!(rt.host().frame_capture_index, 11);
     let out = out.borrow();

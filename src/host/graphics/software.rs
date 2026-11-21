@@ -1,11 +1,13 @@
 //! Reference CPU renderer for hosts that need an offscreen backend.
 
 use super::{DrawList, FrameCanvas, GraphicsBackend, SequenceCapture, Surface, TextureSource};
-use crate::Result;
+use crate::{
+    Result,
+    graphics::{RenderTarget, canvas_tile_bytes},
+};
 
 mod commands;
-
-pub use crate::graphics::RenderTarget;
+use commands::Target;
 
 impl TextureSource {
     /// Resolve a texture against a software canvas. Session hosts can use
@@ -18,7 +20,7 @@ impl TextureSource {
 impl SequenceCapture<'_> {
     #[doc(hidden)]
     pub fn write_render_target(self, frame: &RenderTarget) -> Result<bool> {
-        SoftwareBackend::submit_capture(self, frame)
+        self.write_frame(frame.size(), |x, y| frame.pixel(x, y))
     }
 }
 
@@ -30,18 +32,22 @@ impl DrawList {
         output: &mut RenderTarget,
         canvas: Option<&RenderTarget>,
     ) -> Result<bool> {
-        self.render_at(output, canvas.map(RenderTarget::tiles), [0; 2])
+        self.render_at(
+            Target::Tiled(output),
+            canvas.map(RenderTarget::tiles),
+            [0; 2],
+        )
     }
 
     fn render_at(
         &self,
-        output: &mut RenderTarget,
+        mut output: Target<'_>,
         tiles: Option<&[Option<Surface>]>,
         origin: [u32; 2],
     ) -> Result<bool> {
         let mut touched = false;
         for command in &self.commands {
-            touched |= commands::draw_command(output, tiles, command, self.filter, origin)?;
+            touched |= commands::draw_command(&mut output, tiles, command, self.filter, origin)?;
         }
         Ok(touched)
     }
@@ -53,17 +59,17 @@ pub struct SoftwareBackend;
 
 impl SoftwareBackend {
     /// Submit the software-rendered frame to a pending sequence capture.
-    pub fn submit_capture(capture: SequenceCapture<'_>, frame: &RenderTarget) -> Result<bool> {
-        capture.write_frame(frame.size(), |x, y| frame.pixel(x, y))
+    pub fn submit_capture(capture: SequenceCapture<'_>, frame: &Surface) -> Result<bool> {
+        capture.write_bgra(frame.size(), frame.stride(), frame.pixels())
     }
 
-    /// Draw over an existing software target without clearing it.
+    /// Draw over the host's BGRA surface without clearing it.
     pub fn render_into(
         frame: &DrawList,
         canvas: &FrameCanvas<'_>,
-        output: &mut RenderTarget,
+        output: &mut Surface,
     ) -> Result<bool> {
-        frame.render_at(output, Some(canvas.tiles()), [0; 2])
+        frame.render_at(Target::Surface(output), Some(canvas.tiles()), [0; 2])
     }
 }
 
@@ -74,7 +80,8 @@ impl GraphicsBackend for SoftwareBackend {
         canvas: &mut FrameCanvas<'_>,
         size: [u32; 2],
     ) -> Result<Surface> {
-        let mut output = RenderTarget::new(size)?;
+        canvas_tile_bytes(size)?;
+        let mut output = Surface::new(size)?;
         let pixels = size[0] as usize * size[1] as usize;
         let jobs = (pixels / (192 * 1024)).clamp(1, 4);
         let workers =
@@ -88,28 +95,27 @@ impl GraphicsBackend for SoftwareBackend {
         } else {
             render_in_bands(frame, canvas.tiles(), &mut output, workers)?;
         }
-        Ok(output.into_single_surface())
+        Ok(output)
     }
 }
 
 fn render_in_bands(
     frame: &DrawList,
     tiles: &[Option<Surface>],
-    output: &mut RenderTarget,
+    output: &mut Surface,
     workers: usize,
 ) -> Result<()> {
     let [width, height] = output.size();
     let rows = height.div_ceil(workers as u32);
     // 各分块使用同一全局像素坐标；不平移顶点或改变命令顺序。
-    let render_band = |top| -> Result<RenderTarget> {
-        let mut band = RenderTarget::new([width, rows.min(height - top)])?;
-        frame.render_at(&mut band, Some(tiles), [0, top])?;
-        Ok(band)
+    let render_band = |top| -> Result<Option<Surface>> {
+        let mut band = Surface::new([width, rows.min(height - top)])?;
+        let touched = frame.render_at(Target::Surface(&mut band), Some(tiles), [0, top])?;
+        Ok(touched.then_some(band))
     };
-    let mut copy_band = |top, band: RenderTarget| {
-        if band.dirty_tiles()[0] {
-            let surface = band.tiles()[0].as_ref().unwrap();
-            output.copy_surface(surface, surface.bounds(), [0, top as i32]);
+    let mut copy_band = |top, band: Option<Surface>| {
+        if let Some(band) = band {
+            output.copy_from(&band, band.bounds(), [0, top as i32]);
         }
     };
     std::thread::scope(|scope| {
@@ -142,7 +148,7 @@ mod tests {
             colors.into_iter().flat_map(u32::to_le_bytes).collect(),
         )
         .unwrap();
-        let canvas = RenderTarget::from_tiles([2, 2], [1, 1], vec![Some(texture)]).unwrap();
+        let mut canvas = RenderTarget::from_tiles([2, 2], [1, 1], vec![Some(texture)]).unwrap();
         let vertex = |position, color, rhw| ProjectedVertex {
             position,
             color,
@@ -179,9 +185,15 @@ mod tests {
             filter: TextureFilter::Linear,
         };
         let mut serial = RenderTarget::new(size).unwrap();
-        let mut parallel = serial.clone();
+        let mut surface = Surface::new(size).unwrap();
+        let mut parallel = Surface::new(size).unwrap();
         assert!(frame.render_into(&mut serial, Some(&canvas)).unwrap());
+        assert!(
+            SoftwareBackend::render_into(&frame, &FrameCanvas::new(&mut canvas), &mut surface)
+                .unwrap()
+        );
         render_in_bands(&frame, canvas.tiles(), &mut parallel, 4).unwrap();
-        assert_eq!(parallel, serial);
+        assert_eq!(&surface, serial.tiles()[0].as_ref().unwrap());
+        assert_eq!(parallel, surface);
     }
 }

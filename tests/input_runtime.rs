@@ -107,13 +107,13 @@ fn ordinary_image_cursor_tracks_hotspot_visibility_and_replacement() -> Result<(
     assert_eq!(output.pixel(4, 4), Some(0xffff_0000));
     assert_eq!(output.pixel(5, 4), Some(0));
     assert_eq!(output.pixel(5, 6), Some(0));
-    let mut composed = RenderTarget::new([16, 12])?;
+    let mut composed = katze_system2::host::graphics::Surface::new([16, 12])?;
     assert!(rt.with_frame(|draw, canvas| SoftwareBackend::render_into(
         draw,
         canvas,
         &mut composed
     ))?);
-    assert_eq!(output, composed);
+    assert_eq!(output.tiles()[0].as_ref(), Some(&composed));
 
     device.borrow_mut().cursor = 0;
     assert!(rt.compose_frame()?.commands.is_empty());

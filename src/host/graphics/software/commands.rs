@@ -64,14 +64,33 @@ impl Drawables {
         range: Option<[f32; 2]>,
     ) -> Result<bool> {
         let tiles = canvas.map(RenderTarget::tiles);
+        let mut target = Target::Tiled(output);
         self.visit_frame(projection, parent, range, |command| {
-            draw_command(output, tiles, &command, filter, [0; 2])
+            draw_command(&mut target, tiles, &command, filter, [0; 2])
         })
     }
 }
 
+pub(super) enum Target<'a> {
+    Surface(&'a mut Surface),
+    Tiled(&'a mut RenderTarget),
+}
+
+impl Target<'_> {
+    fn draw(
+        &mut self,
+        origin: [u32; 2],
+        mut draw: impl FnMut(&mut Surface, [u32; 2]) -> bool,
+    ) -> bool {
+        match self {
+            Self::Surface(surface) => draw(surface, origin),
+            Self::Tiled(target) => target.draw_tiles(origin, draw),
+        }
+    }
+}
+
 pub(super) fn draw_command(
-    output: &mut RenderTarget,
+    output: &mut Target<'_>,
     tiles: Option<&[Option<Surface>]>,
     command: &DrawCommand,
     filter: TextureFilter,
@@ -101,38 +120,44 @@ pub(super) fn draw_command(
             if vertices.iter().any(|v| !v.rhw.is_finite()) {
                 return Err(Error::new(0, "纹理插值需要有限的 RHW"));
             }
-            return Ok(
-                output.blend_textured_triangle_clipped(vertices, source.uv, texture, filter, state)
-            );
+            return Ok(output.draw(origin, |surface, origin| {
+                surface.blend_textured_triangle_at(
+                    vertices,
+                    source.uv,
+                    texture,
+                    filter,
+                    RasterState { origin, ..state },
+                )
+            }));
         }
     }
     draw_colors(output, vertices, state)
 }
 
 fn draw_colors(
-    target: &mut RenderTarget,
-    vertices: [ProjectedVertex; 3],
+    target: &mut Target<'_>,
+    mut vertices: [ProjectedVertex; 3],
     state: RasterState,
 ) -> Result<bool> {
     if vertices.iter().all(|v| v.color == vertices[0].color) {
-        if vertices.iter().any(|v| v.rhw < 0.) {
-            return Ok(target.blend_projected_triangle_clipped(vertices, state));
+        if !vertices.iter().any(|v| v.rhw < 0.) {
+            if needs_depth_clip(vertices) {
+                vertices = vertices.map(|v| ProjectedVertex { rhw: 1., ..v });
+            } else {
+                let points = vertices.map(|v| [v.position[0], v.position[1]]);
+                return Ok(target.draw(state.origin, |surface, origin| {
+                    surface.blend_triangle_at(
+                        points,
+                        vertices[0].color,
+                        RasterState { origin, ..state },
+                    )
+                }));
+            }
         }
-        if needs_depth_clip(vertices) {
-            return Ok(target.blend_projected_triangle_clipped(
-                vertices.map(|v| ProjectedVertex { rhw: 1., ..v }),
-                state,
-            ));
-        }
-        Ok(target.blend_triangle_clipped(
-            vertices.map(|v| [v.position[0], v.position[1]]),
-            vertices[0].color,
-            state,
-        ))
-    } else {
-        if vertices.iter().any(|v| !v.rhw.is_finite()) {
-            return Err(Error::new(0, "颜色插值需要有限的 RHW"));
-        }
-        Ok(target.blend_projected_triangle_clipped(vertices, state))
+    } else if vertices.iter().any(|v| !v.rhw.is_finite()) {
+        return Err(Error::new(0, "颜色插值需要有限的 RHW"));
     }
+    Ok(target.draw(state.origin, |surface, origin| {
+        surface.blend_projected_triangle_at(vertices, RasterState { origin, ..state })
+    }))
 }

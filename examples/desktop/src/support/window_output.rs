@@ -1,4 +1,4 @@
-use katze_system2::host::{graphics::software::RenderTarget, platform::WindowServices};
+use katze_system2::host::{graphics::Surface as FrameSurface, platform::WindowServices};
 use sdl2::{
     event::Event,
     messagebox::{ButtonData, ClickedButton, MessageBoxButtonFlag, MessageBoxFlag},
@@ -82,7 +82,7 @@ impl Output {
             }
         }
     }
-    pub fn present(&mut self, frame: &RenderTarget) -> Result<(), String> {
+    pub fn present(&mut self, frame: &FrameSurface) -> Result<(), String> {
         let size = frame.size();
         if self
             .surface
@@ -96,12 +96,10 @@ impl Output {
         let surface = self.surface.as_mut().unwrap();
         let pitch = surface.pitch() as usize;
         surface.with_lock_mut(|pixels| {
-            for y in 0..size[1] {
-                for x in 0..size[0] {
-                    let at = y as usize * pitch + x as usize * 4;
-                    pixels[at..at + 4]
-                        .copy_from_slice(&frame.pixel(x, y).unwrap_or(0).to_le_bytes());
-                }
+            let row_bytes = frame.stride();
+            for (y, row) in frame.pixels().chunks_exact(row_bytes).enumerate() {
+                let start = y * pitch;
+                pixels[start..start + row_bytes].copy_from_slice(row);
             }
         });
         let mut destination = self.window.surface(&self.events)?;

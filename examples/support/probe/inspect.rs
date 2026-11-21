@@ -2,7 +2,7 @@ use super::{AudioStats, ProbeWindow, ScriptedDevice, input::StoryReplay, write_s
 use crate::support::{self, prepare_game};
 use katze_system2::{
     host::{
-        graphics::software::SoftwareBackend,
+        graphics::{Surface, software::SoftwareBackend},
         resources::{ResourceMode, ResourceServices},
     },
     runtime::{GameTasks, TaskRuntime},
@@ -706,17 +706,17 @@ pub(crate) fn inspect_runtime(
                 runtime.drawables_mut().set_display(id, 0);
             }
         }
-        let mut output = katze_system2::graphics::RenderTarget::new(surface)?;
+        let mut output = Surface::new(surface)?;
         runtime
             .with_frame(|draw, canvas| SoftwareBackend::render_into(draw, canvas, &mut output))?;
         // `KATZE_PROBE_SHOT` 以 "@canvas" 结尾时转储蓄布而非合成帧。
         let path_str = path.to_string_lossy().into_owned();
-        let target = if path_str.ends_with("@canvas") {
-            runtime.drawing().target.as_ref().ok_or("缺少渲染目标")?
+        if path_str.ends_with("@canvas") {
+            let canvas = runtime.drawing().target.as_ref().ok_or("缺少渲染目标")?;
+            write_shot(&path, canvas.size(), |x, y| canvas.pixel(x, y))?;
         } else {
-            &output
-        };
-        write_shot(&path, target.size(), |x, y| target.pixel(x, y))?;
+            write_shot(&path, output.size(), |x, y| output.pixel(x, y))?;
+        }
     }
     failure.map_or(Ok(()), |error| Err(error.into()))
 }

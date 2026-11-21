@@ -1,11 +1,8 @@
 use super::Compositor;
 use crate::{
     Error, Result,
-    graphics::Projection,
-    host::graphics::{
-        DrawList, TextureFilter,
-        software::{RenderTarget, SoftwareBackend},
-    },
+    graphics::{Projection, RenderTarget},
+    host::graphics::{DrawList, TextureFilter, software::SoftwareBackend},
 };
 
 impl Compositor {

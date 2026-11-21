@@ -14,7 +14,7 @@ impl Surface {
         self.blend_triangle_at(points, argb, RasterState::default())
     }
 
-    pub(super) fn blend_triangle_at(
+    pub(crate) fn blend_triangle_at(
         &mut self,
         points: [[f32; 2]; 3],
         argb: u32,
@@ -32,7 +32,7 @@ impl Surface {
         self.blend_projected_triangle_at(vertices, RasterState::default())
     }
 
-    pub(super) fn blend_projected_triangle_at(
+    pub(crate) fn blend_projected_triangle_at(
         &mut self,
         vertices: [ProjectedVertex; 3],
         state: RasterState,
@@ -59,7 +59,7 @@ impl Surface {
         self.blend_textured_triangle_at(vertices, uv, texture, filter, RasterState::default())
     }
 
-    pub(super) fn blend_textured_triangle_at(
+    pub(crate) fn blend_textured_triangle_at(
         &mut self,
         vertices: [ProjectedVertex; 3],
         uv: [[f32; 2]; 3],
