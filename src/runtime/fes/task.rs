@@ -1211,9 +1211,6 @@ impl TaskObject for FesObject {
                     if !self.initialized {
                         return Err(Error::new(0, "FES 装载需要已初始化对象"));
                     }
-                    if self.loaded {
-                        return Err(Error::new(0, "FES 重复装载尚未接入"));
-                    }
                     let file = name(
                         buffers
                             .data1
@@ -1229,6 +1226,9 @@ impl TaskObject for FesObject {
                         self.base.control.property = (-2i32) as u32;
                         return Ok(CommandOutcome::finished(false));
                     };
+                    if self.loaded {
+                        return Err(Error::new(0, "FES 重复装载尚未接入"));
+                    }
                     let program = if bytes.starts_with(b"FES\0") {
                         fes::Program::parse(&bytes)?
                     } else {

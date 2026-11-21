@@ -2715,6 +2715,11 @@ fn failed_loads_preserve_the_task_and_input_modes_publish_system_values() {
     send(&mut runtime, fes, 339, 0, 0);
     assert_eq!(runtime.numbers().shared[0], 1);
     assert_eq!(runtime.numbers().shared[2], -1);
+    send(&mut runtime, fes, 24, 0, 17);
+    assert_eq!(send(&mut runtime, fes, 23, 0, 0), 17);
+    file(&mut runtime, fes, b"missing-again").unwrap();
+    assert_eq!(send(&mut runtime, fes, 23, 0, 0), (-2i32) as u32);
+    assert_eq!(runtime.numbers().shared[3], 0);
     runtime.update(1, 1).unwrap();
     assert_eq!(runtime.numbers().shared[0], 1);
     assert_eq!(runtime.numbers().shared[3], -1);
@@ -2724,7 +2729,11 @@ fn failed_loads_preserve_the_task_and_input_modes_publish_system_values() {
     assert_eq!(send(&mut runtime, fes, 23, 0, 0), 3);
     assert_eq!(
         *reads.borrow(),
-        [b"missing".to_vec(), b"complete.fes".to_vec()]
+        [
+            b"missing".to_vec(),
+            b"complete.fes".to_vec(),
+            b"missing-again".to_vec()
+        ]
     );
     assert!(runtime.object(fes).is_some());
 }
