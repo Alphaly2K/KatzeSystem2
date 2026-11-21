@@ -1,7 +1,9 @@
 //! Reference CPU renderer for hosts that need an offscreen backend.
 
 use super::{DrawList, FrameCanvas, GraphicsBackend, SequenceCapture, Surface, TextureSource};
-use crate::{Result, graphics::raster};
+use crate::Result;
+
+mod commands;
 
 pub use crate::graphics::RenderTarget;
 
@@ -39,7 +41,7 @@ impl DrawList {
     ) -> Result<bool> {
         let mut touched = false;
         for command in &self.commands {
-            touched |= raster::draw_command(output, tiles, command, self.filter, origin)?;
+            touched |= commands::draw_command(output, tiles, command, self.filter, origin)?;
         }
         Ok(touched)
     }

@@ -1,7 +1,7 @@
 use super::Resources;
 use crate::{
     Error, Result,
-    graphics::{Image, RenderTarget, canvas_tile_bytes},
+    graphics::{Image, canvas_tile_bytes},
     host::graphics::{FrameCanvas, Rect, Surface, render_readback},
 };
 
@@ -10,12 +10,8 @@ impl Resources {
         let Some(frame) = self.readback_depth_frame(size, range)? else {
             return Ok(false);
         };
-        self.offscreen_frame = Some(RenderTarget::from_tiles(size, [1, 1], vec![Some(frame)])?);
+        self.offscreen_surface = Some(frame);
         Ok(true)
-    }
-
-    pub(super) fn offscreen_surface(&self) -> Option<&Surface> {
-        self.offscreen_frame.as_ref()?.tiles()[0].as_ref()
     }
 
     pub fn render_auxiliary(
@@ -86,7 +82,7 @@ impl Resources {
         if !self.render_offscreen(size, range)? {
             return Ok(None);
         }
-        let frame = self.offscreen_surface().unwrap();
+        let frame = self.offscreen_surface.as_ref().unwrap();
         let rectangle = self
             .capture_rectangle
             .unwrap_or_else(|| Rect::from_xywh(0, 0, size[0] as i32, size[1] as i32));

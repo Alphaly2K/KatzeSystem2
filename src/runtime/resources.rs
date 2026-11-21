@@ -1,5 +1,8 @@
-use crate::graphics::{Compositor, Images, Rect, RenderTarget};
-use crate::host::{graphics::GraphicsBackend, resources::ResourceServices};
+use crate::graphics::{Compositor, Images};
+use crate::host::{
+    graphics::{GraphicsBackend, Rect, Surface},
+    resources::ResourceServices,
+};
 use crate::kcs::{Interpreter, NativeReturn, ResourceState, format_string};
 use crate::{Error, Result};
 
@@ -22,7 +25,7 @@ pub(super) struct Resources {
     pub compositor: Compositor,
     pub readback_backend: Option<Box<dyn GraphicsBackend>>,
     pub capture_rectangle: Option<Rect>,
-    pub offscreen_frame: Option<RenderTarget>,
+    pub offscreen_surface: Option<Surface>,
     pub raw: ResourceState,
     pub input_callbacks: std::collections::BTreeMap<u32, crate::input::CommandState>,
     pub button_callbacks: std::collections::BTreeMap<u32, crate::input::ButtonObject>,

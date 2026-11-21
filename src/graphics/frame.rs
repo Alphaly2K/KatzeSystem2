@@ -79,7 +79,7 @@ impl Drawables {
         Ok(triangles)
     }
 
-    pub(super) fn visit_frame(
+    pub(crate) fn visit_frame(
         &mut self,
         projection: &Projection,
         parent: [f32; 16],

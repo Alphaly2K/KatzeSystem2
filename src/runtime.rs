@@ -306,12 +306,7 @@ impl<F: ObjectFactory> Runtime<F> {
     /// Pixels from the last successful script readback. Skipped or failed
     /// readbacks leave the previous frame available.
     pub fn offscreen_surface(&self) -> Option<&crate::host::graphics::Surface> {
-        self.resources.offscreen_surface()
-    }
-
-    #[doc(hidden)]
-    pub fn offscreen_frame(&self) -> Option<&crate::graphics::RenderTarget> {
-        self.resources.offscreen_frame.as_ref()
+        self.resources.offscreen_surface.as_ref()
     }
 
     pub fn images(&self) -> &crate::graphics::Images {

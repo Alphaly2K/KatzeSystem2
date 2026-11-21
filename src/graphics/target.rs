@@ -219,7 +219,7 @@ impl RenderTarget {
         )
     }
 
-    pub(super) fn blend_triangle_clipped(
+    pub(crate) fn blend_triangle_clipped(
         &mut self,
         points: [[f32; 2]; 3],
         argb: u32,
@@ -230,7 +230,7 @@ impl RenderTarget {
         })
     }
 
-    pub(super) fn blend_projected_triangle_clipped(
+    pub(crate) fn blend_projected_triangle_clipped(
         &mut self,
         vertices: [ProjectedVertex; 3],
         state: super::raster::RasterState,
@@ -243,7 +243,7 @@ impl RenderTarget {
         })
     }
 
-    pub(super) fn blend_textured_triangle_clipped(
+    pub(crate) fn blend_textured_triangle_clipped(
         &mut self,
         vertices: [ProjectedVertex; 3],
         uv: [[f32; 2]; 3],
