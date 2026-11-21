@@ -18,12 +18,13 @@ use crate::{
 use std::sync::Arc;
 
 mod error;
+mod frame;
 mod setup;
 mod window;
 pub use crate::host::platform::WindowPreferences;
 pub use crate::language::StringTables;
-pub use crate::runtime::frame::{AdvanceError, FrameOutcome, FrameTime};
 pub use error::StartupError;
+pub use frame::{AdvanceError, FrameOutcome, FrameTime};
 pub use setup::GameSetup;
 
 /// A running game session created by [`GameSetup::start_game`].
