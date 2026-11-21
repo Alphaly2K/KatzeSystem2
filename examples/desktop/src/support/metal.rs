@@ -4,8 +4,8 @@ use ::metal::*;
 use katze_system2::{
     Error, Result,
     host::graphics::{
-        CanvasTileVersion, DrawList, FrameCanvas, FrameTexture, FrameTriangle, GraphicsBackend,
-        Rect, Surface, TextureAddress, TextureFilter, TextureSource,
+        CanvasTileVersion, DrawCommand, DrawList, FrameCanvas, FrameTexture, GraphicsBackend, Rect,
+        Surface, TextureAddress, TextureFilter, TextureSource,
     },
 };
 use std::{collections::BTreeMap, sync::Arc};
@@ -158,7 +158,7 @@ impl Renderer {
     pub fn present(
         &mut self,
         layer: &MetalLayerRef,
-        triangles: &[FrameTriangle],
+        triangles: &[DrawCommand],
         canvas: &mut FrameCanvas<'_>,
         size: [u32; 2],
         filter: TextureFilter,
@@ -183,7 +183,7 @@ impl Renderer {
     /// 离屏绘制与 BGRA 读回，供画面捕获使用。
     pub fn render_offscreen(
         &mut self,
-        triangles: &[FrameTriangle],
+        triangles: &[DrawCommand],
         canvas: &mut FrameCanvas<'_>,
         size: [u32; 2],
         filter: TextureFilter,
@@ -218,7 +218,7 @@ impl Renderer {
 
     fn prepare(
         &mut self,
-        triangles: &[FrameTriangle],
+        triangles: &[DrawCommand],
         canvas: &mut FrameCanvas<'_>,
         size: [u32; 2],
         filter: TextureFilter,
@@ -382,7 +382,7 @@ impl Renderer {
         &self,
         command: &CommandBufferRef,
         target: &TextureRef,
-        triangles: &[FrameTriangle],
+        triangles: &[DrawCommand],
         canvas: &FrameCanvas<'_>,
         filter: TextureFilter,
     ) {
@@ -496,7 +496,7 @@ impl Drop for Renderer {
     }
 }
 
-fn affine_point_uv(triangle: &FrameTriangle, filter: TextureFilter) -> [[f32; 4]; 2] {
+fn affine_point_uv(triangle: &DrawCommand, filter: TextureFilter) -> [[f32; 4]; 2] {
     let Some(texture) = &triangle.texture else {
         return [[0.; 4]; 2];
     };

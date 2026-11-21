@@ -1,11 +1,14 @@
 use katze_system2::{
     Error, Result,
     expression::State,
-    graphics::{GraphicsFactory, Projection, RenderTarget, TextureFilter, Transform},
-    host::input::{InputDevice, KeySample, PointerSample},
+    graphics::{GraphicsFactory, Projection, RenderTarget, Transform},
+    host::{
+        graphics::TextureFilter,
+        input::{InputDevice, KeySample, PointerSample},
+        resources::{ResourceMode, ResourceServices},
+    },
     input::{InputFactory, KeyEvent, KeyEventKind},
-    kcs::{Host, Interpreter, Program, ResourceServices},
-    resource::ResourceMode,
+    kcs::{Host, Interpreter, Program},
     runtime::{
         BaseObject, ObjectFactory, OrdinaryObject, RootObject, Runtime, TaskObject,
         fes::FesFactory, kind,
@@ -3420,10 +3423,10 @@ fn focus_notifications_wait_for_the_body_and_lock_commands_end_local_handlers() 
         .unwrap();
         let list = runtime.create(0, kind::IMAGE_LIST, b"list", b"").unwrap();
         send(&mut runtime, list, 285, 8, 6);
-        scene
-            .objects_mut()
-            .unwrap()
-            .set_image_list(list, katze_system2::graphics::Rect::from_xywh(0, 0, 8, 6));
+        scene.objects_mut().unwrap().set_image_list(
+            list,
+            katze_system2::host::graphics::Rect::from_xywh(0, 0, 8, 6),
+        );
         let update = |runtime: &mut TestRuntime, scene: &mut Scene, now| {
             for _ in 0..128 {
                 if runtime.update_fes_scene(0, scene, now).unwrap() {
@@ -3490,7 +3493,7 @@ fn focus_notifications_wait_for_the_body_and_lock_commands_end_local_handlers() 
 
 #[test]
 fn fes_return_to_title_posts_one_window_notification_and_yields() {
-    use katze_system2::kcs::{WindowAction, WindowRequest};
+    use katze_system2::host::platform::{WindowAction, WindowRequest};
 
     let source = b"#START\n$0 = 1\nrettitle\n$0 = 2\nwait 1000\n";
     for budget in [1, 4096] {
@@ -3829,7 +3832,7 @@ fn default_only_button_events_respond_and_retry_media_without_repeating_script_e
                     .get(button)
                     .unwrap()
                     .bounds(),
-                katze_system2::graphics::Rect::from_xywh(0, 0, 3, 4)
+                katze_system2::host::graphics::Rect::from_xywh(0, 0, 3, 4)
             );
             assert_eq!(send(&mut runtime, button, 4, 0, 0), 1);
             assert_eq!(runtime.numbers().shared[1], 1);

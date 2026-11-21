@@ -1,9 +1,11 @@
 use katze_system2::{
     Result,
     expression::State,
-    graphics::SoftwareBackend,
-    graphics::{Drawable, Projection, RenderTarget, TextureFilter, Transform},
-    host::graphics::{DrawList, FrameCanvas, GraphicsBackend, Surface, TextureSource},
+    graphics::{Drawable, Projection, RenderTarget, Transform},
+    host::graphics::{
+        DrawList, FrameCanvas, GraphicsBackend, Surface, TextureFilter, TextureSource,
+        software::SoftwareBackend,
+    },
     kcs::Program,
     runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, kind},
 };
@@ -404,7 +406,9 @@ fn frame_capture_returns_an_owned_cropped_image_and_skips_a_disabled_device() {
             rt.set_readback_backend(SoftwareBackend);
         }
         rt.drawing_mut().enabled = enabled;
-        rt.set_frame_capture_rectangle(Some(katze_system2::graphics::Rect::from_xywh(1, 1, 3, 2)));
+        rt.set_frame_capture_rectangle(Some(katze_system2::host::graphics::Rect::from_xywh(
+            1, 1, 3, 2,
+        )));
         let caller = rt.create(0, kind::ORDINARY, b"capture", b"").unwrap();
         rt.update(0, 0).unwrap();
         let handle = u32::from_le_bytes(

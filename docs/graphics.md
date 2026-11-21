@@ -56,7 +56,7 @@ BMP 使用正高度、底端物理行和四字节对齐的行跨度；头部文�
 
 ## 基础渲染面
 
-`graphics::Surface::new([width, height])` 创建零初始化的 BGRA8 像素缓冲区。`from_bgra(size, pixels)` 接收已有像素的所有权，可使用解码帧的像素；长度必须恰好为宽乘高乘四。几何元数据继续由图像对象保存。
+`host::graphics::Surface::new([width, height])` 创建零初始化的 BGRA8 像素缓冲区。`from_bgra(size, pixels)` 接收已有像素的所有权，可使用解码帧的像素；长度必须恰好为宽乘高乘四。几何元数据继续由图像对象保存。
 
 渲染面从上到下存行，左上角为 `(0, 0)`，行跨度为宽乘四。`size()`、`stride()`、`bounds()` 提供布局，`pixels()`／`pixels_mut()` 提供固定长度的像素视图，`pixel(x, y)` 返回原始 ARGB DWORD，越界返回 `None`。任一维为零时允许空渲染面；尺寸必须可由正 i32 坐标表示，单面像素长度最多 256 MiB。画布和电影帧各自应用 128 MiB 的像素上限，文件读取与解压应用独立的 64 MiB 预算。
 

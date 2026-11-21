@@ -18,9 +18,12 @@ fn main() {
 
 #[cfg(target_os = "macos")]
 fn check() -> Result<(), Box<dyn std::error::Error>> {
-    use katze_system2::graphics::{
-        DrawList, FrameTexture, FrameTriangle, GraphicsBackend, ProjectedVertex, Rect,
-        RenderTarget, SoftwareBackend, Surface, TextureFilter, TextureSource,
+    use katze_system2::{
+        graphics::RenderTarget,
+        host::graphics::{
+            DrawCommand, DrawList, FrameTexture, GraphicsBackend, ProjectedVertex, Rect, Surface,
+            TextureFilter, TextureSource, software::SoftwareBackend,
+        },
     };
     use renderer::Renderer;
     let mut renderer = Renderer::new()?;
@@ -32,7 +35,7 @@ fn check() -> Result<(), Box<dyn std::error::Error>> {
             .collect(),
     )?;
     let mut canvas = RenderTarget::from_tiles([4, 4], [2, 1], vec![Some(texture), None])?;
-    let triangle = |positions: [[f32; 2]; 3], colors: [u32; 3], texture| FrameTriangle {
+    let triangle = |positions: [[f32; 2]; 3], colors: [u32; 3], texture| DrawCommand {
         vertices: std::array::from_fn(|i| ProjectedVertex {
             position: [positions[i][0], positions[i][1], 0.5],
             rhw: 1.,

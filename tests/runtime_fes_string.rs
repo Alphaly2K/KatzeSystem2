@@ -2,8 +2,11 @@ use katze_system2::{
     Error, Result,
     expression::State,
     fes,
-    graphics::{GraphicsFactory, Projection, RenderTarget, TextureFilter, Transform},
-    host::font::{FontRequest, FontServices, GlyphMask, TextEncoding},
+    graphics::{GraphicsFactory, Projection, RenderTarget, Transform},
+    host::{
+        font::{FontRequest, FontServices, GlyphMask, TextEncoding},
+        graphics::TextureFilter,
+    },
     message::{MessageDefaults, MessageFactory},
     runtime::{
         BaseObject, ObjectFactory, Runtime, TaskObject,
@@ -41,11 +44,11 @@ type Engine = Runtime<MessageFactory<GraphicsFactory<Reject>>>;
 #[test]
 fn translated_fes_text_uses_the_declared_encoding_and_keeps_expanded_utf8() {
     struct Source;
-    impl katze_system2::kcs::ResourceServices for Source {
+    impl katze_system2::host::resources::ResourceServices for Source {
         fn read(
             &mut self,
             _: &[u8],
-            _: katze_system2::resource::ResourceMode,
+            _: katze_system2::host::resources::ResourceMode,
         ) -> Result<Option<Vec<u8>>> {
             Ok(None)
         }

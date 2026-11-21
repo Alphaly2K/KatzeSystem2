@@ -4,7 +4,7 @@
 
 ## PCM 与 Vorbis 解码
 
-`audio::Pcm::new(sample_rate, channels, samples)` 保存交错排列的有符号 16 位采样，支持非零采样率的单声道和双声道。`sample_rate()`、`channels()`、`frames()` 和 `samples()` 提供只读数据；一帧包含各声道的一个采样。输入须对齐完整帧，容量最多 64 MiB。构造及解码均保留原始采样率，重采样和设备格式转换由后续播放层处理。
+`host::audio::Pcm::new(sample_rate, channels, samples)` 保存交错排列的有符号 16 位采样，支持非零采样率的单声道和双声道。`sample_rate()`、`channels()`、`frames()` 和 `samples()` 提供只读数据；一帧包含各声道的一个采样。输入须对齐完整帧，容量最多 64 MiB。构造及解码均保留原始采样率，重采样和设备格式转换由后续播放层处理。
 
 `audio::decode_vorbis(bytes)` 解码单个完整 Ogg Vorbis 逻辑流，返回 PCM。输入和解码容量各限 64 MiB；结束页的 granule position 决定最终采样帧数，多出的尾部采样截去，解码不足时诊断。截断页、校验失败、缺少起始／结束页、串联或混合逻辑流、结束页后的额外数据及其他编码返回诊断。
 

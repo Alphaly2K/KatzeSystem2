@@ -329,7 +329,7 @@ fn split_update_preserves_clock_controls_and_messages_changed_by_children() {
 
 #[test]
 fn window_close_requests_keep_order_task_identity_and_return_stack_across_budgets() {
-    use katze_system2::kcs::WindowCloseRequest;
+    use katze_system2::host::platform::WindowCloseRequest;
     let mut code = Vec::new();
     ins(&mut code, 0x25, &[(3, 0x12345678)]);
     for value in [0, 1, u32::MAX] {
@@ -358,7 +358,7 @@ fn window_close_requests_keep_order_task_identity_and_return_stack_across_budget
 
 #[test]
 fn menu_requests_keep_task_identity_and_are_emitted_once_across_budget_resumption() {
-    use katze_system2::kcs::MenuItemRequest;
+    use katze_system2::host::platform::MenuItemRequest;
     let mut code = Vec::new();
     for value in [0, u32::MAX] {
         ins(&mut code, 0x25, &[(3, value)]);

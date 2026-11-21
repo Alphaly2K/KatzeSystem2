@@ -3,9 +3,8 @@ use katze_system2::{
     expression::State,
     graphics::Image,
     hg3::{DecodedFrame, StandardInfo},
-    host::storage::FileServices,
+    host::storage::{FileServices, FolderPaths},
     kcs::{Program, SharedMemory},
-    resource::FolderPaths,
     runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, kind},
 };
 use std::{cell::RefCell, io::Write, rc::Rc};

@@ -1,7 +1,7 @@
 //! Lookup and loading of game assets.
 
 use super::storage::SharedSource;
-pub use crate::resource::{CachedResources, ResourceCache};
+pub use crate::resource::cache::{CachedResources, ResourceCache};
 
 mod config;
 use crate::{Error, Result};

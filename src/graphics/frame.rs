@@ -1,8 +1,8 @@
 use super::{Drawables, Projection};
 use crate::Result;
 use crate::host::graphics::{
-    DrawCommand, DrawList, FrameTexture, FrameTriangle, ProjectedVertex, Rect, Surface,
-    TextureFilter, TextureSource, triangle_culled,
+    DrawCommand, DrawList, FrameTexture, ProjectedVertex, Rect, Surface, TextureFilter,
+    TextureSource, triangle_culled,
 };
 use std::sync::Arc;
 
@@ -70,7 +70,7 @@ impl Drawables {
         &mut self,
         projection: &Projection,
         parent: [f32; 16],
-    ) -> Result<Vec<FrameTriangle>> {
+    ) -> Result<Vec<DrawCommand>> {
         let mut triangles = Vec::new();
         self.visit_frame(projection, parent, None, |triangle| {
             triangles.push(triangle);
@@ -84,7 +84,7 @@ impl Drawables {
         projection: &Projection,
         parent: [f32; 16],
         range: Option<[f32; 2]>,
-        mut draw: impl FnMut(FrameTriangle) -> Result<bool>,
+        mut draw: impl FnMut(DrawCommand) -> Result<bool>,
     ) -> Result<bool> {
         self.order();
         let mut touched = false;
@@ -181,7 +181,7 @@ impl Drawables {
                 if triangle_culled(vertices) {
                     continue;
                 }
-                touched |= draw(FrameTriangle {
+                touched |= draw(DrawCommand {
                     vertices,
                     texture,
                     clip,

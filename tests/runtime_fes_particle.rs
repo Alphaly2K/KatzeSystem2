@@ -3,8 +3,8 @@ use katze_system2::{
     expression::State,
     fes::{self, ObjectDefinition},
     graphics::GraphicsFactory,
-    kcs::{Host, Interpreter, ResourceServices},
-    resource::ResourceMode,
+    host::resources::{ResourceMode, ResourceServices},
+    kcs::{Host, Interpreter},
     runtime::{
         BaseObject, ObjectFactory, RootObject, Runtime, TaskObject,
         fes::{ObjectState, Objects, ParticleState, Scene},

@@ -3,10 +3,10 @@ use katze_system2::{
     audio::SoundFactory,
     expression::State,
     graphics::GraphicsFactory,
+    host::resources::{ResourceMode, ResourceServices},
     input::InputFactory,
-    kcs::{OrdinaryTask, Program, ResourceServices},
+    kcs::{OrdinaryTask, Program},
     message::MessageFactory,
-    resource::ResourceMode,
     runtime::{
         KcsFactory, ObjectFactory, OrdinaryObject, ProgramLoader, RootObject, Runtime,
         fes::FesFactory, kind,

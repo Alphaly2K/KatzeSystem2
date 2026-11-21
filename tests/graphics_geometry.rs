@@ -3,10 +3,13 @@ use katze_system2::{
     expression::State,
     graphics::{
         CanvasLayout, Drawable, Drawables, DrawingContext, GraphicsFactory, PlaneObject,
-        Projection, RenderTarget, TextureFilter,
+        Projection, RenderTarget,
     },
-    kcs::{Host, Interpreter, NativeReturn, Program, ResourceServices},
-    resource::ResourceMode,
+    host::{
+        graphics::TextureFilter,
+        resources::{ResourceMode, ResourceServices},
+    },
+    kcs::{Host, Interpreter, NativeReturn, Program},
     runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, TaskObject, kind},
     task::{Command, CommandBuffers, CommandOutcome},
 };
@@ -380,7 +383,7 @@ fn ordinary_kx2_load_formats_resolves_routes_and_reaches_cpu_pixels() {
                         (0..4)
                             .map(|_| {
                                 let mut surface =
-                                    katze_system2::graphics::Surface::new([2, 2]).unwrap();
+                                    katze_system2::host::graphics::Surface::new([2, 2]).unwrap();
                                 surface.clear(0xff204060);
                                 Some(surface)
                             })

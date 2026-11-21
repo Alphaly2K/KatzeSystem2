@@ -1,7 +1,7 @@
 use super::{Host, Interpreter, NativeReturn, Program, ScriptRandom, matrix, numeric, strings};
 use crate::{Error, Result, Step, read};
 
-pub use crate::host::effect::{ParticleSource, ParticleVertex};
+use crate::host::effect::{ParticleSource, ParticleVertex};
 
 /// 粒子任务表。宿主在每次推进前提供时间和当前网格上下文。
 pub struct ParticleHost {

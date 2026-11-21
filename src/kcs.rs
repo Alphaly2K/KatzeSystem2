@@ -43,15 +43,15 @@ mod task_host;
 mod triples;
 mod utf8;
 mod vectors;
-pub use crate::host::storage::ScriptSettings;
-pub use crate::host::{
+pub(crate) use crate::host::effect::{ParticleSource, ParticleVertex};
+pub(crate) use crate::host::storage::ScriptSettings;
+pub(crate) use crate::host::{
     platform::{
-        AchievementServices, ClipboardRequest, ClipboardText, LocalDateTime, MenuItemRequest,
-        SystemServices, WindowAction, WindowCloseRequest, WindowRequest,
+        AchievementServices, ClipboardRequest, MenuItemRequest, SystemServices, WindowAction,
+        WindowCloseRequest, WindowRequest,
     },
     resources::ResourceServices,
 };
-pub use crate::resource::{CachedResources, ResourceCache};
 pub use crate::task::TaskClock;
 pub(crate) use configuration::save_configuration;
 pub(crate) use database::load as load_database;
@@ -78,7 +78,7 @@ pub(crate) use numeric::float_ieee as ieee_float_operation;
 pub(crate) use numeric::native_math as native_float_math;
 pub(crate) use numeric::native_triangle;
 pub use ordinary::OrdinaryTask;
-pub use particle::{ParticleHost, ParticleSource, ParticleTask, ParticleVertex};
+pub use particle::{ParticleHost, ParticleTask};
 pub use queue::MotionQueue;
 pub use random::ScriptRandom;
 pub(crate) use resource_cache::call as prefetch_call;

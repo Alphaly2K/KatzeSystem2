@@ -1,7 +1,8 @@
 use katze_system2::{
     Error, Result,
     expression::State,
-    graphics::{GraphicsFactory, Rect, RenderTarget, Surface},
+    graphics::{GraphicsFactory, RenderTarget},
+    host::graphics::{Rect, Surface},
     kcs::Program,
     runtime::{BaseObject, KcsFactory, ObjectFactory, ProgramLoader, Runtime, TaskObject, kind},
     task::{Command, CommandBuffers},
@@ -1173,7 +1174,7 @@ fn buffer_command<F: ObjectFactory>(
 
 #[test]
 fn list_resize_and_animation_variables_preserve_entries_plane_and_deferred_updates() {
-    use katze_system2::{kcs::ResourceServices, resource::ResourceMode};
+    use katze_system2::host::resources::{ResourceMode, ResourceServices};
     struct Animation(Vec<u8>);
     impl ResourceServices for Animation {
         fn resolve(&mut self, _: &[u8], name: &[u8]) -> Result<Vec<u8>> {

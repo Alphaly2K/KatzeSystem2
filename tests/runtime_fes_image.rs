@@ -2,10 +2,12 @@ use katze_system2::{
     Error, Result, Step,
     expression::State,
     fes::{self, ObjectAttributes, ObjectDefinition, ObjectInitialization, ObjectReference},
-    graphics::{GraphicsFactory, Projection, Rect, RenderTarget, TextureFilter, Transform},
+    graphics::{GraphicsFactory, Projection, RenderTarget, Transform},
+    host::{
+        graphics::{Rect, TextureFilter},
+        resources::{ResourceMode, ResourceServices},
+    },
     input::InputFactory,
-    kcs::ResourceServices,
-    resource::ResourceMode,
     runtime::{
         BaseObject, ObjectFactory, RootObject, Runtime, TaskObject,
         fes::{ObjectState, Objects},

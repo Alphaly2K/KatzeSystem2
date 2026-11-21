@@ -4,8 +4,8 @@ use katze_system2::{
     expression::State,
     fes::{self, ObjectDefinition},
     graphics::{GraphicsFactory, RenderTarget},
-    kcs::{MotionHost, Program, ResourceServices},
-    resource::ResourceMode,
+    host::resources::{ResourceMode, ResourceServices},
+    kcs::{MotionHost, Program},
     runtime::{
         BaseObject, ObjectFactory, Runtime, TaskObject,
         fes::{ObjectState, Objects, Scene},
@@ -319,10 +319,10 @@ fn scene_setup(source: &[u8], budget: usize) -> SceneSetup {
         runtime.host().handle_allocator(),
     )
     .unwrap();
-    scene
-        .objects_mut()
-        .unwrap()
-        .set_image_list(list, katze_system2::graphics::Rect::from_xywh(0, 0, 32, 4));
+    scene.objects_mut().unwrap().set_image_list(
+        list,
+        katze_system2::host::graphics::Rect::from_xywh(0, 0, 32, 4),
+    );
     SceneSetup {
         runtime,
         scene,

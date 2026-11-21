@@ -4,9 +4,12 @@ mod window_input;
 
 use katze_system2::{
     Error, Result,
-    host::input::{DeviceBinding, DeviceKeys, InputDevice},
-    kcs::{Program, WindowAction, WindowCloseRequest, WindowRequest},
-    runtime::{ProgramLoader, TaskRuntime, WindowServices},
+    host::{
+        input::{DeviceBinding, DeviceKeys, InputDevice},
+        platform::{WindowAction, WindowCloseRequest, WindowRequest, WindowServices},
+    },
+    kcs::Program,
+    runtime::{ProgramLoader, TaskRuntime},
     settings::SystemSettings,
 };
 use sdl2::{

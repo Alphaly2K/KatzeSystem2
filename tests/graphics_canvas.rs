@@ -3,8 +3,9 @@ use katze_system2::{
     expression::State,
     graphics::{
         CanvasLayout, Drawable, Drawables, DrawingContext, GraphicsFactory, PlaneObject,
-        Projection, Rect, RenderTarget, Surface, TextureFilter,
+        Projection, RenderTarget,
     },
+    host::graphics::{Rect, Surface, TextureFilter},
     kcs::{Host, Interpreter, NativeReturn, Program},
     runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, TaskObject, kind},
     task::{Command, CommandBuffers},

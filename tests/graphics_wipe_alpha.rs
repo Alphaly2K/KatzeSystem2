@@ -1,6 +1,7 @@
 use katze_system2::{
     Result,
-    graphics::{Image, Images, Rect, Surface, WipeAlphaObject},
+    graphics::{Image, Images, WipeAlphaObject},
+    host::graphics::{Rect, Surface},
     kcs::{Host, Interpreter, NativeReturn},
     runtime::{TaskObject, kind},
     task::{Command, CommandBuffers},

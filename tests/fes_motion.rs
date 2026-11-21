@@ -74,7 +74,7 @@ fn array_subcommands_convert_each_bank_then_run_and_apply_queued_motion() {
         }
     );
     assert_eq!(state.shared[0], 0);
-    let resources = katze_system2::resource::ArchiveConfig::from_xml(
+    let resources = katze_system2::host::resources::ArchiveConfig::from_xml(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?><document><INT><int00>
          <name>mot</name><int>motion.int</int><ext>kcs</ext><dir>loose</dir>
          </int00></INT></document>",
@@ -97,7 +97,7 @@ fn array_subcommands_convert_each_bank_then_run_and_apply_queued_motion() {
     let loaded = router
         .read(
             &target,
-            katze_system2::resource::ResourceMode::Archive,
+            katze_system2::host::resources::ResourceMode::Archive,
             |_| panic!(),
         )
         .unwrap()

@@ -1,6 +1,8 @@
 use katze_system2::{
-    graphics::{Rect, Surface},
-    host::font::TextEncoding,
+    host::{
+        font::TextEncoding,
+        graphics::{Rect, Surface},
+    },
     message::{AtomKind, Layout, LayoutEntry, Reveal, RevealGlyph},
 };
 

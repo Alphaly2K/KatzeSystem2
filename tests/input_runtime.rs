@@ -24,9 +24,11 @@ type Records = Rc<RefCell<Vec<Record>>>;
 #[test]
 fn ordinary_image_cursor_tracks_hotspot_visibility_and_replacement() -> Result<()> {
     use katze_system2::{
-        graphics::{Projection, RenderTarget, SoftwareBackend, TextureFilter, Transform},
-        kcs::ResourceServices,
-        resource::ResourceMode,
+        graphics::{Projection, RenderTarget, Transform},
+        host::{
+            graphics::{TextureFilter, software::SoftwareBackend},
+            resources::{ResourceMode, ResourceServices},
+        },
         runtime::{KcsFactory, ProgramLoader, RootObject},
     };
 
@@ -138,7 +140,7 @@ fn ordinary_image_cursor_tracks_hotspot_visibility_and_replacement() -> Result<(
 #[test]
 fn ordinary_input_wrappers_query_devices_and_update_regions_and_key_switches() -> Result<()> {
     use katze_system2::{
-        graphics::Rect,
+        host::graphics::Rect,
         runtime::{KcsFactory, ProgramLoader, RootObject},
     };
 

@@ -1,10 +1,13 @@
 use katze_system2::{
     Result,
     expression::State,
-    graphics::{Image, Rect},
+    graphics::Image,
     hg3::{DecodedFrame, StandardInfo},
-    kcs::{Program, ResourceServices},
-    resource::ResourceMode,
+    host::{
+        graphics::Rect,
+        resources::{ResourceMode, ResourceServices},
+    },
+    kcs::Program,
     runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, kind},
 };
 struct Loader(Program);

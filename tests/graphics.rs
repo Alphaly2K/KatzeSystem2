@@ -1,4 +1,4 @@
-use katze_system2::graphics::{Rect, Surface};
+use katze_system2::host::graphics::{Rect, Surface};
 
 #[test]
 fn fills_clip_preserve_raw_argb_and_leave_other_pixels_untouched() {

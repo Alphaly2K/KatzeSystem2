@@ -2,9 +2,10 @@ use katze_system2::{
     Error, Result,
     audio::{SoundFactory, SoundGroup, SoundGroups},
     expression::State,
-    host::media::DecodeMode,
-    kcs::ResourceServices,
-    resource::ResourceMode,
+    host::{
+        media::DecodeMode,
+        resources::{ResourceMode, ResourceServices},
+    },
     runtime::{BaseObject, ObjectFactory, Runtime, TaskObject, kind},
     task::{Command, CommandBuffers},
 };
@@ -144,7 +145,7 @@ fn audio(runtime: &Runtime<SoundFactory<Reject>>) -> &katze_system2::audio::Soun
 fn read_channel(
     runtime: &mut Runtime<SoundFactory<Reject>>,
     frames: usize,
-) -> katze_system2::audio::Pcm {
+) -> katze_system2::host::audio::Pcm {
     runtime
         .object_mut(1)
         .unwrap()

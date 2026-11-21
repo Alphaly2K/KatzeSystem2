@@ -1,11 +1,8 @@
 use katze_system2::{
     Error, Result,
     expression::State,
-    kcs::{
-        CoreHost, Host, Interpreter, NativeReturn, OrdinaryTask, Program, ResourceHost,
-        ResourceServices,
-    },
-    resource::{ArchiveConfig, ResourceMode},
+    host::resources::{ArchiveConfig, ResourceMode, ResourceServices},
+    kcs::{CoreHost, Host, Interpreter, NativeReturn, OrdinaryTask, Program, ResourceHost},
 };
 
 #[derive(Default)]
@@ -46,7 +43,7 @@ fn cached_borrowed_resources_preserve_wide_resolution_overrides() -> Result<()> 
         }
     }
     let mut service = Wide;
-    let mut cached = katze_system2::kcs::CachedResources::new(&mut service);
+    let mut cached = katze_system2::host::resources::CachedResources::new(&mut service);
     assert_eq!(
         cached.resolve_utf16(b"export", &"art".encode_utf16().collect::<Vec<_>>())?,
         "📁/art".encode_utf16().collect::<Vec<_>>()

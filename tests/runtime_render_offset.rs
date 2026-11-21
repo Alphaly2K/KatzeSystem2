@@ -204,7 +204,7 @@ fn pointer_exit_query_keeps_position_modes_mapping_and_aliased_outputs() {
                 });
             runtime.set_surface_size([1600, 900]);
             runtime.set_window_content_rect(if mode == 0 && enabled {
-                Some(katze_system2::graphics::Rect {
+                Some(katze_system2::host::graphics::Rect {
                     left: -20,
                     top: 33,
                     right: 1004,

@@ -1,8 +1,8 @@
 use katze_system2::{
     Result,
     expression::State,
-    graphics::{Drawable, GraphicsFactory, Projection, RenderTarget, TextureFilter, Transform},
-    host::graphics::software::SoftwareBackend,
+    graphics::{Drawable, GraphicsFactory, Projection, RenderTarget, Transform},
+    host::graphics::{TextureFilter, software::SoftwareBackend},
     kcs::{Interpreter, Program},
     runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, kind},
     task::Command,
@@ -459,7 +459,7 @@ fn render_wipe_uses_image_wrappers_and_keeps_foreground_and_stopped_pixels() {
             .get_mut(mask)
             .unwrap()
             .fill_rect_from_bottom(
-                katze_system2::graphics::Rect::from_xywh(0, 0, 8, 6),
+                katze_system2::host::graphics::Rect::from_xywh(0, 0, 8, 6),
                 0xff20_1080,
             );
         execute(&mut rt, &[(858, &[1]), (859, &[0, 0, 10f32.to_bits()])]);
@@ -521,7 +521,7 @@ fn render_wipe_uses_image_wrappers_and_keeps_foreground_and_stopped_pixels() {
 
 struct TransitionFiles;
 
-impl katze_system2::kcs::ResourceServices for TransitionFiles {
+impl katze_system2::host::resources::ResourceServices for TransitionFiles {
     fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
         assert!(category == b"image" || (category == b"mot" && name == b"d"));
         Ok(name.to_vec())
@@ -530,7 +530,7 @@ impl katze_system2::kcs::ResourceServices for TransitionFiles {
     fn read(
         &mut self,
         name: &[u8],
-        _: katze_system2::resource::ResourceMode,
+        _: katze_system2::host::resources::ResourceMode,
     ) -> Result<Option<Vec<u8>>> {
         use std::io::Write;
         let compress = |bytes: &[u8]| {

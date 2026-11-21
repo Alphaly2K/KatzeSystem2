@@ -1,12 +1,12 @@
 use katze_system2::{
     Result,
     expression::State,
-    graphics::{
-        Drawable, Drawables, GraphicsFactory, ParticleMesh, Projection, Surface, TextureFilter,
-        TextureSource,
+    graphics::{Drawable, Drawables, GraphicsFactory, ParticleMesh, Projection},
+    host::{
+        graphics::{Surface, TextureFilter, TextureSource},
+        resources::{ResourceMode, ResourceServices},
     },
-    kcs::{ParticleHost, Program, ResourceServices, ScriptRandom},
-    resource::ResourceMode,
+    kcs::{ParticleHost, Program, ScriptRandom},
     runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, kind},
     task::{Command, CommandBuffers},
 };

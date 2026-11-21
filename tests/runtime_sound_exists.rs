@@ -1,10 +1,12 @@
 use katze_system2::{
     Result,
     expression::State,
-    host::storage::{ReadSource, SharedSource},
-    kcs::{CoreHost, Host, Interpreter, NativeReturn, Program, ResourceHost, ResourceServices},
+    host::{
+        resources::{ResourceMode, ResourceServices},
+        storage::{ReadSource, SharedSource},
+    },
+    kcs::{CoreHost, Host, Interpreter, NativeReturn, Program, ResourceHost},
     memory::SharedMemory,
-    resource::ResourceMode,
     runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, TaskRuntime, kind},
 };
 use std::{

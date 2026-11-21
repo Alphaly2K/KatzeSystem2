@@ -1,7 +1,8 @@
 use katze_system2::{
     Error, Result,
     expression::State,
-    graphics::{GraphicsFactory, Projection, RenderTarget, TextureFilter},
+    graphics::{GraphicsFactory, Projection, RenderTarget},
+    host::graphics::TextureFilter,
     runtime::{BaseObject, ObjectFactory, Runtime, TaskObject, kind},
     task::{Command, CommandBuffers},
 };

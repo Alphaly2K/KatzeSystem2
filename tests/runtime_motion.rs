@@ -121,7 +121,7 @@ fn ordinary_motion_properties_preserve_groups_save_direction_and_handle_lifetime
 
 #[test]
 fn motion_loading_copies_parameters_and_saved_data_and_reuses_programs() {
-    use katze_system2::{kcs::ResourceServices, resource::ResourceMode};
+    use katze_system2::host::resources::{ResourceMode, ResourceServices};
     use std::{cell::RefCell, io::Write, rc::Rc};
 
     struct Files(Vec<u8>, Rc<RefCell<Vec<Vec<u8>>>>);

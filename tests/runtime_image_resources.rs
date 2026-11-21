@@ -1,9 +1,12 @@
 use katze_system2::{
     Result,
     expression::State,
-    graphics::{RenderTarget, Surface},
-    kcs::{Interpreter, Program, ResourceServices},
-    resource::ResourceMode,
+    graphics::RenderTarget,
+    host::{
+        graphics::Surface,
+        resources::{ResourceMode, ResourceServices},
+    },
+    kcs::{Interpreter, Program},
     runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, kind},
     task::{Command, CommandBuffers},
 };
@@ -697,7 +700,8 @@ fn snapshot_loading_uses_open_and_preserves_prefetched_image_precedence() {
     }
     for prefetched in [false, true] {
         let opens = Rc::new(RefCell::new(0));
-        let mut sources = katze_system2::kcs::CachedResources::new(Sources(opens.clone()));
+        let mut sources =
+            katze_system2::host::resources::CachedResources::new(Sources(opens.clone()));
         if prefetched {
             let cache = sources.resource_cache().unwrap();
             cache.enqueue(b"art.hg3", 1).unwrap();
@@ -1144,7 +1148,10 @@ fn resource_transforms_keep_return_stack_and_shared_update_flag() {
 
 #[test]
 fn resource_blur_keeps_two_expansion_stages_and_the_first_geometry_cache() {
-    use katze_system2::graphics::{ImageList, ImageListProperties, Rect};
+    use katze_system2::{
+        graphics::{ImageList, ImageListProperties},
+        host::graphics::Rect,
+    };
 
     struct BlurSource;
     impl ResourceServices for BlurSource {
@@ -1247,7 +1254,10 @@ fn resource_blur_keeps_two_expansion_stages_and_the_first_geometry_cache() {
 
 #[test]
 fn resource_resize_updates_pixels_metadata_cache_and_native_stack_together() {
-    use katze_system2::graphics::{ImageList, ImageListProperties, Rect};
+    use katze_system2::{
+        graphics::{ImageList, ImageListProperties},
+        host::graphics::Rect,
+    };
 
     for budget in [1, 4096] {
         let mut code = Vec::new();

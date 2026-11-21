@@ -1,10 +1,8 @@
 use katze_system2::{
     Result,
     expression::State,
-    kcs::{
-        CoreHost, Host, Interpreter, LocalDateTime, NativeReturn, Program, SystemHost,
-        SystemServices,
-    },
+    host::platform::{LocalDateTime, SystemServices},
+    kcs::{CoreHost, Host, Interpreter, NativeReturn, Program, SystemHost},
 };
 use std::{cell::Cell, rc::Rc};
 

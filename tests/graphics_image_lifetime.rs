@@ -1,4 +1,4 @@
-use katze_system2::graphics::{Images, Rect};
+use katze_system2::{graphics::Images, host::graphics::Rect};
 
 #[test]
 fn shared_images_keep_live_pixels_until_the_last_holder_releases() {

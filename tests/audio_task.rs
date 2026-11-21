@@ -4,8 +4,8 @@ use katze_system2::{
     Error, Result,
     audio::{SoundFactory, SoundObject},
     expression::State,
-    kcs::{CoreHost, Program, ResourceServices},
-    resource::{Category, ResourceMode},
+    host::resources::{Category, ResourceMode, ResourceServices},
+    kcs::{CoreHost, Program},
     runtime::{KcsFactory, ProgramLoader, RootObject, Runtime, TaskObject, kind},
     task::{Command, CommandBuffers},
 };

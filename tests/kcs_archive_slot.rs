@@ -2,8 +2,8 @@ use katze_system2::{
     Result,
     audio::{SoundConfig, SoundPart},
     expression::State,
+    host::resources::ArchiveConfig,
     kcs::{CoreHost, OrdinaryTask, Program},
-    resource::ArchiveConfig,
     settings::SystemSettings,
 };
 

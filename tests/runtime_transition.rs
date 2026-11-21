@@ -1,7 +1,8 @@
 use katze_system2::{
     Result,
     expression::State,
-    graphics::{Drawable, GraphicsFactory, Projection, RenderTarget, TextureFilter},
+    graphics::{Drawable, GraphicsFactory, Projection, RenderTarget},
+    host::graphics::TextureFilter,
     kcs::Program,
     runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, kind},
     task::{Command, CommandBuffers},

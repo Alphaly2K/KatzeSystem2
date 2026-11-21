@@ -1,9 +1,12 @@
 use katze_system2::{
     Result,
-    graphics::{DrawingContext, Image, ImageReference, Images, Rect, RenderTarget, Surface},
+    graphics::{DrawingContext, Image, ImageReference, Images, RenderTarget},
     hg3::{DecodedFrame, StandardInfo},
-    kcs::{Program, ResourceServices},
-    resource::{Category, ResourceMode},
+    host::{
+        graphics::{Rect, Surface},
+        resources::{Category, ResourceMode, ResourceServices},
+    },
+    kcs::Program,
     runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, kind},
 };
 use std::cell::RefCell;

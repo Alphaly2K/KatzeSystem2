@@ -1,8 +1,8 @@
 use katze_system2::{
     Result, Step,
     expression::State,
-    kcs::{CachedResources, CoreHost, Interpreter, Program, ResourceHost, ResourceServices},
-    resource::ResourceMode,
+    host::resources::{CachedResources, ResourceMode, ResourceServices},
+    kcs::{CoreHost, Interpreter, Program, ResourceHost},
     runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, kind},
 };
 use std::{cell::RefCell, rc::Rc};

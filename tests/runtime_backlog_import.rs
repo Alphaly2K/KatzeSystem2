@@ -2,8 +2,8 @@ use katze_system2::{
     Result,
     backlog::{Backlog, Record, Settings},
     expression::State,
-    kcs::{Program, ResourceServices},
-    resource::ResourceMode,
+    host::resources::{ResourceMode, ResourceServices},
+    kcs::Program,
     runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, kind},
     settings::SystemSettings,
 };

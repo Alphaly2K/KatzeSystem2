@@ -1,9 +1,11 @@
-use super::{Audio, Decoded, Frame, Metadata, ffi};
+use super::ffi;
 use crate::{
     Error, Result,
     graphics::Surface,
     host::{
-        movie::{MovieDecoder, MovieDecoderFactory},
+        movie::{
+            MovieAudio, MovieDecoded, MovieDecoder, MovieDecoderFactory, MovieFrame, MovieMetadata,
+        },
         storage::SharedSource,
     },
     read,
@@ -25,8 +27,8 @@ struct Input {
     position: usize,
     error: Option<Error>,
     buffer: [u8; 32768],
-    video: Option<Frame>,
-    audio: Option<Audio>,
+    video: Option<MovieFrame>,
+    audio: Option<MovieAudio>,
 }
 
 /// 独占解码状态，可移动到工作线程；推进时同步读取 SharedSource。
@@ -34,7 +36,7 @@ struct Input {
 pub struct Decoder {
     player: NonNull<ffi::Player>,
     input: Box<Input>,
-    metadata: Metadata,
+    metadata: MovieMetadata,
 }
 
 // C 状态及回调上下文由此实例独占，库没有线程局部或全局可变解码状态。
@@ -65,7 +67,7 @@ impl Decoder {
         let mut decoder = Self {
             player,
             input,
-            metadata: Metadata {
+            metadata: MovieMetadata {
                 size: [0; 2],
                 frame_rate: 0.,
                 sample_rate: 0,
@@ -83,7 +85,7 @@ impl Decoder {
             return Err(Error::new(0, "电影缺少可解码的 MPEG-1／MP2／MP3 流头"));
         }
         let metadata = unsafe {
-            Metadata {
+            MovieMetadata {
                 size: [
                     ffi::plm_get_width(player.as_ptr()) as u32,
                     ffi::plm_get_height(player.as_ptr()) as u32,
@@ -115,7 +117,7 @@ impl Decoder {
         Ok(decoder)
     }
 
-    pub fn metadata(&self) -> Metadata {
+    pub fn metadata(&self) -> MovieMetadata {
         self.metadata
     }
 
@@ -136,7 +138,7 @@ impl Decoder {
 
     /// 每次推进零至一秒；较大的时钟变化由调用方分批推进。
     /// 解码错误后应丢弃本实例，避免继续使用不完整输出。
-    pub fn advance(&mut self, seconds: f64) -> Result<Decoded> {
+    pub fn advance(&mut self, seconds: f64) -> Result<MovieDecoded> {
         self.check_error()?;
         if !seconds.is_finite() || !(0.0..=1.0).contains(&seconds) {
             return Err(Error::new(0, "电影推进间隔须为零至一秒"));
@@ -145,7 +147,7 @@ impl Decoder {
             ffi::plm_decode(self.player.as_ptr(), seconds);
         }
         self.check_error()?;
-        Ok(Decoded {
+        Ok(MovieDecoded {
             video: self.input.video.take(),
             audio: self.input.audio.take(),
             ended: unsafe { ffi::plm_has_ended(self.player.as_ptr()) != 0 },
@@ -166,7 +168,7 @@ impl Drop for Decoder {
 }
 
 impl MovieDecoder for Decoder {
-    fn metadata(&self) -> Metadata {
+    fn metadata(&self) -> MovieMetadata {
         self.metadata()
     }
 
@@ -178,7 +180,7 @@ impl MovieDecoder for Decoder {
         self.rewind()
     }
 
-    fn advance(&mut self, seconds: f64) -> Result<Decoded> {
+    fn advance(&mut self, seconds: f64) -> Result<MovieDecoded> {
         self.advance(seconds)
     }
 }
@@ -261,7 +263,7 @@ unsafe extern "C" fn video(_: *mut ffi::Player, frame: *mut ffi::Frame, user: *m
                 _ => {
                     let mut surface = Surface::new(size)?;
                     surface.pixels_mut().fill(255);
-                    input.video.insert(Frame {
+                    input.video.insert(MovieFrame {
                         time: (*frame).time,
                         surface,
                     })
@@ -286,7 +288,7 @@ unsafe extern "C" fn audio(_: *mut ffi::Player, samples: *mut ffi::Samples, user
                 .checked_mul(2)
                 .filter(|&count| count <= samples.interleaved.len())
                 .ok_or_else(|| Error::new(0, "电影音频采样帧数量无效"))?;
-            let audio = input.audio.get_or_insert_with(|| Audio {
+            let audio = input.audio.get_or_insert_with(|| MovieAudio {
                 time: samples.time,
                 samples: Vec::new(),
             });

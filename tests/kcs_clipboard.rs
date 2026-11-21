@@ -1,9 +1,10 @@
 use katze_system2::{
     Result,
     expression::State,
+    host::platform::{ClipboardRequest, ClipboardText},
     kcs::{CoreHost, Host, Interpreter, NativeReturn, Program},
     memory::SharedMemory,
-    runtime::{ClipboardRequest, ClipboardText, ProgramLoader, TaskRuntime, kind},
+    runtime::{ProgramLoader, TaskRuntime, kind},
 };
 
 fn instruction(code: &mut Vec<u8>, opcode: u8, arguments: &[u32]) {

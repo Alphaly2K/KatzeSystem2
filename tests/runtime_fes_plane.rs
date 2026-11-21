@@ -3,8 +3,7 @@ use katze_system2::{
     expression::State,
     fes::{self, ObjectAttributes, ObjectDefinition, ObjectInitialization, ObjectReference},
     graphics::{DrawingContext, GraphicsFactory, Projection, RenderTarget, Transform},
-    kcs::ResourceServices,
-    resource::ResourceMode,
+    host::resources::{ResourceMode, ResourceServices},
     runtime::{
         BaseObject, ObjectFactory, Runtime, TaskObject,
         fes::{ObjectState, Objects},
@@ -622,7 +621,7 @@ fn failed_creation_clears_rebuild_and_non_viewport_binding_clears_clipping() {
 
 #[test]
 fn viewport_binding_crops_across_tiles_and_preserves_missing_targets() {
-    use katze_system2::graphics::{Rect, Surface};
+    use katze_system2::host::graphics::{Rect, Surface};
     let (mut runtime, mut objects) = setup();
     let panel = define(&mut objects, "panel");
     let viewport = objects

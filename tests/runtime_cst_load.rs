@@ -1,8 +1,8 @@
 use katze_system2::{
     Result,
     expression::State,
-    kcs::{Program, ResourceServices},
-    resource::ResourceMode,
+    host::resources::{ResourceMode, ResourceServices},
+    kcs::Program,
     runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, kind},
 };
 use std::{cell::RefCell, collections::BTreeMap, io::Write, rc::Rc};
@@ -419,9 +419,9 @@ fn localized_scene_and_name_table_use_resource_encoding_for_unicode_outputs() {
         for unicode in [0, 1] {
             let (mut rt, task, _, _) = runtime(&code, budget);
             rt.host_mut().unicode_text = unicode;
-            rt.set_resources(katze_system2::kcs::CachedResources::new(TranslatedSources(
-                scene.clone(),
-            )));
+            rt.set_resources(katze_system2::host::resources::CachedResources::new(
+                TranslatedSources(scene.clone()),
+            ));
             rt.update(0, 1).unwrap();
             let vm = rt.object(task).unwrap().interpreter().unwrap();
             assert_eq!(

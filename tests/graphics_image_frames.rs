@@ -2,8 +2,8 @@ use katze_system2::{
     Result,
     expression::State,
     graphics::{GraphicsFactory, ImageList, ImageListProperties, Images, RenderTarget},
-    kcs::{Program, ResourceServices},
-    resource::ResourceMode,
+    host::resources::{ResourceMode, ResourceServices},
+    kcs::Program,
     runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, kind},
     task::{Command, CommandBuffers},
 };
@@ -662,7 +662,7 @@ fn native_image_pack_keeps_shared_frames_until_the_last_list_releases_them() -> 
     impl ResourceServices for PackFiles {
         fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
             assert_eq!(category, b"image");
-            katze_system2::resource::Category {
+            katze_system2::host::resources::Category {
                 prefix: b"image".to_vec(),
                 extension: b"hg3".to_vec(),
             }

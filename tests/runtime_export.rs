@@ -1,13 +1,12 @@
 use katze_system2::{
     Error, Result,
     expression::State,
-    host::storage::{ExportJob, ExportWork},
-    kcs::{Host, Interpreter, Program, ResourceServices, SharedMemory},
-    resource::ResourceMode,
-    runtime::{
-        BaseObject, ExportDestination, ExportServices, KcsFactory, ObjectFactory, ProgramLoader,
-        Runtime, TaskObject, kind,
+    host::{
+        resources::{ResourceMode, ResourceServices},
+        storage::{ExportDestination, ExportJob, ExportServices, ExportWork},
     },
+    kcs::{Host, Interpreter, Program, SharedMemory},
+    runtime::{BaseObject, KcsFactory, ObjectFactory, ProgramLoader, Runtime, TaskObject, kind},
     task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock},
 };
 use std::{
@@ -163,7 +162,7 @@ fn instruction(code: &mut Vec<u8>, opcode: u8, args: &[u32]) {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Resolution(Vec<u8>, Vec<u8>);
 struct Resources(Rc<RefCell<Vec<Resolution>>>);
-impl katze_system2::kcs::ResourceServices for Resources {
+impl katze_system2::host::resources::ResourceServices for Resources {
     fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
         self.0
             .borrow_mut()
@@ -180,7 +179,7 @@ impl katze_system2::kcs::ResourceServices for Resources {
     fn read(
         &mut self,
         _: &[u8],
-        _: katze_system2::resource::ResourceMode,
+        _: katze_system2::host::resources::ResourceMode,
     ) -> Result<Option<Vec<u8>>> {
         unreachable!()
     }
@@ -215,7 +214,7 @@ fn run(
     );
     runtime.set_budget(budget, 1 << 20);
     runtime.set_resources(Resources(resolutions.clone()));
-    runtime.host_mut().folder_paths = Some(katze_system2::resource::FolderPaths {
+    runtime.host_mut().folder_paths = Some(katze_system2::host::storage::FolderPaths {
         user_data: "USER%title%".encode_utf16().collect(),
         common_data: "COMMON".encode_utf16().collect(),
         brand: "BRAND%title%".encode_utf16().collect(),

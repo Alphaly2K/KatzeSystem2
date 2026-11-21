@@ -2,7 +2,8 @@ use katze_system2::{
     Error, Result,
     expression::State,
     fes::{self, ObjectReference},
-    graphics::{GraphicsFactory, Rect, RenderTarget},
+    graphics::{GraphicsFactory, RenderTarget},
+    host::graphics::Rect,
     runtime::{BaseObject, ObjectFactory, Runtime, TaskObject, fes::Scene, kind},
     task::{Command, CommandBuffers},
 };

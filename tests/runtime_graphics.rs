@@ -761,7 +761,7 @@ fn named_plane_commands_expand_external_text_route_zero_selectively_and_preserve
         }
     }
     struct Resources(Records);
-    impl katze_system2::kcs::ResourceServices for Resources {
+    impl katze_system2::host::resources::ResourceServices for Resources {
         fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
             assert_eq!(category, b"kx3");
             assert_eq!(name, b"mesh");
@@ -771,7 +771,7 @@ fn named_plane_commands_expand_external_text_route_zero_selectively_and_preserve
         fn read(
             &mut self,
             _: &[u8],
-            _: katze_system2::resource::ResourceMode,
+            _: katze_system2::host::resources::ResourceMode,
         ) -> Result<Option<Vec<u8>>> {
             panic!("named commands only resolve resources")
         }
@@ -938,7 +938,10 @@ impl ProgramLoader for Programs {
 
 #[test]
 fn native_camera_depth_is_shared_across_tasks_and_frame_paths() {
-    use katze_system2::graphics::{Projection, RenderTarget, TextureFilter, Transform};
+    use katze_system2::{
+        graphics::{Projection, RenderTarget, Transform},
+        host::graphics::TextureFilter,
+    };
 
     let mut runtime = Runtime::new(
         0,

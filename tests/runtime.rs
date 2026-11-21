@@ -4,10 +4,11 @@ use std::rc::Rc;
 
 use katze_system2::{
     Error, Result,
-    kcs::{Host, Interpreter, OrdinaryTask, Program, TaskClock, WindowAction, WindowRequest},
+    host::platform::{WindowAction, WindowRequest, WindowServices},
+    kcs::{Host, Interpreter, OrdinaryTask, Program, TaskClock},
     runtime::{
         BaseObject, KcsFactory, ObjectFactory, OrdinaryObject, ProgramLoader, RootObject, Runtime,
-        TaskObject, WindowServices, kind,
+        TaskObject, kind,
     },
     task::{Command, CommandBuffers, CommandOutcome, Control},
 };
@@ -1803,7 +1804,7 @@ struct Opens {
     calls: Rc<RefCell<Vec<OpenCall>>>,
 }
 
-impl katze_system2::kcs::SystemServices for Opens {
+impl katze_system2::host::platform::SystemServices for Opens {
     fn open(
         &mut self,
         task_id: u32,

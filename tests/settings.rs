@@ -115,7 +115,13 @@ fn voice_definitions_and_native_queries_keep_directory_priority_and_raw_channel_
 }
 
 type ConfigurationWrites = std::rc::Rc<
-    std::cell::RefCell<Vec<(u32, katze_system2::settings::ConfigurationFile, Vec<u8>)>>,
+    std::cell::RefCell<
+        Vec<(
+            u32,
+            katze_system2::host::storage::ConfigurationFile,
+            Vec<u8>,
+        )>,
+    >,
 >;
 
 #[test]
@@ -184,11 +190,11 @@ fn legacy_file_volumes_follow_voice_groups_cached_category_gains_and_mute_order(
 
 struct ConfigurationSink(ConfigurationWrites);
 
-impl katze_system2::settings::ConfigurationServices for ConfigurationSink {
+impl katze_system2::host::storage::ConfigurationServices for ConfigurationSink {
     fn write(
         &mut self,
         task: u32,
-        file: katze_system2::settings::ConfigurationFile,
+        file: katze_system2::host::storage::ConfigurationFile,
         bytes: &[u8],
     ) -> Result<bool> {
         self.0.borrow_mut().push((task, file, bytes.to_vec()));
@@ -200,8 +206,8 @@ impl katze_system2::settings::ConfigurationServices for ConfigurationSink {
 fn ordinary_configuration_save_keeps_file_failures_local_and_sound_gate_independent() {
     use katze_system2::{
         audio::SoundConfig,
-        host::input::DeviceKeys,
-        settings::{ConfigurationFile, PlatformSettings},
+        host::{input::DeviceKeys, storage::ConfigurationFile},
+        settings::PlatformSettings,
     };
     let mut numbers = State::new(0);
     let mut host = CoreHost::new(&mut numbers);

@@ -1,7 +1,9 @@
-use katze_system2::graphics::{
-    Compositor, DrawCommand, DrawList, Drawable, Drawables, FrameTexture, GraphicsBackend,
-    ProjectedVertex, Projection, Rect, RenderTarget, SoftwareBackend, Surface, TextureFilter,
-    TextureSource, Vertex,
+use katze_system2::{
+    graphics::{Compositor, Drawable, Drawables, Projection, RenderTarget, Vertex},
+    host::graphics::{
+        DrawCommand, DrawList, FrameTexture, GraphicsBackend, ProjectedVertex, Rect, Surface,
+        TextureFilter, TextureSource, software::SoftwareBackend,
+    },
 };
 use std::sync::Arc;
 
@@ -392,7 +394,7 @@ fn mirror_sampling_filtering_and_modulation_keep_fractional_channels() {
 
 #[test]
 fn command_addressing_wraps_each_axis_and_filters_across_texture_seams() {
-    use katze_system2::graphics::TextureAddress::{Mirror, Wrap};
+    use katze_system2::host::graphics::TextureAddress::{Mirror, Wrap};
     let image = Arc::new(
         Surface::from_bgra(
             [2, 2],

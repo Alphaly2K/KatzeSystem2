@@ -1,10 +1,9 @@
-use super::{Frame, Metadata};
 use crate::{
     Error, Result,
     host::{
         graphics::pixel_length,
         media::DecodeMode,
-        movie::{MovieDecoder, MovieDecoderFactory},
+        movie::{MovieDecoder, MovieDecoderFactory, MovieFrame, MovieMetadata},
         storage::SharedSource,
     },
     read,
@@ -27,8 +26,8 @@ struct State {
     clock: f64,
     decoded_until: f64,
     end: Option<f64>,
-    first: Option<Frame>,
-    video: VecDeque<Frame>,
+    first: Option<MovieFrame>,
+    video: VecDeque<MovieFrame>,
     audio: VecDeque<Chunk>,
     error: Option<Error>,
     gain: f32,
@@ -38,7 +37,7 @@ struct Shared {
     inline: Option<Mutex<Option<Decode>>>,
     state: Mutex<State>,
     changed: Condvar,
-    metadata: Metadata,
+    metadata: MovieMetadata,
     lead: f64,
     video_capacity: usize,
 }
@@ -100,7 +99,7 @@ impl Player {
         })
     }
 
-    pub fn metadata(&self) -> Metadata {
+    pub fn metadata(&self) -> MovieMetadata {
         self.shared.metadata
     }
     pub fn audio_output(&self) -> AudioOutput {
@@ -217,7 +216,7 @@ impl Player {
     }
 
     /// 取得当前时刻可显示的最后一帧；宿主持有前次画面直到有新输出。
-    pub fn take_video(&mut self) -> Result<Option<Frame>> {
+    pub fn take_video(&mut self) -> Result<Option<MovieFrame>> {
         let mut state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(error) = &state.error {
             return Err(error.clone());

@@ -1,11 +1,8 @@
 use katze_system2::{
     Result,
     expression::State,
-    kcs::{
-        CoreHost, Database, Host, HostState, Interpreter, NativeReturn, Program, ResourceHost,
-        ResourceServices,
-    },
-    resource::ResourceMode,
+    host::resources::{ResourceMode, ResourceServices},
+    kcs::{CoreHost, Database, Host, HostState, Interpreter, NativeReturn, Program, ResourceHost},
     runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, kind},
 };
 use std::io::Write;
@@ -895,7 +892,7 @@ fn quiz_table(prefix: u8) -> Vec<u8> {
 
 #[test]
 fn quiz_debug_session_rebuilds_the_scripts_question_index_and_advances_on_request() -> Result<()> {
-    use katze_system2::{runtime::QuizDebugInput, task::Command};
+    use katze_system2::{host::diagnostics::QuizDebugInput, task::Command};
 
     struct Programs(Program, Program);
     impl ProgramLoader for Programs {

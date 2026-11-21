@@ -1,6 +1,7 @@
 use katze_system2::{
     Step,
-    kcs::{self, Host, NativeReturn, ParticleHost, ParticleVertex},
+    host::effect::ParticleVertex,
+    kcs::{self, Host, NativeReturn, ParticleHost},
 };
 
 fn call(
@@ -87,7 +88,7 @@ fn particle_math_keeps_x86_nan_bits_rounding_and_time_units() {
 fn source_queries_keep_float_bits_write_order_and_absent_object_defaults() {
     let mut host = ParticleHost {
         object_id: 17,
-        source: Some(kcs::ParticleSource {
+        source: Some(katze_system2::host::effect::ParticleSource {
             color: 0x1234_5678,
             position_2d: [1.25, -2.5],
             position_3d: [0xff80_1234, 0x8000_0000, 0x4070_0000].map(f32::from_bits),

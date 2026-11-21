@@ -4,11 +4,12 @@ use katze_system2::{
     Result,
     audio::SoundFactory,
     expression::State,
-    graphics::{
-        GraphicsBackend, GraphicsFactory, Projection, RenderTarget, SoftwareBackend, TextureFilter,
+    graphics::{GraphicsFactory, Projection, RenderTarget},
+    host::{
+        graphics::{GraphicsBackend, TextureFilter, software::SoftwareBackend},
+        resources::{ResourceMode, ResourceServices},
     },
-    kcs::{Program, ResourceServices},
-    resource::ResourceMode,
+    kcs::Program,
     runtime::{KcsFactory, ProgramLoader, RootObject, Runtime, kind},
 };
 use std::sync::Arc;
@@ -579,9 +580,7 @@ fn plane_movie_sources_release_on_replacement_failure_and_task_cleanup() {
 #[cfg(feature = "builtin-mpeg")]
 fn plane_movie_handles_play_transform_mix_and_release_independently() {
     use katze_system2::{
-        audio::SoundState,
-        graphics::{TextureSource, Transform},
-        movie::Player,
+        audio::SoundState, graphics::Transform, host::graphics::TextureSource, movie::Player,
     };
     fn stored(code: &mut Vec<u8>, index: u32, address: u32, args: &[u32]) {
         code.extend([0x25, 0x13]);
@@ -593,7 +592,7 @@ fn plane_movie_handles_play_transform_mix_and_release_independently() {
     }
     fn audio(
         runtime: &mut MovieRuntime,
-        mixer: &mut Option<katze_system2::audio::Mixer>,
+        mixer: &mut Option<katze_system2::host::audio::Mixer>,
         output: &mut [f32],
     ) {
         if let Some(mixer) = mixer {

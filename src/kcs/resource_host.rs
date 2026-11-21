@@ -1,6 +1,5 @@
-use super::{
-    CachedResources, Host, Interpreter, NativeReturn, ResourceServices, TaskClock, strings,
-};
+use super::{Host, Interpreter, NativeReturn, ResourceServices, TaskClock, strings};
+use crate::host::resources::CachedResources;
 use crate::resource::{ResourceMode, XmlDocument};
 use crate::{Error, HandleAllocator, Result, read};
 use std::collections::BTreeMap;

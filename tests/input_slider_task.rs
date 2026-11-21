@@ -1,11 +1,14 @@
 use katze_system2::{
     Error, Result,
     expression::State,
-    graphics::{GraphicsFactory, Rect, RenderTarget},
-    host::input::{InputDevice, KeySample, PointerSample},
+    graphics::{GraphicsFactory, RenderTarget},
+    host::{
+        graphics::Rect,
+        input::{InputDevice, KeySample, PointerSample},
+        resources::{ResourceMode, ResourceServices},
+    },
     input::{InputFactory, KeyEvent, KeyEventKind, PointerMotion},
-    kcs::{Host, Interpreter, ResourceServices},
-    resource::ResourceMode,
+    kcs::{Host, Interpreter},
     runtime::{ObjectFactory, RootObject, Runtime, TaskObject, kind},
     task::{Command, CommandOutcome, Control, TaskClock},
 };

@@ -1,9 +1,8 @@
 use katze_system2::{
     Result,
     expression::State,
-    kcs::{
-        CoreHost, Host, HostState, Interpreter, NativeReturn, OrdinaryTask, Program, WindowAction,
-    },
+    host::platform::WindowAction,
+    kcs::{CoreHost, Host, HostState, Interpreter, NativeReturn, OrdinaryTask, Program},
     runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, kind},
 };
 

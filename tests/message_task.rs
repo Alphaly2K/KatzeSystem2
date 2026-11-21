@@ -1,11 +1,11 @@
 use katze_system2::{
     Error, Result,
     expression::State,
-    graphics::{
-        Drawables, GraphicsFactory, Projection, Rect, RenderTarget, Surface, TextureFilter,
-        Transform,
+    graphics::{Drawables, GraphicsFactory, Projection, RenderTarget, Transform},
+    host::{
+        font::{FontRequest, FontServices, GlyphMask, TextEncoding},
+        graphics::{Rect, Surface, TextureFilter},
     },
-    host::font::{FontRequest, FontServices, GlyphMask, TextEncoding},
     kcs::{Host, Interpreter, NativeReturn, Program},
     message::{MessageDefaults, MessageFactory, MessageObject},
     runtime::{BaseObject, KcsFactory, ObjectFactory, ProgramLoader, Runtime, TaskObject, kind},

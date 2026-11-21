@@ -4,9 +4,9 @@ use katze_system2::{
     fes::{self, ObjectAttributes, ObjectDefinition, ObjectInitialization, ObjectReference},
     graphics::{
         Drawable, GraphicsFactory, ImageFilter, ImageList, ImageListProperties, Images, Projection,
-        Rect, RenderTarget, TextureFilter, Transform,
+        RenderTarget, Transform,
     },
-    host::graphics::software::SoftwareBackend,
+    host::graphics::{Rect, TextureFilter, software::SoftwareBackend},
     runtime::{
         BaseObject, ObjectFactory, Runtime, TaskObject,
         fes::{ObjectState, Objects, Scene},

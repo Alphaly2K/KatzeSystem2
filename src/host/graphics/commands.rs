@@ -121,8 +121,6 @@ pub(crate) fn triangle_culled(vertices: [ProjectedVertex; 3]) -> bool {
     area == 0.
 }
 
-pub type FrameTriangle = DrawCommand;
-
 /// Ordered frame commands with no device resources or script object handles.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DrawList {

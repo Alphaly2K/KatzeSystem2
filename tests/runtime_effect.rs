@@ -2,8 +2,9 @@ use katze_system2::{
     Result,
     expression::State,
     graphics::{Drawable, GraphicsFactory},
+    host::effect::{EffectPlayer, EffectServices},
     kcs::Program,
-    runtime::{BaseObject, EffectPlayer, EffectServices, KcsFactory, ProgramLoader, Runtime, kind},
+    runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, kind},
     task::{Command, CommandBuffers},
 };
 use std::{cell::RefCell, collections::BTreeSet, rc::Rc};

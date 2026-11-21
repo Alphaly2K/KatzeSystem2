@@ -1,8 +1,11 @@
 use katze_system2::{
     Error, Result,
     expression::State,
-    graphics::{Projection, RenderTarget, Surface, TextureFilter, Transform},
-    host::{graphics::software::SoftwareBackend, storage::FileServices},
+    graphics::{Projection, RenderTarget, Transform},
+    host::{
+        graphics::{Surface, TextureFilter, software::SoftwareBackend},
+        storage::FileServices,
+    },
     kcs::{CoreHost, Host, Interpreter, NativeReturn, Program},
     runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, kind},
 };
@@ -229,7 +232,9 @@ fn sequence_output_keeps_rgb_orientation_signed_indices_and_consumes_failed_writ
     assert!(rt.capture_sequence_frame(&frame()).is_err());
     assert_eq!(rt.host().frame_capture_index, 8);
     let out = output(&mut rt, Mode::Full);
-    rt.set_frame_capture_rectangle(Some(katze_system2::graphics::Rect::from_xywh(1, 0, 2, 2)));
+    rt.set_frame_capture_rectangle(Some(katze_system2::host::graphics::Rect::from_xywh(
+        1, 0, 2, 2,
+    )));
     assert!(rt.capture_sequence_frame(&frame())?);
     let out = out.borrow();
     assert_eq!(&out.bytes[0][18..26], &[2, 0, 0, 0, 2, 0, 0, 0]);
@@ -293,7 +298,9 @@ fn sequence_capture_request_tells_the_host_when_to_read_back() -> Result<()> {
     );
     assert_eq!(rt.host().frame_capture_index, 9);
     assert!(out.borrow().bytes.is_empty());
-    rt.set_frame_capture_rectangle(Some(katze_system2::graphics::Rect::from_xywh(-1, 0, 3, 2)));
+    rt.set_frame_capture_rectangle(Some(katze_system2::host::graphics::Rect::from_xywh(
+        -1, 0, 3, 2,
+    )));
     assert!(rt.present_frame(|_, _, capture| {
         SoftwareBackend::submit_capture(capture.unwrap(), surface)
     })?);

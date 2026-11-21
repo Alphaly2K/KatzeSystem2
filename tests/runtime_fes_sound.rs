@@ -6,9 +6,8 @@ use katze_system2::{
         self, ObjectAttributes, ObjectDefinition, ObjectInitialization, ObjectReference, Program,
         SoundState,
     },
-    host::resources::ResourceServices,
+    host::resources::{ResourceMode, ResourceServices},
     kcs::{MotionHost, Program as MotionProgram, ScriptRandom},
-    resource::ResourceMode,
     runtime::{
         BaseObject, ObjectFactory, Runtime, TaskObject,
         fes::{ObjectState, Objects, Scene},

@@ -1,9 +1,11 @@
 use katze_system2::{
     Error, Result,
     expression::State,
-    host::storage::{ReadSource, SharedSource},
-    kcs::{Program, ResourceServices},
-    resource::ResourceMode,
+    host::{
+        resources::{ResourceMode, ResourceServices},
+        storage::{ReadSource, SharedSource},
+    },
+    kcs::Program,
     runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, kind},
 };
 use std::{cell::RefCell, rc::Rc, sync::Arc};
@@ -424,7 +426,9 @@ fn scene_probe_opens_and_releases_wide_resources_without_reading() -> Result<()>
     let paths = services.paths.clone();
     let opened = services.opened.clone();
     let mut runtime = runtime();
-    runtime.set_resources(katze_system2::kcs::CachedResources::new(services));
+    runtime.set_resources(katze_system2::host::resources::CachedResources::new(
+        services,
+    ));
     let task = runtime.create(0, kind::ORDINARY, b"scene_exists", b"")?;
     runtime.update(0, 1)?;
     let vm = runtime.object(task).unwrap().interpreter().unwrap();

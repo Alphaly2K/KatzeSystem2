@@ -1,6 +1,7 @@
 use katze_system2::{
-    graphics::{Image, Rect},
+    graphics::Image,
     hg3::{DecodedFrame, StandardInfo},
+    host::graphics::Rect,
 };
 
 fn bitmap(size: [u32; 2], pixels: Vec<u8>, depth: u32, canvas: [u32; 2]) -> Image {

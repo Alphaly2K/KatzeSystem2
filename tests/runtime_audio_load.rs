@@ -2,10 +2,12 @@ use katze_system2::{
     Error, Result,
     audio::{SoundFactory, SoundGroup, SoundGroups},
     expression::State,
-    host::audio::{Pcm, SpeechSynthesizer},
-    kcs::{Program, ResourceServices},
+    host::{
+        audio::{Pcm, SpeechSynthesizer},
+        resources::{ResourceMode, ResourceServices},
+    },
+    kcs::Program,
     memory::SharedMemory,
-    resource::ResourceMode,
     runtime::{KcsFactory, ProgramLoader, RootObject, Runtime, kind},
     task::{Command, CommandBuffers},
 };

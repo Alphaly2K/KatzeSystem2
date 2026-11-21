@@ -127,14 +127,13 @@ mod particle_warukira;
 pub(crate) use particle_task::refresh_particle_source;
 mod frame;
 pub(crate) mod raster;
-pub use crate::host::graphics::{
-    DrawCommand, DrawList, FrameTexture, FrameTriangle, ProjectedVertex, Rect, TextureAddress,
-    TextureFilter, TextureSource,
+pub(crate) use crate::host::graphics::{
+    DrawCommand, DrawList, FrameTexture, ProjectedVertex, Rect, TextureAddress, TextureFilter,
+    TextureSource,
 };
 mod compositor;
 use crate::host::graphics::pixel_length;
-pub use crate::host::graphics::software::SoftwareBackend;
-pub use crate::host::graphics::{FrameCanvas, GraphicsBackend, Surface};
+pub(crate) use crate::host::graphics::{FrameCanvas, Surface};
 pub use compositor::Compositor;
 pub(crate) mod resample;
 mod surface_ops;

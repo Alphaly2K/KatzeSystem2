@@ -1,6 +1,9 @@
-use katze_system2::resource::{
-    ArchiveConfig, ArchiveDirectory, ArchiveMount, Category, KifArchive, ResourceGroup,
-    ResourceMember, ResourceMode, ResourceRouter, ResourceSlot, ResourceSource,
+use katze_system2::{
+    host::resources::{ArchiveConfig, Category, ResourceMode},
+    resource::{
+        ArchiveDirectory, ArchiveMount, KifArchive, ResourceGroup, ResourceMember, ResourceRouter,
+        ResourceSlot, ResourceSource,
+    },
 };
 
 fn config_xml(body: &str) -> String {
@@ -392,7 +395,7 @@ fn resource_lists_apply_priority_per_member_and_patches_override_every_mode() {
 
 #[test]
 fn folder_expansion_preserves_case_literal_tokens_and_single_pass_replacements() {
-    use katze_system2::resource::FolderPaths;
+    use katze_system2::host::storage::FolderPaths;
     let paths = FolderPaths {
         user_data: wide("user-data"),
         common_data: wide("common-data"),

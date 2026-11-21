@@ -20,9 +20,8 @@ mod cst;
 mod debug_window;
 mod diagnostics;
 use crate::host::diagnostics::trace_detail;
-pub use crate::host::diagnostics::{
-    DiagnosticTrace, NativeInvocation, NativeTraceEvent, QuizDebugInput, QuizDebugSession,
-    ScriptLocation, ScriptMessages, ScriptPosition, TraceCategory,
+pub(crate) use crate::host::diagnostics::{
+    DiagnosticTrace, NativeInvocation, NativeTraceEvent, QuizDebugSession, TraceCategory,
 };
 mod emocon;
 mod export;
@@ -42,7 +41,6 @@ mod particle;
 mod text_window;
 pub use motion::MotionSnapshot;
 mod frame;
-pub use crate::host::graphics::SequenceCapture;
 mod game_tasks;
 mod image_animation;
 mod image_data;
@@ -63,13 +61,10 @@ mod system_tasks;
 mod task_host;
 mod transition;
 mod window;
-pub use crate::host::{
-    effect::{EffectPlayer, EffectServices},
-    platform::{
-        ClipboardRequest, ClipboardText, PlatformJob, PlatformJobRequest, PlatformJobServices,
-        WindowServices,
-    },
-    storage::{ExportDestination, ExportServices},
+pub(crate) use crate::host::{
+    effect::EffectServices,
+    platform::{ClipboardRequest, PlatformJobServices},
+    storage::ExportServices,
 };
 
 use resources::Resources;

@@ -1,12 +1,15 @@
 use katze_system2::{
     Error, Result,
     expression::State,
-    host::storage::FileServices,
-    kcs::{
-        CoreHost, Host, Interpreter, NativeReturn, OrdinaryTask, Program, ResourceHost,
-        ResourceServices, SystemHost, SystemServices, TaskHost, TaskServices,
+    host::{
+        platform::SystemServices,
+        resources::{ResourceMode, ResourceServices},
+        storage::FileServices,
     },
-    resource::ResourceMode,
+    kcs::{
+        CoreHost, Host, Interpreter, NativeReturn, OrdinaryTask, Program, ResourceHost, SystemHost,
+        TaskHost, TaskServices,
+    },
     runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, kind},
 };
 use std::{cell::RefCell, rc::Rc};

@@ -1,7 +1,8 @@
 use katze_system2::{
     Result,
     expression::State,
-    graphics::{DrawingContext, Rect, RenderTarget, Surface},
+    graphics::{DrawingContext, RenderTarget},
+    host::graphics::{Rect, Surface},
     kcs::Program,
     runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, kind},
     settings::SystemSettings,

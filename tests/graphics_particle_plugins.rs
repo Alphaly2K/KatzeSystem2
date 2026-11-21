@@ -2,8 +2,8 @@ use katze_system2::{
     Result,
     expression::State,
     graphics::{GraphicsFactory, Projection},
-    kcs::{Program, ResourceServices, ScriptRandom},
-    resource::ResourceMode,
+    host::resources::{ResourceMode, ResourceServices},
+    kcs::{Program, ScriptRandom},
     runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, kind},
     task::{Command, CommandBuffers},
 };
@@ -1330,7 +1330,7 @@ fn flower_burst_shares_both_random_streams_and_preserves_task_lifecycle() -> Res
 
 #[test]
 fn film_noise_culls_hidden_layers_ignores_source_motion_and_restarts_randomness() -> Result<()> {
-    use katze_system2::graphics::{Drawable, TextureFilter};
+    use katze_system2::{graphics::Drawable, host::graphics::TextureFilter};
     let mut runtime = runtime(plugin(b"filmnoise.ppi"))?;
     runtime.update(1, 1)?;
     runtime.drawables_mut().insert(100, Drawable::default())?;

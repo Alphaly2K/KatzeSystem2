@@ -1,6 +1,8 @@
 use katze_system2::{
-    graphics::{Rect, Surface},
-    host::font::GlyphMask,
+    host::{
+        font::GlyphMask,
+        graphics::{Rect, Surface},
+    },
     message::{GlyphEffects, GlyphPaint},
 };
 

@@ -2,8 +2,7 @@ use katze_system2::{
     Error, Result,
     expression::State,
     fes::{ObjectReference, Program},
-    kcs::ResourceServices,
-    resource::ResourceMode,
+    host::resources::{ResourceMode, ResourceServices},
     runtime::{
         BaseObject, ObjectFactory, Runtime, TaskObject,
         fes::{ObjectState, Scene},

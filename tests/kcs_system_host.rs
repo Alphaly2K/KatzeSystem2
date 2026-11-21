@@ -1,10 +1,8 @@
 use katze_system2::{
     Error, Result,
     expression::State,
-    kcs::{
-        CoreHost, Host, Interpreter, NativeReturn, OrdinaryTask, Program, SystemHost,
-        SystemServices,
-    },
+    host::platform::SystemServices,
+    kcs::{CoreHost, Host, Interpreter, NativeReturn, OrdinaryTask, Program, SystemHost},
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -47,7 +45,7 @@ fn window_content_query_uses_host_bounds_and_preserves_aliased_write_order() {
         NativeReturn::Continue
     );
     assert_eq!(words(&vm), [0, 0, 1280, 720]);
-    host.window_content_rect = Some(katze_system2::graphics::Rect {
+    host.window_content_rect = Some(katze_system2::host::graphics::Rect {
         left: -20,
         top: 33,
         right: 1004,

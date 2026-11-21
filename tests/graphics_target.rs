@@ -1,7 +1,8 @@
 use katze_system2::{
     Result,
-    graphics::{DrawingContext, Image, Rect, RenderTarget, Surface},
+    graphics::{DrawingContext, Image, RenderTarget},
     hg3::{DecodedFrame, StandardInfo},
+    host::graphics::{Rect, Surface},
     kcs::Program,
     runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, kind},
 };

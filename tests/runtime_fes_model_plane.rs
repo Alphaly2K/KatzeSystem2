@@ -2,9 +2,9 @@ use katze_system2::{
     Error, Result,
     expression::State,
     fes::Program,
-    graphics::{Projection, RenderTarget, SoftwareBackend, Transform},
+    graphics::{Projection, RenderTarget, Transform},
     host::{
-        graphics::{GraphicsBackend, Surface, TextureFilter},
+        graphics::{GraphicsBackend, Surface, TextureFilter, software::SoftwareBackend},
         model::{ModelFrame, ModelPlayer, ModelSelection, ModelServices},
         resources::{ResourceMode, ResourceServices},
     },

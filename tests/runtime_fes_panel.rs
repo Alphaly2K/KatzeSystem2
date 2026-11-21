@@ -49,10 +49,10 @@ fn setup(budget: usize, source: &[u8]) -> (Runtime<GraphicsFactory<Reject>>, Sce
         runtime.host().handle_allocator(),
     )
     .unwrap();
-    scene
-        .objects_mut()
-        .unwrap()
-        .set_image_list(list, katze_system2::graphics::Rect::from_xywh(0, 0, 8, 6));
+    scene.objects_mut().unwrap().set_image_list(
+        list,
+        katze_system2::host::graphics::Rect::from_xywh(0, 0, 8, 6),
+    );
     (runtime, scene)
 }
 
@@ -116,9 +116,10 @@ fn pixel_file(id: u32) -> Vec<u8> {
 #[test]
 fn panel_text_wraps_using_character_advances_and_retries_a_failed_font() {
     use katze_system2::{
-        host::font::{FontRequest, FontServices, GlyphMask},
-        kcs::ResourceServices,
-        resource::ResourceMode,
+        host::{
+            font::{FontRequest, FontServices, GlyphMask},
+            resources::{ResourceMode, ResourceServices},
+        },
         save::DataContainer,
     };
     use std::{cell::RefCell, rc::Rc};
@@ -264,7 +265,10 @@ fn panel_text_wraps_using_character_advances_and_retries_a_failed_font() {
 
 #[test]
 fn panel_images_compose_enabled_cells_in_the_shared_list_and_refresh_numbers() {
-    use katze_system2::{kcs::ResourceServices, resource::ResourceMode, save::DataContainer};
+    use katze_system2::{
+        host::resources::{ResourceMode, ResourceServices},
+        save::DataContainer,
+    };
 
     struct Files(Vec<u8>);
     impl ResourceServices for Files {
@@ -497,7 +501,7 @@ fn panel_images_use_frame_zero_and_keep_pixels_when_a_replacement_cannot_load() 
 
 #[test]
 fn panel_slots_clip_flags_and_preserve_previous_data_after_missing_or_invalid_files() {
-    use katze_system2::save::{DataContainer, SaveServices};
+    use katze_system2::{host::storage::SaveServices, save::DataContainer};
     use std::{cell::RefCell, rc::Rc};
 
     type Calls = Rc<RefCell<Vec<(bool, Vec<u8>)>>>;

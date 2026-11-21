@@ -2,9 +2,9 @@ use katze_system2::{
     Result,
     expression::State,
     graphics::{
-        Drawable, Drawables, DrawingContext, GraphicsFactory, Projection, RenderTarget, Surface,
-        Vertex,
+        Drawable, Drawables, DrawingContext, GraphicsFactory, Projection, RenderTarget, Vertex,
     },
+    host::graphics::Surface,
     kcs::Program,
     runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, kind},
 };
@@ -155,7 +155,7 @@ fn ordinary_rectangle_reaches_pixels_and_drawing_context_gates_frames() {
     runtime.create(0, kind::ORDINARY, b"paint", b"").unwrap();
     runtime.update(1, 1).unwrap();
     let mut target = RenderTarget::new([8, 8]).unwrap();
-    target.clear_rect(katze_system2::graphics::Rect::from_xywh(0, 0, 8, 8));
+    target.clear_rect(katze_system2::host::graphics::Rect::from_xywh(0, 0, 8, 8));
     *runtime.drawing_mut() = DrawingContext {
         mode: 0,
         enabled: true,
@@ -294,7 +294,10 @@ fn projection_origin_selection_reaches_frame_pixels() {
 
 #[test]
 fn viewport_crops_interpolated_and_textured_triangles_without_changing_samples() {
-    use katze_system2::graphics::{CanvasLayout, Rect, TextureFilter};
+    use katze_system2::{
+        graphics::CanvasLayout,
+        host::graphics::{Rect, TextureFilter},
+    };
     let mut projection = Projection::default();
     projection.matrix[12] = 100.;
     projection.matrix[13] = -50.;

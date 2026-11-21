@@ -2,9 +2,11 @@ use katze_system2::{
     Error, Result,
     expression::State,
     fes,
-    graphics::{GraphicsFactory, Rect, RenderTarget},
-    kcs::ResourceServices,
-    resource::ResourceMode,
+    graphics::{GraphicsFactory, RenderTarget},
+    host::{
+        graphics::Rect,
+        resources::{ResourceMode, ResourceServices},
+    },
     runtime::{
         BaseObject, ObjectFactory, Runtime, TaskObject,
         fes::{ObjectState, Scene},

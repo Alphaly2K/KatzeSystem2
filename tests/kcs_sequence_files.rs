@@ -1,8 +1,8 @@
 use katze_system2::{
     Error, Result,
     expression::State,
-    kcs::{CoreHost, Host, Interpreter, NativeReturn, Program, ResourceHost, ResourceServices},
-    resource::ResourceMode,
+    host::resources::{ResourceMode, ResourceServices},
+    kcs::{CoreHost, Host, Interpreter, NativeReturn, Program, ResourceHost},
     runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, kind},
 };
 use std::{

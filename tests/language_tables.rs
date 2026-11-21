@@ -118,9 +118,9 @@ fn runtime_reloads_wide_configured_paths_using_current_selections_and_file_fallb
     use katze_system2::{
         Result,
         expression::State,
-        kcs::ResourceServices,
+        host::resources::{ResourceMode, ResourceServices},
         language::{LanguageState, LanguageTarget::*, StringTableConfig},
-        resource::{ResourceMode, XmlDocument},
+        resource::XmlDocument,
         runtime::{BaseObject, ObjectFactory, Runtime, TaskObject, kind},
     };
     use std::{cell::RefCell, rc::Rc};
@@ -225,7 +225,10 @@ fn runtime_reloads_wide_configured_paths_using_current_selections_and_file_fallb
 
 #[test]
 fn default_wide_resource_entry_transcodes_cp932_and_rejects_unrepresentable_names() {
-    use katze_system2::{Result, kcs::ResourceServices, resource::ResourceMode};
+    use katze_system2::{
+        Result,
+        host::resources::{ResourceMode, ResourceServices},
+    };
     #[derive(Default)]
     struct Files(Vec<u8>);
     impl ResourceServices for Files {
@@ -249,9 +252,8 @@ fn platform_refresh_normalizes_subtitles_and_marks_changes_without_modifying_sou
     use katze_system2::{
         Result,
         expression::State,
-        kcs::ResourceServices,
+        host::resources::{ResourceMode, ResourceServices},
         language::{LanguageChangeRequest, LanguageTarget::*, StringTableConfig},
-        resource::ResourceMode,
         runtime::{BaseObject, ObjectFactory, Runtime, TaskObject, kind},
         settings::SystemSettings,
     };

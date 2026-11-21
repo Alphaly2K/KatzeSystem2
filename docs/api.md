@@ -59,7 +59,7 @@ FES `fontcom add name` 调用同一字体服务的 `add_resource`，名称为已
 
 `SoundConfig::file_part(name)` 按非空文件前缀、先父后子查首个匹配；`file_volume`／`file_play_enabled`／`file_system_voice`／`file_mute` 处理各字段的缺省值，`master_mute()` 查询主静音。`group_volume(name)` 单独按分类名称查询，master 在这里是普通名称。规则与缺省值见[文件分类与播放设置](audio.md#文件分类与播放设置)。`HostState::sound_settings_dirty` 保存外层管理的媒体属性刷新标记。
 
-`audio::decode_vorbis(bytes)` 与 `decode_vorbis_source(&source)` 返回保留采样率和声道顺序的 `audio::Pcm`，分别接收字节切片和 `host::storage::ReadSource`。通过 `frames()`、`samples()` 查询完整采样帧和交错 i16 数据。完整逻辑流、容量和结束页规则见[PCM 与解码](audio.md#pcm-与-vorbis-解码)。
+`audio::decode_vorbis(bytes)` 与 `decode_vorbis_source(&source)` 返回保留采样率和声道顺序的 `host::audio::Pcm`，分别接收字节切片和 `host::storage::ReadSource`。通过 `frames()`、`samples()` 查询完整采样帧和交错 i16 数据。完整逻辑流、容量和结束页规则见[PCM 与解码](audio.md#pcm-与-vorbis-解码)。
 
 `audio::VorbisDecoder::new(&source)` 提供相同格式的逐包解码，`from_shared(source)` 持有共享来源并允许移交其他线程。`sample_rate()`、`channels()`、`frames()` 查询来源格式，`read_packet()` 按需返回交错采样并在流结束后返回 `None`。读取期间来源内容须保持一致，音频包错误在对应读取时报告。
 
@@ -393,7 +393,7 @@ FES `steam_achievement` 将首个参数按 FES 字符串变量和全局脚本替
 
 `resource::XmlWriter` 提供配置 XML 写出：`write` 接收名称分段与字面文本，`write_integer` 保存 DWORD，`write_float` 保存浮点数，`write_wide` 接收 UTF-16；`to_bytes` 返回完整文档供宿主保存。根节点、节点顺序、字面实体及转换容量契约见 [XML 字段](resources.md#脚本-xml-字段)。
 
-`resource::FolderPaths::expand(source)`（最多 259 单元）与 `expand_utf16(source, max_units)` 展开配置目录中的系统目录、品牌／标题及 save／imglib 标记。平台提供上下文，接口保留大小写、未知标记及替换结果，契约见[配置目录展开](resources.md#配置目录展开)。
+`host::storage::FolderPaths::expand(source)`（最多 259 单元）与 `expand_utf16(source, max_units)` 展开配置目录中的系统目录、品牌／标题及 save／imglib 标记。平台提供上下文，接口保留大小写、未知标记及替换结果，契约见[配置目录展开](resources.md#配置目录展开)。
 
 `expand_bytes(source, max_units)` 提供字节入口的目录转换，保留普通字节的符号扩展及未知标记内的 CP932 转换规则。Runtime 通过 `HostState::folder_paths` 接收同一份上下文；该入口只转换目录文字。
 
@@ -421,7 +421,7 @@ Runtime 的普通 740 向两个地址写回指针退出位置，不移动指针�
 
 普通 284 查询声音资源是否存在：两个 DWORD 中首项保留，第二项为格式字符串地址。名称按 `sound` 类别补全后，以 `LooseFirst` 打开读取源；成功返回一，未找到返回零，查询不改写名称或解码声音，也不登记持有句柄。Runtime 和 ResourceHost 共用此契约。
 
-`kcs::CachedResources<S>` 为已有同步资源服务增加共享的原始字节缓存，保留 `inner` 及对底层服务的访问；克隆包装时沿用同一 `ResourceCache`。程序装载器和 Runtime 可使用同一包装的克隆，共用预读结果。`ResourceServices::resource_cache()` 默认返回 None，包装提供共享缓存句柄。`ResourceServices::resolve_slot(slot, name)` 默认退回 `resolve(b"sound", name)`，包装与 `&mut S` 转发到底层服务，`ArchiveConfig::resolve_slot` 提供按 INT 槽位补全的实现。`ResourceHost::new` 和 `Runtime::set_resources` 自动包装输入服务，输入已有缓存时继续沿用。
+`host::resources::CachedResources<S>` 为已有同步资源服务增加共享的原始字节缓存，保留 `inner` 及对底层服务的访问；克隆包装时沿用同一 `ResourceCache`。程序装载器和 Runtime 可使用同一包装的克隆，共用预读结果。`ResourceServices::resource_cache()` 默认返回 None，包装提供共享缓存句柄。`ResourceServices::resolve_slot(slot, name)` 默认退回 `resolve(b"sound", name)`，包装与 `&mut S` 转发到底层服务，`ArchiveConfig::resolve_slot` 提供按 INT 槽位补全的实现。`ResourceHost::new` 和 `Runtime::set_resources` 自动包装输入服务，输入已有缓存时继续沿用。
 
 `ResourceServices::resolve_utf16(category, name)` 接受首零结束的宽字符名称，返回补全后的 UTF-16。默认桥接现有 CP932 `resolve`，保留 Windows 私有字符映射；输入不能表示为 CP932 时诊断，宿主可覆盖此方法提供完整宽字符补全。缓存包装和借用包装均保留覆盖实现。
 
@@ -632,7 +632,7 @@ Runtime 的普通 740 向两个地址写回指针退出位置，不移动指针�
 
 `Drawable::from_canvas(data, count)` 读取显式画布三角形，`CanvasTriangle` 保留 tag、面块索引、顶点和 UV；平面命令 83 使用显式缓冲区接入。`Drawables::render_frame` 读取画布并写入独立目标，`Runtime::render_frame` 使用运行时当前画布。提交、缺失纹理和过滤约束见[画布图元与帧](graphics.md#画布图元与独立帧提交)。
 
-`Drawables::compose(projection, parent, filter, range)` 生成设备无关的 `DrawList`，包含按显示、排序、相机、裁剪及投影准备的 `DrawCommand`。`range=None` 合成全帧，指定区间时按图元基点 Z 选择 `[lower, upper)`，非正上界返回空列表。`FrameTexture` 的 `source` 选择 `TextureSource::Canvas(tile)` 或 `TextureSource::Image(Arc<Surface>)`，`uv` 保存三个顶点的纹理坐标，`address` 按 U、V 分别选择 `TextureAddress::Mirror`（默认）或 `Wrap`，循环寻址的双线性过滤跨纹理边缘取样。`filter=None` 沿用 `DrawList::filter`，`Some(TextureFilter)` 为该纹理选择独立过滤方式，同一列表可混合点取样和双线性过滤。`DrawCommand::blend_mode` 保存 0～5 的混合编号，软件与 Metal 后端均在调制之后混合，其他编号回退到零；逐通道规则见[图形接口](graphics.md)。`TextureSource::surface(canvas)` 借用实际像素，缺失面块返回 None；图像来源独立于画布。绘制命令及列表可克隆，共享图像保持像素寿命，修改来源时可使用 `Arc::make_mut` 保留已经生成的帧。`FrameTriangle` 保留为 `DrawCommand` 的兼容别名；既有 `frame_triangles` 返回同类命令。`Runtime::compose_frame()` 使用 `set_frame_view` 配置的视图合成全帧。
+`Drawables::compose(projection, parent, filter, range)` 生成设备无关的 `DrawList`，包含按显示、排序、相机、裁剪及投影准备的 `DrawCommand`。`range=None` 合成全帧，指定区间时按图元基点 Z 选择 `[lower, upper)`，非正上界返回空列表。`FrameTexture` 的 `source` 选择 `TextureSource::Canvas(tile)` 或 `TextureSource::Image(Arc<Surface>)`，`uv` 保存三个顶点的纹理坐标，`address` 按 U、V 分别选择 `TextureAddress::Mirror`（默认）或 `Wrap`，循环寻址的双线性过滤跨纹理边缘取样。`filter=None` 沿用 `DrawList::filter`，`Some(TextureFilter)` 为该纹理选择独立过滤方式，同一列表可混合点取样和双线性过滤。`DrawCommand::blend_mode` 保存 0～5 的混合编号，软件与 Metal 后端均在调制之后混合，其他编号回退到零；逐通道规则见[图形接口](graphics.md)。`TextureSource::surface(canvas)` 借用实际像素，缺失面块返回 None；图像来源独立于画布。绘制命令及列表可克隆，共享图像保持像素寿命，修改来源时可使用 `Arc::make_mut` 保留已经生成的帧。`frame_triangles` 返回 `DrawCommand`。`Runtime::compose_frame()` 使用 `set_frame_view` 配置的视图合成全帧。
 
 `GraphicsFactory` 的类型 35／36 提供实时残影和马赛克，普通 521～524 配置及启停。完整帧合成会推进捕获与反馈；指定深度区间的合成直接选择图元。任务创建、首次矩形保持及重启规则见[实时滤镜](graphics.md#实时残影与马赛克)。
 
@@ -889,7 +889,7 @@ Runtime 的普通 294 创建独立控制器，使用与图像、集合共用且�
 
 `resource::XmlDocument::parse(bytes)` 读取基线 UTF-8 XML，`root_name()` 提供根节点的字面名称。`text(path)` 返回可选借用字节，`integer(path, default)` 和 `float(path, default)` 在缺失时采用默认值；路径和输入约束见[资源文档](resources.md#脚本-xml-字段)。读取器不访问文件系统。
 
-`resource::ArchiveConfig::from_xml(&str)` 读取启动 XML 的类别及必需归档列表。`entries` 固定包含 128 个槽位，`required` 包含 64 个原始整数编号。`find` 按标识返回第一个匹配槽位；`resolve` 接受类别标识和资源名字节，返回虚拟名称，查找失败返回诊断。`Category::resolve` 也可独立用于显式前缀与扩展名。接口不读取文件系统。具体输入约束见[资源名称与类别](resources.md)，XML 诊断的 offset 使用零。
+`host::resources::ArchiveConfig::from_xml(&str)` 读取启动 XML 的类别及必需归档列表。`entries` 固定包含 128 个槽位，`required` 包含 64 个原始整数编号。`find` 按标识返回第一个匹配槽位；`resolve` 接受类别标识和资源名字节，返回虚拟名称，查找失败返回诊断。`Category::resolve` 也可独立用于显式前缀与扩展名。接口不读取文件系统。具体输入约束见[资源名称与类别](resources.md)，XML 诊断的 offset 使用零。
 
 `resource::ArchiveDirectory::new` 索引已经解密的 CP932 目录条目；`from_plain_kif` 读取完整未加密 KIF，遇到加密标记返回诊断。`entries()` 保留输入顺序，`find`／`find_utf16` 返回首个匹配条目及范围。目录查询保留基线宽字符大小写转换步长，不规范化路径分隔符。`KifArchive` 提供数据块读取与解密。
 

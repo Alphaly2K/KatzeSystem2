@@ -4,9 +4,10 @@ use katze_system2::{
     fes,
     graphics::{
         GraphicsFactory, Image, ImageList, ImageListProperties, ImageListTransform, Images,
-        Projection, RenderTarget, Surface, TextureFilter, Transform,
+        Projection, RenderTarget, Transform,
     },
     hg3::{DecodedFrame, StandardInfo},
+    host::graphics::{Surface, TextureFilter},
     kcs::Program,
     runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, fes::Objects, kind},
 };
@@ -468,7 +469,7 @@ fn runtime_lists_keep_kcs_images_alive_and_feed_fes_canvas_planes() {
         list.set_offset([-1, 0]);
         assert_eq!(
             list.dirty_rectangles().collect::<Vec<_>>(),
-            [katze_system2::graphics::Rect::from_xywh(2, 1, 2, 2)]
+            [katze_system2::host::graphics::Rect::from_xywh(2, 1, 2, 2)]
         );
         assert!(runtime.update_image_list(&mut list).unwrap());
         assert!(!runtime.update_image_list(&mut list).unwrap());
@@ -588,7 +589,7 @@ fn list_alpha_classification_stays_with_shared_pixels_and_waits_for_visible_geom
         images.release_owner(1);
         assert!(images.get(source).is_err());
         images.get_mut(alias).unwrap().fill_rect_from_bottom(
-            katze_system2::graphics::Rect::from_xywh(0, 0, 1, 1),
+            katze_system2::host::graphics::Rect::from_xywh(0, 0, 1, 1),
             replacement,
         );
         list.set(
@@ -619,7 +620,7 @@ fn list_alpha_classification_stays_with_shared_pixels_and_waits_for_visible_geom
 
 #[test]
 fn incremental_lists_keep_history_and_repeat_blending_in_overlapping_blocks() {
-    use katze_system2::graphics::Rect;
+    use katze_system2::host::graphics::Rect;
     let mut images = Images::default();
     assert!(ImageList::new_tiled(2, [1, 1], [1, 0], &mut images).is_err());
     assert!(ImageList::new_tiled(2, [65536, 65536], [1, 1], &mut images).is_err());
@@ -737,7 +738,7 @@ fn incremental_lists_keep_history_and_repeat_blending_in_overlapping_blocks() {
 
 #[test]
 fn clipping_keeps_history_shrinks_and_null_reset_waits_for_new_invalidation() {
-    use katze_system2::graphics::Rect;
+    use katze_system2::host::graphics::Rect;
     let mut images = Images::default();
     let source = images.create(1, [3, 2]).unwrap();
     images

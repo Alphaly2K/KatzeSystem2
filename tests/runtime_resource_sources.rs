@@ -1,7 +1,8 @@
 use katze_system2::{
     Result,
     expression::State,
-    graphics::{GraphicsFactory, ImageList, ImageListProperties, Rect, RenderTarget},
+    graphics::{GraphicsFactory, ImageList, ImageListProperties, RenderTarget},
+    host::graphics::Rect,
     kcs::Program,
     runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, kind},
     task::{Command, CommandBuffers},

@@ -283,7 +283,7 @@ fn canvas_resize_keeps_bottom_sampling_and_distinct_metadata_conversions() {
 
 #[test]
 fn scaled_self_copy_uses_row_moves_and_immediate_resampling_reads() {
-    use katze_system2::graphics::Rect;
+    use katze_system2::host::graphics::Rect;
 
     let mut image = Image::new([3, 2]).unwrap();
     image.pixels_mut().copy_from_slice(

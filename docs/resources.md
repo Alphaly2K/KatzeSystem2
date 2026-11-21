@@ -48,7 +48,7 @@ assert_eq!(category.resolve(b"sample").unwrap(), b"mot/sample.kcs");
 `ArchiveConfig` 提供 128 个 `entries` 和 64 项 `required`。每个 `ArchiveEntry` 包含类别标识 `name`、名称补全参数 `category` 以及散装目录 `directory`。默认条目的四个字符串均为空，必需归档列表默认为 −1。
 
 ```rust
-use katze_system2::resource::ArchiveConfig;
+use katze_system2::host::resources::ArchiveConfig;
 
 let config = ArchiveConfig::from_xml(r#"<?xml version="1.0" encoding="UTF-8"?>
 <document><INT><int00>
@@ -158,7 +158,7 @@ XML 路径及字段名称区分大小写，类别标识查询忽略 ASCII 大小
 
 文件回调接收 UTF-16 路径，返回 `Ok(None)` 表示打开失败并继续后续尝试，`Ok(Some(bytes))` 表示成功，空数据也算命中；`Err` 中止读取并传播诊断。返回的 `ResourceData` 同时提供正文和 `ResourceSource`，区分文件路径、普通归档槽位及补丁列表下标。归档正文由 `KifArchive` 按需解密。
 
-运行时 `kcs::ResourceServices::read_utf16` 提供宽字符名称读取；默认转换为 CP932 后调用字节入口，无法表示的名称或无效 UTF-16 返回诊断。需要完整宽字符名称的宿主应覆盖该方法，`CachedResources` 和可变引用包装会转发宿主实现。启动示例的宽字符入口直接使用宿主文件名，并保留直接文件读取与资源回退的区别。
+运行时 `host::resources::ResourceServices::read_utf16` 提供宽字符名称读取；默认转换为 CP932 后调用字节入口，无法表示的名称或无效 UTF-16 返回诊断。需要完整宽字符名称的宿主应覆盖该方法，`CachedResources` 和可变引用包装会转发宿主实现。启动示例的宽字符入口直接使用宿主文件名，并保留直接文件读取与资源回退的区别。
 
 `ResourceServices::open(name, mode)` 返回可选的 `host::storage::SharedSource`，名称及模式沿用 `read`，缺失与读取失败分别返回 `Ok(None)` 和诊断。默认实现持有 `read` 返回的字节；宿主可覆盖以提供独立文件或其他存储源，可变引用包装转发该实现。`CachedResources` 优先使用已预读的字节，未命中时调用内部服务的 `open`；已打开的源在缓存淘汰后继续有效。声音装载通过该入口取得源，解码仍同步执行。
 

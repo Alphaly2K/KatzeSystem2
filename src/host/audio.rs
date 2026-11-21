@@ -1,6 +1,6 @@
 //! PCM output and optional speech synthesis.
 
-pub use crate::audio::Mixer;
+pub use crate::audio::output::Mixer;
 use crate::{Error, Result, read};
 
 /// Interleaved signed 16-bit PCM. Each frame holds one sample per channel.

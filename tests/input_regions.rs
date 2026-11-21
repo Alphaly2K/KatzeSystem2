@@ -1,6 +1,6 @@
 use katze_system2::{
     Result,
-    graphics::Rect,
+    host::graphics::Rect,
     input::Regions,
     task::{Command, CommandBuffers},
 };

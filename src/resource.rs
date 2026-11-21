@@ -1,15 +1,13 @@
-pub use crate::host::resources::ResourceMode;
+pub(crate) use crate::host::resources::ResourceMode;
 
-mod cache;
+pub(crate) mod cache;
 mod directory;
 pub(crate) mod export;
 mod kif;
 mod kif_source;
 mod router;
 mod xml;
-pub use crate::host::resources::{ArchiveConfig, ArchiveEntry, Category};
-pub use crate::host::storage::FolderPaths;
-pub use cache::{CachedResources, ResourceCache};
+use crate::host::resources::Category;
 pub use directory::{ArchiveDirectory, DirectoryEntry};
 pub use kif::{KifArchive, verification_seed};
 pub use kif_source::KifEntrySource;
