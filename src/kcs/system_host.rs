@@ -73,7 +73,7 @@ impl<H: Host, S: SystemServices> Host for SystemHost<'_, H, S> {
         self.inner.diagnostic_trace()
     }
 
-    fn register_file_source(&mut self, source: crate::io::SharedSource) -> Result<u32> {
+    fn register_file_source(&mut self, source: crate::host::storage::SharedSource) -> Result<u32> {
         self.inner.register_file_source(source)
     }
 
@@ -277,7 +277,7 @@ impl<H: Host, S: SystemServices> Host for SystemHost<'_, H, S> {
     fn load_plane_movie(
         &mut self,
         owner: u32,
-        source: crate::io::SharedSource,
+        source: crate::host::storage::SharedSource,
         effect: bool,
     ) -> Result<[u32; 2]> {
         self.inner.load_plane_movie(owner, source, effect)

@@ -1,5 +1,5 @@
 use super::{HostState, Interpreter, NativeReturn, ResourceServices, strings};
-use crate::io::SharedSource;
+use crate::host::storage::SharedSource;
 use crate::resource::ResourceMode;
 use crate::{Error, Result, read};
 

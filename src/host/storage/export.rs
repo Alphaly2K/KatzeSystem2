@@ -1,5 +1,5 @@
-use super::SharedSource;
-use crate::{Error, Result, io, read, resource};
+use super::{SharedSource, source::read_exact_while};
+use crate::{Error, Result, read, resource};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -46,8 +46,7 @@ impl ExportWork {
             return Ok(());
         }
         let mut bytes = vec![0; read::sized(size, 0)?];
-        let complete =
-            io::read_exact_while(&*self.source, 0, &mut bytes, 64 * 1024, || !cancelled())?;
+        let complete = read_exact_while(&*self.source, 0, &mut bytes, 64 * 1024, || !cancelled())?;
         if complete && !cancelled() {
             resource::export::unpack(&bytes, self.destination.as_mut(), &self.cancelled)?;
         }

@@ -1,5 +1,5 @@
 use super::Pcm;
-use crate::io::ReadSource;
+use crate::host::storage::ReadSource;
 use crate::{Error, Result, read};
 
 /// 解码单个完整 Ogg Vorbis 流；保留采样率、声道顺序及末页的帧数。

@@ -1,5 +1,5 @@
 use super::super::{Pcm, decode_vorbis_source, pcm::sample_count};
-use crate::io::SharedSource;
+use crate::host::storage::SharedSource;
 use crate::{Error, Result};
 use std::{
     collections::VecDeque,

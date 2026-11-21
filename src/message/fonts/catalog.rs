@@ -1,5 +1,5 @@
 use super::{Font, FontRequest};
-use crate::{Error, Result, io::SharedSource, read};
+use crate::{Error, Result, host::storage::SharedSource, read};
 use std::sync::Arc;
 
 #[derive(Clone)]

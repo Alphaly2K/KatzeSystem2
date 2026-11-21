@@ -20,7 +20,7 @@ pub fn decode_frame(data: &[u8], id: i32) -> Result<Option<DecodedFrame>> {
 /// 校验全部元数据后仅读取选中帧的像素；None 选择最小无符号 ID。
 /// 重复 ID 始终取文件中第一帧，缺失 ID 返回 None。
 pub fn decode_frame_from(
-    source: &dyn crate::io::ReadSource,
+    source: &dyn crate::host::storage::ReadSource,
     id: Option<i32>,
 ) -> Result<Option<DecodedFrame>> {
     decode_input(Input::source(source)?, id)

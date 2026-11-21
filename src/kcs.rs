@@ -285,7 +285,7 @@ pub trait Host {
     }
 
     /// 登记从资源服务打开的独立文件游标，由普通 30 读取、32 释放。
-    fn register_file_source(&mut self, _source: crate::io::SharedSource) -> Result<u32> {
+    fn register_file_source(&mut self, _source: crate::host::storage::SharedSource) -> Result<u32> {
         Err(Error::new(0, "宿主未提供文件句柄存储"))
     }
     /// 与普通脚本、运动及粒子共用的随机序列。
@@ -536,7 +536,7 @@ pub trait Host {
     fn load_plane_movie(
         &mut self,
         _owner: u32,
-        _source: crate::io::SharedSource,
+        _source: crate::host::storage::SharedSource,
         _effect: bool,
     ) -> Result<[u32; 2]> {
         Err(Error::new(0, "宿主未提供平面电影服务"))
@@ -646,7 +646,7 @@ impl<T: Host + ?Sized> Host for &mut T {
         (**self).diagnostic_trace()
     }
 
-    fn register_file_source(&mut self, source: crate::io::SharedSource) -> Result<u32> {
+    fn register_file_source(&mut self, source: crate::host::storage::SharedSource) -> Result<u32> {
         (**self).register_file_source(source)
     }
     fn language_selection(&self) -> [u32; 3] {
@@ -870,7 +870,7 @@ impl<T: Host + ?Sized> Host for &mut T {
     fn load_plane_movie(
         &mut self,
         owner: u32,
-        source: crate::io::SharedSource,
+        source: crate::host::storage::SharedSource,
         effect: bool,
     ) -> Result<[u32; 2]> {
         (**self).load_plane_movie(owner, source, effect)

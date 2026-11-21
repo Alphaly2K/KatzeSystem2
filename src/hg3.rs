@@ -99,7 +99,7 @@ impl Metadata {
     }
 
     /// 从随机读取源读取全部帧与标签元数据，跳过像素正文。
-    pub fn read(source: &dyn crate::io::ReadSource) -> Result<Self> {
+    pub fn read(source: &dyn crate::host::storage::ReadSource) -> Result<Self> {
         Self::parse_input(Input::source(source)?)
     }
 

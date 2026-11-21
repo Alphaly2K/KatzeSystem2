@@ -14,7 +14,7 @@ use katze_system2::{
         input::{ButtonSource, DeviceBinding, DeviceKeys},
         platform::{LocalDateTime, SystemServices},
         resources::{ArchiveConfig, ResourceMode, ResourceServices},
-        storage::{ConfigurationFile, SharedSource},
+        storage::{ConfigurationFile, ReadSnapshot, SharedSource},
     },
     kcs::Program,
     resource::{KifEntrySource, XmlDocument},
@@ -272,7 +272,7 @@ impl Archive {
             entry.length,
             self.key,
         )?;
-        let snapshot = katze_system2::io::ReadSnapshot::new(self.generation.clone(), position);
+        let snapshot = ReadSnapshot::new(self.generation.clone(), position);
         Ok(Some(Arc::new(source.with_snapshot(snapshot))))
     }
 

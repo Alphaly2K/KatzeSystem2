@@ -1,6 +1,6 @@
 use super::{Data, Pcm, Source, Stream, VorbisDecoder};
 use crate::Result;
-use crate::io::{ReadSnapshot, SharedSource};
+use crate::host::storage::{ReadSnapshot, SharedSource};
 use std::{collections::VecDeque, sync::Arc};
 
 const BUDGET: usize = 8 * 1024 * 1024;
@@ -119,7 +119,7 @@ impl Prepared {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::io::ReadSource;
+    use crate::host::storage::ReadSource;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct Observed {

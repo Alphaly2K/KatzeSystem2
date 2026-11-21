@@ -1,5 +1,11 @@
 use super::{ResourceMode, XmlDocument, terminated};
-use crate::{Error, Result, host::ResourceServices, read, settings::SystemSettings, text};
+use crate::{
+    Error, Result,
+    host::{resources::ResourceServices, storage::SharedSource},
+    read,
+    settings::SystemSettings,
+    text,
+};
 use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 /// 可由资源服务及程序装载器共享的预读队列和原始字节缓存。
@@ -281,7 +287,7 @@ impl<S: ResourceServices> ResourceServices for CachedResources<S> {
         self.inner.read(name, mode)
     }
 
-    fn open(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<crate::io::SharedSource>> {
+    fn open(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<SharedSource>> {
         if let Some(bytes) = self.cache.source_cached(name)? {
             return Ok(Some(bytes));
         }
@@ -296,11 +302,7 @@ impl<S: ResourceServices> ResourceServices for CachedResources<S> {
         self.inner.read_utf16(name, mode)
     }
 
-    fn open_utf16(
-        &mut self,
-        name: &[u16],
-        mode: ResourceMode,
-    ) -> Result<Option<crate::io::SharedSource>> {
+    fn open_utf16(&mut self, name: &[u16], mode: ResourceMode) -> Result<Option<SharedSource>> {
         self.inner.open_utf16(name, mode)
     }
 }

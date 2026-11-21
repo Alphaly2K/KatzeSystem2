@@ -12,7 +12,7 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         self.resources.diagnostic_trace.as_ref()
     }
 
-    fn register_file_source(&mut self, source: crate::io::SharedSource) -> Result<u32> {
+    fn register_file_source(&mut self, source: crate::host::storage::SharedSource) -> Result<u32> {
         self.host.register_file_source(source)
     }
     fn update_particle(
@@ -354,7 +354,7 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
     fn load_plane_movie(
         &mut self,
         owner: u32,
-        source: crate::io::SharedSource,
+        source: crate::host::storage::SharedSource,
         effect: bool,
     ) -> Result<[u32; 2]> {
         self.create_plane_movie(owner, source, effect)

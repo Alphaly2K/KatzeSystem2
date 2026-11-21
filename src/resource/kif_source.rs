@@ -1,6 +1,6 @@
 use crate::{
     Error, Result,
-    io::{ReadSnapshot, ReadSource, SharedSource, read_exact_from},
+    host::storage::{ReadSnapshot, ReadSource, SharedSource, read_exact_from},
 };
 use blowfish::{
     BlowfishLE,

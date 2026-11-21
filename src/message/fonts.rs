@@ -3,7 +3,7 @@
 use super::{Font, FontRequest, FontServices, GlyphMask};
 use crate::{
     Error, Result,
-    io::{ReadSource, SharedSource},
+    host::storage::{ReadSource, SharedSource},
     read,
 };
 use std::sync::Arc;

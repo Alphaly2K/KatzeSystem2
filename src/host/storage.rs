@@ -1,62 +1,18 @@
 //! Byte sources and persistence for files, configuration and game saves.
 
 use crate::{Error, Result};
-use std::{io::Write, sync::Arc};
+use std::io::Write;
 
 mod export;
 mod folder;
 mod script_settings;
+mod source;
 pub use export::{ExportDestination, ExportJob, ExportServices, ExportWork};
 pub use folder::FolderPaths;
 pub use script_settings::ScriptSettings;
 pub(crate) use script_settings::fold_key;
-
-pub type SharedSource = Arc<dyn ReadSource>;
-
-/// Identifies an entry in an immutable resource snapshot. Use a new generation
-/// when replacing content or remounting a source.
-#[derive(Clone)]
-pub struct ReadSnapshot {
-    generation: Arc<()>,
-    entry: usize,
-}
-
-impl ReadSnapshot {
-    pub fn new(generation: Arc<()>, entry: usize) -> Self {
-        Self { generation, entry }
-    }
-}
-
-impl PartialEq for ReadSnapshot {
-    fn eq(&self, other: &Self) -> bool {
-        self.entry == other.entry && Arc::ptr_eq(&self.generation, &other.generation)
-    }
-}
-
-impl Eq for ReadSnapshot {}
-
-/// Random access without a shared cursor. Decoders and export jobs may read
-/// the source on worker threads.
-pub trait ReadSource: Send + Sync {
-    fn len(&self) -> Result<u64>;
-
-    /// Return an identity only if the host keeps this snapshot immutable.
-    fn snapshot(&self) -> Option<ReadSnapshot> {
-        None
-    }
-
-    fn is_empty(&self) -> Result<bool> {
-        Ok(self.len()? == 0)
-    }
-
-    /// Short reads are allowed. Return zero at EOF and never report more bytes
-    /// than fit in `output`.
-    fn read_at(&self, offset: u64, output: &mut [u8]) -> Result<usize>;
-
-    fn read_exact_at(&self, offset: u64, output: &mut [u8]) -> Result<()> {
-        crate::io::read_exact_from(self, offset, output)
-    }
-}
+pub(crate) use source::read_exact_from;
+pub use source::{ReadSnapshot, ReadSource, SharedSource, SourceReader};
 
 /// Script file output. Names use CP932 unless the method accepts UTF-16.
 /// The host resolves names independently of resources and saves.

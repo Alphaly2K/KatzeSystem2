@@ -1,5 +1,6 @@
 use super::{ObjectFactory, ObjectHost, Resources, Runtime, TaskObject};
 use crate::graphics::{DrawList, Rect, Surface, TextureFilter};
+use crate::host::storage::SharedSource;
 use crate::kcs::{Interpreter, NativeReturn, format_string};
 use crate::movie::Player;
 use crate::{Error, Result, read};
@@ -59,7 +60,7 @@ impl Movie {
 }
 
 impl Resources {
-    fn open_movie_player(&self, source: crate::host::SharedSource) -> Result<Player> {
+    fn open_movie_player(&self, source: SharedSource) -> Result<Player> {
         let factory = self
             .movie_decoder_factory
             .clone()
@@ -344,7 +345,7 @@ impl<F: ObjectFactory> ObjectHost<'_, F> {
     pub(super) fn create_plane_movie(
         &mut self,
         owner: u32,
-        source: crate::io::SharedSource,
+        source: SharedSource,
         effect: bool,
     ) -> Result<[u32; 2]> {
         let player = self.resources.open_movie_player(source)?;

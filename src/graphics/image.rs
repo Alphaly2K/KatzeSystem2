@@ -122,7 +122,7 @@ impl Image {
     }
 
     fn decode_source(
-        source: &dyn crate::io::ReadSource,
+        source: &dyn crate::host::storage::ReadSource,
         frame: Option<i32>,
     ) -> Result<Option<Self>> {
         let length = source.len()?;
@@ -136,7 +136,8 @@ impl Image {
             let mut signature = [0; 2];
             source.read_exact_at(0, &mut signature)?;
             if signature == jpeg::SIGNATURE {
-                let reader = std::io::BufReader::new(crate::io::SourceReader::new(source));
+                let reader =
+                    std::io::BufReader::new(crate::host::storage::SourceReader::new(source));
                 return Self::from_frame(jpeg::decode_frame(reader, 24)?).map(Some);
             }
         }

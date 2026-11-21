@@ -264,7 +264,7 @@ impl std::ops::DerefMut for CoreHost<'_> {
 }
 
 impl Host for CoreHost<'_> {
-    fn register_file_source(&mut self, source: crate::io::SharedSource) -> Result<u32> {
+    fn register_file_source(&mut self, source: crate::host::storage::SharedSource) -> Result<u32> {
         self.host.register_file_source(source)
     }
     fn language_selection(&self) -> [u32; 3] {
