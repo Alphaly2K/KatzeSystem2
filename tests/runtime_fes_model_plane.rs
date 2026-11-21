@@ -474,3 +474,76 @@ wait 100
         assert!(events.iter().any(|event| matches!(event, Event::Frame(_))));
     }
 }
+
+#[test]
+fn model_effect_wait_uses_media_status_even_for_hidden_planes() {
+    struct TimedModels;
+    impl ModelServices for TimedModels {
+        fn open(&mut self, selection: &[u8]) -> Result<Option<Box<dyn ModelPlayer>>> {
+            let until = match selection {
+                b"first" => 20,
+                b"second" => 50,
+                _ => unreachable!(),
+            };
+            Ok(Some(Box::new(TimedPlayer(until))))
+        }
+    }
+    struct TimedPlayer(u32);
+    impl ModelPlayer for TimedPlayer {
+        fn effects_active(&mut self, now: u32) -> Result<bool> {
+            Ok(now < self.0)
+        }
+
+        fn frame(&mut self, _: u32) -> Result<Option<ModelFrame>> {
+            panic!("Hidden planes only query effect status");
+        }
+    }
+
+    let source = b"#DEFINE
+M2PLANE actor[2]
+#OBJECT DISP
+actor 0
+#START
+actor[0] load first
+actor[1] load second
+m2_waiteff
+m2_waiteff actor[($0+=1)-1]
+$1=1
+m2_waiteff actor
+$2=1
+m2_waiteff absent
+$3=1
+wait 100
+";
+    let mut runtime = Runtime::new(
+        0,
+        kind::ROOT,
+        Box::new(BaseObject::new()),
+        State::new(4),
+        NoTasks,
+    );
+    runtime.set_model_services(TimedModels);
+    let mut scene = Scene::new(
+        Program::from_text(source).unwrap(),
+        runtime.host().handle_allocator(),
+    )
+    .unwrap();
+
+    for (tick, expected) in [
+        (1, [1, 0, 0, 0]),
+        (2, [1, 0, 0, 0]),
+        (3, [1, 1, 0, 0]),
+        (4, [1, 1, 0, 0]),
+        (5, [1, 1, 0, 0]),
+        (6, [1, 1, 1, 0]),
+        (7, [1, 1, 1, 1]),
+    ] {
+        runtime.host_mut().system_time_ms = tick * 10;
+        assert!(runtime.update_fes_scene(0, &mut scene, tick).unwrap());
+        assert_eq!(
+            runtime.numbers().shared.as_slice(),
+            &expected,
+            "tick {tick}"
+        );
+    }
+}

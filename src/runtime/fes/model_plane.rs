@@ -17,6 +17,7 @@ pub struct ModelPlaneState {
     body_pending: bool,
     effects_mode: Option<u32>,
     applied_effects_mode: Option<u32>,
+    pub(super) effects_active: bool,
 }
 
 impl ModelPlaneState {
@@ -116,6 +117,7 @@ impl<F: ObjectFactory> Store<'_, F> {
         }
         let Some(player) = self.resources.model_players.get_mut(&handle) else {
             state.body_pending = false;
+            state.effects_active = false;
             return Ok(());
         };
         if state.body_pending {
@@ -129,6 +131,7 @@ impl<F: ObjectFactory> Store<'_, F> {
             player.set_effects_mode(mode)?;
             state.applied_effects_mode = Some(mode);
         }
+        state.effects_active = player.effects_active(self.host.system_time_ms)?;
         if state.plane.display == 0 {
             drawables.set_display(handle, 0);
             return Ok(());

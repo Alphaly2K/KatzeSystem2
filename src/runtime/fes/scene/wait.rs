@@ -51,6 +51,15 @@ impl Scene {
         now: u32,
         numbers: &mut State,
     ) -> Result<Option<u32>> {
+        if args.first().is_some_and(|name| name == b"m2_waiteff") {
+            let Some(reference) = args.get(1) else {
+                return Ok(None);
+            };
+            let target = self.interpreter.object_reference(reference, numbers)?;
+            let bank = if target.bank == -1 { 0 } else { target.bank };
+            self.wait_target = self.objects.lookup(&target.name, bank).map(|_| target);
+            return Ok(Some(u32::MAX - 4));
+        }
         if args.first().is_none_or(|name| name != b"wait") {
             return Ok(None);
         }
@@ -183,7 +192,25 @@ impl Scene {
                 }
                 return Ok(false);
             }
-            -5 | -3 => {
+            -5 => {
+                let Some(target) = &self.wait_target else {
+                    return Ok(false);
+                };
+                let banks = if target.bank == -1 {
+                    0..i64::from(self.objects.count(&target.name))
+                } else {
+                    i64::from(target.bank)..i64::from(target.bank) + 1
+                };
+                return Ok(banks
+                    .filter_map(|bank| self.objects.lookup(&target.name, bank as i32))
+                    .any(|handle| {
+                        matches!(
+                            &self.objects.get(handle).unwrap().state,
+                            ObjectState::ModelPlane(model) if model.effects_active
+                        )
+                    }));
+            }
+            -3 => {
                 return Err(Error::new(0, "FES 此类完成等待尚未接入"));
             }
             _ if now >= deadline => return Ok(false),

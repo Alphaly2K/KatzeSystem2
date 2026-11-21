@@ -18,10 +18,12 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 |`host::storage`|`ReadSource`、`SharedSource`、`SourceReader`、`FolderPaths`、`ScriptSettings` 及脚本文件、存档、配置和导出服务|
 |`host::graphics`|`DrawList`、`DrawCommand`、`FrameTexture`、`FrameCanvas`、`GraphicsBackend`、`SequenceCapture`、`Surface`|
 |`host::audio`、`host::movie`、`host::media`|`Mixer`、`Pcm`、语音合成、电影解码及媒体执行方式|
-|`host::model`|模型选择、播放实例和带锚点偏移的透明图像帧|
+|`host::model`|模型选择、播放实例、效果状态和带锚点偏移的透明图像帧|
 |`host::input`、`host::font`|输入事件、按键绑定、`DeviceKeys` 和字体服务|
 |`host::platform`、`host::effect`|`WindowPreferences`、窗口与剪贴板请求、平台任务及外部效果播放器|
 |`host::diagnostics`|脚本位置、调试消息、native 跟踪及 `QuizDebugSession`、`QuizDebugInput`|
+
+模型宿主可用 `ModelPlayer::effects_active(system_time_ms)` 报告仍在播放的差分过渡或效果。运行时在提交待处理的模型参数后读取该状态，隐藏平面也会更新。即时应用参数的播放器可沿用默认的 `false`。
 
 未识别的 3D 粒子插件可由 `host::effect::EffectServices::open_particle` 接入。服务取得资源名和字节，为当前任务创建 `ParticlePlayer`。播放器通过借用的 `ParticleFrame` 更新运行库持有的网格，可在启动或更新时清除 `active` 来结束脚本等待。活动实例收到脚本停止命令时调用 `ParticlePlayer::stop`，之后仍可重启。运行库继续生成绘制命令，由图形宿主呈现。服务不可用时，装载返回插件诊断。
 

@@ -48,6 +48,13 @@ pub trait ModelPlayer {
         Ok(())
     }
 
+    /// Report whether a model effect is still active at the given session time.
+    /// Called during media updates after pending controls, including when the
+    /// plane is hidden. The default suits players that apply changes immediately.
+    fn effects_active(&mut self, _system_time_ms: u32) -> Result<bool> {
+        Ok(false)
+    }
+
     /// Sample the model at the host's session timestamp. `None` hides its current frame.
     fn frame(&mut self, system_time_ms: u32) -> Result<Option<ModelFrame>>;
 }

@@ -65,6 +65,7 @@ impl Scene {
         numbers: &mut crate::expression::State,
     ) -> Result<Option<ScriptDisposition>> {
         match args.first().map(Vec::as_slice) {
+            Some(b"m2_waiteff") if args.len() == 1 => Ok(Some(ScriptDisposition::Continue)),
             Some(b"send") => {
                 let Some(code) = args.get(1) else {
                     return Ok(Some(ScriptDisposition::Continue));
