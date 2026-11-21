@@ -800,7 +800,7 @@ Scene 消费 `noact`／`lockactive` 并按主体时点处理通知。`preferred_
 
 `DeviceKeys::from_xml(bytes)` 读取八十个逻辑键槽及四类设备的四组绑定，`new` 接受显式 `DeviceBinding` 数组。平台通过 `button` 提交按下／释放，`sample` 查询本轮状态，`commit` 提交持有态；一轮内短按保留到提交。四组是第一至第四个绑定，设备来源由掩码表示。`force` 按查询次数强制按下，额外查询同样消费计数；`clear_pressed` 保留重复元数据及强制计数。配置字段、Mouse／Touch 共用绑定和高槽门控见[物理按钮映射](input.md#物理按钮映射)。
 
-`Runtime::set_input_device(device)` 绑定同步 `input::InputDevice`，为已有输入对象逐个查询初始位置；之后新建输入对象在登记前查询，失败不占用编号。共享映射通过 `input_coordinates()`／`input_coordinates_mut()` 配置。InputObject 主体自动执行轮询、定位、选择、按键、滚轮、拖动、光标及更新收尾；未绑定设备返回诊断，显式事件入口仍可使用。平台采集继续实现，设备协议及查询次序见[同步设备更新](input.md#同步设备更新)。独立输入宿主提供 `Host::input_device`／`input_coordinates` 和 `dispatch_input_command(state, delivery, command, buffers, output)`，delivery 区分直接分派与广播，返回值表示目标可达性。
+`Runtime::set_input_device(device)` 绑定同步 `host::input::InputDevice`，为已有输入对象逐个查询初始位置；之后新建输入对象在登记前查询，失败不占用编号。共享映射通过 `input_coordinates()`／`input_coordinates_mut()` 配置。InputObject 主体自动执行轮询、定位、选择、按键、滚轮、拖动、光标及更新收尾；未绑定设备返回诊断，显式事件入口仍可使用。平台采集继续实现，设备协议及查询次序见[同步设备更新](input.md#同步设备更新)。独立输入宿主提供 `Host::input_device`／`input_coordinates` 和 `dispatch_input_command(state, delivery, command, buffers, output)`，delivery 区分直接分派与广播，返回值表示目标可达性。
 
 `Runtime::set_input_pointer_control(enabled)` 设置命令 138 的配置门控，默认 false；139 仍可在前台请求有效目标。独立宿主实现 `Host::input_pointer_control`。两个命令接受打包的无符号十六位逻辑坐标，清理受抑制的键状态后保存定位目标、剩余值和任务 elapsed；设备通过 set_pointer 和 clear_keys 完成对应操作。时刻及坐标约定见[平滑定位](input.md#平滑定位)。
 

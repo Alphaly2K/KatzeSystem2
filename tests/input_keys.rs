@@ -1,6 +1,7 @@
 use katze_system2::{
     Result,
-    input::{Events, KeyEventKind, KeySample, KeyServices, KeyTransition, Keys, Regions},
+    host::input::KeySample,
+    input::{Events, KeyEventKind, KeyServices, KeyTransition, Keys, Regions},
     task::{Command, CommandBuffers},
 };
 

@@ -489,7 +489,7 @@ impl<F: ObjectFactory> Runtime<F> {
     /// 绑定同步设备，并读取已有输入对象的初始设备位置。
     pub fn set_input_device(
         &mut self,
-        device: impl crate::input::InputDevice + 'static,
+        device: impl crate::host::input::InputDevice + 'static,
     ) -> Result<()> {
         self.resources.input_device = Some(Box::new(device));
         for object in self.objects.values_mut() {
@@ -550,7 +550,7 @@ impl<F: ObjectFactory> Runtime<F> {
         &mut self,
         id: u32,
         point: [i32; 2],
-        mut sample: impl FnMut(u32, u32) -> Result<crate::input::KeySample>,
+        mut sample: impl FnMut(u32, u32) -> Result<crate::host::input::KeySample>,
     ) -> Result<bool> {
         let mut consumed = false;
         self.with_input(id, &mut |state, host| {

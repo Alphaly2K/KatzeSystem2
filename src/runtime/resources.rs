@@ -30,7 +30,7 @@ pub(super) struct Resources {
     pub input_callbacks: std::collections::BTreeMap<u32, crate::input::CommandState>,
     pub button_callbacks: std::collections::BTreeMap<u32, crate::input::ButtonObject>,
     pub graphics_responses: std::collections::BTreeMap<u32, u32>,
-    pub input_device: Option<Box<dyn crate::input::InputDevice>>,
+    pub input_device: Option<Box<dyn crate::host::input::InputDevice>>,
     pub input_coordinates: crate::input::CoordinateMap,
     pub input_pointer_control: bool,
     pub image_cursor: Option<super::image_cursor::ImageCursor>,

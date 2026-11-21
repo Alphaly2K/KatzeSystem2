@@ -4,10 +4,8 @@ use std::rc::Rc;
 
 use katze_system2::{
     Error, Result, expression,
-    input::{
-        HitMask, InputDevice, InputFactory, KeyEvent, KeyEventKind, KeySample, PointerMotion,
-        PointerSample,
-    },
+    host::input::{InputDevice, KeySample, PointerSample},
+    input::{HitMask, InputFactory, KeyEvent, KeyEventKind, PointerMotion},
     kcs::{Host, Interpreter, NativeReturn, Program},
     runtime::{BaseObject, ObjectFactory, Runtime, TaskObject, kind},
     task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock},

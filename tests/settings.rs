@@ -200,7 +200,7 @@ impl katze_system2::settings::ConfigurationServices for ConfigurationSink {
 fn ordinary_configuration_save_keeps_file_failures_local_and_sound_gate_independent() {
     use katze_system2::{
         audio::SoundConfig,
-        input::DeviceKeys,
+        host::input::DeviceKeys,
         settings::{ConfigurationFile, PlatformSettings},
     };
     let mut numbers = State::new(0);
@@ -351,7 +351,7 @@ fn platform_overlay_checks_fullscreen_candidates_before_truncation_and_keeps_inh
 #[test]
 fn complete_configuration_merges_shared_window_fields_and_places_keys_with_user_options() {
     use katze_system2::{
-        input::{DeviceBinding, DeviceKeys},
+        host::input::{DeviceBinding, DeviceKeys},
         language::LanguageState,
         settings::{PlatformSettings, write_configuration},
     };

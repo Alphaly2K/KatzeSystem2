@@ -557,7 +557,7 @@ pub trait Host {
         Ok(())
     }
 
-    fn input_device(&mut self) -> Option<&mut dyn crate::input::InputDevice> {
+    fn input_device(&mut self) -> Option<&mut dyn crate::host::input::InputDevice> {
         None
     }
     fn input_coordinates(&self) -> crate::input::CoordinateMap {
@@ -891,7 +891,7 @@ impl<T: Host + ?Sized> Host for &mut T {
         (**self).release_plane_movies(owner)
     }
 
-    fn input_device(&mut self) -> Option<&mut dyn crate::input::InputDevice> {
+    fn input_device(&mut self) -> Option<&mut dyn crate::host::input::InputDevice> {
         (**self).input_device()
     }
     fn input_coordinates(&self) -> crate::input::CoordinateMap {

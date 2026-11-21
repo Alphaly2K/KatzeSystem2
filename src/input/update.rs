@@ -1,7 +1,8 @@
 use super::{
-    CommandState, InputDelivery, InputDevice, InputState, KeyEventKind, KeySample, KeyServices,
-    KeyTransition, Keys, PointerMotion, Regions,
+    CommandState, InputDelivery, InputState, KeyEventKind, KeyServices, KeyTransition, Keys,
+    PointerMotion, Regions,
 };
+use crate::host::input::{InputDevice, KeySample};
 use crate::kcs::Host;
 use crate::task::{Command, CommandBuffers};
 use crate::{Error, Result, read};

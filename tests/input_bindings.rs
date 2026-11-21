@@ -1,9 +1,7 @@
 use katze_system2::{
     Result,
-    input::{
-        ButtonSource, DeviceBinding, DeviceKeys, KeyEventKind, KeySample, KeyServices,
-        KeyTransition, Keys,
-    },
+    host::input::{ButtonSource, DeviceBinding, DeviceKeys, KeySample},
+    input::{KeyEventKind, KeyServices, KeyTransition, Keys},
 };
 
 #[test]

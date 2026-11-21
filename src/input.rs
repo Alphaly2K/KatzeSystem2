@@ -1,5 +1,4 @@
 use crate::graphics::Rect;
-pub use crate::host::input::{ButtonSource, DeviceBinding, InputDevice, KeySample, PointerSample};
 use crate::task::{Command, CommandBuffers};
 use crate::{Error, Result, read};
 
@@ -30,7 +29,6 @@ pub use slider_task::SliderObject;
 mod coordinates;
 pub use coordinates::CoordinateMap;
 mod device;
-pub use crate::host::input::DeviceKeys;
 pub use device::PointerState;
 mod update;
 

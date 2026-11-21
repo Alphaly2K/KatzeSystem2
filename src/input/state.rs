@@ -1,8 +1,9 @@
 use super::text_entry::TextEntry;
 use super::{
-    Events, InputDevice, KeyEvent, KeyEventKind, KeySample, KeyServices, KeyTransition, Keys,
-    PointerMotion, PointerState, Regions,
+    Events, KeyEvent, KeyEventKind, KeyServices, KeyTransition, Keys, PointerMotion, PointerState,
+    Regions,
 };
+use crate::host::input::{InputDevice, KeySample};
 use crate::kcs::Host;
 use crate::task::{Command, CommandBuffers, Control, TaskClock};
 use crate::{Error, Result};

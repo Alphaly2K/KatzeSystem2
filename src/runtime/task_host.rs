@@ -258,7 +258,7 @@ impl<F: ObjectFactory> Host for ObjectHost<'_, F> {
         let parent = self.host.task_id;
         create_object(self.store(), parent, kind, name, context)
     }
-    fn input_device(&mut self) -> Option<&mut dyn crate::input::InputDevice> {
+    fn input_device(&mut self) -> Option<&mut dyn crate::host::input::InputDevice> {
         self.resources
             .input_device
             .as_mut()

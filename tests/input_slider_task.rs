@@ -2,9 +2,8 @@ use katze_system2::{
     Error, Result,
     expression::State,
     graphics::{GraphicsFactory, Rect, RenderTarget},
-    input::{
-        InputDevice, InputFactory, KeyEvent, KeyEventKind, KeySample, PointerMotion, PointerSample,
-    },
+    host::input::{InputDevice, KeySample, PointerSample},
+    input::{InputFactory, KeyEvent, KeyEventKind, PointerMotion},
     kcs::{Host, Interpreter, ResourceServices},
     resource::ResourceMode,
     runtime::{ObjectFactory, RootObject, Runtime, TaskObject, kind},

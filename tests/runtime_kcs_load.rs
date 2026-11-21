@@ -263,14 +263,14 @@ impl ResourceServices for Files {
 }
 
 struct Device;
-impl katze_system2::input::InputDevice for Device {
+impl katze_system2::host::input::InputDevice for Device {
     fn poll(&mut self) -> Result<()> {
         Ok(())
     }
-    fn pointer(&mut self) -> Result<katze_system2::input::PointerSample> {
+    fn pointer(&mut self) -> Result<katze_system2::host::input::PointerSample> {
         Ok(Default::default())
     }
-    fn key(&mut self, _: u32, _: u32, _: bool) -> Result<katze_system2::input::KeySample> {
+    fn key(&mut self, _: u32, _: u32, _: bool) -> Result<katze_system2::host::input::KeySample> {
         Ok(Default::default())
     }
     fn take_wheel(&mut self) -> Result<u32> {

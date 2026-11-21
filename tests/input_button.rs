@@ -1,10 +1,8 @@
 use katze_system2::{
     Error, Result, expression,
     graphics::{Drawable, Drawables, Rect},
-    input::{
-        ButtonObject, CoordinateMap, InputDevice, InputFactory, KeyEvent, KeyEventKind, KeySample,
-        PointerSample,
-    },
+    host::input::{InputDevice, KeySample, PointerSample},
+    input::{ButtonObject, CoordinateMap, InputFactory, KeyEvent, KeyEventKind},
     kcs::{Host, Interpreter, NativeReturn, Program},
     runtime::{BaseObject, ObjectFactory, RootObject, Runtime, TaskObject, kind},
     task::{Command, CommandBuffers, CommandOutcome, Control, TaskClock},

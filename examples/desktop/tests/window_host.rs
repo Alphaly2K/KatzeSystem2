@@ -4,7 +4,7 @@ mod window_input;
 
 use katze_system2::{
     Error, Result,
-    input::{DeviceBinding, DeviceKeys, InputDevice},
+    host::input::{DeviceBinding, DeviceKeys, InputDevice},
     kcs::{Program, WindowAction, WindowCloseRequest, WindowRequest},
     runtime::{ProgramLoader, TaskRuntime, WindowServices},
     settings::SystemSettings,
