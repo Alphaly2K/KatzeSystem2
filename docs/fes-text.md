@@ -127,7 +127,7 @@ FES 配置通知在执行 `MES_CHANGECONFIG` 和本次场景对象更新后，�
 
 `endpos` 先依次求值至多两个目的编号，再按银行顺序写入 X、Y；同一目的编号由 Y 覆盖，越界编号跳过，查询不推进消息或重新排版。普通文字的 `getpos2` 查询平面位置，遵循 [对象位置查询](graphics.md#fes-对象控制命令) 的父级规则。`lineinfo line [string_index] [number_index]` 仅向日志文字取得行内容；普通对象求值前三项后继续，缺少行号时直接继续。日志行查询随 LOGSTRING／LOGSTRING8 接入。
 
-`LOGSTRING`／`NVSTRING` 及 `wait tag` 继续核实。页面引用、记录编辑等其余消息命令尚未接入。
+`LOGSTRING`／`NVSTRING` 的其余入口继续核实。场景级的 `wait tag` 查询声音标签，见[执行块与调度](fes.md#执行块与调度)。页面引用、记录编辑等其余消息命令尚未接入。
 
 ## 编号查询
 

@@ -532,6 +532,35 @@ impl<F: ObjectFactory> Store<'_, F> {
         Ok(())
     }
 
+    pub(super) fn fes_tag_wait_frames(
+        &mut self,
+        owner: u32,
+        objects: &mut Objects,
+        name: &mut [u8],
+    ) -> Result<Option<u32>> {
+        let task = self.fes_sound_task(owner, objects)?;
+        let channel = self.sound_command(owner, task, 216, [0; 3], Some(name))?;
+        if channel == u32::MAX {
+            return Ok(None);
+        }
+        let cue = self.sound_command(owner, task, 215, [channel, 0, 0], Some(name))?;
+        let started = objects
+            .update_order()
+            .find_map(|handle| match &objects.get(handle)?.state {
+                ObjectState::Sound(sound) if sound.channel as u32 == channel => {
+                    Some(sound.started_tick)
+                }
+                _ => None,
+            });
+        Ok(started.map(|started| {
+            let tag_time = started.wrapping_add(cue);
+            tag_time
+                .saturating_sub(self.host.system_time_ms)
+                .wrapping_mul(60)
+                / 1000
+        }))
+    }
+
     pub(super) fn fes_sound_tag_command(
         &mut self,
         scene: &mut Scene,

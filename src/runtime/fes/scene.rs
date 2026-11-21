@@ -1272,10 +1272,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                         } else {
                             scene.interpreter.finish_event_handler()?;
                         }
-                    } else if scene
-                        .wait_command(&args, line.offset, 0, self.numbers)?
-                        .is_some()
-                    {
+                    } else if scene.wait_command(&args, 0, self.numbers)?.is_some() {
                         scene.interpreter.finish_event_handler()?;
                     } else if let Some(stop) = scene.control_command(&args, &line, self.numbers)? {
                         if stop {
@@ -1804,9 +1801,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                                         continue;
                                     }
                                     Some(frames) => Some(now.wrapping_add(frames)),
-                                    None => {
-                                        scene.wait_command(&args, line.offset, now, self.numbers)?
-                                    }
+                                    None => scene.wait_command(&args, now, self.numbers)?,
                                 };
                             if let Some(deadline) = deadline {
                                 scene.deadline = Some(deadline);

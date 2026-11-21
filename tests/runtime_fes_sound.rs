@@ -410,27 +410,27 @@ impl ObjectFactory for Reject {
     }
 }
 
-#[test]
-fn sound_tags_snapshot_loaded_channel_and_wait_on_system_time_without_pcm() {
-    struct Tags;
-    impl ResourceServices for Tags {
-        fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
-            Ok([category, b"/", name].concat())
-        }
-
-        fn read(&mut self, name: &[u8], _: ResourceMode) -> Result<Option<Vec<u8>>> {
-            let cue: u32 = match name {
-                b"tag/first" => 1000,
-                b"tag/second" => 300,
-                _ => return Ok(None),
-            };
-            let mut record = vec![0; 24];
-            record[..3].copy_from_slice(b"cue");
-            record[20..].copy_from_slice(&cue.to_le_bytes());
-            Ok(Some(record))
-        }
+struct Tags;
+impl ResourceServices for Tags {
+    fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+        Ok([category, b"/", name].concat())
     }
 
+    fn read(&mut self, name: &[u8], _: ResourceMode) -> Result<Option<Vec<u8>>> {
+        let cue: u32 = match name {
+            b"tag/first" => 1000,
+            b"tag/second" => 300,
+            _ => return Ok(None),
+        };
+        let mut record = vec![0; 24];
+        record[..3].copy_from_slice(b"cue");
+        record[20..].copy_from_slice(&cue.to_le_bytes());
+        Ok(Some(record))
+    }
+}
+
+#[test]
+fn sound_tags_snapshot_loaded_channel_and_wait_on_system_time_without_pcm() {
     let source = b"#DEFINE
 SOUND sound
 #OBJECT CHANNEL
@@ -493,6 +493,73 @@ wait 1000
             assert_eq!(&runtime.numbers().shared[..6], &expected, "tick {now}");
         }
     }
+}
+
+#[test]
+fn scene_tag_wait_uses_the_first_matching_sound_and_keeps_unmatched_waits() -> Result<()> {
+    let source = b"#DEFINE
+SOUND other
+SOUND sound
+#OBJECT CHANNEL
+other 6
+sound 5
+#START
+other load second
+other play 1 1 1
+sound load first
+sound play 1 1 1
+wait 1
+wait tag cue
+$0=1
+wait tag absent
+$1=1
+wait 1000
+";
+    for budget in [1, 4096] {
+        let mut runtime = Runtime::new(
+            0,
+            kind::ROOT,
+            Box::new(BaseObject::new()),
+            State::new(2),
+            SoundFactory {
+                enabled: true,
+                fallback: Reject,
+            },
+        );
+        runtime.set_budget(budget, 10000);
+        runtime.set_resources(Tags);
+        runtime.host_mut().sound_config_enabled = 1;
+        runtime.host_mut().sound_config = Some(SoundConfig {
+            master_volume: Some(100),
+            ..SoundConfig::default()
+        });
+        let task = runtime.create(0, kind::SOUND, b"sound", b"")?;
+        let mut scene = Scene::new(
+            Program::from_text(source)?,
+            runtime.host().handle_allocator(),
+        )?;
+        scene.objects_mut()?.set_sound_task(task);
+        for (now, ms, expected, deadline) in [
+            (100, 1000, [0, 0], 101),
+            (101, 1500, [0, 0], u32::MAX - 1),
+            (128, 1950, [0, 0], u32::MAX - 1),
+            (129, 1967, [1, 0], u32::MAX - 2),
+            (200, 3000, [1, 0], u32::MAX - 2),
+        ] {
+            runtime.host_mut().system_time_ms = ms;
+            let mut done = false;
+            for _ in 0..128 {
+                if runtime.update_fes_scene(0, &mut scene, now)? {
+                    done = true;
+                    break;
+                }
+            }
+            assert!(done);
+            assert_eq!(&runtime.numbers().shared[..2], &expected, "tick {now}");
+            assert_eq!(scene.deadline(), Some(deadline), "tick {now}");
+        }
+    }
+    Ok(())
 }
 
 #[test]

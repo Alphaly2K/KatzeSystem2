@@ -1,6 +1,6 @@
-use super::Scene;
+use super::{Notification, Scene, ScriptRequest};
 use crate::runtime::fes::ObjectState;
-use crate::{Error, Result, expression::State};
+use crate::{Result, expression::State};
 
 impl Scene {
     pub(super) fn key_skip_command(
@@ -47,7 +47,6 @@ impl Scene {
     pub(super) fn wait_command(
         &mut self,
         args: &[Vec<u8>],
-        offset: usize,
         now: u32,
         numbers: &mut State,
     ) -> Result<Option<u32>> {
@@ -101,7 +100,17 @@ impl Scene {
                 return Ok(Some(now.wrapping_add(duration)));
             }
             b"tag" => {
-                return Err(Error::new(offset, "FES 此类完成等待尚未接入"));
+                let name = args.get(2).map_or(&[][..], Vec::as_slice);
+                let end = name
+                    .iter()
+                    .take(32)
+                    .position(|&byte| byte == 0)
+                    .unwrap_or(name.len().min(32));
+                let mut name = name[..end].to_vec();
+                name.push(0);
+                self.frame_wait = 0;
+                self.notify(Notification::Script(ScriptRequest::WaitTag { name }))?;
+                return Ok(Some(u32::MAX - 2));
             }
             _ => (),
         }
@@ -209,9 +218,6 @@ impl Scene {
                             ObjectState::ModelPlane(model) if model.effects_active
                         )
                     }));
-            }
-            -3 => {
-                return Err(Error::new(0, "FES 此类完成等待尚未接入"));
             }
             _ if now >= deadline => return Ok(false),
             _ => (),

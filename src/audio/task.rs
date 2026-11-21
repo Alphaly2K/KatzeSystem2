@@ -213,6 +213,20 @@ impl TaskObject for SoundObject {
                 }
                 return Ok(CommandOutcome::finished(false));
             }
+            216 => {
+                let bytes = buffers
+                    .data1
+                    .as_deref()
+                    .ok_or_else(|| Error::new(0, "声音 TAG 查询缺少名称缓冲区"))?;
+                let name = read::zstr(bytes, 0)?;
+                *output = self
+                    .audio
+                    .channels
+                    .iter()
+                    .position(|sound| sound.tags.contains_key(name))
+                    .map_or(u32::MAX, |channel| channel as u32);
+                return Ok(CommandOutcome::finished(false));
+            }
             182 => {
                 self.audio
                     .unload(command.data[0], self.base.clock.elapsed())?;

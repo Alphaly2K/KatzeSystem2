@@ -24,6 +24,9 @@ pub(super) enum ScriptRequest {
         parent: bool,
     },
     ReturnToTitle,
+    WaitTag {
+        name: Vec<u8>,
+    },
     SetBackground {
         source: Option<BackgroundSource>,
         image: u32,
@@ -310,6 +313,13 @@ impl<F: ObjectFactory> Store<'_, F> {
                     },
                     &mut 0,
                 )?;
+                Ok(true)
+            }
+            ScriptRequest::WaitTag { name } => {
+                if let Some(frames) = self.fes_tag_wait_frames(owner, &mut scene.objects, name)? {
+                    scene.frame_wait = frames;
+                    scene.deadline = Some(u32::MAX - 1);
+                }
                 Ok(true)
             }
             ScriptRequest::ReturnToTitle => {

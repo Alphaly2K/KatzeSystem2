@@ -270,6 +270,7 @@ exit 0
 |`wait frame [value]`|等待场景帧值达到绝对无符号阈值，缺省零|
 |`wait object`|等待指定对象及其后代动作结束|
 |`wait string object`|等待 STRING／STRING8 最近媒体更新缓存的全部正文剩余数归零；银行与点击规则见[文字等待](fes-text.md#文字完成等待)|
+|`wait tag name`|从声音任务按物理声道顺序查找标签，再用首个匹配的 FES 声音对象的首次播放时刻计算场景帧阈值。找不到标签或对应对象时继续等待，沿用普通计时等待的 `keyskip` 取消规则|
 |`wait privateflag index`|等待场景自身的局部变量非零；区外索引下一轮继续，忽略点击取消|
 |`wait`|等待相关对象动作结束，排除音频类|
 |`keyskip [options...]`|设置等待取消及连续／强制模式；运行时行为见[等待取消](graphics.md#fes-等待取消与-keyskip)|
