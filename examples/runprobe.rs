@@ -68,9 +68,9 @@ fn run_session(
         if outcome? == FrameOutcome::Exited || session.process_window_requests(&mut window)? {
             break;
         }
+        let mut pcm = [0.; 1600];
+        session.mix_audio_stereo(48_000, &mut pcm)?;
         if let Some(stats) = &mut audio {
-            let mut pcm = [0.; 1600];
-            session.mix_audio_stereo(48_000, &mut pcm)?;
             stats.add(round, &pcm);
         }
     }

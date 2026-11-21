@@ -402,9 +402,7 @@ pub(crate) fn inspect_runtime(
                 );
             }
         }
-        if (replay.is_some() || audio_stats.is_some() || mixer.is_some())
-            && runtime.object(sound).is_some()
-        {
+        if runtime.object(sound).is_some() {
             let mut buffer = [0.; 4800];
             let pcm = &mut buffer[..(ticks as usize * 800 * 2)];
             if let Some(mixer) = &mut mixer {
