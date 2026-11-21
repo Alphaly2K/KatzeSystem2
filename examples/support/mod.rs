@@ -491,8 +491,10 @@ pub fn load_game(root: &str) -> std::result::Result<Game, Box<dyn std::error::Er
     let startup = std::fs::read_to_string(format!("{root}/config/startup.xml"))?;
     let config = ArchiveConfig::from_xml(&startup)?;
     let script_encoding = match std::env::var("KATZE_SCRIPT_ENCODING") {
-        Ok(name) => encoding_rs::Encoding::for_label(name.as_bytes()).ok_or("未知脚本文字编码")?,
-        Err(_) => encoding_rs::SHIFT_JIS,
+        Ok(name) if !name.trim().eq_ignore_ascii_case("cp932") => {
+            encoding_rs::Encoding::for_label(name.as_bytes()).ok_or("未知脚本文字编码")?
+        }
+        _ => encoding_rs::SHIFT_JIS,
     };
     let mut router = Router {
         root: root.to_string(),
