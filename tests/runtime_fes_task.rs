@@ -2759,6 +2759,11 @@ fn reinitialization_replaces_execution_context_and_allows_another_load() {
     assert!(scene.deadline().is_some());
     assert_eq!(runtime.numbers().shared[0], 1);
 
+    assert!(
+        runtime
+            .dispatch_command(0, command(task, 340, 0, u32::MAX))
+            .is_err()
+    );
     send(&mut runtime, task, 337, 0, 0);
     let scene = runtime.object(task).unwrap().fes_scene().unwrap();
     assert_eq!(scene.objects().lookup("action", 0), None);

@@ -1292,7 +1292,6 @@ impl TaskObject for FesObject {
                 if self.scene.as_ref().is_some_and(Scene::is_pending) {
                     return Err(Error::new(0, "FES 本轮推进尚未完成"));
                 }
-                self.list = Some(b);
                 let mut image = [0; 4];
                 self.send(
                     host,
@@ -1306,7 +1305,7 @@ impl TaskObject for FesObject {
                     },
                 )?;
                 let info = host.image(u32::from_le_bytes(image))?.info();
-                self.clip = crate::graphics::Rect::from_xywh(
+                let clip = crate::graphics::Rect::from_xywh(
                     0,
                     0,
                     info.size[0] as i32,
@@ -1325,6 +1324,8 @@ impl TaskObject for FesObject {
                         external: None,
                     },
                 )?;
+                self.list = Some(b);
+                self.clip = clip;
                 self.offset = [i32::from_le_bytes(x), i32::from_le_bytes(y)];
                 self.bind()?;
             }
