@@ -64,6 +64,8 @@ impl Objects {
                 | b"getbase"
                 | b"getoffset"
                 | b"getfile"
+                | b"max"
+                | b"baseopt"
                 | b"getsize"
                 | b"endpos"
                 | b"drawarea"
@@ -116,6 +118,20 @@ impl Objects {
             random,
         )? {
             return Ok(true);
+        }
+        if matches!(name, b"max" | b"baseopt" | b"getfile")
+            && self.dispatch_character_table_command(
+                interpreter,
+                line.offset,
+                &args,
+                &target,
+                state,
+            )?
+        {
+            return Ok(true);
+        }
+        if matches!(name, b"baseopt" | b"max") {
+            return Ok(false);
         }
         if matches!(name, b"init" | b"param" | b"start") {
             return self.dispatch_particle_command(interpreter, line.offset, &args, &target, state);

@@ -113,7 +113,7 @@ CIMAGE／IMAGE 的运动传递区已接入：基点 XY 位于 DWORD 3、4；优�
 |输入与控件|`BUTTON`、`SLIDER`、`SCROLL2`|
 |文本|`STRING8`、`LOGSTRING8`|
 |音频|`SOUND`、`SNDTABLE`|
-|存档／表格／粒子|`SAVEPANEL`、`BGTABLE2`、`CHTABLE3`、`PARTICLE`|
+|存档／表格／粒子|`SAVEPANEL`、`BGTABLE2`、`CHTABLE2`、`CHTABLE3`、`PARTICLE`|
 |其他基线类型|`IMGWND`、`VIEWPORT`|
 
 旧手册还介绍 `STRING`、`LOGSTRING`、`NVSTRING` 等类型。本轮样本未使用这些旧文本类型；`CHTABLE3` 等扩展的完整初始化契约待核实。VIEWPORT 的独立状态、元数据门控与平面裁剪见 [VIEWPORT](graphics.md#fes-viewport-裁剪区域)。IMGWND 沿用 IMAGE 初始化，窗口拼接、尺寸与来源寿命见 [IMGWND](graphics.md#fes-imgwnd-窗口图像)。普通文字类型的编码、配置和运行时播放见 [FES 文字对象](fes-text.md)；日志及小说模式类型继续接入。
@@ -389,6 +389,10 @@ mappedOperand = "[", integer, "]" | literal ;
 还存在一个不符合绑定结构的裸标记；它没有冒号和参数，不作为有效绑定读取。原声明入口报告类别错误后继续，库同样保存该行诊断并继续读取后续绑定。
 
 一处孤立 `endif` 已与原引擎的控制流整理函数对照：该函数遇到它便返回当前位置，结束本层结构扫描。四个合成块分别覆盖正常条件、多余尾部终止符、开头孤立终止符和 `else`；实际异常块也得到相同行为，70 条非空语句均完成元数据初始化，返回位置是最后的孤立终止符。该符号位于块尾，前面的条件结构已完成整理。读取器保留孤立的 `endif` 且不产生结构诊断，当前解释器执行时跳过该行并继续后续语句。
+
+## 角色选择表
+
+`CHTABLE2` 从初始化的 `TABLE` 列读取角色表。`max <数值槽> [键 …]` 写入指定节点的直接子项数。省略键时统计根项，查不到节点时写入零。`getfile <字符串槽> <角色键> <主体键> [选项键 …]` 按选项组的顺序合并选择并写入字符串。查不到角色或主体时清空输出。`baseopt [后缀]` 设置附加在配置名后的值，省略时清空。结果可通过 FES 字符串展开交给 `M2PLANE load`。
 
 ## 粒子对象
 

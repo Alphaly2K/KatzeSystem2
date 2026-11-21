@@ -1020,6 +1020,7 @@ fn run_nested<F: ObjectFactory>(
                         buffers.data1.as_deref(),
                         numbers,
                         |name| host.languages.expand_image(name),
+                        |name| fes::character_table::read_table(resources, name),
                     )?;
                 }
                 return Ok(());

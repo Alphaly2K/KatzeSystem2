@@ -136,7 +136,7 @@ impl<F: ObjectFactory> Store<'_, F> {
         let object = objects.get(handle).unwrap();
         if object.state.plane().is_none() {
             return match object.state {
-                ObjectState::Base => Ok(()),
+                ObjectState::Base | ObjectState::CharacterTable(_) => Ok(()),
                 _ => Err(Error::new(0, "FES 图像对象更新尚未接入共享绘制服务")),
             };
         }

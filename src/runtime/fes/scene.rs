@@ -307,6 +307,7 @@ impl Scene {
         row: Option<&[u8]>,
         numbers: &mut crate::expression::State,
         transform_name: impl FnMut(&[u8]) -> Result<Vec<u8>>,
+        load_table: impl FnMut(&[u8]) -> Result<Option<Vec<u8>>>,
     ) -> Result<()> {
         numbers.select_context(
             self.interpreter.local_numbers(),
@@ -316,7 +317,8 @@ impl Scene {
             .interpreter
             .initialize_object_line(header, row, numbers)?
         {
-            self.objects.initialize(&initialization, transform_name)?;
+            self.objects
+                .initialize_with_tables(&initialization, transform_name, load_table)?;
         }
         Ok(())
     }
@@ -601,6 +603,15 @@ impl Scene {
         numbers: &mut crate::expression::State,
         budget: usize,
     ) -> Result<bool> {
+        self.prepare_with_tables(numbers, budget, |_| Ok(None))
+    }
+
+    fn prepare_with_tables(
+        &mut self,
+        numbers: &mut crate::expression::State,
+        budget: usize,
+        mut load_table: impl FnMut(&[u8]) -> Result<Option<Vec<u8>>>,
+    ) -> Result<bool> {
         if self.is_pending() {
             return Err(Error::new(0, "FES 本轮推进尚未完成"));
         }
@@ -611,7 +622,12 @@ impl Scene {
             match self.interpreter.run(numbers, 1)? {
                 Step::Yield => (),
                 Step::Event(event)
-                    if self.apply_initialization(&event, numbers, |name| Ok(name.to_vec()))? =>
+                    if self.apply_initialization(
+                        &event,
+                        numbers,
+                        |name| Ok(name.to_vec()),
+                        &mut load_table,
+                    )? =>
                 {
                     self.interpreter.resume();
                 }
@@ -626,6 +642,7 @@ impl Scene {
         event: &fes::Event,
         numbers: &mut crate::expression::State,
         transform_name: impl FnMut(&[u8]) -> Result<Vec<u8>>,
+        load_table: impl FnMut(&[u8]) -> Result<Option<Vec<u8>>>,
     ) -> Result<bool> {
         match event {
             fes::Event::CreateObject(definition) => {
@@ -633,7 +650,8 @@ impl Scene {
                 self.objects.publish_bindings(&mut self.interpreter);
             }
             fes::Event::InitializeObject(initialization) => {
-                self.objects.initialize(initialization, transform_name)?;
+                self.objects
+                    .initialize_with_tables(initialization, transform_name, load_table)?;
             }
             fes::Event::Declarations(declarations) => {
                 if let Some(declaration) = declarations.iter().find(|declaration| {
@@ -796,7 +814,9 @@ impl<F: ObjectFactory> Store<'_, F> {
         );
         if scene.media_preparation.is_none()
             && !scene.preload.is_pending()
-            && !scene.prepare(self.numbers, self.budget)?
+            && !scene.prepare_with_tables(self.numbers, self.budget, |name| {
+                super::character_table::read_table(self.resources, name)
+            })?
         {
             return Ok(false);
         }
@@ -1313,9 +1333,11 @@ impl<F: ObjectFactory> Store<'_, F> {
                     }
                 }
                 Step::Event(fes::Event::InitializeObject(initialization)) => {
-                    scene.objects.initialize(&initialization, |name| {
-                        self.host.languages.expand_image(name)
-                    })?;
+                    scene.objects.initialize_with_tables(
+                        &initialization,
+                        |name| self.host.languages.expand_image(name),
+                        |name| super::character_table::read_table(self.resources, name),
+                    )?;
                     scene.interpreter.resume();
                 }
                 Step::Event(fes::Event::Exit(code)) => {
@@ -1717,9 +1739,12 @@ impl<F: ObjectFactory> Store<'_, F> {
                 }
                 Step::Event(event) => {
                     let now = scene.invocation.as_ref().unwrap().now;
-                    if scene.apply_initialization(&event, self.numbers, |name| {
-                        self.host.languages.expand_image(name)
-                    })? {
+                    if scene.apply_initialization(
+                        &event,
+                        self.numbers,
+                        |name| self.host.languages.expand_image(name),
+                        |name| super::character_table::read_table(self.resources, name),
+                    )? {
                         scene.interpreter.resume();
                         continue;
                     }

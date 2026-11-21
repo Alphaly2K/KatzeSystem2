@@ -9,6 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 mod animation;
 mod button;
+pub(super) mod character_table;
 mod commands;
 mod configuration;
 mod difimage;
@@ -38,6 +39,7 @@ mod string;
 mod task;
 mod viewport;
 pub use animation::ImageAnimationRequest;
+pub use character_table::CharacterTable;
 pub use difimage::DifImageState;
 pub use draw::DrawState;
 pub use logstring::LogStringState;
@@ -97,6 +99,7 @@ pub enum ObjectState {
     CPlane(Box<CPlaneState>),
     Plane(Box<PlaneState>),
     ModelPlane(Box<ModelPlaneState>),
+    CharacterTable(Box<CharacterTable>),
     Slider(Box<SliderState>),
     Scroll2(Box<Scroll2State>),
     Sound(Box<SoundState>),
@@ -121,6 +124,7 @@ impl ObjectState {
             Self::CPlane(_) => "CPLANE",
             Self::Plane(_) => "PLANE",
             Self::ModelPlane(_) => "M2PLANE",
+            Self::CharacterTable(_) => "CHTABLE2",
             Self::Slider(_) => "SLIDER",
             Self::Scroll2(_) => "SCROLL2",
             Self::Sound(sound) if sound.table.is_some() => "SNDTABLE",
@@ -146,6 +150,7 @@ impl ObjectState {
             "CPLANE" => Self::CPlane(Box::default()),
             "PLANE" => Self::Plane(Box::default()),
             "M2PLANE" => Self::ModelPlane(Box::default()),
+            "CHTABLE2" => Self::CharacterTable(Box::default()),
             "SLIDER" => Self::Slider(Box::default()),
             "SCROLL2" => Self::Scroll2(Box::default()),
             "SOUND" => Self::Sound(Box::default()),
@@ -644,7 +649,16 @@ impl Objects {
     pub fn initialize(
         &mut self,
         initialization: &ObjectInitialization,
+        transform_name: impl FnMut(&[u8]) -> Result<Vec<u8>>,
+    ) -> Result<()> {
+        self.initialize_with_tables(initialization, transform_name, |_| Ok(None))
+    }
+
+    fn initialize_with_tables(
+        &mut self,
+        initialization: &ObjectInitialization,
         mut transform_name: impl FnMut(&[u8]) -> Result<Vec<u8>>,
+        mut load_table: impl FnMut(&[u8]) -> Result<Option<Vec<u8>>>,
     ) -> Result<()> {
         self.require_motion_idle()?;
         let ObjectReference { name, bank } = &initialization.target;
@@ -666,6 +680,14 @@ impl Objects {
                 | ObjectState::Draw(_)
                 | ObjectState::ScreenTransition(_)
                 | ObjectState::Particle(_) => false,
+                ObjectState::CharacterTable(table) => {
+                    if let Some(name) = &initialization.attributes.table {
+                        if let Some(bytes) = load_table(name)? {
+                            table.load(&bytes)?;
+                        }
+                    }
+                    false
+                }
                 ObjectState::Viewport(state) => state.apply(&initialization.attributes),
                 ObjectState::CImage(state) => state.apply(&initialization.attributes, bank as u32),
                 ObjectState::Image(state) | ObjectState::ImageWindow(state) => {

@@ -150,9 +150,13 @@ impl<F: ObjectFactory> Services for ObjectHost<'_, F> {
         header: &[u8],
         row: Option<&[u8]>,
     ) -> Result<()> {
-        scene.initialize_object_line(header, row, self.numbers, |name| {
-            self.host.languages.expand_image(name)
-        })
+        scene.initialize_object_line(
+            header,
+            row,
+            self.numbers,
+            |name| self.host.languages.expand_image(name),
+            |name| super::character_table::read_table(self.resources, name),
+        )
     }
     fn prepare(&mut self, scene: &mut Scene, budget: usize) -> Result<bool> {
         self.numbers.select_context(

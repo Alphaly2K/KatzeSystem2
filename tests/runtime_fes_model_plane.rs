@@ -371,3 +371,104 @@ wait 100
         ]
     );
 }
+
+fn table_record(key: i32, children: &[Vec<u8>], choice: Option<(&[u8], &[u8])>) -> Vec<u8> {
+    let payload_len = if choice.is_some() { 100 } else { 4 };
+    let mut record = vec![0; 12 + payload_len];
+    if !children.is_empty() {
+        record[4..8].copy_from_slice(&((12 + payload_len) as u32).to_le_bytes());
+    }
+    record[8..12].copy_from_slice(&(payload_len as u32).to_le_bytes());
+    record[12..16].copy_from_slice(&key.to_le_bytes());
+    if let Some((profile, options)) = choice {
+        record[48..48 + profile.len()].copy_from_slice(profile);
+        record[80..80 + options.len()].copy_from_slice(options);
+    }
+    for (index, child) in children.iter().enumerate() {
+        let start = record.len();
+        record.extend_from_slice(child);
+        if index + 1 < children.len() {
+            record[start..start + 4].copy_from_slice(&(child.len() as u32).to_le_bytes());
+        }
+    }
+    record
+}
+
+struct TableResources(Vec<u8>);
+
+impl ResourceServices for TableResources {
+    fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+        Resources.resolve(category, name)
+    }
+
+    fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
+        if name == b"config.int/fixture.set" {
+            assert_eq!(mode, ResourceMode::LooseFirst);
+            return Ok(Some(self.0.clone()));
+        }
+        Resources.read(name, mode)
+    }
+}
+
+#[test]
+fn character_table_drives_model_resource_loading_and_clears_failed_selections() {
+    let shape = table_record(0, &[table_record(7, &[], Some((b"@", b"1@4")))], None);
+    let expression = table_record(1, &[table_record(9, &[], Some((b"model", b"@@5")))], None);
+    let body = table_record(3, &[expression, shape], None);
+    let table = table_record(5, &[body], None);
+    let source = b"#DEFINE
+CHTABLE2 table
+M2PLANE actor
+#OBJECT TABLE
+table config.int/fixture.set
+#OBJECT PRI DISP POS
+actor 5 1 20,40
+#START
+table max 10
+table max 11 5
+table max 12 5 3
+table max 13 5 3 0
+table max 14 99
+table baseopt s
+table getfile 601 5 3 7 9
+table baseopt
+table getfile 600 5 3 7 9
+actor load $str600;
+strvar 602 old
+table getfile 602 99 3 7 9
+wait 100
+";
+    for prepare in [false, true] {
+        let mut runtime = Runtime::new(
+            0,
+            kind::ROOT,
+            Box::new(BaseObject::new()),
+            State::new(16),
+            NoTasks,
+        );
+        runtime.set_resources(TableResources(table.clone()));
+        let events = Rc::new(RefCell::new(Vec::new()));
+        runtime.set_model_services(Models {
+            events: events.clone(),
+            apply_options: false,
+        });
+        let mut scene = Scene::new(
+            Program::from_text(source).unwrap(),
+            runtime.host().handle_allocator(),
+        )
+        .unwrap();
+        if prepare {
+            assert!(runtime.prepare_fes_scene(0, &mut scene).unwrap());
+        }
+        assert!(runtime.update_fes_scene(0, &mut scene, 1).unwrap());
+        let numbers = runtime.numbers();
+        assert_eq!(&numbers.shared[10..15], &[1, 1, 2, 1, 0]);
+        assert_eq!(numbers.strings[&600], b"model,1,0,5");
+        assert_eq!(numbers.strings[&601], b"models,1,0,5");
+        assert!(numbers.strings[&602].is_empty());
+        let events = events.borrow();
+        assert_eq!(events[0], Event::ReadModel);
+        assert_eq!(events[1], Event::Open(b"model,1,0,5".to_vec()));
+        assert!(events.iter().any(|event| matches!(event, Event::Frame(_))));
+    }
+}
