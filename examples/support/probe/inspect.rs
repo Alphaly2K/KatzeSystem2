@@ -337,6 +337,7 @@ pub(crate) fn inspect_runtime(
         )
         .transpose()?;
     let mut now = 0;
+    let mut failure = None;
     let ticks = if replay.is_some() { 3 } else { 1 };
     for frame in 0..frames {
         now += ticks;
@@ -384,6 +385,7 @@ pub(crate) fn inspect_runtime(
             if replay.is_some() {
                 return Err(error.into());
             }
+            failure = Some(error);
             break;
         }
         if matches!(advancement, Ok(FrameOutcome::Exited))
@@ -722,7 +724,7 @@ pub(crate) fn inspect_runtime(
         };
         write_shot(&path, target.size(), |x, y| target.pixel(x, y))?;
     }
-    Ok(())
+    failure.map_or(Ok(()), |error| Err(error.into()))
 }
 
 fn task_ids(runtime: &TaskRuntime) -> Vec<u32> {
