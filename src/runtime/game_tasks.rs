@@ -174,12 +174,15 @@ impl<L: ProgramLoader> TaskRuntime<L> {
     /// See [`Runtime::mix_task_audio_stereo`] for buffer and timing requirements.
     /// A session without its sound task produces silence.
     pub fn mix_audio_stereo(&mut self, sample_rate: u32, output: &mut [f32]) -> Result<()> {
-        if self.object(SOUND_TASK).is_none() {
-            crate::audio::validate_stereo_output(sample_rate, output.len())?;
-            output.fill(0.0);
-            return Ok(());
+        if let Some(sound) = self
+            .object_mut(SOUND_TASK)
+            .and_then(|object| object.audio_state_mut())
+        {
+            return sound.mix_stereo(sample_rate, output);
         }
-        self.mix_task_audio_stereo(SOUND_TASK, sample_rate, output)
+        crate::audio::validate_stereo_output(sample_rate, output.len())?;
+        output.fill(0.0);
+        Ok(())
     }
 
     /// Process pending window requests. Returns true when the host should exit.

@@ -1403,6 +1403,14 @@ fn game_runtime_boots_the_standard_tasks_and_supplies_the_first_frame_clock() ->
     assert_eq!(pcm, [1.0; 4]);
     runtime.mix_audio_stereo(48_000, &mut pcm)?;
     assert_eq!(pcm, [0.0; 4]);
+
+    assert!(runtime.update(121, 1)?);
+    let reused = runtime.create_unloaded_ordinary(0, b"")?;
+    assert_eq!(reused, tasks.sound);
+    assert!(runtime.connect_audio_output().is_err());
+    pcm.fill(1.0);
+    runtime.mix_audio_stereo(48_000, &mut pcm)?;
+    assert_eq!(pcm, [0.0; 4]);
     Ok(())
 }
 
