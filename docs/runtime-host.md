@@ -16,7 +16,7 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 |:--|:--|
 |`host::resources`|`ResourceServices`、`ResourceMode`、`ArchiveConfig`、`ArchiveEntry`、`Category` 及资源缓存|
 |`host::storage`|`ReadSource`、`SharedSource`、`SourceReader`、`FolderPaths`、`ScriptSettings` 及脚本文件、存档、配置和导出服务|
-|`host::graphics`|`DrawList`、`DrawCommand`、`FrameTexture`、`FrameCanvas`、`GraphicsBackend`、`SequenceCapture`、`Surface`|
+|`host::graphics`|`DrawList`、`DrawCommand`、`FrameTexture`、`FrameCanvas`、`CanvasTileVersion`、`GraphicsBackend`、`SequenceCapture`、`Surface`|
 |`host::audio`、`host::movie`、`host::media`|`Mixer`、`Pcm`、语音合成、电影解码及媒体执行方式|
 |`host::model`|模型选择、播放实例、效果状态和带锚点偏移的透明图像帧|
 |`host::input`、`host::font`|输入事件、按键绑定、`DeviceKeys` 和字体服务|
@@ -68,7 +68,7 @@ KATZE_PARTICLE_HOST="$PWD/particle-host.exe" cargo run --release --example runpr
 
 窗口宿主可通过 `set_window_content_rect` 和 `set_windowed_mode` 提供客户区绘图矩形和当前窗口模式。`take_clipboard_requests` 取走按序提交的剪贴板写入请求，保留发起任务和原始编码，由宿主解码并写入剪贴板。
 
-宿主用 `GameRuntime::present_frame` 借用当前绘制列表和 `FrameCanvas`，无需创建软件渲染目标。通过 `texture` 解析命令中的纹理，通过 `tiles` 和 `dirty_tiles` 更新画布缓存。呈现和脚本回读共用一个纹理缓存时，由宿主上传所有变更面块后调用 `acknowledge_upload`；有独立缓存的多个消费者应各自跟踪更新。
+宿主用 `GameRuntime::present_frame` 借用当前绘制列表和 `FrameCanvas`，无需创建软件渲染目标。通过 `texture` 解析命令中的纹理，通过 `tiles` 读取画布面块。缓存可为每个槽保留 `tile_version(index)` 返回的版本，版本改变后重新上传，返回 `None` 时释放槽中的纹理。像素写入和面块重建都会改变版本。各缓存独立比较自己的版本，调用 `acknowledge_upload` 不会清除版本。
 
 `set_readback_backend` 设置脚本画面捕获与实时滤镜共用的离屏后端。实时模糊、马赛克和阴影在合成时同步回读中间结果，再把它们作为纹理交给最终绘制列表。`GraphicsBackend::render` 在透明背景上执行命令，返回与请求尺寸一致、从顶行开始紧密排列的 BGRA8 `Surface`。没有回读需求的会话可以不注册后端；脚本实际请求画面捕获或合成启用的实时滤镜时，缺少后端会报错。软件宿主可调用 `setup.set_readback_backend(SoftwareBackend)`，并用 `SoftwareBackend::render_into` 复用已有呈现目标。
 

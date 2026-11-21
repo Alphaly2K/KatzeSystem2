@@ -2,6 +2,7 @@ use katze_system2::{
     Result,
     graphics::{DrawingContext, Image, Rect, RenderTarget, Surface},
     hg3::{DecodedFrame, StandardInfo},
+    host::graphics::FrameCanvas,
     kcs::Program,
     runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, kind},
 };
@@ -30,6 +31,7 @@ fn target_clears_top_origin_regions_and_marks_only_intersecting_present_tiles() 
     assert_eq!(target.size(), [6, 4]);
     assert_eq!(target.tile_size(), [3, 2]);
     assert_eq!(target.grid(), [2, 2]);
+    let before = FrameCanvas::new(&mut target).tile_version(0);
     assert!(target.clear_rect(Rect::from_xywh(2, 1, 2, 2)));
     assert_eq!(target.dirty_tiles(), [true, false, true, true]);
     let expected = [
@@ -46,6 +48,11 @@ fn target_clears_top_origin_regions_and_marks_only_intersecting_present_tiles() 
     assert_eq!(target.pixel(6, 0), None);
     target.clear_dirty();
     assert_eq!(target.dirty_tiles(), [false; 4]);
+    let updated = FrameCanvas::new(&mut target).tile_version(0);
+    assert_ne!(updated, before);
+    let mut replacement = target.clone();
+    assert_eq!(target, replacement);
+    assert_ne!(FrameCanvas::new(&mut replacement).tile_version(0), updated);
     assert!(target.clear_rect(Rect::from_xywh(2, 1, 1, 1)));
     assert_eq!(target.dirty_tiles(), [true, false, false, false]);
     target.clear_dirty();

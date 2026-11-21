@@ -4,8 +4,8 @@ use ::metal::*;
 use katze_system2::{
     Error, Result,
     host::graphics::{
-        DrawList, FrameCanvas, FrameTexture, FrameTriangle, GraphicsBackend, Rect, Surface,
-        TextureAddress, TextureFilter, TextureSource,
+        CanvasTileVersion, DrawList, FrameCanvas, FrameTexture, FrameTriangle, GraphicsBackend,
+        Rect, Surface, TextureAddress, TextureFilter, TextureSource,
     },
 };
 use std::{collections::BTreeMap, sync::Arc};
@@ -23,7 +23,7 @@ struct Vertex {
 
 struct Tile {
     texture: Texture,
-    source: usize,
+    version: Option<CanvasTileVersion>,
 }
 
 struct ImageTexture {
@@ -32,8 +32,8 @@ struct ImageTexture {
     _source: Arc<Surface>,
 }
 
-/// 一个窗口／画布使用一个实例。呈现会清空最终帧，并消费画布的 dirty 标记。
-/// 更换画布时须调用 invalidate_canvas；宿主应为每帧提供 Objective-C autorelease pool。
+/// 呈现会清空最终帧，并按面块版本更新纹理。
+/// 宿主应为每帧提供 Objective-C autorelease pool。
 pub struct Renderer {
     device: Device,
     queue: CommandQueue,
@@ -314,25 +314,26 @@ impl Renderer {
                 continue;
             }
             validate_size(source.size())?;
-            let pointer = source.pixels().as_ptr() as usize;
-            let replace = self.tiles[index].as_ref().is_none_or(|tile| {
-                tile.source != pointer
-                    || tile.texture.width() != u64::from(source.size()[0])
+            let version = canvas.tile_version(index);
+            let slot = &mut self.tiles[index];
+            if slot.as_ref().is_none_or(|tile| {
+                tile.texture.width() != u64::from(source.size()[0])
                     || tile.texture.height() != u64::from(source.size()[1])
-            });
-            if replace {
-                self.tiles[index] = Some(Tile {
+            }) {
+                *slot = Some(Tile {
                     texture: texture(&self.device, source.size(), MTLTextureUsage::ShaderRead),
-                    source: pointer,
+                    version: None,
                 });
             }
-            if replace || canvas.dirty_tiles()[index] {
-                self.tiles[index].as_ref().unwrap().texture.replace_region(
+            let tile = slot.as_mut().unwrap();
+            if tile.version != version {
+                tile.texture.replace_region(
                     region(source.size()),
                     0,
                     source.pixels().as_ptr().cast(),
                     source.stride() as u64,
                 );
+                tile.version = version;
             }
         }
         let mut images = BTreeMap::new();

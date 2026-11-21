@@ -1,8 +1,9 @@
 use super::{FrameCanvas, Image, ProjectedVertex, Rect, Surface, TextureFilter, pixel_length};
 use crate::{Error, Result, read};
+use std::sync::Mutex;
 
 /// 按行排列的 CPU 渲染面块和对应的更新标记。
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct RenderTarget {
     tile_size: [u32; 2],
     grid: [u32; 2],
@@ -10,7 +11,48 @@ pub struct RenderTarget {
     tiles: Vec<Option<Surface>>,
     dirty: Vec<bool>,
     bit_depths: Vec<u32>,
+    versions: CanvasVersions,
 }
+
+#[derive(Debug)]
+struct CanvasVersions {
+    id: u64,
+    revisions: Vec<u64>,
+}
+
+impl CanvasVersions {
+    fn new(count: usize) -> Self {
+        let revisions = vec![0; count];
+        static NEXT_ID: Mutex<u64> = Mutex::new(1);
+        let mut next_id = NEXT_ID.lock().unwrap();
+        let id = *next_id;
+        *next_id = id.wrapping_add(1);
+        Self { id, revisions }
+    }
+
+    fn touch(&mut self, index: usize) {
+        self.revisions[index] = self.revisions[index].wrapping_add(1);
+    }
+}
+
+impl Clone for CanvasVersions {
+    fn clone(&self) -> Self {
+        Self::new(self.revisions.len())
+    }
+}
+
+impl PartialEq for RenderTarget {
+    fn eq(&self, other: &Self) -> bool {
+        self.tile_size == other.tile_size
+            && self.grid == other.grid
+            && self.size == other.size
+            && self.tiles == other.tiles
+            && self.dirty == other.dirty
+            && self.bit_depths == other.bit_depths
+    }
+}
+
+impl Eq for RenderTarget {}
 
 const MAX_CANVAS_BYTES: usize = 128 * 1024 * 1024;
 
@@ -25,7 +67,12 @@ pub(crate) fn canvas_tile_bytes(size: [u32; 2]) -> Result<usize> {
 impl<'a> FrameCanvas<'a> {
     /// Borrow a software canvas for standalone rendering outside a game session.
     pub fn new(target: &'a mut RenderTarget) -> Self {
-        Self::from_tiles(target.size, &target.tiles, &mut target.dirty)
+        Self::from_tiles(
+            target.size,
+            &target.tiles,
+            &mut target.dirty,
+            (target.versions.id, &target.versions.revisions),
+        )
     }
 }
 
@@ -86,6 +133,7 @@ impl RenderTarget {
             tiles,
             dirty: vec![false; count],
             bit_depths,
+            versions: CanvasVersions::new(count),
         })
     }
 
@@ -159,6 +207,7 @@ impl RenderTarget {
                             .ok_or_else(|| Error::new(0, "画布像素存储超过上限"))?;
                         *tile = Some(Surface::new(self.tile_size)?);
                         self.bit_depths[index] = if use_16 { 16 } else { 32 };
+                        self.versions.touch(index);
                         created += 1;
                     }
                 }
@@ -185,7 +234,10 @@ impl RenderTarget {
                 );
                 if tile_rect.intersect(rect).is_some() {
                     let index = row as usize * self.grid[0] as usize + column as usize;
-                    released += usize::from(self.tiles[index].take().is_some());
+                    if self.tiles[index].take().is_some() {
+                        released += 1;
+                        self.versions.touch(index);
+                    }
                 }
             }
         }
@@ -281,6 +333,7 @@ impl RenderTarget {
                             quantize_16(surface.pixels_mut());
                         }
                         self.dirty[index] = true;
+                        self.versions.touch(index);
                         touched = true;
                     }
                 }
@@ -333,6 +386,7 @@ impl RenderTarget {
                     continue;
                 };
                 self.dirty[index] = true;
+                self.versions.touch(index);
                 surface.fill_rect(
                     Rect {
                         left: clipped.left - x,
@@ -415,6 +469,7 @@ impl RenderTarget {
                     continue;
                 };
                 self.dirty[index] = true;
+                self.versions.touch(index);
                 let width = (clipped.right - clipped.left) as usize * 4;
                 let source_x = source_origin[0] + clipped.left - at[0];
                 let source_y = source_origin[1] + clipped.top - at[1];

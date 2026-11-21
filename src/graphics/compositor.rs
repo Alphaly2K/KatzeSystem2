@@ -141,7 +141,7 @@ impl Compositor {
             let backend = backend.ok_or_else(|| Error::new(0, "宿主未配置实时滤镜绘制后端"))?;
             let mut canvas = match self.drawing.target.as_mut() {
                 Some(target) => FrameCanvas::new(target),
-                None => FrameCanvas::from_tiles([0; 2], &[], &mut []),
+                None => FrameCanvas::from_tiles([0; 2], &[], &mut [], (0, &[])),
             };
             effect.frame(
                 middle,

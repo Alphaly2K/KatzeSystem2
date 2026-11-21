@@ -15,12 +15,21 @@ use crate::{Error, Result};
 pub use surface::Surface;
 pub(crate) use surface::pixel_length;
 
+/// Version of a canvas texture slot. Compare versions for the same slot to
+/// decide whether a cached texture needs to be uploaded again.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CanvasTileVersion {
+    pub(crate) canvas: u64,
+    pub(crate) revision: u64,
+}
+
 /// Read-only canvas textures with an explicit upload acknowledgement. A host
 /// cache shared by presentation and script readback can consume the dirty flags.
 pub struct FrameCanvas<'a> {
     size: [u32; 2],
     tiles: &'a [Option<Surface>],
     dirty: &'a mut [bool],
+    revisions: (u64, &'a [u64]),
 }
 
 impl<'a> FrameCanvas<'a> {
@@ -28,8 +37,14 @@ impl<'a> FrameCanvas<'a> {
         size: [u32; 2],
         tiles: &'a [Option<Surface>],
         dirty: &'a mut [bool],
+        revisions: (u64, &'a [u64]),
     ) -> Self {
-        Self { size, tiles, dirty }
+        Self {
+            size,
+            tiles,
+            dirty,
+            revisions,
+        }
     }
 
     /// Logical canvas size in pixels, including unallocated tiles.
@@ -45,6 +60,17 @@ impl<'a> FrameCanvas<'a> {
     /// Upload flags indexed in the same order as `tiles`.
     pub fn dirty_tiles(&self) -> &[bool] {
         self.dirty
+    }
+
+    /// Current texture version at `index`, or `None` for an unallocated slot.
+    /// Writes and reallocation change the version. Acknowledging an upload
+    /// leaves it available for caches that upload independently.
+    pub fn tile_version(&self, index: usize) -> Option<CanvasTileVersion> {
+        self.tiles.get(index)?.as_ref()?;
+        Some(CanvasTileVersion {
+            canvas: self.revisions.0,
+            revision: self.revisions.1[index],
+        })
     }
 
     /// Resolve a draw command's texture, including standalone images.

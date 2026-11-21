@@ -300,6 +300,18 @@ fn check() -> Result<(), Box<dyn std::error::Error>> {
             TextureFilter::Point
         )?
     );
+    assert_eq!(canvas.release_tiles(Rect::from_xywh(0, 0, 4, 4)), 1);
+    assert_eq!(canvas.prepare_tiles(&[[0, 0, 1, 1]], 1)?, 1);
+    let frame = DrawList {
+        commands: triangles.to_vec(),
+        filter: TextureFilter::Point,
+    };
+    let rebuilt = renderer.render(&frame, &mut FrameCanvas::new(&mut canvas), [32, 24])?;
+    assert_ne!(rebuilt, after);
+    assert_eq!(
+        rebuilt,
+        SoftwareBackend.render(&frame, &mut FrameCanvas::new(&mut canvas), [32, 24])?
+    );
     let before = renderer.render_offscreen(
         &independent,
         &mut FrameCanvas::new(&mut canvas),

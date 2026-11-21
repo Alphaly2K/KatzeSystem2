@@ -2,6 +2,7 @@ use katze_system2::{
     Result,
     expression::State,
     graphics::{DrawingContext, Rect, RenderTarget, Surface},
+    host::graphics::FrameCanvas,
     kcs::Program,
     runtime::{BaseObject, KcsFactory, ProgramLoader, Runtime, kind},
     settings::SystemSettings,
@@ -179,6 +180,10 @@ fn release_drops_intersecting_tiles_and_preparation_recreates_zeroed_surfaces() 
                 settings.texture_areas[0] = [0, 0, 2, 2];
                 runtime.host_mut().system_settings = Some(settings);
             }
+            let before = runtime.drawing_mut().target.as_mut().map(|target| {
+                let canvas = FrameCanvas::new(target);
+                std::array::from_fn::<_, 6, _>(|index| canvas.tile_version(index))
+            });
             let task = runtime.create(0, kind::ORDINARY, b"release", b"").unwrap();
             runtime.update(0, 1).unwrap();
             if let Some(target) = runtime.drawing().target.as_ref() {
@@ -214,6 +219,15 @@ fn release_drops_intersecting_tiles_and_preparation_recreates_zeroed_surfaces() 
                     target.dirty_tiles(),
                     [true, false, false, true, false, false]
                 );
+                let before = before.unwrap();
+                let mut canvas = FrameCanvas::new(runtime.drawing_mut().target.as_mut().unwrap());
+                assert_ne!(canvas.tile_version(1), before[1]);
+                assert!(canvas.tile_version(4).is_some());
+                assert_eq!(canvas.tile_version(2), before[2]);
+                assert!(!canvas.dirty_tiles()[1]);
+                let recreated = canvas.tile_version(1);
+                canvas.acknowledge_upload();
+                assert_eq!(canvas.tile_version(1), recreated);
             }
             assert_eq!(
                 runtime
