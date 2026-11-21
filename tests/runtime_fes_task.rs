@@ -2739,6 +2739,55 @@ fn failed_loads_preserve_the_task_and_input_modes_publish_system_values() {
 }
 
 #[test]
+fn destroying_a_model_only_scene_releases_the_player_and_drawable() {
+    use katze_system2::host::{
+        graphics::Surface,
+        model::{ModelFrame, ModelPlayer, ModelServices},
+    };
+    use std::sync::Arc;
+
+    struct Models(Rc<Cell<bool>>);
+    struct Player(Rc<Cell<bool>>);
+    impl ModelServices for Models {
+        fn open(&mut self, _: &[u8]) -> Result<Option<Box<dyn ModelPlayer>>> {
+            Ok(Some(Box::new(Player(self.0.clone()))))
+        }
+    }
+    impl ModelPlayer for Player {
+        fn frame(&mut self, _: u32) -> Result<Option<ModelFrame>> {
+            Ok(Some(ModelFrame {
+                pixels: Arc::new(Surface::from_bgra([1, 1], vec![0, 0, 255, 255])?),
+                origin: [0; 2],
+            }))
+        }
+    }
+    impl Drop for Player {
+        fn drop(&mut self) {
+            self.0.set(true);
+        }
+    }
+
+    let mut runtime = setup(
+        1,
+        b"#DEFINE\nM2PLANE actor\n#OBJECT DISP\nactor 1\n#START\nactor load model,1,0\nwait 100\n",
+    )
+    .runtime;
+    let released = Rc::new(Cell::new(false));
+    runtime.set_model_services(Models(released.clone()));
+    let task = runtime.create(0, kind::FES, b"scene", b"").unwrap();
+    send(&mut runtime, task, 337, 0, 0);
+    file(&mut runtime, task, b"complete.fes").unwrap();
+    send(&mut runtime, task, 339, 0, 0);
+    let scene = runtime.object(task).unwrap().fes_scene().unwrap();
+    let actor = scene.objects().lookup("actor", 0).unwrap();
+    assert!(runtime.drawables().get(actor).is_some());
+    assert!(!released.get());
+    runtime.destroy(task).unwrap();
+    assert!(released.get());
+    assert!(runtime.drawables().get(actor).is_none());
+}
+
+#[test]
 fn immediate_child_updates_can_delete_the_running_fes_owner_before_start() {
     for budget in [1, 4096] {
         let Setup {

@@ -1561,6 +1561,7 @@ impl TaskObject for FesObject {
                     !object.images.is_empty()
                         || object.reference_image.is_some()
                         || object.raw_image != 0
+                        || matches!(&object.state, super::ObjectState::ModelPlane(_))
                         || matches!(&object.state, super::ObjectState::DifImage(state) if state.resource.is_some())
                 })
             {
