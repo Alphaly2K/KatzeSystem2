@@ -2771,7 +2771,7 @@ fn reinitialization_replaces_execution_context_and_allows_another_load() {
     );
 
     file(&mut runtime, task, b"complete.fes").unwrap();
-    runtime.update(1, 1).unwrap();
+    send(&mut runtime, task, 339, 0, 0);
     assert_eq!(runtime.numbers().shared[0], 2);
     assert!(runtime.object(button).is_none());
 }

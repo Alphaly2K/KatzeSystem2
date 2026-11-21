@@ -1712,6 +1712,11 @@ impl<F: ObjectFactory> Lifecycle for TaskLifecycle<'_, F> {
     /// 销毁完成后向父级发送子任务结束通知；普通对象把它转为等待消息。
     fn notify_child_finished(&mut self, tree: &mut TaskTree, parent: u32, id: u32) -> Result<()> {
         let kind = tree.node(parent).map(|node| node.kind).unwrap_or(0);
+        // FES ignores this notification. Starting a scene can retire old children
+        // while the parent is still executing the start command.
+        if kind == kind::FES && self.running.contains_key(&parent) {
+            return Ok(());
+        }
         let mut propagate = true;
         let mut output = 0;
         run_nested(
