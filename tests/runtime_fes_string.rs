@@ -3,9 +3,8 @@ use katze_system2::{
     expression::State,
     fes,
     graphics::{GraphicsFactory, Projection, RenderTarget, TextureFilter, Transform},
-    message::{
-        FontRequest, FontServices, GlyphMask, MessageDefaults, MessageFactory, TextEncoding,
-    },
+    host::font::{FontRequest, FontServices, GlyphMask, TextEncoding},
+    message::{MessageDefaults, MessageFactory},
     runtime::{
         BaseObject, ObjectFactory, Runtime, TaskObject,
         fes::{ObjectState, Scene},

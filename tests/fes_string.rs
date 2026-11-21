@@ -1,8 +1,4 @@
-use katze_system2::{
-    Error,
-    fes::StringState,
-    message::{MessageDefaults, TextEncoding},
-};
+use katze_system2::{Error, fes::StringState, host::font::TextEncoding, message::MessageDefaults};
 
 fn word(state: &StringState, offset: usize) -> u32 {
     u32::from_le_bytes(

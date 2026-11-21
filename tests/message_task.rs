@@ -5,11 +5,9 @@ use katze_system2::{
         Drawables, GraphicsFactory, Projection, Rect, RenderTarget, Surface, TextureFilter,
         Transform,
     },
+    host::font::{FontRequest, FontServices, GlyphMask, TextEncoding},
     kcs::{Host, Interpreter, NativeReturn, Program},
-    message::{
-        FontRequest, FontServices, GlyphMask, MessageDefaults, MessageFactory, MessageObject,
-        TextEncoding,
-    },
+    message::{MessageDefaults, MessageFactory, MessageObject},
     runtime::{BaseObject, KcsFactory, ObjectFactory, ProgramLoader, Runtime, TaskObject, kind},
     task::{Command, CommandBuffers},
 };

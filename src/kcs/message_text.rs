@@ -1,5 +1,5 @@
 use super::{Interpreter, NativeReturn, strings};
-use crate::{Result, message::TextEncoding};
+use crate::{Result, host::font::TextEncoding};
 
 fn characters(source: &[u8], encoding: TextEncoding) -> Result<String> {
     if encoding == TextEncoding::Unicode {

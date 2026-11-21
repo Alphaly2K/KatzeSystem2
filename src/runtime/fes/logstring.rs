@@ -290,7 +290,8 @@ impl<F: ObjectFactory> Store<'_, F> {
                     state.bind(handle, log);
                 }
                 b"remake" => {
-                    if state.template.layout.encoding() == crate::message::TextEncoding::Unicode {
+                    if state.template.layout.encoding() == crate::host::font::TextEncoding::Unicode
+                    {
                         let primary = args
                             .get(2)
                             .and_then(|_| self.host.languages.prefixes.get(values[0] as usize))

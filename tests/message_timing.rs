@@ -1,6 +1,7 @@
+use katze_system2::host::font::TextEncoding;
 use katze_system2::message::{
     AtomKind, BreakCharacters, Layout, LayoutSettings, Markup, Schedule, StyleDefaults,
-    TextEncoding, TimingSettings, VerticalAlignment,
+    TimingSettings, VerticalAlignment,
 };
 
 fn timing(encoding: TextEncoding) -> TimingSettings {

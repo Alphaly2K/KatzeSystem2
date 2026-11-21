@@ -1,8 +1,9 @@
 use katze_system2::{
     Error,
+    host::font::TextEncoding,
     message::{
-        AtomKind, BreakCharacters, LayoutSettings, Markup, Page, StyleDefaults, TextEncoding,
-        TimingSettings, VerticalAlignment,
+        AtomKind, BreakCharacters, LayoutSettings, Markup, Page, StyleDefaults, TimingSettings,
+        VerticalAlignment,
     },
 };
 

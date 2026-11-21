@@ -17,7 +17,7 @@ mod timing;
 mod userfont;
 pub(crate) mod window;
 
-pub use crate::host::font::{FontRequest, FontServices, GlyphMask, TextEncoding};
+use crate::host::font::{FontRequest, GlyphMask, TextEncoding};
 pub use defaults::MessageDefaults;
 pub use display::{Display, DisplayProgress, DisplaySettings};
 pub use effects::GlyphEffects;

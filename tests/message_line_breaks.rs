@@ -1,6 +1,6 @@
+use katze_system2::host::font::TextEncoding;
 use katze_system2::message::{
-    AtomKind, BreakCharacters, Layout, LayoutSettings, Markup, StyleDefaults, TextEncoding,
-    VerticalAlignment,
+    AtomKind, BreakCharacters, Layout, LayoutSettings, Markup, StyleDefaults, VerticalAlignment,
 };
 use std::collections::BTreeMap;
 

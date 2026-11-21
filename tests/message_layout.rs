@@ -1,5 +1,6 @@
+use katze_system2::host::font::TextEncoding;
 use katze_system2::message::{
-    AtomKind, LayoutSettings, Markup, StyleDefaults, TextEncoding, TextGroup, VerticalAlignment,
+    AtomKind, LayoutSettings, Markup, StyleDefaults, TextGroup, VerticalAlignment,
 };
 
 fn defaults() -> StyleDefaults {

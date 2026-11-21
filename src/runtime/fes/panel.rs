@@ -4,8 +4,9 @@ use crate::{
     fes::PanelContent,
     graphics::{Image, Rect, Surface},
     hg3::FrameDirectory,
+    host::font::{FontRequest, TextEncoding},
     host::resources::ResourceServices,
-    message::{FontRequest, GlyphEffects, GlyphPaint, TextEncoding},
+    message::{GlyphEffects, GlyphPaint},
     resource::ResourceMode,
     runtime::{ObjectFactory, Store},
 };

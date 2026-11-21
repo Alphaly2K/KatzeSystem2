@@ -1,5 +1,6 @@
+use katze_system2::host::font::TextEncoding;
 use katze_system2::message::{
-    Alignment, AtomKind, Markup, StyleDefaults, TextEncoding, TextGroup, Wait, message_color_argb,
+    Alignment, AtomKind, Markup, StyleDefaults, TextGroup, Wait, message_color_argb,
 };
 
 fn defaults() -> StyleDefaults {
@@ -110,8 +111,8 @@ fn styles_preserve_recovery_colors_relative_sizes_and_preset_terminators() {
     assert_eq!(reset.final_style.shadow_color, config.shadow_color);
 
     for encoding in [
-        katze_system2::message::TextEncoding::Cp932,
-        katze_system2::message::TextEncoding::Unicode,
+        katze_system2::host::font::TextEncoding::Cp932,
+        katze_system2::host::font::TextEncoding::Unicode,
     ] {
         let styled =
             Markup::parse_with_encoding(r"\tBi;A\tbB\tiC\t;D\tib", &config, encoding).unwrap();

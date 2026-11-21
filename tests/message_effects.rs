@@ -1,6 +1,7 @@
 use katze_system2::{
     graphics::{Rect, Surface},
-    message::{GlyphEffects, GlyphMask, GlyphPaint},
+    host::font::GlyphMask,
+    message::{GlyphEffects, GlyphPaint},
 };
 
 fn alpha_surface(size: [u32; 2], alphas: &[u8]) -> Surface {

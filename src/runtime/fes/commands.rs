@@ -335,7 +335,7 @@ impl Objects {
                     .filter(|object| match &object.state {
                         ObjectState::CPlane(_) | ObjectState::Plane(_) => true,
                         ObjectState::String(state) => {
-                            state.layout.encoding() == crate::message::TextEncoding::Cp932
+                            state.layout.encoding() == crate::host::font::TextEncoding::Cp932
                         }
                         _ => false,
                     })

@@ -1,5 +1,6 @@
 use super::PlaneState;
-use crate::message::{MessageDefaults, TextEncoding};
+use crate::host::font::TextEncoding;
+use crate::message::MessageDefaults;
 use crate::{Error, Result};
 
 /// STRING／STRING8 的二维属性和消息配置；播放状态由运行时持有。

@@ -116,8 +116,8 @@ fn pixel_file(id: u32) -> Vec<u8> {
 #[test]
 fn panel_text_wraps_using_character_advances_and_retries_a_failed_font() {
     use katze_system2::{
+        host::font::{FontRequest, FontServices, GlyphMask},
         kcs::ResourceServices,
-        message::{FontRequest, FontServices, GlyphMask},
         resource::ResourceMode,
         save::DataContainer,
     };

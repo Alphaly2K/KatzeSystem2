@@ -540,7 +540,7 @@ fn defaults_and_xml_overlays_keep_missing_values_raw_flags_and_volume_update_ord
         };
         font_settings.apply_message_defaults(&mut defaults);
         let configuration = defaults
-            .configuration(katze_system2::message::TextEncoding::Cp932)
+            .configuration(katze_system2::host::font::TextEncoding::Cp932)
             .unwrap();
         assert_eq!(
             [0xc4, 0xc8, 0xcc, 0xd0].map(|offset| word(&configuration, offset)),

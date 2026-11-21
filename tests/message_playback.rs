@@ -1,6 +1,6 @@
+use katze_system2::host::font::TextEncoding;
 use katze_system2::message::{
-    BreakCharacters, LayoutSettings, Page, StyleDefaults, TextEncoding, TimingSettings,
-    VerticalAlignment,
+    BreakCharacters, LayoutSettings, Page, StyleDefaults, TimingSettings, VerticalAlignment,
 };
 
 fn prepare(page: &mut Page) {

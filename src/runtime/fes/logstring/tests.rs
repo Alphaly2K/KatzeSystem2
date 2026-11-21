@@ -1,5 +1,6 @@
 use super::*;
-use crate::message::{FontRequest, FontServices, GlyphMask, MessageDefaults, MessageFactory};
+use crate::host::font::{FontRequest, FontServices, GlyphMask};
+use crate::message::{MessageDefaults, MessageFactory};
 use crate::runtime::{BaseObject, Runtime, TaskObject, kind};
 
 struct Reject;

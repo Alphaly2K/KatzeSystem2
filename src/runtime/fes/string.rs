@@ -1,10 +1,7 @@
 use super::{ObjectState, Objects};
 use crate::runtime::{ObjectFactory, Store, kind, route_with_buffers};
 use crate::task::{Command, CommandBuffers};
-use crate::{
-    Error, Result, expression, fes,
-    message::{MessageDefaults, TextEncoding},
-};
+use crate::{Error, Result, expression, fes, host::font::TextEncoding, message::MessageDefaults};
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct Context {

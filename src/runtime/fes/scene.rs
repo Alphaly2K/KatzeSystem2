@@ -1419,7 +1419,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                         | super::ObjectState::Scroll2(_) => fes::SubcommandContext::default(),
                         super::ObjectState::String(text) => {
                             // 基线上下文查询的类型表只把 CP932 文字列入平面分支。
-                            if text.layout.encoding() == crate::message::TextEncoding::Cp932 {
+                            if text.layout.encoding() == crate::host::font::TextEncoding::Cp932 {
                                 text.layout.base.subcommand_context()
                             } else {
                                 fes::SubcommandContext::default()
