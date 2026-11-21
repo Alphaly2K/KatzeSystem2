@@ -45,7 +45,7 @@ impl Surface {
             vertices.map(|v| [v.position[0], v.position[1]]),
             vertices.map(|v| v.rhw),
             state,
-            |point| Some(interpolation.color(interpolation.weights(point)?)),
+            |point| Some(interpolation.color(interpolation.weights(interpolation.areas(point))?)),
         )
     }
 
@@ -74,20 +74,29 @@ impl Surface {
         let Some(interpolation) = Interpolation::new(vertices) else {
             return false;
         };
+        let extent = texture.size().map(f64::from);
+        let affine_point = filter == TextureFilter::Point
+            && interpolation
+                .rhw
+                .iter()
+                .all(|&rhw| rhw == interpolation.rhw[0]);
         self.rasterize(
             vertices.map(|v| [v.position[0], v.position[1]]),
             vertices.map(|v| v.rhw),
             state,
             |point| {
-                let weights = interpolation.weights(point)?;
+                let areas = interpolation.areas(point);
+                let weights = interpolation.weights(areas)?;
                 let coordinates = std::array::from_fn(|axis| {
-                    if uv.iter().all(|p| p[axis] == uv[0][axis]) {
-                        f64::from(uv[0][axis])
+                    let [a, b, c] = uv.map(|uv| f64::from(uv[axis]));
+                    if affine_point {
+                        // 点采样时在纹素坐标中先合计再除面积，避免边界落入前一个纹素。
+                        let span = extent[axis];
+                        a * span
+                            + ((b - a) * span * areas[1] + (c - a) * span * areas[2])
+                                / interpolation.area
                     } else {
-                        // 基点加差值保留精确 texel 边界，避免常量项随权重求和发生偏移。
-                        let base = f64::from(uv[0][axis]);
-                        base + (f64::from(uv[1][axis]) - base) * weights[1]
-                            + (f64::from(uv[2][axis]) - base) * weights[2]
+                        (a + (b - a) * weights[1] + (c - a) * weights[2]) * extent[axis]
                     }
                 });
                 if coordinates.iter().any(|n: &f64| !n.is_finite()) {
@@ -215,18 +224,18 @@ impl Surface {
 
     fn sample(
         &self,
-        uv: [f64; 2],
+        texel: [f64; 2],
         filter: TextureFilter,
         address: [TextureAddress; 2],
     ) -> [f64; 4] {
         // 先缩到镜像的两个周期内，避免大 UV 乘以尺寸后超出索引范围。
         let position: [f64; 2] = std::array::from_fn(|i| {
-            let uv = if (0. ..2.).contains(&uv[i]) {
-                uv[i]
+            let period = f64::from(self.size()[i]) * 2.;
+            if (0. ..period).contains(&texel[i]) {
+                texel[i]
             } else {
-                uv[i].rem_euclid(2.)
-            };
-            uv * f64::from(self.size()[i])
+                texel[i].rem_euclid(period)
+            }
         });
         let resolve =
             |axis: usize, texel| texture_coordinate(texel, self.size()[axis], address[axis]);
@@ -317,11 +326,13 @@ impl Interpolation {
         })
     }
 
-    fn weights(&self, point: [f64; 2]) -> Option<[f64; 3]> {
+    fn areas(&self, point: [f64; 2]) -> [f64; 3] {
         // 插值与覆盖测试使用相同的八位亚像素顶点。
-        let mut weights = std::array::from_fn(|i| {
-            edge(self.points[(i + 1) % 3], self.points[(i + 2) % 3], point) / self.area
-        });
+        std::array::from_fn(|i| edge(self.points[(i + 1) % 3], self.points[(i + 2) % 3], point))
+    }
+
+    fn weights(&self, areas: [f64; 3]) -> Option<[f64; 3]> {
+        let mut weights = areas.map(|area| area / self.area);
         if let Some(depth) = self.depth {
             let value: f64 = (0..3).map(|i| depth[i] * weights[i]).sum();
             if !(0.0..=1.0).contains(&value) {

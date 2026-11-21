@@ -57,6 +57,33 @@ fn affine_uvs_keep_exact_texel_boundaries_across_both_halves_of_a_quad() {
 }
 
 #[test]
+fn point_sampled_image_rectangle_preserves_pixels_at_native_size() {
+    let image = Arc::new(
+        Surface::from_bgra(
+            [13, 19],
+            (0..247).flat_map(|i| [i as u8, 0, 0, 255]).collect(),
+        )
+        .unwrap(),
+    );
+    let mut rectangle = Drawable::image_rectangle([0.; 3], [13., 19.]);
+    rectangle.set_image(Some(image.clone()));
+    let mut drawables = Drawables::default();
+    drawables.insert(0, rectangle).unwrap();
+    drawables.set_display(0, 1);
+    let projection = Projection::default();
+    let frame = drawables
+        .compose(&projection, projection.matrix, TextureFilter::Point, None)
+        .unwrap();
+    let mut target = RenderTarget::new([13, 19]).unwrap();
+    frame.render_into(&mut target, None).unwrap();
+    for y in 0..19 {
+        for x in 0..13 {
+            assert_eq!(target.pixel(x, y), image.pixel(x, y), "pixel ({x}, {y})");
+        }
+    }
+}
+
+#[test]
 fn texture_filter_overrides_mix_point_and_linear_sampling_in_one_frame() {
     let image = Arc::new(
         Surface::from_bgra(
