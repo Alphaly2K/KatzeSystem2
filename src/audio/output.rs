@@ -33,13 +33,18 @@ enum Update {
 }
 
 pub(super) struct Link {
+    connection: Arc<()>,
     sender: mpsc::Sender<Update>,
     progress: [Arc<Mutex<Status>>; 64],
     gains: [[i32; 2]; 64],
 }
 
-/// 可交给设备音频线程的独立混音器；渲染期间不访问文件或游戏运行时。
-pub struct Mixer {
+/// A PCM consumer that the host can move to an audio thread. Rendering does
+/// not access the session or wait for decoded data.
+pub struct Mixer(Option<ConnectedMixer>);
+
+struct ConnectedMixer {
+    connection: Arc<()>,
     sound: SoundState,
     receiver: mpsc::Receiver<Update>,
     progress: [Arc<Mutex<Status>>; 64],
@@ -47,13 +52,14 @@ pub struct Mixer {
 }
 
 impl SoundState {
-    /// 将采样消费交给独立混音器；任务通道继续接收控制并查询设备进度。
-    /// 同一声音存储只能建立一次连接。
+    /// Transfer PCM consumption to a mixer. The sound task continues to control
+    /// the channels and query playback progress.
     pub fn connect_output(&mut self) -> Result<Mixer> {
         if self.output.is_some() {
             return Err(Error::new(0, "声音输出已连接"));
         }
         let (sender, receiver) = mpsc::channel();
+        let connection = Arc::new(());
         let progress = std::array::from_fn(|index| {
             let channel = &self.channels[index];
             Arc::new(Mutex::new(Status {
@@ -77,6 +83,7 @@ impl SoundState {
             channel.progress = Some(progress.clone());
         }
         self.output = Some(Link {
+            connection: connection.clone(),
             sender,
             progress: progress.clone(),
             gains: self
@@ -84,12 +91,37 @@ impl SoundState {
                 .each_ref()
                 .map(|channel| [channel.pcm_volume, channel.pcm_pan]),
         });
-        Ok(Mixer {
+        Ok(Mixer(Some(ConnectedMixer {
+            connection,
             sound,
             receiver,
             progress,
             generations: [0; 64],
-        })
+        })))
+    }
+
+    /// Take back PCM consumption from this sound state's mixer. Returns an
+    /// error for a different or already disconnected mixer. A successful
+    /// handoff preserves playback and allows a new connection.
+    pub fn disconnect_output(&mut self, mixer: &mut Mixer) -> Result<()> {
+        let link = self
+            .output
+            .as_ref()
+            .ok_or_else(|| Error::new(0, "声音输出未连接"))?;
+        let connected = mixer
+            .0
+            .as_mut()
+            .filter(|connected| Arc::ptr_eq(&link.connection, &connected.connection))
+            .ok_or_else(|| Error::new(0, "混音器不属于此声音输出连接"))?;
+        connected.apply_controls()?;
+        let mut connected = mixer.0.take().unwrap();
+        self.output = None;
+        for (channel, mixed) in self.channels.iter_mut().zip(&mut connected.sound.channels) {
+            channel.playback = std::mem::take(&mut mixed.playback);
+            channel.resampler = std::mem::take(&mut mixed.resampler);
+            channel.progress = None;
+        }
+        Ok(())
     }
 
     pub(super) fn output_action(&self, channel: usize, action: Action) {
@@ -213,6 +245,19 @@ impl Mixer {
     /// and report playback progress to the runtime. The rate is in Hz and the
     /// output must contain an even number of samples. Does not wait for decoded data.
     pub fn render(&mut self, sample_rate: u32, output: &mut [f32]) -> Result<()> {
+        let connected = self
+            .0
+            .as_mut()
+            .ok_or_else(|| Error::new(0, "混音器已断开连接"))?;
+        connected.apply_controls()?;
+        connected.sound.mix(sample_rate, output, false)?;
+        connected.publish_progress();
+        Ok(())
+    }
+}
+
+impl ConnectedMixer {
+    fn apply_controls(&mut self) -> Result<()> {
         for update in self.receiver.try_iter() {
             let (channel, generation, action) = match update {
                 Update::Channel {
@@ -265,7 +310,10 @@ impl Mixer {
             }
             self.generations[channel] = generation;
         }
-        self.sound.mix(sample_rate, output, false)?;
+        Ok(())
+    }
+
+    fn publish_progress(&self) {
         for (index, channel) in self.sound.channels.iter().enumerate() {
             if let Ok(mut status) = self.progress[index].try_lock() {
                 if status.generation == self.generations[index] {
@@ -280,11 +328,10 @@ impl Mixer {
                 }
             }
         }
-        Ok(())
     }
 }
 
-impl Drop for Mixer {
+impl Drop for ConnectedMixer {
     fn drop(&mut self) {
         for progress in &self.progress {
             if let Ok(mut status) = progress.try_lock() {

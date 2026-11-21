@@ -98,9 +98,16 @@ impl GameRuntime {
     }
 
     /// Hand PCM consumption to a mixer that can run on the host's audio thread.
-    /// This can be done once, after startup. The host owns the device lifetime.
+    /// Call after startup. The host manages the device and its lifetime.
     pub fn connect_audio_output(&mut self) -> Result<Mixer> {
         self.0.connect_audio_output()
+    }
+
+    /// Take back PCM consumption after stopping the device callback and
+    /// retrieving its mixer. Pending controls are applied before playback
+    /// returns to the session. The old mixer is inactive on success.
+    pub fn disconnect_audio_output(&mut self, mixer: &mut Mixer) -> Result<()> {
+        self.0.disconnect_audio_output(mixer)
     }
 
     /// Fill a stereo buffer with interleaved `f32` PCM in `[-1, 1]`. The sample

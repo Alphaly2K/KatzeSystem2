@@ -154,6 +154,11 @@ impl<L: ProgramLoader> TaskRuntime<L> {
         self.connect_task_audio_output(SOUND_TASK)
     }
 
+    /// Take back PCM consumption from the mixer for the standard sound task.
+    pub fn disconnect_audio_output(&mut self, mixer: &mut Mixer) -> Result<()> {
+        self.disconnect_task_audio_output(SOUND_TASK, mixer)
+    }
+
     /// Fill a buffer with interleaved stereo `f32` PCM using the game mixer.
     /// See [`Runtime::mix_task_audio_stereo`] for buffer and timing requirements.
     pub fn mix_audio_stereo(&mut self, sample_rate: u32, output: &mut [f32]) -> Result<()> {
@@ -190,9 +195,14 @@ impl<L: ProgramLoader> TaskRuntime<L> {
 impl<F: ObjectFactory> Runtime<F> {
     /// Transfer the specified sound task's PCM consumption to a host mixer.
     /// The mixer can be moved to the host's audio thread.
-    /// A sound task can only be connected once, even if the mixer has been dropped.
+    /// Disconnect the current mixer before opening another one.
     pub fn connect_task_audio_output(&mut self, task: u32) -> Result<Mixer> {
         self.sound_output_state(task)?.connect_output()
+    }
+
+    /// Take back PCM consumption from the current mixer for a sound task.
+    pub fn disconnect_task_audio_output(&mut self, task: u32, mixer: &mut Mixer) -> Result<()> {
+        self.sound_output_state(task)?.disconnect_output(mixer)
     }
 
     /// Overwrite the buffer with interleaved left/right `f32` PCM in `[-1, 1]` and

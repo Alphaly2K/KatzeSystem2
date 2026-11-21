@@ -690,6 +690,45 @@ mod tests {
     }
 
     #[test]
+    fn returning_a_mixer_preserves_the_next_sample_and_pending_controls() {
+        let mut reference = output_state();
+        let mut sound = output_state();
+        reference.start(0, 0, 1, 0).unwrap();
+        sound.start(0, 0, 1, 0).unwrap();
+        let mut mixer = sound.connect_output().unwrap();
+        let mut other = output_state();
+        let mut other_mixer = other.connect_output().unwrap();
+
+        let (mut expected, mut actual) = ([0.0; 8], [0.0; 8]);
+        reference.mix_stereo(12, &mut expected[..6]).unwrap();
+        mixer.render(12, &mut actual[..6]).unwrap();
+        assert_eq!(actual[..6], expected[..6]);
+        assert!(sound.disconnect_output(&mut other_mixer).is_err());
+        assert!(sound.connect_output().is_err());
+        other.disconnect_output(&mut other_mixer).unwrap();
+
+        reference.change_count(0, 2).unwrap();
+        sound.change_count(0, 2).unwrap();
+        reference.set_pan(0, -20, true);
+        sound.set_pan(0, -20, true);
+        sound.disconnect_output(&mut mixer).unwrap();
+        assert!(mixer.render(12, &mut actual).is_err());
+        reference.mix_stereo(12, &mut expected).unwrap();
+        sound.mix_stereo(12, &mut actual).unwrap();
+        assert_eq!(actual, expected);
+        assert_eq!(
+            sound.channel(0).unwrap().remaining_plays(),
+            reference.channel(0).unwrap().remaining_plays()
+        );
+
+        let mut replacement = sound.connect_output().unwrap();
+        assert!(sound.disconnect_output(&mut mixer).is_err());
+        reference.mix_stereo(12, &mut expected).unwrap();
+        replacement.render(12, &mut actual).unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
     fn pending_output_controls_keep_newer_status_and_replacement_gain() {
         let mut sound = output_state();
         let mut mixer = sound.connect_output().unwrap();

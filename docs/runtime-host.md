@@ -74,7 +74,9 @@ KATZE_PARTICLE_HOST="$PWD/particle-host.exe" cargo run --release --example runpr
 
 需要连续截图时，回调同时收到一个 `SequenceCapture`。呈现提交后调用 `SequenceCapture::write_bgra` 交回从顶行开始的 BGRA 像素及以字节计的行距。软件宿主可用 `SoftwareBackend::submit_capture` 直接提交软件渲染目标。每次请求只能提交一次；跳过呈现时可丢弃请求。运行库负责裁剪、编码 BMP 和编号，通过宿主文件服务写入。只需查看或离屏绘制时可用 `with_frame`。
 
-离屏宿主在更新后用 `mix_audio_stereo(rate_hz, buffer)` 拉取 PCM；此调用可等待解码。设备宿主用 `connect_audio_output()` 取得可移交给音频线程的 `Mixer`，由回调用 `Mixer::render(rate_hz, buffer)` 拉取 PCM，无须借用运行实例。两者均覆写调用方缓冲，格式为左右交错、幅度 `[-1, 1]` 的 `f32` 采样。游戏声音只能连接一次，连接后不得再调用离屏混音；会话退出时由宿主停止回调并释放混音器。
+离屏宿主在更新后用 `mix_audio_stereo(rate_hz, buffer)` 拉取 PCM；此调用可等待解码。设备宿主用 `connect_audio_output()` 取得可移交给音频线程的 `Mixer`，由回调用 `Mixer::render(rate_hz, buffer)` 拉取 PCM，无须借用运行实例。两者均覆写调用方缓冲，格式为左右交错、幅度 `[-1, 1]` 的 `f32` 采样。会话同时只允许一个 PCM 消费者。会话退出时由宿主停止回调并释放混音器。
+
+替换设备时，宿主先停止回调并取回 `Mixer`，再把它传给 `disconnect_audio_output`。会话接回当前播放位置和待处理的控制，可直接在内存混音，或通过 `connect_audio_output` 连接新的混音器。
 
 宿主可通过 `host::audio::SpeechSynthesizer` 提供合成的 `Pcm`；字体服务及请求、编码和字形遮罩类型从 `host::font` 导入。遮罩每个像素提供一个 `0..=64` 的覆盖值，按从顶行开始的顺序排列。可复用 `message::Fonts` 处理宿主提供的字体，或实现自己的服务。软件图形后端、字形实现与混音器都可在无设备环境运行。
 
