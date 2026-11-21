@@ -67,6 +67,7 @@ impl Objects {
                 | b"getfile"
                 | b"max"
                 | b"baseopt"
+                | b"tone"
                 | b"tonetbl"
                 | b"gettonetbl"
                 | b"exist"
@@ -152,6 +153,27 @@ impl Objects {
             b"baseopt" | b"max" | b"exist" | b"tonetbl" | b"gettonetbl"
         ) {
             return Ok(false);
+        }
+        if name == b"tone" {
+            if let Some(value) = args.get(2).filter(|value| !value.is_empty()) {
+                interpreter
+                    .eval(value, state)
+                    .map_err(|error| Error::new(line.offset + error.offset, error.message))?;
+            }
+            let banks = if target.bank == -1 {
+                0..i64::from(self.count(&target.name))
+            } else {
+                i64::from(target.bank)..i64::from(target.bank) + 1
+            };
+            for bank in banks {
+                let Some(handle) = self.lookup(&target.name, bank as i32) else {
+                    break;
+                };
+                if matches!(self.get(handle).unwrap().state, ObjectState::Sound(_)) {
+                    return Err(Error::new(line.offset, "FES 声音 tone 命令尚未接入"));
+                }
+            }
+            return Ok(true);
         }
         if matches!(name, b"init" | b"param" | b"start") {
             return self.dispatch_particle_command(interpreter, line.offset, &args, &target, state);

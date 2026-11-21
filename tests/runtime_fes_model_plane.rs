@@ -433,6 +433,7 @@ table baseopt s
 table getfile 601 5 3 7 9
 table baseopt
 table getfile 600 5 3 7 9
+actor tone ($0+=1) ($1+=1) ($2+=1)
 actor load $str600;
 strvar 602 old
 table getfile 602 99 3 7 9
@@ -462,6 +463,7 @@ wait 100
         }
         assert!(runtime.update_fes_scene(0, &mut scene, 1).unwrap());
         let numbers = runtime.numbers();
+        assert_eq!(&numbers.shared[..3], &[1, 0, 0]);
         assert_eq!(&numbers.shared[10..15], &[1, 1, 2, 1, 0]);
         assert_eq!(numbers.strings[&600], b"model,1,0,5");
         assert_eq!(numbers.strings[&601], b"models,1,0,5");

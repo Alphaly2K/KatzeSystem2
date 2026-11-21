@@ -1430,6 +1430,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                         }
                         super::ObjectState::CPlane(plane) => plane.subcommand_context(),
                         super::ObjectState::Plane(plane) => plane.subcommand_context(),
+                        super::ObjectState::ModelPlane(model) => model.plane.subcommand_context(),
                         super::ObjectState::Sound(sound) => sound.subcommand_context(),
                         state => state
                             .image()
