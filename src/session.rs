@@ -9,9 +9,9 @@ use crate::{
             DiagnosticTrace, NativeTraceEvent, QuizDebugInput, QuizDebugSession, ScriptMessages,
             ScriptPosition,
         },
-        graphics::{DrawList, FrameCanvas, GraphicsBackend, Rect, SequenceCapture},
+        graphics::{DrawList, FrameCanvas, GraphicsBackend, SequenceCapture},
         movie::MovieDecoderFactory,
-        platform::{ClipboardRequest, PlatformJobServices, WindowRequest, WindowServices},
+        platform::PlatformJobServices,
     },
     runtime::TaskRuntime,
 };
@@ -19,6 +19,7 @@ use std::sync::Arc;
 
 mod error;
 mod setup;
+mod window;
 pub use crate::host::platform::WindowPreferences;
 pub use crate::language::StringTables;
 pub use crate::runtime::frame::{AdvanceError, FrameOutcome, FrameTime};
@@ -107,33 +108,6 @@ impl GameRuntime {
     /// while no separate mixer has been connected.
     pub fn mix_audio_stereo(&mut self, sample_rate: u32, output: &mut [f32]) -> Result<()> {
         self.0.mix_audio_stereo(sample_rate, output)
-    }
-
-    pub fn set_window_content_rect(&mut self, rectangle: Option<Rect>) {
-        self.0.set_window_content_rect(rectangle);
-    }
-
-    pub fn set_windowed_mode(&mut self, mode: Option<u32>) {
-        self.0.set_windowed_mode(mode);
-    }
-
-    /// Process window requests through the host. Returns true when the host
-    /// should stop the session. Menu rebuild and system properties requests
-    /// remain queued for hosts that implement them.
-    pub fn process_window_requests(&mut self, window: &mut dyn WindowServices) -> Result<bool> {
-        self.0.process_window_requests(window)
-    }
-
-    pub fn pending_window_requests(&self) -> &[WindowRequest] {
-        self.0.pending_window_requests()
-    }
-
-    pub fn take_window_requests(&mut self) -> Vec<WindowRequest> {
-        self.0.take_window_requests()
-    }
-
-    pub fn take_clipboard_requests(&mut self) -> Vec<ClipboardRequest> {
-        self.0.take_clipboard_requests()
     }
 
     /// The current text entry request, identified by the returned Arc. Use

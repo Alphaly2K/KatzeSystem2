@@ -1,9 +1,12 @@
 use super::{ClipboardRequest, ObjectFactory, Runtime, route_command_mode};
 use crate::{
     Result,
-    graphics::Rect,
-    host::WindowServices,
-    host::{WindowAction, WindowRequest},
+    host::{
+        graphics::Rect,
+        platform::{
+            MenuItemRequest, WindowAction, WindowCloseRequest, WindowRequest, WindowServices,
+        },
+    },
     input::InputDelivery,
     task::{Command, CommandBuffers},
 };
@@ -27,6 +30,38 @@ impl<F: ObjectFactory> Runtime<F> {
         std::mem::take(&mut self.host.clipboard_requests)
     }
 
+    pub fn take_window_close_requests(&mut self) -> Vec<WindowCloseRequest> {
+        std::mem::take(&mut self.host.window_close_requests)
+    }
+
+    pub fn take_menu_item_requests(&mut self) -> Vec<MenuItemRequest> {
+        std::mem::take(&mut self.host.menu_item_requests)
+    }
+
+    pub fn debug_mode(&self) -> u32 {
+        self.host.debug_mode
+    }
+
+    pub fn report_fullscreen(&mut self, fullscreen: bool) {
+        if let Some(settings) = self.host.system_settings.as_mut() {
+            settings.fullscreen = u32::from(fullscreen);
+        }
+        self.host.system_settings_dirty = 1;
+    }
+
+    pub(super) fn reset_menu_close_idle(&mut self, input: u32) -> Result<()> {
+        self.dispatch_command(
+            self.tree.root_id(),
+            Command {
+                target: input,
+                sender: 0,
+                code: 159,
+                data: [0, 1, 0],
+            },
+        )?;
+        Ok(())
+    }
+
     /// Process script window requests. Pass the input task used for menu close.
     /// Returns true when the host should stop the session. Close notifications
     /// do not require confirmation. System properties and menu rebuild requests
@@ -37,7 +72,7 @@ impl<F: ObjectFactory> Runtime<F> {
         input: u32,
         window: &mut dyn WindowServices,
     ) -> Result<bool> {
-        for request in std::mem::take(&mut self.host.window_close_requests) {
+        for request in self.take_window_close_requests() {
             if request.notify || window.confirm_close() {
                 return Ok(true);
             }
@@ -103,23 +138,12 @@ impl<F: ObjectFactory> Runtime<F> {
         match action {
             WindowAction::ToggleFullscreen => {
                 let fullscreen = window.toggle_fullscreen()?;
-                if let Some(settings) = self.host.system_settings.as_mut() {
-                    settings.fullscreen = u32::from(fullscreen);
-                }
-                self.host.system_settings_dirty = 1;
+                self.report_fullscreen(fullscreen);
             }
             WindowAction::Minimize => window.minimize()?,
             WindowAction::NotifyTasks => self.notify_window_tasks()?,
             WindowAction::CloseFromMenu => {
-                self.dispatch_command(
-                    self.tree.root_id(),
-                    Command {
-                        target: input,
-                        sender: 0,
-                        code: 159,
-                        data: [0, 1, 0],
-                    },
-                )?;
+                self.reset_menu_close_idle(input)?;
                 return Ok(Some(window.confirm_close()));
             }
             WindowAction::OpenSystemProperties | WindowAction::RebuildMenu => return Ok(None),

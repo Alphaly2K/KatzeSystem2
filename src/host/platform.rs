@@ -66,7 +66,7 @@ pub struct WindowCloseRequest {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WindowAction {
     OpenSystemProperties,
-    /// 重建时读取 `HostState::debug_mode` 的最新值。
+    /// Rebuild using the current session debug mode.
     RebuildMenu,
     ToggleFullscreen,
     Minimize,

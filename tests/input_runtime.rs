@@ -1183,6 +1183,111 @@ fn public_session_uses_host_resources_and_delivers_frame_and_pcm()
 }
 
 #[test]
+fn public_session_delivers_window_requests_to_the_host_event_loop() -> Result<()> {
+    use katze_system2::{
+        host::{
+            platform::{MenuItemRequest, WindowAction, WindowCloseRequest},
+            resources::{ResourceMode, ResourceServices},
+        },
+        session::{FrameTime, GameSetup},
+    };
+
+    struct Entry;
+    impl ResourceServices for Entry {
+        fn resolve(&mut self, _: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+            Ok(name.to_vec())
+        }
+
+        fn read(&mut self, _: &[u8], _: ResourceMode) -> Result<Option<Vec<u8>>> {
+            let mut code = Vec::new();
+            for (native, argument) in [
+                (9u32, Some(1u32)),
+                (393, Some(0)),
+                (628, Some(2)),
+                (845, None),
+                (847, None),
+                (1054, None),
+                (628, Some(3)),
+                (393, Some(u32::MAX)),
+                (9, Some(0)),
+            ] {
+                if let Some(value) = argument {
+                    code.extend([0x25, 3]);
+                    code.extend(value.to_le_bytes());
+                }
+                code.extend([0x2b, 3]);
+                code.extend(native.to_le_bytes());
+                code.push(3);
+                code.extend(if argument.is_some() { 4u32 } else { 0 }.to_le_bytes());
+            }
+            code.push(0x3b);
+            Ok(Some(packed_kcs(&code)))
+        }
+    }
+
+    let mut setup = GameSetup::new(0, 0)?;
+    let size = setup.configure_startup(
+        br#"<?xml version="1.0" encoding="UTF-8"?><document><SCREEN><width>64</width><height>48</height></SCREEN></document>"#,
+        None,
+        None,
+    )?;
+    setup.set_resources(Entry);
+    setup.configure_canvas(size)?;
+    setup.set_input_device(Device(Rc::new(RefCell::new(DeviceState::new([12, 34])))))?;
+    let mut game = setup.start_game(b"main").unwrap();
+    let entry = game.script_positions().next().unwrap().task_id;
+    game.advance(FrameTime {
+        tick: 1,
+        increment: 1,
+        system_time_ms: 16,
+    })
+    .unwrap();
+
+    let close = game.take_window_close_requests();
+    assert_eq!(
+        close,
+        [false, true].map(|notify| WindowCloseRequest {
+            task_id: entry,
+            notify
+        })
+    );
+    assert!(game.take_window_close_requests().is_empty());
+    let menu = game.take_menu_item_requests();
+    assert_eq!(
+        menu,
+        [0, u32::MAX].map(|value| MenuItemRequest {
+            task_id: entry,
+            command_id: 0x77,
+            value
+        })
+    );
+    assert!(game.take_menu_item_requests().is_empty());
+    let actions: Vec<_> = game
+        .take_window_requests()
+        .into_iter()
+        .map(|request| request.action)
+        .collect();
+    assert_eq!(
+        actions,
+        [
+            WindowAction::RebuildMenu,
+            WindowAction::ToggleFullscreen,
+            WindowAction::CloseFromMenu,
+            WindowAction::NotifyTasks,
+            WindowAction::RebuildMenu
+        ]
+    );
+    assert!(game.pending_window_requests().is_empty());
+    assert_eq!(game.debug_mode(), 3);
+    game.report_fullscreen(true);
+    assert!(game.window_preferences().unwrap().fullscreen);
+    game.prepare_menu_close()?;
+    game.notify_window_tasks()?;
+    assert_eq!(game.into_task_runtime().host().system_settings_dirty, 1);
+    Ok(())
+}
+
+#[test]
 fn game_runtime_boots_the_standard_tasks_and_supplies_the_first_frame_clock() -> Result<()> {
     use katze_system2::{
         language::{LanguageChangeRequest, LanguageTarget},

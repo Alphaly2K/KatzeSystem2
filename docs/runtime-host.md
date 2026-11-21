@@ -56,7 +56,11 @@ KATZE_PARTICLE_HOST="$PWD/particle-host.exe" cargo run --release --example runpr
 
 `FrameOutcome::Running { interface_language_refreshed }` 表示本轮成功。标志为真时，窗口宿主可以通过 `string_tables` 更新界面译文，再消费绘制和声音输出。`FrameOutcome::Exited` 表示根任务已退出，应结束会话循环；再次调用 `advance` 仍返回 `Exited`。需要自定义结构的调用方仍可用 `Runtime::new` 和 `update`。
 
-窗口宿主在更新后调用 `process_window_requests(window)` 执行脚本提交的窗口请求。设备操作由 `WindowServices` 提供，运行库负责配置回写和任务通知。返回 true 表示应退出窗口循环；发生错误时可在后续调用继续处理尚未尝试的请求。文本对话框通过 `text_entry_request` 取得初始文字及请求句柄，使用同一个句柄调用 `complete_text_entry` 确认或取消。以 `Arc::ptr_eq` 区分请求；同样的初始文字可以属于不同请求。过期请求返回 false。
+窗口宿主在更新后调用 `process_window_requests(window)` 执行脚本提交的窗口请求。设备操作由 `WindowServices` 提供，运行库负责配置回写和任务通知。返回 true 表示应退出窗口循环；发生错误时可在后续调用继续处理尚未尝试的请求。
+
+自行驱动窗口事件循环的宿主可分别用 `take_window_close_requests`、`take_window_requests` 和 `take_menu_item_requests` 取走关闭请求、窗口动作和菜单项更新。每个队列保留各自的提交顺序。关闭请求的 `notify` 为真时直接退出，为假时由宿主确认。处理 `CloseFromMenu` 时先调用 `prepare_menu_close`，再决定是否关闭。全屏切换成功后用 `report_fullscreen` 回报结果，任务通知通过 `notify_window_tasks` 提交，重建菜单时读取 `debug_mode`。同步宿主可继续用 `process_window_requests` 处理关闭和常规动作，再领取它保留的菜单和系统属性请求。
+
+文本对话框通过 `text_entry_request` 取得初始文字及请求句柄，使用同一个句柄调用 `complete_text_entry` 确认或取消。以 `Arc::ptr_eq` 区分请求；同样的初始文字可以属于不同请求。过期请求返回 false。
 
 宿主通过 `set_archive_config`、`set_folder_paths` 和 `set_script_settings` 提供脚本可查的路径及初始配置。图片导入宿主可用 `image_import_directory` 读取、用 `set_image_import_directory` 更新最后选择的 UTF-16 路径，供随后保存配置。标准会话的窗口和目录接口取代直接借用或替换原始设置；任务工具仍可从 `settings` 访问原始设置类型。启动配置和资源服务就绪后调用 `load_startup_language_tables` 装入初始译文；没有可用的界面语言前缀时，仅装入游戏表。
 

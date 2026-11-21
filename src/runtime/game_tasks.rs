@@ -165,6 +165,10 @@ impl<L: ProgramLoader> TaskRuntime<L> {
         self.process_window_requests_with_input(INPUT_TASK, window)
     }
 
+    pub(crate) fn prepare_menu_close(&mut self) -> Result<()> {
+        self.reset_menu_close_idle(INPUT_TASK)
+    }
+
     /// Get a pending text entry request and its initial text, if any. Keep the
     /// returned handle until submission or cancellation and compare requests by
     /// identity with [`Arc::ptr_eq`]. The original dialog limits edits to
