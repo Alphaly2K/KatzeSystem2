@@ -2,6 +2,11 @@
 
 use crate::{Error, Result, read};
 
+mod catalog;
+mod face;
+pub use catalog::Fonts;
+pub use face::Font;
+
 /// The engine text path that produced a font request.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TextEncoding {
@@ -76,6 +81,25 @@ pub struct FontRequest {
     pub glyph_parameter: u32,
     /// Nonzero enables fixed-width layout rules.
     pub measure_parameter: u32,
+}
+
+impl FontRequest {
+    /// 将平台整数度量换算为布局字宽；两种编码均以 CP932 双字节映射区分全角。
+    pub fn character_advance(&self, character: char, size: u32, measured: i32) -> Result<i32> {
+        if size > i32::MAX as u32 {
+            return Err(Error::new(0, "字号超过字形服务支持范围"));
+        }
+        if self.measure_parameter == 0 {
+            return Ok(measured);
+        }
+        let mut text = [0; 4];
+        let (encoded, _, invalid) = encoding_rs::SHIFT_JIS.encode(character.encode_utf8(&mut text));
+        Ok(if !invalid && encoded.len() == 2 {
+            size as i32
+        } else {
+            measured.max(size.div_ceil(2) as i32)
+        })
+    }
 }
 
 /// Synchronous font selection, metrics, and glyph masks with 64 coverage levels.

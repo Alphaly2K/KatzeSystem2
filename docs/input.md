@@ -172,7 +172,7 @@ device_units_per_logical 初值为一，与 logical_scale 分别保存，调用�
 
 标准宿主可从 `GameRuntime::startup_input_bindings` 取得已应用用户覆盖的绑定。平台 `InputDevice` 在 poll 中调用 button，在 key 中调用 sample，在 commit 中调用同名方法。鼠标左／中／右键的代码为 1／2／3，滚轮上／下为 6／7。
 
-`WheelButtons` 将垂直滚轮消息转换为鼠标 6／7 的按钮事件。`scroll(up, emit)` 立即按下，连续同向消息累加延迟重复，反向消息替换重复方向；`finish(emit)` 在扫描后、设备 commit 前释放当前脉冲，再按交替帧重放剩余重复。`cancel_repeat()` 只清方向和计数，保留当前脉冲及其释放。窗口示例将每次取得的非零垂直滚动快照送入该状态，保留独立的滚动通知；窗口库已合并的消息无法逐条还原。
+`host::input::WheelButtons` 将垂直滚轮消息转换为鼠标 6／7 的按钮事件。`scroll(up, emit)` 立即按下，连续同向消息累加延迟重复，反向消息替换重复方向；`finish(emit)` 在扫描后、设备 commit 前释放当前脉冲，再按交替帧重放剩余重复。`cancel_repeat()` 只清方向和计数，保留当前脉冲及其释放。窗口示例将每次取得的非零垂直滚动快照送入该状态，保留独立的滚动通知；窗口库已合并的消息无法逐条还原。
 
 ## 设备按键扫描
 

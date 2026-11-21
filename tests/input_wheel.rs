@@ -1,6 +1,6 @@
 use katze_system2::{
     Result,
-    input::{ButtonSource, DeviceBinding, DeviceKeys, WheelButtons},
+    host::input::{ButtonSource, DeviceBinding, DeviceKeys, WheelButtons},
 };
 
 #[test]

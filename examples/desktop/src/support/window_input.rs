@@ -1,7 +1,9 @@
 use katze_system2::{
     Result,
-    host::input::{ButtonSource, DeviceBinding, DeviceKeys, InputDevice, KeySample, PointerSample},
-    input::WheelButtons,
+    host::input::{
+        ButtonSource, DeviceBinding, DeviceKeys, InputDevice, KeySample, PointerSample,
+        WheelButtons,
+    },
 };
 use sdl2::{
     event::{Event, WindowEvent},

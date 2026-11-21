@@ -295,7 +295,7 @@ Unicode 的 `word_wrap` 按半角空格确定单词边界，空间不足时回�
 
 ### 字体服务
 
-`message::Fonts::new()` 创建空字体目录，使用 Rust 完成字体选择、度量和灰度栅格化。宿主登记字体来源后，使用 `Runtime::set_fonts(fonts)` 安装。桌面示例使用 fontdb 发现系统字体；其他宿主可以只登记随应用提供的字体。
+`host::font::Fonts::new()` 创建空字体目录，使用 Rust 完成字体选择、度量和灰度栅格化。宿主登记字体来源后，使用 `Runtime::set_fonts(fonts)` 安装。桌面示例使用 fontdb 发现系统字体；其他宿主可以只登记随应用提供的字体。
 
 `add_data(bytes)` 登记私有字体或集合的全部成员并返回数量。`add_fallback_source(open)` 登记宿主回退字体，登记时读取元数据，选中时再次打开以装载轮廓；每次打开须提供相同内容。登记失败保留已有字体。`set_resource_loader` 接收原始 CP932 名称，返回可读源或 None；`add_resource` 在来源缺失或格式不受支持时返回 false。桌面示例自行解析名称与目录。登记资源仅在同一字体服务内可见。
 

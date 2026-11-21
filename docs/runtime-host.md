@@ -19,7 +19,7 @@ KatzeSystem2 提供 CatSystem2 2.6.1.90 的 Rust 运行库。宿主创建实例�
 |`host::graphics`|`DrawList`、`DrawCommand`、`FrameTexture`、`FrameCanvas`、`CanvasTileVersion`、`GraphicsBackend`、`SequenceCapture`、`Surface`|
 |`host::audio`、`host::movie`、`host::media`|`Mixer`、`Pcm`、语音合成、电影解码及媒体执行方式|
 |`host::model`|模型选择、播放实例、效果状态和带锚点偏移的透明图像帧|
-|`host::input`、`host::font`|输入事件、按键绑定、`DeviceKeys` 和字体服务|
+|`host::input`、`host::font`|输入事件、按键绑定、`DeviceKeys`、`WheelButtons`、字体服务与参考栅格化实现|
 |`host::platform`、`host::effect`|`WindowPreferences`、窗口与剪贴板请求、平台任务及外部效果播放器|
 |`host::diagnostics`|脚本位置、调试消息、native 跟踪及 `QuizDebugSession`、`QuizDebugInput`|
 
@@ -80,7 +80,7 @@ KATZE_PARTICLE_HOST="$PWD/particle-host.exe" cargo run --release --example runpr
 
 替换设备时，宿主先停止回调并取回 `Mixer`，再把它传给 `disconnect_audio_output`。会话接回当前播放位置和待处理的控制，可直接在内存混音，或通过 `connect_audio_output` 连接新的混音器。 如果设备打开失败并丢弃了 `Mixer`，会话会在下次更新声音任务、混音或连接时接回状态。
 
-宿主可通过 `host::audio::SpeechSynthesizer` 提供合成的 `Pcm`；字体服务及请求、编码和字形遮罩类型从 `host::font` 导入。遮罩每个像素提供一个 `0..=64` 的覆盖值，按从顶行开始的顺序排列。可复用 `message::Fonts` 处理宿主提供的字体，或实现自己的服务。软件图形后端、字形实现与混音器都可在无设备环境运行。
+宿主可通过 `host::audio::SpeechSynthesizer` 提供合成的 `Pcm`；字体服务及请求、编码和字形遮罩类型从 `host::font` 导入。遮罩每个像素提供一个 `0..=64` 的覆盖值，按从顶行开始的顺序排列。可复用 `host::font::Fonts` 处理宿主提供的字体，或实现自己的服务。软件图形后端、字形实现与混音器都可在无设备环境运行。
 
 装载电影需要宿主先通过 `set_movie_decoder_factory` 注册 `host::movie::MovieDecoderFactory`。工厂打开 `SharedSource`，解码器返回 BGRA 帧与交错 PCM。更换工厂不影响已装载电影。默认库构建无需 C 工具链；启用 `builtin-mpeg` 并注册 `movie::MpegDecoderFactory` 可解码 MPEG-1 视频及 MP2／MP3 音轨。
 

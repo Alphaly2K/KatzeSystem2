@@ -1,5 +1,5 @@
 use super::file_source::FileSource;
-use katze_system2::{Error, message::Fonts};
+use katze_system2::{Error, host::font::Fonts};
 use std::{collections::BTreeSet, fs::File, io::ErrorKind, path::PathBuf, sync::Arc};
 
 pub fn load_fonts(resource_root: impl Into<PathBuf>) -> Fonts {

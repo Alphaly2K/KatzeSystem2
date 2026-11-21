@@ -1,8 +1,11 @@
 use katze_system2::{
-    graphics::Surface,
+    host::{
+        font::{Font, FontRequest, GlyphMask, TextEncoding},
+        graphics::Surface,
+    },
     message::{
-        BreakCharacters, Font, FontRequest, GlyphEffects, GlyphMask, LayoutSettings, Page,
-        StyleDefaults, TextEncoding, TimingSettings, VerticalAlignment,
+        BreakCharacters, GlyphEffects, LayoutSettings, Page, StyleDefaults, TimingSettings,
+        VerticalAlignment,
     },
 };
 

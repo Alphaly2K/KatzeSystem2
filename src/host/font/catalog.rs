@@ -8,8 +8,8 @@ use crate::{
 };
 use std::sync::Arc;
 
-mod catalog;
-use catalog::{Face, Source, charset_bit};
+mod metadata;
+use metadata::{Face, Source, charset_bit};
 
 type ResourceLoader = dyn FnMut(&[u8]) -> Result<Option<SharedSource>> + Send + Sync;
 
@@ -43,7 +43,7 @@ impl Fonts {
             return Err(Error::new(0, "字体数据超过存储上限"));
         }
         let data: Arc<[u8]> = bytes.into();
-        let faces = catalog::parse(&data, Source::Data(data.clone()))?;
+        let faces = metadata::parse(&data, Source::Data(data.clone()))?;
         let count = self.insert_faces(self.local_count, faces)?;
         self.local_count += count;
         Ok(count)
@@ -56,7 +56,7 @@ impl Fonts {
         open: impl Fn() -> Result<SharedSource> + Send + Sync + 'static,
     ) -> Result<usize> {
         let bytes = read_font(open()?.as_ref())?;
-        let faces = catalog::parse(&bytes, Source::Deferred(Arc::new(open)))?;
+        let faces = metadata::parse(&bytes, Source::Deferred(Arc::new(open)))?;
         self.insert_faces(self.faces.len(), faces)
     }
 

@@ -1,6 +1,6 @@
-use katze_system2::{
-    host::storage::SharedSource,
-    message::{FontRequest, FontServices, Fonts, TextEncoding},
+use katze_system2::host::{
+    font::{FontRequest, FontServices, Fonts, TextEncoding},
+    storage::SharedSource,
 };
 use std::sync::{
     Arc,

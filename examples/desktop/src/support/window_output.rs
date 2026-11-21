@@ -1,4 +1,4 @@
-use katze_system2::{graphics::RenderTarget, host::platform::WindowServices};
+use katze_system2::host::{graphics::software::RenderTarget, platform::WindowServices};
 use sdl2::{
     event::Event,
     messagebox::{ButtonData, ClickedButton, MessageBoxButtonFlag, MessageBoxFlag},

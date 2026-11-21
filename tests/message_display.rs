@@ -1,9 +1,12 @@
 use katze_system2::{
     Error, Result,
-    graphics::Rect,
+    host::{
+        font::{Font, GlyphMask, TextEncoding},
+        graphics::Rect,
+    },
     message::{
-        BreakCharacters, Display, DisplaySettings, Font, GlyphEffects, GlyphMask, GlyphState,
-        LayoutSettings, StyleDefaults, TextEncoding, TimingSettings, VerticalAlignment,
+        BreakCharacters, Display, DisplaySettings, GlyphEffects, GlyphState, LayoutSettings,
+        StyleDefaults, TimingSettings, VerticalAlignment,
     },
 };
 

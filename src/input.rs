@@ -32,8 +32,6 @@ pub use coordinates::CoordinateMap;
 mod device;
 pub use crate::host::input::DeviceKeys;
 pub use device::PointerState;
-mod wheel;
-pub use wheel::WheelButtons;
 mod update;
 
 /// 输入区域的十五 DWORD 记录；可移植位掩码以存在标记代替指针槽。
