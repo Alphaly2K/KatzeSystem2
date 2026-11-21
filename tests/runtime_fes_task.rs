@@ -2739,6 +2739,44 @@ fn failed_loads_preserve_the_task_and_input_modes_publish_system_values() {
 }
 
 #[test]
+fn reinitialization_replaces_execution_context_and_allows_another_load() {
+    let source = b"#DEFINE\nBUTTON action\n#START\n$0+=1\nwait 100\n";
+    let mut runtime = setup(1, source).runtime;
+    let task = runtime.create(0, kind::FES, b"scene", b"").unwrap();
+    send(&mut runtime, task, 337, 0, 0);
+    let list = runtime
+        .create(task, kind::IMAGE_LIST, b"list", b"")
+        .unwrap();
+    send(&mut runtime, list, 285, 8, 6);
+    send(&mut runtime, task, 340, 0, list);
+    send(&mut runtime, task, 346, 0, 91);
+    file(&mut runtime, task, b"complete.fes").unwrap();
+    send(&mut runtime, task, 339, 0, 0);
+    send(&mut runtime, task, 24, 0, 77);
+    let scene = runtime.object(task).unwrap().fes_scene().unwrap();
+    let action = scene.objects().lookup("action", 0).unwrap();
+    let button = scene.objects().get(action).unwrap().task_id().unwrap();
+    assert!(scene.deadline().is_some());
+    assert_eq!(runtime.numbers().shared[0], 1);
+
+    send(&mut runtime, task, 337, 0, 0);
+    let scene = runtime.object(task).unwrap().fes_scene().unwrap();
+    assert_eq!(scene.objects().lookup("action", 0), None);
+    assert_eq!(scene.deadline(), None);
+    assert_eq!(send(&mut runtime, task, 347, 0, 0), 0);
+    assert_eq!(send(&mut runtime, task, 23, 0, 0), 77);
+    assert_ne!(
+        runtime.object(button).unwrap().control().deletion_requested,
+        0
+    );
+
+    file(&mut runtime, task, b"complete.fes").unwrap();
+    runtime.update(1, 1).unwrap();
+    assert_eq!(runtime.numbers().shared[0], 2);
+    assert!(runtime.object(button).is_none());
+}
+
+#[test]
 fn destroying_a_model_only_scene_releases_the_player_and_drawable() {
     use katze_system2::host::{
         graphics::Surface,

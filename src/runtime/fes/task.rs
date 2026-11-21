@@ -943,6 +943,57 @@ impl FesObject {
         send(self.id, host, target, code, data, buffers)
     }
 
+    fn initialize(&mut self, host: &mut dyn Host) -> Result<()> {
+        if self.scene.as_ref().is_some_and(Scene::is_pending) {
+            return Err(Error::new(0, "FES 本轮推进尚未完成"));
+        }
+        let sound = self.send(host, 0, 35, [0; 3], &mut CommandBuffers::default())?;
+        let input = self.send(host, 0, 34, [0; 3], &mut CommandBuffers::default())?;
+        let inherited = services(host)?.inherited_context()?;
+        let context = name(&inherited, 32)?.to_vec();
+        let handles = host
+            .handle_allocator()
+            .ok_or_else(|| Error::new(0, "宿主未提供 FES 共享编号源"))?;
+        let mut scene = Scene::new(fes::Program::from_text(b"")?, handles)?;
+        if let Some(previous) = &mut self.scene {
+            let tasks: std::collections::BTreeSet<_> = previous
+                .objects
+                .objects
+                .values()
+                .flat_map(|object| {
+                    object
+                        .task_id
+                        .into_iter()
+                        .chain(object.input_tasks.iter().copied())
+                })
+                .collect();
+            services(host)?.release_media(previous)?;
+            for task in tasks {
+                self.send(host, task, 3, [0; 3], &mut CommandBuffers::default())?;
+            }
+            self.focus = None;
+            self.pressed = None;
+            self.input_event = None;
+            self.control_event = None;
+        }
+        scene.objects.preloaded_images = std::mem::take(&mut self.preloaded_images);
+        scene.set_system_value("_EXITCODE_", -1);
+        scene.set_system_value("_SAVEOBJ_", 0);
+        scene.set_system_value("_FRAME_", 0);
+        let values = scene.interpreter.local_numbers();
+        let names = scene.interpreter.named_context();
+        self.sound = sound;
+        self.input = input;
+        self.context = context;
+        self.scene = Some(scene);
+        self.initialized = true;
+        self.loaded = false;
+        host.set_task_shared_numbers(true);
+        host.set_task_local_numbers(values);
+        host.set_task_named_values(names);
+        self.bind()
+    }
+
     fn bind(&mut self) -> Result<()> {
         if let Some(scene) = &mut self.scene {
             scene.focus = self.focus.clone();
@@ -1179,32 +1230,10 @@ impl TaskObject for FesObject {
                 }
             }
             337 => {
-                if self.initialized || b != 0 {
-                    return Err(Error::new(
-                        0,
-                        "FES 初始化需要未初始化对象及运行时隐式共享状态",
-                    ));
+                if b != 0 {
+                    return Err(Error::new(0, "FES 初始化需要运行时隐式共享状态"));
                 }
-                self.sound = self.send(host, 0, 35, [0; 3], &mut CommandBuffers::default())?;
-                self.input = self.send(host, 0, 34, [0; 3], &mut CommandBuffers::default())?;
-                let inherited = services(host)?.inherited_context()?;
-                self.set_creation_context(&inherited)?;
-                let handles = host
-                    .handle_allocator()
-                    .ok_or_else(|| Error::new(0, "宿主未提供 FES 共享编号源"))?;
-                let mut scene = Scene::new(fes::Program::from_text(b"")?, handles)?;
-                scene.objects.preloaded_images = std::mem::take(&mut self.preloaded_images);
-                scene.set_system_value("_EXITCODE_", -1);
-                scene.set_system_value("_SAVEOBJ_", 0);
-                scene.set_system_value("_FRAME_", 0);
-                let values = scene.interpreter.local_numbers();
-                let names = scene.interpreter.named_context();
-                self.scene = Some(scene);
-                self.initialized = true;
-                host.set_task_shared_numbers(true);
-                host.set_task_local_numbers(values);
-                host.set_task_named_values(names);
-                self.bind()?;
+                self.initialize(host)?;
             }
             338 => {
                 if self.pending.is_none() {
