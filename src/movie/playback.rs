@@ -83,7 +83,7 @@ impl Player {
             factory,
             initial: Some(decoder),
             shared: Arc::new(Shared {
-                inline: (mode == DecodeMode::Inline).then(|| Mutex::new(None)),
+                inline: mode.uses_inline().then(|| Mutex::new(None)),
                 state: Mutex::new(State {
                     gain: 1.,
                     ..State::default()

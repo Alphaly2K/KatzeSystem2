@@ -7,6 +7,13 @@ pub enum DecodeMode {
     /// loaded. Movies decode incrementally as the session advances.
     Inline,
     /// Prefetch streamed Vorbis and movies on native worker threads.
+    /// Uses inline decoding on bare WebAssembly targets.
     #[default]
     Threaded,
+}
+
+impl DecodeMode {
+    pub(crate) fn uses_inline(self) -> bool {
+        self == Self::Inline || cfg!(all(target_family = "wasm", target_os = "unknown"))
+    }
 }

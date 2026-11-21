@@ -214,8 +214,8 @@ impl GameSetup {
         self.0.host_mut().random = crate::kcs::ScriptRandom::seeded(seed);
     }
 
-    /// Select how media is decoded. Sessions default to inline decoding for
-    /// hosts that do not provide system threads.
+    /// Select how media is decoded. Sessions default to inline decoding.
+    /// Bare WebAssembly targets use inline decoding for either setting.
     pub fn set_media_decode_mode(&mut self, mode: DecodeMode) {
         self.0.set_media_decode_mode(mode);
     }
