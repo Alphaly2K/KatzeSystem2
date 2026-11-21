@@ -15,11 +15,17 @@ pub struct ModelPlaneState {
     selection: Vec<u8>,
     pending_selection: Option<Vec<u8>>,
     body_commands: VecDeque<Vec<u8>>,
+    effects_mode: Option<u32>,
+    applied_effects_mode: Option<u32>,
 }
 
 impl ModelPlaneState {
     pub fn plane(&self) -> &CPlaneState {
         &self.plane
+    }
+
+    pub(super) fn set_effects_mode(&mut self, mode: u32) {
+        self.effects_mode = Some(mode);
     }
 
     pub(super) fn push_body_options(&mut self, options: &[u8]) -> Result<()> {
@@ -93,6 +99,7 @@ impl<F: ObjectFactory> Store<'_, F> {
                 };
                 if let Some(player) = player {
                     self.resources.model_players.insert(handle, player);
+                    state.applied_effects_mode = Some(1);
                 } else {
                     self.resources.model_players.remove(&handle);
                     drawables.remove(handle);
@@ -107,6 +114,13 @@ impl<F: ObjectFactory> Store<'_, F> {
         while let Some(options) = state.body_commands.front() {
             player.set_body_options(options)?;
             state.body_commands.pop_front();
+        }
+        if let Some(mode) = state
+            .effects_mode
+            .filter(|&mode| Some(mode) != state.applied_effects_mode)
+        {
+            player.set_effects_mode(mode)?;
+            state.applied_effects_mode = Some(mode);
         }
         if state.plane.display == 0 {
             drawables.set_display(handle, 0);

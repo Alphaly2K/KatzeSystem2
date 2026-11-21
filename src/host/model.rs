@@ -42,6 +42,12 @@ pub trait ModelPlayer {
         Ok(())
     }
 
+    /// Set the effect mode from FES `m2enable_eff`. A new player starts with
+    /// mode `1`. The script value is passed through as a DWORD.
+    fn set_effects_mode(&mut self, _mode: u32) -> Result<()> {
+        Ok(())
+    }
+
     /// Sample the model at the host's session timestamp. `None` hides its current frame.
     fn frame(&mut self, system_time_ms: u32) -> Result<Option<ModelFrame>>;
 }

@@ -65,8 +65,9 @@ impl ModelServices for ModelHost {
         }
         match read_tag(&mut player.output)? {
             b'N' => Ok(None),
-            tag @ (b'Y' | b'B') => {
-                player.body_commands = tag == b'B';
+            tag @ (b'Y' | b'B' | b'E') => {
+                player.body_commands = tag != b'Y';
+                player.effects_mode_command = tag == b'E';
                 Ok(Some(Box::new(player)))
             }
             _ => Err(Error::new(0, "Invalid model host acknowledgement")),
@@ -80,6 +81,7 @@ struct Player {
     output: ChildStdout,
     last_frame: Option<ModelFrame>,
     body_commands: bool,
+    effects_mode_command: bool,
 }
 
 impl Player {
@@ -95,6 +97,7 @@ impl Player {
             child,
             last_frame: None,
             body_commands: false,
+            effects_mode_command: false,
         })
     }
 
@@ -120,6 +123,18 @@ impl ModelPlayer for Player {
             write_field(&mut self.input, options).map_err(host_error)?;
             if !self.accepted()? {
                 return Err(Error::new(0, "Model host rejected body options"));
+            }
+        }
+        Ok(())
+    }
+
+    fn set_effects_mode(&mut self, mode: u32) -> Result<()> {
+        if self.effects_mode_command {
+            let mut request = [b'E', 0, 0, 0, 0];
+            request[1..].copy_from_slice(&mode.to_le_bytes());
+            self.input.write_all(&request).map_err(host_error)?;
+            if !self.accepted()? {
+                return Err(Error::new(0, "Model host rejected effect mode"));
             }
         }
         Ok(())

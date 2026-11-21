@@ -17,6 +17,7 @@ enum Command {
     Lock(i32),
     Capture([u32; 2]),
     ModelBody(Vec<u8>),
+    ModelEffects(u32),
     Filter(crate::graphics::ImageFilter),
 }
 
@@ -78,6 +79,7 @@ impl Objects {
                 | b"refcap"
                 | b"filter"
                 | b"m2body"
+                | b"m2enable_eff"
                 | b"init"
                 | b"param"
                 | b"start"
@@ -182,7 +184,7 @@ impl Objects {
         };
         let mut number = |index: usize, default| {
             args.get(index).map_or(Ok(default), |bytes| {
-                let result = if name == b"disp" {
+                let result = if matches!(name, b"disp" | b"m2enable_eff") {
                     interpreter.eval_fallback(bytes, state)
                 } else {
                     interpreter.eval(bytes, state)
@@ -193,6 +195,7 @@ impl Objects {
         let command = match name {
             b"disp" => Command::Display(i32::from(number(2, 1)? != 0)),
             b"refcap" => Command::Capture([number(2, 0)? as u32, number(3, 45000)? as u32]),
+            b"m2enable_eff" => Command::ModelEffects(number(2, 1)? as u32),
             b"m2body" => Command::ModelBody(args.get(2).cloned().unwrap_or_default()),
             b"filter" => Command::Filter(crate::graphics::ImageFilter::parse(
                 args.get(2).map_or(b"", Vec::as_slice),
@@ -272,6 +275,11 @@ impl Objects {
             let object = self.get_mut(handle).unwrap();
             let mut dirty = false;
             match &command {
+                Command::ModelEffects(mode) => {
+                    if let ObjectState::ModelPlane(model) = &mut object.state {
+                        model.set_effects_mode(*mode);
+                    }
+                }
                 Command::ModelBody(options) => {
                     if let ObjectState::ModelPlane(model) = &mut object.state {
                         model.push_body_options(options)?;

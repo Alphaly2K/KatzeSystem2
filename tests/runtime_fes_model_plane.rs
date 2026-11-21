@@ -18,6 +18,7 @@ enum Event {
     ReadModel,
     Options(Vec<u8>),
     BodyOptions(Vec<u8>),
+    EffectsMode(u32),
     Frame(u32),
     Drop,
 }
@@ -93,6 +94,11 @@ impl ModelPlayer for Player {
         self.events
             .borrow_mut()
             .push(Event::BodyOptions(options.to_vec()));
+        Ok(())
+    }
+
+    fn set_effects_mode(&mut self, mode: u32) -> Result<()> {
+        self.events.borrow_mut().push(Event::EffectsMode(mode));
         Ok(())
     }
 
@@ -298,4 +304,56 @@ wait 100
         ]);
         assert_eq!(*events.borrow(), expected);
     }
+}
+
+#[test]
+fn model_effects_mode_uses_the_raw_value_and_survives_player_replacement() {
+    let source = b"#DEFINE
+M2PLANE actor
+#START
+actor load model,1,0
+wait 1
+actor m2enable_eff 0
+actor m2enable_eff -1
+wait 1
+actor m2enable_eff -1
+wait 1
+actor load model,1,2
+wait 1
+actor m2enable_eff
+wait 1
+actor m2enable_eff
+wait 100
+";
+    let mut runtime = Runtime::new(
+        0,
+        kind::ROOT,
+        Box::new(BaseObject::new()),
+        State::new(0),
+        NoTasks,
+    );
+    let events = Rc::new(RefCell::new(Vec::new()));
+    runtime.set_model_services(Models {
+        events: events.clone(),
+        apply_options: true,
+    });
+    let mut scene = Scene::new(
+        Program::from_text(source).unwrap(),
+        runtime.host().handle_allocator(),
+    )
+    .unwrap();
+    for tick in 1..=6 {
+        assert!(runtime.update_fes_scene(0, &mut scene, tick).unwrap());
+    }
+    assert_eq!(
+        *events.borrow(),
+        [
+            Event::Open(b"model,1,0".to_vec()),
+            Event::EffectsMode(u32::MAX),
+            Event::Open(b"model,1,2".to_vec()),
+            Event::Drop,
+            Event::EffectsMode(u32::MAX),
+            Event::EffectsMode(1),
+        ]
+    );
 }
