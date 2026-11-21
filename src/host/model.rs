@@ -36,6 +36,12 @@ pub trait ModelPlayer {
         Ok(false)
     }
 
+    /// Apply the body difference keys from an FES `m2body` command.
+    /// Keys retain the original byte encoding. Return an error to retry the command.
+    fn set_body_options(&mut self, _options: &[u8]) -> Result<()> {
+        Ok(())
+    }
+
     /// Sample the model at the host's session timestamp. `None` hides its current frame.
     fn frame(&mut self, system_time_ms: u32) -> Result<Option<ModelFrame>>;
 }

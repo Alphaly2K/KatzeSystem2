@@ -6,6 +6,7 @@ use crate::{
     host::model::ModelSelection,
     runtime::{ObjectFactory, Store},
 };
+use std::collections::VecDeque;
 
 /// FES character model plane and its pending model selection.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -13,11 +14,21 @@ pub struct ModelPlaneState {
     pub(super) plane: CPlaneState,
     selection: Vec<u8>,
     pending_selection: Option<Vec<u8>>,
+    body_commands: VecDeque<Vec<u8>>,
 }
 
 impl ModelPlaneState {
     pub fn plane(&self) -> &CPlaneState {
         &self.plane
+    }
+
+    pub(super) fn push_body_options(&mut self, options: &[u8]) -> Result<()> {
+        let options = options.split(|&byte| byte == 0).next().unwrap_or_default();
+        if options.len() >= 0x300 {
+            return Err(Error::new(0, "FES 模型主体参数超过存储上限"));
+        }
+        self.body_commands.push_back(options.to_vec());
+        Ok(())
     }
 
     pub(super) fn select(&mut self, selection: &[u8]) -> Result<()> {
@@ -90,8 +101,13 @@ impl<F: ObjectFactory> Store<'_, F> {
             state.selection = state.pending_selection.take().unwrap();
         }
         let Some(player) = self.resources.model_players.get_mut(&handle) else {
+            state.body_commands.clear();
             return Ok(());
         };
+        while let Some(options) = state.body_commands.front() {
+            player.set_body_options(options)?;
+            state.body_commands.pop_front();
+        }
         if state.plane.display == 0 {
             drawables.set_display(handle, 0);
             return Ok(());

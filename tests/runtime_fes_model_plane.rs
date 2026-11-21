@@ -17,6 +17,7 @@ enum Event {
     Open(Vec<u8>),
     ReadModel,
     Options(Vec<u8>),
+    BodyOptions(Vec<u8>),
     Frame(u32),
     Drop,
 }
@@ -86,6 +87,13 @@ impl ModelPlayer for Player {
             .borrow_mut()
             .push(Event::Options(options.to_vec()));
         Ok(self.apply_options)
+    }
+
+    fn set_body_options(&mut self, options: &[u8]) -> Result<()> {
+        self.events
+            .borrow_mut()
+            .push(Event::BodyOptions(options.to_vec()));
+        Ok(())
     }
 
     fn frame(&mut self, time: u32) -> Result<Option<ModelFrame>> {
@@ -248,6 +256,8 @@ M2PLANE actor
 actor load model,1,0,5
 wait 1
 actor load MODEL,1,0,6,,9
+actor m2body 1,,3
+actor m2body ,2
 wait 1
 actor load MODEL,1,2,6,,9
 wait 100
@@ -280,7 +290,12 @@ wait 100
         if !apply_options {
             expected.extend([Event::Open(b"MODEL,1,0,6,,9".to_vec()), Event::Drop]);
         }
-        expected.extend([Event::Open(b"MODEL,1,2,6,,9".to_vec()), Event::Drop]);
+        expected.extend([
+            Event::BodyOptions(b"1,,3".to_vec()),
+            Event::BodyOptions(b",2".to_vec()),
+            Event::Open(b"MODEL,1,2,6,,9".to_vec()),
+            Event::Drop,
+        ]);
         assert_eq!(*events.borrow(), expected);
     }
 }

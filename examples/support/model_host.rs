@@ -63,9 +63,14 @@ impl ModelServices for ModelHost {
         ] {
             write_field(&mut player.input, bytes).map_err(host_error)?;
         }
-        Ok(player
-            .accepted()?
-            .then(|| Box::new(player) as Box<dyn ModelPlayer>))
+        match read_tag(&mut player.output)? {
+            b'N' => Ok(None),
+            tag @ (b'Y' | b'B') => {
+                player.body_commands = tag == b'B';
+                Ok(Some(Box::new(player)))
+            }
+            _ => Err(Error::new(0, "Invalid model host acknowledgement")),
+        }
     }
 }
 
@@ -74,6 +79,7 @@ struct Player {
     input: ChildStdin,
     output: ChildStdout,
     last_frame: Option<ModelFrame>,
+    body_commands: bool,
 }
 
 impl Player {
@@ -88,6 +94,7 @@ impl Player {
             output: child.stdout.take().unwrap(),
             child,
             last_frame: None,
+            body_commands: false,
         })
     }
 
@@ -105,6 +112,17 @@ impl ModelPlayer for Player {
         self.input.write_all(b"O").map_err(host_error)?;
         write_field(&mut self.input, options).map_err(host_error)?;
         self.accepted()
+    }
+
+    fn set_body_options(&mut self, options: &[u8]) -> Result<()> {
+        if self.body_commands {
+            self.input.write_all(b"B").map_err(host_error)?;
+            write_field(&mut self.input, options).map_err(host_error)?;
+            if !self.accepted()? {
+                return Err(Error::new(0, "Model host rejected body options"));
+            }
+        }
+        Ok(())
     }
 
     fn frame(&mut self, system_time_ms: u32) -> Result<Option<ModelFrame>> {

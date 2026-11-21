@@ -16,6 +16,7 @@ enum Command {
     Plane(fes::ObjectReference),
     Lock(i32),
     Capture([u32; 2]),
+    ModelBody(Vec<u8>),
     Filter(crate::graphics::ImageFilter),
 }
 
@@ -76,6 +77,7 @@ impl Objects {
                 | b"stype"
                 | b"refcap"
                 | b"filter"
+                | b"m2body"
                 | b"init"
                 | b"param"
                 | b"start"
@@ -191,6 +193,7 @@ impl Objects {
         let command = match name {
             b"disp" => Command::Display(i32::from(number(2, 1)? != 0)),
             b"refcap" => Command::Capture([number(2, 0)? as u32, number(3, 45000)? as u32]),
+            b"m2body" => Command::ModelBody(args.get(2).cloned().unwrap_or_default()),
             b"filter" => Command::Filter(crate::graphics::ImageFilter::parse(
                 args.get(2).map_or(b"", Vec::as_slice),
             )),
@@ -269,6 +272,11 @@ impl Objects {
             let object = self.get_mut(handle).unwrap();
             let mut dirty = false;
             match &command {
+                Command::ModelBody(options) => {
+                    if let ObjectState::ModelPlane(model) = &mut object.state {
+                        model.push_body_options(options)?;
+                    }
+                }
                 Command::Capture(range) => {
                     if let ObjectState::DifImage(state) = &mut object.state {
                         state.capture = Some(*range);
