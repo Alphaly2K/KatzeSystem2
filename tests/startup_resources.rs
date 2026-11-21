@@ -58,13 +58,14 @@ fn startup_and_dynamic_script_loads_use_the_higher_priority_patch() {
     std::fs::create_dir(&root.0).unwrap();
     std::fs::create_dir(root.0.join("config")).unwrap();
     std::fs::create_dir(root.0.join("loose")).unwrap();
-    std::fs::write(root.0.join("config/startup.xml"), b"<?xml version=\"1.0\" encoding=\"UTF-8\"?><document><SCRIPT><start>kcs.int/main.kcs</start></SCRIPT><INT><int00><name>kcs</name><int>kcs.int</int><ext>kcs</ext><dir>loose</dir></int00></INT></document>").unwrap();
+    std::fs::write(root.0.join("config/startup.xml"), b"<?xml version=\"1.0\" encoding=\"UTF-8\"?><document><SCRIPT><start>kcs.int/main.kcs</start></SCRIPT><INT><int00><name>kcs</name><int>kcs.int</int><ext>kcs</ext><dir>loose</dir></int00><int01><name>extra</name><int>other.int</int><ext>kcs</ext></int01></INT></document>").unwrap();
     std::fs::write(root.0.join("loose/shared.dat"), b"loose").unwrap();
     for (name, entries) in [
         (
             "kcs.int",
             vec![("main.kcs", program(0)), ("base.dat", b"base".to_vec())],
         ),
+        ("other.int", vec![("secondary.KCS", program(5))]),
         (
             "update01.int",
             vec![("shared.dat", b"lower".to_vec()), ("lower.dat", Vec::new())],
@@ -84,6 +85,32 @@ fn startup_and_dynamic_script_loads_use_the_higher_priority_patch() {
     std::fs::write(root.0.join("update99.int"), archive(&[])).unwrap();
     let mut game = support::load_game(root.0.to_str().unwrap()).unwrap();
     assert_eq!(game.router.patches.len(), 3);
+    let programs = support::inspect_programs(&game.router).unwrap();
+    assert_eq!(
+        programs
+            .iter()
+            .map(|(name, program)| (name.as_str(), program.control))
+            .collect::<Vec<_>>(),
+        [
+            ("extra.kcs", 13),
+            ("kcs.int/main.kcs", 12),
+            ("other.int/secondary.kcs", 5)
+        ]
+    );
+    assert_eq!(
+        support::inspect_program(&mut game.router, b"main")
+            .unwrap()
+            .unwrap()
+            .control,
+        12
+    );
+    assert_eq!(
+        support::inspect_program(&mut game.router, b"other.int/secondary.KCS")
+            .unwrap()
+            .unwrap()
+            .control,
+        5
+    );
     for mode in [
         ResourceMode::File,
         ResourceMode::LooseFirst,

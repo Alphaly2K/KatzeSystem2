@@ -13,7 +13,6 @@ pub(crate) fn inspect_runtime(
     mut game: support::Game,
     frames: u32,
 ) -> std::result::Result<(), Box<dyn std::error::Error>> {
-    let programs = support::inspect_programs(&mut game.router)?;
     if let Some(name) = std::env::var_os("KATZE_PROBE_LIST") {
         let name = name.to_string_lossy().into_owned();
         if let Some(archive) = game.router.archives.get(&name) {
@@ -158,7 +157,7 @@ pub(crate) fn inspect_runtime(
             .map_or((range, range), |(from, to)| (from, to));
         let (from, to): (usize, usize) =
             (from.parse().unwrap_or(0), to.parse().unwrap_or(usize::MAX));
-        if let Some(program) = programs.get(&name.to_ascii_lowercase()) {
+        if let Some(program) = support::inspect_program(&mut game.router, name.as_bytes())? {
             for instruction in program
                 .instructions()
                 .iter()
@@ -187,17 +186,15 @@ pub(crate) fn inspect_runtime(
                     .collect()
             },
         );
+        let programs = support::inspect_programs(&game.router)?;
+        println!("扫描脚本 {}", programs.len());
         for (name, program) in &programs {
-            if !name.ends_with(".kcs") {
-                continue;
-            }
             let instructions = program.instructions();
             for (position, instruction) in instructions.iter().enumerate() {
                 if instruction.opcode == 0x2b
-                    && instruction
-                        .operands
-                        .first()
-                        .is_some_and(|operand| wanted.contains(&operand.payload))
+                    && instruction.operands.first().is_some_and(|operand| {
+                        operand.flags == 3 && wanted.contains(&operand.payload)
+                    })
                 {
                     let first = instruction.operands.first().unwrap().payload;
                     let start = position.saturating_sub(6);
@@ -220,20 +217,10 @@ pub(crate) fn inspect_runtime(
             }
         }
     }
-    let start_file = game
-        .start
-        .rsplit('/')
-        .next()
-        .unwrap_or(&game.start)
-        .to_ascii_lowercase();
-    let start_instructions = programs
-        .get(&start_file)
-        .or_else(|| {
-            let stem = start_file.trim_end_matches(".kcs").to_string();
-            programs.get(&stem)
-        })
-        .map(|program| program.instructions().to_vec())
-        .unwrap_or_default();
+    let startup_program = support::inspect_program(&mut game.router, game.start.as_bytes())?;
+    let start_instructions = startup_program
+        .as_ref()
+        .map_or(&[][..], |program| program.instructions());
     println!(
         "启动指令 {} 末偏移 {:?}",
         start_instructions.len(),

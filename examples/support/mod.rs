@@ -20,7 +20,10 @@ use katze_system2::{
     resource::{KifEntrySource, XmlDocument},
     session::GameSetup,
 };
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 mod archive_list;
 mod configuration;
@@ -319,10 +322,8 @@ impl Router {
 
     fn open_name(&mut self, name: &str, mode: ResourceMode) -> Result<Option<SharedSource>> {
         let inner = name.rsplit('/').next().unwrap_or(name);
-        for patch in &mut self.patches {
-            if let Some(bytes) = patch.open_source(inner)? {
-                return Ok(Some(bytes));
-            }
+        if let Some(source) = self.open_patch(inner)? {
+            return Ok(Some(source));
         }
         if mode == ResourceMode::File {
             return Ok(open_file(std::path::Path::new(&self.root).join(name)));
@@ -358,6 +359,15 @@ impl Router {
                 mode,
                 mode == ResourceMode::LooseFirst || !directory.is_empty(),
             )? {
+                return Ok(Some(source));
+            }
+        }
+        Ok(None)
+    }
+
+    fn open_patch(&self, name: &str) -> Result<Option<SharedSource>> {
+        for patch in &self.patches {
+            if let Some(source) = patch.open_source(name)? {
                 return Ok(Some(source));
             }
         }
@@ -565,35 +575,44 @@ pub fn load_game(root: &str) -> std::result::Result<Game, Box<dyn std::error::Er
 }
 
 #[allow(dead_code)]
-pub fn inspect_programs(router: &mut Router) -> Result<BTreeMap<String, Program>> {
+pub fn inspect_program(router: &mut Router, name: &[u8]) -> Result<Option<Program>> {
+    let name = router.resolve(b"kcs", name)?;
+    let bytes = router.read(&name, ResourceMode::ArchiveFirst)?;
+    bytes.as_deref().map(Program::parse).transpose()
+}
+
+#[allow(dead_code)]
+pub fn inspect_programs(router: &Router) -> Result<BTreeMap<String, Program>> {
+    let is_script = |name: &str| {
+        name.rsplit_once('.')
+            .is_some_and(|(_, extension)| extension.eq_ignore_ascii_case("kcs"))
+    };
     let mut programs = BTreeMap::new();
-    if let Some(archive) = router.archives.get("kcs.int") {
-        let mut names: std::collections::BTreeSet<String> = archive
-            .entries()
-            .map(|(name, _, _, _)| name.to_string())
-            .collect();
-        for patch in &router.patches {
-            names.extend(
-                patch
-                    .entries()
-                    .filter(|(name, _, _, _)| name.ends_with(".kcs"))
-                    .map(|(name, _, _, _)| name.to_string()),
-            );
-        }
-        for name in names {
-            let Some(data) =
-                router.read_name(&format!("kcs.int/{name}"), ResourceMode::ArchiveFirst)?
-            else {
-                continue;
+    let mut mounted_names = BTreeSet::new();
+    for (prefix, archive) in &router.archives {
+        for (name, _, _, _) in archive.entries().filter(|entry| is_script(entry.0)) {
+            let basename = name.to_ascii_lowercase();
+            let path = format!("{prefix}/{basename}");
+            let source = match router.open_patch(name)? {
+                Some(source) => Some(source),
+                None => archive.open_source(name)?,
             };
-            let Ok(program) = Program::parse(&data) else {
-                continue;
-            };
-            programs.insert(name.to_ascii_lowercase(), program.clone());
-            programs.insert(name.trim_end_matches(".kcs").to_ascii_lowercase(), program);
+            let source = source.ok_or_else(|| Error::new(0, format!("脚本 {path} 不可读")))?;
+            programs.insert(path, Program::parse(&read_source(source)?)?);
+            mounted_names.insert(basename);
         }
     }
-    println!("脚本 {}", programs.len());
+    for patch in &router.patches {
+        for (name, _, _, _) in patch.entries().filter(|entry| is_script(entry.0)) {
+            let basename = name.to_ascii_lowercase();
+            if mounted_names.insert(basename.clone()) {
+                let source = router
+                    .open_patch(name)?
+                    .ok_or_else(|| Error::new(0, format!("补丁脚本 {name} 不可读")))?;
+                programs.insert(basename, Program::parse(&read_source(source)?)?);
+            }
+        }
+    }
     Ok(programs)
 }
 

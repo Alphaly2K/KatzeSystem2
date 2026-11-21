@@ -116,6 +116,8 @@ FES 的 `m2body` 指令通过 `ModelPlayer::set_body_options` 交给当前播放
 
 默认工作区包 `katze-system2` 发布为库。离屏宿主入口是 `cargo run --release --example runprobe -- "$GAME_DIR"`；需要 MPEG 解码时加入 `--features builtin-mpeg`，或使用上述 FFmpeg 模式。普通运行直接使用 `GameRuntime`，每轮消费内存 PCM 以推进播放时钟。可用 `KATZE_PROBE_SHOT` 输出终帧，并用 `KATZE_PROBE_AUDIO_STATS=1` 显示采样统计。 `KATZE_PROBE_SOUND=0,1` 记录指定物理声道的播放、音量变化和停止，`all` 记录所有声道。 `KATZE_PROBE_DETACHED_MIXER=1` 使用与设备回调相同的独立混音器，将输出写入内存。同一示例的自动回放和 VM 检查由辅助模块通过任务接口执行。 设置 `KATZE_PROBE_SHARED` 为 `起始槽:数量` 可在 `KATZE_PROBE_DUMP` 指定的轮次查看连续的共享数值槽。使用 `KATZE_PROBE_NATURAL_MOVIES=1` 时，自动点击和 Ctrl 快进在独占电影装载后暂停，直到脚本释放电影。脚本检查工具和桌面宿主是单独的仓库内包，分别通过 `cargo run -p katze-script -- ...` 和 `cargo run -p katze-desktop --bin window_startup -- "$GAME_DIR"` 执行。桌面宿主默认启用 MPEG 解码，桌面输入的合成验证用 `cargo test -p katze-desktop --test window_host`。
 
+`KATZE_PROBE_SCAN` 接受逗号分隔的 native 编号，扫描挂载归档与补丁中的 KCS。结果按归档标记调用位置，调用编号属于脚本使用的宿主表。将轮数设为 `0` 可省略逐帧回放。
+
 示例默认使用 CP932 解释脚本和姓名表。使用其他编码的汉化补丁时应设置 `KATZE_SCRIPT_ENCODING`，例如 GBK 补丁使用 `KATZE_SCRIPT_ENCODING=gbk`。其他宿主通过 `ResourceServices::script_encoding` 提供该设置。
 
 标准会话默认在调用线程解码。Vorbis 装载时准备完整 PCM，每个来源受 64 MiB 的 PCM 容量上限约束。电影随会话推进增量解码，内存混音在需要更多样本时也可以推进解码。设备回调只取已准备的 PCM。宿主可在启动前用 `set_media_decode_mode(DecodeMode::Threaded)` 开启后台电影解码和 Vorbis 预取。两个示例宿主均启用此模式。裸 WebAssembly 目标始终在调用线程解码。`ReadSource::read_at` 可能在后台调用，读取源须支持独立偏移与并发读取。
