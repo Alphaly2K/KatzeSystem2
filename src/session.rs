@@ -115,7 +115,8 @@ impl GameRuntime {
 
     /// Fill a stereo buffer with interleaved `f32` PCM in `[-1, 1]`. The sample
     /// rate is in Hz. This call may wait for decoding and is only available
-    /// while no separate mixer has been connected.
+    /// while no separate mixer has been connected. If the sound task has exited,
+    /// fill the buffer with silence.
     pub fn mix_audio_stereo(&mut self, sample_rate: u32, output: &mut [f32]) -> Result<()> {
         self.0.mix_audio_stereo(sample_rate, output)
     }

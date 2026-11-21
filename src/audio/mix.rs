@@ -18,6 +18,13 @@ impl Resampler {
     }
 }
 
+pub(crate) fn validate_stereo_output(sample_rate: u32, samples: usize) -> Result<()> {
+    if sample_rate == 0 || !samples.is_multiple_of(2) || samples > read::MAX_BYTES / 4 {
+        return Err(Error::new(0, "声音混音输出格式或容量无效"));
+    }
+    Ok(())
+}
+
 impl SoundState {
     /// 覆写交错立体声浮点采样，应用通道音量和声像并推进播放位置。
     /// 采样率转换使用连续线性插值；调用方按设备消费速度请求采样。
@@ -30,10 +37,7 @@ impl SoundState {
         if self.output.is_some() {
             return Err(Error::new(0, "声音采样已交给独立混音器"));
         }
-        if sample_rate == 0 || !output.len().is_multiple_of(2) || output.len() > read::MAX_BYTES / 4
-        {
-            return Err(Error::new(0, "声音混音输出格式或容量无效"));
-        }
+        validate_stereo_output(sample_rate, output.len())?;
         output.fill(0.0);
         for sound in &mut self.channels {
             let Some(pcm) = &sound.source else { continue };

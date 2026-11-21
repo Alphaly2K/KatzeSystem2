@@ -1394,6 +1394,12 @@ fn game_runtime_boots_the_standard_tasks_and_supplies_the_first_frame_clock() ->
     let vm = runtime.object(tasks.entry).unwrap().interpreter().unwrap();
     assert_eq!(vm.read(0, 4)?.as_ref(), 42_000u32.to_le_bytes());
     assert_eq!(vm.read(0x8000_0000, 4)?.as_ref(), [0x55; 4]);
+    runtime.destroy(tasks.sound)?;
+    pcm.fill(1.0);
+    assert!(runtime.mix_audio_stereo(48_000, &mut pcm[..3]).is_err());
+    assert_eq!(pcm, [1.0; 4]);
+    runtime.mix_audio_stereo(48_000, &mut pcm)?;
+    assert_eq!(pcm, [0.0; 4]);
     Ok(())
 }
 

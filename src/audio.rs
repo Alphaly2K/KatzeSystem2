@@ -23,6 +23,7 @@ pub use channel::SoundChannel;
 pub use config::{SoundConfig, SoundPart};
 pub use decoder::VorbisDecoder;
 pub use groups::{SoundGroup, SoundGroups};
+pub(crate) use mix::validate_stereo_output;
 pub use output::Mixer;
 pub use pcm::{decode_vorbis, decode_vorbis_source};
 pub use source::Source;

@@ -161,7 +161,13 @@ impl<L: ProgramLoader> TaskRuntime<L> {
 
     /// Fill a buffer with interleaved stereo `f32` PCM using the game mixer.
     /// See [`Runtime::mix_task_audio_stereo`] for buffer and timing requirements.
+    /// A session without its sound task produces silence.
     pub fn mix_audio_stereo(&mut self, sample_rate: u32, output: &mut [f32]) -> Result<()> {
+        if self.object(SOUND_TASK).is_none() {
+            crate::audio::validate_stereo_output(sample_rate, output.len())?;
+            output.fill(0.0);
+            return Ok(());
+        }
         self.mix_task_audio_stereo(SOUND_TASK, sample_rate, output)
     }
 
