@@ -32,19 +32,24 @@ enum Update {
     Swap(usize, usize),
 }
 
+type MixerReturn = Arc<Mutex<Option<Box<ConnectedMixer>>>>;
+
 pub(super) struct Link {
-    connection: Arc<()>,
+    returned: MixerReturn,
     sender: mpsc::Sender<Update>,
     progress: [Arc<Mutex<Status>>; 64],
     gains: [[i32; 2]; 64],
 }
 
 /// A PCM consumer that the host can move to an audio thread. Rendering does
-/// not access the session or wait for decoded data.
-pub struct Mixer(Option<ConnectedMixer>);
+/// not access the session or wait for decoded data. Dropping a connected mixer
+/// lets the session resume consumption from its current playback position.
+pub struct Mixer {
+    connected: Option<Box<ConnectedMixer>>,
+    returned: MixerReturn,
+}
 
 struct ConnectedMixer {
-    connection: Arc<()>,
     sound: SoundState,
     receiver: mpsc::Receiver<Update>,
     progress: [Arc<Mutex<Status>>; 64],
@@ -55,11 +60,12 @@ impl SoundState {
     /// Transfer PCM consumption to a mixer. The sound task continues to control
     /// the channels and query playback progress.
     pub fn connect_output(&mut self) -> Result<Mixer> {
+        self.restore_returned_output()?;
         if self.output.is_some() {
             return Err(Error::new(0, "声音输出已连接"));
         }
         let (sender, receiver) = mpsc::channel();
-        let connection = Arc::new(());
+        let returned = Arc::new(Mutex::new(None));
         let progress = std::array::from_fn(|index| {
             let channel = &self.channels[index];
             Arc::new(Mutex::new(Status {
@@ -83,7 +89,7 @@ impl SoundState {
             channel.progress = Some(progress.clone());
         }
         self.output = Some(Link {
-            connection: connection.clone(),
+            returned: returned.clone(),
             sender,
             progress: progress.clone(),
             gains: self
@@ -91,13 +97,15 @@ impl SoundState {
                 .each_ref()
                 .map(|channel| [channel.pcm_volume, channel.pcm_pan]),
         });
-        Ok(Mixer(Some(ConnectedMixer {
-            connection,
-            sound,
-            receiver,
-            progress,
-            generations: [0; 64],
-        })))
+        Ok(Mixer {
+            connected: Some(Box::new(ConnectedMixer {
+                sound,
+                receiver,
+                progress,
+                generations: [0; 64],
+            })),
+            returned,
+        })
     }
 
     /// Take back PCM consumption from this sound state's mixer. Returns an
@@ -108,20 +116,39 @@ impl SoundState {
             .output
             .as_ref()
             .ok_or_else(|| Error::new(0, "声音输出未连接"))?;
+        let belongs_to_output = Arc::ptr_eq(&link.returned, &mixer.returned);
         let connected = mixer
-            .0
+            .connected
             .as_mut()
-            .filter(|connected| Arc::ptr_eq(&link.connection, &connected.connection))
+            .filter(|_| belongs_to_output)
             .ok_or_else(|| Error::new(0, "混音器不属于此声音输出连接"))?;
         connected.apply_controls()?;
-        let mut connected = mixer.0.take().unwrap();
+        self.restore_from_mixer(connected);
+        mixer.connected = None;
+        Ok(())
+    }
+
+    pub(super) fn restore_returned_output(&mut self) -> Result<()> {
+        let Some(link) = &self.output else {
+            return Ok(());
+        };
+        let returned = link.returned.clone();
+        let mut pending = returned.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(connected) = pending.as_mut() {
+            connected.apply_controls()?;
+            self.restore_from_mixer(connected);
+            *pending = None;
+        }
+        Ok(())
+    }
+
+    fn restore_from_mixer(&mut self, connected: &mut ConnectedMixer) {
         self.output = None;
         for (channel, mixed) in self.channels.iter_mut().zip(&mut connected.sound.channels) {
             channel.playback = std::mem::take(&mut mixed.playback);
             channel.resampler = std::mem::take(&mut mixed.resampler);
             channel.progress = None;
         }
-        Ok(())
     }
 
     pub(super) fn output_action(&self, channel: usize, action: Action) {
@@ -214,8 +241,11 @@ impl SoundState {
         }
     }
 
-    pub(super) fn sync_output(&mut self) {
-        let Some(link) = &self.output else { return };
+    pub(super) fn sync_output(&mut self) -> Result<()> {
+        self.restore_returned_output()?;
+        let Some(link) = &self.output else {
+            return Ok(());
+        };
         for (channel, progress) in self.channels.iter_mut().zip(&link.progress) {
             let status = progress.lock().unwrap_or_else(|error| error.into_inner());
             channel.playback.playing = status.playing;
@@ -223,6 +253,7 @@ impl SoundState {
             channel.playback.remaining = status.remaining;
             channel.playback.completed = status.completed;
         }
+        Ok(())
     }
 
     pub(super) fn output_gains(&mut self) {
@@ -246,7 +277,7 @@ impl Mixer {
     /// output must contain an even number of samples. Does not wait for decoded data.
     pub fn render(&mut self, sample_rate: u32, output: &mut [f32]) -> Result<()> {
         let connected = self
-            .0
+            .connected
             .as_mut()
             .ok_or_else(|| Error::new(0, "混音器已断开连接"))?;
         connected.apply_controls()?;
@@ -331,12 +362,11 @@ impl ConnectedMixer {
     }
 }
 
-impl Drop for ConnectedMixer {
+impl Drop for Mixer {
     fn drop(&mut self) {
-        for progress in &self.progress {
-            if let Ok(mut status) = progress.try_lock() {
-                status.playing = false;
-            }
+        if let Some(connected) = self.connected.take() {
+            let mut pending = self.returned.lock().unwrap_or_else(|e| e.into_inner());
+            *pending = Some(connected);
         }
     }
 }

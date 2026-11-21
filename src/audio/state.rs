@@ -149,6 +149,7 @@ impl SoundState {
 
     /// 读取物理通道的源格式采样并推进位置；空闲及结束后的部分补零。
     pub fn read_channel(&mut self, channel: u32, frames: usize) -> Result<Pcm> {
+        self.restore_returned_output()?;
         if self.output.is_some() {
             return Err(Error::new(0, "声音采样已交给独立混音器"));
         }
@@ -171,7 +172,7 @@ impl SoundState {
     }
 
     pub(super) fn update_idle(&mut self, now: u32, stereo: bool) -> Result<()> {
-        self.sync_output();
+        self.sync_output()?;
         let mut index = 0;
         while index < self.channels.len() {
             let channel = &mut self.channels[index];
@@ -364,7 +365,7 @@ impl SoundState {
     }
 
     pub(super) fn start(&mut self, channel: u32, count: u32, tick: u32, now: u32) -> Result<()> {
-        self.sync_output();
+        self.sync_output()?;
         if let Some(index) = self.property_channel(channel) {
             let sound = &mut self.channels[index];
             let fade = (sound.parameters[0] != 0).then_some(sound.parameters[1] as u32);
@@ -410,7 +411,7 @@ impl SoundState {
         tick: u32,
         now: u32,
     ) -> Result<()> {
-        self.sync_output();
+        self.sync_output()?;
         let Some(sound) = self.channels.get(channel as usize) else {
             return Ok(());
         };
@@ -482,7 +483,7 @@ impl SoundState {
     }
 
     pub(super) fn change_count(&mut self, channel: u32, count: u32) -> Result<()> {
-        self.sync_output();
+        self.sync_output()?;
         if let Some(index) = self.property_channel(channel) {
             let sound = &mut self.channels[index];
             if sound.source.is_some() {

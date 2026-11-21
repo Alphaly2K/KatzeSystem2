@@ -22,6 +22,7 @@ impl SoundState {
     /// 覆写交错立体声浮点采样，应用通道音量和声像并推进播放位置。
     /// 采样率转换使用连续线性插值；调用方按设备消费速度请求采样。
     pub fn mix_stereo(&mut self, sample_rate: u32, output: &mut [f32]) -> Result<()> {
+        self.restore_returned_output()?;
         self.mix(sample_rate, output, true)
     }
 

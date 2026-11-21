@@ -242,6 +242,66 @@ fn dynamic_groups_keep_first_parameters_and_removal_preserves_playback_progress(
 }
 
 #[test]
+fn dropping_a_mixer_allows_the_host_to_resume_pcm_consumption() -> Result<()> {
+    let (mut reference, _) = setup_with_groups(None, DecodeMode::Inline);
+    let (mut runtime, _) = setup_with_groups(None, DecodeMode::Inline);
+    for task in [&mut reference, &mut runtime] {
+        task.host_mut().sound_stereo = Some(1);
+        load(task, &mut record(5, 0, 0, b"audio/tone.ogg"))?;
+        task.dispatch_command(
+            0,
+            Command {
+                data: [5, 100, 0],
+                ..command(187, 5)
+            },
+        )?;
+        task.dispatch_command(0, command(183, 5))?;
+    }
+    drop(runtime.connect_task_audio_output(1)?);
+    let mut mixer = runtime.connect_task_audio_output(1)?;
+
+    let (mut expected, mut actual) = ([0.0; 192], [0.0; 192]);
+    reference.mix_task_audio_stereo(1, 48_000, &mut expected)?;
+    mixer.render(48_000, &mut actual)?;
+    assert_eq!(actual, expected);
+    assert!(expected.iter().any(|&sample| sample != 0.0));
+    for task in [&mut reference, &mut runtime] {
+        task.dispatch_command(
+            0,
+            Command {
+                data: [5, 2, 0],
+                ..command(219, 5)
+            },
+        )?;
+        task.dispatch_command(
+            0,
+            Command {
+                data: [5, (-20i32) as u32, 0],
+                ..command(190, 5)
+            },
+        )?;
+    }
+    std::thread::spawn(move || drop(mixer)).join().unwrap();
+    reference.mix_task_audio_stereo(1, 48_000, &mut expected)?;
+    runtime.mix_task_audio_stereo(1, 48_000, &mut actual)?;
+    assert_eq!(actual, expected);
+    assert_eq!(
+        audio(&runtime).channel(5)?.remaining_plays(),
+        audio(&reference).channel(5)?.remaining_plays()
+    );
+    let mut replacement = runtime.connect_task_audio_output(1)?;
+    reference.mix_task_audio_stereo(1, 48_000, &mut expected)?;
+    replacement.render(48_000, &mut actual)?;
+    assert_eq!(actual, expected);
+    runtime.disconnect_task_audio_output(1, &mut replacement)?;
+    assert!(replacement.render(48_000, &mut actual).is_err());
+    reference.mix_task_audio_stereo(1, 48_000, &mut expected)?;
+    runtime.mix_task_audio_stereo(1, 48_000, &mut actual)?;
+    assert_eq!(actual, expected);
+    Ok(())
+}
+
+#[test]
 fn volume_and_pan_ramps_share_time_and_immediate_settings_cancel_their_own_ramp() {
     let (mut runtime, _) = setup();
     load(&mut runtime, &mut record(5, 0, 0, b"audio/tone.ogg")).unwrap();

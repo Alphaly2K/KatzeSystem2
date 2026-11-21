@@ -98,7 +98,9 @@ impl GameRuntime {
     }
 
     /// Hand PCM consumption to a mixer that can run on the host's audio thread.
-    /// Call after startup. The host manages the device and its lifetime.
+    /// Call after startup. The host manages the device and its lifetime. If the
+    /// mixer is dropped, the session reclaims its playback state on the next
+    /// sound task update, mix or connection.
     pub fn connect_audio_output(&mut self) -> Result<Mixer> {
         self.0.connect_audio_output()
     }
