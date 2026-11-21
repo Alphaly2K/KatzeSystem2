@@ -31,6 +31,6 @@ impl Compositor {
             .target
             .as_ref()
             .ok_or_else(|| Error::new(0, "运行时未配置画布纹理输入"))?;
-        frame.render_into(output, Some(canvas))
+        output.draw_list(&frame, Some(canvas))
     }
 }

@@ -124,10 +124,11 @@ fn state(runtime: &mut Engine, target: u32) -> u32 {
 
 fn pixels(runtime: &mut Engine) -> RenderTarget {
     let mut image = RenderTarget::new([8, 6]).unwrap();
-    runtime
-        .compose_frame()
-        .unwrap()
-        .render_into(&mut image, runtime.drawing().target.as_ref())
+    image
+        .draw_list(
+            &runtime.compose_frame().unwrap(),
+            runtime.drawing().target.as_ref(),
+        )
         .unwrap();
     image
 }
@@ -177,8 +178,8 @@ fn blur_natives_preserve_depth_bands_and_reset_feedback_on_every_enable() {
         assert_eq!(second.pixel(5, 1), Some(0xff0000ff));
         assert_eq!(second.pixel(0, 0), Some(0xffffff00));
         let mut snapshot = RenderTarget::new([8, 6]).unwrap();
-        first
-            .render_into(&mut snapshot, runtime.drawing().target.as_ref())
+        snapshot
+            .draw_list(&first, runtime.drawing().target.as_ref())
             .unwrap();
         assert_eq!(snapshot.pixel(1, 1), Some(0xff00ff00));
         assert_eq!(snapshot.pixel(5, 1), Some(0xffff0000));

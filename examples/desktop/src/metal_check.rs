@@ -19,7 +19,7 @@ fn main() {
 #[cfg(target_os = "macos")]
 fn check() -> Result<(), Box<dyn std::error::Error>> {
     use katze_system2::graphics::{
-        DrawList, FrameCanvas, FrameTexture, FrameTriangle, GraphicsBackend, ProjectedVertex, Rect,
+        DrawList, FrameTexture, FrameTriangle, GraphicsBackend, ProjectedVertex, Rect,
         RenderTarget, SoftwareBackend, Surface, TextureFilter, TextureSource,
     };
     use renderer::Renderer;
@@ -208,9 +208,8 @@ fn check() -> Result<(), Box<dyn std::error::Error>> {
                 commands: triangles.clone(),
                 filter,
             };
-            let expected =
-                SoftwareBackend.render(&frame, &mut FrameCanvas::new(&mut canvas), [32, 24])?;
-            let actual = renderer.render(&frame, &mut FrameCanvas::new(&mut canvas), [32, 24])?;
+            let expected = SoftwareBackend.render(&frame, &mut canvas.frame_canvas(), [32, 24])?;
+            let actual = renderer.render(&frame, &mut canvas.frame_canvas(), [32, 24])?;
             for (index, (&actual, &expected)) in
                 actual.pixels().iter().zip(expected.pixels()).enumerate()
             {
@@ -253,9 +252,8 @@ fn check() -> Result<(), Box<dyn std::error::Error>> {
             commands: commands.to_vec(),
             filter,
         };
-        let expected =
-            SoftwareBackend.render(&frame, &mut FrameCanvas::new(&mut canvas), [8, 6])?;
-        let actual = renderer.render(&frame, &mut FrameCanvas::new(&mut canvas), [8, 6])?;
+        let expected = SoftwareBackend.render(&frame, &mut canvas.frame_canvas(), [8, 6])?;
+        let actual = renderer.render(&frame, &mut canvas.frame_canvas(), [8, 6])?;
         assert_eq!(
             actual.pixels(),
             expected.pixels(),
@@ -266,7 +264,7 @@ fn check() -> Result<(), Box<dyn std::error::Error>> {
     let triangles = &cases[6];
     let before = renderer.render_offscreen(
         triangles,
-        &mut FrameCanvas::new(&mut canvas),
+        &mut canvas.frame_canvas(),
         [32, 24],
         TextureFilter::Point,
     )?;
@@ -274,7 +272,7 @@ fn check() -> Result<(), Box<dyn std::error::Error>> {
         before,
         renderer.render_offscreen(
             triangles,
-            &mut FrameCanvas::new(&mut canvas),
+            &mut canvas.frame_canvas(),
             [32, 24],
             TextureFilter::Point
         )?
@@ -284,7 +282,7 @@ fn check() -> Result<(), Box<dyn std::error::Error>> {
     canvas.copy_surface(&replacement, replacement.bounds(), [0, 0]);
     let after = renderer.render_offscreen(
         triangles,
-        &mut FrameCanvas::new(&mut canvas),
+        &mut canvas.frame_canvas(),
         [32, 24],
         TextureFilter::Point,
     )?;
@@ -295,7 +293,7 @@ fn check() -> Result<(), Box<dyn std::error::Error>> {
         after,
         renderer.render_offscreen(
             triangles,
-            &mut FrameCanvas::new(&mut canvas),
+            &mut canvas.frame_canvas(),
             [32, 24],
             TextureFilter::Point
         )?
@@ -306,15 +304,15 @@ fn check() -> Result<(), Box<dyn std::error::Error>> {
         commands: triangles.to_vec(),
         filter: TextureFilter::Point,
     };
-    let rebuilt = renderer.render(&frame, &mut FrameCanvas::new(&mut canvas), [32, 24])?;
+    let rebuilt = renderer.render(&frame, &mut canvas.frame_canvas(), [32, 24])?;
     assert_ne!(rebuilt, after);
     assert_eq!(
         rebuilt,
-        SoftwareBackend.render(&frame, &mut FrameCanvas::new(&mut canvas), [32, 24])?
+        SoftwareBackend.render(&frame, &mut canvas.frame_canvas(), [32, 24])?
     );
     let before = renderer.render_offscreen(
         &independent,
-        &mut FrameCanvas::new(&mut canvas),
+        &mut canvas.frame_canvas(),
         [32, 24],
         TextureFilter::Point,
     )?;
@@ -331,7 +329,7 @@ fn check() -> Result<(), Box<dyn std::error::Error>> {
         .source = TextureSource::Image(changed);
     let after = renderer.render_offscreen(
         &independent,
-        &mut FrameCanvas::new(&mut canvas),
+        &mut canvas.frame_canvas(),
         [32, 24],
         TextureFilter::Point,
     )?;
@@ -340,7 +338,7 @@ fn check() -> Result<(), Box<dyn std::error::Error>> {
         after,
         renderer.render_offscreen(
             &independent,
-            &mut FrameCanvas::new(&mut canvas),
+            &mut canvas.frame_canvas(),
             [32, 24],
             TextureFilter::Point
         )?
@@ -348,14 +346,14 @@ fn check() -> Result<(), Box<dyn std::error::Error>> {
     drop(independent);
     let cleared = renderer.render_offscreen(
         &[],
-        &mut FrameCanvas::new(&mut canvas),
+        &mut canvas.frame_canvas(),
         [32, 24],
         TextureFilter::Point,
     )?;
     assert!(cleared.pixels().iter().all(|&byte| byte == 0));
     let resized = renderer.render_offscreen(
         &[],
-        &mut FrameCanvas::new(&mut canvas),
+        &mut canvas.frame_canvas(),
         [24, 32],
         TextureFilter::Point,
     )?;

@@ -1,7 +1,7 @@
 use katze_system2::graphics::{
-    Compositor, DrawCommand, DrawList, Drawable, Drawables, FrameCanvas, FrameTexture,
-    GraphicsBackend, ProjectedVertex, Projection, Rect, RenderTarget, SoftwareBackend, Surface,
-    TextureFilter, TextureSource, Vertex,
+    Compositor, DrawCommand, DrawList, Drawable, Drawables, FrameTexture, GraphicsBackend,
+    ProjectedVertex, Projection, Rect, RenderTarget, SoftwareBackend, Surface, TextureFilter,
+    TextureSource, Vertex,
 };
 use std::sync::Arc;
 
@@ -39,12 +39,11 @@ fn affine_uvs_keep_exact_texel_boundaries_across_both_halves_of_a_quad() {
         blend_mode: 0,
     });
     let mut target = RenderTarget::new([8, 6]).unwrap();
-    DrawList {
+    let frame = DrawList {
         commands: commands.to_vec(),
         filter: TextureFilter::Linear,
-    }
-    .render_into(&mut target, None)
-    .unwrap();
+    };
+    target.draw_list(&frame, None).unwrap();
     for y in 0..6 {
         for x in 0..8 {
             assert_eq!(
@@ -75,7 +74,7 @@ fn point_sampled_image_rectangle_preserves_pixels_at_native_size() {
         .compose(&projection, projection.matrix, TextureFilter::Point, None)
         .unwrap();
     let mut target = RenderTarget::new([13, 19]).unwrap();
-    frame.render_into(&mut target, None).unwrap();
+    target.draw_list(&frame, None).unwrap();
     for y in 0..19 {
         for x in 0..13 {
             assert_eq!(target.pixel(x, y), image.pixel(x, y), "pixel ({x}, {y})");
@@ -123,8 +122,8 @@ fn texture_filter_overrides_mix_point_and_linear_sampling_in_one_frame() {
         })
         .collect();
         let mut target = RenderTarget::new([12, 4]).unwrap();
-        DrawList { commands, filter }
-            .render_into(&mut target, None)
+        target
+            .draw_list(&DrawList { commands, filter }, None)
             .unwrap();
         assert_eq!(target.pixel(1, 1), Some(0xff0000ff));
         assert_eq!(target.pixel(5, 1), Some(0xff800080));
@@ -176,7 +175,7 @@ fn draw_commands_apply_all_blend_factors_after_texture_modulation() {
                 filter: TextureFilter::Point,
             };
             let output = backend
-                .render(&frame, &mut FrameCanvas::new(&mut canvas), [8, 8])
+                .render(&frame, &mut canvas.frame_canvas(), [8, 8])
                 .unwrap();
             assert_eq!(
                 output.pixel(3, 2),
@@ -187,7 +186,7 @@ fn draw_commands_apply_all_blend_factors_after_texture_modulation() {
                 vertex.color &= 0xffffff;
             }
             let output = backend
-                .render(&frame, &mut FrameCanvas::new(&mut canvas), [8, 8])
+                .render(&frame, &mut canvas.frame_canvas(), [8, 8])
                 .unwrap();
             assert_eq!(output.pixel(3, 2), Some(0xff607080));
         }
@@ -234,7 +233,7 @@ fn image_commands_hold_their_pixels_and_mix_with_canvas_textures() {
     Arc::make_mut(&mut image).clear(0xff00ff00);
     let mut backend = SoftwareBackend;
     let output = backend
-        .render(&copy, &mut FrameCanvas::new(&mut canvas), [8, 8])
+        .render(&copy, &mut canvas.frame_canvas(), [8, 8])
         .unwrap();
     for y in 0..8 {
         for x in 0..8 {
@@ -246,7 +245,7 @@ fn image_commands_hold_their_pixels_and_mix_with_canvas_textures() {
     }
     copy.commands[0].texture.as_mut().unwrap().source = TextureSource::Image(image);
     let changed = backend
-        .render(&copy, &mut FrameCanvas::new(&mut canvas), [8, 8])
+        .render(&copy, &mut canvas.frame_canvas(), [8, 8])
         .unwrap();
     assert_eq!(changed.pixel(1, 1), Some(0xff00ff00));
     assert_eq!(changed.pixel(6, 1), Some(0xff0000ff));
@@ -281,7 +280,7 @@ fn depth_clipping_keeps_visible_color_and_texture_interpolation() {
                 filter,
             };
             let reference = backend
-                .render(&frame, &mut FrameCanvas::new(&mut canvas), [8, 8])
+                .render(&frame, &mut canvas.frame_canvas(), [8, 8])
                 .unwrap();
             for (depth, visible) in [
                 ([-0.25; 3], 0),
@@ -300,7 +299,7 @@ fn depth_clipping_keeps_visible_color_and_texture_interpolation() {
                     };
                 }
                 let output = backend
-                    .render(&frame, &mut FrameCanvas::new(&mut canvas), [8, 8])
+                    .render(&frame, &mut canvas.frame_canvas(), [8, 8])
                     .unwrap();
                 for y in 0..8 {
                     for x in 0..8 {
@@ -327,7 +326,7 @@ fn depth_clipping_keeps_visible_color_and_texture_interpolation() {
                 vertex.rhw = [-1., 0., f32::NAN][index];
             }
             let empty = backend
-                .render(&frame, &mut FrameCanvas::new(&mut canvas), [8, 8])
+                .render(&frame, &mut canvas.frame_canvas(), [8, 8])
                 .unwrap();
             assert_eq!(empty.pixel(4, 4), Some(0));
         }
@@ -429,7 +428,7 @@ fn command_addressing_wraps_each_axis_and_filters_across_texture_seams() {
                 filter,
             };
             let output = SoftwareBackend
-                .render(&frame, &mut FrameCanvas::new(&mut canvas), [8, 8])
+                .render(&frame, &mut canvas.frame_canvas(), [8, 8])
                 .unwrap();
             assert_eq!(output.pixel(3, 2), Some(expected));
         }
@@ -455,7 +454,7 @@ fn command_addressing_wraps_each_axis_and_filters_across_texture_seams() {
             filter: TextureFilter::Linear,
         };
         let output = SoftwareBackend
-            .render(&frame, &mut FrameCanvas::new(&mut canvas), [8, 8])
+            .render(&frame, &mut canvas.frame_canvas(), [8, 8])
             .unwrap();
         assert_eq!(output.pixel(3, 2), Some(expected));
     }
@@ -475,7 +474,7 @@ fn command_addressing_wraps_each_axis_and_filters_across_texture_seams() {
         filter: TextureFilter::Point,
     };
     let output = SoftwareBackend
-        .render(&frame, &mut FrameCanvas::new(&mut canvas), [8, 8])
+        .render(&frame, &mut canvas.frame_canvas(), [8, 8])
         .unwrap();
     assert_eq!(output.pixel(0, 0), Some(0xffff0000));
     assert_eq!(output.pixel(3, 0), Some(0xff00ff00));
@@ -664,7 +663,7 @@ fn camera_crossing_triangles_keep_the_visible_exterior_and_zero_rhw_fallback() {
                 filter: TextureFilter::Point,
             };
             let reference = SoftwareBackend
-                .render(&frame, &mut FrameCanvas::new(&mut canvas), [8, 6])
+                .render(&frame, &mut canvas.frame_canvas(), [8, 6])
                 .unwrap();
             for zero in [vec![0, 1, 2], vec![0], vec![1], vec![2]] {
                 frame.commands[0].vertices = vertices;
@@ -673,7 +672,7 @@ fn camera_crossing_triangles_keep_the_visible_exterior_and_zero_rhw_fallback() {
                 }
                 assert_eq!(
                     SoftwareBackend
-                        .render(&frame, &mut FrameCanvas::new(&mut canvas), [8, 6])
+                        .render(&frame, &mut canvas.frame_canvas(), [8, 6])
                         .unwrap(),
                     reference
                 );
@@ -681,7 +680,7 @@ fn camera_crossing_triangles_keep_the_visible_exterior_and_zero_rhw_fallback() {
             frame.commands[0].vertices = vertices;
             frame.commands[0].vertices[0].rhw = -1.;
             let output = SoftwareBackend
-                .render(&frame, &mut FrameCanvas::new(&mut canvas), [8, 6])
+                .render(&frame, &mut canvas.frame_canvas(), [8, 6])
                 .unwrap();
             let mut tiled = RenderTarget::from_tiles(
                 [4, 3],
@@ -719,7 +718,7 @@ fn camera_crossing_triangles_keep_the_visible_exterior_and_zero_rhw_fallback() {
                 vertex.rhw = -1.;
             }
             let output = SoftwareBackend
-                .render(&frame, &mut FrameCanvas::new(&mut canvas), [8, 6])
+                .render(&frame, &mut canvas.frame_canvas(), [8, 6])
                 .unwrap();
             assert!(output.pixels().iter().all(|&v| v == 0));
             for (i, vertex) in frame.commands[0].vertices.iter_mut().enumerate() {
@@ -730,7 +729,7 @@ fn camera_crossing_triangles_keep_the_visible_exterior_and_zero_rhw_fallback() {
                 frame.commands[0].vertices.swap(1, 2);
             }
             let output = SoftwareBackend
-                .render(&frame, &mut FrameCanvas::new(&mut canvas), [8, 6])
+                .render(&frame, &mut canvas.frame_canvas(), [8, 6])
                 .unwrap();
             for y in 0..6 {
                 for x in 0..8 {
@@ -783,7 +782,12 @@ fn drawable_submission_interpolates_colors_without_a_texture() {
     let composited = SoftwareBackend
         .render(
             &frame,
-            &mut FrameCanvas::new(compositor.drawing_mut().target.as_mut().unwrap()),
+            &mut compositor
+                .drawing_mut()
+                .target
+                .as_mut()
+                .unwrap()
+                .frame_canvas(),
             [4, 4],
         )
         .unwrap();

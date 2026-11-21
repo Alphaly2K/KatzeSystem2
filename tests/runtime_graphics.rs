@@ -977,7 +977,7 @@ fn native_camera_depth_is_shared_across_tasks_and_frame_paths() {
     runtime.set_frame_view(view.clone(), parent, filter);
     let composed = runtime.compose_frame().unwrap();
     let mut expected = RenderTarget::new([48, 48]).unwrap();
-    assert!(composed.render_into(&mut expected, None).unwrap());
+    assert!(expected.draw_list(&composed, None).unwrap());
     assert_eq!(expected.pixel(30, 30), Some(u32::MAX));
 
     let mut output = RenderTarget::new([48, 48]).unwrap();

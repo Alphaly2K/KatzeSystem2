@@ -1,6 +1,6 @@
 //! Reference CPU renderer for hosts that need an offscreen backend.
 
-use super::{DrawList, FrameCanvas, GraphicsBackend, SequenceCapture, Surface, TextureSource};
+use super::{DrawList, FrameCanvas, GraphicsBackend, SequenceCapture, Surface};
 use crate::{
     Result,
     graphics::{RenderTarget, canvas_tile_bytes},
@@ -9,36 +9,15 @@ use crate::{
 mod commands;
 use commands::Target;
 
-impl TextureSource {
-    /// Resolve a texture against a software canvas. Session hosts can use
-    /// [`FrameCanvas::texture`] directly on the frame they receive.
-    pub fn surface<'a>(&'a self, canvas: &'a RenderTarget) -> Option<&'a Surface> {
-        self.resolve(canvas.tiles())
-    }
-}
-
-impl SequenceCapture<'_> {
-    #[doc(hidden)]
-    pub fn write_render_target(self, frame: &RenderTarget) -> Result<bool> {
-        self.write_frame(frame.size(), |x, y| frame.pixel(x, y))
+impl RenderTarget {
+    /// Draw over this tiled target without clearing it. A source canvas is
+    /// required only for commands referencing canvas tiles.
+    pub fn draw_list(&mut self, frame: &DrawList, canvas: Option<&RenderTarget>) -> Result<bool> {
+        frame.render_at(Target::Tiled(self), canvas.map(RenderTarget::tiles), [0; 2])
     }
 }
 
 impl DrawList {
-    /// Draw over an existing software target without clearing it. A source
-    /// canvas is required only for commands referencing canvas tiles.
-    pub fn render_into(
-        &self,
-        output: &mut RenderTarget,
-        canvas: Option<&RenderTarget>,
-    ) -> Result<bool> {
-        self.render_at(
-            Target::Tiled(output),
-            canvas.map(RenderTarget::tiles),
-            [0; 2],
-        )
-    }
-
     fn render_at(
         &self,
         mut output: Target<'_>,
@@ -187,10 +166,9 @@ mod tests {
         let mut serial = RenderTarget::new(size).unwrap();
         let mut surface = Surface::new(size).unwrap();
         let mut parallel = Surface::new(size).unwrap();
-        assert!(frame.render_into(&mut serial, Some(&canvas)).unwrap());
+        assert!(serial.draw_list(&frame, Some(&canvas)).unwrap());
         assert!(
-            SoftwareBackend::render_into(&frame, &FrameCanvas::new(&mut canvas), &mut surface)
-                .unwrap()
+            SoftwareBackend::render_into(&frame, &canvas.frame_canvas(), &mut surface).unwrap()
         );
         render_in_bands(&frame, canvas.tiles(), &mut parallel, 4).unwrap();
         assert_eq!(&surface, serial.tiles()[0].as_ref().unwrap());

@@ -27,7 +27,7 @@ impl<F: ObjectFactory> Runtime<F> {
             .target
             .as_mut()
             .ok_or_else(|| Error::new(0, "运行时未配置画布纹理输入"))?;
-        present(&frame, &mut FrameCanvas::new(canvas), capture)
+        present(&frame, &mut canvas.frame_canvas(), capture)
     }
 
     /// Access the draw list and canvas without submitting a presentation capture.

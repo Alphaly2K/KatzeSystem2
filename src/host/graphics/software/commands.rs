@@ -1,11 +1,11 @@
-use super::{RenderTarget, Surface, TextureSource};
+use super::{RenderTarget, Surface};
 use crate::{
     Error, Result,
     graphics::{
         Drawables, Projection,
         raster::{RasterState, needs_depth_clip},
     },
-    host::graphics::{DrawCommand, ProjectedVertex, TextureFilter},
+    host::graphics::{DrawCommand, ProjectedVertex, TextureFilter, TextureSource},
 };
 
 impl Drawables {

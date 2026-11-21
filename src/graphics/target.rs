@@ -64,19 +64,17 @@ pub(crate) fn canvas_tile_bytes(size: [u32; 2]) -> Result<usize> {
     Ok(bytes)
 }
 
-impl<'a> FrameCanvas<'a> {
-    /// Borrow a software canvas for standalone rendering outside a game session.
-    pub fn new(target: &'a mut RenderTarget) -> Self {
-        Self::from_tiles(
-            target.size,
-            &target.tiles,
-            &mut target.dirty,
-            (target.versions.id, &target.versions.revisions),
+impl RenderTarget {
+    /// Borrow this canvas as the input for standalone rendering.
+    pub fn frame_canvas(&mut self) -> FrameCanvas<'_> {
+        FrameCanvas::from_tiles(
+            self.size,
+            &self.tiles,
+            &mut self.dirty,
+            (self.versions.id, &self.versions.revisions),
         )
     }
-}
 
-impl RenderTarget {
     /// 创建一块零初始化的完整渲染面。
     pub fn new(size: [u32; 2]) -> Result<Self> {
         canvas_tile_bytes(size)?;

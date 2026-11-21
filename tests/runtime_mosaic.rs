@@ -111,8 +111,8 @@ fn native_mosaic_captures_both_scenes_preserves_foreground_and_releases_its_regi
         assert_eq!(state(&mut rt, id), 7);
         let frame = rt.compose_frame().unwrap();
         let mut output = RenderTarget::new([8, 6]).unwrap();
-        frame
-            .render_into(&mut output, rt.drawing().target.as_ref())
+        output
+            .draw_list(&frame, rt.drawing().target.as_ref())
             .unwrap();
         assert_eq!(output.pixel(0, 0), Some(0xff11_2233));
         assert_eq!(output.pixel(2, 2), Some(0xff55_7733));
@@ -130,17 +130,15 @@ fn native_mosaic_captures_both_scenes_preserves_foreground_and_releases_its_regi
         rt.update(8, 1).unwrap();
         assert_eq!(state(&mut rt, id), 0);
         let mut output = RenderTarget::new([8, 6]).unwrap();
-        rt.compose_frame()
-            .unwrap()
-            .render_into(&mut output, rt.drawing().target.as_ref())
+        output
+            .draw_list(&rt.compose_frame().unwrap(), rt.drawing().target.as_ref())
             .unwrap();
         assert_eq!(output.pixel(0, 0), Some(0xffab_cdef));
         rt.drawables_mut().set_color(100, 0xff33_4466, u32::MAX);
         rt.destroy(id).unwrap();
         let mut output = RenderTarget::new([8, 6]).unwrap();
-        rt.compose_frame()
-            .unwrap()
-            .render_into(&mut output, rt.drawing().target.as_ref())
+        output
+            .draw_list(&rt.compose_frame().unwrap(), rt.drawing().target.as_ref())
             .unwrap();
         assert_eq!(output.pixel(0, 0), Some(0xff33_4466));
     }
@@ -187,9 +185,8 @@ fn unavailable_targets_and_short_duration_leave_the_live_scene_visible() {
         );
         assert_eq!(state(&mut rt, id), 0);
         let mut output = RenderTarget::new([8, 6]).unwrap();
-        rt.compose_frame()
-            .unwrap()
-            .render_into(&mut output, rt.drawing().target.as_ref())
+        output
+            .draw_list(&rt.compose_frame().unwrap(), rt.drawing().target.as_ref())
             .unwrap();
         assert_eq!(
             output.pixel(0, 0),
@@ -231,9 +228,8 @@ fn fading_mosaic_captures_during_creation_then_blends_over_the_live_scene() {
             continue;
         }
         let mut output = RenderTarget::new([8, 6]).unwrap();
-        rt.compose_frame()
-            .unwrap()
-            .render_into(&mut output, rt.drawing().target.as_ref())
+        output
+            .draw_list(&rt.compose_frame().unwrap(), rt.drawing().target.as_ref())
             .unwrap();
         assert_eq!(output.pixel(0, 0), Some(0xff11_2233));
         rt.update(2, 1).unwrap();
@@ -245,8 +241,8 @@ fn fading_mosaic_captures_during_creation_then_blends_over_the_live_scene() {
                 .any(|command| command.vertices[0].color == 0xc0ff_ffff)
         );
         let mut output = RenderTarget::new([8, 6]).unwrap();
-        frame
-            .render_into(&mut output, rt.drawing().target.as_ref())
+        output
+            .draw_list(&frame, rt.drawing().target.as_ref())
             .unwrap();
         assert_eq!(output.pixel(0, 0), Some(0xd037_4c61));
         assert_eq!(state(&mut rt, id), 3);
@@ -254,9 +250,8 @@ fn fading_mosaic_captures_during_creation_then_blends_over_the_live_scene() {
         assert_eq!(state(&mut rt, id), 0);
         for _ in 0..2 {
             let mut output = RenderTarget::new([8, 6]).unwrap();
-            rt.compose_frame()
-                .unwrap()
-                .render_into(&mut output, rt.drawing().target.as_ref())
+            output
+                .draw_list(&rt.compose_frame().unwrap(), rt.drawing().target.as_ref())
                 .unwrap();
             assert_eq!(output.pixel(0, 0), Some(0xffab_cdef));
         }
@@ -290,8 +285,8 @@ fn shatter_uses_the_captured_scene_keeps_foreground_and_releases_its_target() {
         let frame = rt.compose_frame().unwrap();
 
         let mut output = RenderTarget::new([8, 6]).unwrap();
-        frame
-            .render_into(&mut output, rt.drawing().target.as_ref())
+        output
+            .draw_list(&frame, rt.drawing().target.as_ref())
             .unwrap();
         assert_eq!(output.pixel(0, 0), Some(0xff112233));
         assert_eq!(output.pixel(2, 2), Some(0xff557733));
@@ -299,16 +294,16 @@ fn shatter_uses_the_captured_scene_keeps_foreground_and_releases_its_target() {
     execute(&mut rt, &[(859, &[0, 0, 10f32.to_bits()])]);
     let frame = rt.compose_frame().unwrap();
     let mut output = RenderTarget::new([8, 6]).unwrap();
-    frame
-        .render_into(&mut output, rt.drawing().target.as_ref())
+    output
+        .draw_list(&frame, rt.drawing().target.as_ref())
         .unwrap();
     assert_eq!(output.pixel(0, 0), Some(0xffabcdef));
     rt.update(8, 1).unwrap();
     assert_eq!(state(&mut rt, id), 0);
     let frame = rt.compose_frame().unwrap();
     let mut output = RenderTarget::new([8, 6]).unwrap();
-    frame
-        .render_into(&mut output, rt.drawing().target.as_ref())
+    output
+        .draw_list(&frame, rt.drawing().target.as_ref())
         .unwrap();
     assert_eq!(output.pixel(0, 0), Some(0xffabcdef));
     assert_eq!(output.pixel(2, 2), Some(0xff557733));
@@ -317,8 +312,8 @@ fn shatter_uses_the_captured_scene_keeps_foreground_and_releases_its_target() {
     rt.drawables_mut().set_color(100, 0xff224466, u32::MAX);
     let frame = rt.compose_frame().unwrap();
     let mut output = RenderTarget::new([8, 6]).unwrap();
-    frame
-        .render_into(&mut output, rt.drawing().target.as_ref())
+    output
+        .draw_list(&frame, rt.drawing().target.as_ref())
         .unwrap();
     assert_eq!(output.pixel(0, 0), Some(0xffabcdef));
     rt.destroy(fading).unwrap();
@@ -326,8 +321,8 @@ fn shatter_uses_the_captured_scene_keeps_foreground_and_releases_its_target() {
     assert!(rt.compositor().auxiliary_targets().is_empty());
     let frame = rt.compose_frame().unwrap();
 
-    frame
-        .render_into(&mut output, rt.drawing().target.as_ref())
+    output
+        .draw_list(&frame, rt.drawing().target.as_ref())
         .unwrap();
     assert_eq!(output.pixel(0, 0), Some(0xff224466));
 }
@@ -367,9 +362,8 @@ fn page_flip_captures_refreshes_and_releases_the_scene_with_foreground_preserved
     rt.drawables_mut().set_base_point(101, [0., 0., 20.]);
     let render = |rt: &mut Engine| {
         let mut output = RenderTarget::new([8, 6]).unwrap();
-        rt.compose_frame()
-            .unwrap()
-            .render_into(&mut output, rt.drawing().target.as_ref())
+        output
+            .draw_list(&rt.compose_frame().unwrap(), rt.drawing().target.as_ref())
             .unwrap();
         output
     };
@@ -434,9 +428,8 @@ fn cell_flip_uses_both_captures_keeps_foreground_and_releases_the_targets() {
     rt.drawables_mut().set_base_point(101, [0., 0., 20.]);
     let render = |rt: &mut Engine| {
         let mut output = RenderTarget::new([8, 6]).unwrap();
-        rt.compose_frame()
-            .unwrap()
-            .render_into(&mut output, rt.drawing().target.as_ref())
+        output
+            .draw_list(&rt.compose_frame().unwrap(), rt.drawing().target.as_ref())
             .unwrap();
         output
     };
@@ -493,9 +486,8 @@ fn render_wipe_uses_image_wrappers_and_keeps_foreground_and_stopped_pixels() {
         );
         let render = |rt: &mut Engine| {
             let mut output = RenderTarget::new([8, 6]).unwrap();
-            rt.compose_frame()
-                .unwrap()
-                .render_into(&mut output, rt.drawing().target.as_ref())
+            output
+                .draw_list(&rt.compose_frame().unwrap(), rt.drawing().target.as_ref())
                 .unwrap();
             output
         };
@@ -641,9 +633,8 @@ fn fes_screen_transitions_hold_old_pixels_and_release_the_all_objects_wait() {
         };
         let render = |rt: &mut Engine| {
             let mut output = RenderTarget::new([8, 6]).unwrap();
-            rt.compose_frame()
-                .unwrap()
-                .render_into(&mut output, rt.drawing().target.as_ref())
+            output
+                .draw_list(&rt.compose_frame().unwrap(), rt.drawing().target.as_ref())
                 .unwrap();
             output
         };

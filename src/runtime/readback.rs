@@ -2,7 +2,7 @@ use super::Resources;
 use crate::{
     Error, Result,
     graphics::{Image, canvas_tile_bytes},
-    host::graphics::{FrameCanvas, Rect, Surface, render_readback},
+    host::graphics::{Rect, Surface, render_readback},
 };
 
 impl Resources {
@@ -67,7 +67,13 @@ impl Resources {
             return Err(Error::new(0, "宿主未配置脚本离屏绘制后端"));
         }
         let frame = self.compose_frame(Some(range))?;
-        let mut canvas = FrameCanvas::new(self.compositor.drawing.target.as_mut().unwrap());
+        let mut canvas = self
+            .compositor
+            .drawing
+            .target
+            .as_mut()
+            .unwrap()
+            .frame_canvas();
         let surface = render_readback(
             self.readback_backend.as_deref_mut().unwrap(),
             &frame,

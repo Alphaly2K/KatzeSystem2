@@ -692,7 +692,7 @@ fn plane_movie_handles_play_transform_mix_and_release_independently() {
             [[0., 0.], [1., 0.], [1., 1.]]
         );
         let mut drawn = RenderTarget::new([32; 2]).unwrap();
-        assert!(frame.render_into(&mut drawn, None).unwrap());
+        assert!(drawn.draw_list(&frame, None).unwrap());
         let mut direct = RenderTarget::new([32; 2]).unwrap();
         runtime
             .render_frame(

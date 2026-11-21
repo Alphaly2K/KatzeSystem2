@@ -15,7 +15,7 @@ impl<F: ObjectFactory> Runtime<F> {
         filter: TextureFilter,
     ) -> Result<bool> {
         let touched = if let Some(frame) = self.resources.movie_frame(output.size(), filter)? {
-            frame.render_into(output, self.resources.compositor.drawing.target.as_ref())?
+            output.draw_list(&frame, self.resources.compositor.drawing.target.as_ref())?
         } else {
             self.resources
                 .compositor
@@ -29,12 +29,14 @@ impl<F: ObjectFactory> Runtime<F> {
             filter,
         };
         self.resources.append_image_cursor(&mut overlay)?;
-        Ok(overlay.render_into(output, None)? || touched)
+        Ok(output.draw_list(&overlay, None)? || touched)
     }
 
     /// 为当前呈现帧执行连续 BMP 输出；未启用或绘图设备关闭时返回 false。
     /// 宿主在每次提交帧后调用一次。
     pub fn capture_sequence_frame(&mut self, frame: &RenderTarget) -> Result<bool> {
-        self.submit_sequence_capture(|capture| capture.write_render_target(frame))
+        self.submit_sequence_capture(|capture| {
+            capture.write_frame(frame.size(), |x, y| frame.pixel(x, y))
+        })
     }
 }
