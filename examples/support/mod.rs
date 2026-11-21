@@ -33,6 +33,7 @@ pub use font_sources::load_fonts;
 // The desktop example uses the picker; the offline probe only uses preselection.
 #[allow(dead_code)]
 pub mod image_import;
+mod model_host;
 mod movie_decoder;
 mod particle_host;
 
@@ -834,6 +835,9 @@ pub fn prepare_game(
     runtime.set_media_decode_mode(katze_system2::host::media::DecodeMode::Threaded);
     if let Some(host) = particle_host::ParticleHost::configured(&root) {
         runtime.set_effect_services(host);
+    }
+    if let Some(host) = model_host::ModelHost::configured() {
+        runtime.set_model_services(host);
     }
     runtime.set_graphics_backend(SoftwareBackend);
     if std::env::var_os("KATZE_FFMPEG_MOVIES").is_some() {
