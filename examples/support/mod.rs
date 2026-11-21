@@ -14,7 +14,7 @@ use katze_system2::{
         input::{ButtonSource, DeviceBinding, DeviceKeys},
         platform::{LocalDateTime, SystemServices},
         resources::{ArchiveConfig, ResourceMode, ResourceServices},
-        storage::{ConfigurationFile, FileServices, SaveServices, SharedSource},
+        storage::{ConfigurationFile, SharedSource},
     },
     kcs::Program,
     resource::{KifEntrySource, XmlDocument},
@@ -36,6 +36,8 @@ pub mod image_import;
 mod model_host;
 mod movie_decoder;
 mod particle_host;
+mod storage;
+use storage::{Files, Saves};
 
 const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
@@ -287,69 +289,6 @@ impl Archive {
     }
 }
 
-#[cfg(test)]
-mod archive_tests {
-    use super::*;
-    use blowfish::cipher::BlockEncrypt;
-
-    #[test]
-    fn indexed_archive_lookup_matches_exhaustive_decode_and_preserves_priority() {
-        let raw = [
-            decode(b"A_07/bCd.Hg3", 14),
-            decode(b"a_07/BcD.hg3", 5),
-            decode(b"A_08/bCd.Hg3", 14),
-            b"314.159".to_vec(),
-            decode(b"\xc3\xa9.XyZ", 3),
-            decode(b"\xffA\xe7\x8cB.ogg", 11),
-            decode(b"\xef\xbf\xbdA\xef\xbf\xbdB.ogg", 7),
-            decode(b"\xe7\x8c\xab.ogg", 19),
-            b"\xff\xff".to_vec(),
-        ];
-        let mut data = vec![0; 8 + (raw.len() + 1) * 72];
-        let seed = 23u32;
-        data[..4].copy_from_slice(b"KIF\0");
-        data[4..8].copy_from_slice(&((raw.len() + 1) as u32).to_le_bytes());
-        data[8..19].copy_from_slice(b"__key__.dat");
-        data[76..80].copy_from_slice(&seed.to_le_bytes());
-        let key = katze_system2::kcs::ScriptRandom::seeded(seed).next_integer();
-        let cipher = BlowfishLE::new_from_slice(&key.to_le_bytes()).unwrap();
-        for (entry, encrypted_name) in data[80..].chunks_exact_mut(72).zip(&raw) {
-            entry[..encrypted_name.len()].copy_from_slice(encrypted_name);
-            let block: &mut [u8; 8] = (&mut entry[64..72]).try_into().unwrap();
-            cipher.encrypt_block(block.into());
-        }
-        let archive = Archive::from_source(Arc::new(data)).unwrap();
-        let mut requests = vec![
-            "missing.hg3".to_string(),
-            "314.159".to_string(),
-            "\u{732b}.missing".to_string(),
-            "\u{fffd}".to_string(),
-        ];
-        for encrypted_name in &raw {
-            for shift in 0..52 {
-                let bytes = decode(encrypted_name, shift);
-                let name = String::from_utf8_lossy(&bytes);
-                requests.extend([name.to_ascii_uppercase(), name.to_ascii_lowercase()]);
-            }
-        }
-        for name in requests {
-            let expected = archive
-                .entries
-                .iter()
-                .rposition(|entry| entry.name.eq_ignore_ascii_case(&name))
-                .or_else(|| {
-                    raw.iter().position(|entry| {
-                        (0..52).any(|shift| {
-                            String::from_utf8_lossy(&decode(entry, shift))
-                                .eq_ignore_ascii_case(&name)
-                        })
-                    })
-                });
-            assert_eq!(archive.locate(&name), expected, "{name}");
-        }
-    }
-}
-
 fn open_file(path: impl AsRef<std::path::Path>) -> Option<SharedSource> {
     FileSource::open(path)
         .ok()
@@ -506,158 +445,6 @@ impl ResourceServices for Router {
             .replace('\\', "/");
         self.open_name(&name, mode)
     }
-}
-
-pub struct Saves {
-    pub root: String,
-}
-
-impl Saves {
-    fn path(&self, name: &[u8]) -> Result<std::path::PathBuf> {
-        let name = encoding_rs::SHIFT_JIS
-            .decode_without_bom_handling_and_without_replacement(name)
-            .ok_or_else(|| Error::new(0, "存档名称包含无效 CP932"))?
-            .replace('\\', "/");
-        Ok(std::path::Path::new(&self.root).join(name))
-    }
-
-    fn write_file(&self, name: &[u8], bytes: &[u8], preserve_time: bool) -> Result<bool> {
-        use std::io::Write;
-
-        let path = self.path(name)?;
-        let modified = if preserve_time {
-            std::fs::File::open(&path)
-                .ok()
-                .and_then(|file| file.metadata().ok()?.modified().ok())
-        } else {
-            None
-        };
-        let _ = std::fs::create_dir_all(&self.root);
-        let Ok(mut file) = std::fs::File::create(&path) else {
-            return Ok(false);
-        };
-        if file.write_all(bytes).is_err() {
-            drop(file);
-            let _ = std::fs::remove_file(path);
-            return Ok(false);
-        }
-        if let Some(modified) = modified {
-            // 原写入器忽略恢复时间的失败，返回值仍取决于完整写入。
-            let _ = file.set_times(std::fs::FileTimes::new().set_modified(modified));
-        }
-        Ok(true)
-    }
-}
-
-pub struct Files {
-    pub root: String,
-}
-
-impl FileServices for Files {
-    fn create_utf16(&mut self, _: u32, name: &[u16]) -> Result<Option<Box<dyn std::io::Write>>> {
-        let Ok(name) = String::from_utf16(name) else {
-            return Ok(None);
-        };
-        Ok(
-            std::fs::File::create(std::path::Path::new(&self.root).join(name.replace('\\', "/")))
-                .ok()
-                .map(|file| Box::new(file) as Box<dyn std::io::Write>),
-        )
-    }
-
-    fn create(&mut self, _: u32, name: &[u8]) -> Result<Option<Box<dyn std::io::Write>>> {
-        let Some(name) =
-            encoding_rs::SHIFT_JIS.decode_without_bom_handling_and_without_replacement(name)
-        else {
-            return Ok(None);
-        };
-        Ok(
-            std::fs::File::create(std::path::Path::new(&self.root).join(name.replace('\\', "/")))
-                .ok()
-                .map(|file| Box::new(file) as Box<dyn std::io::Write>),
-        )
-    }
-
-    fn append_line(&mut self, _: u32, name: &[u8], text: &[u8]) -> Result<()> {
-        use std::io::Write;
-
-        let Some(name) =
-            encoding_rs::SHIFT_JIS.decode_without_bom_handling_and_without_replacement(name)
-        else {
-            return Ok(());
-        };
-        let name = name.replace('\\', "/");
-        if let Ok(mut file) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(std::path::Path::new(&self.root).join(name))
-        {
-            let _ = file.write(text);
-            let _ = file.write(b"\r\n");
-        }
-        Ok(())
-    }
-}
-
-impl SaveServices for Saves {
-    fn read(&mut self, _: u32, name: &[u8]) -> Result<Option<Vec<u8>>> {
-        Ok(std::fs::read(self.path(name)?).ok())
-    }
-
-    fn write(&mut self, _: u32, name: &[u8], bytes: &[u8]) -> Result<bool> {
-        self.write_file(name, bytes, false)
-    }
-
-    fn write_preserving_time(&mut self, _: u32, name: &[u8], bytes: &[u8]) -> Result<bool> {
-        self.write_file(name, bytes, true)
-    }
-
-    fn remove(&mut self, _: u32, name: &[u8]) -> Result<bool> {
-        Ok(std::fs::remove_file(self.path(name)?).is_ok())
-    }
-
-    fn modified_time(&mut self, _: u32, name: &[u8]) -> Result<Option<u64>> {
-        let Ok(metadata) = std::fs::metadata(self.path(name)?) else {
-            return Ok(None);
-        };
-        let Ok(modified) = metadata.modified() else {
-            return Ok(None);
-        };
-        let Ok(elapsed) = modified.duration_since(std::time::UNIX_EPOCH) else {
-            return Ok(None);
-        };
-        Ok(Some(
-            elapsed.as_nanos() as u64 / 100 + 116_444_736_000_000_000,
-        ))
-    }
-
-    fn modified_date(&mut self, owner: u32, name: &[u8]) -> Result<Option<[u32; 6]>> {
-        self.modified_time(owner, name)?
-            .map(local_save_date)
-            .transpose()
-    }
-}
-
-fn local_save_date(file_time: u64) -> Result<[u32; 6]> {
-    let seconds = (i128::from(file_time) - 116_444_736_000_000_000i128) / 10_000_000;
-    use chrono::{Datelike, Timelike};
-    let seconds = i64::try_from(seconds).map_err(|_| Error::new(0, "存档修改时间超过日期范围"))?;
-    let date = chrono::DateTime::from_timestamp(seconds, 0)
-        .ok_or_else(|| Error::new(0, "存档本地日期转换失败"))?
-        .with_timezone(&chrono::Local);
-    let values = [
-        date.year(),
-        date.month() as i32,
-        date.day() as i32,
-        date.hour() as i32,
-        date.minute() as i32,
-        date.second() as i32,
-    ];
-    let mut result = [0; 6];
-    for (target, value) in result.iter_mut().zip(values) {
-        *target = u32::try_from(value).map_err(|_| Error::new(0, "存档本地日期字段超出范围"))?;
-    }
-    Ok(result)
 }
 
 pub fn local_date_time() -> LocalDateTime {
@@ -886,12 +673,75 @@ pub fn prepare_game(
     )?;
     runtime.load_startup_language_tables()?;
     runtime.set_fonts(load_fonts(&root));
-    runtime.set_file_services(Files { root });
+    runtime.set_file_services(Files { root: root.into() });
     runtime.set_save_services(Saves {
-        root: configuration_files.directory.to_string_lossy().into_owned(),
+        root: configuration_files.directory.clone(),
     });
     runtime.set_configuration_services(configuration_files);
     runtime.set_system_services(ProbeSystem);
     runtime.configure_canvas(surface)?;
     Ok((runtime, keys, surface))
+}
+
+#[cfg(test)]
+mod archive_tests {
+    use super::*;
+    use blowfish::cipher::BlockEncrypt;
+
+    #[test]
+    fn indexed_archive_lookup_matches_exhaustive_decode_and_preserves_priority() {
+        let raw = [
+            decode(b"A_07/bCd.Hg3", 14),
+            decode(b"a_07/BcD.hg3", 5),
+            decode(b"A_08/bCd.Hg3", 14),
+            b"314.159".to_vec(),
+            decode(b"\xc3\xa9.XyZ", 3),
+            decode(b"\xffA\xe7\x8cB.ogg", 11),
+            decode(b"\xef\xbf\xbdA\xef\xbf\xbdB.ogg", 7),
+            decode(b"\xe7\x8c\xab.ogg", 19),
+            b"\xff\xff".to_vec(),
+        ];
+        let mut data = vec![0; 8 + (raw.len() + 1) * 72];
+        let seed = 23u32;
+        data[..4].copy_from_slice(b"KIF\0");
+        data[4..8].copy_from_slice(&((raw.len() + 1) as u32).to_le_bytes());
+        data[8..19].copy_from_slice(b"__key__.dat");
+        data[76..80].copy_from_slice(&seed.to_le_bytes());
+        let key = katze_system2::kcs::ScriptRandom::seeded(seed).next_integer();
+        let cipher = BlowfishLE::new_from_slice(&key.to_le_bytes()).unwrap();
+        for (entry, encrypted_name) in data[80..].chunks_exact_mut(72).zip(&raw) {
+            entry[..encrypted_name.len()].copy_from_slice(encrypted_name);
+            let block: &mut [u8; 8] = (&mut entry[64..72]).try_into().unwrap();
+            cipher.encrypt_block(block.into());
+        }
+        let archive = Archive::from_source(Arc::new(data)).unwrap();
+        let mut requests = vec![
+            "missing.hg3".to_string(),
+            "314.159".to_string(),
+            "\u{732b}.missing".to_string(),
+            "\u{fffd}".to_string(),
+        ];
+        for encrypted_name in &raw {
+            for shift in 0..52 {
+                let bytes = decode(encrypted_name, shift);
+                let name = String::from_utf8_lossy(&bytes);
+                requests.extend([name.to_ascii_uppercase(), name.to_ascii_lowercase()]);
+            }
+        }
+        for name in requests {
+            let expected = archive
+                .entries
+                .iter()
+                .rposition(|entry| entry.name.eq_ignore_ascii_case(&name))
+                .or_else(|| {
+                    raw.iter().position(|entry| {
+                        (0..52).any(|shift| {
+                            String::from_utf8_lossy(&decode(entry, shift))
+                                .eq_ignore_ascii_case(&name)
+                        })
+                    })
+                });
+            assert_eq!(archive.locate(&name), expected, "{name}");
+        }
+    }
 }
