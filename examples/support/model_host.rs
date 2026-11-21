@@ -44,19 +44,8 @@ impl ModelServices for ModelHost {
             return Ok(None);
         };
         let packed = read_bounded(source.psz, MODEL_LIMIT)?;
-        let mut read_table = |name: Option<Vec<u8>>| -> Result<Vec<u8>> {
-            let Some(name) = name else {
-                return Ok(Vec::new());
-            };
-            let name = resources.resolve(b"m2config", &name)?;
-            resources
-                .open(&name, ResourceMode::LooseFirst)?
-                .map(|source| read_bounded(source, TABLE_LIMIT))
-                .transpose()
-                .map(Option::unwrap_or_default)
-        };
-        let expression = read_table(source.expression_config)?;
-        let body = read_table(source.body_config)?;
+        let expression = read_model_table(resources, source.expression_config.as_deref())?;
+        let body = read_model_table(resources, source.body_config.as_deref())?;
         let mut player = Player::spawn(&self.0)?;
         player.input.write_all(b"KMOD\x01").map_err(host_error)?;
         for bytes in [
@@ -184,6 +173,76 @@ impl Drop for Player {
     }
 }
 
+fn read_model_table(resources: &mut dyn ResourceServices, name: Option<&[u8]>) -> Result<Vec<u8>> {
+    let mut table = Vec::new();
+    if let Some(name) = name {
+        let mut remaining = TABLE_LIMIT;
+        append_model_table(resources, name, &mut Vec::new(), &mut remaining, &mut table)?;
+    }
+    Ok(table)
+}
+
+fn append_model_table(
+    resources: &mut dyn ResourceServices,
+    name: &[u8],
+    active: &mut Vec<Vec<u8>>,
+    remaining: &mut usize,
+    table: &mut Vec<u8>,
+) -> Result<()> {
+    if active.len() == 16 {
+        return Err(Error::new(0, "Model table include depth exceeds its limit"));
+    }
+    let path = resources.resolve(b"m2config", name)?;
+    if active
+        .iter()
+        .any(|parent| parent.eq_ignore_ascii_case(&path))
+    {
+        return Err(Error::new(0, "Model table includes itself"));
+    }
+    let Some(source) = resources.open(&path, ResourceMode::LooseFirst)? else {
+        if active.is_empty() {
+            return Ok(());
+        }
+        return Err(Error::new(0, "Model table include is missing"));
+    };
+    let bytes = read_bounded(source, *remaining)?;
+    *remaining -= bytes.len();
+    active.push(path);
+
+    let start = table.len();
+    let end = bytes
+        .iter()
+        .position(|&byte| byte == 0)
+        .unwrap_or(bytes.len());
+    let mut includes = false;
+    for line in bytes[..end].split_inclusive(|&byte| byte == b'\n') {
+        let comment = line.windows(2).position(|pair| pair == b"//");
+        let entry = line[..comment.unwrap_or(line.len())].trim_ascii();
+        if entry.starts_with(b"#") {
+            includes = entry.eq_ignore_ascii_case(b"#include");
+            if includes {
+                continue;
+            }
+        }
+        if !includes {
+            table.extend_from_slice(line);
+        } else if !entry.is_empty() {
+            let file = entry
+                .strip_prefix(b"\"")
+                .and_then(|entry| entry.strip_suffix(b"\""))
+                .unwrap_or(entry);
+            append_model_table(resources, file, active, remaining, table)?;
+        }
+    }
+    if active.len() == 1 {
+        table.extend_from_slice(&bytes[end..]);
+    } else if table.len() > start && table.last() != Some(&b'\n') {
+        table.push(b'\n');
+    }
+    active.pop();
+    Ok(())
+}
+
 fn read_bounded(source: SharedSource, limit: usize) -> Result<Vec<u8>> {
     let len = usize::try_from(source.len()?)
         .ok()
@@ -243,6 +302,63 @@ fn host_error(error: io::Error) -> Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct Tables<'a>(&'a [(&'a [u8], &'a [u8])]);
+
+    impl ResourceServices for Tables<'_> {
+        fn resolve(&mut self, category: &[u8], name: &[u8]) -> Result<Vec<u8>> {
+            assert_eq!(category, b"m2config");
+            Ok(name.to_ascii_lowercase())
+        }
+
+        fn read(&mut self, name: &[u8], mode: ResourceMode) -> Result<Option<Vec<u8>>> {
+            assert_eq!(mode, ResourceMode::LooseFirst);
+            Ok(self
+                .0
+                .iter()
+                .find(|(path, _)| *path == name)
+                .map(|(_, bytes)| bytes.to_vec()))
+        }
+    }
+
+    #[test]
+    fn model_tables_supply_included_sections_in_place() {
+        let mut resources = Tables(&[
+            (b"face.txt", b"#scale\r\n1\r\n#include\r\nbase.inc // comment\r\n#pattern\r\n%1 2\r\nsmile 1\0suffix"),
+            (b"base.inc", b"#include\n\"common.inc\"\n#dif\nsmile 0"),
+            (b"common.inc", b"#pattern\n%1 1\nsmile -1\0ignored"),
+        ]);
+        assert_eq!(
+            read_model_table(&mut resources, Some(b"face.txt")).unwrap(),
+            b"#scale\r\n1\r\n#pattern\n%1 1\nsmile -1\n#dif\nsmile 0\n#pattern\r\n%1 2\r\nsmile 1\0suffix",
+        );
+        assert!(
+            read_model_table(&mut resources, Some(b"missing.txt"))
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn model_tables_reject_include_cycles_and_missing_include_data() {
+        let mut resources = Tables(&[
+            (b"face.txt", b"#include\nbase.inc"),
+            (b"base.inc", b"#include\nFACE.TXT"),
+            (b"body.txt", b"#include\nunavailable.inc"),
+        ]);
+        assert!(
+            read_model_table(&mut resources, Some(b"face.txt"))
+                .unwrap_err()
+                .message
+                .contains("includes itself")
+        );
+        assert!(
+            read_model_table(&mut resources, Some(b"body.txt"))
+                .unwrap_err()
+                .message
+                .contains("is missing")
+        );
+    }
 
     #[test]
     fn model_open_negotiates_capabilities_without_reading_past_legacy_responses() {
