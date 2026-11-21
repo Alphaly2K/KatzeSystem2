@@ -38,7 +38,6 @@ impl MosaicObject {
         let image = available
             .then_some(&compositor.auxiliary_targets)
             .and_then(|targets| targets.get(index))
-            .and_then(|target| target.tiles()[0].as_ref())
             .cloned();
         self.ready = image.is_some();
         if let Some(image) = image {
@@ -95,7 +94,6 @@ impl TaskObject for MosaicObject {
         let image = available
             .then_some(&compositor.auxiliary_targets)
             .and_then(|targets| targets.first())
-            .and_then(|target| target.tiles()[0].as_ref())
             .cloned();
         compositor.auxiliary_targets.clear();
         self.ready = image.is_some();

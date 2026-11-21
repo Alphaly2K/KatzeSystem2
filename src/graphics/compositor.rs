@@ -1,5 +1,5 @@
-use super::{Drawables, DrawingContext, Projection, RenderTarget};
-use crate::host::graphics::{DrawList, FrameCanvas, GraphicsBackend, TextureFilter};
+use super::{Drawables, DrawingContext, Projection, canvas_tile_bytes};
+use crate::host::graphics::{DrawList, FrameCanvas, GraphicsBackend, Surface, TextureFilter};
 use crate::{Error, Result};
 
 #[derive(Clone, Copy)]
@@ -20,7 +20,7 @@ pub struct Compositor {
     pub(crate) drawables: Drawables,
     pub(crate) frame_view: Option<(Projection, [f32; 16], TextureFilter)>,
     camera_depth: Option<f32>,
-    pub(crate) auxiliary_targets: Vec<RenderTarget>,
+    pub(crate) auxiliary_targets: Vec<Surface>,
     pub(crate) mosaics: super::mosaic::Mosaics,
     pub(crate) shatters: super::shatter::Shatters,
     pub(crate) page_flips: std::collections::BTreeMap<u32, super::page_flip::PageFlip>,
@@ -54,8 +54,8 @@ impl Compositor {
         &mut self.drawables
     }
 
-    /// 按零起始编号保存的辅助绘制目标；独立于画布和单次画面捕获。
-    pub fn auxiliary_targets(&self) -> &[RenderTarget] {
+    /// Auxiliary readback surfaces in zero-based slot order.
+    pub fn auxiliary_targets(&self) -> &[Surface] {
         &self.auxiliary_targets
     }
 
@@ -72,8 +72,9 @@ impl Compositor {
         if maximum_size as i32 > 0 && size.iter().any(|&dimension| dimension > maximum_size) {
             return Ok(());
         }
+        canvas_tile_bytes(size)?;
         for _ in 0..count {
-            self.auxiliary_targets.push(RenderTarget::new(size)?);
+            self.auxiliary_targets.push(Surface::new(size)?);
         }
         Ok(())
     }

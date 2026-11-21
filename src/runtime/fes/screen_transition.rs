@@ -1,5 +1,5 @@
 use super::{ObjectState, Objects, Scene};
-use crate::graphics::RenderTarget;
+use crate::host::graphics::Surface;
 use crate::runtime::{ObjectFactory, Store, create_object, kind, route_with_buffers};
 use crate::task::{Command, CommandBuffers};
 use crate::{Error, Result, fes};
@@ -7,7 +7,7 @@ use crate::{Error, Result, fes};
 #[derive(Clone, Debug, PartialEq)]
 enum Capture {
     Pending,
-    Done(Option<RenderTarget>),
+    Done(Option<Surface>),
 }
 
 /// RDRAW 和 RWIPE 的捕获参数及媒体阶段。
@@ -135,7 +135,7 @@ impl<F: ObjectFactory> Store<'_, F> {
             .resolve(category, name)
     }
 
-    fn capture_fes_transition(&mut self, range: [f32; 2]) -> Result<Option<RenderTarget>> {
+    fn capture_fes_transition(&mut self, range: [f32; 2]) -> Result<Option<Surface>> {
         if self
             .host
             .platform_settings
@@ -153,9 +153,7 @@ impl<F: ObjectFactory> Store<'_, F> {
             return Ok(None);
         }
         self.resources
-            .readback_depth_frame(self.host.surface_size, range)?
-            .map(|frame| RenderTarget::from_tiles(frame.size(), [1, 1], vec![Some(frame)]))
-            .transpose()
+            .readback_depth_frame(self.host.surface_size, range)
     }
 
     pub(super) fn prepare_fes_screen_transition(

@@ -61,9 +61,6 @@ impl TaskObject for CellFlipObject {
                 .auxiliary_targets
                 .first()
                 .zip(compositor.auxiliary_targets.get(1))
-                .and_then(|(first, second)| {
-                    first.tiles()[0].as_ref().zip(second.tiles()[0].as_ref())
-                })
                 .map(|(first, second)| [Arc::new(first.clone()), Arc::new(second.clone())]);
             self.ready = images.is_some();
             if let Some(images) = images {

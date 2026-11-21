@@ -14,7 +14,7 @@ pub struct RenderTarget {
 
 const MAX_CANVAS_BYTES: usize = 128 * 1024 * 1024;
 
-fn canvas_tile_bytes(size: [u32; 2]) -> Result<usize> {
+pub(crate) fn canvas_tile_bytes(size: [u32; 2]) -> Result<usize> {
     let bytes = pixel_length(size)?;
     if bytes > MAX_CANVAS_BYTES {
         return Err(Error::new(0, "画布像素存储超过上限"));

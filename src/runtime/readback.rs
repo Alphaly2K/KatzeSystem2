@@ -1,7 +1,7 @@
 use super::Resources;
 use crate::{
     Error, Result,
-    graphics::{Image, RenderTarget},
+    graphics::{Image, RenderTarget, canvas_tile_bytes},
     host::graphics::{FrameCanvas, Rect, Surface, render_readback},
 };
 
@@ -30,35 +30,26 @@ impl Resources {
         let Some(frame) = self.readback_depth_frame(size, range)? else {
             return Ok(false);
         };
-        let frame = RenderTarget::from_tiles(size, [1, 1], vec![Some(frame)])?;
-        if index == 0 && !self.compositor.shatters.entries.is_empty() {
-            let image = frame.tiles()[0].as_ref().cloned().map(std::sync::Arc::new);
-            for effect in self.compositor.shatters.entries.values_mut() {
-                effect.source = image.clone();
-            }
-        }
-        if index == 0 && !self.compositor.page_flips.is_empty() {
-            if let Some(image) = frame.tiles()[0].as_ref() {
-                let image = std::sync::Arc::new(image.clone());
-                for effect in self.compositor.page_flips.values_mut() {
+        let compositor = &mut self.compositor;
+        let notify_first = index == 0
+            && (!compositor.shatters.entries.is_empty()
+                || !compositor.page_flips.is_empty()
+                || !compositor.render_draws.is_empty());
+        if notify_first || !compositor.cell_flips.is_empty() {
+            let image = std::sync::Arc::new(frame.clone());
+            if notify_first {
+                for effect in compositor.shatters.entries.values_mut() {
+                    effect.source = Some(image.clone());
+                }
+                for effect in compositor.page_flips.values_mut() {
                     effect.set_source(image.clone());
                 }
-            }
-        }
-        if index == 0 && !self.compositor.render_draws.is_empty() {
-            if let Some(image) = frame.tiles()[0].as_ref() {
-                let image = std::sync::Arc::new(image.clone());
-                for effect in self.compositor.render_draws.values_mut() {
+                for effect in compositor.render_draws.values_mut() {
                     effect.source = image.clone();
                 }
             }
-        }
-        if !self.compositor.cell_flips.is_empty() {
-            if let Some(image) = frame.tiles()[0].as_ref() {
-                let image = std::sync::Arc::new(image.clone());
-                for effect in self.compositor.cell_flips.values_mut() {
-                    effect.set_source(index as usize, image.clone());
-                }
+            for effect in compositor.cell_flips.values_mut() {
+                effect.set_source(index as usize, image.clone());
             }
         }
         self.compositor.auxiliary_targets[index as usize] = frame;
@@ -81,13 +72,14 @@ impl Resources {
         }
         let frame = self.compose_frame(Some(range))?;
         let mut canvas = FrameCanvas::new(self.compositor.drawing.target.as_mut().unwrap());
-        render_readback(
+        let surface = render_readback(
             self.readback_backend.as_deref_mut().unwrap(),
             &frame,
             &mut canvas,
             size,
-        )
-        .map(Some)
+        )?;
+        canvas_tile_bytes(size)?;
+        Ok(Some(surface))
     }
 
     pub fn capture_image(&mut self, size: [u32; 2], range: [f32; 2]) -> Result<Option<Image>> {

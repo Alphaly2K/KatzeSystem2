@@ -60,12 +60,7 @@ impl TaskObject for ShatterObject {
         self.ready = host.reserve_auxiliary_targets(1)?;
         if self.ready {
             let compositor = compositor(host)?;
-            let image = compositor
-                .auxiliary_targets
-                .first()
-                .and_then(|target| target.tiles()[0].as_ref())
-                .cloned()
-                .map(Arc::new);
+            let image = compositor.auxiliary_targets.first().cloned().map(Arc::new);
             self.ready = image.is_some();
             if let Some(image) = image {
                 compositor

@@ -153,12 +153,11 @@ impl TaskObject for RenderDrawObject {
     fn initialize_resources(&mut self, host: &mut dyn Host) -> Result<()> {
         if host.reserve_auxiliary_targets(1)? {
             let compositor = compositor(host)?;
-            if let Some(surface) = compositor.auxiliary_targets[0].tiles()[0].as_ref() {
-                compositor
-                    .render_draws
-                    .insert(self.id, RenderDraw::new(Arc::new(surface.clone())));
-                compositor.screen_effect = Some(ScreenEffect::Draw(self.id));
-            }
+            let source = Arc::new(compositor.auxiliary_targets[0].clone());
+            compositor
+                .render_draws
+                .insert(self.id, RenderDraw::new(source));
+            compositor.screen_effect = Some(ScreenEffect::Draw(self.id));
         }
         Ok(())
     }

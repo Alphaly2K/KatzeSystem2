@@ -8,6 +8,7 @@ pub use image_list::{ImageList, ImageListProperties, ImageListTransform};
 mod image_list_task;
 pub use image_list_task::ImageListObject;
 mod target;
+pub(crate) use target::canvas_tile_bytes;
 pub use target::{DrawingContext, RenderTarget};
 mod transform;
 pub use transform::Transform;

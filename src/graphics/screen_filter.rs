@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use super::{
-    DrawCommand, DrawList, FrameTexture, ProjectedVertex, Rect, RenderTarget, Surface,
-    TextureFilter, TextureSource,
+    DrawCommand, DrawList, FrameTexture, ProjectedVertex, Rect, Surface, TextureFilter,
+    TextureSource, canvas_tile_bytes,
 };
 use crate::{
     Error, Result,
@@ -217,7 +217,7 @@ impl ScreenFilter {
         mut middle: DrawList,
         backend: &mut dyn GraphicsBackend,
         canvas: &mut FrameCanvas<'_>,
-        targets: &mut [RenderTarget],
+        targets: &mut [Surface],
         output: &mut Vec<DrawCommand>,
     ) -> Result<()> {
         if targets.len() < self.effect.kind().target_count() {
@@ -285,9 +285,10 @@ fn render_pass(
     canvas: &mut FrameCanvas<'_>,
     frame: &DrawList,
     size: [u32; 2],
-) -> Result<RenderTarget> {
+) -> Result<Surface> {
     let surface = render_readback(backend, frame, canvas, size)?;
-    RenderTarget::from_tiles(size, [1, 1], vec![Some(surface)])
+    canvas_tile_bytes(size)?;
+    Ok(surface)
 }
 
 impl Shade {
@@ -402,10 +403,8 @@ impl Mosaic {
     }
 }
 
-fn padded_image(target: &RenderTarget, size: [u32; 2]) -> Result<Arc<Surface>> {
+fn padded_image(source: &Surface, size: [u32; 2]) -> Result<Arc<Surface>> {
     let mut image = Surface::new(size)?;
-    if let Some(source) = target.tiles().first().and_then(Option::as_ref) {
-        image.copy_from(source, source.bounds(), [0, 0]);
-    }
+    image.copy_from(source, source.bounds(), [0, 0]);
     Ok(Arc::new(image))
 }
