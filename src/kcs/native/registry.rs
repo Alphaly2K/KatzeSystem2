@@ -211,7 +211,20 @@ pub(super) fn core(index: u32) -> CoreHandler {
 }
 
 #[derive(Clone, Copy)]
+pub(crate) enum TableHandler {
+    NameTable,
+    SectionTable,
+    DatabaseTable,
+    QuestTable,
+    Quiz,
+    QuizOptions,
+    SequenceFile,
+    DatabaseLoad,
+}
+
+#[derive(Clone, Copy)]
 pub(crate) enum RuntimeHandler {
+    Table(TableHandler),
     FileOpen,
     Property,
     Configuration,
@@ -228,16 +241,8 @@ pub(crate) enum RuntimeHandler {
     LoadParticle,
     Movie,
     Transition,
-    NameTable,
-    SectionTable,
-    DatabaseTable,
-    QuestTable,
-    Quiz,
-    QuizOptions,
     Cst,
     Motion,
-    SequenceFile,
-    DatabaseLoad,
     SharedRecord,
     SharedNumbers,
     SoundLoop,
@@ -282,12 +287,12 @@ pub(crate) fn runtime(index: u32) -> RuntimeHandler {
         196..=203 | 520..=532 | 853..=857 | 860 | 861 | 905 | 967..=973 => {
             RuntimeHandler::Transition
         }
-        633..=640 => RuntimeHandler::NameTable,
-        683..=685 => RuntimeHandler::SectionTable,
-        791..=794 => RuntimeHandler::DatabaseTable,
-        795 => RuntimeHandler::QuestTable,
-        742..=778 => RuntimeHandler::Quiz,
-        779..=784 | 829..=832 => RuntimeHandler::QuizOptions,
+        633..=640 => RuntimeHandler::Table(TableHandler::NameTable),
+        683..=685 => RuntimeHandler::Table(TableHandler::SectionTable),
+        791..=794 => RuntimeHandler::Table(TableHandler::DatabaseTable),
+        795 => RuntimeHandler::Table(TableHandler::QuestTable),
+        742..=778 => RuntimeHandler::Table(TableHandler::Quiz),
+        779..=784 | 829..=832 => RuntimeHandler::Table(TableHandler::QuizOptions),
         219..=235
         | 239
         | 249
@@ -308,8 +313,8 @@ pub(crate) fn runtime(index: u32) -> RuntimeHandler {
         | 1038
         | 1064 => RuntimeHandler::Cst,
         294..=317 | 388 | 440 | 514 | 535 | 586 => RuntimeHandler::Motion,
-        458 => RuntimeHandler::SequenceFile,
-        869 => RuntimeHandler::DatabaseLoad,
+        458 => RuntimeHandler::Table(TableHandler::SequenceFile),
+        869 => RuntimeHandler::Table(TableHandler::DatabaseLoad),
         240 | 250 => RuntimeHandler::SharedRecord,
         609 | 610 | 658 | 659 => RuntimeHandler::SharedNumbers,
         400 => RuntimeHandler::SoundLoop,

@@ -1,9 +1,36 @@
 use super::{ObjectFactory, ObjectHost, route_command};
-use crate::kcs::{Interpreter, NativeReturn};
+use crate::kcs::{Interpreter, NativeReturn, call_native};
 use crate::task::{Command, CommandBuffers};
 use crate::{Error, Result, read};
 
 impl<F: ObjectFactory> ObjectHost<'_, F> {
+    pub(super) fn pointer_position_native(
+        &mut self,
+        index: u32,
+        arguments: &[u8],
+        vm: &mut Interpreter,
+    ) -> Result<NativeReturn> {
+        if arguments.len() != 8 {
+            return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+        }
+        if let Some(device) = self.resources.input_device.as_mut() {
+            self.host.pointer_position = self
+                .resources
+                .input_coordinates
+                .to_logical(device.pointer()?.position)
+                .0;
+        }
+
+        call_native(
+            &mut *self.numbers,
+            &mut *self.host,
+            None,
+            index,
+            arguments,
+            vm,
+        )
+    }
+
     pub(super) fn input_native(
         &mut self,
         index: u32,

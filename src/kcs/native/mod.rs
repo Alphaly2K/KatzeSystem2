@@ -9,7 +9,7 @@ mod rectangle;
 pub(crate) use rectangle::unite_at as unite_rectangle;
 mod registry;
 pub(crate) use registry::{
-    RuntimeHandler, canonical as canonical_native, runtime as runtime_native_handler,
+    RuntimeHandler, TableHandler, canonical as canonical_native, runtime as runtime_native_handler,
 };
 mod scalar;
 mod settings;

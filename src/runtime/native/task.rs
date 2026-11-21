@@ -1,11 +1,57 @@
 use super::super::{
     Execution, ObjectFactory, ObjectHost, create_object, kind, route_command, run_nested,
 };
-use crate::kcs::{Interpreter, NativeReturn};
+use crate::kcs::{Interpreter, NativeReturn, call_native};
 use crate::task::{Command, CommandBuffers};
 use crate::{Error, Result, read};
 
 impl<F: ObjectFactory> ObjectHost<'_, F> {
+    pub(super) fn shared_numbers_native(
+        &mut self,
+        index: u32,
+        arguments: &[u8],
+        vm: &mut Interpreter,
+    ) -> Result<NativeReturn> {
+        let length = match index {
+            658 => 4,
+            659 => 8,
+            _ => 0,
+        };
+        if arguments.len() != length {
+            return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+        }
+        if !self
+            .running
+            .get(&self.host.task_id)
+            .is_some_and(|task| task.shared_numbers == Some(true))
+            || (matches!(index, 658 | 659) && self.numbers.active_local().is_none())
+        {
+            return Ok(if index == 658 {
+                NativeReturn::Value(0)
+            } else {
+                NativeReturn::Continue
+            });
+        }
+        call_native(self.numbers, self.host, None, index, arguments, vm)
+    }
+
+    pub(super) fn set_property_native(
+        &mut self,
+        arguments: &[u8],
+        vm: &mut Interpreter,
+    ) -> Result<NativeReturn> {
+        if arguments.len() != 4 {
+            return Err(Error::new(vm.pc, "KCS native 参数字节数不匹配"));
+        }
+        let task = self
+            .running
+            .get_mut(&self.host.task_id)
+            .ok_or_else(|| Error::new(vm.pc, "执行中任务属性上下文不可用"))?;
+        task.property = read::u32_at(arguments, 0)?;
+        task.property_changed = true;
+        Ok(NativeReturn::Continue)
+    }
+
     pub(super) fn task_native(
         &mut self,
         index: u32,

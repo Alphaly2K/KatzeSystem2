@@ -517,7 +517,7 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
         }
         if matches!(
             super::native::runtime_native_handler(index),
-            super::native::RuntimeHandler::QuizOptions
+            super::native::RuntimeHandler::Table(super::native::TableHandler::QuizOptions)
         ) {
             let random = if matches!(index, 831 | 832) {
                 self.inner.random()
@@ -534,7 +534,7 @@ impl<H: Host, S: ResourceServices> Host for ResourceHost<'_, H, S> {
         }
         if matches!(
             super::native::runtime_native_handler(index),
-            super::native::RuntimeHandler::Quiz
+            super::native::RuntimeHandler::Table(super::native::TableHandler::Quiz)
         ) {
             let random = if index == 765 {
                 self.inner.random()
