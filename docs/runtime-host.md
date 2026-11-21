@@ -112,4 +112,4 @@ FES 的 `m2body` 指令通过 `ModelPlayer::set_body_options` 交给当前播放
 
 标准会话默认在调用线程解码。Vorbis 装载时准备完整 PCM，每个来源受 64 MiB 的 PCM 容量上限约束。电影随会话推进增量解码，内存混音在需要更多样本时也可以推进解码。设备回调只取已准备的 PCM。宿主可在启动前用 `set_media_decode_mode(DecodeMode::Threaded)` 开启后台电影解码和 Vorbis 预取。两个示例宿主均启用此模式。`ReadSource::read_at` 可能在后台调用，读取源须支持独立偏移与并发读取。
 
-文件导出服务在会话线程选择目的地。`ExportServices::start` 默认同步执行 `ExportWork`。宿主也可以自行安排工作并返回 `ExportJob`，由会话轮询完成状态。完成通知仍在会话线程回调，导出任务销毁时会取消未执行的工作。
+文件导出服务在会话线程选择目的地。`ExportServices::start` 默认同步执行 `ExportWork`。宿主也可以自行安排工作并返回 `ExportJob`，由会话轮询完成状态。完成通知在会话线程回调。导出任务删除后，排队工作会跳过，活跃工作会在分段读取或写入操作之间检查取消状态。宿主可释放作业句柄，让已经进到宿主的 I/O 自行结束。

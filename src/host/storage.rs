@@ -35,7 +35,8 @@ impl PartialEq for ReadSnapshot {
 
 impl Eq for ReadSnapshot {}
 
-/// Random access without a shared cursor. Calls may come from decoder workers.
+/// Random access without a shared cursor. Decoders and export jobs may read
+/// the source on worker threads.
 pub trait ReadSource: Send + Sync {
     fn len(&self) -> Result<u64>;
 

@@ -6,16 +6,32 @@ use std::io::{Read, Seek, SeekFrom};
 
 pub(crate) fn read_exact_from<S: ReadSource + ?Sized>(
     source: &S,
+    offset: u64,
+    output: &mut [u8],
+) -> Result<()> {
+    read_exact_while(source, offset, output, usize::MAX, || true)?;
+    Ok(())
+}
+
+/// Returns false when reading stops at the caller's request.
+pub(crate) fn read_exact_while<S: ReadSource + ?Sized>(
+    source: &S,
     mut offset: u64,
     mut output: &mut [u8],
-) -> Result<()> {
+    max_read: usize,
+    keep_reading: impl Fn() -> bool,
+) -> Result<bool> {
     while !output.is_empty() {
+        if !keep_reading() {
+            return Ok(false);
+        }
         let position = usize::try_from(offset).unwrap_or(usize::MAX);
-        let count = source.read_at(offset, output)?;
+        let length = max_read.min(output.len());
+        let count = source.read_at(offset, &mut output[..length])?;
         if count == 0 {
             return Err(Error::new(position, "读取源提前结束"));
         }
-        if count > output.len() {
+        if count > length {
             return Err(Error::new(position, "读取源返回量超过输出缓冲区"));
         }
         offset = offset
@@ -23,7 +39,7 @@ pub(crate) fn read_exact_from<S: ReadSource + ?Sized>(
             .ok_or_else(|| Error::new(position, "读取源位置溢出"))?;
         output = &mut output[count..];
     }
-    Ok(())
+    Ok(true)
 }
 
 impl ReadSource for [u8] {

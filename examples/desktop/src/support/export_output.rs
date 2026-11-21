@@ -70,14 +70,6 @@ impl ExportJob for Worker {
     }
 }
 
-impl Drop for Worker {
-    fn drop(&mut self) {
-        if let Some(worker) = self.0.take() {
-            let _ = worker.join();
-        }
-    }
-}
-
 impl ExportDestination for Directory {
     fn create_directory(&mut self, parts: &[String]) -> Result<()> {
         let path = self.locate(parts)?;

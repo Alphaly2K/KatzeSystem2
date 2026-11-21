@@ -453,6 +453,7 @@ impl ExportJob for DeferredJob {
 
 struct MemoryDestination {
     events: Sender<ExportEvent>,
+    fail_on_write: bool,
 }
 
 impl ExportDestination for MemoryDestination {
@@ -464,6 +465,9 @@ impl ExportDestination for MemoryDestination {
     }
 
     fn write_file(&mut self, path: &[String], bytes: &[u8]) -> Result<()> {
+        if self.fail_on_write {
+            return Err(Error::new(0, format!("cannot write {}", path.join("/"))));
+        }
         self.events
             .send(ExportEvent::File(path.join("/"), bytes.to_vec()))
             .unwrap();
@@ -583,6 +587,7 @@ fn host_defers_export_while_script_can_poll_for_completion() -> Result<()> {
         let released = Rc::new(Cell::new(false));
         let destination = MemoryDestination {
             events: events.clone(),
+            fail_on_write: false,
         };
         let (mut runtime, task, caller) = start_export(
             692,
@@ -633,6 +638,7 @@ fn cancelled_or_invalid_exports_finish_without_writing_files() -> Result<()> {
         let (events, receive) = mpsc::channel();
         let destination = MemoryDestination {
             events: events.clone(),
+            fail_on_write: false,
         };
         let (mut runtime, task, _) =
             start_export(690, bundle, events, Some(destination), None, 4096)?;
@@ -643,6 +649,31 @@ fn cancelled_or_invalid_exports_finish_without_writing_files() -> Result<()> {
         );
         assert!(receive.try_recv().is_err());
     }
+    Ok(())
+}
+
+#[test]
+fn an_export_write_error_completes_the_task_once() -> Result<()> {
+    let mut bundle = bundle_node(b"later.txt", Some(b"later"));
+    let next = bundle.len() as u32;
+    bundle[..4].copy_from_slice(&next.to_le_bytes());
+    bundle.extend(bundle_node(b"first.txt", Some(b"first")));
+
+    let (events, receive) = mpsc::channel();
+    let destination = MemoryDestination {
+        events: events.clone(),
+        fail_on_write: true,
+    };
+    let (mut runtime, task, _) =
+        start_export(690, Some(bundle), events, Some(destination), None, 4096)?;
+    assert!(export_done(&mut runtime, task)?);
+    assert!(export_done(&mut runtime, task)?);
+    assert_eq!(receive.try_recv(), Ok(ExportEvent::Selected(task)));
+    assert_eq!(
+        receive.try_recv(),
+        Ok(ExportEvent::Done(Err("cannot write first.txt".into())))
+    );
+    assert!(receive.try_recv().is_err());
     Ok(())
 }
 
