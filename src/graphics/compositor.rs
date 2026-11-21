@@ -1,4 +1,4 @@
-use super::{Drawables, DrawingContext, Projection, RenderTarget, SoftwareBackend};
+use super::{Drawables, DrawingContext, Projection, RenderTarget};
 use crate::host::graphics::{DrawList, FrameCanvas, GraphicsBackend, TextureFilter};
 use crate::{Error, Result};
 
@@ -99,11 +99,6 @@ impl Compositor {
         projection
     }
 
-    /// Compose with the software renderer for any intermediate filter passes.
-    pub fn compose(&mut self, range: Option<[f32; 2]>) -> Result<DrawList> {
-        self.compose_with_backend(range, Some(&mut SoftwareBackend))
-    }
-
     pub(crate) fn compose_with_backend(
         &mut self,
         range: Option<[f32; 2]>,
@@ -116,7 +111,7 @@ impl Compositor {
         self.compose_view(projection.clone(), *parent, *filter, range, backend)
     }
 
-    fn compose_view(
+    pub(crate) fn compose_view(
         &mut self,
         projection: Projection,
         parent: [f32; 16],
@@ -257,29 +252,6 @@ impl Compositor {
                 .commands,
         );
         Ok(frame)
-    }
-
-    /// 使用显式视图向现有目标混合软件帧，不清空目标。
-    pub fn render_frame(
-        &mut self,
-        output: &mut RenderTarget,
-        projection: &Projection,
-        parent: [f32; 16],
-        filter: TextureFilter,
-    ) -> Result<bool> {
-        let frame = self.compose_view(
-            projection.clone(),
-            parent,
-            filter,
-            None,
-            Some(&mut SoftwareBackend),
-        )?;
-        let canvas = self
-            .drawing
-            .target
-            .as_ref()
-            .ok_or_else(|| Error::new(0, "运行时未配置画布纹理输入"))?;
-        frame.render_into(output, Some(canvas))
     }
 
     /// 使用当前绘图上下文提交非纹理三角形，保留上下文显示门控。

@@ -6,7 +6,7 @@ use super::{
 };
 use crate::{
     Error, Result,
-    host::graphics::{FrameCanvas, GraphicsBackend},
+    host::graphics::{FrameCanvas, GraphicsBackend, render_readback},
     read,
 };
 
@@ -286,10 +286,7 @@ fn render_pass(
     frame: &DrawList,
     size: [u32; 2],
 ) -> Result<RenderTarget> {
-    let surface = backend.render(frame, canvas, size)?;
-    if surface.size() != size {
-        return Err(Error::new(0, "宿主回读尺寸与请求不符"));
-    }
+    let surface = render_readback(backend, frame, canvas, size)?;
     RenderTarget::from_tiles(size, [1, 1], vec![Some(surface)])
 }
 

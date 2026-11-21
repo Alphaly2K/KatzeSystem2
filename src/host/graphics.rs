@@ -10,7 +10,7 @@ pub use commands::{
     TextureFilter, TextureSource,
 };
 
-use crate::Result;
+use crate::{Error, Result};
 pub use surface::Surface;
 pub(crate) use surface::pixel_length;
 
@@ -68,4 +68,18 @@ pub trait GraphicsBackend {
         canvas: &mut FrameCanvas<'_>,
         size: [u32; 2],
     ) -> Result<Surface>;
+}
+
+/// Validate the host's output before exposing it to script or compositor state.
+pub(crate) fn render_readback(
+    backend: &mut dyn GraphicsBackend,
+    frame: &DrawList,
+    canvas: &mut FrameCanvas<'_>,
+    size: [u32; 2],
+) -> Result<Surface> {
+    let surface = backend.render(frame, canvas, size)?;
+    if surface.size() != size {
+        return Err(Error::new(0, "宿主回读尺寸与请求不符"));
+    }
+    Ok(surface)
 }

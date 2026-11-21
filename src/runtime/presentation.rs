@@ -1,7 +1,8 @@
+mod software;
+
 use super::{ObjectFactory, Resources, Runtime};
 use crate::{
     Error, Result,
-    graphics::RenderTarget,
     host::graphics::{DrawList, FrameCanvas, GraphicsBackend, SequenceCapture},
     kcs::HostState,
 };
@@ -41,14 +42,6 @@ impl<F: ObjectFactory> Runtime<F> {
     pub fn wants_sequence_capture(&self) -> bool {
         let drawing = &self.resources.compositor.drawing;
         self.host.frame_capture_enabled != 0 && drawing.mode == 0 && drawing.enabled
-    }
-
-    /// 为当前呈现帧执行连续 BMP 输出；未启用或绘图设备关闭时返回 false。
-    /// 宿主在每次提交帧后调用一次。
-    pub fn capture_sequence_frame(&mut self, frame: &RenderTarget) -> Result<bool> {
-        self.submit_sequence_capture(|capture| {
-            capture.write_frame(frame.size(), |x, y| frame.pixel(x, y))
-        })
     }
 
     /// Submit host readback for callers that manage presentation separately.

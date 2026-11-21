@@ -2,7 +2,7 @@ use super::Resources;
 use crate::{
     Error, Result,
     graphics::{Image, RenderTarget},
-    host::graphics::{FrameCanvas, Rect, Surface},
+    host::graphics::{FrameCanvas, Rect, Surface, render_readback},
 };
 
 impl Resources {
@@ -81,15 +81,13 @@ impl Resources {
         }
         let frame = self.compose_frame(Some(range))?;
         let mut canvas = FrameCanvas::new(self.compositor.drawing.target.as_mut().unwrap());
-        let rendered =
-            self.readback_backend
-                .as_deref_mut()
-                .unwrap()
-                .render(&frame, &mut canvas, size)?;
-        if rendered.size() != size {
-            return Err(Error::new(0, "宿主回读尺寸与请求不符"));
-        }
-        Ok(Some(rendered))
+        render_readback(
+            self.readback_backend.as_deref_mut().unwrap(),
+            &frame,
+            &mut canvas,
+            size,
+        )
+        .map(Some)
     }
 
     pub fn capture_image(&mut self, size: [u32; 2], range: [f32; 2]) -> Result<Option<Image>> {

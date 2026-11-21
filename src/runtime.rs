@@ -270,32 +270,6 @@ impl<F: ObjectFactory> Runtime<F> {
         Some(object.as_mut())
     }
 
-    /// 以当前画布为纹理输入，向独立目标提交画面；不清空目标或执行设备呈现。
-    pub fn render_frame(
-        &mut self,
-        output: &mut crate::graphics::RenderTarget,
-        projection: &crate::graphics::Projection,
-        parent: [f32; 16],
-        filter: crate::graphics::TextureFilter,
-    ) -> Result<bool> {
-        let touched = if let Some(frame) = self.resources.movie_frame(output.size(), filter)? {
-            frame.render_into(output, self.resources.compositor.drawing.target.as_ref())?
-        } else {
-            self.resources
-                .compositor
-                .render_frame(output, projection, parent, filter)?
-        };
-        if !self.uses_image_cursor() {
-            return Ok(touched);
-        }
-        let mut overlay = crate::graphics::DrawList {
-            commands: Vec::new(),
-            filter,
-        };
-        self.resources.append_image_cursor(&mut overlay)?;
-        Ok(overlay.render_into(output, None)? || touched)
-    }
-
     /// 配置脚本内部画面捕获使用的投影、父变换和纹理取样。
     /// 调用方应与显式 render_frame 使用同一组参数，并在视图变化时更新。
     pub fn set_frame_view(
