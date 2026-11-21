@@ -16,16 +16,25 @@ use std::{cell::RefCell, rc::Rc, sync::Arc};
 enum Event {
     Open(Vec<u8>),
     ReadModel,
+    Options(Vec<u8>),
     Frame(u32),
     Drop,
 }
 
-struct Models(Rc<RefCell<Vec<Event>>>);
+struct Models {
+    events: Rc<RefCell<Vec<Event>>>,
+    apply_options: bool,
+}
 
 impl ModelServices for Models {
     fn open(&mut self, selection: &[u8]) -> Result<Option<Box<dyn ModelPlayer>>> {
-        self.0.borrow_mut().push(Event::Open(selection.to_vec()));
-        Ok(Some(Box::new(Player(self.0.clone()))))
+        self.events
+            .borrow_mut()
+            .push(Event::Open(selection.to_vec()));
+        Ok(Some(Box::new(Player {
+            events: self.events.clone(),
+            apply_options: self.apply_options,
+        })))
     }
 
     fn open_with_resources(
@@ -42,7 +51,7 @@ impl ModelServices for Models {
         assert_eq!(source.initial_motion.as_deref(), Some(b"stand".as_slice()));
         assert_eq!(source.expression_config, None);
         assert_eq!(source.body_config.as_deref(), Some(b"body.dif".as_slice()));
-        self.0.borrow_mut().push(Event::ReadModel);
+        self.events.borrow_mut().push(Event::ReadModel);
         self.open(selection)
     }
 }
@@ -66,11 +75,21 @@ impl ResourceServices for Resources {
     }
 }
 
-struct Player(Rc<RefCell<Vec<Event>>>);
+struct Player {
+    events: Rc<RefCell<Vec<Event>>>,
+    apply_options: bool,
+}
 
 impl ModelPlayer for Player {
+    fn set_options(&mut self, options: &[u8]) -> Result<bool> {
+        self.events
+            .borrow_mut()
+            .push(Event::Options(options.to_vec()));
+        Ok(self.apply_options)
+    }
+
     fn frame(&mut self, time: u32) -> Result<Option<ModelFrame>> {
-        self.0.borrow_mut().push(Event::Frame(time));
+        self.events.borrow_mut().push(Event::Frame(time));
         Ok(Some(ModelFrame {
             pixels: Arc::new(Surface::from_bgra([8, 12], [16, 32, 64, 255].repeat(96))?),
             origin: [-2, -3],
@@ -80,7 +99,7 @@ impl ModelPlayer for Player {
 
 impl Drop for Player {
     fn drop(&mut self) {
-        self.0.borrow_mut().push(Event::Drop);
+        self.events.borrow_mut().push(Event::Drop);
     }
 }
 
@@ -128,7 +147,10 @@ wait 100
             runtime.set_resources(Resources);
         }
         if available {
-            runtime.set_model_services(Models(events.clone()));
+            runtime.set_model_services(Models {
+                events: events.clone(),
+                apply_options: false,
+            });
         }
         let mut scene = Scene::new(
             Program::from_text(source).unwrap(),
@@ -215,5 +237,50 @@ wait 100
         } else {
             assert!(events.borrow().is_empty());
         }
+    }
+}
+
+#[test]
+fn model_options_can_keep_a_player_until_its_motion_selection_changes() {
+    let source = b"#DEFINE
+M2PLANE actor
+#START
+actor load model,1,0,5
+wait 1
+actor load MODEL,1,0,6,,9
+wait 1
+actor load MODEL,1,2,6,,9
+wait 100
+";
+    for apply_options in [true, false] {
+        let mut runtime = Runtime::new(
+            0,
+            kind::ROOT,
+            Box::new(BaseObject::new()),
+            State::new(0),
+            NoTasks,
+        );
+        let events = Rc::new(RefCell::new(Vec::new()));
+        runtime.set_model_services(Models {
+            events: events.clone(),
+            apply_options,
+        });
+        let mut scene = Scene::new(
+            Program::from_text(source).unwrap(),
+            runtime.host().handle_allocator(),
+        )
+        .unwrap();
+        for tick in 1..=3 {
+            assert!(runtime.update_fes_scene(0, &mut scene, tick).unwrap());
+        }
+        let mut expected = vec![
+            Event::Open(b"model,1,0,5".to_vec()),
+            Event::Options(b"6,,9".to_vec()),
+        ];
+        if !apply_options {
+            expected.extend([Event::Open(b"MODEL,1,0,6,,9".to_vec()), Event::Drop]);
+        }
+        expected.extend([Event::Open(b"MODEL,1,2,6,,9".to_vec()), Event::Drop]);
+        assert_eq!(*events.borrow(), expected);
     }
 }

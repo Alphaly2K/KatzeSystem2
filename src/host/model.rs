@@ -29,6 +29,13 @@ pub trait ModelServices {
 }
 
 pub trait ModelPlayer {
+    /// Apply the remaining fields of a selection with the same profile, body
+    /// and initial motion. Return `false` to open a new player instead.
+    /// An error keeps the request pending for retry.
+    fn set_options(&mut self, _options: &[u8]) -> Result<bool> {
+        Ok(false)
+    }
+
     /// Sample the model at the host's session timestamp. `None` hides its current frame.
     fn frame(&mut self, system_time_ms: u32) -> Result<Option<ModelFrame>>;
 }

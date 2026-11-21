@@ -3,6 +3,7 @@ use crate::{
     Error, Result,
     fes::CPlaneState,
     graphics::Drawable,
+    host::model::ModelSelection,
     runtime::{ObjectFactory, Store},
 };
 
@@ -11,7 +12,7 @@ use crate::{
 pub struct ModelPlaneState {
     pub(super) plane: CPlaneState,
     selection: Vec<u8>,
-    pending: bool,
+    pending_selection: Option<Vec<u8>>,
 }
 
 impl ModelPlaneState {
@@ -27,10 +28,14 @@ impl ModelPlaneState {
         if selection.len() >= 0x300 {
             return Err(Error::new(0, "FES 模型选择参数超过存储上限"));
         }
-        if !self.selection.eq_ignore_ascii_case(selection) {
-            self.selection.clear();
-            self.selection.extend_from_slice(selection);
-            self.pending = true;
+        if self.selection.eq_ignore_ascii_case(selection) {
+            self.pending_selection = None;
+        } else if !self
+            .pending_selection
+            .as_ref()
+            .is_some_and(|pending| pending.eq_ignore_ascii_case(selection))
+        {
+            self.pending_selection = Some(selection.to_vec());
         }
         Ok(())
     }
@@ -48,25 +53,41 @@ impl<F: ObjectFactory> Store<'_, F> {
             unreachable!()
         };
         let drawables = self.resources.compositor.drawables_mut();
-        if state.pending {
-            let player = if state.selection.is_empty() {
-                None
-            } else if let Some(services) = self.resources.model_services.as_mut() {
-                if let Some(resources) = self.resources.services.as_deref_mut() {
-                    services.open_with_resources(&state.selection, resources)?
-                } else {
-                    services.open(&state.selection)?
+        if let Some(selection) = state.pending_selection.as_deref() {
+            let reused = match (
+                ModelSelection::parse(&state.selection),
+                ModelSelection::parse(selection),
+                self.resources.model_players.get_mut(&handle),
+            ) {
+                (Some(current), Some(next), Some(player))
+                    if current.profile.eq_ignore_ascii_case(next.profile)
+                        && current.body.eq_ignore_ascii_case(next.body)
+                        && current.motion.eq_ignore_ascii_case(next.motion) =>
+                {
+                    player.set_options(next.options)?
                 }
-            } else {
-                None
+                _ => false,
             };
-            if let Some(player) = player {
-                self.resources.model_players.insert(handle, player);
-            } else {
-                self.resources.model_players.remove(&handle);
-                drawables.remove(handle);
+            if !reused {
+                let player = if selection.is_empty() {
+                    None
+                } else if let Some(services) = self.resources.model_services.as_mut() {
+                    if let Some(resources) = self.resources.services.as_deref_mut() {
+                        services.open_with_resources(selection, resources)?
+                    } else {
+                        services.open(selection)?
+                    }
+                } else {
+                    None
+                };
+                if let Some(player) = player {
+                    self.resources.model_players.insert(handle, player);
+                } else {
+                    self.resources.model_players.remove(&handle);
+                    drawables.remove(handle);
+                }
             }
-            state.pending = false;
+            state.selection = state.pending_selection.take().unwrap();
         }
         let Some(player) = self.resources.model_players.get_mut(&handle) else {
             return Ok(());
