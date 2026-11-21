@@ -5,6 +5,7 @@ mod commands;
 pub mod software;
 mod surface;
 pub use capture::SequenceCapture;
+pub(crate) use commands::triangle_culled;
 pub use commands::{
     DrawCommand, DrawList, FrameTexture, FrameTriangle, ProjectedVertex, Rect, TextureAddress,
     TextureFilter, TextureSource,

@@ -1,4 +1,5 @@
 use super::{DrawCommand, FrameTexture, ProjectedVertex, Projection, Surface, TextureSource};
+use crate::host::graphics::triangle_culled;
 use crate::kcs::{ParticleHost, ParticleVertex, transform_vector};
 use crate::{Error, Result, read};
 use std::sync::Arc;
@@ -159,7 +160,7 @@ impl ParticleMesh {
                     rhw: quad[i].rhw,
                     color: quad[i].color,
                 });
-                if super::raster::triangle_culled(vertices) {
+                if triangle_culled(vertices) {
                     continue;
                 }
                 touched |= draw(DrawCommand {

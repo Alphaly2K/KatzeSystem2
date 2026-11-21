@@ -2,16 +2,9 @@ use super::{Drawables, Projection};
 use crate::Result;
 use crate::host::graphics::{
     DrawCommand, DrawList, FrameTexture, FrameTriangle, ProjectedVertex, Rect, Surface,
-    TextureFilter, TextureSource,
+    TextureFilter, TextureSource, triangle_culled,
 };
 use std::sync::Arc;
-
-impl DrawCommand {
-    /// Returns whether the triangle is culled by the engine's screen-space winding rules.
-    pub fn is_culled(&self) -> bool {
-        super::raster::triangle_culled(self.vertices)
-    }
-}
 
 impl DrawList {
     pub(crate) fn push_screen_quad(
@@ -185,7 +178,7 @@ impl Drawables {
                         }),
                     )
                 };
-                if super::raster::triangle_culled(vertices) {
+                if triangle_culled(vertices) {
                     continue;
                 }
                 touched |= draw(FrameTriangle {

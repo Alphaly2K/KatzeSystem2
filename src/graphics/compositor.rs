@@ -1,3 +1,5 @@
+mod software;
+
 use super::{Drawables, DrawingContext, Projection, canvas_tile_bytes};
 use crate::host::graphics::{DrawList, FrameCanvas, GraphicsBackend, Surface, TextureFilter};
 use crate::{Error, Result};
@@ -112,7 +114,7 @@ impl Compositor {
         self.compose_view(projection.clone(), *parent, *filter, range, backend)
     }
 
-    pub(crate) fn compose_view(
+    fn compose_view(
         &mut self,
         projection: Projection,
         parent: [f32; 16],

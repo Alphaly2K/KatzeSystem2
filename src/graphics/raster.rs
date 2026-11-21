@@ -443,7 +443,7 @@ pub(crate) fn draw_command(
         blend_mode: command.blend_mode,
         ..Default::default()
     };
-    if triangle_culled(vertices) {
+    if command.is_culled() {
         return Ok(false);
     }
     if let Some(source) = &command.texture {
@@ -472,26 +472,6 @@ fn needs_depth_clip(vertices: [ProjectedVertex; 3]) -> bool {
     vertices
         .iter()
         .any(|v| v.rhw < 0. || v.position[2].is_finite() && !(0.0..=1.0).contains(&v.position[2]))
-}
-
-pub(super) fn triangle_culled(vertices: [ProjectedVertex; 3]) -> bool {
-    if vertices.iter().all(|v| v.rhw < 0.)
-        || vertices
-            .iter()
-            .all(|v| v.position[2].is_finite() && v.position[2] < 0.)
-        || vertices
-            .iter()
-            .all(|v| v.position[2].is_finite() && v.position[2] > 1.)
-        || vertices
-            .iter()
-            .any(|v| v.position[..2].iter().any(|n| !n.is_finite()))
-    {
-        return true;
-    }
-    let points = vertices.map(|v| {
-        [v.position[0], v.position[1]].map(|n| (f64::from(n) * 256. + 0.5).floor() / 256.)
-    });
-    edge(points[0], points[1], points[2]) == 0.
 }
 
 fn draw_colors(

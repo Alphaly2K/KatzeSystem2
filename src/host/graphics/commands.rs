@@ -92,6 +92,35 @@ pub struct DrawCommand {
     pub blend_mode: u32,
 }
 
+impl DrawCommand {
+    /// Test whether projection or subpixel coverage leaves no triangle to draw.
+    pub fn is_culled(&self) -> bool {
+        triangle_culled(self.vertices)
+    }
+}
+
+pub(crate) fn triangle_culled(vertices: [ProjectedVertex; 3]) -> bool {
+    if vertices.iter().all(|v| v.rhw < 0.)
+        || vertices
+            .iter()
+            .all(|v| v.position[2].is_finite() && v.position[2] < 0.)
+        || vertices
+            .iter()
+            .all(|v| v.position[2].is_finite() && v.position[2] > 1.)
+        || vertices
+            .iter()
+            .any(|v| v.position[..2].iter().any(|n| !n.is_finite()))
+    {
+        return true;
+    }
+    let points = vertices.map(|v| {
+        [v.position[0], v.position[1]].map(|n| (f64::from(n) * 256. + 0.5).floor() / 256.)
+    });
+    let [a, b, c] = points;
+    let area = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+    area == 0.
+}
+
 pub type FrameTriangle = DrawCommand;
 
 /// Ordered frame commands with no device resources or script object handles.
